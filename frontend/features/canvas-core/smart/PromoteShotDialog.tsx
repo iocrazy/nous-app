@@ -14,9 +14,13 @@ import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import type { SceneDoc } from '../../../editor/types';
 
-/** `INT/EXT · Location · TIME`, empty parts dropped — same composition as
- *  `StoryboardView.tsx`'s `headingLine` so a scene reads identically in
- *  both places. */
+/** `INT/EXT · Location · TIME`, empty parts dropped — same composition the
+ *  pre-redesign `frontend/editor/storyboard/StoryboardView.tsx`'s
+ *  `headingLine` used before that file retired in Task 6 (shot-nodes-on-
+ *  canvas epic, #1797). The current rail — `EpisodeSceneBoard.tsx` — shows
+ *  int/ext, location, and time in separate labeled grid cells instead of one
+ *  joined string, so this joined form now only needs to read well inside
+ *  this dialog, not match a second live surface. */
 function headingLine(scene: SceneDoc): string {
   return [scene.heading_int_ext, scene.location_text, scene.time_of_day]
     .map((part) => (part ?? '').trim())

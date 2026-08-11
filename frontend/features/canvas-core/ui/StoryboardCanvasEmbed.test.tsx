@@ -83,4 +83,49 @@ describe('StoryboardCanvasEmbed', () => {
       expect(props.canvasId).toBe('cv-2');
     });
   });
+
+  // Task 7 (shot-nodes-on-canvas epic — keep-alive 显隐切换): the host page
+  // (EpisodeStoryboardPage) is now kept mounted-but-hidden across module
+  // switches, so this embed must stop resolving/mounting `CanvasView` while
+  // `active` is false — CanvasView owns a SINGLETON store, and letting it run
+  // in the background indefinitely (autosave, realtime, reconcile) for a
+  // canvas nobody is looking at is exactly what the `active` prop exists to
+  // prevent. See that prop's doc comment for the full rationale.
+  describe('active prop (Task 7 keep-alive)', () => {
+    it('does not resolve or mount CanvasView while inactive', async () => {
+      render(<StoryboardCanvasEmbed episodeId="ep-1" active={false} />);
+
+      // Give any stray microtask a chance to run, then assert nothing fired.
+      await Promise.resolve();
+      expect(getOrCreateStoryboardCanvas).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('storyboard-canvas-embed-loading')).toBeNull();
+      expect(screen.queryByTestId('canvas-view-mock')).toBeNull();
+    });
+
+    it('unmounts CanvasView (releasing the singleton store) when active flips from true to false', async () => {
+      getOrCreateStoryboardCanvas.mockResolvedValue({ id: 'cv-1', kind: 'storyboard' });
+      const { rerender } = render(<StoryboardCanvasEmbed episodeId="ep-1" active />);
+      await waitFor(() => expect(screen.getByTestId('canvas-view-mock')).toBeInTheDocument());
+
+      rerender(<StoryboardCanvasEmbed episodeId="ep-1" active={false} />);
+
+      expect(screen.queryByTestId('canvas-view-mock')).toBeNull();
+    });
+
+    it('re-resolves and re-mounts CanvasView when active flips back to true', async () => {
+      getOrCreateStoryboardCanvas.mockResolvedValueOnce({ id: 'cv-1', kind: 'storyboard' });
+      const { rerender } = render(<StoryboardCanvasEmbed episodeId="ep-1" active />);
+      await waitFor(() => expect(screen.getByTestId('canvas-view-mock')).toBeInTheDocument());
+
+      rerender(<StoryboardCanvasEmbed episodeId="ep-1" active={false} />);
+      expect(screen.queryByTestId('canvas-view-mock')).toBeNull();
+      getOrCreateStoryboardCanvas.mockClear();
+
+      getOrCreateStoryboardCanvas.mockResolvedValueOnce({ id: 'cv-1', kind: 'storyboard' });
+      rerender(<StoryboardCanvasEmbed episodeId="ep-1" active />);
+
+      await waitFor(() => expect(getOrCreateStoryboardCanvas).toHaveBeenCalledWith('ep-1'));
+      await waitFor(() => expect(screen.getByTestId('canvas-view-mock')).toBeInTheDocument());
+    });
+  });
 });

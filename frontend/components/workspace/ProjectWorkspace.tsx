@@ -165,6 +165,34 @@ export function ProjectWorkspace({
     );
   }, [activeModule, stageNodeId, setSearchParams]);
 
+  // Idle-time chunk preload (Task 7, shot-nodes-on-canvas epic — keep-alive
+  // 显隐切换 + chunk 预加载): `EpisodeStoryboardPage` is code-split (see the
+  // `lazy()` declaration above) — on a cold visit, the FIRST click into the
+  // Storyboard module pays for both the network fetch of that chunk AND the
+  // subsequent mount, which is exactly the "分镜 是懒加载模块" jank this task
+  // exists to fix. This kicks off the SAME dynamic import a moment after the
+  // workspace itself mounts (deferred to browser idle time so it never
+  // competes with the shell's own first paint — mirrors `AIHealthBoard`'s
+  // identical idle-probe pattern), warming the module cache so `lazy()`'s own
+  // factory (invoked lazily on the real navigation) resolves instantly. A
+  // plain side-effect import — this file never touches its result, `lazy()`
+  // above owns the actual default-export mapping.
+  useEffect(() => {
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const preload = () => {
+      void import('./EpisodeStoryboardPage');
+    };
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(preload);
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(preload, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
   // ── Episodes (sidebar current-episode block + switcher) ────────────────
   // Declared BEFORE the workflow instance / advance callbacks below: they all
   // consume `currentEpisodeId` (B2 #1712 — the workflow read + advance chain are
@@ -557,6 +585,11 @@ export function ProjectWorkspace({
   const [studioView, setStudioView] = useState<RailView>('script');
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
+  // Keep-alive mount flags (Task 7 — see the `studioMode`/`storyboardEverOpenedRef`
+  // usage further down for why these are plain refs, mutated inline during
+  // render rather than via an effect).
+  const scriptEverOpenedRef = useRef(false);
+  const storyboardEverOpenedRef = useRef(false);
 
   // Concurrent triggers for the SAME episode share one resolve/provision.
   // Without this, a double-fire — double-clicking a work view, or the
@@ -830,6 +863,24 @@ export function ProjectWorkspace({
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
 
+  // Keep-alive mount tracking (Task 7, shot-nodes-on-canvas epic): the studio
+  // (EditorShell) and Storyboard (EpisodeStoryboardPage) subtrees used to be
+  // an EXCLUSIVE ternary — switching modules fully unmounted whichever one
+  // was open, which is exactly the "剧本↔分镜来回切换" jank this task exists
+  // to fix (the render below now mounts both ONCE first visited and never
+  // unmounts them again for the lifetime of this component — visibility is a
+  // pure `display:none` toggle instead). A plain boolean ref (not state) so
+  // flipping it doesn't itself trigger a render — it's read directly in the
+  // same render that already recomputes `studioMode`/`activeModule` below,
+  // so the mount happens in the SAME commit the module first becomes active
+  // (no extra "mount, then show" render needed). `resolvedScriptId != null`
+  // is baked into `studioMode` already, and `resolvedScriptId` is monotonic
+  // (see its own declaration — never reset to null once set), so once this
+  // ref flips true `resolvedScriptId` is guaranteed non-null on every
+  // subsequent render.
+  if (studioMode) scriptEverOpenedRef.current = true;
+  if (activeModule === 'storyboard') storyboardEverOpenedRef.current = true;
+
   // `?module=stage` without a `node` param has nothing to render (stageNodeId
   // fell back to null, see the useState initializer above) — the module
   // comment promised a fallback to Overview, but the render switch below only
@@ -996,13 +1047,33 @@ export function ProjectWorkspace({
             </div>
           }
         >
-        {studioMode && resolvedScriptId ? (
+        {/* Keep-alive (Task 7, shot-nodes-on-canvas epic): studio and
+            Storyboard used to be branches of one EXCLUSIVE ternary — every
+            module switch fully unmounted whichever was open, forcing a cold
+            re-resolve/re-fetch/re-mount on every return trip (the "分镜是懒
+            加载模块" jank this task exists to fix, versus 剧本↔节拍 staying
+            instant because THAT switch never left EditorShell's own mounted
+            shell). Both are now mounted ONCE the first time their module
+            becomes active (`scriptEverOpenedRef`/`storyboardEverOpenedRef`
+            above) and never unmounted again for this component's lifetime —
+            only `display:none` toggles which one is visible. The `else`
+            branch (Overview/Episodes/Settings/etc.) is UNCHANGED (still a
+            plain mount/unmount per switch) — those modules don't carry the
+            same singleton-store / heavy-remount cost EditorShell and the
+            storyboard canvas do, so they're out of this task's scope. */}
+        {scriptEverOpenedRef.current && resolvedScriptId && (
           // Full-bleed: EditorShell manages its own internal layout/scroll
           // (`.mh-editor-shell { position:absolute; inset:0 }`), so this
           // wrapper only needs to be a sized, positioned box — no padding,
           // no `overflow-y-auto` (that would create a second scrollbar on
-          // top of the editor's own scene-sheet scroll).
-          <div data-testid="ws-script-editor" className="flex-1 min-h-0 relative overflow-hidden">
+          // top of the editor's own scene-sheet scroll). `display:none`
+          // while inactive rather than omitting the wrapper — the child
+          // stays mounted (see the file-level comment above).
+          <div
+            data-testid="ws-script-editor"
+            className="flex-1 min-h-0 relative overflow-hidden"
+            style={studioMode ? undefined : { display: 'none' }}
+          >
             <EditorShell
               scriptId={resolvedScriptId}
               currentUserId={currentUserId}
@@ -1014,23 +1085,34 @@ export function ProjectWorkspace({
               onActiveSceneChange={handleActiveSceneChange}
             />
           </div>
-        ) : activeModule === 'storyboard' ? (
+        )}
+        {storyboardEverOpenedRef.current && (
           // Storyboard's standalone module (IA redesign Task 2) — replaces
           // the old Overview "surface panel". Full-bleed like the EditorShell
           // branch above: the page owns its own header + scroll region, so
           // no px-6 pb-8 wrapper (that would double the padding/scrollbar).
-          <EpisodeStoryboardPage
-            projectId={project.id}
-            teamId={teamId ?? ''}
-            episode={currentEpisode}
-            initialView={readWorkspaceParams(searchParams).view}
-            onViewChange={handleStoryboardViewChange}
-            findExistingScript={findExistingScript}
-            provisionScript={resolveOrProvisionScript}
-            focusShotId={canvasFocusShotId}
-            onFocusShotIdConsumed={handleCanvasFocusShotIdConsumed}
-          />
-        ) : (
+          // `active` (Task 7): lets the page ignore focus-bus side effects
+          // and URL writes while merely resident-but-hidden — see that
+          // prop's doc comment on `EpisodeStoryboardPageProps`.
+          <div
+            data-testid="ws-storyboard-page"
+            className="flex-1 min-h-0 flex flex-col overflow-hidden"
+            style={activeModule === 'storyboard' ? undefined : { display: 'none' }}
+          >
+            <EpisodeStoryboardPage
+              active={activeModule === 'storyboard'}
+              teamId={teamId ?? ''}
+              episode={currentEpisode}
+              initialView={readWorkspaceParams(searchParams).view}
+              onViewChange={handleStoryboardViewChange}
+              findExistingScript={findExistingScript}
+              provisionScript={resolveOrProvisionScript}
+              focusShotId={canvasFocusShotId}
+              onFocusShotIdConsumed={handleCanvasFocusShotIdConsumed}
+            />
+          </div>
+        )}
+        {!studioMode && activeModule !== 'storyboard' && (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
             {showOverview && (
               <WorkspaceOverview
@@ -1065,6 +1147,11 @@ export function ProjectWorkspace({
                       onRequestAdvance={requestAdvance}
                       onOpenTodolist={() => setActiveModule('tasks')}
                       onOpenSettings={(_ignoredEpisodeId, nid) => handleOpenNodeSettings(episodeId, nid)}
+                      // Task 9 (#1787 遗留修复): the deliverable fact's own
+                      // Stage Board entry — `handleOpenStage` already exists
+                      // (Sidebar Stages block, M2 PR-F F2), just not wired
+                      // into this card until now.
+                      onOpenStage={handleOpenStage}
                       people={nodeCardPeople}
                       agents={nodeCardAgents}
                       onPatchNode={handlePatchNode}

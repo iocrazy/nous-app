@@ -60,13 +60,17 @@ function readStr(v: unknown): string | null {
 }
 
 /**
- * "1A" shot-code convention — mirrors `StoryboardView.tsx`'s
- * `` `${sceneIdx + 1}${String.fromCharCode(65 + shotIdx)}` `` so the canvas
- * never shows a different numbering scheme than the storyboard rail for the
- * same shot. `sceneNo` is the caller-computed 1-based scene rank (same
- * source as the rail); `shotIndexInScene` is 0-based, wrapping past Z the
- * same (unhandled, matching precedent) way the rail does for >26 shots in
- * one scene.
+ * "1A" shot-code convention — originally mirrored the pre-redesign
+ * `frontend/editor/storyboard/StoryboardView.tsx`'s letter-suffix formula so
+ * the canvas and the rail agreed on a shot's code. That file (and its
+ * `ShotCard.tsx`) retired in Task 6 (shot-nodes-on-canvas epic, #1797); the
+ * current rail — `EpisodeSceneBoard.tsx`'s scene columns — displays its own
+ * `SHOT {scene}-{shot}` numeric badge instead (`projects.sceneBoard.
+ * shotBadge` i18n key), so this label is now canvas-shot-node-only, no
+ * longer required to match a second live surface. `sceneNo` is the
+ * caller-computed 1-based scene rank; `shotIndexInScene` is 0-based,
+ * wrapping past Z unhandled (kept from the original formula, never hit in
+ * practice).
  */
 export function computeShotLabel(sceneNo: number, shotIndexInScene: number): string {
   const letter = String.fromCharCode(65 + (shotIndexInScene % 26));
@@ -216,6 +220,16 @@ export function reconcileShotNodes(
       ...(inFlight
         ? {}
         : { image_url: readStr(shot.image_url), shot_status: readStr(shot.status) }),
+      // Reverse transition (final review Important 3): the shot survived
+      // this pass (it's in `shots`, we're inside this loop at all) — if the
+      // node is still carrying a PREVIOUS pass's `stale: true` (e.g. an
+      // agent-deleted shot's node went grey, then an Undo restored the
+      // `script_shots` row), clear it here so the card comes back editable
+      // and doSave's stale-filter stops excluding it. Only written when the
+      // node actually has `stale === true` — never turns an untouched
+      // node's absent `stale` field into an explicit `false`, which would
+      // make every reconcile pass emit a no-op-shaped patch for every node.
+      ...(data.stale === true ? { stale: false } : {}),
     };
 
     const patch: Partial<ShotNodeData> = {};

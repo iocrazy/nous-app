@@ -90,7 +90,14 @@ export interface ShotNodeData {
    *  layer drops the node from `nodes_json` on the next autosave — see
    *  `canvasCoreStore.ts`'s `doSave` stale-filter. Absent/undefined on
    *  every other node (including unbound drafts, which reconcile never
-   *  touches) — only ever `true`, never explicitly `false`. */
+   *  touches). Final review Important 3: reversible — if the shot's
+   *  `script_shots` row comes back (e.g. an Undo after an agent deletion)
+   *  and the NEXT reconcile pass finds it in `shots` again while this node
+   *  still carries `stale: true`, that same pass patches it back to
+   *  `false` so the card returns to editable/saveable. Only ever flips
+   *  `true`→`false` or `false`(absent)→`true` — never written when it was
+   *  already absent/false, so a healthy node never gets a no-op `stale:
+   *  false` patch. */
   stale?: boolean;
 }
 

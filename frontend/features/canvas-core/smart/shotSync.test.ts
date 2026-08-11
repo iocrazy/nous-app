@@ -265,4 +265,88 @@ describe('reconcileShotNodes', () => {
     expect(result.nodesToPatch[0]).not.toHaveProperty('position');
     expect(result.nodesToPatch[0].data).not.toHaveProperty('position');
   });
+
+  // Final review Important 3 — stale reverse transition: a node previously
+  // flagged `stale: true` (its shot vanished from `script_shots`) whose shot
+  // comes BACK (e.g. an Undo of the deletion that caused the stale flag)
+  // must have `stale: false` patched back in on the pass that sees it, or
+  // the card stays permanently grey and excluded from doSave's payload even
+  // though the shot is alive again.
+  describe('stale reverse transition (final review Important 3)', () => {
+    it('a stale node whose shot is present again gets patched back to stale: false', () => {
+      const revivedShot = shot('s1');
+      const staleNode = boundNode('node-s1', 's1', {
+        shot_label: '1A',
+        shot_type: 'MEDIUM',
+        camera_angle: 'EYE_LEVEL',
+        camera_movement: 'STATIC',
+        focal_length: '35mm',
+        description: 'Base description',
+        image_url: null,
+        shot_status: 'empty',
+        scene_id: SCENE_1.id,
+        stale: true,
+      });
+
+      const result = reconcileShotNodes([staleNode], [SCENE_1], [revivedShot]);
+
+      expect(result.nodesToMarkStale).toEqual([]);
+      expect(result.nodesToPatch).toEqual([{ id: 'node-s1', data: { stale: false } }]);
+    });
+
+    it('a revived stale node with OTHER mirror drift too gets both in one patch', () => {
+      const revivedShot = shot('s1', { shot_type: 'CLOSE_UP' });
+      const staleNode = boundNode('node-s1', 's1', {
+        shot_label: '1A',
+        shot_type: 'MEDIUM', // drifted
+        camera_angle: 'EYE_LEVEL',
+        camera_movement: 'STATIC',
+        focal_length: '35mm',
+        description: 'Base description',
+        image_url: null,
+        shot_status: 'empty',
+        scene_id: SCENE_1.id,
+        stale: true,
+      });
+
+      const result = reconcileShotNodes([staleNode], [SCENE_1], [revivedShot]);
+
+      expect(result.nodesToPatch).toEqual([
+        { id: 'node-s1', data: { shot_type: 'CLOSE_UP', stale: false } },
+      ]);
+    });
+
+    it('a node with no stale field never gets a no-op stale patch (healthy node stays untouched)', () => {
+      // Regression guard for the "don't full-patch every node" caveat: a
+      // node that was NEVER stale (data.stale is undefined, not false) must
+      // not have `stale` appear in its patch just because reconcile ran.
+      const s1 = shot('s1');
+      const healthyNode = boundNode('node-s1', 's1', {
+        shot_label: '1A',
+        shot_type: 'MEDIUM',
+        camera_angle: 'EYE_LEVEL',
+        camera_movement: 'STATIC',
+        focal_length: '35mm',
+        description: 'Base description',
+        image_url: null,
+        shot_status: 'empty',
+        scene_id: SCENE_1.id,
+        // stale intentionally omitted (undefined).
+      });
+
+      const result = reconcileShotNodes([healthyNode], [SCENE_1], [s1]);
+
+      expect(result.nodesToPatch).toEqual([]);
+    });
+
+    it('a node still genuinely gone stays in nodesToMarkStale, not nodesToPatch — reverse transition only fires when the shot is found', () => {
+      const survivor = shot('s1');
+      const staleNode = boundNode('node-gone', 'deleted-shot-id', { stale: true });
+
+      const result = reconcileShotNodes([staleNode], [SCENE_1], [survivor]);
+
+      expect(result.nodesToMarkStale).toEqual(['node-gone']);
+      expect(result.nodesToPatch.some((p) => p.id === 'node-gone')).toBe(false);
+    });
+  });
 });

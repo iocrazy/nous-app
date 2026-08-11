@@ -2150,7 +2150,8 @@
       "people": "People",
       "agents": "Agents",
       "noCandidates": "No candidates",
-      "forbidden": "Only the project or episode owner can edit this"
+      "forbidden": "Only the project or episode owner can edit this",
+      "openDeliverablesBoard": "Open deliverables board"
     }
   },
   "storyboard": {

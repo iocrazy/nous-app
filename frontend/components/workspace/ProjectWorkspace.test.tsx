@@ -11,11 +11,12 @@
  * EditorShell itself is a thin stub recording the props it was called with.
  */
 import { useEffect } from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ApiError } from '../../services/apiClient';
+import { requestShotFocus } from '../agentActivity/shotFocusBus';
 import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 const navigate = vi.fn();
@@ -52,6 +53,11 @@ vi.mock('../../contexts/AuthContext', () => ({
 
 const mockEditorShell = vi.hoisted(() => vi.fn());
 const mockSelectScene = vi.hoisted(() => vi.fn());
+// Task 7 (keep-alive 显隐切换): fires on the mock's OWN unmount cleanup —
+// the RED test for "EditorShell stays mounted across a module switch" needs
+// a way to observe a REAL unmount (vs. just a prop-driven re-render), which
+// `mockEditorShell`'s per-render call count alone can't distinguish.
+const mockEditorShellUnmount = vi.hoisted(() => vi.fn());
 vi.mock('../../editor/components/EditorShell', () => ({
   EditorShell: (props: {
     scriptId: string;
@@ -71,6 +77,7 @@ vi.mock('../../editor/components/EditorShell', () => ({
       props.onScenesChange?.([{ id: 'sc1', heading_int_ext: 'INT', location_text: 'Test Loc' }]);
       props.onActiveSceneChange?.('sc1');
       if (props.selectSceneRef) props.selectSceneRef.current = mockSelectScene;
+      return () => mockEditorShellUnmount();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     return (
@@ -277,6 +284,7 @@ beforeEach(() => {
   navigate.mockClear();
   addToast.mockClear();
   mockEditorShell.mockClear();
+  mockEditorShellUnmount.mockClear();
   mockSelectScene.mockClear();
   mockStoryboardCanvasEmbed.mockClear();
   mockProjectsService.generateMissingFrames.mockReset();
@@ -1138,6 +1146,104 @@ describe('ProjectWorkspace', () => {
     expect(await screen.findByTestId('ws-overview')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-stage-board')).toBeNull();
     expect(screen.queryByTestId('stage-board-loading')).toBeNull();
+  });
+});
+
+// Task 7 (shot-nodes-on-canvas epic — keep-alive 显隐切换 + chunk 预加载): the
+// studio (EditorShell) and Storyboard (EpisodeStoryboardPage) subtrees used
+// to be an EXCLUSIVE ternary — switching modules fully unmounted whichever
+// was open. This is the root fix for the reported jank (剧本↔节拍 stayed
+// instant because that switch never left EditorShell's own mounted shell;
+// 分镜 was a lazy REMOUNTING module) — both now mount once and stay resident,
+// toggled only by `display:none`.
+describe('ProjectWorkspace — Task 7 keep-alive + preload', () => {
+  it('keeps EditorShell mounted (not unmounted) across a Script → Storyboard → Script round trip', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await expandEpisodesTree();
+    fireEvent.click(await screen.findByTestId('ws-ep-script'));
+    await screen.findByTestId('mock-editor-shell');
+    expect(mockEditorShellUnmount).not.toHaveBeenCalled();
+
+    // Switch to Storyboard — EditorShell must stay in the DOM, just hidden
+    // (display:none), NOT unmounted.
+    fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
+    await screen.findByTestId('episode-view-tabs');
+    expect(screen.getByTestId('mock-editor-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-editor-shell')).not.toBeVisible();
+    expect(mockEditorShellUnmount).not.toHaveBeenCalled();
+    // Storyboard, meanwhile, is the one visible.
+    expect(screen.getByTestId('episode-storyboard-page')).toBeVisible();
+
+    // ...and back to Script — instantly visible again, same mounted instance.
+    // (The click still goes through the async resolve chain — same episode,
+    // same script, so it resolves near-instantly — but the state update
+    // isn't synchronous with the click, hence `waitFor`.)
+    fireEvent.click(await screen.findByTestId('ws-ep-script'));
+    await waitFor(() => expect(screen.getByTestId('mock-editor-shell')).toBeVisible());
+    expect(screen.getByTestId('episode-storyboard-page')).not.toBeVisible();
+    expect(mockEditorShellUnmount).not.toHaveBeenCalled();
+  });
+
+  it('a hidden (kept-alive but inactive) Storyboard module ignores a shotFocusBus request — no URL write', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await openStoryboardModule();
+    await screen.findByTestId('episode-view-tabs');
+
+    // Switch away — Storyboard goes inactive but stays mounted (see the test
+    // above); the module list is reachable without re-expanding the tree.
+    fireEvent.click(await screen.findByTestId('ws-module-overview'));
+    expect(await screen.findByTestId('ws-overview')).toBeInTheDocument();
+    expect(screen.getByTestId('episode-storyboard-page')).not.toBeVisible();
+
+    setSearchParamsSpy.mockClear();
+    act(() => requestShotFocus('hidden-bus-shot'));
+
+    // No reaction from the hidden page: no URL write (the tab-switch path
+    // that would normally fire one, `handleTabChange` → `onViewChange` →
+    // `setSearchParams`, never runs).
+    expect(setSearchParamsSpy).not.toHaveBeenCalled();
+    // Still on Overview — the hidden page didn't silently jump the writer.
+    expect(screen.getByTestId('ws-overview')).toBeInTheDocument();
+  });
+
+  it('idle-preloads the EpisodeStoryboardPage chunk after mount', async () => {
+    const idleCallback = vi.fn((cb: () => void) => {
+      cb();
+      return 1;
+    });
+    const original = (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+    (window as { requestIdleCallback?: unknown }).requestIdleCallback = idleCallback;
+    try {
+      render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+      await screen.findByTestId('ws-module-overview');
+      expect(idleCallback).toHaveBeenCalledTimes(1);
+    } finally {
+      (window as { requestIdleCallback?: unknown }).requestIdleCallback = original;
+    }
+  });
+
+  it('falls back to setTimeout when requestIdleCallback is unavailable', async () => {
+    const original = (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+    delete (window as { requestIdleCallback?: unknown }).requestIdleCallback;
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+    try {
+      render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+      await screen.findByTestId('ws-module-overview');
+      expect(setTimeoutSpy).toHaveBeenCalled();
+    } finally {
+      (window as { requestIdleCallback?: unknown }).requestIdleCallback = original;
+      setTimeoutSpy.mockRestore();
+    }
   });
 });
 
