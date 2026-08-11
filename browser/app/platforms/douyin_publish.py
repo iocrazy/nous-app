@@ -65,6 +65,7 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ..assets import AssetError, StagedAsset
 from ..browser_runtime import (
     ProxyConfigError,
     apply_stealth,
@@ -75,12 +76,14 @@ from ..config import get_settings
 from ..dom import click_element, click_first, remove_nodes, visible_marker_texts
 from ..publish import (
     COVER_ROLE,
+    IMAGES_CONTENT_TYPE,
     VIDEO_ROLE,
     Deadline,
     IntentProblem,
     PlatformIntentRules,
     PublishJob,
     PublishOutcome,
+    ordered_image_assets,
 )
 from ..redaction import scrub
 from ..schemas import PublishIntent, SessionStatus
@@ -107,6 +110,28 @@ EDITOR_PATHS: tuple[tuple[str, str], ...] = (
 # Where the platform redirects once a post is live.
 MANAGE_PATH_FRAGMENT = "/content/manage"
 
+# --- image posts: page geography -------------------------------------------
+#
+# [实测 2026-08-11] (spec §3.4 V1) The gallery composer is not a separate page:
+# it is a *tab* on the same upload page the video flow uses, selected by
+# `default-tab=3`. Built from `douyin.UPLOAD_URL` rather than restated, so the
+# host and path keep one definition (the rule this module's header states).
+IMAGE_UPLOAD_URL = f"{douyin.UPLOAD_URL}?default-tab=3"
+
+# [实测 2026-08-11] (V1) Handing three files to the composer moves the SPA to
+# `/content/post/image?...&media_type=image&type=new`. Three runs, same landing.
+#
+# ⚠️ A tuple with one entry, deliberately - **not** a string. Three samples on
+# one account on one day cannot show that a second gray-release path does not
+# exist; the video flow runs two in parallel (`EDITOR_PATHS`) and polling only
+# one of those hangs half the time, *after* the upload. Nothing speculative is
+# listed here because a made-up path is a matcher that can fire on the wrong
+# page - but the shape stays a candidate list so adding a real one, once
+# observed, is one line and no restructuring.
+IMAGE_EDITOR_PATHS: tuple[tuple[str, str], ...] = (
+    ("/content/post/image", "image_v1"),
+)
+
 # --- selectors --------------------------------------------------------------
 
 FILE_INPUT_SELECTOR = "div[class^='container'] input"
@@ -117,6 +142,90 @@ UPLOAD_FAILED_SELECTOR = 'div.progress-div > div:has-text("上传失败")'
 
 TITLE_INPUT_SELECTOR = 'input[placeholder*="填写作品标题"]'
 DESCRIPTION_EDITOR_SELECTOR = 'div.zone-container[contenteditable="true"]'
+
+# --- image posts: selectors -------------------------------------------------
+#
+# Everything in this block is either a 2026-08-11 measurement (spec §3.4) or is
+# marked as unverified at its point of use. The gallery editor is **not** the
+# video editor with a different upload widget - the two pages disagree on the
+# title placeholder, on how completion is announced, and on what a cover is -
+# so nothing is reused here on the assumption that "it is the same console".
+
+# [实测 2026-08-11] (V5) `input[type="file"][multiple]` matches exactly one
+# element on the composer, and one `set_input_files` with three paths produced
+# 「已添加3张图片」. So: one call, all files (spec D8 - fewer interactions, fewer
+# behavioural fingerprints).
+#
+# [实测 2026-08-11, T3] Both candidates re-measured against the live page, since
+# they were *derived* from V3/V5's attribute values rather than run as selectors:
+#   input[type="file"][multiple]        total 1, visible 1
+#   input[type="file"][accept*="image/"] total 1, visible 1
+# and the page's only file input is that one (`input[type="file"]` total 1,
+# accept="image/png,image/jpeg,image/jpg,image/bmp,image/webp,image/tif",
+# multiple=true).
+#
+# ⚠️ `FILE_INPUT_SELECTOR` is deliberately **not** a third candidate, even though
+# that measurement shows it would currently resolve to the same element. The two
+# tabs share one URL and switch client-side, so a generic input selector is
+# image-only *by coincidence of which tab is mounted* - and the day it resolves
+# to the video input instead (V-baseline: `multiple` false, `accept="video/…"`),
+# a gallery goes into the video channel. That is a wrong post, not a failed one,
+# and it is the one failure mode this whole step is arranged to avoid. Both
+# candidates above are image-only by construction.
+IMAGE_FILE_INPUT_SELECTORS: tuple[str, ...] = (
+    'input[type="file"][multiple]',
+    'input[type="file"][accept*="image/"]',
+)
+
+# [实测 2026-08-11] (V9) `placeholder="添加作品标题"` on the gallery editor. The
+# video editor says 填写作品标题, which matches **nothing** here - this is the
+# single clearest proof that the two editors are not one page with a different
+# uploader.
+IMAGE_TITLE_INPUT_SELECTORS: tuple[str, ...] = (
+    'input[placeholder*="添加作品标题"]',
+)
+# [实测 2026-08-11] (V9) A contenteditable carrying
+# `data-placeholder="添加作品描述..."`. Its class was not read, so the video
+# editor's `div.zone-container` is kept as a second candidate: it costs one
+# locator query and it is the only other shape this console is known to use.
+IMAGE_DESCRIPTION_SELECTORS: tuple[str, ...] = (
+    '[contenteditable="true"][data-placeholder*="添加作品描述"]',
+    DESCRIPTION_EDITOR_SELECTOR,
+)
+
+# [实测 2026-08-11] (V9) The editor shows two counters, `0/20` and `0 / 1000`.
+# ⚠️ **Which counter belongs to which field was not read directly** - it was
+# settled by elimination (1000 can only be the description). Treated as 20
+# because over-truncating shortens a title while under-truncating risks the
+# platform silently clamping or refusing, and the truncation is reported in
+# `detail` (`title_truncated`) either way, so a real run can contradict it.
+IMAGE_TITLE_LIMIT = 20
+
+# [实测 2026-08-11] (V6) How the composer announces a finished transfer.
+#
+# ⚠️ Two traps, both measured, both live here rather than in a comment far away:
+#   * 「重新上传」 has exact=0 / substring=1 on this page - it is a *substring of*
+#     「清空并重新上传」. The video flow's `UPLOAD_DONE_SELECTOR` matches it as a
+#     substring, so copying that selector across would read a gallery that has
+#     not finished as one that has.
+#   * 「已添加N张图片」 has exact=0 / substring=1 - the node carries other text
+#     around it, so this one must NOT be matched exactly.
+IMAGE_UPLOAD_DONE_TEXT = "清空并重新上传"
+IMAGE_ADDED_PATTERN = re.compile(r"已添加\s*(\d+)\s*张图片")
+
+# ⚠️ UNVERIFIED for galleries. 「上传失败」 was exact=0 during the survey, but the
+# survey only ever saw a *successful* composer, so that is not evidence the
+# string is absent - only that nothing had failed. Reused from the video flow
+# because a false negative here is safe (the count check below still refuses to
+# call an incomplete gallery complete) while having no failure probe at all
+# would spend the whole upload budget before saying anything.
+IMAGE_UPLOAD_FAILED_SELECTOR = UPLOAD_FAILED_SELECTOR
+
+# [实测 2026-08-11] (V4) 「图片文件大小不超过50MB」. Three orders of magnitude
+# below `asset_max_bytes` (2GB), so the neutral staging ceiling cannot catch it:
+# an oversized image stages happily and then fails at the DOM with whatever the
+# platform decides to render.
+IMAGE_MAX_BYTES = 50 * 1024 * 1024
 
 # §7.4: shepherd coach-marks and the topic autocomplete sit *over* the controls
 # and swallow clicks. Playwright reports "element intercepts pointer events"
@@ -311,20 +420,29 @@ class PublishJudgement:
     reason: str
 
 
-def judge_editor_arrival(url: str) -> EditorArrival:
+def judge_editor_arrival(
+    url: str, paths: Sequence[tuple[str, str]] = EDITOR_PATHS
+) -> EditorArrival:
     """Did the upload page hand us over to the post editor yet? Pure.
 
     Host-checked and path-matched rather than compared to a full URL: the
     platform appends `?enter_from=publish_page` and other query material, and
     an exact match against one of the two gray-release URLs is a matcher that
     is wrong roughly half the time.
+
+    `paths` is a parameter because the two content types land on different
+    editors and **must not accept each other's**. Both tabs are reachable from
+    one upload URL, so a gallery run that somehow ended up on `/content/post/
+    video` has gone somewhere it cannot publish from; treating that as arrival
+    would push the failure two steps downstream, into a form whose selectors
+    would then be blamed for it.
     """
     parts = urlsplit(url or "")
     host = (parts.hostname or "").lower()
     if host not in douyin.CREATOR_HOSTS:
         return EditorArrival(False, None, f"not on the creator host (host={host or 'unknown'})")
 
-    for fragment, variant in EDITOR_PATHS:
+    for fragment, variant in paths:
         if fragment in parts.path:
             return EditorArrival(True, variant, f"reached the {variant} editor")
 
@@ -349,11 +467,126 @@ def judge_upload_state(snapshot: UploadSnapshot) -> UploadJudgement:
     return UploadJudgement(UploadState.PENDING, "no upload outcome on the page yet")
 
 
+class ImageUploadState(str, Enum):
+    PENDING = "pending"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    # The composer holds a different number of images than we handed it. Its own
+    # state, not a variant of FAILED: nothing broke, the page is simply
+    # describing a gallery nobody composed.
+    MISCOUNTED = "miscounted"
+
+
+@dataclass(frozen=True)
+class ImageUploadSnapshot:
+    """What the driver could see of the gallery transfer. Pure data.
+
+    `added_count` is `None` for "the page has not said a number yet", which is
+    **not** zero: zero would be a claim that the composer is empty, and the two
+    have to stay apart or a page whose copy changed reads as an upload that
+    silently lost every file.
+    """
+
+    added_count: int | None = None
+    reupload_visible: bool = False
+    failure_visible: bool = False
+
+
+@dataclass(frozen=True)
+class ImageUploadJudgement:
+    state: ImageUploadState
+    reason: str
+
+
+def read_added_image_count(text: str | None) -> int | None:
+    """The N in 「已添加N张图片」, or None. Pure.
+
+    Parsed rather than probed one candidate string at a time, and that is not
+    only about query count: probing 「已添加3张图片」 can answer *whether* three
+    landed but never *how many did*, so a gallery stuck at two and a gallery the
+    page never described look identical - and they need different answers.
+    """
+    if not text:
+        return None
+    match = IMAGE_ADDED_PATTERN.search(text)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):  # pragma: no cover - \d+ cannot fail here
+        return None
+
+
+def judge_image_upload_state(
+    snapshot: ImageUploadSnapshot, expected: int
+) -> ImageUploadJudgement:
+    """Are all `expected` images in the composer? Pure.
+
+    Failure is read before completion, for the same reason the video judgement
+    does it (the two markers can coexist and the mistakes are not symmetric).
+
+    What is different here is that completion is a **count**, not a marker.
+    「清空并重新上传」 appears as soon as the composer holds anything at all, so
+    a gallery that lost its last two files shows exactly the same marker as a
+    complete one. Publishing on the marker alone would send a real post, to a
+    real audience, missing images the user chose - and it would look like a
+    success. The count is the only signal that can tell those apart, so it is
+    the one that licenses COMPLETE; the marker is recorded and nothing more.
+    """
+    if snapshot.failure_visible:
+        return ImageUploadJudgement(
+            ImageUploadState.FAILED, "the composer is reporting an upload failure"
+        )
+    if snapshot.added_count is None:
+        return ImageUploadJudgement(
+            ImageUploadState.PENDING, "the composer has not reported an image count yet"
+        )
+    if snapshot.added_count == expected:
+        return ImageUploadJudgement(
+            ImageUploadState.COMPLETE, f"all {expected} images are in the composer"
+        )
+    if snapshot.added_count > expected:
+        # Leftovers from an earlier attempt, or a second upload that appended
+        # (this composer offers 继续添加, so appending is what it does). Either
+        # way the gallery on screen is not the one that was requested.
+        return ImageUploadJudgement(
+            ImageUploadState.MISCOUNTED,
+            f"the composer holds {snapshot.added_count} images but only {expected} "
+            "were uploaded",
+        )
+    return ImageUploadJudgement(
+        ImageUploadState.PENDING,
+        f"{snapshot.added_count} of {expected} images added so far",
+    )
+
+
+def first_oversized_image(
+    images: Sequence[StagedAsset], limit: int = IMAGE_MAX_BYTES
+) -> tuple[int, StagedAsset] | None:
+    """`(position, asset)` of the first image over the platform's per-file cap.
+
+    Pure, and checked before the browser opens the composer: the alternative is
+    discovering it at the DOM, where the platform's complaint is a toast this
+    code would have to scrape, after every other image has already transferred.
+    """
+    for position, asset in enumerate(images):
+        if asset.size_bytes > limit:
+            return position, asset
+    return None
+
+
 def judge_publish_outcome(url: str) -> PublishJudgement:
     """Did the post go out? Pure.
 
     Landing on the content-management page is the platform's own signal that a
     post was accepted; nothing on the editor page says so.
+
+    ⚠️ **UNVERIFIED for image posts** (spec §3.4 V16): confirming where a
+    gallery redirects needs someone to actually press 发布, which the read-only
+    survey was forbidden from doing. If galleries land somewhere else, this
+    reports a timeout for a post that really went out - wrong, but wrong in the
+    safe direction (a publish is never claimed without the platform's own
+    signal). T7 settles it on a real account.
     """
     parts = urlsplit(url or "")
     host = (parts.hostname or "").lower()
@@ -363,7 +596,12 @@ def judge_publish_outcome(url: str) -> PublishJudgement:
         )
     if MANAGE_PATH_FRAGMENT in parts.path:
         return PublishJudgement(PublishPageState.PUBLISHED, "redirected to the content manager")
-    if any(fragment in parts.path for fragment, _ in EDITOR_PATHS):
+    # Both editors, because this only ever names *where a publish got stuck* -
+    # and "unrecognised page" for a page we recognise perfectly well is the kind
+    # of diagnostic that sends the next investigation somewhere else entirely.
+    if any(
+        fragment in parts.path for fragment, _ in (*EDITOR_PATHS, *IMAGE_EDITOR_PATHS)
+    ):
         return PublishJudgement(PublishPageState.EDITING, "still on the post editor")
     return PublishJudgement(
         PublishPageState.UNKNOWN, f"unrecognised page (path={parts.path or '/'})"
@@ -699,7 +937,13 @@ async def _goto_editor(page: Any, job: PublishJob, deadline: Deadline) -> None:
     )
 
 
-async def _await_editor(page: Any, deadline: Deadline) -> EditorArrival:
+async def _await_editor(
+    page: Any,
+    deadline: Deadline,
+    *,
+    paths: Sequence[tuple[str, str]] = EDITOR_PATHS,
+    stage: str = "editor",
+) -> EditorArrival:
     settings = get_settings()
     end = time.monotonic() + _stage_budget(deadline, settings.publish_editor_wait_s)
 
@@ -707,7 +951,7 @@ async def _await_editor(page: Any, deadline: Deadline) -> EditorArrival:
     # implementation's equivalent loop has no ceiling at all, so an editor that
     # never renders hangs the caller for as long as the process lives.
     while time.monotonic() < end:
-        arrival = judge_editor_arrival(page.url)
+        arrival = judge_editor_arrival(page.url, paths)
         if arrival.arrived:
             return arrival
         await asyncio.sleep(settings.publish_poll_interval_s)
@@ -720,17 +964,73 @@ async def _await_editor(page: Any, deadline: Deadline) -> EditorArrival:
             SessionStatus.SESSION_INVALID,
             "the session dropped mid-publish: a login prompt appeared instead of the editor",
             reason="session_lost_during_publish",
-            stage="editor",
+            stage=stage,
         )
     raise StepFailure(
         SessionStatus.TIMEOUT,
         f"the post editor did not open within {settings.publish_editor_wait_s}s",
-        stage="editor",
+        stage=stage,
         final_url=scrub(page.url),
     )
 
 
-async def _fill_form(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
+@dataclass(frozen=True)
+class FormLayout:
+    """Where the title and description live, and how long a title may be.
+
+    A parameter rather than two module constants, because the video editor and
+    the gallery editor genuinely disagree: 填写作品标题 matches nothing on the
+    gallery page and 添加作品标题 matches nothing on the video page (spec §3.4
+    V9). Copying `_fill_form` into an image-flavoured twin would have worked
+    too, and would have meant that the next fix to topic entry - the part the
+    two editors *do* share - lands in one copy and not the other.
+    """
+
+    title_selectors: tuple[str, ...]
+    description_selectors: tuple[str, ...]
+    title_limit: int
+
+
+VIDEO_FORM = FormLayout(
+    title_selectors=(TITLE_INPUT_SELECTOR,),
+    description_selectors=(DESCRIPTION_EDITOR_SELECTOR,),
+    title_limit=TITLE_LIMIT,
+)
+
+IMAGE_FORM = FormLayout(
+    title_selectors=IMAGE_TITLE_INPUT_SELECTORS,
+    description_selectors=IMAGE_DESCRIPTION_SELECTORS,
+    title_limit=IMAGE_TITLE_LIMIT,
+)
+
+
+async def _first_visible(
+    page: Any, selectors: Sequence[str], timeout_ms: int
+) -> Any | None:
+    """The first of `selectors` to become visible, or None if none does.
+
+    The budget is split across the candidates rather than granted to each, so a
+    list of three cannot quietly triple the time a step is allowed to take.
+    """
+    if not selectors:
+        return None
+    slice_ms = max(1_000, timeout_ms // len(selectors))
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            await locator.wait_for(state="visible", timeout=slice_ms)
+            return locator
+        except Exception:
+            continue
+    return None
+
+
+async def _fill_form(
+    page: Any,
+    job: PublishJob,
+    deadline: Deadline,
+    layout: FormLayout = VIDEO_FORM,
+) -> dict[str, Any]:
     settings = get_settings()
     intent = job.intent
     # §7.4: the editor renders its form only once the video has finished
@@ -738,13 +1038,32 @@ async def _fill_form(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     # every real video, which is why this budget is minutes rather than seconds.
     form_timeout = deadline.slice_ms(settings.publish_form_timeout_ms)
 
-    title, truncated = truncate_title(intent.title)
-    title_input = page.locator(TITLE_INPUT_SELECTOR).first
-    await title_input.wait_for(state="visible", timeout=form_timeout)
+    title, truncated = truncate_title(intent.title, layout.title_limit)
+    title_input = await _first_visible(page, layout.title_selectors, form_timeout)
+    if title_input is None:
+        # Typed, but still `TIMEOUT`: this used to surface as whatever Playwright
+        # raised, which `classify_playwright_error` turned into a timeout, and a
+        # caller that retries on timeout must keep behaving the same way. The
+        # reason is the new part - "the title box never appeared" is a different
+        # investigation from "the page never loaded".
+        raise StepFailure(
+            SessionStatus.TIMEOUT,
+            "the title field never appeared on the editor",
+            reason="title_input_missing",
+            stage="form",
+            selectors=list(layout.title_selectors),
+        )
     await title_input.fill(title, timeout=deadline.slice_ms(settings.publish_click_timeout_ms))
 
-    editor = page.locator(DESCRIPTION_EDITOR_SELECTOR).first
-    await editor.wait_for(state="visible", timeout=form_timeout)
+    editor = await _first_visible(page, layout.description_selectors, form_timeout)
+    if editor is None:
+        raise StepFailure(
+            SessionStatus.TIMEOUT,
+            "the description editor never appeared",
+            reason="description_editor_missing",
+            stage="form",
+            selectors=list(layout.description_selectors),
+        )
     await editor.click(timeout=deadline.slice_ms(settings.publish_click_timeout_ms))
     # It is a contenteditable, not an input: `fill()` does not apply, and the
     # platform pre-seeds it with the filename. Select-all + delete first, or the
@@ -769,7 +1088,14 @@ async def _fill_form(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # note - `mention-wrapper` is this dropdown).
         await page.keyboard.press("Escape")
 
-    return {"title_truncated": truncated, "topics_applied": len(tokens)}
+    return {
+        "title_truncated": truncated,
+        # Reported because the gallery limit (20) is the one fact in V9 that was
+        # reached by elimination rather than read. A run whose title came back
+        # unexpectedly short is then explainable from `detail` alone.
+        "title_limit": layout.title_limit,
+        "topics_applied": len(tokens),
+    }
 
 
 async def _retry_upload(page: Any, path: str, deadline: Deadline) -> bool:
@@ -835,6 +1161,186 @@ async def _await_upload_complete(
         f"the video did not finish uploading within {settings.publish_upload_wait_s}s",
         stage="upload",
         retries=retried,
+    )
+
+
+# --- image posts: upload ----------------------------------------------------
+
+
+async def _goto_image_composer(
+    page: Any, images: Sequence[StagedAsset], deadline: Deadline
+) -> dict[str, Any]:
+    """Open the gallery tab and hand it every image in one call.
+
+    One `set_input_files` with N paths, which is what V5 measured working and
+    what spec D8 asks for: each extra interaction is another behavioural
+    fingerprint, and a per-file loop would add N of them for nothing.
+
+    The order of `images` is the order of the post. It comes from
+    `ordered_image_assets`, which derives it from the index in each role rather
+    than from mapping iteration order - so it survives any rebuild of the assets
+    mapping, and a gap or a duplicate raises instead of silently publishing a
+    gallery nobody composed (spec D2).
+    """
+    settings = get_settings()
+
+    oversized = first_oversized_image(images)
+    if oversized is not None:
+        position, asset = oversized
+        raise StepFailure(
+            SessionStatus.FAILED,
+            f"image {position} ({asset.filename}) is {asset.size_bytes} bytes; the "
+            f"platform's per-image ceiling is {IMAGE_MAX_BYTES}",
+            reason="image_too_large",
+            stage="image_upload",
+            image_index=position,
+            image_size_bytes=asset.size_bytes,
+            image_max_bytes=IMAGE_MAX_BYTES,
+        )
+
+    await page.goto(
+        IMAGE_UPLOAD_URL,
+        wait_until="domcontentloaded",
+        timeout=deadline.slice_ms(settings.nav_timeout_ms),
+    )
+
+    # `attached`, not `visible`. [实测 2026-08-11, T3] this input reports
+    # `visible: 1`, so waiting for visibility would work *today* - but the video
+    # flow's equivalent is hidden behind a styled drop zone, styling like that
+    # is a decision the platform can revisit, and `attached` is the weaker
+    # requirement that costs nothing. `set_input_files` does not need the
+    # element to be visible.
+    file_input = await _first_attached(
+        page,
+        IMAGE_FILE_INPUT_SELECTORS,
+        deadline.slice_ms(settings.publish_form_timeout_ms),
+    )
+    if file_input is None:
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "the gallery composer exposed no image file input; refusing to fall "
+            "back to a generic file input, because the video uploader shares "
+            "this URL and a gallery sent to it is a wrong post, not a failed one",
+            reason="image_upload_input_missing",
+            stage="image_upload",
+            selectors=list(IMAGE_FILE_INPUT_SELECTORS),
+        )
+
+    await file_input.set_input_files(
+        [asset.path for asset in images],
+        timeout=deadline.slice_ms(settings.publish_upload_wait_s * 1000),
+    )
+    return {
+        "images_requested": len(images),
+        # The filenames in publish order, so a post whose gallery came out in the
+        # wrong order can be checked against what was actually handed over
+        # instead of against what someone believes was handed over.
+        "image_order": [asset.filename for asset in images],
+    }
+
+
+async def _first_attached(
+    page: Any, selectors: Sequence[str], timeout_ms: int
+) -> Any | None:
+    """The first of `selectors` to attach to the DOM, or None. Budget is split."""
+    if not selectors:
+        return None
+    slice_ms = max(1_000, timeout_ms // len(selectors))
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            await locator.wait_for(state="attached", timeout=slice_ms)
+            return locator
+        except Exception:
+            continue
+    return None
+
+
+async def _read_added_images(page: Any) -> int | None:
+    """How many images the composer says it holds, or None if it does not say."""
+    try:
+        node = page.get_by_text(IMAGE_ADDED_PATTERN).first
+        if not await node.count():
+            return None
+        return read_added_image_count(await node.inner_text())
+    except Exception:
+        # A locator racing a re-render is not evidence the gallery is empty.
+        return None
+
+
+async def _await_images_uploaded(
+    page: Any, deadline: Deadline, expected: int
+) -> dict[str, Any]:
+    """Wait until the composer holds exactly `expected` images.
+
+    **No retry, and that is a measured decision rather than a shortcut.** The
+    video flow re-feeds its file to the failure card's own replacement input,
+    which *replaces*. This composer offers 继续添加 alongside
+    清空并重新上传 (V6), so handing it the same N files again appends them -
+    turning a three-image post into a six-image one. Re-uploading here would
+    trade a failed publish for a wrong publish, which is the trade this module
+    refuses everywhere else. Recovery is 清空并重新上传 followed by a fresh
+    upload, and that sequence has never been observed; until it has, the honest
+    answer is a typed failure.
+    """
+    settings = get_settings()
+    end = time.monotonic() + _stage_budget(deadline, settings.publish_upload_wait_s)
+    observed: int | None = None
+
+    while time.monotonic() < end:
+        observed = await _read_added_images(page)
+        snapshot = ImageUploadSnapshot(
+            added_count=observed,
+            reupload_visible=bool(
+                await visible_marker_texts(page, (IMAGE_UPLOAD_DONE_TEXT,), exact=True)
+            ),
+            failure_visible=await _visible(page, IMAGE_UPLOAD_FAILED_SELECTOR),
+        )
+        judgement = judge_image_upload_state(snapshot, expected)
+
+        if judgement.state is ImageUploadState.COMPLETE:
+            return {
+                "images_added": expected,
+                # Recorded, never trusted: the marker appears as soon as the
+                # composer holds anything, so it can only ever corroborate the
+                # count. Its absence on a complete gallery is the early warning
+                # that the copy moved.
+                "image_upload_marker_seen": snapshot.reupload_visible,
+            }
+
+        if judgement.state is ImageUploadState.FAILED:
+            raise StepFailure(
+                SessionStatus.FAILED,
+                f"the composer reported an upload failure: {judgement.reason}",
+                reason="image_upload_failed",
+                stage="image_upload",
+                images_expected=expected,
+                images_added=observed,
+            )
+
+        if judgement.state is ImageUploadState.MISCOUNTED:
+            raise StepFailure(
+                SessionStatus.FAILED,
+                judgement.reason
+                + "; refusing to publish a gallery that is not the one requested",
+                reason="image_count_mismatch",
+                stage="image_upload",
+                images_expected=expected,
+                images_added=observed,
+            )
+
+        await asyncio.sleep(settings.publish_poll_interval_s)
+
+    raise StepFailure(
+        SessionStatus.TIMEOUT,
+        f"only {observed if observed is not None else 'an unknown number of'} of "
+        f"{expected} images finished uploading within "
+        f"{settings.publish_upload_wait_s}s",
+        stage="image_upload",
+        images_expected=expected,
+        # Which ones are missing is not readable from a count, but *how many*
+        # is - and "2 of 3" is a different bug report from "0 of 3".
+        images_added=observed,
     )
 
 
@@ -1455,6 +1961,83 @@ async def _drive(page: Any, job: PublishJob, deadline: Deadline) -> PublishOutco
     )
 
 
+async def _drive_images(page: Any, job: PublishJob, deadline: Deadline) -> PublishOutcome:
+    """Publish one image post. The sibling of `_drive`, not a branch inside it.
+
+    Two flows rather than one with `if content_type == ...` scattered through
+    it, because the differences are not incidental: a different upload page, a
+    different completion signal, a different title field, and no cover step at
+    all. Interleaving them would put four conditionals in a function whose value
+    is that it reads as a sequence.
+
+    What *is* shared is shared outright - the declaration, collection,
+    visibility, schedule and confirm steps are the same functions the video flow
+    calls, because V10/V12/V13/V14 measured the same copy on both pages. A
+    second copy of `_set_self_declaration` is how one of them ends up with a fix
+    the other never gets.
+
+    Step order matches `_drive` where it can, and differs where it must:
+    the upload is awaited **before** the form is filled. On the video flow the
+    form renders while the transfer runs, so filling it first is free; here the
+    editor only exists because the images were handed over, and a form filled
+    against a gallery that turns out to be incomplete is work thrown away under
+    a failure that would then be reported from the wrong step.
+    """
+    detail: dict[str, Any] = {}
+
+    # First, and before any navigation: a mapping that cannot describe a gallery
+    # must not cost a page load, and this raises rather than publishing whatever
+    # subset it can make sense of (spec D2).
+    images = ordered_image_assets(job.assets)
+
+    detail.update(await _goto_image_composer(page, images, deadline))
+    arrival = await _await_editor(
+        page, deadline, paths=IMAGE_EDITOR_PATHS, stage="image_editor"
+    )
+    detail["editor_variant"] = arrival.variant
+
+    detail.update(await _await_images_uploaded(page, deadline, len(images)))
+    detail.update(await _fill_form(page, job, deadline, layout=IMAGE_FORM))
+    # No `_set_cover`. Spec D4: this channel has no separate cover asset - the
+    # gallery's own first image is the cover - and `validate_intent` has already
+    # refused any intent that sent one (`cover_not_supported_for_images`), so
+    # there is no file staged under COVER_ROLE for this step to upload.
+    #
+    # ⚠️ The composer *does* have a cover control (V8: 选择一张图片作为封面),
+    # it simply picks from the images already uploaded. Whether it defaults to
+    # the first one could not be measured without opening its dialog, which the
+    # read-only survey could not do. T7 confirms it on a real post.
+    detail.update(await _set_self_declaration(page, job, deadline))
+    detail.update(await _set_collection(page, job, deadline))
+    detail.update(await _apply_options(page, job, deadline))
+    detail.update(await _set_schedule(page, job, deadline))
+    detail.update(await _confirm_publish(page, deadline))
+
+    return PublishOutcome(
+        status=SessionStatus.PUBLISHED,
+        message=f"image post published ({len(images)} images)",
+        detail=detail,
+        # Same as the video flow: the redirect carries no identifier for the post
+        # just created, and the survey found the manage page has no anchors at
+        # all (V17b), so guessing one from the first card would be wrong for any
+        # account with a scheduled or concurrently-published post.
+        platform_item_id=None,
+        published_url=None,
+    )
+
+
+def _driver_for(content_type: str):
+    """Which flow publishes this content type.
+
+    Looked up by content type rather than decided inside one driver, so the day
+    a third type arrives it is a new function and a new row, not a fourth branch
+    inside a sequence of DOM steps.
+    """
+    if content_type == IMAGES_CONTENT_TYPE:
+        return _drive_images
+    return _drive
+
+
 _KIND_TO_STATUS = {
     ProbeKind.PROXY_FAILED: SessionStatus.PROXY_FAILED,
     ProbeKind.TIMEOUT: SessionStatus.TIMEOUT,
@@ -1465,6 +2048,19 @@ _KIND_TO_STATUS = {
 def _outcome_from_exception(exc: BaseException) -> PublishOutcome:
     if isinstance(exc, StepFailure):
         return PublishOutcome(status=exc.status, message=exc.message, detail=dict(exc.detail))
+
+    if isinstance(exc, AssetError):
+        # `run_publish` types the ones raised while staging, but the gallery flow
+        # can raise one from *inside* the publisher: `ordered_image_assets`
+        # refuses a mapping with a gap or a duplicate index. Falling through to
+        # the classifier below would flatten `image_role_gap` into a scrubbed
+        # string and lose the reason the caller branches on - a typed failure
+        # that stops being typed one layer up is not a typed failure.
+        return PublishOutcome(
+            status=exc.status,
+            message=exc.message,
+            detail={**exc.detail, "stage": "assets"},
+        )
 
     raw = f"{type(exc).__name__}: {exc}"
     status = _KIND_TO_STATUS.get(classify_playwright_error(raw), SessionStatus.FAILED)
@@ -1492,7 +2088,14 @@ async def _safe_storage_state(context: Any) -> dict[str, Any] | None:
 
 
 async def publish(job: PublishJob, deadline: Deadline) -> PublishOutcome:
-    """Publish one video. Total: every failure comes back as a typed status."""
+    """Publish one post - video or gallery. Total: failures come back typed.
+
+    The browser lifecycle is identical for both, so only the driving differs
+    (`_driver_for`). Everything below - the proxy check, the stealth injection,
+    the refreshed-cookie collection on every path out - applies to an image post
+    exactly as it does to a video, and duplicating this function for galleries
+    is how one of the two copies quietly stops collecting the renewal.
+    """
     # patchright，不是 playwright：drop-in fork，补 CDP 层泄露。
     # 四个 import 点必须一致 —— test_patchright_everywhere 会失败。
     from patchright.async_api import async_playwright
@@ -1521,7 +2124,7 @@ async def publish(job: PublishJob, deadline: Deadline) -> PublishOutcome:
             await apply_stealth(context)
             try:
                 page = await context.new_page()
-                outcome = await _drive(page, job, deadline)
+                outcome = await _driver_for(job.intent.content_type)(page, job, deadline)
             except Exception as exc:  # noqa: BLE001
                 outcome = _outcome_from_exception(exc)
             finally:
