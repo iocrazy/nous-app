@@ -131,8 +131,9 @@ const SCRIPTS = [
 ];
 
 // A single-node workflow whose CURRENT node is storyboard-surfaced — drives
-// the Overview's storyboard surface panel (三视图主工作面, PR-A). Only used by
-// the test below that exercises it; the other tests in this file never stub
+// the standalone Storyboard module page (三视图主工作面, PR-A; lifted out of
+// Overview into its own module by IA redesign Task 2). Only used by the test
+// below that exercises it; the other tests in this file never stub
 // `/workflow` and keep getting the generic `{success:true,data:[]}` catch-all
 // from setupStubbedSession (has_workflow undefined → WorkflowSection's empty
 // "Set up workflow" CTA — unrelated pre-existing behavior, unaffected here).
@@ -423,7 +424,7 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('ws-ep-publish')).toBeDisabled();
   });
 
-  test('storyboard child lands on the Overview surface panel (scene board + shot list), not the embedded editor (PR-A)', async ({
+  test('storyboard child lands on the standalone Storyboard module page (scene board + shot list), not the embedded editor (IA redesign Task 2)', async ({
     page,
   }) => {
     await routeWorkspaceApi(page);
@@ -436,13 +437,18 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.getByTestId('ws-module-episodes').click();
     await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
 
-    // Storyboard child — 三视图主工作面 (PR-A): the sidebar's 分镜 row now lands
-    // back on Overview with the storyboard surface panel expanded (the scene
-    // board IS the view), not the embedded editor.
+    // Storyboard child — 三视图主工作面 (PR-A), promoted to its OWN standalone
+    // module page by IA redesign Task 2: the sidebar's 分镜 row now routes
+    // straight to EpisodeStoryboardPage (activeModule='storyboard'), not back
+    // onto Overview's old surface panel (which Task 2 removed) and not the
+    // embedded editor. Task 3 then re-laid the scene board out as fixed-width
+    // columns (`scene-column-*`, replacing the old full-width `ep-scene-card-*`
+    // rows).
     await page.getByTestId('ws-ep-storyboard').click();
-    await expect(page.getByTestId('ws-overview')).toBeVisible();
+    await expect(page.getByTestId('episode-storyboard-page')).toBeVisible();
+    await expect(page.getByTestId('ws-overview')).toHaveCount(0);
     await expect(page.getByTestId('episode-view-tabs')).toBeVisible();
-    await expect(page.getByTestId('ep-scene-card-300')).toBeVisible();
+    await expect(page.getByTestId('scene-column-300')).toBeVisible();
     await expect(page.locator('[data-editor-shell]')).toHaveCount(0);
 
     // Shot List tab — the flat per-shot table for the same script.

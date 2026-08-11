@@ -16,17 +16,18 @@
  * stages happens elsewhere.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
-import { fetchEpisodesProgress } from '../../services/projectsService';
+import { fetchEpisodesProgress, fetchProjectMembers } from '../../services/projectsService';
 import {
   createScriptProject,
   fetchScriptProjects,
 } from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
+import { hasShotFocusListener, requestShotFocus } from '../agentActivity/shotFocusBus';
 // Kept eager: ProjectsListView statically imports it too, so it lives in the
 // ProjectsPage chunk regardless — a dynamic import here buys nothing and just
 // trips Rollup's "dynamically + statically imported" warning.
@@ -34,15 +35,17 @@ import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import type { RailView } from '../../editor/components/RailModules';
 import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
-import { resolveSurface, viewsForNode } from './nodeSurface';
-import { EpisodeViewTabs } from './EpisodeViewTabs';
-import { EpisodeSceneBoard } from './EpisodeSceneBoard';
-import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
+import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
+import { EpisodeNodeCard, type NodeConfigPatch } from './EpisodeNodeCard';
+import { WorkspaceNodeSettings } from './WorkspaceNodeSettings';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
 import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
-import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
+import { executeAdvance, fetchAdvancePreview, updateProjectNode } from '../../services/workflowService';
+import { aiLibraryService } from '../../services/aiLibraryService';
+import { ApiError } from '../../services/apiClient';
+import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
 import type { AdvancePreview, EpisodeProgress, Project, ProjectStageNode } from '../../types';
@@ -77,12 +80,62 @@ const WorkspaceStageBoard = lazy(() =>
 const ProjectTrashView = lazy(() =>
   import('../ProjectTrashView').then((m) => ({ default: m.ProjectTrashView })),
 );
+const EpisodeStoryboardPage = lazy(() =>
+  import('./EpisodeStoryboardPage').then((m) => ({ default: m.EpisodeStoryboardPage })),
+);
 
 /** Minimal scene shape lifted from the embedded editor for the SCENES sidebar. */
 interface SceneLift {
   id: string;
   heading_int_ext: string | null;
   location_text: string | null;
+}
+
+/**
+ * URL 统一寻址 (IA redesign Task 1, spec `2026-08-10-workspace-ia-redesign`):
+ * reads the `ep/node/view/scene/shot` param family as plain strings (never
+ * `Number()` — Snowflake BIGINT exceeds JS's safe integer range). Missing or
+ * empty params come back `null`, never `''`/`NaN`. Exported so Task 2
+ * (storyboard `view/scene/shot`) and Task 4 (accordion `node`) consume the
+ * same contract instead of each re-deriving it from `URLSearchParams`.
+ */
+export function readWorkspaceParams(sp: URLSearchParams) {
+  const get = (k: string) => {
+    const v = sp.get(k);
+    return v && v.length > 0 ? v : null;
+  };
+  return { ep: get('ep'), node: get('node'), view: get('view'), scene: get('scene'), shot: get('shot') };
+}
+
+// Shot-focus request timing (Task 3 修复轮2, 2026-08-10 用户拍板): `shotFocusBus`'s
+// ONLY subscriber is EditorShell (editor/components/EditorShell.tsx ~L534,
+// `useEffect(() => onShotFocus(...), [selectRailView])`), which registers on
+// mount. Getting from "shot card clicked" to "EditorShell mounted and
+// subscribed" crosses TWO unbounded async hops — resolving/provisioning the
+// episode's script (network) and loading EditorShell's own lazy chunk
+// (`lazy(() => import('../../editor/components/EditorShell'))` above) — so a
+// single fixed delay (the 300ms this codebase used for the OLD page-local
+// canvas jump, when the target was already mounted) can't be trusted here.
+// `hasShotFocusListener()` (already exported by the bus for exactly this
+// "is anyone listening" question) turns the guess into a check: try once
+// after a generous first delay, and if nobody's listening yet, retry once
+// more after a longer one before giving up silently — matching the bus's own
+// fire-and-forget philosophy ("a chip that does nothing beats yanking the
+// writer somewhere unexpected", per shotFocusBus.ts's file doc comment) over
+// an unbounded poll loop.
+const SHOT_FOCUS_FIRST_DELAY_MS = 400;
+const SHOT_FOCUS_RETRY_DELAY_MS = 900;
+
+function requestShotFocusWhenEditorReady(shotId: string): void {
+  window.setTimeout(() => {
+    if (hasShotFocusListener()) {
+      requestShotFocus(shotId);
+      return;
+    }
+    window.setTimeout(() => {
+      if (hasShotFocusListener()) requestShotFocus(shotId);
+    }, SHOT_FOCUS_RETRY_DELAY_MS);
+  }, SHOT_FOCUS_FIRST_DELAY_MS);
 }
 
 interface ProjectWorkspaceProps {
@@ -115,7 +168,7 @@ export function ProjectWorkspace({
     const q = searchParams.get('module');
     const valid: WorkspaceModule[] = [
       'overview', 'canvas', 'episodes', 'tasks', 'script', 'characters',
-      'locations', 'props', 'files', 'trash', 'settings', 'stage',
+      'locations', 'props', 'files', 'trash', 'settings', 'stage', 'storyboard',
     ];
     return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
   })();
@@ -131,8 +184,13 @@ export function ProjectWorkspace({
         const next = new URLSearchParams(prev);
         if (activeModule === 'overview') next.delete('module');
         else next.set('module', activeModule);
-        if (activeModule === 'stage' && stageNodeId) next.set('node', stageNodeId);
-        else next.delete('node');
+        if (activeModule === 'stage') {
+          if (stageNodeId) next.set('node', stageNodeId);
+          else next.delete('node');
+        }
+        // Non-stage modules leave an existing `node` param untouched — it's
+        // the accordion's selected node (Task 4, IA redesign), which this
+        // effect doesn't own and must not clobber on every module switch.
         return next;
       },
       { replace: true },
@@ -145,6 +203,14 @@ export function ProjectWorkspace({
   // scoped to the current episode), so its state must exist first.
   const [episodes, setEpisodes] = useState<EpisodeProgress[]>([]);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  // Overview accordion (IA redesign Task 4): whether the writer collapsed the
+  // open row WITHOUT switching episodes (EpisodeSummaryRow's chevron click on
+  // an already-open row). Deliberately NOT part of the URL — Task 1's `ep=`
+  // stays the "which episode" truth; this is purely the accordion's own
+  // open/closed UI state, reset back to expanded on every real episode switch
+  // (see `handleEpisodeChange` below) so collapsing one episode's row never
+  // silently hides the NEXT one you switch to.
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,7 +228,18 @@ export function ProjectWorkspace({
         } catch (err) {
           console.error('[ProjectWorkspace] failed to read stored episode:', err);
         }
-        const valid = stored && rows.some((r) => r.episode_id === stored) ? stored : fallback;
+        // URL `ep` is the first source of truth (Task 1, IA redesign): a
+        // deep link (e.g. shared/back-navigated) should win over whatever
+        // was last selected on this browser. Falls through the same
+        // validation as the stored value — an invalid/stale `ep` degrades to
+        // localStorage, then the first episode, exactly like before.
+        const fromUrl = readWorkspaceParams(searchParams).ep;
+        const valid =
+          fromUrl && rows.some((r) => r.episode_id === fromUrl)
+            ? fromUrl
+            : stored && rows.some((r) => r.episode_id === stored)
+              ? stored
+              : fallback;
         setCurrentEpisodeId(valid);
       })
       .catch((err) => console.error('[ProjectWorkspace] failed to load episodes progress:', err));
@@ -174,9 +251,105 @@ export function ProjectWorkspace({
   const currentEpisode = episodes.find((e) => e.episode_id === currentEpisodeId) ?? null;
 
   // ── Workflow instance (strip + node card + advance gate) ───────────────
-  const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id, currentEpisodeId);
-  // A node the sidebar / top-bar asked to focus on the Overview.
-  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  // `loading` (Task 4 修复轮1): threaded to WorkspaceOverview so it can gate
+  // the accordion's strip/card-slot render — see that prop's doc comment for
+  // why `workflow` alone isn't a safe signal of "this is the expanded
+  // episode's data" during an episode-switch fetch.
+  const {
+    workflow,
+    loading: workflowLoading,
+    reload: reloadWorkflow,
+    patchNodeLocally,
+  } = useProjectWorkflow(project.id, currentEpisodeId);
+
+  // Owner/agent candidates for `EpisodeNodeCard`'s Task 9 editable owner
+  // field — one project-scoped fetch (mirrors `WorkflowSection`'s own
+  // people/agents effect), independent of which episode/node is selected.
+  const [nodeCardPeople, setNodeCardPeople] = useState<PersonOption[]>([]);
+  const [nodeCardAgents, setNodeCardAgents] = useState<AgentOption[]>([]);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      fetchProjectMembers(project.id).catch(() => []),
+      aiLibraryService.listAgents().catch(() => []),
+    ]).then(([mem, ag]) => {
+      if (!alive) return;
+      setNodeCardPeople(mem.map((m) => ({ id: m.user_id, name: m.email || 'Member' })));
+      setNodeCardAgents(ag.map((a) => ({ id: a.id, name: a.name, slug: a.slug })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
+  // Task 9 (角色门控行内编辑): the project owner OR the SELECTED episode's own
+  // owner (episodes/progress `owner_id`, Task 6) may edit that episode's
+  // node config in place. Real signal this file already has in scope —
+  // `project.owner_id` (the Project type's only owner field) and each
+  // episode row's `owner_id` — no new field invented.
+  const canEditNodeConfig = useCallback(
+    (episodeId: string): boolean => {
+      if (!currentUserId) return false;
+      if (currentUserId === project.owner_id) return true;
+      const episode = episodes.find((e) => e.episode_id === episodeId);
+      return currentUserId === episode?.owner_id;
+    },
+    [currentUserId, project.owner_id, episodes],
+  );
+
+  // 评审修复轮 (Important #4): ARRANGEMENT (episode create/reorder/delete;
+  // workflow node add/remove) is backend-gated to the project MANAGER only
+  // (`node_authz.require_arrangement_role` — no episode-owner carve-out,
+  // spec §5), stricter than the WRITE_ROLES gate `canWrite` reflects. The
+  // only owner signal already in scope on the frontend is `project.owner_id`
+  // (the same one `canEditNodeConfig` above and `canAssignEpisodeOwner`
+  // below use) — narrower than the backend's "manager" role (a team-admin
+  // resolved to manager with no `owner_id` match still passes the backend
+  // gate but sees these controls hidden here, per the review ledger). That
+  // asymmetry is intentionally fail-safe: hiding a legitimate manager's
+  // controls is a lesser harm than exposing them to a non-manager who'd
+  // just eat a 403 — and the typed `arrangement_forbidden` toast (wired in
+  // `WorkspaceEpisodes`/`WorkflowSection`) still catches the gap either way.
+  const isProjectOwner = currentUserId === project.owner_id;
+
+  // Task 9: in-place PATCH for a node's owner/schedule facts. Optimistic
+  // (patches `workflow.nodes` locally before the request settles), reverts
+  // on failure, and is the SOLE toaster for this action (EpisodeNodeCard
+  // itself holds no local state and never toasts — see that file's doc
+  // comment) so there's exactly one toast per failed patch, not two.
+  //
+  // 评审修复轮1 (Important #1): failure reverts by RE-FETCHING server truth
+  // (`reloadWorkflow()`), not by re-merging a captured pre-edit node
+  // snapshot. The snapshot approach broke under a fast concurrent edit:
+  // schedule PATCH succeeds + reloads (server now has the new schedule),
+  // then a fast-follow owner PATCH on the SAME node fails — merging the
+  // stale (pre-BOTH-edits) snapshot back in would silently stomp the
+  // already-confirmed schedule too, with no toast explaining why. Re-fetch
+  // is simple and always correct; the cost is one extra request on the
+  // (already the unhappy, infrequent) failure path — accepted trade-off.
+  const handlePatchNode = useCallback(
+    async (nodeId: string, patch: NodeConfigPatch): Promise<void> => {
+      patchNodeLocally(nodeId, patch);
+      try {
+        await updateProjectNode(project.id, nodeId, patch);
+        await reloadWorkflow();
+      } catch (err) {
+        await reloadWorkflow();
+        const forbidden =
+          err instanceof ApiError &&
+          err.status === 403 &&
+          (err.details as { code?: string } | undefined)?.code === 'node_config_forbidden';
+        console.error('[ProjectWorkspace] node config patch failed:', err);
+        addToast(
+          forbidden
+            ? t('projects.nodeCard.forbidden', 'Only the project or episode owner can edit this')
+            : t('common.error'),
+          'error',
+        );
+      }
+    },
+    [project.id, patchNodeLocally, reloadWorkflow, addToast, t],
+  );
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
   // the dialog only ever renders what the same predicate ruled (#1400).
@@ -226,10 +399,99 @@ export function ProjectWorkspace({
       });
   }, [advance?.direction, project.id, currentEpisodeId, reloadWorkflow, addToast, t]);
 
-  const handleJumpToNode = useCallback((nodeId: string) => {
-    setActiveModule('overview');
-    setFocusNodeId(nodeId);
+  // Overview accordion node selection (IA redesign Task 4) — writes URL
+  // `node=` only; it does NOT itself navigate/route anywhere. Task 5's
+  // `EpisodeNodeCard` (consumed via `WorkspaceOverview`'s `renderNodeCard`
+  // slot) owns what "a node is selected" actually does.
+  const handleSelectNodeId = useCallback(
+    (nodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // Settings module's Node Config tab (Task 10) — mirrors its own episode/node
+  // selection into the URL `ep=`/`node=` so a refresh (or a shared link) lands
+  // back on the same episode+node. Deliberately NOT routed through
+  // `handleEpisodeChange`/`handleSelectNodeId` above: `WorkspaceNodeSettings`
+  // browses episodes independently of the main workspace's own
+  // `currentEpisodeId` (see that file's doc comment) — switching episodes
+  // inside Settings must never reset the main workspace's view/scene/shot
+  // params or localStorage.
+  const handleNodeSettingsEpisodeChange = useCallback(
+    (episodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('ep', episodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const handleNodeSettingsNodeChange = useCallback(
+    (nodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  // Bubbles a fresh `owner_id` after a successful episode-owner PATCH so the
+  // rest of the shell (Task 9's `canEditNodeConfig`, the Overview accordion)
+  // sees the new owner without a full episodes refetch.
+  const handleEpisodeOwnerChanged = useCallback((episodeId: string, ownerId: string | null) => {
+    setEpisodes((rows) =>
+      rows.map((r) => (r.episode_id === episodeId ? { ...r, owner_id: ownerId } : r)),
+    );
   }, []);
+
+  // Task 10 修复轮1 (Important #2): `WorkspaceNodeSettings` holds its OWN
+  // `useProjectWorkflow` instance (see that file's doc comment — deliberately
+  // independent of `currentEpisodeId` so browsing episodes in Settings never
+  // disturbs the main workspace). A node PATCH there only reloads THAT
+  // instance, leaving this file's own `workflow` (Overview accordion +
+  // top-bar flow pill) stale until some unrelated refetch happens to fire —
+  // exactly the same staleness class Task 9's `onEpisodeOwnerChanged` above
+  // was added to close for the episode-owner field. Only reload when the
+  // patched episode is the one THIS instance is actually watching — a patch
+  // in a different episode's Settings tab has nothing for this instance to
+  // refresh.
+  const handleNodePatchedInSettings = useCallback(
+    (episodeId: string) => {
+      if (episodeId === currentEpisodeId) void reloadWorkflow();
+    },
+    [currentEpisodeId, reloadWorkflow],
+  );
+
+  // Top-bar node stepper (H3) — jump back to Overview with that node selected
+  // (URL `node=`, same as clicking it in the accordion strip) instead of the
+  // old free-standing `focusNodeId`/scroll-into-view mechanism, which had no
+  // surviving consumer once the accordion replaced the always-mounted
+  // project-wide WorkflowSection strip (Task 4). `overviewCollapsed` reset
+  // ensures a jump while the accordion is collapsed actually shows the row.
+  const handleJumpToNode = useCallback(
+    (nodeId: string) => {
+      setActiveModule('overview');
+      setOverviewCollapsed(false);
+      handleSelectNodeId(nodeId);
+    },
+    [handleSelectNodeId],
+  );
 
   // Sidebar Stages block (M2 PR-F F2) — opens the dedicated Stage Board module
   // instead of scrolling to the node's Overview card (handleJumpToNode above).
@@ -241,13 +503,64 @@ export function ProjectWorkspace({
   const handleEpisodeChange = useCallback(
     (episodeId: string) => {
       setCurrentEpisodeId(episodeId);
+      // A real episode switch always re-expands the accordion (Task 4) — see
+      // `overviewCollapsed`'s doc comment: collapsing one episode's row must
+      // never carry over and silently hide the row you just switched to.
+      setOverviewCollapsed(false);
+      // localStorage stays as the cross-session/no-URL-yet default; the URL
+      // `ep` (Task 1) is now the first source of truth on load, so keep both
+      // in sync on every explicit switch.
       try {
         localStorage.setItem(episodeStorageKey(project.id), episodeId);
       } catch (err) {
         console.error('[ProjectWorkspace] failed to persist episode selection:', err);
       }
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('ep', episodeId);
+          // Task 2 review carry-over: `view`/`scene`/`shot` are scoped to
+          // WHICHEVER episode was current when they were set (e.g. a
+          // `?shot=` deep-link into that episode's canvas) — an episode
+          // switch must drop them in this SAME setSearchParams call, or a
+          // shot/scene id from the episode just left behind would survive
+          // into the newly-selected one's storyboard page.
+          next.delete('view');
+          next.delete('scene');
+          next.delete('shot');
+          // 评审修复轮 (Important #3): `node=` is the OTHER per-episode deep
+          // link — the Overview accordion's selected node id (Task 4/5).
+          // Left uncleared, a real episode switch carried the OLD episode's
+          // node id into the NEW episode's row: `renderNodeCard` computes
+          // `selectedNodeId ?? workflow.current_node_id`, so a stale (but
+          // non-empty) `node=` always won over the new episode's own cursor
+          // node — the accordion expanded correctly but the node-card slot
+          // rendered nothing (`workflow.nodes.find` misses an id that
+          // belongs to a different episode's node set).
+          next.delete('node');
+          return next;
+        },
+        { replace: true },
+      );
     },
-    [project.id],
+    [project.id, setSearchParams],
+  );
+
+  // Overview accordion row toggle (IA redesign Task 4, ambiguity #3): a
+  // non-null id opens/switches to that episode's row by routing through
+  // `handleEpisodeChange` (writes URL `ep=` AND resets the collapsed flag);
+  // `null` means "collapse the currently-open row" — the writer clicked the
+  // chevron on an already-open row, which must NOT change which episode is
+  // current (URL `ep=` stays exactly as-is).
+  const handleExpandEpisode = useCallback(
+    (episodeId: string | null) => {
+      if (episodeId != null) {
+        handleEpisodeChange(episodeId);
+      } else {
+        setOverviewCollapsed(true);
+      }
+    },
+    [handleEpisodeChange],
   );
 
   // Re-fetch the progress feed after a create/rename/reorder/delete in the
@@ -400,27 +713,21 @@ export function ProjectWorkspace({
     [resolveOrProvisionScript, addToast, t],
   );
 
-  const openCurrentEpisodeScript = useCallback(
-    () => openEpisodeScript(currentEpisode),
-    [openEpisodeScript, currentEpisode],
-  );
-
   // Storyboard is now the episode node's PRIMARY face (三视图主工作面, 2026-08-09
-  // 拍板): a bare open ('storyboard', no sceneId) — from the sidebar's 分镜
-  // row, a workflow-strip node (handleSelectNode below), or anywhere else that
-  // used to jump straight into the embedded editor — now lands on Overview
-  // with the storyboard surface panel expanded (EpisodeSceneBoard IS the view,
-  // not an entry button into one). Only a scene card's "Open" deep-link
-  // (opts.sceneId set) still wants the real editor — studioFocusSceneId
-  // carries the target down to EditorShell's initialFocusSceneId, which
-  // scrolls the matching storyboard column / script scene into view once it
-  // has rendered (Task 8).
+  // 拍板) AND its own standalone module (IA redesign Task 2): a bare open
+  // ('storyboard', no sceneId) — from the sidebar's 分镜 row, a workflow-strip
+  // node (handleSelectNode below), or anywhere else that used to jump
+  // straight into the embedded editor — now routes to the dedicated
+  // EpisodeStoryboardPage module (EpisodeSceneBoard IS the view, not an entry
+  // button into one). Only a scene card's "Open" deep-link (opts.sceneId set)
+  // still wants the real editor — studioFocusSceneId carries the target down
+  // to EditorShell's initialFocusSceneId, which scrolls the matching
+  // storyboard column / script scene into view once it has rendered (Task 8).
   const handleOpenWorkView = useCallback(
     (view: WorkView, opts?: { sceneId?: string }) => {
       if (view === 'storyboard' && !opts?.sceneId) {
         setStudioFocusSceneId(null); // clear any stale target from a prior deep link
-        setActiveModule('overview');
-        setEpisodeView('storyboard');
+        setActiveModule('storyboard');
         return;
       }
       setStudioView(view);
@@ -511,6 +818,13 @@ export function ProjectWorkspace({
   // deliverable-only one (surface === null) — falls back to its own dedicated
   // Stage Board (Task 7, see guard below: a non-current node's click must not
   // flash open the CURRENT episode's surface panel with unrelated content).
+  //
+  // Task 4 (IA redesign accordion rewrite) unwired this from `WorkspaceOverview`
+  // directly — clicking a strip node now only writes URL `node=` (see
+  // `handleSelectNodeId` above) and selects that node's `EpisodeNodeCard`.
+  // Task 5 wires THIS function back in as that card's `onEnterSurface` prop
+  // (see `renderNodeCard` below) — the card's entry button is the surviving
+  // consumer of this exact routing logic.
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
       // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
@@ -536,6 +850,37 @@ export function ProjectWorkspace({
     [handleOpenWorkView, handleOpenRenders, handleOpenStage, workflow?.current_node_id],
   );
 
+  // EpisodeNodeCard's Settings deep-link (Task 5, ambiguity #4) — a plain new
+  // navigation into the Settings module's Node Config tab, so `replace: false`
+  // (unlike the module-sync effect above, which intentionally collapses
+  // module switches into the current history entry).
+  //
+  // Task 10 修复轮1 (Critical): `activeModule` is a plain `useState`, seeded
+  // ONCE from the URL on mount (see `initialModule` above) — it is NOT kept
+  // in sync with `searchParams` afterward (that effect only runs the other
+  // direction, state → URL). Writing `module=settings` into the URL here
+  // without also calling `setActiveModule('settings')` left the address bar
+  // correct but the screen showing whatever module was already on screen —
+  // the button looked like a no-op. Mirrors `handleModuleChange`'s own
+  // pattern (side effects THEN `setActiveModule`).
+  const handleOpenNodeSettings = useCallback(
+    (episodeId: string, nodeId: string) => {
+      setActiveModule('settings');
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('module', 'settings');
+          next.set('tab', 'nodes');
+          next.set('ep', episodeId);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
+
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
 
   // `?module=stage` without a `node` param has nothing to render (stageNodeId
@@ -547,129 +892,82 @@ export function ProjectWorkspace({
   // still behaves as expected).
   const showOverview = activeModule === 'overview' || (activeModule === 'stage' && !stageNodeId);
 
-  // ── Episode surface view set (B5 T-B5.4) ──────────────────────────────
-  // The current workflow node's creative `surface` (nodeSurface.ts) drives a
-  // top segmented control (EpisodeViewTabs). Deliverable-only nodes yield an
-  // empty view set → no control (they still reach their Stage Board via the
-  // node click). The panel is rendered on the workspace landing (Overview),
-  // above the overview content, so it is strictly additive and easy to retune
-  // once the design mock lands — see the render block + report for assumptions.
-  const currentNode = useMemo(
-    () => workflow?.nodes.find((n) => n.id === workflow.current_node_id) ?? null,
-    [workflow],
-  );
-  const surfaceViews = useMemo(() => viewsForNode(currentNode), [currentNode]);
-  const [episodeView, setEpisodeView] = useState<string | null>(null);
-  // Keep the active view key valid for the current node's set: default to the
-  // first view; reset when the set no longer contains the active key (e.g. the
-  // writer advanced to a node with a different surface).
-  useEffect(() => {
-    if (surfaceViews.length === 0) {
-      if (episodeView !== null) setEpisodeView(null);
-      return;
-    }
-    if (!surfaceViews.some((v) => v.key === episodeView)) {
-      setEpisodeView(surfaceViews[0].key);
-    }
-  }, [surfaceViews, episodeView]);
-  const activeEpisodeView = episodeView ?? surfaceViews[0]?.key ?? null;
-  const showSurfacePanel = showOverview && surfaceViews.length > 0;
-
-  // Script id for the storyboard/shot-list surface views (Task 3, 主工作面接线;
-  // review fix, Task 3 round 1): the panel is reached by a passive Overview
-  // landing just as often as by an explicit click (a project whose current
-  // node sits on storyboard shows this panel by DEFAULT), so this probe MUST
-  // be read-only — `findExistingScript`, never `resolveOrProvisionScript`.
-  // Silently creating an empty script on mere render was the bug: opening a
-  // project that has no script yet used to provision one before the writer
-  // touched anything. `'missing'` renders an explicit "Start Storyboard" CTA
-  // (handleStartStoryboard below) — provisioning only happens from THAT
-  // click, same as every other write in this file (script/beats views, the
-  // scene card's Open deep-link).
-  type SurfaceScriptState =
-    | { status: 'loading' }
-    | { status: 'ready'; scriptId: string }
-    | { status: 'missing' }
-    | { status: 'provisioning' };
-  const [surfaceScript, setSurfaceScript] = useState<SurfaceScriptState>({ status: 'loading' });
-  const needsSurfaceScriptId =
-    showSurfacePanel && surfaceViews.some((v) => v.key === 'storyboard');
-  useEffect(() => {
-    if (!needsSurfaceScriptId || !currentEpisode) {
-      setSurfaceScript({ status: 'loading' });
-      return;
-    }
-    let cancelled = false;
-    setSurfaceScript({ status: 'loading' });
-    findExistingScript(currentEpisode)
-      .then((id) => {
-        if (cancelled) return;
-        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
-      })
-      .catch((err) => {
-        console.error('[ProjectWorkspace] failed to probe surface script:', err);
-        if (!cancelled) setSurfaceScript({ status: 'missing' });
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-probe only on an episode-id change or the panel/view-set flipping; `currentEpisode`'s object identity changes on every episodes refetch (mirrors the analogous effect above at ~L390)
-  }, [needsSurfaceScriptId, currentEpisodeId, findExistingScript]);
-
-  // The ONLY write trigger for the surface panel's script — fired exclusively
-  // by the "Start Storyboard" CTA (an explicit click), never by the probe
-  // effect above.
-  const handleStartStoryboard = useCallback(() => {
-    if (!currentEpisode || surfaceScript.status === 'provisioning') return;
-    setSurfaceScript({ status: 'provisioning' });
-    resolveOrProvisionScript(currentEpisode)
-      .then((id) => {
-        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
-      })
-      .catch((err) => {
-        console.error('[ProjectWorkspace] failed to start storyboard:', err);
-        addToast(t('common.error'), 'error');
-        setSurfaceScript({ status: 'missing' });
-      });
-  }, [currentEpisode, surfaceScript.status, resolveOrProvisionScript, addToast, t]);
-
-  // Shared gate for the storyboard/shot-list panes while `surfaceScript` isn't
-  // 'ready': a spinner during the read-only probe (or a CTA-triggered
-  // provision), or the "no script yet" empty state with the explicit
-  // "Start Storyboard" CTA — the ONLY thing that calls handleStartStoryboard.
-  function renderSurfaceScriptGate() {
-    if (surfaceScript.status === 'missing') {
-      return (
-        <div
-          data-testid="episode-surface-no-script"
-          className="rounded-lg border border-dashed border-line bg-island-2/40 px-6 py-10 text-center"
-        >
-          <p className="text-sm font-medium text-content-2">
-            {t('projects.episodeSurface.noScriptHint')}
-          </p>
-          <button
-            type="button"
-            data-testid="episode-surface-start-storyboard"
-            onClick={handleStartStoryboard}
-            className="mt-3 rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
-          >
-            {t('projects.episodeSurface.startStoryboard')}
-          </button>
-        </div>
+  // EpisodeStoryboardPage (IA redesign Task 2) owns the `?view=` param on its
+  // own — it holds the active-view state internally and calls back here only
+  // to persist a writer-driven tab switch to the URL (deep-linkable, survives
+  // back/forward). `replace: true` mirrors the module-sync effect above: a
+  // tab switch isn't a new history entry.
+  //
+  // Review fix round 1 (sticky `?shot=`): `shot` is a ONE-SHOT deep-link
+  // trigger, now consumed by THIS file's own URL-shot effect below (moved out
+  // of EpisodeStoryboardPage in 修复轮2 — see that effect's comment) — every
+  // view change, whether the writer clicking a tab or that effect's own
+  // consumption, clears it here. Without this, `shot` lingered in the URL
+  // after the writer manually switched tabs; a later remount (refresh, or
+  // navigating out and back into the Storyboard module) re-read the stale
+  // `shot` and re-fired the editor deep-link, silently overriding whatever
+  // the writer was doing.
+  const handleStoryboardViewChange = useCallback(
+    (view: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('view', view);
+          next.delete('shot');
+          return next;
+        },
+        { replace: true },
       );
-    }
-    // 'loading' (initial probe) or 'provisioning' (CTA click in flight).
-    return (
-      <div className="flex justify-center py-10">
-        <Loading center />
-      </div>
-    );
-  }
+    },
+    [setSearchParams],
+  );
 
-  // Imperative handle into the mounted EpisodeShotListTable (hideExport) so
-  // the Export trigger can live in EpisodeViewTabs' `actions` slot instead of
-  // inside the table's own content pane, without a second scenes/shots fetch.
-  const shotListTableRef = useRef<EpisodeShotListTableHandle>(null);
+  // Shot deep-link into the editor (Task 3 修复轮2, 2026-08-10 用户拍板): the
+  // ONLY two entry points — a scene board's shot-card click (via
+  // EpisodeStoryboardPage's `onOpenShotInEditor` prop, sceneId always known —
+  // the shot's own column has it) and the URL `?shot=` one-shot trigger below
+  // (sceneId unknown, `null` — an agent-panel/share link only carries the
+  // shot id) — both funnel through here, so there is exactly ONE behavior to
+  // reason about. Routes through `openEpisodeScript` directly (NOT
+  // `handleOpenWorkView('storyboard', {sceneId})`; that helper's own
+  // `!opts?.sceneId` guard would redirect a null-sceneId call back to the
+  // standalone Storyboard MODULE page instead of the embedded editor — see
+  // its comment above). `openEpisodeScript` already handles `sceneId=null`
+  // gracefully (just skips the scroll-to-scene half), so the editor's
+  // storyboard rail opens on the current episode's script either way.
+  const handleOpenShotInEditor = useCallback(
+    (shotId: string, sceneId: string | null) => {
+      void openEpisodeScript(currentEpisode, 'storyboard', sceneId);
+      requestShotFocusWhenEditorReady(shotId);
+    },
+    [openEpisodeScript, currentEpisode],
+  );
+
+  // URL `?shot=` one-shot deep-link (kept as an entry point per 修复轮2's
+  // 拍板: an agent panel or a shared link may carry `shot=<id>` into the
+  // Storyboard module page without a `scene`). Fires once `currentEpisode`
+  // has resolved (so `openEpisodeScript` above has a real episode to work
+  // with, not a premature `null` that would bounce to the Episodes module),
+  // then immediately clears `shot` from the URL in the SAME effect — true
+  // one-shot, mirroring the `shot`-clearing contract `handleStoryboardViewChange`
+  // already enforces on a manual tab switch. Not gated on `activeModule` —
+  // the deep-link's destination is the EDITOR, a different module entirely,
+  // so it's meant to fire regardless of which module the URL happened to
+  // land on first.
+  useEffect(() => {
+    const shotId = readWorkspaceParams(searchParams).shot;
+    if (!shotId || !currentEpisode) return;
+    handleOpenShotInEditor(shotId, null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('shot');
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves; `handleOpenShotInEditor`'s identity riding on `currentEpisode` would otherwise re-fire this on every episodes refetch even with no `shot` in the URL, but the `!shotId` guard above already makes that a no-op
+  }, [searchParams, currentEpisode, setSearchParams]);
 
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
@@ -678,6 +976,49 @@ export function ProjectWorkspace({
     (studioActiveSceneId
       ? studioScenes.findIndex((s) => s.id === studioActiveSceneId) + 1
       : 0) || null;
+
+  // Overview accordion addressing (IA redesign Task 4, ambiguity #3; revised
+  // 评审修复轮 Important #2): the accordion must show whichever episode
+  // `workflow` (this file's ONE `useProjectWorkflow` instance, scoped to
+  // `currentEpisodeId`) actually holds data for — reading a raw URL `ep=`
+  // here independently of `currentEpisodeId` broke that invariant once Task
+  // 10 gave Settings its OWN reason to write `ep=` without moving
+  // `currentEpisodeId` (`handleNodeSettingsEpisodeChange` above — Settings
+  // browses episodes independently of the main workspace by design, see
+  // that handler's doc comment). Leaving Settings back to Overview with a
+  // browsed-but-not-switched-to episode left URL `ep=` pointing at episode
+  // X while `workflow`/`renderNodeCard` stayed scoped to episode Y
+  // (`currentEpisodeId`) — the accordion expanded X's row and rendered Y's
+  // strip/node card underneath it, a silent wrong-episode display (not a
+  // loading gap `workflowLoading` could catch, since Y's fetch had already
+  // resolved). `currentEpisodeId` is ALREADY the URL-`ep`-derived value for
+  // every path meant to move the main workspace (the episode-resolution
+  // effect on mount, and `handleEpisodeChange` on every real switch) — it's
+  // the single source of truth now; a raw second read of `searchParams`
+  // here was redundant on the happy path and actively wrong on this one.
+  // `overviewCollapsed` still wins over it: the writer explicitly collapsed
+  // the row — that's local UI state, not a URL concern. `node=` has no such
+  // override; Task 5's node card decides what an absent selection defaults
+  // to.
+  const expandedEpisodeId = overviewCollapsed ? null : currentEpisodeId;
+  const selectedNodeId = readWorkspaceParams(searchParams).node;
+
+  // Settings module tabs (Task 10, spec §7): `?tab=nodes` deep-links straight
+  // into Node Config (Task 5's card Settings button — `handleOpenNodeSettings`
+  // above — always sets it); anything else (including absent) is the existing
+  // Project tab, unchanged default.
+  const settingsTab = searchParams.get('tab') === 'nodes' ? 'nodes' : 'project';
+  const setSettingsTab = (tab: 'project' | 'nodes') => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('module', 'settings');
+        next.set('tab', tab);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   return (
     <div data-testid="project-workspace" className="flex flex-col h-full min-h-0">
@@ -732,124 +1073,68 @@ export function ProjectWorkspace({
               onActiveSceneChange={handleActiveSceneChange}
             />
           </div>
+        ) : activeModule === 'storyboard' ? (
+          // Storyboard's standalone module (IA redesign Task 2) — replaces
+          // the old Overview "surface panel". Full-bleed like the EditorShell
+          // branch above: the page owns its own header + scroll region, so
+          // no px-6 pb-8 wrapper (that would double the padding/scrollbar).
+          <EpisodeStoryboardPage
+            projectId={project.id}
+            teamId={teamId ?? ''}
+            episode={currentEpisode}
+            initialView={readWorkspaceParams(searchParams).view}
+            onViewChange={handleStoryboardViewChange}
+            findExistingScript={findExistingScript}
+            provisionScript={resolveOrProvisionScript}
+            onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
+            onOpenShotInEditor={handleOpenShotInEditor}
+          />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
-            {showSurfacePanel && activeEpisodeView && (
-              // B5 T-B5.4, promoted by PR-A (三视图主工作面, 2026-08-09 拍板):
-              // surface view set for the current node, rendered above the
-              // Overview content. Storyboard is now a MAIN face — the scene
-              // board / shot table render directly, not behind an entry
-              // button — while script/beats/renders (unchanged, out of PR-A's
-              // scope) still route to the embedded editor / renders filter
-              // via an entry button; canvas reuses the real module inline.
-              <div data-testid="episode-surface-panel" className="pt-4 pb-2">
-                <EpisodeViewTabs
-                  views={surfaceViews}
-                  active={activeEpisodeView}
-                  onChange={setEpisodeView}
-                  actions={
-                    activeEpisodeView === 'shotlist' ? (
-                      <button
-                        type="button"
-                        data-testid="ep-shotlist-export"
-                        disabled={surfaceScript.status !== 'ready'}
-                        onClick={() => shotListTableRef.current?.exportCsv()}
-                        className="rounded-md border border-line px-3 py-1.5 text-[13px] font-medium text-content hover:bg-island-2 disabled:opacity-50"
-                      >
-                        {t('projects.shotList.export')}
-                      </button>
-                    ) : undefined
-                  }
-                />
-                <div className="mt-4">
-                  {activeEpisodeView === 'canvas' ? (
-                    // Reuse the SAME canvas module component (not a fork); its
-                    // sidebar module registration is untouched.
-                    <div className="min-h-[24rem]">
-                      <WorkspaceCanvas projectId={project.id} teamId={teamId} />
-                    </div>
-                  ) : activeEpisodeView === 'storyboard' ? (
-                    // Storyboard's primary face: a stream of scene cards, each
-                    // with an Open deep-link into the real editor and an Auto
-                    // Storyboard dispatch — see EpisodeSceneBoard. 'missing' /
-                    // 'loading' render the shared read-only-probe gate below —
-                    // provisioning a script never happens just from viewing
-                    // this panel (see the state comment above).
-                    <div data-testid="episode-view-storyboard" className="min-h-[24rem]">
-                      {surfaceScript.status === 'ready' ? (
-                        <EpisodeSceneBoard
-                          scriptId={surfaceScript.scriptId}
-                          onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
-                        />
-                      ) : (
-                        renderSurfaceScriptGate()
-                      )}
-                    </div>
-                  ) : activeEpisodeView === 'shotlist' ? (
-                    // Flat per-shot table (Export lives in the tabs' actions
-                    // slot above, driven through shotListTableRef).
-                    <div data-testid="episode-view-shotlist" className="min-h-[24rem]">
-                      {surfaceScript.status === 'ready' ? (
-                        <EpisodeShotListTable
-                          ref={shotListTableRef}
-                          scriptId={surfaceScript.scriptId}
-                          hideExport
-                        />
-                      ) : (
-                        renderSurfaceScriptGate()
-                      )}
-                    </div>
-                  ) : (
-                    // Editor-backed / renders views: entry button into the
-                    // existing surface. Deep inline embedding of Script/Beats
-                    // is unchanged — only Storyboard was promoted to a main
-                    // face by PR-A.
-                    <div
-                      data-testid="episode-view-entry"
-                      className="rounded-lg border border-line bg-island-2/40 px-6 py-10 text-center"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (activeEpisodeView === 'renders') handleOpenRenders();
-                          else if (activeEpisodeView === 'beats') handleOpenWorkView('beats');
-                          else handleOpenWorkView('script');
-                        }}
-                        className="rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
-                      >
-                        {activeEpisodeView === 'renders'
-                          ? t('projects.episodeSurface.openRenders')
-                          : activeEpisodeView === 'beats'
-                            ? t('projects.episodeSurface.openBeats')
-                            : t('projects.episodeSurface.openScript')}
-                      </button>
-                      {activeEpisodeView !== 'renders' && (
-                        <p className="mt-2 text-xs text-content-3">
-                          {t('projects.episodeSurface.editorEntryHint')}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
             {showOverview && (
               <WorkspaceOverview
                 project={project}
                 episodes={episodes}
-                currentEpisode={currentEpisode}
-                episodeId={currentEpisodeId}
-                epNumber={epNumber}
-                onOpenScript={() => void openCurrentEpisodeScript()}
                 workflow={workflow}
+                workflowLoading={workflowLoading}
+                expandedEpisodeId={expandedEpisodeId}
+                selectedNodeId={selectedNodeId}
+                onExpandEpisode={handleExpandEpisode}
+                onSelectNode={handleSelectNodeId}
+                // Task 5: the real EpisodeNodeCard. `nodeId` is
+                // `selectedNodeId ?? workflow.current_node_id ?? null`
+                // (WorkspaceOverview's own default) — a node not found in the
+                // (possibly stale/mid-fetch) `workflow.nodes` list renders
+                // nothing rather than guessing (ambiguity #1).
+                renderNodeCard={(episodeId, nodeId) => {
+                  const node = workflow?.nodes.find((n) => String(n.id) === String(nodeId)) ?? null;
+                  if (!node) return null;
+                  return (
+                    <EpisodeNodeCard
+                      key={node.id}
+                      node={node}
+                      // Task 9: project owner OR this episode's own owner.
+                      canEditConfig={canEditNodeConfig(episodeId)}
+                      // 评审修复轮1 (Important #1): gates Back/Complete-stage —
+                      // a read-only member must never see those buttons at all,
+                      // not just have the server reject the click.
+                      canWrite={canWrite}
+                      isCursorNode={String(node.id) === String(workflow?.current_node_id ?? '')}
+                      onEnterSurface={handleSelectNode}
+                      onRequestAdvance={requestAdvance}
+                      onOpenTodolist={() => setActiveModule('tasks')}
+                      onOpenSettings={(_ignoredEpisodeId, nid) => handleOpenNodeSettings(episodeId, nid)}
+                      people={nodeCardPeople}
+                      agents={nodeCardAgents}
+                      onPatchNode={handlePatchNode}
+                    />
+                  );
+                }}
                 canWrite={canWrite}
+                // 评审修复轮 (Important #4): workflow node add/remove is an
+                // ARRANGEMENT action — see `isProjectOwner`'s doc comment.
+                canArrangeWorkflow={isProjectOwner}
                 onReloadWorkflow={() => void reloadWorkflow()}
-                onRequestAdvance={requestAdvance}
-                onOpenTodolist={() => setActiveModule('tasks')}
-                onOpenStage={handleOpenStage}
-                onSelectNode={handleSelectNode}
-                focusNodeId={focusNodeId}
-                onSelectEpisode={handleEpisodeChange}
               />
             )}
             {activeModule === 'episodes' && (
@@ -858,6 +1143,9 @@ export function ProjectWorkspace({
                 episodes={episodes}
                 onEpisodesChanged={() => void refetchEpisodes()}
                 onOpenEpisode={handleOpenEpisode}
+                // 评审修复轮 (Important #4): episode create/reorder/delete is
+                // an ARRANGEMENT action — see `isProjectOwner`'s doc comment.
+                canArrange={isProjectOwner}
               />
             )}
             {(activeModule === 'characters' || activeModule === 'locations' || activeModule === 'props') && (
@@ -874,16 +1162,64 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'trash' && <ProjectTrashView projectId={project.id} />}
             {activeModule === 'settings' && (
-              <ProjectSettingsPanel
-                project={project}
-                isOpen
-                onClose={() => setActiveModule('overview')}
-                onUpdated={(updated) => {
-                  onProjectUpdated?.(updated);
-                  setActiveModule('overview');
-                }}
-                onDeleted={onBack}
-              />
+              <div className="space-y-4">
+                <div className="flex gap-1 border-b border-line" data-testid="settings-tabs">
+                  <button
+                    type="button"
+                    data-testid="settings-tab-project"
+                    onClick={() => setSettingsTab('project')}
+                    aria-current={settingsTab === 'project' ? 'true' : undefined}
+                    className={`px-3 py-2 text-[13px] font-medium transition ${
+                      settingsTab === 'project'
+                        ? 'border-b-2 border-[var(--accent-border)] text-ink-100'
+                        : 'text-ink-500 hover:text-ink-200'
+                    }`}
+                  >
+                    {t('projects.settings.tabs.project', 'Project')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-tab-nodes"
+                    onClick={() => setSettingsTab('nodes')}
+                    aria-current={settingsTab === 'nodes' ? 'true' : undefined}
+                    className={`px-3 py-2 text-[13px] font-medium transition ${
+                      settingsTab === 'nodes'
+                        ? 'border-b-2 border-[var(--accent-border)] text-ink-100'
+                        : 'text-ink-500 hover:text-ink-200'
+                    }`}
+                  >
+                    {t('projects.settings.tabs.nodes', 'Node Config')}
+                  </button>
+                </div>
+
+                {settingsTab === 'project' ? (
+                  <ProjectSettingsPanel
+                    project={project}
+                    isOpen
+                    onClose={() => setActiveModule('overview')}
+                    onUpdated={(updated) => {
+                      onProjectUpdated?.(updated);
+                      setActiveModule('overview');
+                    }}
+                    onDeleted={onBack}
+                  />
+                ) : (
+                  <WorkspaceNodeSettings
+                    projectId={project.id}
+                    episodes={episodes}
+                    initialEpisodeId={readWorkspaceParams(searchParams).ep}
+                    initialNodeId={readWorkspaceParams(searchParams).node}
+                    canEditFor={canEditNodeConfig}
+                    canAssignEpisodeOwner={isProjectOwner}
+                    people={nodeCardPeople}
+                    agents={nodeCardAgents}
+                    onEpisodeChange={handleNodeSettingsEpisodeChange}
+                    onNodeChange={handleNodeSettingsNodeChange}
+                    onEpisodeOwnerChanged={handleEpisodeOwnerChanged}
+                    onNodePatched={handleNodePatchedInSettings}
+                  />
+                )}
+              </div>
             )}
             {activeModule === 'canvas' && (
               <WorkspaceCanvas projectId={project.id} teamId={teamId} />

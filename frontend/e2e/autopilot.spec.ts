@@ -85,7 +85,7 @@ function node(id: string, name: string, sort: number, status: string, extra: Rec
 // node-3 is a FUTURE node with no `depends_on` at all → unmetDeps() is
 // trivially empty → eligible for Start early. node-4 depends on node-3
 // (still pending, unsatisfied) so it must NOT also render a Start-early
-// button — otherwise `workflow-start-early` would match two elements.
+// button — otherwise `stage-board-start-early` would match two elements.
 const WORKFLOW = {
   has_workflow: true,
   current_node_id: 'node-2',
@@ -190,6 +190,19 @@ async function setupAutopilotStubs(page: Page): Promise<void> {
   // Per-project workflow instance (response_model → no envelope). Trailing `*`
   // so the glob still matches once the read carries `?episode_id=`.
   await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW));
+  // Stage Board aggregate (Task 5: brief-editing/start-early now live there,
+  // not on the Overview card — see `openStageBoardForNode` above). Resolves
+  // whichever node the URL asks for out of the same WORKFLOW fixture; no
+  // mirror issue/files needed for these tests.
+  await page.route('**/api/v1/projects/*/workflow/nodes/*/board', (route) => {
+    const nodeId = /\/workflow\/nodes\/([^/]+)\/board/.exec(route.request().url())?.[1];
+    const boardNode = WORKFLOW.nodes.find((n) => n.id === nodeId) ?? null;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { node: boardNode, issue: null, files: [] } }),
+    });
+  });
 }
 
 async function setupTemplateStubs(page: Page): Promise<void> {
@@ -248,10 +261,14 @@ async function useEnglishLocale(page: Page): Promise<void> {
   });
 }
 
+// Task 5 (IA redesign): the always-mounted `CurrentNodeCard` this walkthrough
+// used to wait on doesn't render for a has_workflow=true project any more —
+// the Overview accordion's expanded row shows `EpisodeNodeCard`
+// (`data-testid="episode-node-card"`) for the selected/current node.
 async function openWorkspaceOverview(page: Page): Promise<void> {
   await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
   await expect(page.getByTestId('workflow-strip')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('workflow-current-node-card').first()).toBeVisible();
+  await expect(page.getByTestId('episode-node-card').first()).toBeVisible();
 }
 
 async function openWorkspace(page: Page): Promise<void> {
@@ -268,12 +285,24 @@ async function openTemplateEditor(page: Page): Promise<void> {
   await expect(page.getByTestId('workflow-node-capsule').first()).toBeVisible();
 }
 
-/** Scope the brief textarea to a specific node's card — CurrentNodeCard
- * renders `workflow-node-brief` unconditionally (active AND future peek
- * cards alike), so an unscoped `getByTestId` would match more than one
- * element whenever a future-eligible card is also on the page (node-3 here). */
-function cardBrief(page: Page, nodeId: string) {
-  return page.locator(`[data-testid="workflow-current-node-card"][data-node-id="${nodeId}"]`).getByTestId('workflow-node-brief');
+/**
+ * Task 5 (IA redesign): brief-editing, Run now, and Start early no longer
+ * live on the Overview card (`EpisodeNodeCard` is deliberately read-only +
+ * advance-only — see its file doc) — that full surface moved to the node's
+ * own Stage Board. Selecting a node in the strip switches the accordion's
+ * card slot to that node (writes URL `node=`); its entry button
+ * (`node-card-enter`) then opens the Stage Board via the SAME
+ * `handleSelectNode` routing the strip used to call directly pre-Task-4.
+ * `nodeId` may already be the row's default-selected node (the workflow's
+ * current node) — clicking its strip capsule again is a harmless re-select.
+ */
+async function openStageBoardForNode(page: Page, nodeId: string): Promise<void> {
+  await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
+  await expect(page.getByTestId('workflow-strip')).toBeVisible({ timeout: 15_000 });
+  await page.locator(`[data-testid="workflow-strip-node"][data-node-id="${nodeId}"]`).click();
+  await expect(page.locator(`[data-testid="episode-node-card"][data-node-id="${nodeId}"]`)).toBeVisible();
+  await page.getByTestId('node-card-enter').click();
+  await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 }
 
 test('brief field blur-save PATCHes { brief } (task O4 §1)', async ({ page }) => {
@@ -299,8 +328,10 @@ test('brief field blur-save PATCHes { brief } (task O4 §1)', async ({ page }) =
     });
   });
 
-  await openWorkspaceOverview(page);
-  const briefField = cardBrief(page, 'node-2');
+  // node-2 has no `surface` set → its entry button opens the Stage Board,
+  // where brief-editing now lives (Task 5: the Overview card is read-only).
+  await openStageBoardForNode(page, 'node-2');
+  const briefField = page.getByTestId('stage-board-brief-field');
   await expect(briefField).toBeVisible();
   await briefField.fill('Focus on the mountain establishing shots.');
   await briefField.blur();
@@ -323,10 +354,12 @@ test('Start early — deps-satisfied future node shows the button; click POSTs s
     });
   });
 
-  await openWorkspaceOverview(page);
-  // Only node-3 clears unmetDeps() (empty depends_on) — node-4 depends on it
-  // and is still pending, so exactly one Start-early button renders.
-  const startEarlyBtn = page.getByTestId('workflow-start-early');
+  // node-3 is a future (non-cursor) node — selecting it in the strip and
+  // entering routes to its own Stage Board (Task 5: `handleSelectNode`
+  // sends any non-current node there regardless of surface), where
+  // Start-early now lives.
+  await openStageBoardForNode(page, 'node-3');
+  const startEarlyBtn = page.getByTestId('stage-board-start-early');
   await expect(startEarlyBtn).toBeVisible();
   await startEarlyBtn.click();
 
@@ -355,8 +388,8 @@ test('Start early — server DEPS_PENDING 422 surfaces the shared waiting-on toa
     }),
   );
 
-  await openWorkspaceOverview(page);
-  await page.getByTestId('workflow-start-early').click();
+  await openStageBoardForNode(page, 'node-3');
+  await page.getByTestId('stage-board-start-early').click();
 
   await expect(page.getByText('Waiting on: Script')).toBeVisible();
 });
@@ -434,8 +467,13 @@ for (const theme of ['dark', 'light'] as const) {
       json({ success: true, data: STAGE_BOARD_DATA_WITH_BRIEF }),
     );
 
+    // Task 5: selecting the strip node shows its EpisodeNodeCard first (URL
+    // `node=`); the card's entry button is what actually opens the Stage
+    // Board (node-2 has no `surface` → "Open Stage Board").
     await openWorkspace(page);
     await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    await expect(page.locator('[data-testid="episode-node-card"][data-node-id="node-2"]')).toBeVisible();
+    await page.getByTestId('node-card-enter').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // The in_review node's saved brief pins to the top of the board...

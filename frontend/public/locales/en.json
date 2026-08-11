@@ -177,6 +177,23 @@
       "minutesAgo": "{{count}}m ago",
       "hoursAgo": "{{count}}h ago",
       "daysAgo": "{{count}}d ago"
+    },
+    "dateRangePopover": {
+      "title": "Select date range",
+      "monthYear": "{{monthName}} {{year}}",
+      "prevMonth": "Previous Month",
+      "nextMonth": "Next Month",
+      "start": "Start",
+      "end": "End",
+      "empty": "–",
+      "clear": "Clear",
+      "weekdaySun": "Su",
+      "weekdayMon": "Mo",
+      "weekdayTue": "Tu",
+      "weekdayWed": "We",
+      "weekdayThu": "Th",
+      "weekdayFri": "Fr",
+      "weekdaySat": "Sa"
     }
   },
   "distribution": {
@@ -1431,12 +1448,11 @@
     },
     "episodeSurface": {
       "noScriptHint": "This episode doesn't have a script yet.",
-      "startStoryboard": "Start Storyboard",
-      "openCanvas": "Open Canvas",
-      "openScript": "Open Script Editor",
-      "openBeats": "Open Beats View",
-      "openRenders": "Open Renders",
-      "editorEntryHint": "This view opens in the episode editor."
+      "startStoryboard": "Start Storyboard"
+    },
+    "storyboardPage": {
+      "title": "Storyboard",
+      "shotHint": "Open in editor"
     },
     "sceneBoard": {
       "open": "Open",
@@ -1645,7 +1661,11 @@
       "noGroup": "No group",
       "save": "Save Changes",
       "dangerZone": "Danger Zone",
-      "deleteProject": "Delete Project"
+      "deleteProject": "Delete Project",
+      "tabs": {
+        "project": "Project",
+        "nodes": "Node Config"
+      }
     },
     "deleteConfirm": {
       "title": "Delete Project",
@@ -1846,7 +1866,6 @@
       },
       "overview": {
         "continue": "Continue",
-        "openEpisode": "Open Episode",
         "scriptScenes": "{{count}} scenes",
         "shotsProgress": "Shots {{done}}/{{total}}",
         "rendersCount": "Renders {{count}}",
@@ -1897,7 +1916,12 @@
         "loadMore": "Load more",
         "loadingMore": "Loading…"
       },
-      "canvasEmpty": "No canvases yet — create one to start sketching this project."
+      "canvasEmpty": "No canvases yet — create one to start sketching this project.",
+      "nodeSettings": {
+        "selectEpisode": "Select episode",
+        "episodeOwner": "Episode Owner",
+        "episodeOwnerForbidden": "Only the project owner can assign the episode owner"
+      }
     },
     "workflow": {
       "templatesEntry": "Workflow Templates",
@@ -1920,6 +1944,8 @@
       "agentsActive_one": "{{count}} agent active",
       "agentsActive_other": "{{count}} agents active",
       "unassigned": "Unassigned",
+      "notSet": "Not set",
+      "arrangementForbidden": "Only the project owner can restructure episodes and stages",
       "genericAgent": "Agent",
       "genericMember": "Member",
       "days_one": "{{count}} day",
@@ -2066,6 +2092,20 @@
         "episodeMismatch": "This Stage Belongs to a Different Episode — Switch to Its Episode to Start It.",
         "failed": "Failed to start this stage early"
       }
+    },
+    "nodeCard": {
+      "openScript": "Open Script",
+      "openStoryboard": "Open Storyboard",
+      "openRenders": "Open Renders",
+      "openStageBoard": "Open Stage Board",
+      "settings": "Node settings",
+      "assignOwner": "+ Assign Owner",
+      "setSchedule": "+ Set Schedule",
+      "unassign": "Unassign",
+      "people": "People",
+      "agents": "Agents",
+      "noCandidates": "No candidates",
+      "forbidden": "Only the project or episode owner can edit this"
     }
   },
   "storyboard": {

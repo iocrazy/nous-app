@@ -115,6 +115,7 @@ def _progress_stmt(project_id: Optional[int]):
             Episodes.title.label("title"),
             Episodes.sort_order.label("sort_order"),
             Episodes.current_node_id.label("current_node_id"),
+            Episodes.owner_id.label("owner_id"),
             func.count(func.distinct(ScriptProjects.id)).label("script_count"),
             func.count(func.distinct(ScriptScenes.id)).label("scene_count"),
             _scene_content_count_col(),
@@ -140,7 +141,11 @@ def _progress_stmt(project_id: Optional[int]):
         .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
         .where(Episodes.project_id == project_id)
         .group_by(
-            Episodes.id, Episodes.title, Episodes.sort_order, Episodes.current_node_id
+            Episodes.id,
+            Episodes.title,
+            Episodes.sort_order,
+            Episodes.current_node_id,
+            Episodes.owner_id,
         )
         .order_by(Episodes.sort_order.asc())
     )
@@ -273,10 +278,12 @@ def _progress_row(
     renders_count = int(row["renders_count"] or 0)
     rollup = workflow_rollup or {}
     current_node_id = row.get("current_node_id")
+    owner_id = row.get("owner_id")
     return {
         "episode_id": str(row["episode_id"]),
         "title": row["title"],
         "sort_order": int(row["sort_order"]),
+        "owner_id": str(owner_id) if owner_id is not None else None,
         "script_count": script_count,
         "scene_count": scene_count,
         "shots_total": shots_total,

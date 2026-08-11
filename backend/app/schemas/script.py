@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, constr, model_validator
 
@@ -132,10 +133,19 @@ class EpisodeCreate(BaseModel):
 
 
 class EpisodeUpdate(BaseModel):
-    """Request body for updating an episode (title / sort_order)."""
+    """Request body for updating an episode (title / sort_order / owner_id).
+
+    ``owner_id`` uses field-set semantics (spec §5 方案 A, workspace IA
+    redesign Task 6): omit to leave the episode owner untouched, supply
+    (including ``null``) to reassign/clear it. The router reads
+    ``model_fields_set`` to distinguish "not sent" from "set null" and gates
+    the write on the project manager role — see ``update_episode``. A
+    non-UUID string 422s here at validation, never reaching the permission
+    check or the DB."""
 
     title: Optional[str] = Field(None, max_length=200)
     sort_order: Optional[int] = None
+    owner_id: Optional[UUID] = None
 
 
 # ---------------------------------------------------------------------------

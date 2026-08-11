@@ -728,18 +728,69 @@ async def patch_workflow_node(
 ):
     """In-place tweak of a live node (owner / members / schedule / skipped).
 
-    Writes the instance only — never the template. Requires an effective role of
-    manager/editor (the workflow single-source, on top of the write guard)."""
+    Writes the instance only — never the template. Two different gates,
+    depending on which fields the body touches (Task 7, workspace IA
+    redesign spec §5):
+
+    - CONFIG fields (owner_user_id/owner_agent_id/members/planned_start/
+      planned_due/brief) require ``can_edit_node_config``: the project
+      manager OR the node's episode's ``owner_id`` (Task 6) — tighter than,
+      and NOT layered on top of, the base role gate below (an episode owner
+      need not hold a project_members row at all).
+    - Everything else (skipped/form_data/depends_on — instance STRUCTURE,
+      not owner-configurable content) keeps the pre-existing behavior
+      UNCHANGED: an effective role of manager/editor (the workflow
+      single-source, on top of the write guard).
+    - MIXED body (touches CONFIG fields AND a structure field in the same
+      request, e.g. ``{"brief": "x", "skipped": true}``): 评审 Critical #1 —
+      passing ``can_edit_node_config`` alone must NOT be enough to also
+      apply the structure fields. Pre-branch, every PATCH required
+      WRITE_ROLES; the config gate is intentionally narrower (an episode
+      owner needs no project_members row at all), so an episode owner with
+      no WRITE_ROLES membership could otherwise smuggle a structural change
+      through by piggybacking it on a config field they ARE allowed to
+      touch. Both gates must pass for a mixed body — see below."""
     from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
-
-    role = await resolve_effective_role(auth.user_id, project_id=project_id)
-    if role not in WRITE_ROLES:
-        raise HTTPException(status_code=403, detail="Insufficient role")
+    from app.services.workflow.node_authz import can_edit_node_config
 
     fields = payload.model_fields_set
+    CONFIG_FIELDS = {
+        "owner_user_id",
+        "owner_agent_id",
+        "members",
+        "planned_start",
+        "planned_due",
+        "brief",
+    }
+    repo = get_project_stage_nodes_repository()
+
+    if fields & CONFIG_FIELDS:
+        node_for_authz = await repo.get_node(node_id, project_id)
+        if node_for_authz is None:
+            raise HTTPException(status_code=404, detail="Node not found")
+        if not await can_edit_node_config(
+            project_id, node_for_authz.get("episode_id"), auth.user_id
+        ):
+            raise HTTPException(
+                status_code=403, detail={"code": "node_config_forbidden"}
+            )
+        # Mixed body: also ALSO require WRITE_ROLES for the structure fields
+        # riding along (see docstring "MIXED body" above). An episode owner
+        # with no WRITE_ROLES membership may PATCH config fields alone; the
+        # moment the same body touches skipped/form_data/depends_on it needs
+        # the base role gate too, on top of (not instead of) the config gate.
+        if fields - CONFIG_FIELDS:
+            role = await resolve_effective_role(auth.user_id, project_id=project_id)
+            if role not in WRITE_ROLES:
+                raise HTTPException(status_code=403, detail="Insufficient role")
+    else:
+        role = await resolve_effective_role(auth.user_id, project_id=project_id)
+        if role not in WRITE_ROLES:
+            raise HTTPException(status_code=403, detail="Insufficient role")
+
     kwargs: dict = {}
     if "owner_user_id" in fields or "owner_agent_id" in fields:
         kwargs["_set_owner"] = True
@@ -772,7 +823,6 @@ async def patch_workflow_node(
     if "brief" in fields and payload.brief is not None:
         kwargs["brief"] = payload.brief
 
-    repo = get_project_stage_nodes_repository()
     try:
         row = await repo.update_node(node_id, project_id, **kwargs)
     except DepsBackwardOnly as exc:
@@ -800,13 +850,14 @@ async def add_workflow_node(
     _project_guard: None = Depends(verify_project_write_access),
 ):
     """Add a node to a live instance — from the node bank (source_stage_id) or
-    blank (name). Requires an effective role of manager/editor."""
-    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    blank (name). ARRANGEMENT (Task 7, spec §5): manager only — tightened
+    from the prior manager/editor gate, no episode-owner carve-out (an
+    episode owner configures their episode's node CONTENT, not the
+    workflow's STRUCTURE)."""
+    from app.services.workflow.node_authz import require_arrangement_role
     from app.services.workflow.node_mutations import add_project_node
 
-    role = await resolve_effective_role(auth.user_id, project_id=project_id)
-    if role not in WRITE_ROLES:
-        raise HTTPException(status_code=403, detail="Insufficient role")
+    await require_arrangement_role(project_id, auth.user_id)
 
     try:
         node = await add_project_node(
@@ -830,13 +881,12 @@ async def delete_workflow_node(
 ):
     """Remove a node from a live instance. Guarded: only a still-pending node
     with no mirror issue that is not part of the active group is removable —
-    otherwise 409 with a machine reason (skip ≠ delete). manager/editor only."""
-    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    otherwise 409 with a machine reason (skip ≠ delete). ARRANGEMENT (Task 7,
+    spec §5): manager only — tightened from the prior manager/editor gate."""
+    from app.services.workflow.node_authz import require_arrangement_role
     from app.services.workflow.node_mutations import delete_project_node
 
-    role = await resolve_effective_role(auth.user_id, project_id=project_id)
-    if role not in WRITE_ROLES:
-        raise HTTPException(status_code=403, detail="Insufficient role")
+    await require_arrangement_role(project_id, auth.user_id)
 
     try:
         await delete_project_node(project_id, node_id)

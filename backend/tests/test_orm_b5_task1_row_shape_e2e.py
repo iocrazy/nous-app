@@ -331,7 +331,7 @@ _EPISODES_DDL = """
 CREATE TABLE episodes (
     id INTEGER PRIMARY KEY, project_id INTEGER, title TEXT,
     sort_order INTEGER, created_at TIMESTAMP, updated_at TIMESTAMP,
-    current_node_id INTEGER
+    current_node_id INTEGER, owner_id TEXT
 )
 """
 

@@ -177,6 +177,23 @@
       "minutesAgo": "{{count}} 分钟前",
       "hoursAgo": "{{count}} 小时前",
       "daysAgo": "{{count}} 天前"
+    },
+    "dateRangePopover": {
+      "title": "选择日期区间",
+      "monthYear": "{{year}}年 {{monthNum}}月",
+      "prevMonth": "上个月",
+      "nextMonth": "下个月",
+      "start": "开始",
+      "end": "结束",
+      "empty": "–",
+      "clear": "清除",
+      "weekdaySun": "日",
+      "weekdayMon": "一",
+      "weekdayTue": "二",
+      "weekdayWed": "三",
+      "weekdayThu": "四",
+      "weekdayFri": "五",
+      "weekdaySat": "六"
     }
   },
   "distribution": {
@@ -1431,12 +1448,11 @@
     },
     "episodeSurface": {
       "noScriptHint": "该剧集还没有剧本。",
-      "startStoryboard": "开始分镜",
-      "openCanvas": "打开画布",
-      "openScript": "打开剧本编辑器",
-      "openBeats": "打开节拍视图",
-      "openRenders": "打开成片",
-      "editorEntryHint": "该视图在剧集编辑器中打开。"
+      "startStoryboard": "开始分镜"
+    },
+    "storyboardPage": {
+      "title": "分镜",
+      "shotHint": "在编辑器中打开"
     },
     "sceneBoard": {
       "open": "打开",
@@ -1645,7 +1661,11 @@
       "noGroup": "暂无分组",
       "save": "保存更改",
       "dangerZone": "危险操作",
-      "deleteProject": "删除项目"
+      "deleteProject": "删除项目",
+      "tabs": {
+        "project": "项目",
+        "nodes": "节点配置"
+      }
     },
     "deleteConfirm": {
       "title": "确认删除项目",
@@ -1846,7 +1866,6 @@
       },
       "overview": {
         "continue": "继续",
-        "openEpisode": "打开剧集",
         "scriptScenes": "{{count}} 场",
         "shotsProgress": "镜头 {{done}}/{{total}}",
         "rendersCount": "成片 {{count}}",
@@ -1897,7 +1916,12 @@
         "loadMore": "加载更多",
         "loadingMore": "加载中…"
       },
-      "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。"
+      "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。",
+      "nodeSettings": {
+        "selectEpisode": "选择剧集",
+        "episodeOwner": "剧集负责人",
+        "episodeOwnerForbidden": "只有项目负责人可以指派剧集负责人"
+      }
     },
     "workflow": {
       "templatesEntry": "工作流模板",
@@ -1920,6 +1944,8 @@
       "agentsActive_one": "{{count}} 个智能体运行中",
       "agentsActive_other": "{{count}} 个智能体运行中",
       "unassigned": "未指派",
+      "notSet": "未设置",
+      "arrangementForbidden": "仅项目负责人可调整剧集与阶段结构",
       "genericAgent": "智能体",
       "genericMember": "成员",
       "days_one": "{{count}} 天",
@@ -2066,6 +2092,20 @@
         "episodeMismatch": "此阶段属于其他剧集 — 请切换到对应剧集后再开工。",
         "failed": "提前开工失败"
       }
+    },
+    "nodeCard": {
+      "openScript": "打开剧本",
+      "openStoryboard": "打开分镜",
+      "openRenders": "打开渲染成片",
+      "openStageBoard": "打开阶段面板",
+      "settings": "节点设置",
+      "assignOwner": "+ 指定负责人",
+      "setSchedule": "+ 设置排期",
+      "unassign": "取消指定",
+      "people": "成员",
+      "agents": "Agent",
+      "noCandidates": "暂无可选项",
+      "forbidden": "仅项目负责人或本集负责人可编辑"
     }
   },
   "storyboard": {

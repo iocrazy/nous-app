@@ -80,6 +80,14 @@ const PROJECT = {
   id: PARENT_PROJECT_ID,
   name: 'Workflow E2E Project',
   description: null,
+  // 评审修复轮 (Important #4, workspace IA redesign): node arrangement
+  // (add/remove stage) is now gated to the project owner on the frontend
+  // (`ProjectWorkspace.isProjectOwner`, `currentUserId === project.owner_id`)
+  // in addition to `canWrite` — without this, `workflow-add-stage`/
+  // `workflow-remove-node` below would be hidden and the two W3-1 tests
+  // would fail to find them. The stubbed session logs in as `USER_ID`
+  // (see `helpers/stubs.ts`), so this project must be owned by that same id.
+  owner_id: USER_ID,
   team_id: TEAM_ID,
   project_type: 'internal',
   project_group: null,
@@ -241,10 +249,15 @@ async function openTemplateEditor(page: Page): Promise<void> {
   await expect(page.getByTestId('workflow-node-capsule').first()).toBeVisible();
 }
 
+// Task 5 (IA redesign): the always-mounted `CurrentNodeCard` this walkthrough
+// used to wait on doesn't render for a has_workflow=true project any more —
+// the Overview accordion's expanded row renders `WorkflowStrip` + the node
+// card SLOT (`EpisodeNodeCard`, `data-testid="episode-node-card"`), defaulted
+// to the workflow's current node (WORKFLOW.current_node_id = 'node-2' here).
 async function openWorkspaceOverview(page: Page): Promise<void> {
   await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
   await expect(page.getByTestId('workflow-strip')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('workflow-current-node-card').first()).toBeVisible();
+  await expect(page.getByTestId('episode-node-card').first()).toBeVisible();
 }
 
 for (const theme of ['dark', 'light'] as const) {
@@ -312,8 +325,8 @@ for (const theme of ['dark', 'light'] as const) {
     await setupWorkflowStubs(page);
     await forceTheme(page, theme);
     await openWorkspaceOverview(page);
-    // The deliverable row surfaces the server-computed filed-file count.
-    await expect(page.getByTestId('workflow-node-filed-count').first()).toContainText('2');
+    // The deliverable row (EpisodeNodeCard, Task 5) surfaces the server-computed filed-file count.
+    await expect(page.getByTestId('node-card-deliverable').first()).toContainText('2');
     await page.screenshot({ path: `${SHOTS}/02-overview-${theme}.png`, fullPage: true });
   });
 
@@ -333,7 +346,8 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     await openWorkspaceOverview(page);
-    await page.getByTestId('workflow-complete-stage').click();
+    // node-2 is the cursor node → EpisodeNodeCard (Task 5) shows Complete stage.
+    await page.getByTestId('node-card-complete').click();
     await expect(page.getByTestId('workflow-advance-dialog')).toBeVisible();
     // The dialog renders the server ruling: closing Storyboard, creating Editing.
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Storyboard');
@@ -358,6 +372,15 @@ for (const theme of ['dark', 'light'] as const) {
     await page.screenshot({ path: `${SHOTS}/04-overdue-${theme}.png`, fullPage: true });
   });
 
+  // W3-1's add/remove-stage affordances (`WorkflowStrip`'s `canEdit` +
+  // `onAddNode`/`onRemoveNode`) were wired through the pre-Task-4
+  // always-mounted `WorkflowSection` (the accordion's predecessor). Task 4's
+  // accordion rewrite called `WorkflowStrip` directly in `WorkspaceOverview`
+  // without those three props, so these two went red. Task 5 修复轮1
+  // (评审 Important #2) restored the mechanism: the accordion body now
+  // mounts `WorkflowSection` itself (`showNodeCards={false}` — see that
+  // component's file doc) as the strip + `LibraryPickerModal` + remove-confirm
+  // host, so `workflow-add-stage`/`workflow-remove-node` render again.
   test(`${theme}: add stage opens the library picker (W3-1)`, async ({ page }) => {
     await setupWorkflowStubs(page);
     await forceTheme(page, theme);

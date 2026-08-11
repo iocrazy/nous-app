@@ -13,6 +13,7 @@ import { ArrowLeft, Bot, Zap, ZapOff } from 'lucide-react';
 import { MiniStepper } from './MiniStepper';
 import { updateProject } from '../../services/projectsService';
 import { useOptionalToast } from '../Toast';
+import { NODE_STATUS_LABEL } from '../workflow/nodeStatus';
 import type { Project, ProjectStage, ProjectWorkflow } from '../../types';
 
 interface WorkspaceTopBarProps {
@@ -106,6 +107,15 @@ export function WorkspaceTopBar({
   };
   const agentsActive = workflow?.agents_active ?? 0;
 
+  // Editor flow pill (IA redesign Task 10, spec §6) — studio (slate) mode's
+  // `● <node name> · <status>` + Complete Stage capsule, the writer's one
+  // glance at "what stage am I in / what happens if I finish this". The
+  // cursor node must actually resolve against THIS episode's own node list
+  // (`workflow.nodes`, already episode-scoped by the caller) — a stale id
+  // pointing nowhere (e.g. a brief render gap right after an episode switch)
+  // degrades the same as "no workflow", never a blank/broken pill.
+  const cursorNode = hasWorkflow ? (wfNodes.find((n) => n.id === workflow?.current_node_id) ?? null) : null;
+
   return (
     <div
       data-testid="workspace-topbar"
@@ -185,6 +195,26 @@ export function WorkspaceTopBar({
           canWrite={canWrite}
           onJump={handleWorkflowJump}
         />
+      )}
+
+      {slate && cursorNode && (
+        <span
+          data-testid="workspace-flow-pill"
+          className="ml-auto inline-flex items-center gap-2 rounded-full border border-agent-line bg-agent-soft py-1 pl-3 pr-1 text-[11.5px] font-bold text-agent"
+        >
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
+          {cursorNode.name} · {NODE_STATUS_LABEL[cursorNode.status]}
+          {canWrite && (
+            <button
+              type="button"
+              data-testid="workspace-flow-pill-complete"
+              onClick={() => onRequestAdvance?.('forward')}
+              className="rounded-full bg-agent px-2.5 py-1 text-[11px] text-white"
+            >
+              {t('projects.workflow.completeStage')}
+            </button>
+          )}
+        </span>
       )}
     </div>
   );

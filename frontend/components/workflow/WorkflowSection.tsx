@@ -11,6 +11,16 @@
  * toast). For a No-workflow project (`has_workflow=false`) a writer gets a
  * "Set up workflow" empty-state CTA (M1.x opt-in migration path — see
  * AttachWorkflowModal); a non-writer sees nothing, same as before.
+ *
+ * IA redesign Task 5 修复轮1: `WorkspaceOverview`'s accordion now has its own
+ * per-node summary card (`EpisodeNodeCard`), so this component's OWN
+ * `CurrentNodeCard` stacks would duplicate the same node's controls when
+ * both are mounted together. `WorkspaceOverview` reuses THIS component (not
+ * a bare `WorkflowStrip`) for the has_workflow=true accordion body purely as
+ * the add/remove-stage MECHANISM host — `showNodeCards={false}` keeps the
+ * strip + `LibraryPickerModal` + remove-confirm dialog + the people/agents
+ * fetch those need, while skipping the `CurrentNodeCard` render blocks
+ * entirely (see that prop's doc comment below).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -46,6 +56,16 @@ interface WorkflowSectionProps {
   episodeId?: string | null;
   workflow: ProjectWorkflow;
   canWrite: boolean;
+  /** 评审修复轮 (Important #4, workspace IA redesign): node add/remove is an
+   * ARRANGEMENT action — the backend gates it to the project manager only
+   * (`node_authz.require_arrangement_role`, 403 `arrangement_forbidden`,
+   * NO episode-owner carve-out — spec §5), stricter than `canWrite`'s
+   * WRITE_ROLES gate. Defaults to `canWrite` so every caller that predates
+   * this prop (there's exactly one production mount today —
+   * `WorkspaceOverview` — plus this file's own test harness) keeps its
+   * prior, unrestricted-by-arrangement behavior; `WorkspaceOverview` passes
+   * a real (narrower) value computed from `project.owner_id`. */
+  canArrange?: boolean;
   onReload: () => void;
   onRequestAdvance: (direction: 'forward' | 'back') => void;
   onOpenTodolist: () => void;
@@ -59,6 +79,16 @@ interface WorkflowSectionProps {
   onSelectNode?: (node: ProjectStageNode) => void;
   /** A node the user asked to focus (from the sidebar / strip) — scroll to it. */
   focusNodeId: string | null;
+  /** IA redesign Task 5 修复轮1: the Overview accordion now shows its own
+   * `EpisodeNodeCard` per selected node (see `WorkspaceOverview`'s
+   * `renderNodeCard` slot) — mounting THIS component's `CurrentNodeCard`
+   * stacks alongside it would duplicate the same node's controls twice.
+   * `false` keeps everything else (strip, add/remove-stage picker + confirm,
+   * the people/agents fetch those need) but skips both `groupNodes`/
+   * `futureEligible` render blocks below. Defaults `true` so every other
+   * caller (today: none besides `WorkspaceOverview`, but the flag is opt-out
+   * to keep the pre-Task-5 behavior as the fallback) is unaffected. */
+  showNodeCards?: boolean;
 }
 
 /** Map a delete 409 reason code to user copy (server sends the code only). */
@@ -74,12 +104,14 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   episodeId,
   workflow,
   canWrite,
+  canArrange = canWrite,
   onReload,
   onRequestAdvance,
   onOpenTodolist,
   onOpenStage,
   onSelectNode,
   focusNodeId,
+  showNodeCards = true,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -148,8 +180,16 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       setPickerOpen(false);
       onReload();
     } catch (err) {
-      console.error('[WorkflowSection] add node failed', err);
-      addToast(t('projects.workflow.addFailed'), 'error');
+      // 评审修复轮 (Important #4): typed 403 for the ARRANGEMENT gate — see
+      // `canArrange`'s doc comment. The frontend hide/disable above already
+      // covers a project-owner-signal miss; this toast covers the narrower
+      // backend-manager-but-not-owner edge that same comment documents.
+      if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+        addToast(t('projects.workflow.arrangementForbidden'), 'error');
+      } else {
+        console.error('[WorkflowSection] add node failed', err);
+        addToast(t('projects.workflow.addFailed'), 'error');
+      }
     } finally {
       setBusy(false);
     }
@@ -166,6 +206,9 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       if (err instanceof ApiError && err.status === 409) {
         const key = REMOVE_BLOCK_KEY[err.message] ?? 'projects.workflow.removeBlocked.generic';
         addToast(t(key), 'error');
+      } else if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+        // 评审修复轮 (Important #4) — see doAdd's matching branch above.
+        addToast(t('projects.workflow.arrangementForbidden'), 'error');
       } else {
         console.error('[WorkflowSection] remove node failed', err);
         addToast(t('projects.workflow.removeFailed'), 'error');
@@ -278,25 +321,30 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
         nodes={workflow.nodes}
         currentNodeId={workflow.current_node_id}
         onSelectNode={onSelectNode}
-        canEdit={canWrite}
+        // 评审修复轮 (Important #4): add/remove-stage is gated on BOTH
+        // canWrite (base write access) AND canArrange (project-owner-only
+        // arrangement signal) — see `canArrange`'s doc comment.
+        canEdit={canWrite && canArrange}
         onAddNode={() => setPickerOpen(true)}
         onRemoveNode={(node) => setRemoving(node)}
       />
-      {groupNodes.map((node) => (
-        <CurrentNodeCard
-          key={node.id}
-          projectId={projectId}
-          node={node}
-          canWrite={canWrite}
-          people={people}
-          agents={agents}
-          onPatched={onReload}
-          onRequestAdvance={onRequestAdvance}
-          onOpenTodolist={onOpenTodolist}
-          onOpenStage={onOpenStage}
-        />
-      ))}
-      {canWrite &&
+      {showNodeCards &&
+        groupNodes.map((node) => (
+          <CurrentNodeCard
+            key={node.id}
+            projectId={projectId}
+            node={node}
+            canWrite={canWrite}
+            people={people}
+            agents={agents}
+            onPatched={onReload}
+            onRequestAdvance={onRequestAdvance}
+            onOpenTodolist={onOpenTodolist}
+            onOpenStage={onOpenStage}
+          />
+        ))}
+      {showNodeCards &&
+        canWrite &&
         futureEligible.map((node) => (
           <CurrentNodeCard
             key={node.id}

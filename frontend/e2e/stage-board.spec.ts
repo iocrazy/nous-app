@@ -244,6 +244,23 @@ async function openWorkspace(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]')).toBeVisible();
 }
 
+/**
+ * Task 5 (IA redesign): a strip node click no longer navigates straight to
+ * the Stage Board — it only selects that node (writes URL `node=`), which
+ * switches the Overview accordion's card slot to that node's
+ * `EpisodeNodeCard`. The card's own entry button (`node-card-enter`) is what
+ * actually opens the Stage Board, reusing the exact routing
+ * `ProjectWorkspace.handleSelectNode` used to run directly off the strip
+ * click pre-Task-4 (non-current node, or a current node with no creative
+ * `surface` — node-2 here has neither `surface` set, so both cases land
+ * here regardless of which node this is).
+ */
+async function selectNodeAndEnterStageBoard(page: Page, nodeId: string): Promise<void> {
+  await page.locator(`[data-testid="workflow-strip-node"][data-node-id="${nodeId}"]`).click();
+  await expect(page.locator(`[data-testid="episode-node-card"][data-node-id="${nodeId}"]`)).toBeVisible();
+  await page.getByTestId('node-card-enter').click();
+}
+
 for (const theme of ['dark', 'light'] as const) {
   test(`${theme}: Workflow strip node click opens the Stage Board module`, async ({ page }) => {
     await setupStageBoardStubs(page);
@@ -251,9 +268,9 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspace(page);
 
-    // Workflow-strip node click → stage module opens with the node id in the URL
-    // (node-2 has no creative surface → deliverable-only → its Stage Board).
-    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    // Selecting + entering node-2 → stage module opens with the node id in
+    // the URL (node-2 has no creative surface → deliverable-only → its Stage Board).
+    await selectNodeAndEnterStageBoard(page, 'node-2');
     await expect(page).toHaveURL(/[?&]module=stage(&|$)/);
     await expect(page).toHaveURL(/[?&]node=node-2(&|$)/);
 
@@ -280,7 +297,7 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspace(page);
 
-    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    await selectNodeAndEnterStageBoard(page, 'node-2');
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // node-2 is the current node → the active-group action bar renders.
@@ -322,7 +339,7 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     await openWorkspace(page);
-    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    await selectNodeAndEnterStageBoard(page, 'node-2');
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // The stage hook already prepared a run → solid "Run now" button, not
@@ -377,7 +394,7 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     await openWorkspace(page);
-    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    await selectNodeAndEnterStageBoard(page, 'node-2');
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     const form = page.getByTestId('stage-node-form');
@@ -415,7 +432,7 @@ for (const theme of ['dark', 'light'] as const) {
     );
 
     await openWorkspace(page);
-    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    await selectNodeAndEnterStageBoard(page, 'node-2');
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     const completeButton = page.getByTestId('stage-board-complete');

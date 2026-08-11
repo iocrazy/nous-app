@@ -490,10 +490,13 @@ export const createEpisode = async (
   await apiClient.post(`/api/v1/projects/${projectId}/episodes`, title ? { title } : {});
 };
 
-/** Update an episode's title and/or sort_order. */
+/** Update an episode's title / sort_order / owner_id ("集负责人", Task 6 +
+ * IA redesign Task 10 — `owner_id` PATCHes are manager-only server-side,
+ * 403 `episode_owner_forbidden` otherwise; `sort_order` is manager-only too,
+ * 403 `arrangement_forbidden` — see backend/app/api/episodes_router.py). */
 export const updateEpisode = async (
   episodeId: string,
-  data: { title?: string; sort_order?: number },
+  data: { title?: string; sort_order?: number; owner_id?: string | null },
 ): Promise<void> => {
   await apiClient.patch(`/api/v1/episodes/${episodeId}`, data);
 };

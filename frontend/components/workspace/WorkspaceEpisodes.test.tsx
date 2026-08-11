@@ -225,4 +225,61 @@ describe('WorkspaceEpisodes', () => {
     fireEvent.click(screen.getByTestId('ws-episode-open-1'));
     expect(onOpenEpisode).toHaveBeenCalledWith('1');
   });
+
+  // ── 评审修复轮 (Important #4): episode arrangement is project-owner-only ──
+
+  it('canArrange=false hides New Episode and the Move/Delete menu items, but keeps Rename', () => {
+    render(
+      <WorkspaceEpisodes
+        projectId="p1"
+        episodes={EPISODES}
+        onEpisodesChanged={noop}
+        onOpenEpisode={noop}
+        canArrange={false}
+      />,
+    );
+    expect(screen.queryByTestId('ws-episodes-new-btn')).toBeNull();
+    fireEvent.click(screen.getByTestId('ws-episode-menu-1'));
+    expect(screen.getByTestId('ws-episode-menu-rename-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('ws-episode-menu-moveup-1')).toBeNull();
+    expect(screen.queryByTestId('ws-episode-menu-movedown-1')).toBeNull();
+    expect(screen.queryByTestId('ws-episode-menu-delete-1')).toBeNull();
+  });
+
+  it('canArrange defaults to true (New Episode + Move/Delete all present)', () => {
+    render(
+      <WorkspaceEpisodes
+        projectId="p1"
+        episodes={EPISODES}
+        onEpisodesChanged={noop}
+        onOpenEpisode={noop}
+      />,
+    );
+    expect(screen.getByTestId('ws-episodes-new-btn')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('ws-episode-menu-1'));
+    expect(screen.getByTestId('ws-episode-menu-moveup-1')).toBeInTheDocument();
+    expect(screen.getByTestId('ws-episode-menu-delete-1')).toBeInTheDocument();
+  });
+
+  it('a 403 arrangement_forbidden on create surfaces the typed toast, not the generic error', async () => {
+    class ArrangementForbidden extends FakeApiError {
+      code = 'arrangement_forbidden';
+      constructor() {
+        super(403);
+      }
+    }
+    mockService.createEpisode.mockRejectedValue(new ArrangementForbidden());
+    render(
+      <WorkspaceEpisodes
+        projectId="p1"
+        episodes={EPISODES}
+        onEpisodesChanged={noop}
+        onOpenEpisode={noop}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('ws-episodes-new-btn'));
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('projects.workflow.arrangementForbidden', 'error'),
+    );
+  });
 });

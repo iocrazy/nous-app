@@ -1,8 +1,10 @@
 /**
- * EpisodeSummaryRow (B5 T-B5.5) — per-episode rollup row. Pins: the mono
- * read-out (SC · SHOTS · CUTS) mirrors the Continue card; the segmented stage
- * indicator lights `stageFill(status)` of 5 segments (status-derived
- * approximation of the spec's node-segmented bar); clicking deep-links.
+ * EpisodeSummaryRow (IA redesign Task 4 rewrite) — the accordion row shell.
+ * Pins: the mono read-out (SC · SHOTS · CUTS) and segmented stage indicator
+ * are unchanged from the pre-rewrite rollup row; `isOpen`/`onToggle` replace
+ * `isCurrent`/`onSelect` (the row toggles its own body in place instead of
+ * deep-linking away), and the body only mounts (with the caller's children)
+ * while open.
  */
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -52,15 +54,15 @@ describe('stageFill', () => {
 
 describe('EpisodeSummaryRow', () => {
   it('renders the EP number, title and the SC/SHOTS/CUTS read-out', () => {
-    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={() => {}} />);
-    const row = screen.getByTestId('ws-rollup-row-7');
+    render(<EpisodeSummaryRow episode={EP} epNumber={7} isOpen={false} onToggle={() => {}} />);
+    const row = screen.getByTestId('ep-accordion-row-7');
     expect(row).toHaveTextContent('EP7');
     expect(row).toHaveTextContent('Ep 7 — Finale');
     expect(row).toHaveTextContent('5 SC · SHOTS 12/20 · CUTS 3');
   });
 
   it('lights stageFill(status) segments in the stage indicator', () => {
-    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={() => {}} />);
+    render(<EpisodeSummaryRow episode={EP} epNumber={7} isOpen={false} onToggle={() => {}} />);
     // boarding → 3 of 5 lit.
     expect(screen.getByTestId('ws-rollup-stages-7')).toHaveAttribute('data-fill', '3');
   });
@@ -74,8 +76,8 @@ describe('EpisodeSummaryRow', () => {
       <EpisodeSummaryRow
         episode={{ ...EP, workflow: WF }}
         epNumber={7}
-        isCurrent={false}
-        onSelect={() => {}}
+        isOpen={false}
+        onToggle={() => {}}
       />,
     );
     const bar = screen.getByTestId('ws-rollup-stages-7');
@@ -85,7 +87,7 @@ describe('EpisodeSummaryRow', () => {
   });
 
   it('falls back to the status ladder when the rollup is absent or has no nodes', () => {
-    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={() => {}} />);
+    render(<EpisodeSummaryRow episode={EP} epNumber={7} isOpen={false} onToggle={() => {}} />);
     const legacy = screen.getByTestId('ws-rollup-stages-7');
     expect(legacy).toHaveAttribute('data-fill', '3'); // boarding
     expect(legacy).toHaveAttribute('data-total', '5');
@@ -94,24 +96,42 @@ describe('EpisodeSummaryRow', () => {
       <EpisodeSummaryRow
         episode={{ ...EP, workflow: { ...WF, nodes_total: 0, nodes_done: 0 } }}
         epNumber={7}
-        isCurrent={false}
-        onSelect={() => {}}
+        isOpen={false}
+        onToggle={() => {}}
       />,
     );
     expect(screen.getByTestId('ws-rollup-stages-7')).toHaveAttribute('data-total', '5');
   });
 
-  it('deep-links to the episode on click', () => {
-    const onSelect = vi.fn();
-    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={onSelect} />);
-    fireEvent.click(screen.getByTestId('ws-rollup-row-7'));
-    expect(onSelect).toHaveBeenCalledWith('7');
+  it('toggles: passes the episode id when closed, null when already open', () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(
+      <EpisodeSummaryRow episode={EP} epNumber={7} isOpen={false} onToggle={onToggle} />,
+    );
+    fireEvent.click(screen.getByTestId('ep-accordion-row-7'));
+    expect(onToggle).toHaveBeenCalledWith('7');
+
+    onToggle.mockClear();
+    rerender(<EpisodeSummaryRow episode={EP} epNumber={7} isOpen onToggle={onToggle} />);
+    fireEvent.click(screen.getByTestId('ep-accordion-row-7'));
+    expect(onToggle).toHaveBeenCalledWith(null);
   });
 
-  it('marks the current episode and disables clicking when no handler is given', () => {
-    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent />);
-    const row = screen.getByTestId('ws-rollup-row-7');
-    expect(row).toHaveAttribute('data-current', 'true');
-    expect(row).toBeDisabled();
+  it('mounts the body (and its children) only while open', () => {
+    const { rerender } = render(
+      <EpisodeSummaryRow episode={EP} epNumber={7} isOpen={false} onToggle={() => {}}>
+        <div data-testid="strip-slot">strip</div>
+      </EpisodeSummaryRow>,
+    );
+    expect(screen.queryByTestId('ep-accordion-body-7')).toBeNull();
+    expect(screen.queryByTestId('strip-slot')).toBeNull();
+
+    rerender(
+      <EpisodeSummaryRow episode={EP} epNumber={7} isOpen onToggle={() => {}}>
+        <div data-testid="strip-slot">strip</div>
+      </EpisodeSummaryRow>,
+    );
+    expect(screen.getByTestId('ep-accordion-body-7')).toBeTruthy();
+    expect(screen.getByTestId('strip-slot')).toBeTruthy();
   });
 });

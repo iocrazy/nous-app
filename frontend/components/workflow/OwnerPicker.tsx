@@ -12,22 +12,17 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, User, X } from 'lucide-react';
+import { ChevronDown, User, X } from 'lucide-react';
 import type { WorkflowMemberRef } from '../../types';
+import { Avatar, OwnerCandidateList } from './OwnerCandidateList';
+import type { AgentOption, PersonOption } from './OwnerCandidateList';
 
-export interface PersonOption {
-  /** user_id (UUID). */
-  id: string;
-  name: string;
-}
-
-export interface AgentOption {
-  /** ai_agents.id (UUID). */
-  id: string;
-  name: string;
-  slug?: string;
-  color?: string;
-}
+// Re-exported so existing consumers (`WorkflowSection.tsx`,
+// `CurrentNodeCard.tsx`, `EpisodeNodeCard.tsx`/its test) that import these
+// types from `./OwnerPicker` keep compiling unchanged — the canonical
+// definitions moved to `OwnerCandidateList.tsx` (评审修复轮1, task 9), which
+// both this widget and `EpisodeNodeCard`'s own candidate menu now share.
+export type { AgentOption, PersonOption };
 
 type OwnerProps = {
   mode: 'owner';
@@ -51,32 +46,6 @@ type MembersProps = {
 };
 
 type OwnerPickerProps = OwnerProps | MembersProps;
-
-function Avatar({
-  kind,
-  name,
-  color,
-}: {
-  kind: 'user' | 'agent';
-  name: string;
-  color?: string;
-}) {
-  if (kind === 'agent') {
-    return (
-      <span
-        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-white"
-        style={{ background: color || 'var(--accent, #6366f1)' }}
-      >
-        <Bot size={12} />
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-ink-700 text-[10px] font-semibold text-ink-200">
-      {(name || '?').charAt(0).toUpperCase()}
-    </span>
-  );
-}
 
 export const OwnerPicker: React.FC<OwnerPickerProps> = (props) => {
   const { people, agents, disabled, placeholder } = props;
@@ -213,55 +182,15 @@ export const OwnerPicker: React.FC<OwnerPickerProps> = (props) => {
 
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 max-h-64 w-full min-w-[13rem] overflow-y-auto rounded-lg border border-line-strong bg-island py-1 shadow-2xl">
-          {people.length > 0 && (
-            <>
-              <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-600">
-                People
-              </div>
-              {people.map((p) => {
-                const ref: WorkflowMemberRef = { user_id: p.id };
-                const sel = isSelected(ref);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => toggle(ref)}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[13px] text-ink-200 hover:bg-ink-800"
-                  >
-                    <Avatar kind="user" name={p.name} />
-                    <span className="flex-1 truncate text-left">{p.name}</span>
-                    {sel && <Check size={14} className="text-emerald-500" />}
-                  </button>
-                );
-              })}
-            </>
-          )}
-          {agents.length > 0 && (
-            <>
-              <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-600">
-                Agents
-              </div>
-              {agents.map((a) => {
-                const ref: WorkflowMemberRef = { agent_id: a.id };
-                const sel = isSelected(ref);
-                return (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => toggle(ref)}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[13px] text-ink-200 hover:bg-ink-800"
-                  >
-                    <Avatar kind="agent" name={a.name} color={a.color} />
-                    <span className="flex-1 truncate text-left">{a.name}</span>
-                    {sel && <Check size={14} className="text-emerald-500" />}
-                  </button>
-                );
-              })}
-            </>
-          )}
-          {people.length === 0 && agents.length === 0 && (
-            <div className="px-2.5 py-2 text-[13px] text-ink-500">No candidates</div>
-          )}
+          <OwnerCandidateList
+            people={people}
+            agents={agents}
+            isSelected={isSelected}
+            onSelect={toggle}
+            peopleLabel="People"
+            agentsLabel="Agents"
+            emptyLabel="No candidates"
+          />
         </div>
       )}
     </div>

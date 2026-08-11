@@ -29,6 +29,17 @@ interface WorkspaceEpisodesProps {
   onEpisodesChanged: () => void;
   /** Set this episode as current + deep-link into its script editor. */
   onOpenEpisode: (episodeId: string) => void;
+  /** 评审修复轮 (Important #4, workspace IA redesign): episode create/
+   * reorder(move up-down)/delete is an ARRANGEMENT action — the backend
+   * gates it to the project manager only (403 `arrangement_forbidden`, spec
+   * §5), stricter than plain project write access. Rename is NOT gated
+   * (the backend's title-only PATCH skips the role check entirely — see
+   * `test_update_episode_title_only_no_role_check_unchanged`), so it stays
+   * available regardless of this prop. Defaults `true` so a caller that
+   * doesn't pass it (this file's own test harness) keeps the pre-existing,
+   * unrestricted behavior; `ProjectWorkspace` passes a real value computed
+   * from `project.owner_id`. */
+  canArrange?: boolean;
 }
 
 function isEpisodeEmpty(ep: EpisodeProgress): boolean {
@@ -40,6 +51,7 @@ export function WorkspaceEpisodes({
   episodes,
   onEpisodesChanged,
   onOpenEpisode,
+  canArrange = true,
 }: WorkspaceEpisodesProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -74,8 +86,13 @@ export function WorkspaceEpisodes({
       await createEpisode(projectId, title);
       onEpisodesChanged();
     } catch (err) {
-      console.error('[WorkspaceEpisodes] create failed:', err);
-      addToast(t('common.error'), 'error');
+      // 评审修复轮 (Important #4): typed 403 for the ARRANGEMENT gate.
+      if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+        addToast(t('projects.workflow.arrangementForbidden'), 'error');
+      } else {
+        console.error('[WorkspaceEpisodes] create failed:', err);
+        addToast(t('common.error'), 'error');
+      }
     } finally {
       setCreating(false);
     }
@@ -123,8 +140,13 @@ export function WorkspaceEpisodes({
         ]);
         onEpisodesChanged();
       } catch (err) {
-        console.error('[WorkspaceEpisodes] reorder failed:', err);
-        addToast(t('common.error'), 'error');
+        // 评审修复轮 (Important #4): typed 403 for the ARRANGEMENT gate.
+        if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+          addToast(t('projects.workflow.arrangementForbidden'), 'error');
+        } else {
+          console.error('[WorkspaceEpisodes] reorder failed:', err);
+          addToast(t('common.error'), 'error');
+        }
       } finally {
         setBusyId(null);
       }
@@ -142,6 +164,9 @@ export function WorkspaceEpisodes({
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           addToast(t('projects.workspace.episodes.notEmpty'), 'error');
+        } else if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+          // 评审修复轮 (Important #4): typed 403 for the ARRANGEMENT gate.
+          addToast(t('projects.workflow.arrangementForbidden'), 'error');
         } else {
           console.error('[WorkspaceEpisodes] delete failed:', err);
           addToast(t('common.error'), 'error');
@@ -159,14 +184,16 @@ export function WorkspaceEpisodes({
         <div className="text-sm font-semibold text-ink-100">
           {t('projects.workspace.episodes.title')}
         </div>
-        <button
-          data-testid="ws-episodes-new-btn"
-          onClick={handleCreate}
-          disabled={creating}
-          className="rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950 font-semibold text-[12.5px] px-3 py-1.5 transition-colors"
-        >
-          {t('projects.workspace.episodes.newEpisode')}
-        </button>
+        {canArrange && (
+          <button
+            data-testid="ws-episodes-new-btn"
+            onClick={handleCreate}
+            disabled={creating}
+            className="rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-ink-950 font-semibold text-[12.5px] px-3 py-1.5 transition-colors"
+          >
+            {t('projects.workspace.episodes.newEpisode')}
+          </button>
+        )}
       </div>
 
       <div className="rounded-xl border border-ink-800 overflow-hidden">
@@ -259,32 +286,41 @@ export function WorkspaceEpisodes({
                     >
                       {t('projects.workspace.episodes.rename')}
                     </button>
-                    <button
-                      data-testid={`ws-episode-menu-moveup-${ep.episode_id}`}
-                      onClick={() => move(ep.episode_id, 'up')}
-                      disabled={i === 0}
-                      className="w-full text-left px-3 py-1.5 text-[12px] text-ink-300 hover:text-ink-100 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-default"
-                    >
-                      {t('projects.workspace.episodes.moveUp')}
-                    </button>
-                    <button
-                      data-testid={`ws-episode-menu-movedown-${ep.episode_id}`}
-                      onClick={() => move(ep.episode_id, 'down')}
-                      disabled={i === sorted.length - 1}
-                      className="w-full text-left px-3 py-1.5 text-[12px] text-ink-300 hover:text-ink-100 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-default"
-                    >
-                      {t('projects.workspace.episodes.moveDown')}
-                    </button>
-                    <button
-                      data-testid={`ws-episode-menu-delete-${ep.episode_id}`}
-                      onClick={() => {
-                        setMenuOpenFor(null);
-                        setDeleteConfirmId(ep.episode_id);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:text-red-300 hover:bg-ink-800"
-                    >
-                      {t('projects.workspace.episodes.delete')}
-                    </button>
+                    {/* 评审修复轮 (Important #4): reorder/delete are ARRANGEMENT
+                        actions (project-owner-only backend gate) — see
+                        `canArrange`'s doc comment. Rename stays available to
+                        every writer regardless (the backend's title-only
+                        PATCH skips the role check). */}
+                    {canArrange && (
+                      <>
+                        <button
+                          data-testid={`ws-episode-menu-moveup-${ep.episode_id}`}
+                          onClick={() => move(ep.episode_id, 'up')}
+                          disabled={i === 0}
+                          className="w-full text-left px-3 py-1.5 text-[12px] text-ink-300 hover:text-ink-100 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-default"
+                        >
+                          {t('projects.workspace.episodes.moveUp')}
+                        </button>
+                        <button
+                          data-testid={`ws-episode-menu-movedown-${ep.episode_id}`}
+                          onClick={() => move(ep.episode_id, 'down')}
+                          disabled={i === sorted.length - 1}
+                          className="w-full text-left px-3 py-1.5 text-[12px] text-ink-300 hover:text-ink-100 hover:bg-ink-800 disabled:opacity-40 disabled:cursor-default"
+                        >
+                          {t('projects.workspace.episodes.moveDown')}
+                        </button>
+                        <button
+                          data-testid={`ws-episode-menu-delete-${ep.episode_id}`}
+                          onClick={() => {
+                            setMenuOpenFor(null);
+                            setDeleteConfirmId(ep.episode_id);
+                          }}
+                          className="w-full text-left px-3 py-1.5 text-[12px] text-red-400 hover:text-red-300 hover:bg-ink-800"
+                        >
+                          {t('projects.workspace.episodes.delete')}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
