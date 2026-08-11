@@ -1204,8 +1204,12 @@ async def _goto_image_composer(
         timeout=deadline.slice_ms(settings.nav_timeout_ms),
     )
 
-    # `attached`, not `visible`: like the video input, this one is hidden behind
-    # a styled drop zone, so waiting for visibility waits forever.
+    # `attached`, not `visible`. [实测 2026-08-11, T3] this input reports
+    # `visible: 1`, so waiting for visibility would work *today* - but the video
+    # flow's equivalent is hidden behind a styled drop zone, styling like that
+    # is a decision the platform can revisit, and `attached` is the weaker
+    # requirement that costs nothing. `set_input_files` does not need the
+    # element to be visible.
     file_input = await _first_attached(
         page,
         IMAGE_FILE_INPUT_SELECTORS,
@@ -1214,9 +1218,9 @@ async def _goto_image_composer(
     if file_input is None:
         raise StepFailure(
             SessionStatus.FAILED,
-            "the gallery composer exposed no multi-file image input; refusing to "
-            "fall back to a generic file input, which on this page can be the "
-            "video uploader",
+            "the gallery composer exposed no image file input; refusing to fall "
+            "back to a generic file input, because the video uploader shares "
+            "this URL and a gallery sent to it is a wrong post, not a failed one",
             reason="image_upload_input_missing",
             stage="image_upload",
             selectors=list(IMAGE_FILE_INPUT_SELECTORS),
