@@ -195,6 +195,30 @@ class ScriptShotRepository:
             logger.error(f"Failed to get shot {shot_id}: {e}")
             return None
 
+    async def get_project_id(self, shot_id: str) -> Optional[int]:
+        """The owning ``projects.id`` for a shot (script_shots → script_scenes
+        → script_projects.project_id), or None when the shot/its chain is
+        missing.
+
+        Cross-project guard for the canvas-generation shot-backfill lane
+        (facts §7 lane (c)): a canvas may only backfill a shot that belongs
+        to the canvas's own project."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ScriptProjects.project_id)
+                    .select_from(ScriptShots)
+                    .join(ScriptScenes, ScriptScenes.id == ScriptShots.scene_id)
+                    .join(ScriptProjects, ScriptProjects.id == ScriptScenes.script_id)
+                    .where(ScriptShots.id == _bigint(shot_id))
+                    .limit(1)
+                )
+                row = result.scalar_one_or_none()
+                return int(row) if row is not None else None
+        except Exception as e:
+            logger.error(f"Failed to get project_id for shot {shot_id}: {e}")
+            return None
+
     async def storyboard_progress_for_project(self, project_id) -> Dict[str, Any]:
         """Shot completion rolled up across ALL non-deleted scripts in a project.
 

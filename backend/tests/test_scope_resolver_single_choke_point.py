@@ -216,6 +216,19 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "owns — no user-supplied scope to resolve — so this is a system read, "
         "not the agent-tool id-resolution this guard protects."
     ),
+    "workflows/canvas_generation.py": (
+        "pre-A2 DBOS workflow, dispatched from the authenticated + "
+        "project-gated /canvases/{id}/generations REST endpoint (not an "
+        "agent-tool scope path). shot-nodes-on-canvas Task 2's "
+        "backfill_shot_from_generation_step calls "
+        "get_script_shot_repository().get_project_id/update_status to write "
+        "the generation result onto a shot bound by a canvas node — shot "
+        "three-write-lanes lane (c), facts §7. The shot_id itself is read "
+        "server-side from canvases.nodes_json (never client-supplied at "
+        "completion time) and cross-checked against the canvas's own "
+        "project_id before any write, so this is not the model-supplied-id "
+        "bypass shape this guard protects against."
+    ),
     "api/projects_router.py": (
         "authenticated REST layer — the /workflow + /advance + start-early "
         "endpoints. B2 T3 reads get_episode_repository().get_by_id to verify a "

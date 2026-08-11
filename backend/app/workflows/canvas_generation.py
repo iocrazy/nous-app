@@ -187,6 +187,99 @@ async def record_canvas_generation_result_step(result: Dict[str, Any]) -> None:
     )
 
 
+@DBOS.step()
+async def backfill_shot_from_generation_step(
+    canvas_id: Optional[int],
+    node_id: Optional[str],
+    result_url: str,
+) -> None:
+    """When the completed node is a bound shot node, also write the result
+    onto ``script_shots`` — shot three-write-lanes lane (c), the generation
+    workflow lane (facts §7). NEVER writes ``script_shot_ops`` — that
+    ledger is lane (b), the agent gateway's, and is deliberately excluded
+    from human/generation writes (mig 415).
+
+    Node type / ``data.shot_id`` are read server-side from
+    ``canvases.nodes_json`` — the workflow never trusts a client-supplied
+    node payload at completion time. Reuses
+    ``ScriptShotRepository.update_status`` — the SAME write lane
+    ``script_shot_generate.py``'s ``mark_shot_done`` already uses; it
+    internally fires ``fire_surface_sync_for_shot`` once ``status='done'``
+    lands (never raises).
+
+    Best-effort at the lookup layer: no canvas/node target, canvas missing,
+    node not found/not a shot, ``data.shot_id`` unset, the shot row gone, or
+    a cross-project shot_id (never trust the client) — every one of these
+    logs (at most) a warning and returns, so the generation itself still
+    succeeds. The actual DB WRITE is NOT best-effort: a failure there
+    raises (DBOS retries this step; ``generated_media`` registration
+    already happened and is idempotent, so a retry is safe).
+    """
+    if canvas_id is None or not node_id:
+        return
+
+    from app.repositories.canvas_repository import CanvasRepository
+
+    canvas = await CanvasRepository().get_by_id(str(canvas_id))
+    if not canvas:
+        logger.warning(
+            "[canvas_generation][shot-backfill] canvas {} not found, skipping "
+            "(node={})",
+            canvas_id,
+            node_id,
+        )
+        return
+
+    nodes = canvas.get("nodes_json") or []
+    node = next(
+        (n for n in nodes if isinstance(n, dict) and str(n.get("id")) == str(node_id)),
+        None,
+    )
+    if not node or node.get("type") != "shot":
+        return
+
+    data = node.get("data")
+    shot_id = data.get("shot_id") if isinstance(data, dict) else None
+    if not shot_id:
+        return
+    shot_id = str(shot_id)
+
+    from app.repositories.script_shot_repository import get_script_shot_repository
+
+    shot_repo = get_script_shot_repository()
+    shot_project_id = await shot_repo.get_project_id(shot_id)
+    if shot_project_id is None:
+        logger.warning(
+            "[canvas_generation][shot-backfill] shot {} not found (canvas={} "
+            "node={}), skipping",
+            shot_id,
+            canvas_id,
+            node_id,
+        )
+        return
+
+    canvas_project_id = canvas.get("project_id")
+    if canvas_project_id is None or int(shot_project_id) != int(canvas_project_id):
+        logger.warning(
+            "[canvas_generation][shot-backfill] shot {} belongs to project {} "
+            "but canvas {} belongs to project {}, rejecting cross-project "
+            "backfill",
+            shot_id,
+            shot_project_id,
+            canvas_id,
+            canvas_project_id,
+        )
+        return
+
+    await shot_repo.update_status(shot_id, "done", image_url=result_url)
+    logger.info(
+        "[canvas_generation][shot-backfill] shot {} ← canvas={} node={}",
+        shot_id,
+        canvas_id,
+        node_id,
+    )
+
+
 @DBOS.workflow()
 async def canvas_generation_workflow(
     kind: str,
@@ -206,6 +299,11 @@ async def canvas_generation_workflow(
         node_id=node_id,
         prompt=prompt,
         params=params,
+    )
+    await backfill_shot_from_generation_step(
+        canvas_id=canvas_id,
+        node_id=node_id,
+        result_url=str(result.get("result_url")),
     )
     await record_canvas_generation_result_step(result)
     return result
