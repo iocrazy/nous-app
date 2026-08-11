@@ -370,7 +370,16 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspaceOverview(page);
 
+    // Task 4/5 (IA redesign) two-click flow: clicking a strip node only
+    // selects it (accordion writes `node=`, renders the `EpisodeNodeCard`)
+    // — the card's own "enter surface" button is what actually navigates
+    // (node-2 is deliverable-only/surface=null → routes to the Stage Board).
+    // Mirrors workflow-walkthrough.spec.ts's `openWorkspaceOverview` +
+    // `node-card-*` idiom.
     await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
+    const nodeCard = page.locator('[data-testid="episode-node-card"][data-node-id="node-2"]');
+    await expect(nodeCard).toBeVisible();
+    await nodeCard.getByTestId('node-card-enter').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // Local derivation (nodeStatus.ts::unmetDeps) — the board's own "Waiting
