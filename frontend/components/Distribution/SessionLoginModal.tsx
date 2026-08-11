@@ -327,9 +327,23 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
         setSmsError(
           res.detail?.error_kind
             ? t('distribution.session.smsInfraFailed', 'The browser service could not be reached — try again in a moment.')
-            : res.message
-              || t('distribution.session.smsFailed', 'That code was rejected — check it and try again'),
+            // `code_rejected` is the browser service's typed verdict on the
+            // code we just sent: it went into the page, and the page is still
+            // asking for one. Its own English message says so, but this is a
+            // user-facing line under a possibly-Chinese UI, so it is
+            // translated here rather than echoed (same rule as
+            // SERVER_DETAIL_COPY above).
+            : res.detail?.code_rejected
+              ? t('distribution.session.smsRejected', 'That code was not accepted — the platform is still asking for one. Check it and send it again.')
+              : res.message
+                || t('distribution.session.smsFailed', 'That code was rejected — check it and try again'),
         );
+        // Deliberately NOT clearing `smsCode`. A rejected code is almost always
+        // a mistyped digit or a stale one, and the next action is to correct
+        // what is on screen — wiping it forces the user back to the SMS app to
+        // re-read all six digits for the sake of one. The field stays enabled
+        // and the Submit button re-enables (the value still passes `smsValid`),
+        // so a retry is one edit away.
         return;
       }
       setSmsCode('');

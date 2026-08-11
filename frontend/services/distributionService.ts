@@ -65,12 +65,17 @@ export const startSessionLogin = (body: {
  * than on the HTTP status. `detail.error_kind` present means the failure was
  * infrastructural (browser container unreachable / unconfigured), which is a
  * different message to the user than "wrong code".
+ *
+ * `detail.code_rejected` is the SMS path's own marker: the code was typed into
+ * the live page and the page is *still* asking for one. It rides on
+ * `status: 'sms_required'` — the same value a first-time challenge uses — so
+ * the status cannot carry that verdict and the flag has to.
  */
 export interface SessionOpResult {
   success: boolean;
   status: string;
   message: string;
-  detail?: { error_kind?: string } & Record<string, unknown>;
+  detail?: { error_kind?: string; code_rejected?: boolean } & Record<string, unknown>;
 }
 
 /**

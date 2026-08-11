@@ -222,6 +222,17 @@ LOGIN_FAILURE_STATUSES = frozenset(
     }
 )
 
+# 浏览器侧在 ``detail`` 里给"这个码没被接受"打的标记（``login_sessions.py`` 的
+# ``submit_sms``）。它必须能否决 ``success``：``sms_required`` 是进行中状态，
+# 而"进行中 == 问到了结论 == success"这条推导对**提交验证码**这一次调用是错的
+# —— 用户刚做了一个动作，动作没成，success=True 会让前端走成功分支（清空输入
+# 框、不提示任何东西），这正是"验证码输错界面零反馈"的成因。
+#
+# 只有 ``/sms`` 的响应会带这个键：``/status`` 的轮询没人提交过码，自然也无从
+# 被拒 —— 所以在共用的 ``_login_snapshot`` 里判它是安全的，第一次要码仍是
+# success=True。
+LOGIN_CODE_REJECTED_KEY = "code_rejected"
+
 
 @dataclass(frozen=True)
 class SessionOpResult:
@@ -1072,9 +1083,14 @@ class BrowserClient:
     async def submit_login_sms(self, login_session_id: str, code: str) -> LoginSnapshot:
         """``POST /session/login/{id}/sms`` —— 提交短信验证码。
 
-        返回的仍是状态快照：验证码错时浏览器侧回 ``sms_required`` +
-        message（"code rejected"之类），而不是 HTTP 4xx —— 这样"码错了"和
+        返回的仍是状态快照：验证码没被接受时浏览器侧回 ``sms_required`` +
+        ``detail.code_rejected=True``，而不是 HTTP 4xx —— 这样"码没过"和
         "容器挂了"在调用方看来是两件不同的事（§7.8 的整条设计）。
+
+        ⚠️ 那个标记不是装饰：光看 status 分不出"第一次要码"和"你给的码没过"
+        （两者都是 ``sms_required``），而 ``_login_snapshot`` 正是靠它把
+        ``success`` 判成 False。丢掉它，这次调用就会以 success=True 回到前端，
+        用户输错验证码将得到**零反馈**。
         """
         if not (code or "").strip():
             raise ValueError("sms code must be a non-empty string")
@@ -1241,6 +1257,10 @@ class BrowserClient:
         显示成"失败了"。``success`` 由 status 推导（单一真相源，与
         ``validate_session`` 同款）：进行中的四个状态都算"问到了结论"，
         只有三个失败终态才是 False。
+
+        唯一的例外是 ``detail.code_rejected``（见 ``LOGIN_CODE_REJECTED_KEY``）：
+        它是浏览器侧对"用户刚提交的这个码没被接受"的类型化标记，status 仍是
+        ``sms_required``（页面确实还在要码），但对调用方而言这次操作**失败了**。
         """
         raw_status = data.get("status")
         if raw_status not in LOGIN_STATUSES:
@@ -1256,9 +1276,10 @@ class BrowserClient:
         detail = dict(detail) if isinstance(detail, Mapping) else {}
         qrcode = data.get("qrcode_data_url")
         expires_at = data.get("expires_at")
+        code_rejected = detail.get(LOGIN_CODE_REJECTED_KEY) is True
         return LoginSnapshot(
             result=SessionOpResult(
-                success=raw_status not in LOGIN_FAILURE_STATUSES,
+                success=raw_status not in LOGIN_FAILURE_STATUSES and not code_rejected,
                 status=raw_status,
                 message=str(data.get("message") or ""),
                 detail=detail,
@@ -1280,6 +1301,7 @@ __all__ = [
     "DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS",
     "DEFAULT_PUBLISH_TIMEOUT_SECONDS",
     "INTERNAL_TOKEN_HEADER",
+    "LOGIN_CODE_REJECTED_KEY",
     "LOGIN_FAILURE_STATUSES",
     "LOGIN_PENDING_STATUSES",
     "LOGIN_STATUSES",

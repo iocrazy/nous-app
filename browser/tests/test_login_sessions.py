@@ -361,6 +361,62 @@ async def test_submitting_when_no_input_is_present_says_so_instead_of_failing(sp
 
     assert "no verification code input" in snapshot.message
     assert snapshot.status is SessionStatus.WAITING_SCAN
+    # Nothing was typed, so nothing was refused. Marking this a rejection would
+    # tell the user their code is wrong when the page never took one.
+    assert "code_rejected" not in snapshot.detail
+
+
+async def test_a_code_the_page_did_not_accept_comes_back_marked_as_rejected(spec):
+    """**The tombstone of "wrong code, zero feedback".**
+
+    The page still showing a code field *after* we typed one into it is the
+    only evidence available, and it has to survive as something a caller can
+    branch on. Delete the marker and the whole chain silently reverts: the
+    backend's `success` goes back to True (`sms_required` is a pending state),
+    the modal takes the success path, clears the field and says nothing.
+    """
+    sms_spec = make_spec(
+        judge=always(SessionStatus.SMS_REQUIRED, "the platform is asking for a code")
+    )
+    driver = FakeDriver(sms_spec)
+    registry = LoginSessionRegistry(open_driver=driver_factory(driver))
+    session = await registry.start(sms_spec, None)
+
+    snapshot = await session.submit_sms("000000")
+
+    assert snapshot.status is SessionStatus.SMS_REQUIRED
+    assert snapshot.detail["code_rejected"] is True
+    assert snapshot.detail["submitted"] is True
+    # The judge's reason reads as a first-time prompt; a rejection must not
+    # report it as its message, because that message is shown to people.
+    assert "was not accepted" in snapshot.message
+    # Never the code itself, on any path.
+    assert "000000" not in snapshot.message
+
+
+async def test_the_first_request_for_a_code_is_not_reported_as_a_rejection(spec):
+    """The other half of the same contract: polling has submitted nothing."""
+    sms_spec = make_spec(
+        judge=always(SessionStatus.SMS_REQUIRED, "the platform is asking for a code")
+    )
+    registry = LoginSessionRegistry(open_driver=driver_factory(FakeDriver(sms_spec)))
+    session = await registry.start(sms_spec, None)
+
+    snapshot = await session.poll_status()
+
+    assert snapshot.status is SessionStatus.SMS_REQUIRED
+    assert "code_rejected" not in snapshot.detail
+
+
+async def test_an_accepted_code_carries_no_rejection_marker(spec):
+    sms_spec = make_spec(judge=always(SessionStatus.SUCCESS, "logged in"))
+    registry = LoginSessionRegistry(open_driver=driver_factory(FakeDriver(sms_spec)))
+    session = await registry.start(sms_spec, None)
+
+    snapshot = await session.submit_sms("123456")
+
+    assert snapshot.status is SessionStatus.SUCCESS
+    assert "code_rejected" not in snapshot.detail
 
 
 # --- state collection ------------------------------------------------------

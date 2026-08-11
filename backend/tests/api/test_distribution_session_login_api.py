@@ -245,6 +245,37 @@ def test_sms_rejection_is_a_200_with_a_readable_status(
     assert resp.json()["message"] == "code rejected"
 
 
+def test_sms_rejection_reaches_the_browser_with_success_false_and_the_marker(
+    client, configured_browser, monkeypatch
+):
+    """信封整条链都要活着：``success=False`` **和** ``detail.code_rejected``。
+
+    前者决定前端走不走失败分支（走错就是零反馈），后者决定它说哪句话（"码没
+    过，再输一次" vs 回显一句机器写的英文）。中间任何一层把 ``detail`` 抹平
+    成 ``{}``，第二件事就静默丢了 —— 而没有断言的话没人会发现。
+    """
+    _patch_task(monkeypatch)
+    snapshot = MagicMock()
+    snapshot.result.to_dict.return_value = {
+        "success": False,
+        "status": "sms_required",
+        "message": "the verification code was not accepted",
+        "detail": {"code_rejected": True, "submitted": True},
+    }
+    configured_browser.submit_login_sms.return_value = snapshot
+
+    resp = client.post(
+        "/api/v1/distribution/accounts/session/login/wf-1/sms", json={"code": "000000"}
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["detail"]["code_rejected"] is True
+    # 提交的验证码本身绝不回显。
+    assert "000000" not in resp.text
+
+
 def test_sms_on_a_terminal_task_is_409(client, configured_browser, monkeypatch):
     """终态任务的 context 早已释放，转发进去只会在容器里 404。"""
     _patch_task(monkeypatch, phase="cancelled")

@@ -227,6 +227,29 @@ def test_submitting_a_code_returns_the_resulting_status(client, wired):
     assert installed["driver"].submitted_codes == ["123456"]
 
 
+def test_a_rejected_code_says_so_on_the_wire_not_just_in_the_session(client, wired):
+    """The marker has to make it out of the process, or it protects nothing.
+
+    `SmsCodeResponse` used to be `{status, message}` only, which meant a
+    verdict that existed in the session object was dropped at the HTTP
+    boundary — and the backend, seeing a pending `sms_required`, called the
+    submission a success.
+    """
+    wired(judge=always(SessionStatus.SMS_REQUIRED, "asking for a verification code"))
+    session_id = _start(client).json()["login_session_id"]
+
+    resp = client.post(
+        f"/session/login/{session_id}/sms", json={"code": "000000"}, headers=AUTH
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == SessionStatus.SMS_REQUIRED.value
+    assert body["detail"]["code_rejected"] is True
+    # The submitted code is never echoed back, on any path.
+    assert "000000" not in resp.text
+
+
 @pytest.mark.parametrize("code", ["", "12", "abcdef", "12345678901", "12 34"])
 def test_a_nonsense_code_is_rejected_before_it_reaches_the_page(client, wired, code):
     installed = wired()

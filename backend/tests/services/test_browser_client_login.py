@@ -319,7 +319,12 @@ async def test_submit_sms_rejection_stays_sms_required():
     """码错了是业务结论（带 message），不是 HTTP 错误 —— 前端才好回显。"""
     respx.post(f"{BASE}/session/login/{SID}/sms").mock(
         return_value=httpx.Response(
-            200, json={"status": "sms_required", "message": "code rejected"}
+            200,
+            json={
+                "status": "sms_required",
+                "message": "code rejected",
+                "detail": {"code_rejected": True},
+            },
         )
     )
     snapshot = await _client().submit_login_sms(SID, "000000")
@@ -327,6 +332,60 @@ async def test_submit_sms_rejection_stays_sms_required():
     assert snapshot.status == SessionStatus.SMS_REQUIRED.value
     assert snapshot.message == "code rejected"
     assert snapshot.is_infra_failure is False
+
+
+@respx.mock
+async def test_a_rejected_code_is_not_a_successful_operation():
+    """**这条测试是"验证码输错界面零反馈"那个 bug 的墓碑。**
+
+    ``sms_required`` 是进行中状态，而 ``success`` 由 status 推导 —— 于是"码
+    被拒"曾经算 success=True：前端走成功分支，清空输入框，什么都不说。用户
+    唯一能看到的变化是自己刚打的六位数没了。
+
+    否决它的是 ``detail.code_rejected``（浏览器侧 ``submit_sms`` 打的标记）。
+    去掉那个判断，这条立刻红 —— 它守的正是"用户动作失败必须有类型化回显"。
+    """
+    respx.post(f"{BASE}/session/login/{SID}/sms").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "sms_required",
+                "message": "the verification code was not accepted",
+                "detail": {"code_rejected": True, "submitted": True},
+            },
+        )
+    )
+    snapshot = await _client().submit_login_sms(SID, "000000")
+
+    assert snapshot.success is False
+    # 但它**不是**基建故障：平台确实答复了，账号也没问题。前端据此选文案，
+    # 混淆的代价是让用户去查账号是不是被限制了。
+    assert snapshot.is_infra_failure is False
+    assert snapshot.detail["code_rejected"] is True
+    # 标记必须原样传到前端 —— 它是那边区分"码没过"与"第一次要码"的唯一依据。
+    assert snapshot.result.to_dict()["detail"]["code_rejected"] is True
+
+
+@respx.mock
+async def test_the_first_sms_challenge_is_still_a_successful_call():
+    """另一半：没人提交过码，就不该被判成失败。
+
+    ``_login_snapshot`` 是 /start、/status、/sms 共用的，所以"见到
+    sms_required 就判 False"是错的 —— 轮询到平台开始要码是正常进展。
+    """
+    respx.get(f"{BASE}/session/login/{SID}/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "sms_required",
+                "message": "the platform is asking for a verification code",
+                "detail": {"reason": "asking for a code"},
+            },
+        )
+    )
+    snapshot = await _client().get_login_status(SID)
+
+    assert snapshot.success is True
 
 
 async def test_submit_sms_rejects_empty_code_as_programming_error():
