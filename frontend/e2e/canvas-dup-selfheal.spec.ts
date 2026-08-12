@@ -8,14 +8,19 @@
 //      (102 nodes for 6 shots in the real row). React Flow keeps duplicated
 //      ids permanently `visibility:hidden` → the user-reported BLANK canvas
 //      (zoom controls only, no nodes).
-//   2. `listShots` rows carry bigint ids as JSON *numbers* — the shots REST
-//      router does not stringify them the way the canvases router does.
+//   2. `listShots` rows carry bigint ids as JSON *numbers* — at the time of
+//      the bug, the shots REST router did not stringify them the way the
+//      canvases router does. (#1809, 2026-08-12, closed that specific gap
+//      server-side; this fixture keeps the number shape deliberately — see
+//      e2e/helpers/realShapes.ts's file header for why it's still a real
+//      regression-coverage shape, not stale after #1809.)
 // The fixed build must: render the shot nodes VISIBLY (self-heal on load),
 // reconcile without re-adding, and persist a healed row with exactly one
 // node per shot.
 
 import { expect, test, type Page } from '@playwright/test';
 import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
+import { realCanvasRow, realSceneRow, realShotRows } from './helpers/realShapes';
 
 const CANVAS_ID = '208443000009999';
 const SCENE_ID = 208443000000100; // numeric on the wire, like production
@@ -46,25 +51,14 @@ for (let c = 0; c < COPIES; c++) {
   });
 }
 
-const CANVAS = {
+const CANVAS = realCanvasRow({
   id: CANVAS_ID,
-  project_id: '208443000000200',
-  episode_id: '208443000000300',
-  name: 'EP1 · Storyboard',
-  kind: 'storyboard',
   // Zoomed out far enough that the whole 6-shot column fits the 1280×720
   // e2e viewport — `onlyRenderVisibleElements` culls off-screen nodes, and
   // this test's point is counting VISIBLE ones.
-  viewport_json: { x: 0, y: 20, zoom: 0.28 },
-  nodes_json: poisonedNodes,
-  connections_json: [],
-  node_ops_json: [],
-  connection_ops_json: [],
-  base_updated_at: '2020-01-02T00:00:00Z',
-  created_at: '2020-01-01T00:00:00Z',
-  updated_at: '2020-01-02T00:00:00Z',
-  created_by: null,
-};
+  viewportJson: { x: 0, y: 20, zoom: 0.28 },
+  nodesJson: poisonedNodes,
+});
 
 const fulfillJson = (body: unknown) => ({
   status: 200,
@@ -104,44 +98,17 @@ async function setupStubs(page: Page, savedPayloads: unknown[]): Promise<void> {
   );
   await page.route('**/api/v1/scripts/208443000000400/scenes', (route) =>
     route.fulfill(
-      fulfillJson({
-        success: true,
-        data: [
-          {
-            id: SCENE_ID, // numeric — toSceneDoc coerces at the boundary
-            script_id: 208443000000400,
-            chapter_id: null,
-            heading_int_ext: 'INT',
-            location_text: 'House',
-            time_of_day: 'DAY',
-            content_version: 1,
-            content_json: [],
-            sort_order: 1,
-          },
-        ],
-      }),
+      // id/script_id/chapter_id numeric — toSceneDoc coerces at the
+      // frontend boundary, but the wire itself is un-stringified.
+      fulfillJson({ success: true, data: [realSceneRow({ id: SCENE_ID })] }),
     ),
   );
   await page.route(`**/api/v1/scenes/${SCENE_ID}/shots`, (route) =>
     route.fulfill(
+      // id/scene_id numeric — the shots router's real behaviour.
       fulfillJson({
         success: true,
-        data: SHOT_IDS.map((sid, i) => ({
-          id: sid, // numeric — the shots router's real behaviour
-          scene_id: SCENE_ID,
-          shot_number: i + 1,
-          shot_type: 'MEDIUM',
-          camera_angle: 'EYE_LEVEL',
-          camera_movement: 'STATIC',
-          focal_length: '35mm',
-          lighting: null,
-          description: `Shot ${i + 1}`,
-          image_url: null,
-          thumbnail_url: null,
-          video_url: null,
-          status: 'empty',
-          sort_order: (i + 1) * 1000,
-        })),
+        data: realShotRows(SHOT_IDS.length, { sceneId: SCENE_ID, baseId: SHOT_IDS[0] }),
       }),
     ),
   );

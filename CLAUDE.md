@@ -125,6 +125,12 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 - ✅ `Test Team`、`My Collection`
 - ❌ `测试团队`、`我的集合`
 
+### 边界 mock 必须用真实 JSON 形状（2026-08-12 血泪）
+
+任何模拟后端 HTTP 响应体的 mock（`page.route` fulfill、桩 `fetch` 等）必须照抄后端真实返回的 JSON 形状——字段类型（number vs string）也算，不能按前端书写习惯"美化"。典型陷阱：Snowflake BIGINT 主键/外键，`scenes`/`shots` 两个 router 原样返回 ORM dict 是 JSON **number**，`canvases` router 显式 `str(out["id"])` 是 JSON **string**——同一类 id 在不同资源上形状不同，是真实的、故意的，不是可以"统一"的漂移。
+
+2026-08-12 分镜画布 P0 事故的根因之一就是这条纪律缺失：全仓库手写 fixture 一律用理想化字符串 id（`'shot1'`、`'200'`），从未有测试真正跑过数字 id 分支，导致"对账索引按字符串建、真实响应给数字"的类型不匹配在生产环境才第一次触发（102 个重复节点、画布空白）。区分口径见 `frontend/e2e/helpers/realShapes.ts` 顶部注释：模拟"HTTP 响应体"要用真实 wire 形状；模拟"已归一化的前端 service 函数"（如 `vi.mock('editor/sceneService')`）用该函数自己文档化的返回类型（通常是 string）才是对的——判断标准是你在模拟哪一层边界，不是"哪个更像 TypeScript"。
+
 ## 项目结构
 
 ```
@@ -676,6 +682,16 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
 ```
 
 加新的健康信号时：**`is_enabled()` 不能当健康依据**，它只表示句柄对象存在；worker 角色下 `init_dbos()` 在碰 DB 之前就赋值了 `_dbos`，launch 失败后它仍为 True。用 `is_launched()`。
+
+**前端上线验收 = version.json SHA + 真栈走查，二者缺一不可（2026-08-12 血泪）**：分镜画布上线（2026-08-11）后 `version.json`/`readyz`/CI 全绿过，用户真机点开却是整片空白——验收从来没有拿真数据把 UI 真正点一遍，直到用户自己撞上才发现。"测试绿 ≠ 真栈正常" 是上面「读正常 ≠ 服务正常」的前端版。
+
+现在的口径：每次前端发布后跑一遍
+
+```bash
+cd frontend && npm run e2e:prod
+```
+
+`frontend/e2e-prod/walkthrough.spec.ts`（独立 Playwright project，`testDir` 与常规 `e2e/` 套件分开，不进 CI）用专用调试账号真登录，对 `PROD_BASE_URL`（默认 `https://app.nous.ink`）走一遍核心路径：总览手风琴展开 → 侧栏进分镜模块 → 场次卡可见 → 画布 tab 真实节点可见 → 分镜列表 → 剧本编辑器加载。全部断言用可见性（`toBeVisible`/`:visible`），不用裸 `toHaveCount`——分镜画布那次事故的教训就是重复 id 节点在 DOM 里"存在"但永久 `visibility:hidden`，`toHaveCount` 在坏版本上照样通过。详见 `frontend/e2e-prod/README.md`（凭证约定、fixture 数据、"个人项目"URL scope 与 `team_id` 列的坑）。
 
 ### 部署陷阱
 

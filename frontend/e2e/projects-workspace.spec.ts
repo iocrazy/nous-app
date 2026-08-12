@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
+import { realSceneRow, realShotRow } from './helpers/realShapes';
 
 /**
  * Visual regression stub spec for the PR-10b workspace shell (Wave 2):
@@ -163,39 +164,30 @@ const WORKFLOW = { has_workflow: true, current_node_id: 'wn1', agents_active: 0,
 
 // One scene (Ep 1's script s1) with one shot — feeds EpisodeSceneBoard /
 // EpisodeShotListTable, both of which self-fetch via /scripts/{id}/scenes and
-// /scenes/{id}/shots (editor/sceneService.ts).
+// /scenes/{id}/shots (editor/sceneService.ts). Real wire shape (realShapes.ts,
+// CLAUDE.md「边界 mock 必须用真实 JSON 形状」): scene/shot `id` and the FK
+// `scene_id` are JSON NUMBERS on the wire — this repo's own e2e/unit fixtures
+// used idealized strings ('300') everywhere until the 2026-08-12 dup-id
+// incident, which is exactly why that mismatch shipped undetected.
+const SCENE_ID = 208443000000300;
+const SHOT_ID = 208443000000400;
 const SCENES = [
-  {
-    id: '300',
-    script_id: 's1',
-    chapter_id: null,
-    scene_number: '1',
-    heading_int_ext: 'INT',
-    location_text: 'Kitchen',
-    time_of_day: 'DAY',
-    content_version: 1,
-    sort_order: 0,
-    content_json: [{ id: 'el1', type: 'action', text: 'She enters.' }],
-  },
+  realSceneRow({
+    id: SCENE_ID,
+    locationText: 'Kitchen',
+    contentJson: [{ id: 'el1', type: 'action', text: 'She enters.' }],
+  }),
 ];
 const SHOTS_BY_SCENE: Record<string, unknown[]> = {
-  '300': [
-    {
-      id: '400',
-      scene_id: '300',
-      shot_number: 1,
-      shot_type: 'WIDE',
-      camera_angle: 'EYE',
-      camera_movement: 'STATIC',
-      focal_length: '35mm',
-      lighting: null,
+  [String(SCENE_ID)]: [
+    realShotRow({
+      id: SHOT_ID,
+      sceneId: SCENE_ID,
+      shotType: 'WIDE',
+      cameraAngle: 'EYE',
       description: 'Establishing shot of the kitchen.',
-      image_url: null,
-      thumbnail_url: null,
-      video_url: null,
-      status: 'empty',
-      sort_order: 0,
-    },
+      sortOrder: 0,
+    }),
   ],
 };
 
@@ -448,13 +440,13 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('episode-storyboard-page')).toBeVisible();
     await expect(page.getByTestId('ws-overview')).toHaveCount(0);
     await expect(page.getByTestId('episode-view-tabs')).toBeVisible();
-    await expect(page.getByTestId('scene-column-300')).toBeVisible();
+    await expect(page.getByTestId(`scene-column-${SCENE_ID}`)).toBeVisible();
     await expect(page.locator('[data-editor-shell]')).toHaveCount(0);
 
     // Shot List tab — the flat per-shot table for the same script.
     await page.locator('[data-view="shotlist"]').click();
     await expect(page.getByTestId('ep-shotlist-table')).toBeVisible();
-    await expect(page.getByTestId('ep-shotlist-row-400')).toBeVisible();
+    await expect(page.getByTestId(`ep-shotlist-row-${SHOT_ID}`)).toBeVisible();
 
     // Publish placeholder (G12) — still visible/disabled regardless of which
     // surface view is active (it's the sidebar tree, not the content pane).

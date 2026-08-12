@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "e2e:prod": "playwright test --config e2e-prod/playwright.config.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
