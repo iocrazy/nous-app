@@ -189,6 +189,9 @@ POST /distribution/accounts/session/login   (backend)
        step3  循环轮询 GET /session/login/{id}/status（有上界！见 §7.2）
               ├─ waiting_scan / scanned → patch metadata.login.status
               ├─ qrcode_expired     → browser 侧自动点刷新，返回新二维码 → 回 step2
+              ├─ identity_challenge → browser 侧自动点「接收短信验证码」（下一屏若有
+              │                       「获取验证码」再点它），点不到/点了不动在 5 轮内
+              │                       翻成 failed + detail.reason，绝不静默干等
               ├─ sms_required       → patch metadata.login，等前端 POST 验证码
               └─ success            → 继续
        step4  GET /session/login/{id}/state → storage_state JSON
@@ -454,7 +457,8 @@ sau 的 `while True`（`main.py:693` / `718` / `762`）没有任何上界，页�
 | `waiting_scan` | S2 | 二维码已展示，等待用户扫描 |
 | `scanned` | S2 | 已扫描，等待用户在手机上确认 |
 | `qrcode_expired` | S2 | 二维码失效（browser 侧已自动刷新，同响应带回新码） |
-| `sms_required` | S2 | 需要短信验证码 |
+| `identity_challenge` | S2 | 平台插了一屏身份验证，正在等我们选验证方式（browser 侧已自动点「接收短信验证码」，同响应带回点完之后的状态）。**此刻一条短信都没发** —— 它跟 `sms_required` 分家的唯一理由就是后者授权的 UI 文案是「把收到的码填进来」（2026-08-11：合并两者让用户对着一个从未被请求的验证码干等到 TTL 用完） |
+| `sms_required` | S2 | 需要短信验证码。`detail.code_requested=true` 时才代表**我们的点击真的向平台请求过发码**，前端据此才可以说「已代你请求发送」；没有它只能说中性文案 |
 | `success` | S2 | 登录完成，可取 storage_state |
 | `published` | S3 | 发布成功 |
 
