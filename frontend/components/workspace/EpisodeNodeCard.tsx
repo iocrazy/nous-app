@@ -13,8 +13,11 @@
  * Task 9 (角色门控行内编辑) flips the owner/schedule facts to live pickers
  * when `canEditConfig` is true (project owner OR the episode's own owner —
  * computed by `ProjectWorkspace`, see that file): empty state renders a
- * dashed "+ Assign Owner" / "+ Set Schedule" pill (hover agent-soft), a
- * filled value renders a quiet button (looks like plain text until hover,
+ * dashed "Assign Owner" / "Set Schedule" pill (leading `+` is the icon only —
+ * see UI polish fix #2, 2026-08-11: the i18n string used to carry its own
+ * literal "+ " prefix ON TOP of the `<Plus>` icon, reading as a double
+ * plus-sign) (hover agent-soft), a filled value renders a quiet button (looks
+ * like plain text until hover,
  * which reveals a border + `--island-2` background + a trailing chevron).
  * Owner opens a small local candidate menu (people/agents props — NOT the
  * full `OwnerPicker` widget: that component owns its own trigger+dropdown
@@ -260,7 +263,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
             <EditableFactTrigger
               testId="node-card-owner"
               empty={!hasOwner}
-              emptyLabel={t('projects.nodeCard.assignOwner', '+ Assign Owner')}
+              emptyLabel={t('projects.nodeCard.assignOwner', 'Assign Owner')}
               onClick={() => setOwnerMenuOpen((v) => !v)}
             >
               {node.owner_agent_id ? <Bot size={12} /> : <User size={12} />}
@@ -309,7 +312,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
           <EditableFactTrigger
             testId="node-card-schedule"
             empty={!hasSchedule}
-            emptyLabel={t('projects.nodeCard.setSchedule', '+ Set Schedule')}
+            emptyLabel={t('projects.nodeCard.setSchedule', 'Set Schedule')}
             onClick={(e) => setScheduleAnchor(e.currentTarget)}
           >
             {node.planned_start ?? '—'} → {node.planned_due ?? '—'}

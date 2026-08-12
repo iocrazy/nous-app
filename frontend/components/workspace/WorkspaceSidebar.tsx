@@ -76,7 +76,7 @@ export function WorkspaceSidebar({
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [epExpanded, setEpExpanded] = useState(
-    activeModule === 'episodes' || activeModule === 'script',
+    activeModule === 'episodes' || activeModule === 'script' || activeModule === 'storyboard',
   );
   // Popover position in viewport coordinates. The popover is `fixed` (anchored
   // to the ep-card's rect) instead of `absolute`, for two reasons: the old
@@ -94,9 +94,15 @@ export function WorkspaceSidebar({
 
   // Auto-reveal the tree once the writer is inside an episode/studio context
   // (e.g. the Overview "Open Studio" button jumps straight to the script view);
-  // a manual collapse otherwise sticks.
+  // a manual collapse otherwise sticks. 'storyboard' joined this list (UI
+  // polish fix #3, 2026-08-11) alongside the active-row fix below — Storyboard
+  // became its own top-level `WorkspaceModule` (IA redesign Task 2) rather
+  // than a `script` work view, so a direct deep-link into it needs the same
+  // auto-expand the script/episodes entry points already got.
   useEffect(() => {
-    if (activeModule === 'script' || activeModule === 'episodes') setEpExpanded(true);
+    if (activeModule === 'script' || activeModule === 'episodes' || activeModule === 'storyboard') {
+      setEpExpanded(true);
+    }
   }, [activeModule]);
 
   const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
@@ -267,7 +273,17 @@ export function WorkspaceSidebar({
           <button
             data-testid="ws-ep-storyboard"
             onClick={() => onOpenWorkView('storyboard')}
-            className={childRowClass(isScript && activeWorkView === 'storyboard')}
+            // UI polish fix #3 (2026-08-11): this row used to highlight off
+            // `isScript && activeWorkView === 'storyboard'` — a holdover from
+            // when Storyboard was one of `script`'s embedded-editor rail
+            // views. Storyboard is now its own top-level `WorkspaceModule`
+            // (IA redesign Task 2, `activeWorkView` stays null whenever
+            // `activeModule !== 'script'` — see ProjectWorkspace.tsx), so
+            // that condition could never be true again and the row never lit
+            // up (剧本 kept its highlight since it's still gated on
+            // `isScript`; 分镜 silently lost its own). Gate on the module
+            // directly instead, matching every other module row in this file.
+            className={childRowClass(activeModule === 'storyboard')}
           >
             <span className="flex items-center gap-2 min-w-0">
               <Clapperboard size={13} className="shrink-0" />

@@ -102,6 +102,28 @@ describe('WorkflowStrip', () => {
     expect(late?.getAttribute('data-overdue')).toBe('true');
   });
 
+  // UI polish fix #1 (2026-08-11): the cursor dot used to be a SEPARATE
+  // amber dot floating outside the pill's top-left corner, on top of the
+  // pill's own inner status dot — two dots reading as one indicator. Now the
+  // current node's inner dot itself takes the warn/ochre color; there is no
+  // second floating dot.
+  it("merges the cursor indicator into the pill's own dot (no floating dot, warn-colored inner dot)", () => {
+    render(
+      <WorkflowStrip
+        nodes={[node({ id: 'cur', name: 'Current', status: 'in_progress' })]}
+        currentNodeId="cur"
+      />,
+    );
+    const pill = screen.getByTestId('workflow-strip-node');
+    expect(pill.getAttribute('data-current')).toBe('true');
+    const dot = screen.getByTestId('workflow-node-dot');
+    expect(dot.className).toContain('bg-warn');
+    expect(dot.className).toContain('animate-pulse');
+    // No separate absolutely-positioned floating dot sibling of the pill.
+    const wrapper = pill.parentElement as HTMLElement;
+    expect(wrapper.querySelectorAll('.animate-pulse')).toHaveLength(1);
+  });
+
   // M3 PR-J (task J3): a lock icon on a current-active-group capsule blocked
   // by an unmet dependency — local derivation (nodeStatus.ts::unmetDeps),
   // display-only (the server's DEPS_PENDING predicate is the real gate).
