@@ -354,9 +354,6 @@ SCOPE_EXEMPT_RUN_RECORDER_SITES: dict[str, str] = {
     "services/ai/classify/classify_service.py": (
         "internal classification run; fixed prompt, no project context, hookless runner"
     ),
-    "services/ai/llm/llm_analysis_service.py": (
-        "internal analysis run; fixed prompt, no project context, hookless runner"
-    ),
     "services/ai/summarize/summarize_service.py": (
         "internal summarization run; fixed prompt, no project context, hookless runner"
     ),

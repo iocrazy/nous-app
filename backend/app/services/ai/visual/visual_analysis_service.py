@@ -4,7 +4,7 @@ V1 (runner-multimodal) moved the ``analyze`` path off its OpenAI-native
 closure onto ``AgentRunner`` + ``RunRecorder`` like every other AI service.
 V4 (analyze-byo) wires in per-user BYO credentials: the caller passes
 ``provider_key`` + ``provider_config`` (from ``user_profiles.ai_providers``)
-exactly the way :class:`LLMAnalysisService` does for summarize, so the agent
+exactly the way :class:`SummarizeService` does for summarize, so the agent
 runs against whichever multimodal provider the user configured (Doubao
 vision, gpt-4o, qwen-vl, Claude vision, etc.) with **their** key — no
 hardcoded global fallback to one provider.
@@ -26,15 +26,9 @@ from uuid import UUID
 from loguru import logger
 
 from app.boundary import URLBlockedError, safe_async_client
-from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters.base import AIAdapter
-from app.services.ai.adapters.factory import (
-    get_adapter_for_user,
-    provider_key_for_model,
-)
-from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
@@ -85,10 +79,11 @@ class VisualAnalysisService:
 
         ``provider_key`` / ``provider_config`` come from the Celery task
         layer (which reads the user's ``ai_settings.ai_providers`` per the
-        resolved agent's model). When both are empty, :meth:`_build_adapter`
-        falls back to the factory's per-model default using global settings
-        — that path is only exercised by the smoke-test / no-user
-        invocations.
+        resolved agent's model). When both are empty, adapter construction
+        (via ``build_fallback_llm``) falls back to the platform catalog
+        (DB-only credentials; raises ``ProviderNotConfiguredError`` if
+        unconfigured — no env-var fallback since 2026-07-07) — that path is
+        only exercised by the smoke-test / no-user invocations.
 
         ``agent_slug`` is the user's assigned visual-analysis agent (resolved
         from ``task_assignment.visual_analysis``; defaults to the built-in
@@ -185,59 +180,6 @@ class VisualAnalysisService:
         except json.JSONDecodeError as err:
             logger.warning(f"[VisualAnalysis] JSON parse failed: {err}")
             return {}
-
-    # ── Adapter assembly (BYO-aware) ──────────────────────────────────
-
-    def _build_adapter(self, model: str) -> AIAdapter:
-        """Build an adapter for ``model`` using caller-supplied BYO config.
-
-        Mirrors :func:`llm_analysis_service._build_adapter_from_provider_config`:
-        the caller (Celery analysis task) has already resolved the agent's
-        ``model`` → ``provider_key`` and read the user's BYO entry from
-        ``ai_settings.ai_providers``. We wrap that dict under the right
-        provider key and hand it to :func:`get_adapter_for_user`, which
-        picks the correct adapter subclass per prefix (Doubao / Qwen /
-        DeepSeek / Claude / OpenAI).
-
-        If the model prefix is unknown to the factory (e.g. a custom
-        OpenAI-compatible endpoint ID) we fall back to a generic
-        :class:`OpenAICompatibleAdapter` using whatever ``base_url`` /
-        ``api_key`` the task provided. If no BYO config at all was passed
-        (bare smoke-test path), routes through the factory's
-        per-provider global settings fallback.
-        """
-        provider_key = self._provider_key
-        if not provider_key and model:
-            try:
-                provider_key = provider_key_for_model(model)
-            except ValueError:
-                provider_key = ""
-        if not provider_key:
-            # No caller context and no derivable prefix — last-ditch
-            # generic compatible adapter. Will almost certainly fail at
-            # request time if neither base_url nor api_key was set, which
-            # is the desired outcome (loud failure over silent misroute).
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
-        user_cfg_scoped = {
-            provider_key: {
-                "api_key": self._provider_config.get("api_key", ""),
-                "base_url": self._provider_config.get("base_url", "") or "",
-                "app_id": self._provider_config.get("app_id", ""),
-            }
-        }
-        try:
-            return get_adapter_for_user(model, user_cfg_scoped, settings)
-        except ValueError:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
 
     # ── Shared runner invocation ──────────────────────────────────────
 

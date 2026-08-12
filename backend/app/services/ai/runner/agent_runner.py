@@ -987,10 +987,10 @@ class AgentRunner:
         which only runs if it was registered on this runner's ``hooks``.
         ``_run_pre_hooks`` returns ``None`` immediately when ``self.hooks is
         None`` — so on a hookless runner the PreToolUse chain is a no-op and
-        every tool below would execute UNGATED. Eight services build
+        every tool below would execute UNGATED. Seven services build
         ``AgentRunner(adapter=..., skill_tool=...)`` with no hooks
         (script_ai / summarize / caption / classify / translate /
-        visual_analysis / llm_analysis / topic_scorer) while composing
+        visual_analysis / topic_scorer) while composing
         through ``PromptComposer.compose`` — which advertises these tools.
         Moving advertisement into the composer made it universal;
         enforcement stayed on the four ``build_agent_runner_stack`` paths.
