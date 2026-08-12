@@ -54,6 +54,51 @@ def test_a_code_field_counts_once_the_qr_panel_is_gone():
     assert verdict.status is SessionStatus.SMS_REQUIRED
 
 
+# --- identity challenge ----------------------------------------------------
+
+
+def test_the_identity_chooser_outranks_the_code_field_it_renders():
+    """The 2026-08-11 bug, as one assertion.
+
+    That screen carries a code field of its own, so on the old ordering it read
+    as `sms_required` — and the UI then told the user a code had been texted to
+    them while the platform was still waiting for them to pick *how* to verify.
+    Nothing had been sent, so nothing ever arrived.
+    """
+    verdict = judge_douyin_login(
+        snap(
+            sms_input_visible=True,
+            qrcode_visible=False,
+            identity_challenge_texts=("接收短信验证码", "发送短信验证"),
+        )
+    )
+    assert verdict.status is SessionStatus.IDENTITY_CHALLENGE
+
+
+def test_only_the_manual_option_is_still_an_identity_challenge():
+    """An account offered only 发送短信验证 (the user texts the platform).
+
+    We cannot complete it, but calling the screen something else would hide it:
+    the flow needs to reach its typed "could not answer this" failure, not
+    report a code prompt.
+    """
+    verdict = judge_douyin_login(
+        snap(sms_input_visible=True, identity_challenge_texts=("发送短信验证",))
+    )
+    assert verdict.status is SessionStatus.IDENTITY_CHALLENGE
+    assert "发送短信验证" in verdict.reason
+
+
+def test_an_unanswered_identity_challenge_is_not_a_finished_login():
+    """Same reasoning as the code field: a console URL with a verification step
+    still on it is a half-finished login, and persisting its cookies creates an
+    account row that never works."""
+    verdict = judge_douyin_login(
+        snap(url=CONSOLE, identity_challenge_texts=("接收短信验证码",))
+    )
+    assert verdict.status is SessionStatus.IDENTITY_CHALLENGE
+
+
 def test_scan_confirmation_prompt_is_scanned_not_waiting():
     """The most confusing moment of the flow for a user: the code is scanned,
     the phone is asking for confirmation, and the QR image on screen has not

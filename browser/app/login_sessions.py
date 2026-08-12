@@ -78,6 +78,32 @@ CODE_NOT_ACCEPTED_MESSAGE = (
     "the verification code was not accepted; the page is still asking for one"
 )
 
+# How many polls may go by with the identity chooser still on screen before the
+# login is called off. At the backend's 3s poll interval this is ~15s, which is
+# generous for a click plus a screen swap and short enough that a user is not
+# left watching a dead screen for the full 5 minute TTL.
+#
+# There has to be a ceiling at all for the reason this whole change exists:
+# "keep polling and hope" is indistinguishable, from the outside, from the bug
+# where nobody ever clicked. A run of failures must end in something the user
+# can see and act on.
+MAX_IDENTITY_CHALLENGE_POLLS = 5
+
+# `detail` keys for the identity challenge, so the backend and the UI branch on
+# a contract instead of on prose.
+#
+# `code_requested` is the important one, and it is deliberately narrow: it means
+# **we clicked something that asks the platform to send a code**, never "a code
+# field is on screen". The false claim it replaces ("the platform sent a code to
+# the phone number on this account", printed whenever `sms_required` showed up)
+# is what left the user waiting on a message nobody had requested.
+CODE_REQUESTED_KEY = "code_requested"
+# Terminal `detail["reason"]` values. The UI keys its copy off these — a user
+# whose platform only offers the manual option needs a different sentence from
+# one whose login screen changed shape.
+IDENTITY_CHALLENGE_UNCLICKABLE = "identity_challenge_unclickable"
+IDENTITY_CHALLENGE_STALLED = "identity_challenge_stalled"
+
 
 class LoginError(Exception):
     """A typed failure. Carries the wire status so no caller has to guess."""
@@ -142,6 +168,15 @@ class LoginSession:
         self.detail: dict[str, Any] = {}
         self._lock = asyncio.Lock()
         self._state_extended = False
+        # --- identity challenge bookkeeping ---------------------------------
+        # Counted, latched and capped rather than re-derived per poll, because
+        # every one of these drives a *click*: re-deriving would mean clicking
+        # "send me a code" once every poll interval, i.e. a text message every
+        # three seconds. Each anchor is clicked at most once per login.
+        self._identity_polls = 0
+        self._identity_option: str | None = None
+        self._code_request_click: str | None = None
+        self._sms_code_requested = False
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -191,7 +226,25 @@ class LoginSession:
 
             snapshot = await driver.snapshot()
             judgement = self.spec.judge(snapshot)
+
+            if judgement.status is SessionStatus.IDENTITY_CHALLENGE:
+                # Answer the chooser inside this same response, for the reason
+                # `qrcode_expired` refreshes inside its own: reporting the
+                # screen and waiting for someone else to act on it is how a
+                # user ends up staring at a step nothing is driving. Returns a
+                # snapshot when the screen is still up (or has run out of
+                # patience); None once the click landed and the page moved.
+                stuck = await self._answer_identity_challenge(
+                    driver, snapshot, judgement
+                )
+                if stuck is not None:
+                    return stuck
+                snapshot = await driver.snapshot()
+                judgement = self.spec.judge(snapshot)
+
             detail: dict[str, Any] = {"reason": judgement.reason}
+            if self._identity_option:
+                detail["identity_option"] = self._identity_option
 
             if judgement.status is SessionStatus.QRCODE_EXPIRED:
                 # Contract: an expired code must come back refreshed *in this
@@ -214,6 +267,15 @@ class LoginSession:
                     self.qrcode_data_url = current
             else:
                 self.qrcode_data_url = None
+                if judgement.status is SessionStatus.SMS_REQUIRED:
+                    # The second anchor. The chooser hands over to a form that
+                    # sends nothing until its own button is pressed, and this
+                    # is also the path for a code screen reached with no
+                    # chooser at all — "click whichever is on screen, walk on
+                    # if neither is" rather than a fixed sequence.
+                    await self._request_sms_code(driver)
+                    if self._code_request_click:
+                        detail["code_request_click"] = self._code_request_click
 
             self._record(judgement.status, judgement.reason, detail)
             return self._snapshot()
@@ -350,9 +412,101 @@ class LoginSession:
     def _operate(self):
         return _SessionOperation(self)
 
+    async def _answer_identity_challenge(
+        self, driver: LoginDriver, snapshot: Any, judgement: Any
+    ) -> StatusSnapshot | None:
+        """Pick "receive an SMS" on the chooser. None = it worked, read again.
+
+        Three outcomes, and the two that are not "it worked" both have to be
+        *visible*, because the state they replace — sitting on the chooser
+        forever — is the bug:
+
+        * **clicked** → latch it (one click per login: this button texts a real
+          phone) and return None so the caller re-reads the page it moved to.
+        * **still there** → report `identity_challenge`, which the UI renders
+          as "verifying identity", never as "enter the code we sent you".
+        * **out of patience** → a terminal `failed` carrying *why*: the option
+          we drive was never on offer (`identity_challenge_unclickable`, which
+          is what an account offered only 发送短信验证 looks like), or it was
+          clicked and the platform stayed put (`identity_challenge_stalled`).
+        """
+        self._identity_polls += 1
+        offered = list(getattr(snapshot, "identity_challenge_texts", ()) or ())
+
+        if self._identity_option is None:
+            clicked = await driver.choose_sms_challenge()
+            if clicked:
+                self._identity_option = clicked
+                # Clicking the card captioned 接收短信验证码 *is* the request:
+                # from here the platform is the one sending. Latched on the
+                # click landing, never on anything read off the page — a flag
+                # set by observation is a flag that can lie the way the old
+                # copy did.
+                self._sms_code_requested = True
+                # Let the chooser hand over before the caller re-reads;
+                # sampling immediately just re-reads the screen we clicked.
+                await asyncio.sleep(get_settings().login_sms_settle_s)
+                return None
+
+        if self._identity_polls >= MAX_IDENTITY_CHALLENGE_POLLS:
+            if self._identity_option:
+                reason = IDENTITY_CHALLENGE_STALLED
+                message = (
+                    "selected the SMS verification option, but the platform is "
+                    "still showing the identity check"
+                )
+            else:
+                reason = IDENTITY_CHALLENGE_UNCLICKABLE
+                message = (
+                    "the platform is asking to verify your identity and the "
+                    "SMS option could not be selected"
+                )
+            detail = {
+                "reason": reason,
+                "options_seen": offered,
+                "polls": self._identity_polls,
+            }
+            if self._identity_option:
+                detail["identity_option"] = self._identity_option
+            self.qrcode_data_url = None
+            self._record(SessionStatus.FAILED, message, detail)
+            return self._snapshot()
+
+        self.qrcode_data_url = None
+        detail = {
+            "reason": judgement.reason,
+            "options_seen": offered,
+            "polls": self._identity_polls,
+        }
+        if self._identity_option:
+            detail["identity_option"] = self._identity_option
+        self._record(SessionStatus.IDENTITY_CHALLENGE, judgement.reason, detail)
+        return self._snapshot()
+
+    async def _request_sms_code(self, driver: LoginDriver) -> None:
+        """Press the platform's own "send me the code" button, at most once.
+
+        Re-attempted every poll until it lands, because the button may render a
+        beat after the code field does — but capped at one *successful* click,
+        since each one is a real text message to a real phone.
+        """
+        if self._code_request_click:
+            return
+        clicked = await driver.request_sms_code()
+        if clicked:
+            self._code_request_click = clicked
+            self._sms_code_requested = True
+
     def _record(
         self, status: SessionStatus, reason: str, detail: dict[str, Any]
     ) -> None:
+        # `sms_required` alone never licensed "a code was sent to you", and
+        # saying it anyway is the bug. The flag rides along on every report of
+        # that status once one of our clicks has actually asked for a code, so
+        # the UI can say "we asked the platform to text you" only when it is
+        # true, and something neutral otherwise.
+        if status is SessionStatus.SMS_REQUIRED and self._sms_code_requested:
+            detail = {**detail, CODE_REQUESTED_KEY: True}
         self.status = status
         self.message = scrub(reason)
         self.detail = detail

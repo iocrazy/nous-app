@@ -174,6 +174,66 @@ async def test_sms_required_keeps_polling_until_success():
     assert harness.published[0].status == "sms_required"
 
 
+async def test_identity_challenge_keeps_polling_until_the_code_step():
+    """平台插了一屏「身份验证」—— 这是进行中，不是结论。
+
+    浏览器侧在同一响应里**已经替我们点了**「接收短信验证码」，所以循环该做的
+    是继续等状态翻转。少了 ``LOGIN_PENDING_STATUSES`` 里的那一项，它会掉进
+    "unhandled login status" 分支当场判死，用户在选择页上就被告知登录失败。
+    """
+    client = _FakeClient(
+        [
+            _snap("scanned"),
+            _snap("identity_challenge", message="verifying identity"),
+            _snap("sms_required", message="Enter the code"),
+            _snap("success"),
+        ]
+    )
+    harness = _Harness()
+    outcome = await _run(client, harness)
+
+    assert outcome.ok is True
+    assert [s.status for s in harness.published] == [
+        "scanned",
+        "identity_challenge",
+        "sms_required",
+        "success",
+    ]
+
+
+async def test_code_requested_reaches_the_frontend_blob():
+    """``code_requested`` 是前端唯一能据以说"已代你请求发送验证码"的证据。
+
+    ``metadata.login.detail`` 是白名单裁剪的，漏掉这个键不会报错 —— 只会让
+    前端永远拿不到它，于是要么退回那句假话，要么对**真的**发了码的那次也说
+    含糊话。两个方向都是回归。
+    """
+    manager = MagicMock()
+    manager.patch_metadata = AsyncMock()
+    manager.update_progress = AsyncMock()
+    writer = m.LoginMetadataWriter(manager, "wf-1", "douyin")
+    snapshot = _snap("sms_required", message="Enter the code")
+    snapshot.result.detail["code_requested"] = True
+
+    await writer.publish(snapshot)
+
+    login = manager.patch_metadata.await_args_list[0].args[1]["login"]
+    assert login["detail"]["code_requested"] is True
+
+
+async def test_a_code_nobody_requested_carries_no_claim():
+    """反向：没有那个键时，blob 里也不该凭空出现它。"""
+    manager = MagicMock()
+    manager.patch_metadata = AsyncMock()
+    manager.update_progress = AsyncMock()
+    writer = m.LoginMetadataWriter(manager, "wf-1", "douyin")
+
+    await writer.publish(_snap("sms_required", message="Enter the code"))
+
+    login = manager.patch_metadata.await_args_list[0].args[1]["login"]
+    assert (login["detail"] or {}).get("code_requested") is None
+
+
 @pytest.mark.parametrize("status", ["failed", "timeout", "proxy_failed"])
 async def test_failure_status_ends_the_loop(status):
     client = _FakeClient([_snap(status, message="nope")])

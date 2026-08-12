@@ -26,6 +26,12 @@ class FakeDriver:
         storage: dict[str, Any] | None = None,
         profile: LoginProfile | None = None,
         sms_input_present: bool = True,
+        # What the two identity-challenge clicks resolve to. `None` = "that
+        # anchor is not on this page", which is a legitimate state for
+        # `request_sms_code` (some flows send on their own) and a finding for
+        # `choose_sms_challenge` (nobody answered the chooser).
+        challenge_option: str | None = None,
+        code_request_text: str | None = None,
     ):
         self.spec = spec
         self._snapshots = snapshots or [LoginPageSnapshot(url="https://x/", qrcode_visible=True)]
@@ -35,10 +41,14 @@ class FakeDriver:
         self._storage = storage or {"cookies": [{"name": "sessionid", "value": "s"}]}
         self._profile = profile or LoginProfile(platform_user_id="uid", username="Test Creator")
         self._sms_input_present = sms_input_present
+        self._challenge_option = challenge_option
+        self._code_request_text = code_request_text
         self.closed = False
         self.submitted_codes: list[str] = []
         self.refresh_calls = 0
         self.profile_calls = 0
+        self.challenge_clicks = 0
+        self.code_request_clicks = 0
 
     async def snapshot(self) -> LoginPageSnapshot:
         current = self._snapshots[min(self._index, len(self._snapshots) - 1)]
@@ -52,6 +62,14 @@ class FakeDriver:
         self.refresh_calls += 1
         self._qrcode = self._refreshed
         return self._refreshed
+
+    async def choose_sms_challenge(self) -> str | None:
+        self.challenge_clicks += 1
+        return self._challenge_option
+
+    async def request_sms_code(self) -> str | None:
+        self.code_request_clicks += 1
+        return self._code_request_text
 
     async def submit_sms_code(self, code: str) -> bool:
         self.submitted_codes.append(code)
@@ -170,6 +188,7 @@ class FakeLocator:
         return self
 
     def get_by_text(self, text: Any, exact: bool = False) -> "FakeLocator":
+        self.page.text_queries.append((text, exact))
         return FakeLocator(self.page, text_selector(text))
 
     def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> "FakeLocator":
@@ -255,6 +274,7 @@ class FakePage:
         self.fills: list[tuple[str, str]] = []
         self.file_inputs: list[tuple[str, str, int]] = []
         self.waits: list[tuple[str, str, Any]] = []
+        self.text_queries: list[tuple[Any, bool]] = []
         self.navigations: list[str] = []
         self.removed_overlays = 0
         # caption -> data-checked。缺键 = 读不出来（None），不是 False。
@@ -293,6 +313,11 @@ class FakePage:
         return FakeLocator(self, selector)
 
     def get_by_text(self, text: Any, exact: bool = False) -> FakeLocator:
+        # Recorded with the flag, because `exact` is load-bearing on this page
+        # and invisible in the resulting key: 「允许」⊂「不允许」 is the house
+        # example, and the identity chooser adds another (a generous match
+        # resolves `.first` to an ancestor, i.e. the whole card stack).
+        self.text_queries.append((text, exact))
         return FakeLocator(self, text_selector(text))
 
     def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> FakeLocator:

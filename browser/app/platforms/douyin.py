@@ -174,6 +174,51 @@ SMS_INPUT_SELECTORS: tuple[str, ...] = (
     'input[name*="verify"]',
 )
 
+# --- identity challenge (read off the live page 2026-08-11) ----------------
+#
+# Some accounts get an extra screen between "scanned" and "signed in":
+#
+#     身份验证
+#     为保障账号安全，请先完成身份验证，以确保为本人操作
+#     [ 接收短信验证码  > ]      ← the platform texts the account's phone
+#     [ 发送短信验证    > ]      ← the USER texts the platform from that phone
+#
+# **Nothing is sent until one of those cards is clicked**, and the flow never
+# clicked either. Meanwhile `judge_douyin_login` saw a code field with no QR
+# panel and answered `sms_required`, so the UI told the user a code had been
+# texted to them. It had not. Two accounts bound fine before this surfaced
+# simply because the platform did not challenge them.
+#
+# Only the two card captions are markers, and 身份验证 deliberately is not.
+# The title is a plausible caption elsewhere in the creator console (a settings
+# row, a menu item), and a false positive here does not degrade quietly — it
+# would block a completed login from ever reading as `success`. The captions
+# are specific to this screen, and they are also what we click, so detection
+# and action cannot drift apart.
+IDENTITY_CHALLENGE_MARKERS: tuple[str, ...] = (
+    "接收短信验证码",
+    "发送短信验证",
+)
+
+# The one option an unattended login can actually complete. `发送短信验证` is
+# deliberately absent: it requires the human to send an SMS from the bound
+# handset to a number the page shows, which nothing in this service can do, and
+# picking it would strand the login on a screen with no way forward.
+SMS_CHALLENGE_OPTION_TEXTS: tuple[str, ...] = ("接收短信验证码",)
+
+# The button on the screen *after* the chooser. The reference project
+# (`social-auto-upload`, publish-side) shows the same shape on Douyin's other
+# SMS gate: an input plus 获取验证码, and **the code is sent by the click, not
+# by the screen appearing**. Listed as whole captions instead of a
+# `获取验证码` substring so the resend wording is covered without a generous
+# match that could land on some other control — the failure mode this repo
+# already owns twice (「允许」⊂「不允许」).
+SMS_REQUEST_TEXTS: tuple[str, ...] = (
+    "获取验证码",
+    "重新获取验证码",
+    "发送验证码",
+)
+
 SMS_SUBMIT_SELECTORS: tuple[str, ...] = (
     'button:has-text("确认")',
     'button:has-text("提交")',
@@ -281,21 +326,39 @@ def judge_douyin_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
       is consumed. A page that is asking for a text message may *also* be
       showing the expired caption, and the other order would click "refresh"
       right out of the 2FA flow the user is halfway through.
+    * **The identity chooser outranks SMS**, and that ordering is the 2026-08-11
+      fix. That screen renders a code field of its own, so the older order
+      answered `sms_required` on it — a sentence ("enter the code we texted
+      you") that was false, because the platform sends nothing until a card is
+      clicked. Reading the chooser first is what lets the flow click, and what
+      keeps the UI from promising a message nobody asked for.
     """
     parts = urlsplit(snapshot.url or "")
     host = (parts.hostname or "").lower()
     on_creator_host = host in CREATOR_HOSTS
     asking_for_code = snapshot.sms_input_visible and not snapshot.qrcode_visible
+    identity_challenge = bool(snapshot.identity_challenge_texts)
 
     if (
         on_creator_host
         and CONSOLE_PATH_FRAGMENT in parts.path
         and not snapshot.login_texts
         and not asking_for_code
+        # Same reasoning as `asking_for_code`: a half-finished verification
+        # step sitting on a console URL is not a finished login, and treating
+        # it as one hands the backend cookies that do not work.
+        and not identity_challenge
     ):
         return LoginJudgement(
             SessionStatus.SUCCESS,
             "reached the creator console with no login prompt",
+        )
+
+    if identity_challenge:
+        return LoginJudgement(
+            SessionStatus.IDENTITY_CHALLENGE,
+            "the platform is asking to verify your identity: "
+            + ", ".join(snapshot.identity_challenge_texts),
         )
 
     if asking_for_code:
@@ -386,6 +449,9 @@ LOGIN_SPEC = LoginFlowSpec(
     sms_submit_selectors=SMS_SUBMIT_SELECTORS,
     judge=judge_douyin_login,
     parse_profile=parse_douyin_profile,
+    identity_challenge_markers=IDENTITY_CHALLENGE_MARKERS,
+    sms_challenge_option_texts=SMS_CHALLENGE_OPTION_TEXTS,
+    sms_request_texts=SMS_REQUEST_TEXTS,
     profile_text_selectors=PROFILE_TEXT_SELECTORS,
     profile_attr_selectors=PROFILE_ATTR_SELECTORS,
 )
