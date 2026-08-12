@@ -138,3 +138,36 @@ export function requestStoryboardRefresh(): void {
     }
   }
 }
+
+/**
+ * Third channel: "an Undo reverted scene TEXT content — any open script
+ * sheet should reload." EditorShell subscribes (reload + remount nonce,
+ * the same recipe as a version rollback); useRunUndo publishes after an
+ * undo that reverted at least one scene element. Fire-and-forget like the
+ * channels above — no subscriber (script sheet not mounted) just means
+ * the next mount seeds from a fresh fetch anyway.
+ */
+export type SceneContentRefreshListener = () => void;
+
+const sceneContentListeners = new Set<SceneContentRefreshListener>();
+
+/** Subscribe; returns the unsubscribe function (useEffect-shaped). */
+export function onSceneContentRefresh(
+  listener: SceneContentRefreshListener,
+): () => void {
+  sceneContentListeners.add(listener);
+  return () => {
+    sceneContentListeners.delete(listener);
+  };
+}
+
+/** Ask any open script sheet to reload scene content. No-op when nothing listens. */
+export function requestSceneContentRefresh(): void {
+  for (const listener of [...sceneContentListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error('[shotFocusBus] scene content refresh listener failed:', err);
+    }
+  }
+}

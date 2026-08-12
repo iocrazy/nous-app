@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
 import type { AgentRunUndoReport } from '../../types';
-import { requestStoryboardRefresh } from './shotFocusBus';
+import { requestSceneContentRefresh, requestStoryboardRefresh } from './shotFocusBus';
 
 export type RunUndoState = 'loading' | 'ready' | 'busy' | 'undone' | 'hidden';
 
@@ -97,6 +97,11 @@ export function useRunUndo(
       undoneCache.set(runId, true);
       setState('undone');
       requestStoryboardRefresh();
+      if (result.scene_elements_reverted > 0) {
+        // Scene TEXT changed server-side — tell any open script sheet to
+        // reload (skipped-only reports changed nothing, so stay quiet).
+        requestSceneContentRefresh();
+      }
     } catch (err) {
       console.error('[useRunUndo] undo failed:', err);
       setState('ready');

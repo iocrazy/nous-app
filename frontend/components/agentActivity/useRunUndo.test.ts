@@ -10,7 +10,7 @@ vi.mock('../../services/aiLibraryService', () => ({
   },
 }));
 
-import { onStoryboardRefresh } from './shotFocusBus';
+import { onSceneContentRefresh, onStoryboardRefresh } from './shotFocusBus';
 import { __clearRunUndoCache, useRunUndo } from './useRunUndo';
 import type { AgentRunDetail, AgentRunUndoReport } from '../../types';
 
@@ -181,5 +181,34 @@ describe('useRunUndo', () => {
     });
     expect(undoRun).not.toHaveBeenCalled();
     expect(result.current.state).toBe('hidden');
+  });
+
+  it('fires scene content refresh when the undo reverted scene elements', async () => {
+    getRun.mockResolvedValue(makeRun());
+    undoRun.mockResolvedValue(makeReport({ scene_elements_reverted: 2 }));
+    const listener = vi.fn();
+    const off = onSceneContentRefresh(listener);
+    const { result } = renderHook(() => useRunUndo('run-1', true));
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    await act(() => result.current.undo());
+    expect(listener).toHaveBeenCalledTimes(1);
+    off();
+  });
+
+  it('does NOT fire scene content refresh when no scene elements changed', async () => {
+    getRun.mockResolvedValue(makeRun());
+    undoRun.mockResolvedValue(
+      makeReport({
+        scene_elements_reverted: 0,
+        skipped: [{ kind: 'scene', id: '700', reason: 'internal_error' }],
+      }),
+    );
+    const listener = vi.fn();
+    const off = onSceneContentRefresh(listener);
+    const { result } = renderHook(() => useRunUndo('run-2', true));
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+    await act(() => result.current.undo());
+    expect(listener).not.toHaveBeenCalled();
+    off();
   });
 });
