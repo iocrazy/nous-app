@@ -309,16 +309,36 @@ export class ShotGenerateDisabledError extends Error {
   }
 }
 
+/**
+ * Same boundary rule as `toSceneDoc` above: the shots router (unlike the
+ * canvases router's `_to_response`) does NOT stringify bigint ids — `id` and
+ * `scene_id` arrive as JSON *numbers* at runtime even though this interface
+ * (honestly, aspirationally) declares them strings. Leaving them numeric is
+ * what shipped the 2026-08-12 storyboard-canvas production bug: shotSync's
+ * `reconcileShotNodes` indexes existing bound nodes with a
+ * `typeof shotId === 'string'` narrow, so numeric ids made EVERY mounted
+ * reconcile re-add every shot — duplicate `shot-{id}` node ids, which React
+ * Flow renders permanently `visibility:hidden` (blank canvas). Coerce once,
+ * here at the boundary, so no consumer ever sees a numeric shot id.
+ */
+function toShot(row: Shot): Shot {
+  return {
+    ...row,
+    id: String(row.id),
+    scene_id: String(row.scene_id),
+  };
+}
+
 export async function listShots(sceneId: string): Promise<Shot[]> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/scenes/${sceneId}/shots`, { headers });
-  return unwrapResponse<Shot[]>(res);
+  return (await unwrapResponse<Shot[]>(res)).map(toShot);
 }
 
 export async function getShot(shotId: string): Promise<Shot> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${apiBase()}/shots/${shotId}`, { headers });
-  return unwrapResponse<Shot>(res);
+  return toShot(await unwrapResponse<Shot>(res));
 }
 
 export async function createShot(sceneId: string, data: ShotInput = {}): Promise<Shot> {
@@ -328,7 +348,7 @@ export async function createShot(sceneId: string, data: ShotInput = {}): Promise
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<Shot>(res);
+  return toShot(await unwrapResponse<Shot>(res));
 }
 
 export async function updateShot(shotId: string, data: ShotInput): Promise<Shot> {
@@ -338,7 +358,7 @@ export async function updateShot(shotId: string, data: ShotInput): Promise<Shot>
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  return unwrapResponse<Shot>(res);
+  return toShot(await unwrapResponse<Shot>(res));
 }
 
 export async function deleteShot(shotId: string): Promise<void> {
@@ -356,7 +376,7 @@ export async function moveShot(
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
   });
-  return unwrapResponse<Shot>(res);
+  return toShot(await unwrapResponse<Shot>(res));
 }
 
 // ── Beats (beat-sheet tier) ──────────────────────────────────────────────────

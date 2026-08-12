@@ -614,3 +614,85 @@ describe('canvasCoreStore — doSave post-write mount generation guard (Task 5 �
     expect(s.baseUpdatedAt).not.toBe(baseCanvas.base_updated_at);
   });
 });
+
+// 2026-08-12 production incident — duplicated node ids blank the whole
+// React Flow surface (nodes stay permanently `visibility:hidden`). Three
+// defense layers, each pinned here: load-time sanitize (applyServerRow),
+// the write-point guard (appendElementsNoHistory), and the reconcile
+// self-heal channel's applier (dedupeNodes).
+describe('canvasCoreStore — duplicate-node-id defenses (2026-08-12)', () => {
+  it('loadCanvas collapses duplicated ids in nodes_json down to the first occurrence', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stubs = makeStubs({
+      ...baseCanvas,
+      nodes_json: [
+        { id: 'shot-1', type: 'shot', position: { x: 1, y: 1 }, data: { shot_id: '1' } },
+        { id: 'shot-1', type: 'shot', position: { x: 2, y: 2 }, data: { shot_id: '1' } },
+        { id: 'shot-1', type: 'shot', position: { x: 3, y: 3 }, data: { shot_id: '1' } },
+        { id: 'shot-2', type: 'shot', position: { x: 4, y: 4 }, data: { shot_id: '2' } },
+      ],
+    });
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+
+    const nodes = useStore.getState().nodes as Array<{ id: string; position: { x: number } }>;
+    expect(nodes.map((n) => n.id)).toEqual(['shot-1', 'shot-2']);
+    // First occurrence survives (it carries the user-arranged position).
+    expect(nodes[0].position.x).toBe(1);
+    // A pure load is NOT dirty — sanitizing must not autosave on open.
+    expect(useStore.getState().revision).toBe(0);
+    warnSpy.mockRestore();
+  });
+
+  it('appendElementsNoHistory refuses nodes whose id already exists (and in-batch dupes)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stubs = makeStubs({
+      ...baseCanvas,
+      nodes_json: [{ id: 'shot-1', type: 'shot', position: { x: 0, y: 0 }, data: {} }],
+    });
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+
+    useStore.getState().appendElementsNoHistory(
+      [
+        { id: 'shot-1', type: 'shot', position: { x: 9, y: 9 }, data: {} }, // exists → dropped
+        { id: 'shot-2', type: 'shot', position: { x: 0, y: 0 }, data: {} }, // new → kept
+        { id: 'shot-2', type: 'shot', position: { x: 5, y: 5 }, data: {} }, // in-batch dupe → dropped
+      ],
+      [],
+    );
+
+    const ids = (useStore.getState().nodes as Array<{ id: string }>).map((n) => n.id);
+    expect(ids).toEqual(['shot-1', 'shot-2']);
+    warnSpy.mockRestore();
+  });
+
+  it('dedupeNodes collapses only the listed ids, keeps first occurrence, and marks dirty', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+    // Seed duplicates directly (simulating a poisoned in-memory set).
+    useStore.setState({
+      nodes: [
+        { id: 'a', type: 'shot', position: { x: 1, y: 0 }, data: {} },
+        { id: 'a', type: 'shot', position: { x: 2, y: 0 }, data: {} },
+        { id: 'b', type: 'shot', position: { x: 3, y: 0 }, data: {} },
+        { id: 'b', type: 'shot', position: { x: 4, y: 0 }, data: {} },
+      ] as never,
+    });
+    const revBefore = useStore.getState().revision;
+
+    useStore.getState().dedupeNodes(['a']);
+
+    const nodes = useStore.getState().nodes as Array<{ id: string; position: { x: number } }>;
+    expect(nodes.map((n) => n.id)).toEqual(['a', 'b', 'b']);
+    expect(nodes[0].position.x).toBe(1);
+    // Healing persists through the normal save path → must mark dirty.
+    expect(useStore.getState().revision).toBe(revBefore + 1);
+
+    // No listed dupes → exact no-op (no dirty bump).
+    const revAfter = useStore.getState().revision;
+    useStore.getState().dedupeNodes(['a']);
+    expect(useStore.getState().revision).toBe(revAfter);
+  });
+});

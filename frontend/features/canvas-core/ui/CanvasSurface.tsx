@@ -437,7 +437,17 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
     [],
   );
 
-  const nodeTypes = isSmartFamily(kind) ? SMART_NODE_TYPES : undefined;
+  // 'storyboard' is deliberately excluded from `isSmartFamily` (T4/T5 — it
+  // must never grow the composer/Arrange/TopNodeBar chrome), but its BOUND
+  // SHOT NODES render through the same smart registry — without this bypass
+  // React Flow has no 'shot' renderer on a storyboard canvas, falls back to
+  // the default node (whose empty label measures 0×0, which xyflow skips),
+  // and every node stays permanently `visibility:hidden`: the 2026-08-12
+  // "blank storyboard canvas" production symptom, present even on a clean
+  // row. Same explicit-bypass shape as the resume sweep in `CanvasPage.tsx`
+  // (final review Critical 1) — the smart-family UI gates stay untouched.
+  const nodeTypes =
+    isSmartFamily(kind) || kind === 'storyboard' ? SMART_NODE_TYPES : undefined;
   // Smart mode swaps the default edge for the scissors edge (G6 conn-cut).
   const edgeTypes = isSmartFamily(kind) ? SMART_EDGE_TYPES : undefined;
 

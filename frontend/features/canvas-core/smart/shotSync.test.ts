@@ -349,4 +349,111 @@ describe('reconcileShotNodes', () => {
       expect(result.nodesToPatch.some((p) => p.id === 'node-gone')).toBe(false);
     });
   });
+
+  // 2026-08-12 production incident: the shots REST router returns bigint
+  // ids as JSON *numbers* (the `Shot` interface only CLAIMED strings), and
+  // the original `typeof shotId === 'string'` indexing dropped every
+  // numeric id from `boundNodesByShotId` — each reconcile re-added its
+  // whole shot set. One production row accumulated 102 nodes for 6 shots,
+  // and React Flow renders duplicated ids permanently `visibility:hidden`
+  // (blank canvas). These tests feed the PRODUCTION shape (numbers), not
+  // the interface's aspirational one.
+  describe('numeric-id production shape (2026-08-12 incident)', () => {
+    const NUM_SCENE = { id: '208443000000100', sceneNo: 1 };
+    const numShot = (id: number, overrides: Record<string, unknown> = {}) => ({
+      ...shot(String(id), overrides),
+      id: id as unknown as string,
+      scene_id: 208443000000100 as unknown as string,
+    });
+
+    it('reconcile is idempotent when ids arrive as numbers: the second pass adds nothing', () => {
+      const first = reconcileShotNodes([], [NUM_SCENE], [numShot(208443000000001)]);
+      expect(first.nodesToAdd).toHaveLength(1);
+      expect(first.nodesToAdd[0].id).toBe('shot-208443000000001');
+      // New nodes must be born with canonical STRING ids regardless of the
+      // wire type — that's what makes the round trip idempotent.
+      expect(first.nodesToAdd[0].data.shot_id).toBe('208443000000001');
+      expect(first.nodesToAdd[0].data.scene_id).toBe('208443000000100');
+
+      const second = reconcileShotNodes(
+        first.nodesToAdd,
+        [NUM_SCENE],
+        [numShot(208443000000001)],
+      );
+      expect(second.nodesToAdd).toHaveLength(0);
+      expect(second.nodesToMarkStale).toHaveLength(0);
+    });
+
+    it('regression-era persisted nodes (NUMERIC data.shot_id) still index — never re-added', () => {
+      const legacyNode = boundNode('shot-208443000000001', 'placeholder');
+      (legacyNode.data as unknown as Record<string, unknown>).shot_id = 208443000000001;
+      (legacyNode.data as unknown as Record<string, unknown>).scene_id = 208443000000100;
+
+      const result = reconcileShotNodes(
+        [legacyNode],
+        [NUM_SCENE],
+        [numShot(208443000000001)],
+      );
+
+      expect(result.nodesToAdd).toHaveLength(0);
+      expect(result.nodesToMarkStale).toHaveLength(0);
+      // Type-normalization patch: the numeric shot_id/scene_id drift to
+      // their canonical string forms so the row converges after one save.
+      const patch = result.nodesToPatch.find((p) => p.id === 'shot-208443000000001');
+      expect(patch?.data.shot_id).toBe('208443000000001');
+      expect(patch?.data.scene_id).toBe('208443000000100');
+    });
+
+    it('numeric scene_id still resolves the real scene column (not the trailing fallback column)', () => {
+      const result = reconcileShotNodes([], [NUM_SCENE], [numShot(208443000000001)]);
+      // Scene rank 0 → x = 0. The regression put every shot in the
+      // `scenes.length` fallback column because a numeric scene_id never
+      // matched the string-keyed scene index.
+      expect(result.nodesToAdd[0].position.x).toBe(0);
+      expect(result.nodesToAdd[0].data.shot_label).toBe('1A');
+    });
+  });
+
+  // Self-heal channel for rows poisoned by the incident (dozens of copies
+  // of each deterministic `shot-{id}` node persisted server-side).
+  describe('nodeIdsToDedupe (2026-08-12 self-heal)', () => {
+    it('reports each duplicated node id exactly once; unique ids are not reported', () => {
+      const copyA = boundNode('shot-s1', 's1');
+      const copyB = boundNode('shot-s1', 's1');
+      const copyC = boundNode('shot-s1', 's1');
+      const unique = boundNode('shot-s2', 's2');
+
+      const result = reconcileShotNodes(
+        [copyA, copyB, copyC, unique],
+        [SCENE_1],
+        [shot('s1'), shot('s2')],
+      );
+
+      expect(result.nodeIdsToDedupe).toEqual(['shot-s1']);
+      // And the duplicated shot is NOT re-added on top.
+      expect(result.nodesToAdd).toHaveLength(0);
+    });
+
+    it('duplicates also count across non-shot node types (generic id sweep)', () => {
+      const media = { id: 'media-1', type: 'media', position: { x: 0, y: 0 }, data: {} };
+      const mediaCopy = { id: 'media-1', type: 'media', position: { x: 0, y: 0 }, data: {} };
+
+      const result = reconcileShotNodes(
+        [media, mediaCopy] as unknown as SmartNode[],
+        [SCENE_1],
+        [],
+      );
+
+      expect(result.nodeIdsToDedupe).toEqual(['media-1']);
+    });
+
+    it('a clean node set reports an empty dedupe list', () => {
+      const result = reconcileShotNodes(
+        [boundNode('shot-s1', 's1')],
+        [SCENE_1],
+        [shot('s1')],
+      );
+      expect(result.nodeIdsToDedupe).toEqual([]);
+    });
+  });
 });
