@@ -26,7 +26,9 @@ from app.core.scope_guards import (
     verify_project_read_access,
     verify_project_write_access,
     verify_scene_access,
+    verify_scene_read_access,
     verify_script_access,
+    verify_script_read_access,
 )
 from app.main import app
 
@@ -37,7 +39,9 @@ KNOWN_GUARDS = {
     verify_project_write_access,
     verify_episode_write_access,
     verify_script_access,
+    verify_script_read_access,
     verify_scene_access,
+    verify_scene_read_access,
 }
 
 FAKE_USER_ID = str(uuid4())

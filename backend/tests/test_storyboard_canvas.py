@@ -111,16 +111,22 @@ def _stub_episode_repo(
 
 
 def _allow_write_gate(monkeypatch):
-    """Bypass ``verify_project_write_access`` — membership itself is not
-    under test here (see ``test_canvas_gates.py`` / ``test_scope_guards.py``
-    for that); this pins that the handler CALLS the gate with the episode's
-    resolved project_id, not that the gate's internals are correct."""
+    """Bypass BOTH ``verify_project_write_access`` and
+    ``verify_project_read_access`` — membership itself is not under test
+    here (see ``test_canvas_gates.py`` / ``test_scope_guards.py`` for that);
+    this pins that the handler CALLS the appropriate gate with the
+    episode's resolved project_id, not that the gate's internals are
+    correct. Both are stubbed because the get-or-create flow now takes the
+    READ gate once a canvas already exists (2026-08-12 gate split) — most
+    callers here don't care which branch runs, just that whichever gate
+    fires passes."""
     calls: list = []
 
     async def _fake(*, project_id, auth):
         calls.append(project_id)
 
     monkeypatch.setattr(canvases_router, "verify_project_write_access", _fake)
+    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
     return calls
 
 
@@ -133,6 +139,22 @@ def _deny_write_gate(monkeypatch):
     monkeypatch.setattr(canvases_router, "verify_project_write_access", _fake)
 
 
+def _deny_read_gate(monkeypatch):
+    from fastapi import HTTPException
+
+    async def _fake(*, project_id, auth):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
+
+
+def _allow_read_gate(monkeypatch):
+    async def _fake(*, project_id, auth):
+        return None
+
+    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
+
+
 class _FakeCanvasService:
     """In-memory get-or-create store, keyed by (project_id, episode_id) —
     stands in for CanvasService.get_or_create_storyboard so these tests pin
@@ -142,6 +164,9 @@ class _FakeCanvasService:
 
     _next_id = 90000
     store: Dict[tuple, Dict[str, Any]] = {}
+
+    async def peek_storyboard(self, project_id, episode_id):
+        return _FakeCanvasService.store.get((str(project_id), str(episode_id)))
 
     async def get_or_create_storyboard(
         self, *, project_id, episode_id, name, created_by
@@ -269,6 +294,54 @@ async def test_non_member_403(client, monkeypatch):
     resp = await client.get(f"/api/v1/canvases/storyboard?episode_id={EPISODE_ID}")
 
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Gate split (2026-08-12 fix): existing canvas → read gate; missing → write
+# gate. Before this fix EVERY call (including one that only reads an
+# already-existing canvas) went through verify_project_write_access, so a
+# viewer-role project member got a 403 just opening a storyboard someone
+# else had already created.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_existing_storyboard_uses_read_gate_not_write_gate(client, monkeypatch):
+    """A viewer (write gate denies, read gate allows) can fetch an ALREADY
+    EXISTING storyboard canvas — proves the read branch, not the write
+    branch, gates this case."""
+    _stub_episode_repo(monkeypatch, _episode())
+    _deny_write_gate(monkeypatch)
+    _allow_read_gate(monkeypatch)
+
+    existing = {
+        "id": "42",
+        "project_id": PROJECT_ID,
+        "episode_id": EPISODE_ID,
+        "name": "EP1 · Storyboard",
+        "kind": "storyboard",
+    }
+    _FakeCanvasService.store[(PROJECT_ID, EPISODE_ID)] = existing
+
+    resp = await client.get(f"/api/v1/canvases/storyboard?episode_id={EPISODE_ID}")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["id"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_missing_storyboard_still_denied_by_write_gate(client, monkeypatch):
+    """A viewer (read gate allows, write gate denies) requesting a
+    NOT-YET-CREATED storyboard still 403s — the read fallback must never
+    let a read-only caller conjure a new canvas via this GET."""
+    _stub_episode_repo(monkeypatch, _episode())
+    _allow_read_gate(monkeypatch)
+    _deny_write_gate(monkeypatch)
+
+    resp = await client.get(f"/api/v1/canvases/storyboard?episode_id={EPISODE_ID}")
+
+    assert resp.status_code == 403
+    assert not _FakeCanvasService.store  # nothing was created
 
 
 # --------------------------------------------------------------------------- #

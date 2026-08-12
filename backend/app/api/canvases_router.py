@@ -399,14 +399,31 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
     Registered BEFORE the dynamic ``/canvases/{canvas_id}`` route below —
     static segments must win the match, or 'storyboard' would be captured
     as a canvas id (FastAPI matches routes in registration order).
+
+    Gate split (2026-08-12 fix): this endpoint used to gate EVERY call —
+    including one that only reads an already-existing canvas — behind
+    ``verify_project_write_access``, so a viewer-role project member got a
+    403 just trying to OPEN an episode's storyboard that another editor had
+    already created. It must still gate a genuinely NEW canvas behind write
+    access (a GET should not let a read-only visitor conjure a row), so the
+    split is: peek first — existing → read gate; missing → write gate.
     """
     ep = await get_episode_repository().get_by_id(episode_id)
     if not ep:
         raise HTTPException(status_code=404, detail={"code": "episode_not_found"})
     project_id = str(ep["project_id"])
-    # Write access: this GET can create a row, so it must pass the same
-    # gate a POST would (matches the brief's call sketch — read-only
-    # visitors should not be able to conjure a new canvas via a GET).
+
+    svc = CanvasService()
+    existing = await svc.peek_storyboard(project_id, episode_id)
+    if existing is not None:
+        # Pure read — any project member (owner / team / explicit
+        # project_members row, any role) may fetch an existing storyboard.
+        await verify_project_read_access(project_id=project_id, auth=auth)
+        return {"success": True, "data": _to_response(existing)}
+
+    # No canvas yet: this GET is about to CREATE one, so it must pass the
+    # same gate a POST would (read-only visitors should not be able to
+    # conjure a new canvas via a GET).
     await verify_project_write_access(project_id=project_id, auth=auth)
 
     # sort_order-ascending list of the project's own episodes, purely to
@@ -415,7 +432,6 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
     siblings = await get_episode_repository().list_by_project(project_id)
     rank = _episode_rank(siblings, episode_id)
 
-    svc = CanvasService()
     row = await svc.get_or_create_storyboard(
         project_id=project_id,
         episode_id=episode_id,
@@ -520,7 +536,11 @@ async def list_project_canvases(
     auth: AuthDep,
     project_id: str = Path(..., description="Snowflake project ID"),
 ) -> dict:
-    await verify_project_write_access(project_id=project_id, auth=auth)
+    """List a project's canvases — a pure read. 2026-08-12 fix: this GET was
+    gated behind ``verify_project_write_access``, so a viewer-role project
+    member 403'd just listing canvases (inconsistent with the trash-list
+    sibling right below, which already used the read guard)."""
+    await verify_project_read_access(project_id=project_id, auth=auth)
     svc = CanvasService()
     rows = await svc.list_for_project(project_id)
     return {"success": True, "data": [_to_response(r) for r in rows]}

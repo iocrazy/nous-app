@@ -5,22 +5,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
-from app.core.deps import AuthDep, get_team_id_for_user
+from app.core.deps import AuthDep
+from app.core.scope_guards import verify_script_access, verify_script_read_access
 from app.schemas.script import ScriptAssetCreate, ScriptAssetUpdate
 from app.services.storyboard.script.script_service import ScriptService
 
 router = APIRouter(prefix="/scripts/projects")
-
-
-async def _verify_script_access(script_id: str, user_id: str) -> None:
-    """Verify the authenticated user has access to this script (via team membership)."""
-    svc = ScriptService()
-    project = await svc.project_repo.get_by_id(script_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Script project not found")
-    user_team = await get_team_id_for_user(user_id)
-    if str(user_team) != str(project.get("team_id")):
-        raise HTTPException(status_code=403, detail="Access denied")
 
 
 @router.post("/{script_id}/assets")
@@ -29,7 +19,12 @@ async def create_asset(
 ) -> Dict[str, Any]:
     """Create a new script asset (worldview, character, location, prop, plot_point)."""
     try:
-        await _verify_script_access(script_id, auth.user_id)
+        # Delegates to the shared, tested script-team guard (this router used
+        # to carry its own private copy — a strict get_team_id_for_user()
+        # equality check that 403'd every teammate on a shared-team script;
+        # replaced 2026-08-12 to match the rest of the script/scene/shot
+        # family and get its personal-project project_members fallback).
+        await verify_script_access(script_id, auth)
         svc = ScriptService()
         data = {**body.model_dump(exclude_none=True), "script_id": script_id}
         asset = await svc.create_asset(data)
@@ -49,7 +44,7 @@ async def list_assets(
 ) -> Dict[str, Any]:
     """List all assets for a script project, optionally filtered by type."""
     try:
-        await _verify_script_access(script_id, auth.user_id)
+        await verify_script_read_access(script_id, auth)
         svc = ScriptService()
         assets = await svc.list_assets(script_id, asset_type=asset_type)
         return {"success": True, "data": assets}

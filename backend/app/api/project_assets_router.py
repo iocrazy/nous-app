@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.media_permissions import check_media_access
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_project_write_access
+from app.core.scope_guards import verify_project_read_access
 from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.projects_repository import ProjectsRepository
 from app.services.canvas import CanvasService
@@ -26,12 +26,18 @@ router = APIRouter(dependencies=[Depends(require_module("projects"))])
 
 async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
     """Resolve canvas → project, then require project membership.
-    Mirrors canvases_router._gate_canvas_read."""
+    Mirrors canvases_router._gate_canvas_read.
+
+    2026-08-12 fix: this docstring always claimed "read" semantics but the
+    body called ``verify_project_write_access`` — a viewer-role project
+    member got a 403 on this pure-read endpoint (list a canvas's referenced
+    assets). Now actually calls the read guard, matching the name and the
+    canvases_router sibling it claims to mirror."""
     svc = CanvasService()
     project_id = await svc.get_project_id(canvas_id)
     if project_id is None:
         raise HTTPException(status_code=404, detail="canvas not found")
-    await verify_project_write_access(project_id=project_id, auth=auth)
+    await verify_project_read_access(project_id=project_id, auth=auth)
     return project_id
 
 

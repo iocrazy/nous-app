@@ -1,13 +1,17 @@
 """Script Scenes Router — scene CRUD + versioned element ops (Phase B P2).
 
 Endpoints:
-  GET  /scripts/{script_id}/scenes        — verify_script_access
+  GET  /scripts/{script_id}/scenes        — verify_script_read_access
   POST /scripts/{script_id}/scenes        — verify_script_access
-  GET    /scenes/{scene_id}               — verify_scene_access
+  GET    /scenes/{scene_id}               — verify_scene_read_access
   PATCH  /scenes/{scene_id}               — verify_scene_access
   DELETE /scenes/{scene_id}               — verify_scene_access
   POST /scenes/{scene_id}/elements/ops    — verify_scene_access
   POST /scenes/{scene_id}/move            — verify_scene_access
+
+The GET routes use the *_read_access variants (team membership OR an
+explicit project_members row on the parent project — 2026-08-12 fix); the
+write routes keep the team-only gate unchanged.
 
 The ops endpoint is the optimistic-concurrency heart: it requires an
 ``If-Match: <content_version>`` header (missing → 428), maps ``VersionConflict``
@@ -23,7 +27,12 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_scene_access, verify_script_access
+from app.core.scope_guards import (
+    verify_scene_access,
+    verify_scene_read_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.repositories.script_scene_repository import (
     UNSET,
     VersionConflict,
@@ -95,7 +104,7 @@ def _to_response_list(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def list_scenes(
     script_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     """List all scenes for a script (chapter_id NULLS LAST, then sort_order)."""
     try:
@@ -161,7 +170,7 @@ async def create_scene_after_lock(
 async def get_scene(
     scene_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_scene_access),
+    _guard: None = Depends(verify_scene_read_access),
 ) -> Dict[str, Any]:
     """Get a single scene by id."""
     try:

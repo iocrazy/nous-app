@@ -20,12 +20,16 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.script_versions_router import router as versions_router
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_commit_access, verify_script_access
+from app.core.scope_guards import (
+    verify_commit_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.main import app
 
 pytestmark = pytest.mark.unit
 
-KNOWN_GUARDS = {verify_script_access, verify_commit_access}
+KNOWN_GUARDS = {verify_script_access, verify_script_read_access, verify_commit_access}
 
 FAKE_USER_ID = str(uuid4())
 

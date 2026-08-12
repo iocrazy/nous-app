@@ -1,20 +1,22 @@
 """Beat Memos Router — timeline memo CRUD + image upload/serve (Beats M5).
 
 Endpoints:
-  GET    /scripts/{script_id}/memos                     — verify_script_access
+  GET    /scripts/{script_id}/memos                     — verify_script_read_access
   POST   /scripts/{script_id}/memos                     — verify_script_access
   POST   /scripts/{script_id}/memos/upload             — verify_script_access
   PATCH  /memos/{memo_id}                                — verify_memo_access
   DELETE /memos/{memo_id}                                — verify_memo_access
-  GET    /scripts/{script_id}/memos/{memo_id}/images/{idx}  — dual-channel auth
+  GET    /scripts/{script_id}/memos/{memo_id}/images/{idx}  — dual-channel auth (read)
 
 A memo is a laper-style note anchored to a whole-second offset on a script's
 Beats arrangement timeline — its OWN table (beat_memos), never the inspiration
 library. Pure synchronous CRUD — no AI, no workflow. Ownership is enforced by
-verify_script_access (script-scoped routes) / verify_memo_access (id-scoped
-routes); the image serve route authenticates the media-token / JWT dual channel
-itself (browser-native <img> loads cannot send an Authorization header) and then
-bounds every read to a memo the caller's script owns.
+verify_script_access / verify_script_read_access (script-scoped routes) /
+verify_memo_access (id-scoped write routes); the image serve route
+authenticates the media-token / JWT dual channel itself (browser-native <img>
+loads cannot send an Authorization header) and then bounds every read to a
+memo the caller's script owns, via ``_assert_script_access(..., write=False)``
+(team membership OR an explicit project_members row — 2026-08-12 fix).
 """
 
 from __future__ import annotations
@@ -36,9 +38,10 @@ from loguru import logger
 
 from app.core.deps import AuthDep, get_current_user
 from app.core.scope_guards import (
-    _assert_script_team_access,
+    _assert_script_access,
     verify_memo_access,
     verify_script_access,
+    verify_script_read_access,
 )
 from app.repositories.beat_memo_repository import get_beat_memo_repository
 from app.schemas.beat_memo import MemoCreate, MemoOut, MemoUpdate
@@ -56,7 +59,7 @@ router = APIRouter()
 async def list_memos(
     script_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     """List all memos for a script, ordered along the timeline."""
     try:
@@ -187,8 +190,9 @@ async def get_memo_image(
     memo = await get_beat_memo_repository().get_by_id(memo_id)
     if not memo or str(memo.get("script_id")) != str(script_id):
         raise HTTPException(status_code=404, detail="Memo not found")
-    # Membership check: raises 403/404 if the caller can't reach the script.
-    await _assert_script_team_access(str(script_id), user_id)
+    # Read-access check: raises 403/404 if the caller can't reach the script
+    # (team membership OR an explicit project_members row — 2026-08-12 fix).
+    await _assert_script_access(str(script_id), user_id, write=False)
 
     images = memo.get("images") or []
     if idx < 0 or idx >= len(images):
