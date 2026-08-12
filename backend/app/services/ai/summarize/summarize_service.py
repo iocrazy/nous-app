@@ -48,6 +48,13 @@ class SummarizeResult:
     key_points: List[str] = field(default_factory=list)
     topics: List[str] = field(default_factory=list)
     cost: float = 0.0
+    # I2 (final-review): the model that ACTUALLY served the response — reads
+    # LLMFallbackChain's ``_actual_model`` injection (llm_fallback_chain.py's
+    # ``call()`` docstring) off ``run_turn``'s ``raw`` passthrough when a
+    # fallback fired, so run_summarize_agent's persisted
+    # resource_summaries.llm_model reflects the model that actually ran, not
+    # always the configured primary.
+    llm_model: str = ""
 
 
 class SummarizeService:
@@ -115,7 +122,9 @@ class SummarizeService:
             return {"summary": content or "", "key_points": [], "topics": []}
 
     @classmethod
-    def _to_result(cls, data: Dict[str, Any], cost: float) -> SummarizeResult:
+    def _to_result(
+        cls, data: Dict[str, Any], cost: float, llm_model: str = ""
+    ) -> SummarizeResult:
         kp = data.get("key_points") or []
         tp = data.get("topics") or []
         return SummarizeResult(
@@ -123,7 +132,27 @@ class SummarizeService:
             key_points=[str(x) for x in kp if x],
             topics=[str(x) for x in tp if x],
             cost=cost,
+            llm_model=llm_model,
         )
+
+    @staticmethod
+    def _actual_model(result: Dict[str, Any], fallback: str) -> str:
+        """I2 (final-review): the model that ACTUALLY served this turn.
+
+        ``run_turn`` passes the adapter's raw response through verbatim as
+        ``result["raw"]`` — when the adapter is an ``LLMFallbackChain``
+        (always true here), a successful response injects ``_actual_model``
+        (see llm_fallback_chain.py's chain-call docstring). Absent when the
+        chain isn't the adapter (tests stubbing ``run_turn`` directly) or on
+        a bare passthrough — ``fallback`` (the configured primary) is the
+        pre-fix behavior in both cases.
+        """
+        raw = result.get("raw")
+        if isinstance(raw, dict):
+            actual = raw.get("_actual_model")
+            if actual:
+                return str(actual)
+        return fallback
 
     async def summarize(
         self,
@@ -189,6 +218,15 @@ class SummarizeService:
             primary_model=model,
             fallback_models=list(fallback_models or []),
             user_provider_config=self._provider_config,
+            # self._provider_config is the NARROWED flat single-provider
+            # shape ({"model","api_key","base_url"}), not the provider-keyed
+            # dict get_adapter_for_user expects — provider_key tells
+            # build_fallback_llm to wrap it per-attempt (final-review C1).
+            # "summarization" matches resolve_summarization_config's own
+            # governance module key (final-review I1) so the pre-resolved
+            # platform-catalog gate agrees with the primary model's resolver.
+            provider_key=self._provider_key,
+            module="summarization",
         )
         runner = AgentRunner(
             adapter=adapter, skill_tool=SkillToolService(get_skill_repository())
@@ -229,7 +267,9 @@ class SummarizeService:
                     logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
                 return self._to_result(
-                    self._parse_json(result.get("content") or ""), 0.0
+                    self._parse_json(result.get("content") or ""),
+                    0.0,
+                    llm_model=self._actual_model(result, model),
                 )
             except Exception as e:
                 logger.error(f"[Summarize] bare run failed: {e}")
@@ -265,11 +305,17 @@ class SummarizeService:
                 if result.get("error"):
                     logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
-                return self._to_result(self._parse_json(content), 0.0)
+                return self._to_result(
+                    self._parse_json(content),
+                    0.0,
+                    llm_model=self._actual_model(result, model),
+                )
         except AgentPausedError as err:
             logger.warning(f"[Summarize] agent paused: {err}")
             return None
         # LLM 类异常(AllModelsFailed/LLMCallError 及其他意外)一律 propagate:
-        # workflow 的 record-then-raise(PR #1743)会把真因经 classify_ai_error
-        # 落 task_tracking.error_code——吞成 None 会让它只看到合成 RuntimeError
+        # ai_summary_workflow 的 tail except 会先 await record_ai_error_code(wf_id, e)
+        # (classify_ai_error 落 task_tracking.metadata.error_code),再
+        # record_workflow_failure + raise(PR #1743 route-C rule 4)——吞成 None
+        # 会让 workflow 只看到合成 RuntimeError,两个机制都够不着真因
         # (本次接线的动机,spec §1 异常口径)。

@@ -11,11 +11,14 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
     get_adapter_for_key,
     get_adapter_for_user,
+    provider_key_for_model,
     resolve_provider_key,
 )
+from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
 
 
@@ -64,6 +67,8 @@ async def build_fallback_llm(
     primary_model: str,
     fallback_models: list[str],
     user_provider_config: Optional[dict],
+    provider_key: Optional[str] = None,
+    module: str = "chat",
 ) -> LLMFallbackChain:
     """Build the fallback-wrapped adapter chain (DB-only credentials).
 
@@ -73,6 +78,32 @@ async def build_fallback_llm(
     (primary_model); the resolver only tags the credential origin. The caller
     is responsible for resolving ``user_provider_config`` on the allowed path
     only (a locked module must skip the user BYOK read entirely).
+
+    ``provider_key`` / ``module`` (final-review C1/I1 fix, 2026-08-11): chat
+    passes neither (module defaults ``"chat"``, matching legacy behavior
+    byte-for-byte) and ``user_provider_config`` stays the FULL provider-KEYED
+    dict (``{"qwen": {...}, "doubao": {...}}``) that ``get_adapter_for_user``
+    expects.
+
+    Summarize / visual-analyze resolve credentials differently: their
+    ``user_provider_config`` is a NARROWED FLAT single-provider dict
+    (``{"model", "api_key", "base_url", "app_id"}``) — handing that straight
+    to ``get_adapter_for_user`` makes its ``.get(provider_key, {})`` always
+    find an empty dict (the flat dict has no provider-name keys), silently
+    dropping real credentials. Those two callers pass ``provider_key``
+    (their resolved provider, possibly ``""`` when unresolved — the *passing
+    of the kwarg itself*, not its truthiness, is the signal; ``None`` stays
+    reserved for "not a batch caller") and their MODULE'S governance key
+    (``"summarization"`` / ``"visual_analysis"``) so the platform-catalog
+    pre-resolution below gates against the right module instead of a
+    hardcoded ``"chat"``. When the sentinel fires, the adapter factory wraps
+    the flat config under the (explicit-or-derived) provider key and, on an
+    unknown model prefix, degrades to a generic
+    :class:`OpenAICompatibleAdapter` — mirroring the deleted
+    ``SummarizeService``/``VisualAnalysisService._build_adapter`` (see
+    ``git show d48cd956~1`` for the pre-fallback-chain original) faithfully,
+    so a primary whose provider the factory can't derive doesn't get treated
+    as ``adapter_init_failed`` and skipped straight to a fallback model.
     """
     # Pre-resolve every model the fallback chain may dial against the platform
     # ``mediahub_models`` catalog (async — the factory below must stay sync for
@@ -84,7 +115,7 @@ async def build_fallback_llm(
     # time — there is no env fallback anymore.
     _platform_adapters: dict = {}
     for _m in dict.fromkeys([primary_model, *fallback_models]):
-        _hit = await resolve_mediahub_model(_m, "chat")
+        _hit = await resolve_mediahub_model(_m, module)
         if _hit:
             _prov, _pcfg, _actual = _hit
             _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}
@@ -100,12 +131,52 @@ async def build_fallback_llm(
     # correctly regardless of when the caller invokes it relative to this
     # coroutine's own execution window (e.g. a test's mock.patch context).
     _get_adapter_for_user = get_adapter_for_user
+    # ``provider_key is not None`` — NOT truthiness — is the batch-style
+    # signal: summarize/visual always pass the kwarg (even "" when their own
+    # resolution left it unset), chat never passes it at all. See docstring.
+    _is_flat_config = provider_key is not None
+    _flat_config: dict = dict(user_provider_config or {}) if _is_flat_config else {}
+    _explicit_provider_key = (provider_key or "").strip()
+
+    def _flat_degrade(model: str) -> AIAdapter:
+        return OpenAICompatibleAdapter(
+            api_url=_flat_config.get("base_url", "") or "",
+            api_key=_flat_config.get("api_key", "") or "",
+            default_model=model,
+        )
 
     def _adapter_factory(model: str):
         pre_resolved = _platform_adapters.get(model)
         if pre_resolved is not None:
             return pre_resolved
-        return _get_adapter_for_user(model, user_provider_config, None)
+        if not _is_flat_config:
+            return _get_adapter_for_user(model, user_provider_config, None)
+
+        # Batch style (summarize/visual-analyze): resolve THIS attempt's
+        # provider key (explicit if the service was given one, else derived
+        # per-model — a fallback model can sit on a different provider than
+        # the primary), wrap the flat config under it, and degrade to a
+        # generic OpenAI-compatible adapter rather than raise on an unknown
+        # prefix / ValueError (mirrors the deleted ``_build_adapter``).
+        key = _explicit_provider_key
+        if not key and model:
+            try:
+                key = provider_key_for_model(model)
+            except ValueError:
+                key = ""
+        if not key:
+            return _flat_degrade(model)
+        scoped = {
+            key: {
+                "api_key": _flat_config.get("api_key", ""),
+                "base_url": _flat_config.get("base_url", "") or "",
+                "app_id": _flat_config.get("app_id", ""),
+            }
+        }
+        try:
+            return _get_adapter_for_user(model, scoped, None)
+        except ValueError:
+            return _flat_degrade(model)
 
     # P1-5: pull the per-process ModelHealthRegistry off app.state if
     # available so cooled-down models are skipped on subsequent calls.

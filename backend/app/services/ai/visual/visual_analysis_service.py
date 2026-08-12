@@ -275,6 +275,15 @@ class VisualAnalysisService:
             primary_model=model,
             fallback_models=list(fallback_models or []),
             user_provider_config=self._provider_config,
+            # self._provider_config is the NARROWED flat single-provider
+            # shape ({"model","api_key","base_url"}), not the provider-keyed
+            # dict get_adapter_for_user expects — provider_key tells
+            # build_fallback_llm to wrap it per-attempt (final-review C1).
+            # "visual_analysis" matches resolve_task_ai_config's own task_key
+            # for this module (final-review I1) so the pre-resolved
+            # platform-catalog gate agrees with the primary model's resolver.
+            provider_key=self._provider_key,
+            module="visual_analysis",
         )
         runner = AgentRunner(
             adapter=adapter,
@@ -348,8 +357,10 @@ class VisualAnalysisService:
             logger.warning(f"[VisualAnalysis] agent paused: {err}")
             return None
         # LLM 类异常(AllModelsFailed/LLMCallError 及其他意外)一律 propagate:
-        # workflow 的 record-then-raise(PR #1743)会把真因经 classify_ai_error
-        # 落 task_tracking.error_code——吞成 None 会让它只看到合成 RuntimeError
+        # analyze_l1_workflow 的 tail except 会先 await record_ai_error_code(wf_id, e)
+        # (classify_ai_error 落 task_tracking.metadata.error_code),再
+        # record_workflow_failure + raise(PR #1743 route-C rule 4)——吞成 None
+        # 会让 workflow 只看到合成 RuntimeError,两个机制都够不着真因
         # (本次接线的动机,spec §1/§4 异常口径)。
 
     # ── Public API ────────────────────────────────────────────────────
