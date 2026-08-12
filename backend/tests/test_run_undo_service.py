@@ -384,9 +384,7 @@ async def test_shot_unexpected_failure_reason_internal_error():
     ("edited_after_run" is a lie there) — it reports as internal_error."""
     read_session = _CaptureSession(
         [
-            _FakeResult(
-                all_rows=[_shot_ledger_row(1, 900, "create", None, _FULL)]
-            ),
+            _FakeResult(all_rows=[_shot_ledger_row(1, 900, "create", None, _FULL)]),
             _FakeResult(all_rows=[]),  # no scenes touched
         ]
     )

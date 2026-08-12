@@ -282,8 +282,7 @@ class ScriptSceneRepository:
                 .order_by(ScriptOps.op_seq.asc())
             )
             return [
-                _parity(_orm_obj_to_dict(r, _OPS_N2A))
-                for r in result.scalars().all()
+                _parity(_orm_obj_to_dict(r, _OPS_N2A)) for r in result.scalars().all()
             ]
 
     # ------------------------------------------------------------------ #
