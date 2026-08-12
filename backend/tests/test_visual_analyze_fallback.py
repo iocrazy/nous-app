@@ -321,6 +321,8 @@ async def test_analyze_l1_builds_fallback_chain_with_given_models() -> None:
         primary_model=_ASSIGNED,
         fallback_models=["lite"],
         user_provider_config=svc._provider_config,
+        provider_key=svc._provider_key,
+        module="visual_analysis",
     )
     assert captured["runner_kwargs"]["adapter"] is chain_sentinel
 
@@ -364,6 +366,8 @@ async def test_analyze_l1_fallback_models_none_still_routes_through_chain() -> N
         primary_model=_ASSIGNED,
         fallback_models=[],
         user_provider_config=svc._provider_config,
+        provider_key=svc._provider_key,
+        module="visual_analysis",
     )
     assert result is not None
     assert result.category == "Other"

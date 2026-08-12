@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 
+import app.services.ai.llm.fallback_wiring as fw
 from app.db import session as db_session
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
@@ -101,6 +102,8 @@ async def test_summarize_builds_fallback_chain_with_given_models() -> None:
         primary_model=_ASSIGNED,
         fallback_models=["lite"],
         user_provider_config=svc._provider_config,
+        provider_key=svc._provider_key,
+        module="summarization",
     )
     assert captured["runner_kwargs"]["adapter"] is chain_sentinel
 
@@ -152,9 +155,101 @@ async def test_summarize_fallback_models_none_or_empty_still_routes_through_chai
             primary_model=_ASSIGNED,
             fallback_models=[],
             user_provider_config=svc._provider_config,
+            provider_key=svc._provider_key,
+            module="summarization",
         )
         assert result is not None
         assert result.summary == "s"
+
+
+# ---------------------------------------------------------------------------
+# 2b (final-review I3/⑤a): fake-adapter integration test through the REAL
+# build_fallback_llm — only resolve_mediahub_model (→ no platform-catalog
+# hit) and the adapter factory seam (get_adapter_for_user) are mocked, so
+# LLMFallbackChain + LLMRetryMiddleware run for real. A C1-shaped regression
+# (build_fallback_llm handing the flat provider_config straight to
+# get_adapter_for_user instead of wrapping it under a provider key) would
+# have made get_adapter_for_user's ``.get(provider_key, {})`` always find
+# empty credentials — this test would have caught that via the assertion on
+# the config it actually receives.
+# ---------------------------------------------------------------------------
+
+
+class _RateLimited(Exception):
+    status_code = 429
+
+
+class _FakeChatAdapter:
+    """Minimal OpenAI-chat-completions-shaped adapter stub."""
+
+    def __init__(self, model: str, *, should_fail: bool) -> None:
+        self.model = model
+        self.should_fail = should_fail
+
+    async def call(self, composed: Any, messages: list[dict]) -> dict:
+        if self.should_fail:
+            raise _RateLimited("rate limited")
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary":"ok","key_points":[],"topics":[]}'
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {},
+        }
+
+
+@pytest.mark.asyncio
+async def test_summarize_falls_back_on_429_through_real_build_fallback_llm() -> None:
+    primary = _ASSIGNED
+    fallback = "doubao-lite"
+    svc = SummarizeService(
+        provider_key="doubao",
+        provider_config={"model": primary, "api_key": "k1", "base_url": "http://h1/v1"},
+    )
+    composed = _composed(primary)
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    captured_scoped_configs: list[dict] = []
+
+    def _fake_get_adapter_for_user(model, user_provider_config, _settings):
+        captured_scoped_configs.append(dict(user_provider_config))
+        # C1 regression guard: pre-fix, build_fallback_llm passed the FLAT
+        # {"model","api_key","base_url"} config straight through — this
+        # assertion would fail against that shape (no "doubao" key at all).
+        assert "doubao" in user_provider_config
+        assert user_provider_config["doubao"]["api_key"] == "k1"
+        return _FakeChatAdapter(model, should_fail=(model == primary))
+
+    with (
+        patch(f"{_MOD}.PromptComposer", return_value=composer),
+        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=None)),
+        patch.object(
+            fw, "get_adapter_for_user", side_effect=_fake_get_adapter_for_user
+        ),
+        patch("asyncio.sleep", AsyncMock(return_value=None)),
+    ):
+        result = await svc.summarize(
+            transcript="hello world",
+            user_id=None,
+            parsed_media_id=1,
+            title="T",
+            fallback_models=[fallback],
+        )
+
+    assert result is not None
+    assert result.summary == "ok"
+    # I3(c)/I2: the model that actually served the response is the
+    # FALLBACK, not the primary that 429'd — run_summarize_agent threads
+    # this into resource_summaries.llm_model instead of always the primary.
+    assert result.llm_model == fallback
+    # Exactly one adapter build per model attempted (primary, then fallback)
+    # — retries reuse the same adapter instance, they don't rebuild it.
+    assert len(captured_scoped_configs) == 2
 
 
 # ---------------------------------------------------------------------------

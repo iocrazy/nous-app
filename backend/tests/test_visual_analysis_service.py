@@ -409,4 +409,6 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
         primary_model="doubao-seed-2-0-pro-260215",
         fallback_models=[],
         user_provider_config=svc._provider_config,
+        provider_key=svc._provider_key,
+        module="visual_analysis",
     )
