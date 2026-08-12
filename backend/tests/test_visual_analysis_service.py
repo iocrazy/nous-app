@@ -114,7 +114,10 @@ async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
             "app.services.ai.visual.visual_analysis_service.AgentRunner",
             return_value=runner,
         ),
-        patch.object(svc, "_build_adapter", return_value=MagicMock()),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -182,7 +185,10 @@ async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
             "app.services.ai.visual.visual_analysis_service.AgentRunner",
             return_value=runner,
         ),
-        patch.object(svc, "_build_adapter", return_value=MagicMock()),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -271,7 +277,10 @@ async def test_run_composes_the_constructor_agent_slug() -> None:
             "app.services.ai.visual.visual_analysis_service.AgentRunner",
             return_value=runner,
         ),
-        patch.object(svc, "_build_adapter", return_value=MagicMock()),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -336,8 +345,16 @@ def test_build_adapter_empty_config_falls_back_to_generic_compat() -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
-    """End-to-end: L1 call with BYO config → runner gets an adapter
-    built from user_cfg, not from global settings."""
+    """End-to-end: L1 call with BYO config → the fallback chain is built
+    from the resolved (composed) model and the user's BYO config, not from
+    global settings.
+
+    Post-fallback-chain wiring (spec 2026-08-11-batch-llm-fallback §4): the
+    adapter is now built by ``build_fallback_llm`` rather than
+    ``svc._build_adapter`` directly — the capture point moves to
+    ``build_fallback_llm``'s ``primary_model`` / ``user_provider_config``
+    kwargs.
+    """
     svc = VisualAnalysisService(
         provider_key="doubao",
         provider_config={
@@ -361,7 +378,7 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
         }
     )
 
-    build_adapter_spy = MagicMock(return_value=MagicMock())
+    build_mock = AsyncMock(return_value=MagicMock())
 
     with (
         patch.object(
@@ -375,7 +392,10 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
             "app.services.ai.visual.visual_analysis_service.AgentRunner",
             return_value=runner,
         ),
-        patch.object(svc, "_build_adapter", build_adapter_spy),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=build_mock,
+        ),
         patch(
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
@@ -383,5 +403,10 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
     ):
         await svc.analyze_l1("https://example.com/cover.jpg")
 
-    # _build_adapter was called with the resolved model from composed
-    build_adapter_spy.assert_called_once_with("doubao-seed-2-0-pro-260215")
+    # build_fallback_llm was built for the resolved model from composed,
+    # with the service's BYO provider config.
+    build_mock.assert_awaited_once_with(
+        primary_model="doubao-seed-2-0-pro-260215",
+        fallback_models=[],
+        user_provider_config=svc._provider_config,
+    )

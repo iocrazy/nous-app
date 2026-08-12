@@ -121,6 +121,12 @@ async def test_visual_analysis_honors_assigned_model() -> None:
     is the user's model. That composed model must drive the adapter, NOT the
     ``self.model = provider_config["model"] or "gpt-4o"`` cost-estimate field.
     Locks in the second-half fix of the historical visual-analysis bug.
+
+    Post-fallback-chain wiring (spec §4): the adapter is now built by
+    ``build_fallback_llm`` rather than ``svc._build_adapter`` directly — the
+    seam this test pins moves to ``build_fallback_llm``'s ``primary_model``
+    kwarg, but the guarantee (assigned model reaches the wire, not the
+    "gpt-4o" cost-estimate field) is unchanged.
     """
     svc = VisualAnalysisService(
         agent_slug="analyze",
@@ -145,8 +151,8 @@ async def test_visual_analysis_honors_assigned_model() -> None:
 
     captured: dict = {}
 
-    def _capture_build(model):
-        captured["adapter_model"] = model
+    async def _capture_build(*, primary_model, **_kw):
+        captured["adapter_model"] = primary_model
         return MagicMock()
 
     with (
@@ -165,7 +171,10 @@ async def test_visual_analysis_honors_assigned_model() -> None:
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
         ),
-        patch.object(svc, "_build_adapter", side_effect=_capture_build),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            side_effect=_capture_build,
+        ),
     ):
         await svc.analyze_l1("https://example.com/cover.jpg")
 

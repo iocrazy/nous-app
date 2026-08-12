@@ -47,31 +47,36 @@ def _analyze_resource_lookup_stmt(media_id: int, user_id: Optional[str]):
 
 @DBOS.step()
 async def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
-    """Resolve provider key + config + model name. Mirrors
+    """Resolve provider key + config + model name + fallback models. Mirrors
     analysis_tasks._resolve_analyze_provider_config.
 
     §2.4b: async-native — awaits the (now async) helper directly on the
     workflow's event loop instead of bridging the repo reads through a
-    fresh-loop run_async shim (ORM-incompatible)."""
+    fresh-loop run_async shim (ORM-incompatible).
+
+    Calls ``resolve_task_ai_config`` directly instead of the tuple-shim
+    ``resolve_analyze_provider_config`` (which discards ``fallback_models``
+    down to 4 positional fields) so the typed ``ResolvedAIConfig.fallback_models``
+    rides along into the step's return dict, threaded to ``call_analyze_l1`` ->
+    ``VisualAnalysisService`` (spec 2026-08-11-batch-llm-fallback §4)."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_analyze_provider_config,
+        DEFAULT_ANALYZE_AGENT_SLUG,
+        resolve_task_ai_config,
     )
 
-    (
-        provider_key,
-        provider_config,
-        agent_model,
-        agent_slug,
-    ) = await resolve_analyze_provider_config(user_id)
+    cfg = await resolve_task_ai_config(
+        user_id, "visual_analysis", DEFAULT_ANALYZE_AGENT_SLUG
+    )
     return {
-        "provider_key": provider_key,
-        "provider_config": provider_config or {},
-        "agent_model": agent_model,
-        "agent_slug": agent_slug,
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config or {},
+        "agent_model": cfg.model,
+        "agent_slug": cfg.agent_slug,
+        "fallback_models": list(cfg.fallback_models),
     }
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step(retries_allowed=True, max_attempts=1)
 async def call_analyze_l1(
     media_id: int,
     cover_url: str,
@@ -83,6 +88,7 @@ async def call_analyze_l1(
     agent_model: Optional[str],
     agent_slug: str = "analyze",
     wf_id: Optional[str] = None,
+    fallback_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run the multimodal analysis + persist results. Returns a digest dict.
 
@@ -184,6 +190,7 @@ async def call_analyze_l1(
         # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
         # this workflow's task_tracking row.
         task_id=wf_id,
+        fallback_models=fallback_models,
     )
     if not result:
         # Mark the resource failed so the UI's existing 'failed' branch (retry
@@ -317,6 +324,7 @@ async def analyze_l1_workflow(
             agent_model=cfg["agent_model"],
             agent_slug=cfg.get("agent_slug") or "analyze",
             wf_id=wf_id,
+            fallback_models=cfg.get("fallback_models") or [],
         )
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
