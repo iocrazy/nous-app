@@ -40,7 +40,8 @@ class CanvasResponse(BaseModel):
     id: str = Field(..., description="Snowflake bigint, serialized as string")
     project_id: str = Field(..., description="Snowflake bigint, serialized as string")
     episode_id: Optional[str] = Field(
-        None, description="Snowflake bigint, serialized as string; set only for kind='storyboard'"
+        None,
+        description="Snowflake bigint, serialized as string; set only for kind='storyboard'",
     )
     name: str
     kind: CanvasKind

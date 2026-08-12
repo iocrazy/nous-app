@@ -134,7 +134,9 @@ def _deny_write_gate(monkeypatch):
     from fastapi import HTTPException
 
     async def _fake(*, project_id, auth):
-        raise HTTPException(status_code=403, detail="You do not have access to this project")
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this project"
+        )
 
     monkeypatch.setattr(canvases_router, "verify_project_write_access", _fake)
 
@@ -143,7 +145,9 @@ def _deny_read_gate(monkeypatch):
     from fastapi import HTTPException
 
     async def _fake(*, project_id, auth):
-        raise HTTPException(status_code=403, detail="You do not have access to this project")
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this project"
+        )
 
     monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
 
@@ -278,9 +282,7 @@ async def test_name_falls_back_to_title_when_episode_not_in_its_own_project_list
 async def test_unknown_episode_404(client, monkeypatch):
     _stub_episode_repo(monkeypatch, None)
 
-    resp = await client.get(
-        "/api/v1/canvases/storyboard?episode_id=999999999999999999"
-    )
+    resp = await client.get("/api/v1/canvases/storyboard?episode_id=999999999999999999")
 
     assert resp.status_code == 404
     assert resp.json()["details"]["code"] == "episode_not_found"
@@ -351,9 +353,7 @@ async def test_missing_storyboard_still_denied_by_write_gate(client, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_storyboard_route_not_captured_by_canvas_id_catchall(
-    client, monkeypatch
-):
+async def test_storyboard_route_not_captured_by_canvas_id_catchall(client, monkeypatch):
     """If route registration order regressed (this route moved below
     ``/canvases/{canvas_id}``), FastAPI would match 'storyboard' as a
     canvas_id and dispatch to ``get_canvas`` instead — which never calls

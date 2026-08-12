@@ -58,9 +58,7 @@ async def verify_scope_access(
 _PROJECT_WRITE_ROLES = ("manager", "editor")
 
 
-async def _check_project_access(
-    project_id: str, user_id: str, *, write: bool
-) -> None:
+async def _check_project_access(project_id: str, user_id: str, *, write: bool) -> None:
     """Shared body for the project read/write guards.
 
     Access: owner, or member of the project's team, or a row in
@@ -155,9 +153,7 @@ async def verify_project_read_access(
 # ============================================================================
 
 
-async def _assert_script_access(
-    script_id: str, user_id: str, *, write: bool
-) -> None:
+async def _assert_script_access(script_id: str, user_id: str, *, write: bool) -> None:
     """Shared body: load ``script_projects`` by id (404 if missing), then
     require either team membership or — for read-only callers — an explicit
     ``project_members`` row on the parent project. Raises HTTPException on
@@ -291,9 +287,7 @@ async def verify_scene_read_access(
     scene = await get_script_scene_repository().get_by_id(scene_id)
     if not scene:
         raise HTTPException(status_code=404, detail="Scene not found")
-    await _assert_script_access(
-        str(scene.get("script_id")), auth.user_id, write=False
-    )
+    await _assert_script_access(str(scene.get("script_id")), auth.user_id, write=False)
 
 
 async def verify_shot_access(
