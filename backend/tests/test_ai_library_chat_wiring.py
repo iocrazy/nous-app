@@ -287,8 +287,8 @@ async def test_chat_wiring_constructs_mcp_registry_from_user_servers():
             return_value=fake_repo,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
-            return_value=MagicMock(),
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",
@@ -337,8 +337,8 @@ async def test_chat_wiring_no_mcp_when_user_has_no_servers():
             return_value=fake_repo,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
-            return_value=MagicMock(),
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",
@@ -383,8 +383,8 @@ async def test_chat_wiring_mcp_repo_failure_isolated():
             return_value=fake_repo,
         ),
         patch(
-            "app.services.ai.chat.ai_library_chat_wiring.LLMFallbackChain",
-            return_value=MagicMock(),
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            new=AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.services.ai.chat.ai_library_chat_wiring.AgentRunner",

@@ -54,11 +54,9 @@ async def test_health_registry_absent_is_none_and_deadline_from_env(monkeypatch)
             primary_model="m1", fallback_models=[], user_provider_config={}
         )
     assert chain.total_deadline_seconds == 45.0
-    # app.state 不可用时 health_registry 必须是 None(best-effort),不许抛
-    assert (
-        chain.health_registry is None or chain.health_registry is not None
-    )  # 不抛即过,值断言见下一行注释
-    # (在测试进程里 app.main 可能可导入,两种值都合法;核心断言是"构造不抛")
+    # best-effort app.state lookup (app.main may or may not be importable in
+    # this test process) — the only real assertion is that construction
+    # doesn't raise either way; no value-level claim to make here.
 
 
 @pytest.mark.asyncio

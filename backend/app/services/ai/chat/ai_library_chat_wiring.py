@@ -32,13 +32,14 @@ from uuid import UUID
 from app.core.config import settings
 from app.repositories.agent_memory_repository import get_user_team_ids
 
-# Not called directly here anymore (construction moved to
-# app.services.ai.llm.fallback_wiring.build_fallback_llm) — kept as a
-# module-level name because legacy tests patch
-# ``ai_library_chat_wiring.LLMFallbackChain`` to short-circuit the real
-# fallback-chain construction; removing the import would AttributeError
-# those patches instead of leaving them a (now inert) no-op.
-from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain  # noqa: F401
+# Fallback-chain construction moved to
+# app.services.ai.llm.fallback_wiring.build_fallback_llm — no local
+# LLMFallbackChain reference remains here. Legacy tests that patched
+# ``ai_library_chat_wiring.LLMFallbackChain`` (inert even before this
+# removal — the class is constructed inside fallback_wiring's own
+# already-bound import, so patching it here never touched that call) were
+# repointed to patch ``fallback_wiring.build_fallback_llm`` directly
+# (final-review cleanup, 2026-08-11).
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.agent_memory import recall
 from app.services.ai.runner.agent_runner import AgentRunner
