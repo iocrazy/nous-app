@@ -1,21 +1,18 @@
 // e2e/helpers/realShapes.ts
 //
-// Boundary-mock factories for scene/shot/canvas backend rows — REAL wire
-// shape, not the frontend-normalized shape the app's services hand to React
-// components.
+// Boundary-mock factories for scene/shot/canvas backend rows.
 //
 // Event background (2026-08-12 production incident): a canvas self-heal
 // regression shipped because `shot_id`/`scene_id` was treated as a STRING
 // in one code path (the reconcile index, built off `Shot.id: string`) and a
 // NUMBER in another (the actual `listShots`/`listScenes` HTTP response
-// bodies — the shots/scenes REST routers return raw ORM dicts with no
-// `str()` coercion; only `editor/sceneService.ts`'s `toShotDto`/`toSceneDoc`
-// stringify at the frontend boundary via `String(row.id)`). The two never
-// diverged in tests because EVERY hand-written fixture in the repo used
-// idealized string ids (`'shot1'`, `'200'`) — no fixture ever exercised the
-// numeric-JSON branch, so the mismatch shipped silently until it hit
-// production canvases with real bigint rows (102 duplicated nodes for 6
-// real shots — see e2e/canvas-dup-selfheal.spec.ts and
+// bodies — at the time, the shots/scenes REST routers returned raw ORM
+// dicts with no `str()` coercion). The two never diverged in tests because
+// EVERY hand-written fixture in the repo used idealized string ids
+// (`'shot1'`, `'200'`) — no fixture ever exercised the numeric-JSON branch,
+// so the mismatch shipped silently until it hit production canvases with
+// real bigint rows (102 duplicated nodes for 6 real shots — see
+// e2e/canvas-dup-selfheal.spec.ts and
 // features/canvas-core/ui/CanvasPage.remountDedupe.test.tsx for the full
 // regression writeup).
 //
@@ -32,15 +29,41 @@
 // response body → real wire shape (this file); normalized service return
 // value → the service's own documented contract.
 //
-// Verified against backend source (2026-08-11):
-//   - scenes REST router (`script_scenes_router.py`) and shots REST router
-//     (`script_shots_router.py`) return repository dicts with NO id
-//     stringification — `id` / `scene_id` (FK) are native JSON *numbers*.
-//   - canvases REST router (`canvases_router.py`) explicitly does
-//     `out["id"] = str(out["id"])` (and project_id/episode_id/created_by) —
-//     canvas rows ARE stringified. `realCanvasRow` below reflects that
-//     asymmetry; don't "fix" it to match scenes/shots — they're genuinely
-//     different on the wire.
+// ⚠️ UPDATE (2026-08-12, #1809): the incident's backend source fix landed —
+// `script_scenes_router.py` / `script_shots_router.py` now stringify `id` /
+// `scene_id` (FK) (and scenes' `script_id` / `chapter_id`) at the RESPONSE
+// boundary (a `_to_response` normalizer added in the router layer; the
+// repositories' `_row()`/`_parity()` still deliberately keep bigints native
+// int internally — only the outgoing JSON changed). So as of #1809,
+// `GET /api/v1/scenes/{id}/shots` and `GET /api/v1/scripts/{id}/scenes`
+// really do return STRING ids in production — `realSceneRow`/`realShotRow`
+// below, which still produce NUMBER ids, are no longer "the current real
+// shape of these two specific endpoints". They're kept (not deleted) for
+// two other reasons that are still exactly this real:
+//
+//   1. **Frontend resilience regression coverage.** `readId()`
+//      (`features/canvas-core/smart/shotSync.ts`) was hardened to accept
+//      EITHER a string or a number and normalize to string — the fix for
+//      the type-mismatch itself, independent of which shape the backend
+//      happens to emit today. These number-shaped fixtures are the tests
+//      that pin `readId`'s dual-format tolerance so a FUTURE backend
+//      regression (or a not-yet-migrated endpoint, see 2) can't silently
+//      reopen the same class of bug undetected.
+//   2. **Every other same-pattern router that HASN'T been migrated yet.**
+//      #1809's own PR body lists ~24 other router files matching the same
+//      "repository keeps bigint ids native int + router passes them through
+//      unstringified" pattern (episodes, canvases, notifications, teams,
+//      projects, beats, script versions/commits, tags, ai-library, …) —
+//      none of those got fixed by #1809, so a fixture standing in for ANY
+//      of those endpoints' current real response, or for scenes/shots rows
+//      fetched by code that hasn't been redeployed past #1809 yet, still
+//      legitimately needs a number-shaped id today.
+//
+// Bottom line: don't read "shots/scenes id" as one fixed shape anymore —
+// read it as "what does THIS specific router version emit right now",
+// which is exactly why CLAUDE.md's rule is to verify against source, not
+// memory. `realCanvasRow` below was never affected by #1809 (canvases were
+// already stringified before it) and is unrelated to this update.
 //
 // ID magnitude note: Snowflake bigints can in principle exceed
 // Number.MAX_SAFE_INTEGER (2^53-1 = 9_007_199_254_740_991), which JSON
@@ -82,13 +105,20 @@ export interface RealSceneRowOptions {
 }
 
 /**
- * A single scene row shaped exactly like `script_scenes_router.py`'s real
- * response: `id`, `script_id` and `chapter_id` are all JSON numbers, never
- * strings — `script_scene_repository.py`'s `_parity()` only stringifies
- * `uuid.UUID` and `datetime`/`date` fields; bigint ids/FKs stay native int
- * on read (its own in-file comment: "Ids/FKs stay native int on read (5.3
- * trap)"). Default id (208443000000100) matches the Snowflake range the
- * 2026-08-12 incident's production canvas actually carried.
+ * A scene row with `id` / `script_id` / `chapter_id` as JSON NUMBERS.
+ *
+ * ⚠️ As of #1809 (2026-08-12), `script_scenes_router.py`'s real response
+ * stringifies these fields — this factory's number shape is no longer
+ * "what `GET /api/v1/scripts/{id}/scenes` currently returns". It's kept
+ * for two other still-real purposes (see the file header): pinning the
+ * frontend's `readId()` dual-format resilience, and standing in for the
+ * ~24 other same-pattern routers #1809 didn't touch (or for a scenes
+ * response from a backend build that predates #1809). If you need today's
+ * ACTUAL scenes-endpoint response shape, stringify these fields yourself
+ * at the call site — the underlying repository (`script_scene_repository.py`
+ * `_parity()`) still keeps bigints native int internally; only the router's
+ * outgoing JSON changed. Default id (208443000000100) matches the Snowflake
+ * range the 2026-08-12 incident's production canvas actually carried.
  */
 export function realSceneRow(opts: RealSceneRowOptions = {}): RealSceneRow {
   return {
@@ -140,10 +170,16 @@ export interface RealShotRowOptions {
 }
 
 /**
- * A single shot row shaped exactly like `script_shots_router.py`'s real
- * response: `id` AND `scene_id` (the FK) are JSON numbers — this is the
- * specific field the 2026-08-12 incident's reconcile index mis-typed as a
- * string. Default ids (208443000000001 / 208443000000100) match the same
+ * A shot row with `id` AND `scene_id` (the FK) as JSON NUMBERS — this is
+ * the specific field the 2026-08-12 incident's reconcile index mis-typed
+ * as a string.
+ *
+ * ⚠️ As of #1809 (2026-08-12), `script_shots_router.py`'s real response
+ * stringifies both fields — same caveat as {@link realSceneRow}: this
+ * factory's number shape is intentionally retained for `readId()`
+ * dual-format resilience coverage and for the ~24 still-unmigrated
+ * same-pattern routers, not because it's today's actual shots-endpoint
+ * response. Default ids (208443000000001 / 208443000000100) match the same
  * production Snowflake range as {@link realSceneRow}'s default.
  */
 export function realShotRow(opts: RealShotRowOptions = {}): RealShotRow {

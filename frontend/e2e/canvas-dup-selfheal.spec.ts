@@ -8,8 +8,12 @@
 //      (102 nodes for 6 shots in the real row). React Flow keeps duplicated
 //      ids permanently `visibility:hidden` → the user-reported BLANK canvas
 //      (zoom controls only, no nodes).
-//   2. `listShots` rows carry bigint ids as JSON *numbers* — the shots REST
-//      router does not stringify them the way the canvases router does.
+//   2. `listShots` rows carry bigint ids as JSON *numbers* — at the time of
+//      the bug, the shots REST router did not stringify them the way the
+//      canvases router does. (#1809, 2026-08-12, closed that specific gap
+//      server-side; this fixture keeps the number shape deliberately — see
+//      e2e/helpers/realShapes.ts's file header for why it's still a real
+//      regression-coverage shape, not stale after #1809.)
 // The fixed build must: render the shot nodes VISIBLY (self-heal on load),
 // reconcile without re-adding, and persist a healed row with exactly one
 // node per shot.
