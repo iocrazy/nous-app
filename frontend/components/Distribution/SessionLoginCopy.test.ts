@@ -66,6 +66,11 @@ describe('session login copy maps', () => {
           'waiting_scan',
           'scanned',
           'qrcode_expired',
+          // The platform's own identity check. Its copy has to exist in both
+          // locales like every other status — and it is the one state whose
+          // wording is load-bearing rather than cosmetic: it is what stops the
+          // UI promising a code that has not been asked for yet.
+          'identity_challenge',
           'sms_required',
           'success',
           'timeout',

@@ -98,6 +98,14 @@ class SessionStatus(str, Enum):
     WAITING_SCAN = "waiting_scan"
     SCANNED = "scanned"
     QRCODE_EXPIRED = "qrcode_expired"
+    # 平台在扫码之后插了一屏「身份验证」，还在等我们选验证方式 —— **此刻一条
+    # 短信都还没发出去**。它跟 ``sms_required`` 分开正是因为两者授权的用户文案
+    # 相反：后者的意思是"把收到的码填进来"，而在选择页上这么说，用户就会对着
+    # 一个从未被请求过的验证码干等到 TTL 用完（2026-08-11 实测）。
+    #
+    # ⚠️ 少了这个值不会报错，只会让轮询循环走进 "unhandled login status" 分支
+    # 直接判死（§7.8 两侧枚举必须对齐的那条，这里是活的例子）。
+    IDENTITY_CHALLENGE = "identity_challenge"
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"
@@ -208,6 +216,7 @@ LOGIN_STATUSES = frozenset(
         SessionStatus.WAITING_SCAN.value,
         SessionStatus.SCANNED.value,
         SessionStatus.QRCODE_EXPIRED.value,
+        SessionStatus.IDENTITY_CHALLENGE.value,
         SessionStatus.SMS_REQUIRED.value,
         SessionStatus.SUCCESS.value,
         SessionStatus.TIMEOUT.value,
@@ -219,11 +228,15 @@ LOGIN_STATUSES = frozenset(
 # 登录流程里"还在进行中"的状态 —— 轮询循环见到它们要继续等。
 # qrcode_expired 也在其中：浏览器侧**已经自动点了刷新**并在同一响应里带回新码
 # (spec §7.8)，所以它是一次画面更新，不是终点。
+# identity_challenge 同理：浏览器侧**已经自己点了**「接收短信验证码」并在同一
+# 响应里带回点完之后的状态，所以它也是一次画面更新，不是终点。它停在这个状态
+# 只意味着"选择页还在"，浏览器侧有自己的重试上界，超了会翻成 failed。
 LOGIN_PENDING_STATUSES = frozenset(
     {
         SessionStatus.WAITING_SCAN.value,
         SessionStatus.SCANNED.value,
         SessionStatus.QRCODE_EXPIRED.value,
+        SessionStatus.IDENTITY_CHALLENGE.value,
         SessionStatus.SMS_REQUIRED.value,
     }
 )

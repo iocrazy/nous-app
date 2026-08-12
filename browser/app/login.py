@@ -22,6 +22,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .browser_runtime import apply_stealth, build_launch_kwargs
 from .config import get_settings
 from .dom import (
+    click_element,
     first_text,
     first_visible_attribute,
     is_selector_visible,
@@ -43,6 +44,12 @@ class LoginPageSnapshot:
     scanned_texts: tuple[str, ...] = ()
     # Visible markers meaning "this QR code is dead".
     expired_texts: tuple[str, ...] = ()
+    # Visible captions of the platform's identity-verification chooser — the
+    # step that asks *how* to verify before anything is sent anywhere. Carried
+    # as the matched texts rather than a bool so the judge can say which options
+    # were on offer: "only 发送短信验证 was there" is the difference between a
+    # broken selector and a platform that never offered the path we drive.
+    identity_challenge_texts: tuple[str, ...] = ()
     sms_input_visible: bool = False
     qrcode_visible: bool = False
 
@@ -151,6 +158,30 @@ class LoginFlowSpec:
     # passed on purpose: identity comes from `identity_cookie` and nowhere else,
     # and any `platform_user_id` this returns is discarded.
     parse_profile: Callable[[Mapping[str, str]], LoginProfile]
+    # --- identity challenge (2026-08-11) ---------------------------------
+    #
+    # Some accounts get an extra screen between "scanned" and "signed in": the
+    # platform asks how it should verify the person. Three tuples, and the split
+    # is the point — one says *we are on that screen*, one says *which option
+    # gets us a text message*, one says *which button actually sends it*.
+    #
+    # All three are matched with `exact=True`. This repo has been burned twice
+    # by generous matching voting on the wrong control (「允许」⊂「不允许」,
+    # 「重新上传」⊂「清空并重新上传」), and here the wrong control is a
+    # different verification flow entirely — 发送短信验证 makes the *user* text
+    # the platform, which no automated login can complete.
+    #
+    # Empty tuples = this platform has no such screen modelled, and the flow
+    # behaves exactly as it did before. Every platform but Douyin is in that
+    # state today; none of them is worse off than before it existed.
+    identity_challenge_markers: tuple[str, ...] = ()
+    # Priority order. Clicked at most once per login.
+    sms_challenge_option_texts: tuple[str, ...] = ()
+    # The "send me the code" button on the screen *after* the chooser (and on
+    # any code screen reached without one). Listed as complete captions rather
+    # than a prefix so that 重新获取验证码 is covered without a substring match
+    # that could also land on an unrelated control.
+    sms_request_texts: tuple[str, ...] = ()
     # field name -> selector candidates, read as text.
     profile_text_selectors: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # field name -> (selector candidates, attribute name).
@@ -189,6 +220,15 @@ class LoginDriver:
             login_texts=tuple(await visible_marker_texts(page, spec.login_markers)),
             scanned_texts=tuple(await visible_marker_texts(page, spec.scanned_markers)),
             expired_texts=tuple(await visible_marker_texts(page, spec.expired_markers)),
+            # `exact=True`, unlike the three above. Those decide "are we still
+            # logged out", where a miss is the dangerous direction; this one
+            # decides which of two verification flows to *click*, where a
+            # generous match is the dangerous direction (see the spec fields).
+            identity_challenge_texts=tuple(
+                await visible_marker_texts(
+                    page, spec.identity_challenge_markers, exact=True
+                )
+            ),
             sms_input_visible=await _any_selector_visible(page, spec.sms_input_selectors),
             qrcode_visible=await _any_selector_visible(page, spec.qrcode_selectors),
         )
@@ -239,6 +279,61 @@ class LoginDriver:
         if not clicked:
             return None
         return await self.read_qrcode()
+
+    async def choose_sms_challenge(self) -> str | None:
+        """Pick "receive an SMS" on the identity-verification chooser.
+
+        Returns the caption that was clicked, or None when nothing matched.
+        None is a **finding**, not a shrug: the caller turns a run of them into
+        a typed failure, because the alternative — sitting on the chooser
+        without answering it — is the exact shape of the bug this exists to
+        fix (nobody clicks, so the platform never sends, so the user waits out
+        the TTL for a code that was never requested).
+
+        Only the platform's `sms_challenge_option_texts` are clicked, matched
+        exactly. The other card on that screen (`发送短信验证`) reverses the
+        direction — the *user* texts the platform from their own phone — and
+        an automated login has no way to complete it, so clicking it by
+        accident would be worse than clicking nothing.
+        """
+        return await self._click_exact_text(self._spec.sms_challenge_option_texts)
+
+    async def request_sms_code(self) -> str | None:
+        """Click the platform's own "send me the code" button, if it is there.
+
+        Separate from `choose_sms_challenge` because it is a *second* screen,
+        not a second selector for the same one: the chooser hands over to a
+        form that (on the reference implementation's evidence, and on this
+        platform) sends nothing until 获取验证码 is pressed. Whichever of the
+        two anchors is on screen gets clicked; neither being present is a
+        legitimate state (some flows send on their own), so this returns None
+        rather than failing.
+        """
+        return await self._click_exact_text(self._spec.sms_request_texts)
+
+    async def _click_exact_text(self, texts: Sequence[str]) -> str | None:
+        """First visible exact-text match, clicked. Returns which caption.
+
+        `exact=True` is not optional here and not a style choice: these
+        captions are clicked, and Playwright's substring mode also matches
+        every *ancestor* containing the text — `.first` on a generous match
+        can be the page body.
+        """
+        if not texts:
+            return None
+        timeout = get_settings().login_click_timeout_ms
+        for text in texts:
+            try:
+                locator = self._page.get_by_text(text, exact=True).first
+                if not await locator.count() or not await locator.is_visible():
+                    continue
+            except Exception:
+                # A locator racing a re-render is not evidence of absence; the
+                # next poll looks again.
+                continue
+            if await click_element(locator, timeout):
+                return text
+        return None
 
     async def submit_sms_code(self, code: str) -> bool:
         """Type the code and submit. False = no input to type into."""

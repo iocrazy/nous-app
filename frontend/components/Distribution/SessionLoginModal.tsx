@@ -71,6 +71,20 @@ const RETRYABLE: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
  */
 const IDENTITY_UNRESOLVED = 'identity_unresolved';
 
+/**
+ * `detail.reason` for the two ways the platform's identity check can end
+ * without a code ever being requested (`browser/app/login_sessions.py`).
+ *
+ * Both arrive as a plain `status: 'failed'`, so without a branch they read as
+ * "the platform refused the sign-in — check whether the account is
+ * restricted", which is wrong in a way that costs the user real time: the
+ * account is fine, and the actual finding is that the verification screen did
+ * not offer (or did not respond to) the one option an unattended login can
+ * complete.
+ */
+const IDENTITY_CHALLENGE_UNCLICKABLE = 'identity_challenge_unclickable';
+const IDENTITY_CHALLENGE_STALLED = 'identity_challenge_stalled';
+
 /** An i18n key with the English it falls back to. */
 type Copy = [key: string, fallback: string];
 
@@ -121,6 +135,10 @@ export const SERVER_DETAIL_COPY: Record<SessionLoginStatus, Copy> = {
   qrcode_expired: [
     'distribution.session.qrcodeExpiredDetail',
     'The platform marked this code as expired, so a fresh one was requested.',
+  ],
+  identity_challenge: [
+    'distribution.session.identityChallengeDetail',
+    'The platform is showing its identity-verification step — no code has been sent yet.',
   ],
   sms_required: [
     'distribution.session.smsRequiredDetail',
@@ -182,6 +200,12 @@ export const SMS_SUBMIT_COPY: Record<SessionLoginStatus, Copy> = {
     'distribution.session.smsQrExpired',
     'The QR code expired before the code was accepted — get a new one and scan again.',
   ],
+  // The page went *back* to the verification chooser. Nothing is wrong with
+  // the digits; the step they belonged to is no longer the step on screen.
+  identity_challenge: [
+    'distribution.session.smsIdentityChallenge',
+    'The platform went back to its identity check — wait for the code step to come back before entering a code.',
+  ],
   timeout: [
     'distribution.session.smsSessionEnded',
     'This sign-in ended before the code could be used — get a new code and start over.',
@@ -206,6 +230,7 @@ const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   waiting_scan: 'info',
   scanned: 'info',
   qrcode_expired: 'warn',
+  identity_challenge: 'info',
   sms_required: 'warn',
   success: 'ok',
   timeout: 'warn',
@@ -511,6 +536,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     waiting_scan: t('distribution.session.waitingScanLabel', 'Waiting for the scan'),
     scanned: t('distribution.session.scannedLabel', 'Scanned — confirm on your phone'),
     qrcode_expired: t('distribution.session.qrcodeExpiredLabel', 'QR code expired'),
+    identity_challenge: t('distribution.session.identityChallengeLabel', 'Identity verification'),
     sms_required: t('distribution.session.smsRequiredLabel', 'SMS verification required'),
     success: t('distribution.session.successLabel', 'Account linked'),
     timeout: t('distribution.session.timeoutLabel', 'Sign-in timed out'),
@@ -527,7 +553,11 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     waiting_scan: t('distribution.session.waitingScanHint', 'Open the app on your phone and scan the code to link this account.'),
     scanned: t('distribution.session.scannedHint', 'Tap Confirm in the app to finish signing in.'),
     qrcode_expired: t('distribution.session.qrcodeExpiredHint', 'Codes are short-lived. A fresh one is being fetched — or request it now.'),
-    sms_required: t('distribution.session.smsRequiredHint', 'The platform sent a code to the phone number on this account. Enter it to continue.'),
+    identity_challenge: t('distribution.session.identityChallengeHint', 'The platform wants to confirm it is really you. Choosing "Receive SMS code" for you — nothing has been sent to your phone yet.'),
+    // The default is deliberately the one that promises nothing. See
+    // `smsRequestedHint` below for the case where we know a code was asked
+    // for; claiming it unconditionally is the bug this replaces.
+    sms_required: t('distribution.session.smsRequiredHint', 'The platform is asking for a verification code for this account. Enter the code it is showing you how to get.'),
     success: t('distribution.session.successHint', 'This account can now publish unattended.'),
     timeout: t('distribution.session.timeoutHint', 'Nobody scanned the code in time. Nothing was changed — start over when you are ready.'),
     failed: t('distribution.session.failedHint', 'The platform refused the sign-in. Try again, and check whether the account is restricted.'),
@@ -566,15 +596,52 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const identityUnresolved = !infraKind
     && status === 'failed'
     && failureDetail?.reason === IDENTITY_UNRESOLVED;
+  // The platform ran its identity check and the flow could not get through it:
+  // either the "receive an SMS" option was not on that screen at all (some
+  // accounts are only offered the reverse flow, where the human texts the
+  // platform), or it was selected and the screen never moved. Either way **no
+  // code was sent**, so the one thing the user must not be told is to wait for
+  // one — which is exactly what the generic `failed` copy implies once they
+  // have already seen the verification screen.
+  const identityChallengeFailed = !infraKind
+    && status === 'failed'
+    && (failureDetail?.reason === IDENTITY_CHALLENGE_UNCLICKABLE
+      || failureDetail?.reason === IDENTITY_CHALLENGE_STALLED);
+  // Whether a code has actually been requested on the user's behalf. Comes
+  // from the browser service latching its own landed click — never inferred
+  // from "there is a code field on screen", which is what made the old copy
+  // lie (the identity chooser renders one too, and the platform sends nothing
+  // until a card is clicked).
+  const codeRequested = status === 'sms_required' && login?.detail?.code_requested === true;
 
   let label = STATUS_LABEL[status];
   let hint = STATUS_HINT[status];
+  if (codeRequested) {
+    hint = t(
+      'distribution.session.smsRequestedHint',
+      'We asked the platform to text a code to the phone number on this account. Enter it to continue.',
+    );
+  }
   if (infraKind) {
     label = t('distribution.session.infraLabel', 'Service temporarily unavailable');
     hint = t(
       'distribution.session.failedInfraHint',
       'This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at.',
     );
+  } else if (identityChallengeFailed) {
+    label = t(
+      'distribution.session.identityChallengeFailedLabel',
+      'Identity verification could not be completed',
+    );
+    hint = failureDetail?.reason === IDENTITY_CHALLENGE_STALLED
+      ? t(
+        'distribution.session.identityChallengeStalledHint',
+        'We selected "Receive SMS code" but the platform stayed on its verification screen, so no code was sent. Get a new code and scan again.',
+      )
+      : t(
+        'distribution.session.identityChallengeUnclickableHint',
+        'The platform asked to verify your identity and did not offer an option we can complete automatically, so no code was sent. Get a new code and scan again, or sign in to this account on your phone first.',
+      );
   } else if (identityUnresolved) {
     label = t(
       'distribution.session.identityUnresolvedLabel',
@@ -599,7 +666,9 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   // Transient-and-ours reads as `warn`, not `danger`: nothing is broken about
   // the user's account and the remedy is simply to retry (bind again, or wait
   // a moment) — true of the identity case for exactly the same reason.
-  const tone = infraKind || identityUnresolved ? 'warn' : TONE[status];
+  const tone = infraKind || identityUnresolved || identityChallengeFailed
+    ? 'warn'
+    : TONE[status];
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
   const canRetry = RETRYABLE.has(status);
@@ -647,6 +716,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
                 {busy && <Loader2 size={30} className="spin" />}
                 {(status === 'qrcode_expired' || status === 'session_ended') && <QrCode size={30} />}
                 {status === 'sms_required' && <Smartphone size={30} />}
+                {status === 'identity_challenge' && <ShieldAlert size={30} />}
               </div>
             )}
           </div>

@@ -85,6 +85,7 @@ _STATUS_SUBTITLE: dict[str, str] = {
     SessionStatus.WAITING_SCAN.value: "Scan the QR code",
     SessionStatus.SCANNED.value: "Confirm on your phone",
     SessionStatus.QRCODE_EXPIRED.value: "QR code refreshed",
+    SessionStatus.IDENTITY_CHALLENGE.value: "Verifying identity",
     SessionStatus.SMS_REQUIRED.value: "Enter the SMS code",
     SessionStatus.SUCCESS.value: "Signed in",
     SessionStatus.TIMEOUT.value: "Login timed out",
@@ -144,7 +145,12 @@ class LoginLoopOutcome:
 # （``status_code`` / ``timeout_seconds`` / ``stage``），它们对用户没有意义，
 # 也不该成为前端可以依赖的契约。这两个键是 spec §7.8 明确定义、
 # ``frontend/types.ts::SessionLoginState.detail`` 已经声明的那两个。
-_PUBLIC_DETAIL_KEYS = ("error_kind", "reason")
+# ``code_requested`` 是第三个：它是"我们真的点了那个按钮，平台真的在发码"的
+# 唯一证据。没有它，前端只能凭 ``sms_required`` 说"平台已向你的手机发送验证码"
+# —— 而那句话在身份验证选择页上是**假的**（平台没点之前一条都不发），用户会
+# 对着一个不存在的码干等到超时。它由浏览器侧在**点击落地时**写入，不是从页面
+# 上读出来的（``login_sessions.CODE_REQUESTED_KEY``）。
+_PUBLIC_DETAIL_KEYS = ("error_kind", "reason", "code_requested")
 
 
 def _public_detail(detail: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -240,6 +246,7 @@ def _progress_for(status: str) -> int:
         SessionStatus.WAITING_SCAN.value: 20,
         SessionStatus.QRCODE_EXPIRED.value: 20,
         SessionStatus.SCANNED.value: 60,
+        SessionStatus.IDENTITY_CHALLENGE.value: 65,
         SessionStatus.SMS_REQUIRED.value: 70,
         SessionStatus.SUCCESS.value: 90,
     }.get(status, 10)

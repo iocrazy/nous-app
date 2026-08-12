@@ -33,6 +33,17 @@ class SessionStatus(str, Enum):
     WAITING_SCAN = "waiting_scan"
     SCANNED = "scanned"
     QRCODE_EXPIRED = "qrcode_expired"
+    # The platform interrupted the scan to ask *how* it should verify the
+    # person, and is waiting for that choice — nothing has been sent to anybody
+    # yet. It is a separate member from `SMS_REQUIRED` precisely because the two
+    # licence opposite user-facing sentences: `sms_required` invites "enter the
+    # code you received", and saying that while the platform is still showing a
+    # menu leaves the user waiting for a text message that was never requested.
+    # That is not hypothetical — it is the bug this member was added for
+    # (2026-08-11: a Douyin account whose login inserted 身份验证 read as
+    # `sms_required`, and the user waited out the full TTL for a code nobody
+    # had asked for).
+    IDENTITY_CHALLENGE = "identity_challenge"
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"

@@ -203,6 +203,8 @@ describe('SessionLoginModal', () => {
       'The platform registered the scan and is waiting for you to approve it.'],
     ['qrcode_expired', 'QR code expired: 二维码已失效',
       'The platform marked this code as expired, so a fresh one was requested.'],
+    ['identity_challenge', 'the platform is asking to verify your identity: 接收短信验证码',
+      'The platform is showing its identity-verification step — no code has been sent yet.'],
     ['sms_required', 'the platform is asking for a verification code',
       'The platform is asking for a verification code.'],
     ['success', 'reached the creator console with no login prompt',
@@ -597,6 +599,80 @@ describe('SessionLoginModal', () => {
     expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
   });
 
+  // --- the identity challenge (2026-08-11) ---------------------------------
+  //
+  // A Douyin bind stopped on the platform's own 身份验证 screen: two cards
+  // (接收短信验证码 / 发送短信验证) and nothing sent until one is clicked. The
+  // flow clicked neither, the judge read the code field that screen renders as
+  // `sms_required`, and this modal said "The platform sent a code to the phone
+  // number on this account" — so the user waited out the TTL for a message
+  // that had never been requested.
+
+  it('does not claim a code was sent while the platform is still asking how to verify', async () => {
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'identity_challenge',
+      message: 'the platform is asking to verify your identity: 接收短信验证码, 发送短信验证',
+    });
+
+    expect(screen.getByText(/Identity verification$/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing has been sent to your phone yet/i)).toBeInTheDocument();
+    // The sentence that caused the wait, in any of its forms.
+    expect(screen.queryByText(/sent a code to the phone number/i)).toBeNull();
+    expect(screen.queryByText(/We asked the platform to text a code/i)).toBeNull();
+    // And no code box: there is nothing to type yet.
+    expect(screen.queryByLabelText(/Verification code/i)).toBeNull();
+  });
+
+  it('stays neutral about a code prompt nobody asked for on the user\'s behalf', async () => {
+    // `sms_required` with no `code_requested`: a code field is on screen and
+    // we have no evidence anything was sent. Claiming otherwise is the bug;
+    // saying nothing at all would be the other one.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+
+    expect(screen.getByText(/asking for a verification code for this account/i))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/sent a code to the phone number/i)).toBeNull();
+    expect(screen.queryByText(/We asked the platform to text a code/i)).toBeNull();
+    // The form is still there — the user may well have a code in hand.
+    expect(screen.getByLabelText(/Verification code/i)).toBeInTheDocument();
+  });
+
+  it('says a code was requested only when the service actually asked for one', async () => {
+    // `code_requested` is set by the browser service latching its own landed
+    // click (the 接收短信验证码 card, or the 获取验证码 button behind it) —
+    // never by observing that a code field exists.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required', detail: { code_requested: true } });
+
+    expect(screen.getByText(/We asked the platform to text a code/i)).toBeInTheDocument();
+    expect(screen.queryByText(/asking for a verification code for this account/i)).toBeNull();
+  });
+
+  it('explains a verification screen it could not get through, and never blames the account', async () => {
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'failed',
+      message: 'the platform is asking to verify your identity and the SMS option could not be selected',
+      detail: { reason: 'identity_challenge_unclickable' },
+    });
+
+    expect(screen.getByText('Identity verification could not be completed')).toBeInTheDocument();
+    expect(screen.getByText(/did not offer an option we can complete automatically/i))
+      .toBeInTheDocument();
+    // The generic `failed` copy sends the user hunting for a ban that never
+    // happened; the platform refused nothing here.
+    expect(screen.queryByText(/The platform refused the sign-in/i)).toBeNull();
+    // No code was sent, so nothing may imply one is on its way.
+    expect(screen.queryByText(/sent a code to the phone number/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
+  });
+
   it('lands each failure payload on exactly one of the three tiers', async () => {
     // The whole point of the trio: three payloads that differ only inside
     // `detail` must produce three different sentences, and never two at once.
@@ -604,11 +680,14 @@ describe('SessionLoginModal', () => {
       platform: /^Sign-in failed$/,
       infra: /^Service temporarily unavailable$/,
       identity: /^Signed in, but the account is unidentified$/,
+      challenge: /^Identity verification could not be completed$/,
     } as const;
     const cases: Array<[keyof typeof LABELS, Partial<SessionLoginState>]> = [
       ['platform', { status: 'failed', message: 'account is restricted' }],
       ['infra', { status: 'failed', detail: { error_kind: 'unreachable' } }],
       ['identity', { status: 'failed', detail: { reason: 'identity_unresolved' } }],
+      ['challenge', { status: 'failed', detail: { reason: 'identity_challenge_unclickable' } }],
+      ['challenge', { status: 'failed', detail: { reason: 'identity_challenge_stalled' } }],
       // Both markers at once: "we never reached a conclusion" subsumes any
       // reason riding along with it, so infra wins rather than both showing.
       ['infra', {

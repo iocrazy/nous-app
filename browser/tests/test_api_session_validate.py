@@ -184,6 +184,14 @@ def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
         "waiting_scan",
         "scanned",
         "qrcode_expired",
+        # The identity chooser (2026-08-11). Added to BOTH sides in the same
+        # change, and the flattening it prevents is specific: unrecognised here
+        # it would come back `failed`, i.e. "the platform refused the sign-in",
+        # for a screen where the platform has refused nothing and is simply
+        # waiting for a choice. It exists as its own member because
+        # `sms_required` licenses "enter the code we sent you", and on this
+        # screen nothing has been sent to anybody.
+        "identity_challenge",
         "sms_required",
         "success",
         "published",

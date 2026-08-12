@@ -2463,6 +2463,13 @@ export type SessionLoginStatus =
   | 'waiting_scan'
   | 'scanned'
   | 'qrcode_expired'
+  /**
+   * The platform interrupted the scan with its own identity check and is
+   * showing a menu of verification methods. **Nothing has been sent to the
+   * user's phone in this state** — the browser service is picking "receive an
+   * SMS" on their behalf, and only what follows is `sms_required`.
+   */
+  | 'identity_challenge'
   | 'sms_required'
   | 'success'
   | 'timeout'
@@ -2483,7 +2490,19 @@ export interface SessionLoginState {
    * about the account. The distinction decides what the user is told to do, so
    * a `failed` without it means the platform really did say no.
    */
-  detail?: { error_kind?: string; reason?: string } & Record<string, unknown>;
+  /**
+   * `code_requested` is the browser service's evidence that **one of its own
+   * clicks asked the platform to send a code** — not that a code field is on
+   * screen. Only that licenses "we asked the platform to text you"; without
+   * it the copy has to stay neutral, because `sms_required` on its own once
+   * printed "the platform sent a code to this account" over a screen where
+   * nothing had been sent and nobody had asked.
+   */
+  detail?: {
+    error_kind?: string;
+    reason?: string;
+    code_requested?: boolean;
+  } & Record<string, unknown>;
 }
 
 export interface PublishTaskAccount {

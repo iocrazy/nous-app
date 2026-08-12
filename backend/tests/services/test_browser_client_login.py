@@ -45,12 +45,30 @@ def test_login_status_enum_matches_spec_table():
         "waiting_scan",
         "scanned",
         "qrcode_expired",
+        # 平台的「身份验证」选择页（2026-08-11）。它必须是独立值：
+        # ``sms_required`` 授权的那句 UI 文案是"把收到的验证码填进来"，而这一屏
+        # 上平台还在等我们选验证方式，**一条短信都没发**。合并两者正是那次
+        # 用户对着不存在的验证码干等到超时的直接原因。
+        "identity_challenge",
         "sms_required",
         "success",
         "timeout",
         "proxy_failed",
         "failed",
     }
+
+
+def test_the_identity_challenge_is_a_pending_status_not_a_verdict():
+    """浏览器侧在同一响应里已经替我们点了选项 —— 所以它跟 qrcode_expired 一样
+    是"画面更新"，循环要继续等。掉出 PENDING 集合会让 ``drive_login_loop``
+    走进 "unhandled login status" 当场判死。"""
+    from app.services.distribution.browser_client import (
+        LOGIN_FAILURE_STATUSES,
+        LOGIN_PENDING_STATUSES,
+    )
+
+    assert SessionStatus.IDENTITY_CHALLENGE.value in LOGIN_PENDING_STATUSES
+    assert SessionStatus.IDENTITY_CHALLENGE.value not in LOGIN_FAILURE_STATUSES
 
 
 # ── /session/login/start ────────────────────────────────────
