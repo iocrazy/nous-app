@@ -267,21 +267,23 @@ class ScriptSceneRepository:
         """The immutable op ledger for a scene, ordered by ``op_seq`` ASC (replay
         order). Each row carries ``op_json`` = ``{"ops": [...], "inverse": [...]}``
         native (JSONB stays a dict). Read by the version service to replay a scene
-        to a commit watermark and to build inverse batches for rollback."""
-        try:
-            async with read_scope() as session:
-                result = await session.execute(
-                    select(ScriptOps)
-                    .where(ScriptOps.scene_id == _bigint(scene_id))
-                    .order_by(ScriptOps.op_seq.asc())
-                )
-                return [
-                    _parity(_orm_obj_to_dict(r, _OPS_N2A))
-                    for r in result.scalars().all()
-                ]
-        except Exception as e:
-            logger.error(f"Failed to list ops for scene {scene_id}: {e}")
-            return []
+        to a commit watermark and to build inverse batches for rollback.
+
+        A query failure PROPAGATES (house convention for primary reads — same as
+        ``list_scene_rows_for_project`` above): every consumer replays or inverts
+        this ledger, so an empty list on error is not a safe default — it silently
+        reconstructs wrong content (version_service) or reports "nothing to undo"
+        (run_undo_service, which maps the raised error to ``internal_error``).
+        """
+        async with read_scope() as session:
+            result = await session.execute(
+                select(ScriptOps)
+                .where(ScriptOps.scene_id == _bigint(scene_id))
+                .order_by(ScriptOps.op_seq.asc())
+            )
+            return [
+                _parity(_orm_obj_to_dict(r, _OPS_N2A)) for r in result.scalars().all()
+            ]
 
     # ------------------------------------------------------------------ #
     # Writes — create / update_meta / delete

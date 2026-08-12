@@ -176,7 +176,9 @@ class UndoSkippedItem(BaseModel):
 
     kind: str  # 'shot' | 'scene' | 'scene_element'
     id: str
-    reason: str  # 'edited_after_run' | 'rendered' | 'version_conflict'
+    reason: (
+        str  # 'edited_after_run' | 'rendered' | 'version_conflict' | 'internal_error'
+    )
 
 
 class UndoReport(BaseModel):

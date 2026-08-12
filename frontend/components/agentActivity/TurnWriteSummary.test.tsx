@@ -169,6 +169,41 @@ describe('TurnWriteSummary undo', () => {
     expect(report.textContent).toContain('agentActivity.undoReason.rendered');
   });
 
+  it('renders a distinct message for an already-undone run (no counts)', () => {
+    hookReturn = {
+      state: 'undone',
+      report: {
+        status: 'already_undone',
+        shots_deleted: 0,
+        shots_reverted: 0,
+        scene_elements_reverted: 0,
+        skipped: [],
+      },
+      undo: undoMock,
+    };
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    const report = getByTestId('turn-undo-report');
+    expect(report.textContent).toContain('Already undone earlier — nothing changed');
+    expect(report.textContent).not.toContain('agentActivity.undoSummary');
+  });
+
+  it('renders the internal_error skip reason via its i18n key', () => {
+    hookReturn = {
+      state: 'undone',
+      report: {
+        status: 'done',
+        shots_deleted: 0,
+        shots_reverted: 0,
+        scene_elements_reverted: 0,
+        skipped: [{ kind: 'scene', id: '700', reason: 'internal_error' }],
+      },
+      undo: undoMock,
+    };
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    const report = getByTestId('turn-undo-report');
+    expect(report.textContent).toContain('agentActivity.undoReason.internal_error');
+  });
+
   it('does not render the undo button when interactive is false or runId is missing', () => {
     const { queryByTestId, rerender } = render(
       <TurnWriteSummary summary={summary} runId="123" interactive={false} />,

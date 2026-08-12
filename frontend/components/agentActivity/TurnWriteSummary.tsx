@@ -175,19 +175,25 @@ export function TurnWriteSummary({
           data-testid="turn-undo-report"
           className="mt-1 border-t border-agent-line px-2 pt-1 text-[10px] text-ink-500"
         >
-          <p>
-            {t('agentActivity.undoSummary', {
-              deleted: undoReport.shots_deleted,
-              reverted: undoReport.shots_reverted,
-              elements: undoReport.scene_elements_reverted,
-            })}
-          </p>
-          {undoReport.skipped.map((item, i) => (
-            <p key={`${item.kind}-${item.id}-${i}`}>
-              {t(`agentActivity.undoKind.${item.kind}`)} {item.id} ·{' '}
-              {t(`agentActivity.undoReason.${item.reason}`)}
-            </p>
-          ))}
+          {undoReport.status === 'already_undone' ? (
+            <p>{t('agentActivity.undoAlreadyUndone', 'Already undone earlier — nothing changed')}</p>
+          ) : (
+            <>
+              <p>
+                {t('agentActivity.undoSummary', {
+                  deleted: undoReport.shots_deleted,
+                  reverted: undoReport.shots_reverted,
+                  elements: undoReport.scene_elements_reverted,
+                })}
+              </p>
+              {undoReport.skipped.map((item, i) => (
+                <p key={`${item.kind}-${item.id}-${i}`}>
+                  {t(`agentActivity.undoKind.${item.kind}`)} {item.id} ·{' '}
+                  {t(`agentActivity.undoReason.${item.reason}`)}
+                </p>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
