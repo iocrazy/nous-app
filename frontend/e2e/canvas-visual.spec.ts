@@ -61,8 +61,11 @@ test.describe('canvas token base (Phase 0 G10)', () => {
     const engine = page.locator('.mh-canvas').first();
     await expect(engine).toBeVisible();
 
-    // --canvas-page dark = #0f141d
-    await expect(engine).toHaveCSS('background-color', 'rgb(15, 20, 29)');
+    // --canvas-page dark = var(--island) = #15151a (storyboard UI polish
+    // fix #4, 2026-08-11: was a hardcoded #0f141d unrelated to the theme's
+    // --island token, reading as a visibly different/cooler surface than the
+    // warm-paper island the canvas sits inside).
+    await expect(engine).toHaveCSS('background-color', 'rgb(21, 21, 26)');
     await page.screenshot({ path: 'e2e-artifacts/canvas-visual-dark.png', fullPage: true });
   });
 
@@ -75,8 +78,9 @@ test.describe('canvas token base (Phase 0 G10)', () => {
     const engine = page.locator('.mh-canvas').first();
     await expect(engine).toBeVisible();
 
-    // --canvas-page light = #f8fafc — the legacy dark-only vars could never do this.
-    await expect(engine).toHaveCSS('background-color', 'rgb(248, 250, 252)');
+    // --canvas-page light = var(--island) = #FCFBF8 (storyboard UI polish fix
+    // #4) — the legacy dark-only vars could never do this at all.
+    await expect(engine).toHaveCSS('background-color', 'rgb(252, 251, 248)');
     await page.screenshot({ path: 'e2e-artifacts/canvas-visual-light.png', fullPage: true });
   });
 });

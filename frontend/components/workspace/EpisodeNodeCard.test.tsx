@@ -256,10 +256,17 @@ describe('EpisodeNodeCard', () => {
     });
   });
 
-  it('empty editable fields render as "+ Assign"/"+ Set Schedule" pills', () => {
+  it('empty editable fields render as "Assign Owner"/"Set Schedule" pills (icon-only +, no doubled text prefix)', () => {
     renderCard({ canEditConfig: true, people: PEOPLE });
-    expect(screen.getByTestId('node-card-owner').textContent).toMatch(/Assign/);
-    expect(screen.getByTestId('node-card-schedule').textContent).toMatch(/Set Schedule/);
+    // UI polish fix #2 (2026-08-11): the i18n string itself no longer carries
+    // a literal "+ " prefix — only the <Plus> icon renders the plus sign, so
+    // the text content must NOT start with "+".
+    const ownerText = screen.getByTestId('node-card-owner').textContent ?? '';
+    const scheduleText = screen.getByTestId('node-card-schedule').textContent ?? '';
+    expect(ownerText).toMatch(/Assign/);
+    expect(ownerText.trim().startsWith('+')).toBe(false);
+    expect(scheduleText).toMatch(/Set Schedule/);
+    expect(scheduleText.trim().startsWith('+')).toBe(false);
   });
 
   it('readonly viewer sees plain <span> facts even when owner/schedule are empty', () => {

@@ -728,6 +728,38 @@ describe('ProjectWorkspace', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  // UI polish fix #3 (2026-08-11): the 分镜 sidebar row's active highlight
+  // used to be gated on `isScript && activeWorkView === 'storyboard'` — a
+  // holdover from when Storyboard was a `script` embedded-editor rail view.
+  // Since Storyboard became its own top-level `activeModule` (IA redesign
+  // Task 2), that condition could never be true again: `activeWorkView` is
+  // hard-null whenever `activeModule !== 'script'`, so the row never lit up
+  // (剧本 kept its highlight — the accordion click screenshot bug report).
+  it('highlights the 分镜 row (not 剧本) once Storyboard is the active module', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await expandEpisodesTree();
+    const storyboardRow = await screen.findByTestId('ws-ep-storyboard');
+    const scriptRow = screen.getByTestId('ws-ep-script');
+    // Neither row is active before anything is clicked.
+    expect(storyboardRow.className).not.toContain('accent-soft');
+    expect(scriptRow.className).not.toContain('accent-soft');
+
+    fireEvent.click(storyboardRow);
+    await screen.findByTestId('episode-view-tabs');
+
+    expect(storyboardRow.className).toContain('accent-soft');
+    expect(scriptRow.className).not.toContain('accent-soft');
+  });
+
   // IA redesign Task 4: the workflow strip moved from the always-mounted,
   // whole-project WorkflowSection into the Overview accordion's expanded-row
   // body, and node clicks no longer route anywhere by themselves — a click

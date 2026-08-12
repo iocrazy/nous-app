@@ -168,17 +168,21 @@ const NodeCapsule: React.FC<{
               : ''
         } ${removable ? 'pr-6' : ''}`}
       >
-        {current && (
-          <span
-            aria-hidden
-            className="absolute -left-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-amber-400"
-          />
-        )}
         {isDone ? (
           <Check size={13} className="text-emerald-500" />
         ) : (
+          // Cursor dot lives INSIDE the pill, right before the node name (UI
+          // polish fix #1, 2026-08-11): a separate amber dot used to float
+          // outside the pill's top-left corner while this inner dot kept its
+          // own status color — two dots reading as one indicator was
+          // confusing. The current node's dot now just IS the warn/ochre
+          // "you are here" signal (still pulsing), same as every other
+          // node's dot is its own status signal.
           <span
-            className={`h-2 w-2 rounded-full ${overdue ? 'bg-rose-400' : meta.dot}`}
+            data-testid="workflow-node-dot"
+            className={`h-2 w-2 rounded-full ${
+              current ? 'bg-warn animate-pulse' : overdue ? 'bg-rose-400' : meta.dot
+            }`}
             aria-hidden
           />
         )}
