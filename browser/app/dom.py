@@ -51,6 +51,79 @@ async def visible_marker_texts(
     return found
 
 
+async def describe_controls(
+    page: Any,
+    selector: str,
+    *,
+    attributes: Sequence[str] = (),
+    limit: int = 8,
+    text_len: int = 60,
+) -> tuple[int, list[dict[str, Any]]]:
+    """(how many exist, a capped description of the first few). Never raises.
+
+    For diagnostics, not for driving: when a click "landed" and the page did
+    not move, the first question is *what was on that page at all*, and a list
+    of the inputs and buttons answers it in a way a screenshot cannot be
+    (screenshots do not survive a JSON column).
+
+    Invisible nodes are listed too, with `visible: False`. That is not noise —
+    "the code field exists but is hidden" and "there is no code field" are
+    different findings with different fixes, and dropping the invisible ones
+    would make them look identical.
+    """
+    items: list[dict[str, Any]] = []
+    try:
+        locator = page.locator(selector)
+        total = int(await locator.count())
+    except Exception:
+        return 0, items
+
+    for index in range(min(total, limit)):
+        item: dict[str, Any] = {"selector": selector, "index": index}
+        try:
+            node = locator.nth(index)
+        except Exception:
+            continue
+        try:
+            item["visible"] = bool(await node.is_visible())
+        except Exception:
+            # None, not False: "we could not tell" must not read as "hidden".
+            item["visible"] = None
+        try:
+            text = (await node.inner_text() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            item["text"] = text[:text_len]
+        for attribute in attributes:
+            try:
+                value = await node.get_attribute(attribute)
+            except Exception:
+                value = None
+            if value:
+                item[attribute] = value[:text_len]
+        items.append(item)
+    return total, items
+
+
+async def scroll_into_view(locator: Any, timeout_ms: int) -> bool:
+    """Best-effort `scrollIntoViewIfNeeded`. False = could not, or not needed.
+
+    Playwright's own click already scrolls, so this is not a duplicate of it:
+    it runs *before* the click so that the actionability facts we record
+    alongside a failed click (in-viewport, covered-by) describe the element as
+    the click would have found it, rather than one that was simply off screen.
+    """
+    scroll = getattr(locator, "scroll_into_view_if_needed", None)
+    if scroll is None:
+        return False
+    try:
+        await scroll(timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
 async def is_selector_visible(page: Any, selector: str) -> bool:
     if not selector:
         return False

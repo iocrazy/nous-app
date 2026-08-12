@@ -673,6 +673,25 @@ describe('SessionLoginModal', () => {
     expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
   });
 
+  it('tells a slider challenge apart from a stall, and does not say "scan again"', async () => {
+    // Same label, deliberately different remedy. Rescanning a platform that has
+    // escalated to a slider produces the same slider, so the copy that helps
+    // everywhere else ("get a new code and scan again") is the one sentence
+    // that must not appear here.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'failed',
+      message: 'the platform escalated to a challenge this service cannot complete (滑块)',
+      detail: { reason: 'identity_challenge_blocked', blocking_marker: '滑块' },
+    });
+
+    expect(screen.getByText('Identity verification could not be completed')).toBeInTheDocument();
+    expect(screen.getByText(/slider or picture check/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Get a new code and scan again/i)).toBeNull();
+    expect(screen.queryByText(/sent a code to the phone number/i)).toBeNull();
+  });
+
   it('lands each failure payload on exactly one of the three tiers', async () => {
     // The whole point of the trio: three payloads that differ only inside
     // `detail` must produce three different sentences, and never two at once.
@@ -688,6 +707,7 @@ describe('SessionLoginModal', () => {
       ['identity', { status: 'failed', detail: { reason: 'identity_unresolved' } }],
       ['challenge', { status: 'failed', detail: { reason: 'identity_challenge_unclickable' } }],
       ['challenge', { status: 'failed', detail: { reason: 'identity_challenge_stalled' } }],
+      ['challenge', { status: 'failed', detail: { reason: 'identity_challenge_blocked' } }],
       // Both markers at once: "we never reached a conclusion" subsumes any
       // reason riding along with it, so infra wins rather than both showing.
       ['infra', {

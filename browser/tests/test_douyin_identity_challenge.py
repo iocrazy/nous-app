@@ -30,9 +30,11 @@ import pytest
 from app.config import get_settings
 from app.login import LoginDriver
 from app.login_sessions import (
+    IDENTITY_CHALLENGE_BLOCKED,
     IDENTITY_CHALLENGE_STALLED,
     IDENTITY_CHALLENGE_UNCLICKABLE,
     MAX_IDENTITY_CHALLENGE_POLLS,
+    PAGE_EVIDENCE_KEY,
     LoginSession,
 )
 from app.platforms.douyin import LOGIN_SPEC
@@ -54,8 +56,9 @@ CODE_FIELD = 'input[placeholder*="验证码"]'
 
 @pytest.fixture(autouse=True)
 def _no_settle(monkeypatch):
-    """The post-click settle is a real 3s in production. Not here."""
+    """The post-click waits are real seconds in production. Not here."""
     monkeypatch.setenv("BROWSER_LOGIN_SMS_SETTLE_S", "0")
+    monkeypatch.setenv("BROWSER_LOGIN_CHALLENGE_PROGRESS_POLL_S", "0")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -228,7 +231,9 @@ async def test_a_chooser_that_never_moves_after_the_click_also_fails_typed():
     assert final is not None
     assert final.status is SessionStatus.FAILED
     assert final.detail["reason"] == IDENTITY_CHALLENGE_STALLED
-    # Still exactly one click, even across five polls of a stuck screen.
+    # Still exactly one click on the caption itself, however many polls a stuck
+    # screen takes. (The escalation re-clicks a *different* node — the card —
+    # and is capped at one of its own; see the evidence tests below.)
     assert page.clicks.count(RECEIVE) == 1
 
 
@@ -242,3 +247,190 @@ async def test_the_qr_code_is_dropped_while_the_challenge_is_up():
 
     assert snapshot.status is SessionStatus.IDENTITY_CHALLENGE
     assert snapshot.qrcode_data_url is None
+
+
+# --- what a failure leaves behind (2026-08-12) -------------------------------
+#
+# The 08-11 fix above made the stall *typed*. It shipped, and the next real
+# bind stalled anyway: click reported as landed, page unmoved, user with no
+# code screen and no text message, 27 seconds start to finish. `detail` said
+# `identity_challenge_stalled` and nothing else — true, and not enough to
+# choose between "the click missed its handler", "the platform moved to a
+# screen our captions still match", "the platform escalated to a slider" and
+# "15 seconds was not long enough". These pin the evidence that separates them.
+
+
+def stalling_chooser() -> FakePage:
+    """A chooser that never moves, with a probe-able DOM behind it."""
+    page = FakePage(url=LOGIN_URL, visible={RECEIVE, SEND_YOURSELF, CODE_FIELD})
+    page.dom_probe = {
+        "接收短信验证码": [
+            {
+                "tag": "span",
+                "chain": ["span", "div[role=button]", "div", "div", "body"],
+                "size": [96, 22],
+                "in_viewport": True,
+                "disabled": False,
+                "pointer_events": "none",
+                "covered_by": "div[role=dialog]",
+                "button_ancestor": "div[role=button]",
+            }
+        ]
+    }
+    return page
+
+
+async def run_until_it_gives_up(page: FakePage):
+    session = session_over(page)
+    snapshot = None
+    for _ in range(MAX_IDENTITY_CHALLENGE_POLLS):
+        snapshot = await session.poll_status()
+    assert snapshot is not None
+    return snapshot
+
+
+async def test_a_stall_carries_the_shape_of_the_node_we_clicked():
+    """Covered? Styled unclickable? Is there a button ancestor at all?
+
+    These are the three facts that decide whether the click was the problem,
+    and none of them survives the failure — the session is torn down, so if the
+    record does not carry them, nobody will ever have them.
+    """
+    snapshot = await run_until_it_gives_up(stalling_chooser())
+
+    target = next(
+        t
+        for t in snapshot.detail[PAGE_EVIDENCE_KEY]["click_targets"]
+        if t["caption"] == "接收短信验证码"
+    )
+    shape = target["shapes"][0]
+    assert shape["covered_by"] == "div[role=dialog]"
+    assert shape["pointer_events"] == "none"
+    assert shape["button_ancestor"] == "div[role=button]"
+
+
+async def test_an_unanswerable_chooser_records_the_page_too():
+    """Both terminal reasons carry evidence, not just the stalled one.
+
+    `unclickable` has its own open question — is the caption stale, or does
+    this account really only get the manual option? — and the answer is on the
+    page it gave up on.
+    """
+    page = FakePage(url=LOGIN_URL, visible={SEND_YOURSELF, CODE_FIELD})
+
+    snapshot = await run_until_it_gives_up(page)
+
+    assert snapshot.detail["reason"] == IDENTITY_CHALLENGE_UNCLICKABLE
+    assert PAGE_EVIDENCE_KEY in snapshot.detail
+
+
+async def test_capturing_the_page_never_replaces_the_failure():
+    """Diagnostics run on a path that is already failing.
+
+    A reader that raised here would trade a typed, explained failure for a
+    driver error about the diagnostics — losing the reason *and* the evidence.
+    """
+
+    class Exploding(FakePage):
+        def locator(self, selector):
+            raise RuntimeError("renderer went away")
+
+    page = Exploding(url=LOGIN_URL, visible={RECEIVE, SEND_YOURSELF})
+
+    snapshot = await run_until_it_gives_up(page)
+
+    assert snapshot.status is SessionStatus.FAILED
+    assert snapshot.detail["reason"] == IDENTITY_CHALLENGE_STALLED
+    # Something is recorded either way — "the capture itself failed" is a
+    # finding, an absent key is a gap.
+    assert snapshot.detail[PAGE_EVIDENCE_KEY]
+
+
+async def test_page_text_is_captured_without_the_numbers_on_it():
+    """The verification screen's two numbers are the two that must not be kept.
+
+    The code that was texted and the phone it went to are the only secrets on
+    that page, and this record travels: `detail` reaches the browser tab
+    through `task_tracking.metadata`.
+    """
+    page = FakePage(
+        url=LOGIN_URL,
+        visible={RECEIVE, SEND_YOURSELF},
+        texts={"body": "验证码 已发送至 13800001234，请输入 845213"},
+    )
+
+    snapshot = await run_until_it_gives_up(page)
+
+    text = snapshot.detail[PAGE_EVIDENCE_KEY]["visible_text"]
+    assert "13800001234" not in text
+    assert "845213" not in text
+    # …while the words that say which screen this was survive intact.
+    assert "已发送至" in text
+
+
+async def test_a_challenge_we_cannot_complete_is_named_as_such():
+    """A slider is not a stall, and telling the user to rescan wastes their
+    time — rescanning produces the same screen.
+
+    The classification only ever rewrites the wording of a failure that has
+    already been decided, so a stale caption here costs one sentence and can
+    never block a sign-in.
+    """
+    page = FakePage(
+        url=LOGIN_URL,
+        visible={RECEIVE, SEND_YOURSELF},
+        texts={"body": "请完成安全验证 拖动下方滑块完成拼图"},
+    )
+
+    snapshot = await run_until_it_gives_up(page)
+
+    assert snapshot.status is SessionStatus.FAILED
+    assert snapshot.detail["reason"] == IDENTITY_CHALLENGE_BLOCKED
+    assert snapshot.detail["blocking_marker"] == "滑块"
+
+
+# --- the click, hardened -----------------------------------------------------
+
+
+async def test_the_click_is_followed_by_a_wait_for_the_page_to_answer():
+    """Not a fixed sleep: whether the click worked is a question the page can
+    be asked, and the answer is what a later failure has to report."""
+    page = FakePage(url=LOGIN_URL, visible=chooser_then_code_form)
+
+    snapshot = await session_over(page).poll_status()
+
+    assert snapshot.status is SessionStatus.SMS_REQUIRED
+    assert page.clicks == [RECEIVE, GET_CODE]
+
+
+async def test_a_page_that_moves_is_never_re_clicked():
+    """The escalation is for a page that did not answer. One that did must not
+    get a second click — that would be a second text message."""
+    page = FakePage(url=LOGIN_URL, visible=chooser_then_code_form)
+    session = session_over(page)
+
+    for _ in range(3):
+        await session.poll_status()
+
+    assert page.clicks.count(RECEIVE) == 1
+    assert "escalated_click" not in (await session.poll_status()).detail
+
+
+async def test_the_stall_budget_is_raised_but_still_ends():
+    """~36s at the backend's 3s poll interval, and it still terminates.
+
+    The old ceiling (5 polls, ~15s) called the login off while the user was
+    still reading the screen. Raising it is the change; keeping a ceiling at
+    all is the discipline — "keep polling and hope" is indistinguishable, from
+    outside, from the original bug where nobody ever clicked.
+    """
+    backend_poll_interval_s = 3.0
+    budget = MAX_IDENTITY_CHALLENGE_POLLS * backend_poll_interval_s
+    assert 30 <= budget <= 60
+
+    page = FakePage(url=LOGIN_URL, visible={RECEIVE, SEND_YOURSELF, CODE_FIELD})
+    session = session_over(page)
+
+    for _ in range(MAX_IDENTITY_CHALLENGE_POLLS - 1):
+        assert (await session.poll_status()).status is SessionStatus.IDENTITY_CHALLENGE
+    assert (await session.poll_status()).status is SessionStatus.FAILED

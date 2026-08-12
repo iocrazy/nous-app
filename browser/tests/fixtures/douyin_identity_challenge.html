@@ -1,0 +1,42 @@
+<!--
+  The 身份验证 screen a real Douyin bind stopped on (user screenshot,
+  2026-08-11; the same screen stalled a retry on 2026-08-12).
+
+  Structure, not styling, is what is being reproduced:
+
+    * the caption we click (接收短信验证码) is a LEAF SPAN inside a card, and
+      the card - not the span - is what carries role="button" and the chevron.
+      That nesting is the reason `get_by_text(...).first` resolves to something
+      other than the control, and it is what the escalation exists for.
+    * a code input is already on this screen, before anything has been sent.
+      It is why the judge used to answer `sms_required` here and tell the user
+      a code had been texted to them when nothing had been.
+    * class names are `<role>-<hash>` CSS Modules, as on the live console. They
+      are here to be *unusable* as selectors: the hash moves every deploy, so
+      nothing may key on them.
+
+  The DOM never changes in response to a click, which is the observed failure
+  reproduced exactly: the flow believed it had selected the SMS option and the
+  platform went on showing this screen.
+-->
+<body>
+  <div class="container-Jx2Kq9">
+    <div class="header-_F2uzl">
+      <span class="title-a8Kd2m">身份验证</span>
+    </div>
+    <div class="desc-Lp3Qw1">为保障账号安全，请先完成身份验证，以确保为本人操作</div>
+    <div class="card-Zx9Vb2" role="button">
+      <span class="caption-Rt5Yu8">接收短信验证码</span>
+      <span class="arrow-Kk1Nn3">&gt;</span>
+    </div>
+    <div class="card-Zx9Vb2" role="button">
+      <span class="caption-Rt5Yu8">发送短信验证</span>
+      <span class="arrow-Kk1Nn3">&gt;</span>
+    </div>
+    <div class="form-Hj7Mm4">
+      <input class="input-Ww2Ee5" type="tel" name="mobile" placeholder="请输入手机号" />
+      <input class="input-Ww2Ee5" type="tel" name="verify_code" placeholder="请输入验证码" />
+      <button class="submit-Qq8Zz6" type="button">确认</button>
+    </div>
+  </div>
+</body>

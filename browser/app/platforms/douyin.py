@@ -219,6 +219,25 @@ SMS_REQUEST_TEXTS: tuple[str, ...] = (
     "发送验证码",
 )
 
+# Captions that would mean the platform escalated to a challenge no unattended
+# browser may complete. **Not observed on this flow** — they are the shapes
+# Douyin uses elsewhere (and the shapes every platform of this kind uses), kept
+# here so that a login which ends up in front of one is *named* instead of
+# reported as a generic stall.
+#
+# Their only effect is the wording of a failure that has already happened
+# (`login_sessions.blocking_challenge_marker`): they cannot fail a login, block
+# a status, or change what gets clicked. That asymmetry is what makes a
+# substring match acceptable here while every clicked caption stays `exact=True`
+# — being wrong costs one sentence, and the page evidence in the same `detail`
+# is what settles whether the sentence was right.
+BLOCKING_CHALLENGE_MARKERS: tuple[str, ...] = (
+    "滑块",
+    "拼图",
+    "图形验证码",
+    "旋转图片",
+)
+
 SMS_SUBMIT_SELECTORS: tuple[str, ...] = (
     'button:has-text("确认")',
     'button:has-text("提交")',
@@ -452,6 +471,7 @@ LOGIN_SPEC = LoginFlowSpec(
     identity_challenge_markers=IDENTITY_CHALLENGE_MARKERS,
     sms_challenge_option_texts=SMS_CHALLENGE_OPTION_TEXTS,
     sms_request_texts=SMS_REQUEST_TEXTS,
+    blocking_challenge_markers=BLOCKING_CHALLENGE_MARKERS,
     profile_text_selectors=PROFILE_TEXT_SELECTORS,
     profile_attr_selectors=PROFILE_ATTR_SELECTORS,
 )

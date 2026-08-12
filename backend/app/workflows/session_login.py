@@ -150,7 +150,32 @@ class LoginLoopOutcome:
 # —— 而那句话在身份验证选择页上是**假的**（平台没点之前一条都不发），用户会
 # 对着一个不存在的码干等到超时。它由浏览器侧在**点击落地时**写入，不是从页面
 # 上读出来的（``login_sessions.CODE_REQUESTED_KEY``）。
-_PUBLIC_DETAIL_KEYS = ("error_kind", "reason", "code_requested")
+#
+# 2026-08-12 补进来的是**诊断组**。上一次身份验证失败（``reason=
+# identity_challenge_stalled``）之所以只能靠猜，正是因为浏览器侧其实已经把
+# ``options_seen`` / ``polls`` 算出来了，却卡在这份白名单外面 —— 排障时
+# ``SELECT metadata->'login'->'detail'`` 拿到的只有一个 reason。它们不是给
+# 用户看的文案（UI 只认 ``reason``），是给排障看的**证据**，而证据必须落到
+# 那条失败记录上：浏览器 context 在失败瞬间就被释放，页面没有第二次机会。
+#
+# ⚠️ 只允许终态失败带 ``page_evidence``（浏览器侧只在终态填它），且浏览器侧
+# 已按条数/字数封顶 —— 这个 blob 会经 Supabase Realtime 广播到用户的浏览器
+# 标签页，不封顶就是让用户替我们的日志买单。页面文本走
+# ``browser/app/redaction.py::scrub_page_text``，验证码与手机号在离开浏览器
+# 进程之前就被掩掉。
+_PUBLIC_DETAIL_KEYS = (
+    "error_kind",
+    "reason",
+    "code_requested",
+    # ── 诊断组（身份验证失败时排障用）─────────────────────────
+    "options_seen",
+    "polls",
+    "identity_option",
+    "progress_signals",
+    "escalated_click",
+    "blocking_marker",
+    "page_evidence",
+)
 
 
 def _public_detail(detail: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
