@@ -50,6 +50,9 @@ class ResolvedAIConfig:
     model: str
     agent_slug: str
     origin: str  # "governance" | "platform" | "byok" | "env"
+    # mig 155 的 ai_agents.fallback_models,仅 agent 行分支填充(spec
+    # 2026-08-11-batch-llm-fallback §4);tuple 保持 frozen 语义。
+    fallback_models: tuple[str, ...] = ()
 
 
 async def get_ai_settings(user_id: str) -> dict:
@@ -514,6 +517,13 @@ async def resolve_task_ai_config(
             origin=_byok_origin({}),
         )
 
+    # mig 155: the agent row's platform-preset fallback pool, carried into
+    # every branch below that resolves FROM this agent's model (spec
+    # 2026-08-11-batch-llm-fallback §4). Not populated above (governance /
+    # nous:-direct-pick / no-model) because those branches never consult
+    # this agent row.
+    fallback_models = tuple((agent or {}).get("fallback_models") or [])
+
     # Shared nous lookup: if the agent's model names a platform Nous model,
     # return the platform config while KEEPING resolved_slug so the caller
     # still composes THIS agent's custom prompt (prompt preserved).
@@ -526,6 +536,7 @@ async def resolve_task_ai_config(
             model=n_model,
             agent_slug=resolved_slug,
             origin="platform",
+            fallback_models=fallback_models,
         )
 
     try:
@@ -544,6 +555,7 @@ async def resolve_task_ai_config(
             model=model,
             agent_slug=resolved_slug,
             origin=_byok_origin({"model": model}),
+            fallback_models=fallback_models,
         )
 
     provider_config = dict(get_provider_config(ai_settings, provider_key))
@@ -554,6 +566,7 @@ async def resolve_task_ai_config(
         model=model,
         agent_slug=resolved_slug,
         origin=_byok_origin(provider_config),
+        fallback_models=fallback_models,
     )
 
 

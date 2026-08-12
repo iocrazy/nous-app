@@ -72,8 +72,8 @@ async def test_locked_chat_skips_user_provider_lookup():
                 return_value=fake_adapter,
             ):
                 with patch(
-                    "app.services.ai.llm.llm_fallback_chain.LLMFallbackChain",
-                    return_value=fake_chain,
+                    "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+                    new=AsyncMock(return_value=fake_chain),
                 ):
                     with patch.object(
                         wiring_mod,
@@ -135,8 +135,8 @@ async def test_allowed_chat_calls_user_provider_lookup():
                 return_value=fake_adapter,
             ):
                 with patch(
-                    "app.services.ai.llm.llm_fallback_chain.LLMFallbackChain",
-                    return_value=fake_chain,
+                    "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+                    new=AsyncMock(return_value=fake_chain),
                 ):
                     with patch.object(
                         wiring_mod,

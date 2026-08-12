@@ -251,6 +251,7 @@ class VisualAnalysisService:
         user_id: Optional[Any],
         trigger: str,
         task_id: Optional[str] = None,
+        fallback_models: Optional[list[str]] = None,
     ) -> Optional[VisualAnalysisResult]:
         """Compose prompt + run one turn with multimodal content.
 
@@ -267,7 +268,23 @@ class VisualAnalysisService:
             )
         )
 
-        adapter = self._build_adapter(composed.model or self.model)
+        from app.services.ai.llm.fallback_wiring import build_fallback_llm
+
+        model = composed.model or self.model
+        adapter = await build_fallback_llm(
+            primary_model=model,
+            fallback_models=list(fallback_models or []),
+            user_provider_config=self._provider_config,
+            # self._provider_config is the NARROWED flat single-provider
+            # shape ({"model","api_key","base_url"}), not the provider-keyed
+            # dict get_adapter_for_user expects — provider_key tells
+            # build_fallback_llm to wrap it per-attempt (final-review C1).
+            # "visual_analysis" matches resolve_task_ai_config's own task_key
+            # for this module (final-review I1) so the pre-resolved
+            # platform-catalog gate agrees with the primary model's resolver.
+            provider_key=self._provider_key,
+            module="visual_analysis",
+        )
         runner = AgentRunner(
             adapter=adapter,
             skill_tool=SkillToolService(get_skill_repository()),
@@ -300,7 +317,6 @@ class VisualAnalysisService:
                 return None
 
         uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
-        model = composed.model or self.model
         if self._provider_key:
             provider = self._provider_key
         else:
@@ -340,9 +356,12 @@ class VisualAnalysisService:
         except AgentPausedError as err:
             logger.warning(f"[VisualAnalysis] agent paused: {err}")
             return None
-        except Exception as e:
-            logger.error(f"[VisualAnalysis] {trigger} failed: {e}")
-            return None
+        # LLM 类异常(AllModelsFailed/LLMCallError 及其他意外)一律 propagate:
+        # analyze_l1_workflow 的 tail except 会先 await record_ai_error_code(wf_id, e)
+        # (classify_ai_error 落 task_tracking.metadata.error_code),再
+        # record_workflow_failure + raise(PR #1743 route-C rule 4)——吞成 None
+        # 会让 workflow 只看到合成 RuntimeError,两个机制都够不着真因
+        # (本次接线的动机,spec §1/§4 异常口径)。
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -353,6 +372,7 @@ class VisualAnalysisService:
         user_id: Optional[Any] = None,
         on_progress: Optional[Any] = None,
         task_id: Optional[str] = None,
+        fallback_models: Optional[list[str]] = None,
     ) -> Optional[VisualAnalysisResult]:
         """L1 Analysis: cover image only. Cost: ~$0.001 per image.
 
@@ -366,6 +386,11 @@ class VisualAnalysisService:
         ``task_id``: the task_tracking PK (dbos_workflow_id) when running
         inside a tracked workflow — threaded into RunRecorder for the
         paperclip-style task ↔ run bidirectional linkage (mig 282).
+
+        ``fallback_models``: platform-preset fallback pool from the resolved
+        agent row (spec 2026-08-11-batch-llm-fallback §4), threaded into
+        :func:`build_fallback_llm` so a primary-model outage fails over
+        instead of erroring the whole analysis.
         """
 
         async def _progress(pct: int, subtitle: str) -> None:
@@ -400,6 +425,7 @@ class VisualAnalysisService:
             user_id=user_id,
             trigger="visual_analysis_l1",
             task_id=task_id,
+            fallback_models=fallback_models,
         )
 
     async def analyze_l2(

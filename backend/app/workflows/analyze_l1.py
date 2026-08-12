@@ -47,31 +47,36 @@ def _analyze_resource_lookup_stmt(media_id: int, user_id: Optional[str]):
 
 @DBOS.step()
 async def resolve_analyze_provider(user_id: Optional[str]) -> dict[str, Any]:
-    """Resolve provider key + config + model name. Mirrors
+    """Resolve provider key + config + model name + fallback models. Mirrors
     analysis_tasks._resolve_analyze_provider_config.
 
     §2.4b: async-native — awaits the (now async) helper directly on the
     workflow's event loop instead of bridging the repo reads through a
-    fresh-loop run_async shim (ORM-incompatible)."""
+    fresh-loop run_async shim (ORM-incompatible).
+
+    Calls ``resolve_task_ai_config`` directly instead of the tuple-shim
+    ``resolve_analyze_provider_config`` (which discards ``fallback_models``
+    down to 4 positional fields) so the typed ``ResolvedAIConfig.fallback_models``
+    rides along into the step's return dict, threaded to ``call_analyze_l1`` ->
+    ``VisualAnalysisService`` (spec 2026-08-11-batch-llm-fallback §4)."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_analyze_provider_config,
+        DEFAULT_ANALYZE_AGENT_SLUG,
+        resolve_task_ai_config,
     )
 
-    (
-        provider_key,
-        provider_config,
-        agent_model,
-        agent_slug,
-    ) = await resolve_analyze_provider_config(user_id)
+    cfg = await resolve_task_ai_config(
+        user_id, "visual_analysis", DEFAULT_ANALYZE_AGENT_SLUG
+    )
     return {
-        "provider_key": provider_key,
-        "provider_config": provider_config or {},
-        "agent_model": agent_model,
-        "agent_slug": agent_slug,
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config or {},
+        "agent_model": cfg.model,
+        "agent_slug": cfg.agent_slug,
+        "fallback_models": list(cfg.fallback_models),
     }
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step(retries_allowed=True, max_attempts=1)
 async def call_analyze_l1(
     media_id: int,
     cover_url: str,
@@ -83,6 +88,7 @@ async def call_analyze_l1(
     agent_model: Optional[str],
     agent_slug: str = "analyze",
     wf_id: Optional[str] = None,
+    fallback_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run the multimodal analysis + persist results. Returns a digest dict.
 
@@ -175,17 +181,7 @@ async def call_analyze_l1(
         except Exception:  # noqa: BLE001 — progress is decorative
             pass
 
-    await _progress(30, "Preparing analysis...")
-    result = await analysis_service.analyze_l1(
-        cover_url,
-        user_id=user_id,
-        on_progress=_progress,
-        # task ↔ run bidirectional linkage (mig 282): RunRecorder writes
-        # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
-        # this workflow's task_tracking row.
-        task_id=wf_id,
-    )
-    if not result:
+    async def _mark_visual_analysis_failed() -> None:
         # Mark the resource failed so the UI's existing 'failed' branch (retry
         # button) shows instead of a stuck "Analyzing…". Same SYSTEM-scope
         # rationale as the 'processing' write above.
@@ -203,6 +199,35 @@ async def call_analyze_l1(
                     .where(Resources.id == resource_id)
                     .values(visual_analysis_status="failed")
                 )
+
+    await _progress(30, "Preparing analysis...")
+    try:
+        result = await analysis_service.analyze_l1(
+            cover_url,
+            user_id=user_id,
+            on_progress=_progress,
+            # task ↔ run bidirectional linkage (mig 282): RunRecorder writes
+            # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
+            # this workflow's task_tracking row.
+            task_id=wf_id,
+            fallback_models=fallback_models,
+        )
+    except Exception:
+        # final-review C2: VisualAnalysisService's recorder path now lets
+        # LLM-class exceptions (AllModelsFailed/LLMCallError) PROPAGATE
+        # instead of swallowing them to None (spec §3/§4) — which used to be
+        # the ONLY way this step reached the 'failed' write below. An
+        # exception here skipped straight past it, leaving
+        # resources.visual_analysis_status stuck on 'processing' forever even
+        # though the workflow's own tail except correctly failed
+        # task_tracking. Mark it failed here too, then re-raise UNCHANGED so
+        # the workflow's record_ai_error_code / record_workflow_failure /
+        # raise (Route-C rule 4) still runs exactly as before.
+        await _mark_visual_analysis_failed()
+        raise
+
+    if not result:
+        await _mark_visual_analysis_failed()
         # No result == the provider call failed (VisualAnalysisService caught the
         # error, logged it, and returned None — e.g. the assigned provider is
         # unreachable OR is not a vision/multimodal model). RAISE rather than
@@ -317,10 +342,20 @@ async def analyze_l1_workflow(
             agent_model=cfg["agent_model"],
             agent_slug=cfg.get("agent_slug") or "analyze",
             wf_id=wf_id,
+            fallback_models=cfg.get("fallback_models") or [],
         )
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
     except Exception as e:  # noqa: BLE001
+        # Translate the raw failure into a stable error code the frontend
+        # can turn into actionable copy (an AllModelsFailed(429) otherwise
+        # reaches the user as "Step ... exceeded its maximum of N retries").
+        # Writes metadata only — error_msg/phase stay trigger-owned — and
+        # never raises, so the failure path below is unchanged (mirrors
+        # caption_asset.py / caption_slide.py — final-review C3).
+        from app.services.ai.error_catalog import record_ai_error_code
+
+        await record_ai_error_code(DBOS.workflow_id, e)
         # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
         # DBOS records ERROR — returning the dict made DBOS mark this
         # workflow SUCCESS while task_tracking said failed (observed live

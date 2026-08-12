@@ -1,5 +1,10 @@
 # backend/app/services/llm_analysis_service.py
 
+# ⚠️ 疑似死代码(2026-08-11 侦察):生产零调用方,仅 tests/test_llm_analysis_service.py
+# 引用。真实 analyze 路径是 visual_analysis_service.py。本文件未接 fallback 链
+# (spec 2026-08-11-batch-llm-fallback §6);删除/归档另立 refactor PR,勿在
+# feature 分支顺手删。
+
 """LLM analysis service — transcript summarization.
 
 Phase 2 PR 2.4 migrated this from a hardcoded-prompt design to the AI

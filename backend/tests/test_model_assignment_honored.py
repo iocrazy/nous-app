@@ -37,6 +37,12 @@ async def test_summarize_honors_assigned_model() -> None:
     let "qwen-max" win and silently dropped the user's assigned model. The
     adapter (and the composed handed to the runner) must carry the assigned
     model instead.
+
+    Post-fallback-chain wiring (spec §3): the adapter is now built by
+    ``build_fallback_llm`` rather than ``svc._build_adapter`` directly — the
+    seam this test pins moves to ``build_fallback_llm``'s ``primary_model``
+    kwarg, but the guarantee (assigned model reaches the wire, not the
+    composer's "qwen-max" default) is unchanged.
     """
     svc = SummarizeService(
         provider_key="doubao",
@@ -74,8 +80,8 @@ async def test_summarize_honors_assigned_model() -> None:
 
     captured: dict = {}
 
-    def _capture_build(model):
-        captured["adapter_model"] = model
+    async def _capture_build(*, primary_model, **_kw):
+        captured["primary_model"] = primary_model
         return MagicMock()
 
     with (
@@ -91,15 +97,18 @@ async def test_summarize_honors_assigned_model() -> None:
             "app.services.ai.summarize.summarize_service.SkillToolService",
             return_value=MagicMock(),
         ),
-        patch.object(svc, "_build_adapter", side_effect=_capture_build),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            side_effect=_capture_build,
+        ),
     ):
         # user_id=None → bare path (no RunRecorder), cleanest capture point.
         await svc.summarize(
             transcript="hello world", user_id=None, parsed_media_id=1, title="T"
         )
 
-    # The adapter was built for the user's assigned model, not "qwen-max".
-    assert captured["adapter_model"] == _ASSIGNED
+    # The fallback chain was built for the user's assigned model, not "qwen-max".
+    assert captured["primary_model"] == _ASSIGNED
     # And the composed handed to the runner carries the assigned wire model.
     ran_composed = runner.run_turn.await_args.args[0]
     assert ran_composed.model == _ASSIGNED
@@ -112,6 +121,12 @@ async def test_visual_analysis_honors_assigned_model() -> None:
     is the user's model. That composed model must drive the adapter, NOT the
     ``self.model = provider_config["model"] or "gpt-4o"`` cost-estimate field.
     Locks in the second-half fix of the historical visual-analysis bug.
+
+    Post-fallback-chain wiring (spec §4): the adapter is now built by
+    ``build_fallback_llm`` rather than ``svc._build_adapter`` directly — the
+    seam this test pins moves to ``build_fallback_llm``'s ``primary_model``
+    kwarg, but the guarantee (assigned model reaches the wire, not the
+    "gpt-4o" cost-estimate field) is unchanged.
     """
     svc = VisualAnalysisService(
         agent_slug="analyze",
@@ -136,8 +151,8 @@ async def test_visual_analysis_honors_assigned_model() -> None:
 
     captured: dict = {}
 
-    def _capture_build(model):
-        captured["adapter_model"] = model
+    async def _capture_build(*, primary_model, **_kw):
+        captured["adapter_model"] = primary_model
         return MagicMock()
 
     with (
@@ -156,7 +171,10 @@ async def test_visual_analysis_honors_assigned_model() -> None:
             "app.services.ai.visual.visual_analysis_service.SkillToolService",
             return_value=MagicMock(),
         ),
-        patch.object(svc, "_build_adapter", side_effect=_capture_build),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            side_effect=_capture_build,
+        ),
     ):
         await svc.analyze_l1("https://example.com/cover.jpg")
 

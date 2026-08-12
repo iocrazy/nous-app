@@ -31,12 +31,15 @@ from uuid import UUID
 
 from app.core.config import settings
 from app.repositories.agent_memory_repository import get_user_team_ids
-from app.services.ai.adapters.factory import (
-    get_adapter_for_key,
-    get_adapter_for_user,
-    resolve_provider_key,
-)
-from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
+
+# Fallback-chain construction moved to
+# app.services.ai.llm.fallback_wiring.build_fallback_llm — no local
+# LLMFallbackChain reference remains here. Legacy tests that patched
+# ``ai_library_chat_wiring.LLMFallbackChain`` (inert even before this
+# removal — the class is constructed inside fallback_wiring's own
+# already-bound import, so patching it here never touched that call) were
+# repointed to patch ``fallback_wiring.build_fallback_llm`` directly
+# (final-review cleanup, 2026-08-11).
 from app.services.ai.memory import registry as memory_registry
 from app.services.ai.memory.agent_memory import recall
 from app.services.ai.runner.agent_runner import AgentRunner
@@ -76,22 +79,6 @@ def _resolve_tool_rate_limit(capability_profile: dict[str, Any]) -> int:
     except (TypeError, ValueError):
         return 0
     return value if value > 0 else 0
-
-
-def _llm_total_deadline_s() -> Optional[float]:
-    """AI-007: chain-wide wall-time ceiling for LLM retry + fallback.
-
-    Without it, primary retries + each fallback's retries + backoffs can spin
-    7-15 min on a flaky upstream. Default 120s bounds the worst case while
-    staying well above a normal multi-attempt recovery. ``LLM_TOTAL_DEADLINE_S=0``
-    disables it (legacy unbounded behavior).
-    """
-    raw = os.getenv("LLM_TOTAL_DEADLINE_S", "120")
-    try:
-        val = float(raw)
-    except ValueError:
-        return 120.0
-    return None if val <= 0 else val
 
 
 @dataclass(frozen=True)
@@ -329,10 +316,7 @@ async def build_agent_runner_stack(
     # (primary_model); the resolver only tags the credential origin. The load
     # is injected so it happens ONLY on the allowed path (a locked module must
     # skip the user BYOK read entirely).
-    from app.services.ai.providers.ai_provider_helpers import (
-        resolve_chat_config,
-        resolve_mediahub_model,
-    )
+    from app.services.ai.providers.ai_provider_helpers import resolve_chat_config
 
     _chat_cfg = await resolve_chat_config(
         user_id,
@@ -342,50 +326,12 @@ async def build_agent_runner_stack(
     )
     user_provider_config = _chat_cfg.provider_config
 
-    # Pre-resolve every model the fallback chain may dial against the platform
-    # ``mediahub_models`` catalog (async — the factory below must stay sync for
-    # LLMFallbackChain). A catalog hit is served by admin-managed credentials
-    # under the catalog's ``actual_model``; a found-but-disabled/gated model
-    # raises here (fail-closed) instead of silently 401-ing through BYOK.
-    # Credentials are DB-only (铁律 2026-07-07): a miss on both the catalog and
-    # the BYOK/platform-provider dict raises ProviderNotConfiguredError at dial
-    # time — there is no env fallback anymore.
-    _platform_adapters: dict = {}
-    for _m in dict.fromkeys([primary_model, *fallback_models]):
-        _hit = await resolve_mediahub_model(_m, "chat")
-        if _hit:
-            _prov, _pcfg, _actual = _hit
-            _creds = {"api_key": _pcfg["api_key"], "base_url": _pcfg["base_url"]}
-            # Dispatch on the row's admin-named actual_provider (#1279
-            # contract) — a prefix guess on actual_model raises for catalog
-            # models like ``qwen3-6-35b`` and killed EVERY chat turn at
-            # stack-build time (prod 2026-07-06→13).
-            _key = resolve_provider_key(_prov, _actual)
-            _platform_adapters[_m] = get_adapter_for_key(_key, _actual, {_key: _creds})
+    from app.services.ai.llm.fallback_wiring import build_fallback_llm
 
-    def _adapter_factory(model: str):
-        pre_resolved = _platform_adapters.get(model)
-        if pre_resolved is not None:
-            return pre_resolved
-        return get_adapter_for_user(model, user_provider_config, None)
-
-    # P1-5: pull the per-process ModelHealthRegistry off app.state if
-    # available so cooled-down models are skipped on subsequent calls.
-    # No registry → legacy linear behavior (try every model in order).
-    health_registry = None
-    try:
-        from app.main import app as _app  # late import to avoid cycle
-
-        health_registry = getattr(_app.state, "model_health", None)
-    except Exception:
-        health_registry = None
-
-    fallback_chain = LLMFallbackChain(
+    fallback_chain = await build_fallback_llm(
         primary_model=primary_model,
         fallback_models=fallback_models,
-        adapter_factory=_adapter_factory,
-        health_registry=health_registry,
-        total_deadline_seconds=_llm_total_deadline_s(),
+        user_provider_config=user_provider_config,
     )
 
     # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────

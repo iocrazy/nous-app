@@ -100,6 +100,45 @@ class TestAiTranscriptionWorkflowReraises:
         assert ctx["user_id"] == "u-1"
 
 
+class TestAiSummaryWorkflowRecordsErrorCode:
+    """final-review C3/⑤b: the workflow tail must classify the raised
+    exception into a stable error_code (mirrors caption_asset.py /
+    caption_slide.py's ``record_ai_error_code`` call, which ai_summary and
+    analyze_l1 previously lacked)."""
+
+    async def test_records_ai_error_code_with_the_raised_exception(self):
+        from app.workflows import ai_summary as m
+
+        manager = _make_manager()
+        record_failure = AsyncMock(return_value={"status": "failed"})
+        record_code = AsyncMock(return_value="PROVIDER_RATE_LIMIT")
+        exc = RuntimeError("provider 429")
+
+        with (
+            patch.object(m, "load_summary_inputs", AsyncMock(side_effect=exc)),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+            patch(
+                "app.workflows._failure_handler.record_workflow_failure",
+                record_failure,
+            ),
+            patch(
+                "app.services.ai.error_catalog.record_ai_error_code",
+                record_code,
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="provider 429"):
+                await inspect.unwrap(m.ai_summary_workflow)(
+                    parsed_media_id=1, user_id="u-1"
+                )
+
+        record_code.assert_awaited_once()
+        assert record_code.await_args.args[1] is exc
+        record_failure.assert_awaited_once()
+
+
 class TestAnalyzeL1WorkflowReraises:
     async def test_reraises_after_recording(self):
         from app.workflows import analyze_l1 as m
@@ -132,6 +171,46 @@ class TestAnalyzeL1WorkflowReraises:
         assert ctx["workflow"] == "analyze_l1"
         assert ctx["media_id"] == 1
         assert ctx["user_id"] == "u-1"
+
+
+class TestAnalyzeL1WorkflowRecordsErrorCode:
+    """final-review C3/⑤b — see TestAiSummaryWorkflowRecordsErrorCode."""
+
+    async def test_records_ai_error_code_with_the_raised_exception(self):
+        from app.workflows import analyze_l1 as m
+
+        manager = _make_manager()
+        record_failure = AsyncMock(return_value={"status": "failed"})
+        record_code = AsyncMock(return_value="PROVIDER_RATE_LIMIT")
+        exc = RuntimeError("no provider configured")
+
+        with (
+            patch.object(
+                m,
+                "resolve_analyze_provider",
+                AsyncMock(side_effect=exc),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+            patch(
+                "app.workflows._failure_handler.record_workflow_failure",
+                record_failure,
+            ),
+            patch(
+                "app.services.ai.error_catalog.record_ai_error_code",
+                record_code,
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="no provider configured"):
+                await inspect.unwrap(m.analyze_l1_workflow)(
+                    media_id=1, cover_url="http://x", user_id="u-1"
+                )
+
+        record_code.assert_awaited_once()
+        assert record_code.await_args.args[1] is exc
+        record_failure.assert_awaited_once()
 
 
 class TestCaptionSlideWorkflowReraises:
