@@ -373,12 +373,18 @@ class VersionService:
             if cur_seq <= tgt_seq:
                 results.append({"scene_id": sid, "status": "unchanged"})
                 continue
-            rows = await self.scenes.list_ops_by_scene(sid)
-            inverse = inverse_between(rows, tgt_seq, cur_seq)
-            if not inverse:
-                results.append({"scene_id": sid, "status": "unchanged"})
-                continue
             try:
+                # The ledger read lives INSIDE the per-scene try too: it's just
+                # as capable of blowing up (transient DB error) as the apply
+                # step below, and per the docstring above a per-scene failure
+                # must never abort scenes already committed earlier in the
+                # loop (scene_ids are processed sorted, so scenes before this
+                # one in id order have already landed their rollback).
+                rows = await self.scenes.list_ops_by_scene(sid)
+                inverse = inverse_between(rows, tgt_seq, cur_seq)
+                if not inverse:
+                    results.append({"scene_id": sid, "status": "unchanged"})
+                    continue
                 await self.scenes.apply_element_ops(
                     sid, inverse, expected_version=cur_seq, actor=actor
                 )

@@ -251,11 +251,16 @@ class _FakeSceneRepo:
         self._ops = ops_by_scene
         self.applied: List[dict] = []
         self.fail_scene_ids: set = set()
+        # Scenes whose ledger READ itself blows up (e.g. a transient DB error),
+        # as opposed to fail_scene_ids which fails the later apply step.
+        self.fail_ledger_scene_ids: set = set()
 
     async def list_by_script(self, script_id: str) -> List[dict]:
         return list(self._scenes)
 
     async def list_ops_by_scene(self, scene_id: str) -> List[dict]:
+        if str(scene_id) in self.fail_ledger_scene_ids:
+            raise RuntimeError("ledger read boom")
         return list(self._ops.get(str(scene_id), []))
 
     async def apply_element_ops(self, scene_id, ops, expected_version, actor):
@@ -420,6 +425,41 @@ async def test_rollback_edge_semantics_and_partial_failure():
     applied_111 = next(a for a in scene_repo.applied if a["scene_id"] == "111")
     assert applied_111["expected_version"] == 3
     assert applied_111["actor"] == "actor-uuid"
+
+
+@pytest.mark.asyncio
+async def test_rollback_ledger_read_failure_is_per_scene_not_fatal():
+    """I-1 regression: a ledger read (list_ops_by_scene) that raises for one
+    scene must NOT abort the whole rollback — it should land as that scene's
+    'failed' result, same as an apply_element_ops failure, while scenes
+    processed before it (sorted by scene_id) keep their committed rollback."""
+    rows_a, _ = _ledger(
+        [
+            [_ins("el_1", "one")],
+            [_upd("el_1", "one-edited")],
+            [_upd("el_1", "one-edited-again")],
+        ]
+    )
+    scenes = [
+        {"id": 111, "content_version": 3, "sort_order": 1000},  # rolls back fine
+        {"id": 222, "content_version": 2, "sort_order": 2000},  # ledger read raises
+    ]
+    scene_repo = _FakeSceneRepo(scenes, {"111": rows_a})
+    scene_repo.fail_ledger_scene_ids = {"222"}
+    commit = {"watermarks": {"111": 1, "222": 1}, "scene_ids": []}
+    svc = VersionService(scene_repo=scene_repo, commit_repo=_FakeCommitRepo(commit))
+
+    out = await svc.rollback_to("900", "5000", "actor-uuid")
+
+    by_scene = {r["scene_id"]: r for r in out["results"]}
+    # 111 (processed first, scene_ids sorted) rolled back and stayed committed
+    # even though 222 (processed after) blew up reading its ledger.
+    assert by_scene["111"]["status"] == "rolled_back"
+    assert by_scene["222"]["status"] == "failed"
+    assert by_scene["222"]["error_code"] == "error"
+    assert out["partial_failure"] is True
+    applied_ids = {a["scene_id"] for a in scene_repo.applied}
+    assert applied_ids == {"111"}
 
 
 @pytest.mark.asyncio

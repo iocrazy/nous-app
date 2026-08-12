@@ -362,4 +362,41 @@ describe('EditorShell', () => {
 
     await waitFor(() => expect(svc.listScenes).toHaveBeenCalledTimes(2));
   });
+
+  it('remounts the scene blocks (not just reloads) on scene content refresh, so an ' +
+    'undo that reverted TEXT under an unchanged scene id is actually reflected', async () => {
+    // M-1 regression: useSceneSync only reseeds a SceneBlock when scene.id
+    // CHANGES. A reload that returns the SAME scene ids with different
+    // elements would silently leave every open editor showing stale
+    // pre-undo text if the subtree weren't force-remounted. Asserting only
+    // "listScenes was called again" (the pre-existing test above) can't
+    // catch a regression to a listener that reloads without bumping the
+    // remount key — this test pins the remount itself via DOM node identity:
+    // a real remount replaces the SceneBlock's root element, so the old
+    // node reference goes stale even though a query for the same testid at
+    // the same index still resolves.
+    svc.listScenes.mockResolvedValue(twoScenes);
+    render(<EditorShell scriptId="1" />);
+
+    const blocksBefore = await screen.findAllByTestId('scene-block');
+    expect(blocksBefore).toHaveLength(2);
+    const firstBlockBefore = blocksBefore[0];
+    expect(document.body.contains(firstBlockBefore)).toBe(true);
+
+    act(() => {
+      requestSceneContentRefresh();
+    });
+    await waitFor(() => expect(svc.listScenes).toHaveBeenCalledTimes(2));
+
+    // The remount happens AFTER the re-fetch lands (see EditorShell's
+    // handleRolledBack), so give it a retry window.
+    await waitFor(() => {
+      const blocksAfter = screen.getAllByTestId('scene-block');
+      expect(blocksAfter).toHaveLength(2);
+      expect(blocksAfter[0]).not.toBe(firstBlockBefore);
+    });
+    // The pre-refresh node was actually torn out of the document, not just
+    // shadowed by a later element — confirms unmount, not a no-op reorder.
+    expect(document.body.contains(firstBlockBefore)).toBe(false);
+  });
 });
