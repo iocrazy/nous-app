@@ -912,3 +912,29 @@ async def test_project_scene_rows_stmt_entity_level_negative_control_proves_sens
     assert bad_row.get("location_text") is None  # dict(r) consumption would break
     with pytest.raises(KeyError):
         bad_row["location_text"]
+
+
+@pytest.mark.asyncio
+async def test_list_ops_by_scene_propagates_db_errors():
+    """A ledger-read failure must PROPAGATE, not silently return [].
+
+    Both consumers replay/invert this ledger: an empty list on error would
+    reconstruct wrong content (version_service) or report "nothing to undo"
+    (run_undo_service). House convention: primary reads fail loud, same as
+    list_scene_rows_for_project.
+    """
+
+    class _BoomSession:
+        async def execute(self, stmt):
+            raise RuntimeError("db down")
+
+    class _BoomCtx:
+        async def __aenter__(self):
+            return _BoomSession()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with patch.object(scene_mod, "read_scope", lambda: _BoomCtx()):
+        with pytest.raises(RuntimeError, match="db down"):
+            await ScriptSceneRepository().list_ops_by_scene(str(_SCENE_ID))
