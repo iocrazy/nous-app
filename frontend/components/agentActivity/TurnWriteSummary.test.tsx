@@ -183,7 +183,7 @@ describe('TurnWriteSummary undo', () => {
     };
     const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
     const report = getByTestId('turn-undo-report');
-    expect(report.textContent).toContain('agentActivity.undoAlreadyUndone');
+    expect(report.textContent).toContain('Already undone earlier — nothing changed');
     expect(report.textContent).not.toContain('agentActivity.undoSummary');
   });
 

@@ -176,7 +176,7 @@ export function TurnWriteSummary({
           className="mt-1 border-t border-agent-line px-2 pt-1 text-[10px] text-ink-500"
         >
           {undoReport.status === 'already_undone' ? (
-            <p>{t('agentActivity.undoAlreadyUndone')}</p>
+            <p>{t('agentActivity.undoAlreadyUndone', 'Already undone earlier — nothing changed')}</p>
           ) : (
             <>
               <p>
