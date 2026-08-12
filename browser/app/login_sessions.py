@@ -42,6 +42,8 @@ from .login import (
     IdentityUnresolved,
     LoginDriver,
     LoginFlowSpec,
+    LoginJudgement,
+    LoginPageSnapshot,
     LoginProfile,
     open_login_driver,
 )
@@ -413,7 +415,10 @@ class LoginSession:
         return _SessionOperation(self)
 
     async def _answer_identity_challenge(
-        self, driver: LoginDriver, snapshot: Any, judgement: Any
+        self,
+        driver: LoginDriver,
+        snapshot: LoginPageSnapshot,
+        judgement: LoginJudgement,
     ) -> StatusSnapshot | None:
         """Pick "receive an SMS" on the chooser. None = it worked, read again.
 
@@ -431,7 +436,7 @@ class LoginSession:
           clicked and the platform stayed put (`identity_challenge_stalled`).
         """
         self._identity_polls += 1
-        offered = list(getattr(snapshot, "identity_challenge_texts", ()) or ())
+        offered = list(snapshot.identity_challenge_texts)
 
         if self._identity_option is None:
             clicked = await driver.choose_sms_challenge()
