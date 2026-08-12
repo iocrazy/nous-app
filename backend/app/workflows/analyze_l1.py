@@ -181,18 +181,7 @@ async def call_analyze_l1(
         except Exception:  # noqa: BLE001 — progress is decorative
             pass
 
-    await _progress(30, "Preparing analysis...")
-    result = await analysis_service.analyze_l1(
-        cover_url,
-        user_id=user_id,
-        on_progress=_progress,
-        # task ↔ run bidirectional linkage (mig 282): RunRecorder writes
-        # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
-        # this workflow's task_tracking row.
-        task_id=wf_id,
-        fallback_models=fallback_models,
-    )
-    if not result:
+    async def _mark_visual_analysis_failed() -> None:
         # Mark the resource failed so the UI's existing 'failed' branch (retry
         # button) shows instead of a stuck "Analyzing…". Same SYSTEM-scope
         # rationale as the 'processing' write above.
@@ -210,6 +199,35 @@ async def call_analyze_l1(
                     .where(Resources.id == resource_id)
                     .values(visual_analysis_status="failed")
                 )
+
+    await _progress(30, "Preparing analysis...")
+    try:
+        result = await analysis_service.analyze_l1(
+            cover_url,
+            user_id=user_id,
+            on_progress=_progress,
+            # task ↔ run bidirectional linkage (mig 282): RunRecorder writes
+            # agent_runs.task_id and stamps agent_id + metadata.run_id back onto
+            # this workflow's task_tracking row.
+            task_id=wf_id,
+            fallback_models=fallback_models,
+        )
+    except Exception:
+        # final-review C2: VisualAnalysisService's recorder path now lets
+        # LLM-class exceptions (AllModelsFailed/LLMCallError) PROPAGATE
+        # instead of swallowing them to None (spec §3/§4) — which used to be
+        # the ONLY way this step reached the 'failed' write below. An
+        # exception here skipped straight past it, leaving
+        # resources.visual_analysis_status stuck on 'processing' forever even
+        # though the workflow's own tail except correctly failed
+        # task_tracking. Mark it failed here too, then re-raise UNCHANGED so
+        # the workflow's record_ai_error_code / record_workflow_failure /
+        # raise (Route-C rule 4) still runs exactly as before.
+        await _mark_visual_analysis_failed()
+        raise
+
+    if not result:
+        await _mark_visual_analysis_failed()
         # No result == the provider call failed (VisualAnalysisService caught the
         # error, logged it, and returned None — e.g. the assigned provider is
         # unreachable OR is not a vision/multimodal model). RAISE rather than
@@ -329,6 +347,15 @@ async def analyze_l1_workflow(
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
     except Exception as e:  # noqa: BLE001
+        # Translate the raw failure into a stable error code the frontend
+        # can turn into actionable copy (an AllModelsFailed(429) otherwise
+        # reaches the user as "Step ... exceeded its maximum of N retries").
+        # Writes metadata only — error_msg/phase stay trigger-owned — and
+        # never raises, so the failure path below is unchanged (mirrors
+        # caption_asset.py / caption_slide.py — final-review C3).
+        from app.services.ai.error_catalog import record_ai_error_code
+
+        await record_ai_error_code(DBOS.workflow_id, e)
         # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
         # DBOS records ERROR — returning the dict made DBOS mark this
         # workflow SUCCESS while task_tracking said failed (observed live

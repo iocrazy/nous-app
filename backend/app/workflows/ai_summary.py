@@ -207,7 +207,13 @@ async def run_summarize_agent(
         "topics": result.topics,
         # Telemetry for resource_summaries.llm_model/llm_provider — both
         # columns were NULL since the table was created (2026-08-07 diag).
-        "llm_model": (provider_config or {}).get("model", "") or "",
+        # I2 (final-review): prefer the model that ACTUALLY served the
+        # response (result.llm_model, reads LLMFallbackChain's injected
+        # _actual_model) — falls back to the configured primary only when
+        # the chain didn't run (bare passthrough / stubbed run_turn in
+        # tests), so a fallback swap is reflected instead of always showing
+        # the primary that was bypassed.
+        "llm_model": result.llm_model or (provider_config or {}).get("model", "") or "",
         "llm_provider": provider_key or "",
     }
 
@@ -357,6 +363,15 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
         await manager.update_progress(wf_id, 100, subtitle="Summary saved")
         return result
     except Exception as e:  # noqa: BLE001
+        # Translate the raw failure into a stable error code the frontend
+        # can turn into actionable copy (an AllModelsFailed(429) otherwise
+        # reaches the user as "Step ... exceeded its maximum of N retries").
+        # Writes metadata only — error_msg/phase stay trigger-owned — and
+        # never raises, so the failure path below is unchanged (mirrors
+        # caption_asset.py / caption_slide.py — final-review C3).
+        from app.services.ai.error_catalog import record_ai_error_code
+
+        await record_ai_error_code(DBOS.workflow_id, e)
         # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
         # DBOS records ERROR — returning the dict made DBOS mark this
         # workflow SUCCESS while task_tracking said failed (observed live
