@@ -145,16 +145,24 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
 
     cfg = await resolve_summarization_config(user_id)
 
+    # fallback 链来源:summarize 预设行的 fallback_models(spec §1 拍板——与
+    # chat 同源;per-user primary + 平台预设 fallbacks)。行缺失/空 → 空链。
+    from app.repositories.agent_repository import get_agent_repository
+
+    agent_row = await get_agent_repository().get_by_slug("summarize")
+    fallback_models = list((agent_row or {}).get("fallback_models") or [])
+
     return {
         "transcript": row["transcript"],
         "title": row.get("title") or "",
         "resource_id": str(row["resource_id"]),
         "provider_key": cfg.provider_key,
         "provider_config": cfg.provider_config,
+        "fallback_models": fallback_models,
     }
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step(retries_allowed=True, max_attempts=1)
 async def run_summarize_agent(
     *,
     transcript: str,
@@ -164,13 +172,19 @@ async def run_summarize_agent(
     provider_key: str,
     provider_config: dict[str, Any],
     wf_id: Optional[str] = None,
+    fallback_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Invoke the `summarize` agent via SummarizeService → AgentRunner.
     Returns {summary, key_points, topics}. Each retry is a fresh agent
     call (token cost + agent_runs row each time).
 
     PR #237 audit: was sync ``def`` with ``asyncio.run()``. Now async
-    so the AgentRunner / asyncpg pool stays on the executor's loop."""
+    so the AgentRunner / asyncpg pool stays on the executor's loop.
+
+    ``max_attempts=1`` (spec §1): retry + fallback now live entirely in
+    LLMFallbackChain (build_fallback_llm, threaded via ``fallback_models``
+    below) — a step-level retry on top would multiply attempts (this
+    step's retries × the chain's own per-model retries)."""
     from app.services.ai.summarize.summarize_service import SummarizeService
 
     svc = SummarizeService(provider_key=provider_key, provider_config=provider_config)
@@ -181,7 +195,9 @@ async def run_summarize_agent(
         title=title,
         # task ↔ run bidirectional linkage (mig 282) — see analyze_l1.
         task_id=wf_id,
+        fallback_models=fallback_models,
     )
+    # 残余 None = pause/runner-error-dict;LLM 异常已直接 propagate 不经此路。
     if result is None:
         raise RuntimeError("summarize agent returned None")
 
@@ -324,6 +340,7 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             provider_key=inputs.get("provider_key", ""),
             provider_config=inputs.get("provider_config", {}),
             wf_id=wf_id,
+            fallback_models=inputs.get("fallback_models", []),
         )
         await manager.update_progress(wf_id, 70, subtitle="Summary generated")
         result = await persist_summary(
