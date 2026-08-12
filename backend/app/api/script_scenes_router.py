@@ -61,6 +61,35 @@ MAX_COPILOT_TEXT_LEN = 4000
 
 router = APIRouter()
 
+# Snowflake BIGINT id/FK fields on a script_scenes row (mirrors the
+# repository's `_SCENE_BIGINT_FIELDS` write-side coercion; `id` itself is the
+# PK and always bigint). The repository deliberately keeps these NATIVE INT
+# on read (strategy-C parity, see script_scene_repository.py) for internal
+# comparisons — this stringifies ONLY at the JSON response boundary. Same
+# fix family as script_shots_router._to_response (2026-08 P0: a Snowflake id
+# serialized as a JSON number risks JS precision loss and string-keyed
+# reconciliation mismatches on the frontend).
+_SCENE_ID_FIELDS = ("id", "script_id", "chapter_id", "location_id")
+
+
+def _to_response(scene: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Stringify a scene row's bigint id/FK fields for the JSON response.
+
+    Returns a NEW dict (never mutates the repository's row). ``None`` passes
+    through unchanged."""
+    if scene is None:
+        return None
+    out = dict(scene)
+    for field in _SCENE_ID_FIELDS:
+        if field in out and out[field] is not None:
+            out[field] = str(out[field])
+    return out
+
+
+def _to_response_list(scenes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``_to_response`` applied to every row in a list."""
+    return [_to_response(s) for s in scenes]
+
 
 @router.get("/scripts/{script_id}/scenes")
 async def list_scenes(
@@ -71,7 +100,7 @@ async def list_scenes(
     """List all scenes for a script (chapter_id NULLS LAST, then sort_order)."""
     try:
         scenes = await get_script_scene_repository().list_by_script(script_id)
-        return {"success": True, "data": scenes}
+        return {"success": True, "data": _to_response_list(scenes)}
     except Exception as exc:
         logger.error(f"[Scenes] list for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to list scenes")
@@ -90,7 +119,7 @@ async def create_scene(
         data = body.model_dump(exclude_none=True)
         data["script_id"] = script_id
         scene = await get_script_scene_repository().create(data)
-        return {"success": True, "data": scene}
+        return {"success": True, "data": _to_response(scene)}
     except Exception as exc:
         logger.error(f"[Scenes] create for script {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create scene")
@@ -120,7 +149,7 @@ async def create_scene_after_lock(
             before_scene_id=body.before_scene_id,
             after_scene_id=body.after_scene_id,
         )
-        return {"success": True, "data": scene}
+        return {"success": True, "data": _to_response(scene)}
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
@@ -139,7 +168,7 @@ async def get_scene(
         scene = await get_script_scene_repository().get_by_id(scene_id)
         if scene is None:
             raise HTTPException(status_code=404, detail="Scene not found")
-        return {"success": True, "data": scene}
+        return {"success": True, "data": _to_response(scene)}
     except HTTPException:
         raise
     except Exception as exc:
@@ -161,7 +190,7 @@ async def update_scene(
         )
         if scene is None:
             raise HTTPException(status_code=404, detail="Scene not found")
-        return {"success": True, "data": scene}
+        return {"success": True, "data": _to_response(scene)}
     except HTTPException:
         raise
     except Exception as exc:
@@ -181,6 +210,8 @@ async def delete_scene(
     number is never reused (agent-layer spec §4.2 "删除保留号标 OMITTED")."""
     try:
         result = await get_script_scene_repository().delete(scene_id)
+        result = dict(result)
+        result["scene"] = _to_response(result.get("scene"))
         return {"success": True, "data": result}
     except Exception as exc:
         logger.error(f"[Scenes] delete {scene_id} failed: {exc}")
@@ -437,7 +468,7 @@ async def move_scene(
             before_scene_id=body.before_scene_id,
             after_scene_id=body.after_scene_id,
         )
-        return {"success": True, "data": scene}
+        return {"success": True, "data": _to_response(scene)}
     except Exception as exc:
         logger.error(f"[Scenes] move {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to move scene")

@@ -17,7 +17,7 @@ and the status machine flows through the generate workflow.
 """
 
 import uuid as _uuid
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
@@ -31,6 +31,41 @@ from app.services.infra.unified_task_manager import get_task_manager
 
 router = APIRouter()
 
+# Snowflake BIGINT id/FK fields on a script_shots row (mirrors the
+# repository's `_SHOT_BIGINT_FIELDS` write-side coercion; `id` itself is the
+# PK and always bigint). The repository deliberately keeps these NATIVE INT
+# on read (strategy-C parity, see script_shot_repository.py) for internal
+# comparisons — this stringifies ONLY at the JSON response boundary.
+#
+# 2026-08 P0: a Snowflake id > 2^53 serialized as a JSON *number* loses
+# precision in JS, and even below that threshold the frontend's node-id
+# reconciliation matches shot ids as strings — a bare int response silently
+# mismatched and caused the storyboard canvas to re-mount (duplicate,
+# hidden) shot nodes on every reconcile. The frontend's `readId` (canvas
+# shotSync) already tolerates BOTH number and string, so this is a
+# backward-compatible stringify, not a breaking contract change.
+_SHOT_ID_FIELDS = ("id", "scene_id", "created_by_agent_run_id")
+
+
+def _to_response(shot: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Stringify a shot row's bigint id/FK fields for the JSON response.
+
+    Returns a NEW dict (never mutates the repository's row) so any caller
+    still holding the original dict for internal use is unaffected. ``None``
+    passes through (a 404-shaped "not found" caller checks before this)."""
+    if shot is None:
+        return None
+    out = dict(shot)
+    for field in _SHOT_ID_FIELDS:
+        if field in out and out[field] is not None:
+            out[field] = str(out[field])
+    return out
+
+
+def _to_response_list(shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``_to_response`` applied to every row in a list."""
+    return [_to_response(s) for s in shots]
+
 
 @router.get("/scenes/{scene_id}/shots")
 async def list_shots(
@@ -41,7 +76,7 @@ async def list_shots(
     """List all shots for a scene, ordered by sort_order."""
     try:
         shots = await get_script_shot_repository().list_by_scene(scene_id)
-        return {"success": True, "data": shots}
+        return {"success": True, "data": _to_response_list(shots)}
     except Exception as exc:
         logger.error(f"[Shots] list for scene {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to list shots")
@@ -60,7 +95,7 @@ async def create_shot(
         data = body.model_dump(exclude_none=True)
         data["scene_id"] = scene_id
         shot = await get_script_shot_repository().create(data)
-        return {"success": True, "data": shot}
+        return {"success": True, "data": _to_response(shot)}
     except Exception as exc:
         logger.error(f"[Shots] create for scene {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create shot")
@@ -77,7 +112,7 @@ async def get_shot(
         shot = await get_script_shot_repository().get_by_id(shot_id)
         if shot is None:
             raise HTTPException(status_code=404, detail="Shot not found")
-        return {"success": True, "data": shot}
+        return {"success": True, "data": _to_response(shot)}
     except HTTPException:
         raise
     except Exception as exc:
@@ -99,7 +134,7 @@ async def update_shot(
         )
         if shot is None:
             raise HTTPException(status_code=404, detail="Shot not found")
-        return {"success": True, "data": shot}
+        return {"success": True, "data": _to_response(shot)}
     except HTTPException:
         raise
     except Exception as exc:
@@ -136,7 +171,7 @@ async def move_shot(
             before_shot_id=body.before_shot_id,
             after_shot_id=body.after_shot_id,
         )
-        return {"success": True, "data": shot}
+        return {"success": True, "data": _to_response(shot)}
     except Exception as exc:
         logger.error(f"[Shots] move {shot_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to move shot")
