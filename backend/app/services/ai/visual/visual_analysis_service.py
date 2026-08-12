@@ -80,9 +80,10 @@ class VisualAnalysisService:
         ``provider_key`` / ``provider_config`` come from the Celery task
         layer (which reads the user's ``ai_settings.ai_providers`` per the
         resolved agent's model). When both are empty, adapter construction
-        (via ``build_fallback_llm``) falls back to the factory's per-model
-        default using global settings — that path is only exercised by the
-        smoke-test / no-user invocations.
+        (via ``build_fallback_llm``) falls back to the platform catalog
+        (DB-only credentials; raises ``ProviderNotConfiguredError`` if
+        unconfigured — no env-var fallback since 2026-07-07) — that path is
+        only exercised by the smoke-test / no-user invocations.
 
         ``agent_slug`` is the user's assigned visual-analysis agent (resolved
         from ``task_assignment.visual_analysis``; defaults to the built-in

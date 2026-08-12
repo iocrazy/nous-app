@@ -184,9 +184,9 @@ async def test_malformed_write_level_denies(tool_name):
 #
 # These drive the RUNNER, not the hook: the hook tests above all construct
 # HighRiskCapabilityGateHook by hand, which silently assumes something
-# registered it. Eight services build AgentRunner with no hooks at all
+# registered it. Seven services build AgentRunner with no hooks at all
 # (script_ai / summarize / caption / classify / translate / visual_analysis
-# / llm_analysis / topic_scorer) while composing through the same
+# / topic_scorer) while composing through the same
 # PromptComposer that advertises these tools — on those runners the whole
 # PreToolUse chain is a no-op, so a hook-level test proves nothing about
 # whether the call was gated.
@@ -227,7 +227,7 @@ def _recorder():
 @pytest.mark.parametrize("tool_name", _ALL_TOOLS)
 async def test_a_hookless_runner_refuses_every_screenwriting_tool(tool_name):
     """A runner with no capability gate has no business running
-    capability-gated tools. Without this, the eight hookless services would
+    capability-gated tools. Without this, the seven hookless services would
     execute these tools with NO write grading whatsoever — the gate isn't
     bypassed, it simply never runs."""
     called = False
@@ -294,7 +294,7 @@ async def test_gate_detection_is_by_type_not_by_registration_name():
     assert result["error_code"] == "capability_gate_missing"
 
 
-def test_the_eight_hookless_services_still_construct_runners_without_hooks():
+def test_the_seven_hookless_services_still_construct_runners_without_hooks():
     """Documents WHY the check above exists, and fails loudly if someone
     "fixes" these services by adding hooks — at which point the refusal
     stops being the thing protecting them and their exemption in
