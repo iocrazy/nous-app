@@ -1969,7 +1969,7 @@ export interface AgentRunUndoReport {
   skipped: {
     kind: 'shot' | 'scene' | 'scene_element';
     id: string;
-    reason: 'edited_after_run' | 'rendered' | 'version_conflict';
+    reason: 'edited_after_run' | 'rendered' | 'version_conflict' | 'internal_error';
   }[];
 }
 

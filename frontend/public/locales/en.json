@@ -4169,6 +4169,7 @@
     "undo": "Undo",
     "undone": "Undone",
     "undoSummary": "Undid {{deleted}} cards, reverted {{reverted}} cards, restored {{elements}} passages",
+    "undoAlreadyUndone": "Already undone earlier — nothing changed",
     "undoKind": {
       "shot": "Shot",
       "scene": "Scene",
@@ -4177,7 +4178,8 @@
     "undoReason": {
       "edited_after_run": "changed since this run — left untouched",
       "rendered": "already rendered — left untouched",
-      "version_conflict": "scene was being edited — left untouched"
+      "version_conflict": "scene was being edited — left untouched",
+      "internal_error": "internal error during undo — left untouched"
     },
     "chooseAgent": "Choose an agent",
     "chooseAgentHint": "Pick who you want to work with",
