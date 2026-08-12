@@ -376,3 +376,57 @@ async def test_report_shape_all_ids_are_str():
     ]
     for item in report["skipped"]:
         assert isinstance(item["id"], str)
+
+
+@pytest.mark.asyncio
+async def test_shot_unexpected_failure_reason_internal_error():
+    """A generic exception inside a shot plan must NOT be blamed on the user
+    ("edited_after_run" is a lie there) — it reports as internal_error."""
+    read_session = _CaptureSession(
+        [
+            _FakeResult(
+                all_rows=[_shot_ledger_row(1, 900, "create", None, _FULL)]
+            ),
+            _FakeResult(all_rows=[]),  # no scenes touched
+        ]
+    )
+    with (
+        patch.object(service_mod, "read_scope", lambda: _ScopeCtx(read_session)),
+        patch.object(
+            service_mod,
+            "_undo_delete_shot",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ),
+    ):
+        report = await service_mod.execute_undo(_RUN_ID)
+
+    assert report["shots_deleted"] == 0
+    assert report["skipped"] == [
+        {"kind": "shot", "id": "900", "reason": "internal_error"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scene_ledger_read_failure_reason_internal_error():
+    """Task 1 makes list_ops_by_scene raise on DB errors; the per-scene
+    handler must surface that as internal_error, not edited_after_run."""
+    read_session = _CaptureSession(
+        [
+            _FakeResult(all_rows=[]),  # no shot ledger rows
+            _FakeResult(all_rows=[(_SCENE_ID,)]),  # one scene touched
+        ]
+    )
+    repo = MagicMock()
+    repo.list_ops_by_scene = AsyncMock(side_effect=RuntimeError("db down"))
+    with (
+        patch.object(service_mod, "read_scope", lambda: _ScopeCtx(read_session)),
+        patch.object(
+            service_mod, "get_script_scene_repository", MagicMock(return_value=repo)
+        ),
+    ):
+        report = await service_mod.execute_undo(_RUN_ID)
+
+    assert report["scene_elements_reverted"] == 0
+    assert report["skipped"] == [
+        {"kind": "scene", "id": str(_SCENE_ID), "reason": "internal_error"}
+    ]

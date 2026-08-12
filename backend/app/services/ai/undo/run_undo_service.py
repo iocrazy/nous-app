@@ -41,8 +41,9 @@ async def execute_undo(run_id: int) -> dict[str, Any]:
     ``{"shots_deleted": int, "shots_reverted": int,
        "scene_elements_reverted": int, "skipped": [...]}``
     with ``reason`` in ``skipped`` one of ``edited_after_run`` /
-    ``rendered`` / ``version_conflict``, and every id a ``str`` (snowflake
-    precision discipline).
+    ``rendered`` / ``version_conflict`` / ``internal_error`` (the last is
+    the honest label for unexpected server-side failures — never blamed on
+    a user edit), and every id a ``str`` (snowflake precision discipline).
     """
     report: dict[str, Any] = {
         "shots_deleted": 0,
@@ -96,7 +97,7 @@ async def _undo_shots(run_id: int, report: dict[str, Any]) -> None:
                 {
                     "kind": "shot",
                     "id": str(plan.shot_id),
-                    "reason": "edited_after_run",
+                    "reason": "internal_error",
                 }
             )
 
@@ -211,5 +212,5 @@ async def _undo_scenes(run_id: int, report: dict[str, Any]) -> None:
                 exc_info=True,
             )
             report["skipped"].append(
-                {"kind": "scene", "id": str(scene_id), "reason": "edited_after_run"}
+                {"kind": "scene", "id": str(scene_id), "reason": "internal_error"}
             )
