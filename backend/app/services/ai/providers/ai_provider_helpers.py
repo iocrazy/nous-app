@@ -443,7 +443,7 @@ async def resolve_task_ai_config(
     ``resolve_locked_module_config`` helper, which tries the platform catalog
     FIRST (#857 order) and only then the admin's manual base_url / model /
     api_key.  Locked + no admin api_key (and not a catalog model) →
-    fail-closed (RuntimeError) — WhisperService and LLMAnalysisService use
+    fail-closed (RuntimeError) — WhisperService uses
     AIProviderFactory.get_provider directly (no env fallback), so a missing key
     would silently fail; we surface the error early.  ``agent_slug`` is
     ``default_slug`` so the caller composes the module's built-in default agent

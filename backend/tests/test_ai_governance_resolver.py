@@ -180,7 +180,7 @@ async def test_locked_unknown_model_prefix_falls_back_to_generic():
 async def test_locked_no_api_key_fails_closed():
     """A locked module with no admin api_key MUST raise RuntimeError.
 
-    WhisperService and LLMAnalysisService use AIProviderFactory.get_provider
+    WhisperService uses AIProviderFactory.get_provider
     directly (no env fallback).  Silently running without a key would fail
     later with a cryptic auth error; we surface it early."""
     from app.services.ai.providers import ai_provider_helpers as helpers_mod

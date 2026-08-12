@@ -297,52 +297,6 @@ async def test_run_composes_the_constructor_agent_slug() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_adapter_uses_user_cfg_for_doubao() -> None:
-    """V4: when caller passes Doubao provider config, _build_adapter
-    routes through get_adapter_for_user with the user's api_key /
-    base_url — NOT through global settings.
-    """
-    svc = VisualAnalysisService(
-        provider_key="doubao",
-        provider_config={
-            "api_key": "user-doubao-key",
-            "base_url": "https://ark.example.com/api/v3/chat/completions",
-            "model": "doubao-seed-2-0-pro-260215",
-        },
-    )
-    adapter = svc._build_adapter("doubao-seed-2-0-pro-260215")
-    # DoubaoAdapter inherits from OpenAICompatibleAdapter — check the
-    # concrete state the service would hand to the runner.
-    assert adapter.api_key == "user-doubao-key"
-    assert "ark.example.com" in adapter.api_url
-
-
-def test_build_adapter_uses_user_cfg_for_openai() -> None:
-    """Same path for the OpenAI family: BYO api_key propagates through."""
-    svc = VisualAnalysisService(
-        provider_key="openai",
-        provider_config={
-            "api_key": "sk-user-personal",
-            "model": "gpt-4o",
-        },
-    )
-    adapter = svc._build_adapter("gpt-4o")
-    assert adapter.api_key == "sk-user-personal"
-    # OpenAIAdapter uses the canonical endpoint when base_url is empty.
-    assert "api.openai.com" in adapter.api_url
-
-
-def test_build_adapter_empty_config_falls_back_to_generic_compat() -> None:
-    """No BYO config + unknown model prefix → generic compat adapter
-    (will fail loudly at request time, not silently misroute)."""
-    svc = VisualAnalysisService()  # no provider key, no config
-    adapter = svc._build_adapter("totally-unknown-vendor-x-7b")
-    # OpenAICompatibleAdapter is the concrete fallback class
-    from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
-
-    assert isinstance(adapter, OpenAICompatibleAdapter)
-
-
 @pytest.mark.asyncio
 async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
     """End-to-end: L1 call with BYO config → the fallback chain is built

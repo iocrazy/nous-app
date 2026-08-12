@@ -310,7 +310,6 @@ def test_the_eight_hookless_services_still_construct_runners_without_hooks():
         "services/ai/classify/classify_service.py",
         "services/ai/translate/translate_service.py",
         "services/ai/visual/visual_analysis_service.py",
-        "services/ai/llm/llm_analysis_service.py",
         "services/topics/topic_scorer.py",
     )
     for rel in hookless:

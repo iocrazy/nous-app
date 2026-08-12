@@ -23,15 +23,9 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters.base import AIAdapter
-from app.services.ai.adapters.factory import (
-    get_adapter_for_user,
-    provider_key_for_model,
-)
-from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
@@ -68,41 +62,6 @@ class SummarizeService:
         self._provider_key = (provider_key or "").strip()
         self._provider_config: Dict[str, Any] = dict(provider_config or {})
         self.model = self._provider_config.get("model") or ""
-
-    def _build_adapter(self, model: str) -> AIAdapter:
-        """Same adapter resolution as VisualAnalysisService — derive the
-        provider key from the model prefix, wrap the user's BYO config,
-        fall back to a generic OpenAI-compatible adapter on unknown
-        prefixes. See visual_analysis_service._build_adapter for the
-        full rationale."""
-        provider_key = self._provider_key
-        if not provider_key and model:
-            try:
-                provider_key = provider_key_for_model(model)
-            except ValueError:
-                provider_key = ""
-        if not provider_key:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
-        user_cfg_scoped = {
-            provider_key: {
-                "api_key": self._provider_config.get("api_key", ""),
-                "base_url": self._provider_config.get("base_url", "") or "",
-                "app_id": self._provider_config.get("app_id", ""),
-            }
-        }
-        try:
-            return get_adapter_for_user(model, user_cfg_scoped, settings)
-        except ValueError:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
@@ -201,8 +160,8 @@ class SummarizeService:
         # falls back to its hardcoded "qwen-max" default -- a non-empty value
         # that would win ``composed.model or self.model`` and SILENTLY DROP
         # the user's assigned summary model (the last-mile-hardcode class:
-        # cf. visual-analysis, whisper). Mirror the twin llm_analysis_service
-        # ._run_agent, whose comment already codifies the rule: the caller's
+        # cf. visual-analysis, whisper). Mirrors the rule the deleted
+        # llm_analysis_service._run_agent used to codify: the caller's
         # per-request model takes precedence over the agent row's, because
         # summarize's model routing is set per-user in the task-assignment
         # UI, not in the agent row. Only override when a resolved model
