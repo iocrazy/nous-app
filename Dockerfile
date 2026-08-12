@@ -25,9 +25,21 @@
 # rust-builder stage with `SSL_ERROR_SYSCALL` before apt ever got a turn.
 # Set it empty to use crates.io directly:
 #   docker build --build-arg CARGO_MIRROR= .
+# PIP_MIRROR is the PyPI counterpart of the two mirrors above, and it exists
+# for exactly the same reason. 2026-08-11: `pip install yt-dlp faster-whisper`
+# (line ~140) died with
+#   ProtocolError: Connection broken: IncompleteRead(3029067 bytes read,
+#                                                    147657 more expected)
+# — pypi.org cut the transfer mid-wheel. That layer had been a cache hit for
+# months; it only became visible after a `docker image prune` cleared the build
+# cache, which is the same way the chromium download failure surfaced. A layer
+# that only works while cached is not "working", it is untested.
+# Set it empty to use pypi.org directly (overseas builds):
+#   docker build --build-arg PIP_MIRROR= .
 ARG PYTHON_BASE=python:3.13-slim@sha256:99569264a52f7665899b7bc0fb48e72a2712b850b129f63c4733af1e939accfb
 ARG APT_MIRROR=mirrors.aliyun.com
 ARG CARGO_MIRROR=sparse+https://rsproxy.cn/index/
+ARG PIP_MIRROR=https://mirrors.aliyun.com/pypi/simple/
 
 # ============================================
 # Stage 1: Build Rust nous-core module
@@ -38,6 +50,15 @@ FROM ${PYTHON_BASE} AS rust-builder
 # ARGs declared before the first FROM are global; a stage that wants one has to
 # re-declare it (Docker semantics, not a typo).
 ARG APT_MIRROR
+ARG PIP_MIRROR
+# Set once per stage instead of per `pip install` — there are five of them
+# across the two stages and a per-call flag is one `RUN` away from being
+# forgotten. `${VAR:-default}` keeps `--build-arg PIP_MIRROR=` (empty) working
+# as the documented overseas escape hatch; an empty PIP_INDEX_URL would make
+# pip fail to resolve anything at all.
+ENV PIP_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
+# uv reads its own variable and ignores PIP_INDEX_URL (`uv sync`, line ~165).
+ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 
 # Debian 13 ships deb822 sources, so this rewrites debian.sources rather than
 # the classic sources.list. Both URIs (debian + debian-security) are covered by
@@ -75,6 +96,10 @@ RUN maturin build --release
 FROM ${PYTHON_BASE}
 
 ARG APT_MIRROR
+ARG PIP_MIRROR
+# Same reasoning as the rust-builder stage above.
+ENV PIP_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
+ENV UV_INDEX_URL=${PIP_MIRROR:-https://pypi.org/simple/}
 
 # Install Chrome, ffmpeg, Node.js, build tools and dependencies.
 # Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
