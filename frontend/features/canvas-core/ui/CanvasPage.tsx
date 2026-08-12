@@ -262,6 +262,14 @@ export function CanvasView({
           shots as unknown as Array<{ id: string; scene_id: string; [k: string]: unknown }>,
         );
         if (cancelled || !sameCanvas()) return;
+        // Self-heal FIRST (2026-08-12 incident): collapse duplicated node
+        // ids down to their first occurrence before adds/patches — the
+        // patches below address nodes by id, so they land on the survivor.
+        // (Load already dedupes via `applyServerRow`; this channel covers
+        // anything that slipped in after load.)
+        if (result.nodeIdsToDedupe.length > 0) {
+          store.dedupeNodes(result.nodeIdsToDedupe);
+        }
         if (result.nodesToAdd.length > 0) {
           store.appendElementsNoHistory(result.nodesToAdd, []);
         }

@@ -34,6 +34,18 @@ export interface ShotSyncResult {
    *  — id + the partial `data` patch to merge in (only the fields that
    *  actually changed, never a full-object replace). */
   nodesToPatch: Array<{ id: string; data: Partial<ShotNodeData> }>;
+  /**
+   * Node ids that appear MORE THAN ONCE among `existing` (2026-08-12
+   * production incident self-heal): the numeric-shot-id regression made
+   * every mounted reconcile re-add its whole shot set — rows accumulated
+   * dozens of copies of each deterministic `shot-{id}` node, and React
+   * Flow renders a duplicated id permanently `visibility:hidden` (blank
+   * canvas). Each offending id is listed ONCE; the consumer collapses the
+   * copies down to the FIRST occurrence (`dedupeNodesById` in the store)
+   * BEFORE applying adds/patches, then persists the healed set through the
+   * normal save path — never a manual SQL fixup.
+   */
+  nodeIdsToDedupe: string[];
 }
 
 /** Horizontal gap between scene columns and vertical gap between stacked
@@ -57,6 +69,26 @@ export const SHOT_SYNC_NODE_HEIGHT_ESTIMATE = 360;
  *  field read narrows defensively instead of trusting the shape. */
 function readStr(v: unknown): string | null {
   return typeof v === 'string' ? v : null;
+}
+
+/**
+ * Id-shaped value → canonical string, or null. THE fix for the 2026-08-12
+ * production incident: the shots REST router (unlike canvases/scenes) hands
+ * bigint ids back as JSON *numbers*, and this module's original
+ * `typeof shotId === 'string'` narrowing silently dropped every numeric id
+ * from `boundNodesByShotId` — so each reconcile re-added its entire shot set
+ * (duplicate node ids → React Flow keeps them all `visibility:hidden` →
+ * blank canvas). `sceneService.toShot` now stringifies at the fetch
+ * boundary, but rows PERSISTED during the regression carry numeric
+ * `data.shot_id`/`data.scene_id` forever — so this module must normalize on
+ * its own, or those rows would keep re-adding after the boundary fix.
+ * Snowflake ids in this app are 53-bit (mig 050) so Number→String is exact;
+ * anything non-id-shaped (objects, NaN, empty string) stays null.
+ */
+function readId(v: unknown): string | null {
+  if (typeof v === 'string') return v.length > 0 ? v : null;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return null;
 }
 
 /**
@@ -87,7 +119,10 @@ function buildNewShotNode(
   position: { x: number; y: number },
 ): SmartNode<ShotNodeData> {
   return {
-    id: `shot-${shot.id}`,
+    // `readId` (not raw interpolation): a numeric id would interpolate to
+    // the same string anyway, but routing through the normalizer keeps the
+    // node id and `data.shot_id` provably the same canonical value.
+    id: `shot-${readId(shot.id)}`,
     type: 'shot',
     position,
     data: {
@@ -97,7 +132,7 @@ function buildNewShotNode(
       title: '',
       reference_resource_ids: [],
       notes: '',
-      shot_id: shot.id,
+      shot_id: readId(shot.id) as string,
       shot_label: label,
       shot_type: readStr(shot.shot_type),
       camera_angle: readStr(shot.camera_angle),
@@ -107,7 +142,7 @@ function buildNewShotNode(
       image_url: readStr(shot.image_url),
       shot_status: readStr(shot.status),
       gen_task_id: null,
-      scene_id: shot.scene_id,
+      scene_id: readId(shot.scene_id) as string,
     },
   };
 }
@@ -149,15 +184,33 @@ export function reconcileShotNodes(
   const nodesToMarkStale: string[] = [];
   const nodesToPatch: Array<{ id: string; data: Partial<ShotNodeData> }> = [];
 
+  // Duplicate-node-id sweep over ALL existing nodes (2026-08-12 self-heal —
+  // see `ShotSyncResult.nodeIdsToDedupe`). Runs before/independently of the
+  // shot indexing below so a poisoned row heals even for ids the current
+  // shot list no longer contains.
+  const idCounts = new Map<string, number>();
+  for (const node of existing) {
+    if (typeof node.id !== 'string') continue;
+    idCounts.set(node.id, (idCounts.get(node.id) ?? 0) + 1);
+  }
+  const nodeIdsToDedupe = [...idCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id]) => id);
+
   // Index existing BOUND shot nodes by shot_id. Everything else (unbound
   // drafts, every other node type) is deliberately left out of this map —
   // that's the entire mechanism behind "orphan nodes are untouched".
+  // `readId` (not a `typeof === 'string'` narrow): rows persisted during
+  // the numeric-shot-id regression carry `data.shot_id` as a number — they
+  // MUST still index here or every reconcile would re-add their shots
+  // (the exact production failure this narrowing originally caused).
   const boundNodesByShotId = new Map<string, SmartNode<ShotNodeData>>();
   for (const node of existing) {
     if (node.type !== 'shot') continue;
     const data = node.data as ShotNodeData | undefined;
-    const shotId = data?.shot_id;
-    if (typeof shotId === 'string' && shotId.length > 0) {
+    const shotId = readId(data?.shot_id);
+    if (shotId !== null && !boundNodesByShotId.has(shotId)) {
+      // First occurrence wins — the same survivor `dedupeNodesById` keeps.
       boundNodesByShotId.set(shotId, node as SmartNode<ShotNodeData>);
     }
   }
@@ -165,33 +218,43 @@ export function reconcileShotNodes(
   const sceneIndexById = new Map<string, number>();
   const sceneNoById = new Map<string, number>();
   scenes.forEach((scene, idx) => {
-    sceneIndexById.set(scene.id, idx);
-    sceneNoById.set(scene.id, scene.sceneNo);
+    const key = readId(scene.id);
+    if (key === null) return;
+    sceneIndexById.set(key, idx);
+    sceneNoById.set(key, scene.sceneNo);
   });
 
   // Per-scene shot index, computed from the ORDER `shots` arrives in (the
   // caller concatenates `listShots(sceneId)` per scene, already
-  // sort_order-sorted server-side) — never re-sorted here.
+  // sort_order-sorted server-side) — never re-sorted here. All keys go
+  // through `readId` so a numeric `scene_id`/`id` (see `readId`'s doc
+  // comment) still buckets/joins correctly against the string-keyed maps.
   const shotIndexInScene = new Map<string, number>();
   const perSceneCounter = new Map<string, number>();
   for (const shot of shots) {
-    const n = perSceneCounter.get(shot.scene_id) ?? 0;
-    shotIndexInScene.set(shot.id, n);
-    perSceneCounter.set(shot.scene_id, n + 1);
+    const sceneKey = readId(shot.scene_id) ?? '';
+    const shotKey = readId(shot.id);
+    if (shotKey === null) continue;
+    const n = perSceneCounter.get(sceneKey) ?? 0;
+    shotIndexInScene.set(shotKey, n);
+    perSceneCounter.set(sceneKey, n + 1);
   }
 
   const seenShotIds = new Set<string>();
   for (const shot of shots) {
-    seenShotIds.add(shot.id);
+    const shotKey = readId(shot.id);
+    if (shotKey === null) continue;
+    const sceneKey = readId(shot.scene_id) ?? '';
+    seenShotIds.add(shotKey);
     // Defensive fallback (not expected in practice — every shot's scene_id
     // should be one of `scenes`): an unresolvable scene lands in a trailing
     // extra column rather than colliding with column 0.
-    const sceneIdx = sceneIndexById.get(shot.scene_id) ?? scenes.length;
-    const sceneNo = sceneNoById.get(shot.scene_id) ?? sceneIdx + 1;
-    const idxInScene = shotIndexInScene.get(shot.id) ?? 0;
+    const sceneIdx = sceneIndexById.get(sceneKey) ?? scenes.length;
+    const sceneNo = sceneNoById.get(sceneKey) ?? sceneIdx + 1;
+    const idxInScene = shotIndexInScene.get(shotKey) ?? 0;
     const label = computeShotLabel(sceneNo, idxInScene);
 
-    const node = boundNodesByShotId.get(shot.id);
+    const node = boundNodesByShotId.get(shotKey);
     if (!node) {
       nodesToAdd.push(
         buildNewShotNode(shot, label, {
@@ -213,7 +276,12 @@ export function reconcileShotNodes(
       camera_movement: readStr(shot.camera_movement),
       focal_length: readStr(shot.focal_length),
       description: readStr(shot.description),
-      scene_id: shot.scene_id,
+      scene_id: sceneKey,
+      // Type-normalization patch for regression-era rows: a persisted
+      // NUMERIC `shot_id` drifts to its canonical string form here (the
+      // value is identical, only the JSON type changes), so healed rows
+      // converge to strings end-to-end after one reconcile+save cycle.
+      shot_id: shotKey,
       // In-flight guard (Task 3 fix-round-2 carry-over): a generation in
       // progress owns these two fields until it settles — reconcile must
       // not race it with a possibly-stale-in-the-other-direction read.
@@ -254,5 +322,5 @@ export function reconcileShotNodes(
     }
   }
 
-  return { nodesToAdd, nodesToMarkStale, nodesToPatch };
+  return { nodesToAdd, nodesToMarkStale, nodesToPatch, nodeIdsToDedupe };
 }

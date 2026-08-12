@@ -60,6 +60,42 @@ const RF_INTERNAL_KEYS = [
   'positionAbsolute',
 ] as const;
 
+/**
+ * Drop every node after the FIRST occurrence of its id (2026-08-12
+ * production incident). React Flow builds its internal `nodeLookup` keyed by
+ * id — duplicated ids leave the whole node layer permanently
+ * `visibility:hidden` (the measurement echo lands on one copy while the
+ * lookup keeps another, so nodes never "initialize"): a poisoned row renders
+ * as a BLANK canvas with only the zoom controls. Applied at load
+ * (`applyServerRow`) so any row poisoned by the numeric-shot-id reconcile
+ * regression — or any future duplicate producer — renders correctly the
+ * moment it's opened; the healed set then reaches the DB through whichever
+ * normal save fires next. Nodes with a missing/non-string id are kept as-is
+ * (`toReactFlowNodes` assigns those a positional fallback id).
+ */
+export function dedupeNodesById(nodes: CanvasNode[]): CanvasNode[] {
+  const seen = new Set<string>();
+  let dropped = false;
+  const out: CanvasNode[] = [];
+  for (const node of nodes) {
+    const id = (node as Record<string, unknown>).id;
+    if (typeof id === 'string') {
+      if (seen.has(id)) {
+        dropped = true;
+        continue;
+      }
+      seen.add(id);
+    }
+    out.push(node);
+  }
+  if (dropped) {
+    console.warn(
+      `[canvasCoreStore] dropped ${nodes.length - out.length} duplicate-id node(s) — duplicated ids blank the React Flow surface`,
+    );
+  }
+  return dropped ? out : nodes;
+}
+
 export function stripRfInternals(node: CanvasNode): CanvasNode {
   const obj = node as Record<string, unknown>;
   let dirty = false;
@@ -183,8 +219,18 @@ interface CanvasState {
 
   /** Append runtime-produced nodes/edges (loop output slots) in one atomic
    *  set. Marks dirty but does NOT push to history — operational output,
-   *  not a user-undoable edit (mirrors patchNode's contract). */
+   *  not a user-undoable edit (mirrors patchNode's contract). Nodes whose id
+   *  already exists in the store (or earlier in the same batch) are DROPPED:
+   *  duplicated ids blank the whole React Flow surface (2026-08-12
+   *  incident), so the write point itself refuses to create them no matter
+   *  what the caller's diff logic concluded. */
   appendElementsNoHistory(nodes: CanvasNode[], connections: CanvasConnection[]): void;
+
+  /** Collapse the listed node ids down to their FIRST occurrence each
+   *  (2026-08-12 self-heal — `ShotSyncResult.nodeIdsToDedupe`). No history
+   *  entry (an automated repair must not become an undo step); marks dirty
+   *  so the healed set persists through the normal debounced save. */
+  dedupeNodes(ids: string[]): void;
 
   // ---- Phase 6e performance: drag-tick + viewport throttle ----
   /**
@@ -314,7 +360,10 @@ export function createCanvasCoreStore(
         // membership) historically persisted RF-internal size snapshots
         // (measured/width/height) into rows — stale ones clamp a node's
         // rendered box below its content (dangling-selects screenshot).
-        nodes: (row.nodes_json ?? []).map(stripRfInternals),
+        // `dedupeNodesById`: a row with duplicated node ids renders as a
+        // blank canvas (see that helper's doc comment) — collapse to the
+        // first occurrence before anything downstream sees the set.
+        nodes: dedupeNodesById((row.nodes_json ?? []).map(stripRfInternals)),
         connections: row.connections_json ?? [],
         nodeOps: row.node_ops_json ?? [],
         connectionOps: row.connection_ops_json ?? [],
@@ -616,12 +665,59 @@ export function createCanvasCoreStore(
       appendElementsNoHistory(nodes, connections) {
         if (nodes.length === 0 && connections.length === 0) return;
         const s = get();
+        // Write-point duplicate-id guard (2026-08-12 incident): whatever a
+        // caller's diff concluded, appending an id that already exists
+        // would blank the surface — refuse it HERE, at the single place
+        // runtime appends happen, not just in callers' lookup logic.
+        let toAppend = nodes;
+        if (nodes.length > 0) {
+          const existingIds = new Set<string>();
+          for (const n of s.nodes) {
+            const id = (n as Record<string, unknown>).id;
+            if (typeof id === 'string') existingIds.add(id);
+          }
+          toAppend = nodes.filter((n) => {
+            const id = (n as Record<string, unknown>).id;
+            if (typeof id !== 'string') return true;
+            if (existingIds.has(id)) {
+              console.warn(
+                `[canvasCoreStore] appendElementsNoHistory dropped duplicate node id ${id}`,
+              );
+              return false;
+            }
+            existingIds.add(id);
+            return true;
+          });
+        }
+        if (toAppend.length === 0 && connections.length === 0) return;
         set({
-          nodes: nodes.length ? [...s.nodes, ...nodes] : s.nodes,
+          nodes: toAppend.length ? [...s.nodes, ...toAppend] : s.nodes,
           connections: connections.length
             ? [...s.connections, ...connections]
             : s.connections,
         });
+        markDirty();
+      },
+
+      dedupeNodes(ids) {
+        if (ids.length === 0) return;
+        const target = new Set(ids);
+        const seen = new Set<string>();
+        let dropped = false;
+        const next = get().nodes.filter((n) => {
+          const id = (n as Record<string, unknown>).id;
+          if (typeof id !== 'string' || !target.has(id)) return true;
+          if (seen.has(id)) {
+            dropped = true;
+            return false;
+          }
+          seen.add(id);
+          return true;
+        });
+        if (!dropped) return;
+        // No noteDocumentEditStarting — an automated repair is not an
+        // undoable user edit (same contract as appendElementsNoHistory).
+        set({ nodes: next });
         markDirty();
       },
 
