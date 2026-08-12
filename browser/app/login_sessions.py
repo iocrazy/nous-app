@@ -35,7 +35,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from .config import get_settings
 from .login import (
@@ -81,15 +81,19 @@ CODE_NOT_ACCEPTED_MESSAGE = (
 )
 
 # How many polls may go by with the identity chooser still on screen before the
-# login is called off. At the backend's 3s poll interval this is ~15s, which is
-# generous for a click plus a screen swap and short enough that a user is not
-# left watching a dead screen for the full 5 minute TTL.
+# login is called off. At the backend's 3s poll interval this is ~36s.
+#
+# It was 5 (~15s) until a real bind failed inside it (2026-08-12): the click
+# landed, the screen did not move, and the login was called off 27 seconds after
+# it began — while the user was still reading the screen. 15s is a fine budget
+# for a click plus a repaint and a poor one for "platform sends an SMS, then
+# re-renders", which is the step actually being waited on.
 #
 # There has to be a ceiling at all for the reason this whole change exists:
 # "keep polling and hope" is indistinguishable, from the outside, from the bug
 # where nobody ever clicked. A run of failures must end in something the user
-# can see and act on.
-MAX_IDENTITY_CHALLENGE_POLLS = 5
+# can see and act on — so this may be raised, and may not be removed.
+MAX_IDENTITY_CHALLENGE_POLLS = 12
 
 # `detail` keys for the identity challenge, so the backend and the UI branch on
 # a contract instead of on prose.
@@ -105,6 +109,39 @@ CODE_REQUESTED_KEY = "code_requested"
 # one whose login screen changed shape.
 IDENTITY_CHALLENGE_UNCLICKABLE = "identity_challenge_unclickable"
 IDENTITY_CHALLENGE_STALLED = "identity_challenge_stalled"
+# The platform escalated to something no unattended browser may complete — a
+# slider, a jigsaw. Split from `stalled` because the remedy is different and
+# non-obvious: rescanning produces the same screen, and the user has to finish
+# the sign-in somewhere we are not driving.
+IDENTITY_CHALLENGE_BLOCKED = "identity_challenge_blocked"
+
+# The key carrying "what was on that page", written on every terminal identity
+# failure. Whitelisted through to `task_tracking.metadata.login.detail`, because
+# the alternative is what the previous attempt at this bug produced: a failure
+# reason with no way to tell which of four explanations it was
+# (`backend/app/workflows/session_login.py::_PUBLIC_DETAIL_KEYS`).
+PAGE_EVIDENCE_KEY = "page_evidence"
+
+
+def blocking_challenge_marker(
+    evidence: Mapping[str, Any], markers: Sequence[str]
+) -> str | None:
+    """Which "we cannot do this" caption is in the captured page text, if any.
+
+    Pure, and deliberately used for one thing only: choosing the wording of a
+    failure that has already been decided. It cannot fail a login that would
+    otherwise succeed, so a false positive costs one wrong sentence on a screen
+    that was broken anyway — while a miss costs nothing at all beyond the
+    generic copy. That asymmetry is why substring matching is acceptable here
+    and nowhere near the captions we *click*.
+    """
+    text = evidence.get("visible_text") or ""
+    if not isinstance(text, str):
+        return None
+    for marker in markers:
+        if marker and marker in text:
+            return marker
+    return None
 
 
 class LoginError(Exception):
@@ -179,6 +216,15 @@ class LoginSession:
         self._identity_option: str | None = None
         self._code_request_click: str | None = None
         self._sms_code_requested = False
+        # What the page did after the click landed, as reported by
+        # `wait_for_challenge_progress`. `None` = we have not clicked yet;
+        # `[]` = we clicked and the page did not move, which is the state the
+        # one-shot escalation below exists for.
+        self._challenge_progress: list[str] | None = None
+        # The escalated re-click: `None` = not attempted, `""` = attempted and
+        # there was nothing to escalate to. Both are recorded, because "no
+        # button ancestor exists" is a finding about the page, not a no-op.
+        self._challenge_escalation: str | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -427,13 +473,18 @@ class LoginSession:
         forever — is the bug:
 
         * **clicked** → latch it (one click per login: this button texts a real
-          phone) and return None so the caller re-reads the page it moved to.
+          phone), wait for the page to move, and return None so the caller
+          re-reads whatever it moved to.
         * **still there** → report `identity_challenge`, which the UI renders
           as "verifying identity", never as "enter the code we sent you".
-        * **out of patience** → a terminal `failed` carrying *why*: the option
-          we drive was never on offer (`identity_challenge_unclickable`, which
-          is what an account offered only 发送短信验证 looks like), or it was
-          clicked and the platform stayed put (`identity_challenge_stalled`).
+        * **out of patience** → a terminal `failed` carrying *why*, and — since
+          2026-08-12 — **what the page looked like when it gave up**. The
+          previous version of this failure reported a reason and nothing else,
+          which was enough to know the login had stalled and not enough to know
+          why: the click may never have reached a handler, the platform may have
+          moved to a screen our captions still match, or it may have escalated
+          to a challenge nothing here can complete. Those need opposite fixes
+          and looked identical on the wire.
         """
         self._identity_polls += 1
         offered = list(snapshot.identity_challenge_texts)
@@ -448,13 +499,40 @@ class LoginSession:
                 # set by observation is a flag that can lie the way the old
                 # copy did.
                 self._sms_code_requested = True
-                # Let the chooser hand over before the caller re-reads;
-                # sampling immediately just re-reads the screen we clicked.
-                await asyncio.sleep(get_settings().login_sms_settle_s)
-                return None
+                # Ask the page whether it moved, rather than sleeping a fixed
+                # 3s and letting the next poll's timing decide. `[]` means it
+                # did not, and that is what licenses the escalation below.
+                self._challenge_progress = await driver.wait_for_challenge_progress()
+                if self._challenge_progress:
+                    return None
+        elif self._challenge_escalation is None and not self._challenge_progress:
+            # One re-click, on the next poll rather than in the same one: the
+            # platform gets a beat, and a single status request never has to
+            # fit two click timeouts plus two waits inside the backend's 20s
+            # read budget. See `LoginDriver.escalate_challenge_click` — it is a
+            # hypothesis being tried, not a diagnosis being acted on.
+            self._challenge_escalation = (
+                await driver.escalate_challenge_click(self._identity_option) or ""
+            )
+            if self._challenge_escalation:
+                self._challenge_progress = await driver.wait_for_challenge_progress()
+                if self._challenge_progress:
+                    return None
+
+        self.qrcode_data_url = None
 
         if self._identity_polls >= MAX_IDENTITY_CHALLENGE_POLLS:
-            if self._identity_option:
+            evidence = await self._page_evidence(driver)
+            blocking = blocking_challenge_marker(
+                evidence, self.spec.blocking_challenge_markers
+            )
+            if blocking:
+                reason = IDENTITY_CHALLENGE_BLOCKED
+                message = (
+                    "the platform escalated to a challenge this service cannot "
+                    f"complete ({blocking})"
+                )
+            elif self._identity_option:
                 reason = IDENTITY_CHALLENGE_STALLED
                 message = (
                     "selected the SMS verification option, but the platform is "
@@ -466,27 +544,56 @@ class LoginSession:
                     "the platform is asking to verify your identity and the "
                     "SMS option could not be selected"
                 )
-            detail = {
-                "reason": reason,
-                "options_seen": offered,
-                "polls": self._identity_polls,
-            }
-            if self._identity_option:
-                detail["identity_option"] = self._identity_option
-            self.qrcode_data_url = None
+            detail = self._challenge_detail(reason, offered)
+            detail[PAGE_EVIDENCE_KEY] = evidence
+            if blocking:
+                detail["blocking_marker"] = blocking
             self._record(SessionStatus.FAILED, message, detail)
             return self._snapshot()
 
-        self.qrcode_data_url = None
-        detail = {
-            "reason": judgement.reason,
+        detail = self._challenge_detail(judgement.reason, offered)
+        self._record(SessionStatus.IDENTITY_CHALLENGE, judgement.reason, detail)
+        return self._snapshot()
+
+    def _challenge_detail(self, reason: str, offered: list[str]) -> dict[str, Any]:
+        """The per-poll bookkeeping every challenge report carries.
+
+        Separate from the page evidence because it answers a different
+        question: this is *what we did*, the evidence is *what we were looking
+        at*. Reading a failure means lining the two up — "we clicked, nothing
+        moved, and here is the screen that did not move".
+        """
+        detail: dict[str, Any] = {
+            "reason": reason,
             "options_seen": offered,
             "polls": self._identity_polls,
         }
         if self._identity_option:
             detail["identity_option"] = self._identity_option
-        self._record(SessionStatus.IDENTITY_CHALLENGE, judgement.reason, detail)
-        return self._snapshot()
+        if self._challenge_progress is not None:
+            detail["progress_signals"] = self._challenge_progress
+        if self._challenge_escalation is not None:
+            # "" records an attempted escalation with no button ancestor to
+            # escalate to — a fact about the page, not an absence of action.
+            detail["escalated_click"] = self._challenge_escalation
+        return detail
+
+    async def _page_evidence(self, driver: LoginDriver) -> dict[str, Any]:
+        """Capture the page, and never let capturing it become the failure.
+
+        This runs on a path that is already failing. An exception here would
+        replace a typed, explained failure with a driver error whose message is
+        about the diagnostics — losing both the reason and the evidence.
+        """
+        try:
+            return await driver.page_evidence(self.spec.sms_challenge_option_texts)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "page evidence capture failed for platform=%s: %s",
+                self.platform,
+                scrub(f"{type(exc).__name__}: {exc}"),
+            )
+            return {"evidence_error": type(exc).__name__}
 
     async def _request_sms_code(self, driver: LoginDriver) -> None:
         """Press the platform's own "send me the code" button, at most once.

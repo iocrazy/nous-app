@@ -23,14 +23,91 @@ from .browser_runtime import apply_stealth, build_launch_kwargs
 from .config import get_settings
 from .dom import (
     click_element,
+    describe_controls,
     first_text,
     first_visible_attribute,
     is_selector_visible,
+    scroll_into_view,
     visible_marker_texts,
 )
+from .redaction import scrub_page_text
 from .schemas import EnvironmentConfig, SessionStatus
 
 logger = logging.getLogger("nous_browser.login")
+
+# --- page evidence caps -----------------------------------------------------
+#
+# Everything captured for diagnostics is capped here rather than at the reader,
+# because this blob does not stay in the process: it rides `detail` through the
+# backend into `task_tracking.metadata`, which Supabase Realtime broadcasts to
+# an open browser tab. A diagnostic that costs a megabyte per poll would be
+# paid for by the user watching the modal.
+EVIDENCE_CONTROL_LIMIT = 8
+EVIDENCE_TARGET_LIMIT = 3
+
+# Selector groups listed in `page_evidence`. `[role="button"]` is separate from
+# `button` on purpose: the platform's cards are divs, and "there was no <button>
+# on that screen at all" is itself the answer to one of the open questions.
+_INPUT_ATTRIBUTES = ("placeholder", "type", "name")
+_CONTROL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("button", ()),
+    ('[role="button"]', ()),
+)
+
+# What the click target looks like in the DOM, answered in one round trip.
+#
+# The token in the comment is what the test fakes key on — the fakes cannot run
+# JavaScript, so they recognise the probe by its source and answer from a
+# scripted table. Anything this returns is *evidence about a failure*, so every
+# branch degrades to null rather than throwing: a probe that can fail is a probe
+# that leaves us with nothing on exactly the run we needed it for.
+_CLICK_TARGET_PROBE_JS = """
+(caption) => {
+  /* __nous_click_target_probe__ */
+  const describe = (el) => {
+    if (!el || !el.tagName) return null;
+    const role = el.getAttribute && el.getAttribute('role');
+    return el.tagName.toLowerCase() + (role ? '[role=' + role + ']' : '');
+  };
+  const out = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    if ((el.textContent || '').trim() !== caption) continue;
+    let rect = {width: 0, height: 0, top: 0, left: 0, bottom: 0};
+    try { rect = el.getBoundingClientRect(); } catch (e) {}
+    const chain = [];
+    let node = el;
+    for (let i = 0; i < 5 && node; i += 1) { chain.push(describe(node)); node = node.parentElement; }
+    let covered = null;
+    if (rect.width > 0 && rect.height > 0) {
+      const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) covered = describe(top);
+    }
+    let pointer = null;
+    try { pointer = window.getComputedStyle(el).pointerEvents; } catch (e) {}
+    out.push({
+      tag: describe(el),
+      chain: chain,
+      size: [Math.round(rect.width), Math.round(rect.height)],
+      in_viewport: rect.height > 0 && rect.top < (window.innerHeight || 0) && rect.bottom > 0,
+      disabled: !!(el.closest && el.closest('[disabled],[aria-disabled="true"]')),
+      pointer_events: pointer,
+      covered_by: covered,
+      button_ancestor: el.closest ? describe(el.closest('button,[role="button"]')) : null
+    });
+    if (out.length >= LIMIT) break;
+  }
+  return out;
+}
+""".replace("LIMIT", str(EVIDENCE_TARGET_LIMIT))
+
+# The escalation target: the nearest ancestor the page itself declares
+# clickable. The bare parent is deliberately **not** a candidate — a click lands
+# at the element's centre, and a wrapper that spans both cards of this chooser
+# would put that centre on 发送短信验证, the one option an unattended login can
+# never complete. Narrowing to a declared button keeps the escalation from
+# choosing for us.
+BUTTON_ANCESTOR_XPATH = 'xpath=ancestor-or-self::*[@role="button" or self::button][1]'
 
 
 @dataclass(frozen=True)
@@ -182,6 +259,13 @@ class LoginFlowSpec:
     # than a prefix so that 重新获取验证码 is covered without a substring match
     # that could also land on an unrelated control.
     sms_request_texts: tuple[str, ...] = ()
+    # Captions that mean the platform is asking for something no unattended
+    # login can do — a slider, a jigsaw, a rotate-the-image puzzle. Matched as
+    # substrings against the *captured page text*, and used for one thing only:
+    # choosing the wording of a failure that has already happened. Nothing here
+    # can block a login or change a status, so a stale entry costs a slightly
+    # wrong sentence, never a working sign-in.
+    blocking_challenge_markers: tuple[str, ...] = ()
     # field name -> selector candidates, read as text.
     profile_text_selectors: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # field name -> (selector candidates, attribute name).
@@ -298,6 +382,167 @@ class LoginDriver:
         """
         return await self._click_exact_text(self._spec.sms_challenge_option_texts)
 
+    async def escalate_challenge_click(self, caption: str) -> str | None:
+        """Re-click `caption` on the nearest ancestor declared clickable.
+
+        The second attempt, and only ever a second one. It exists because
+        `_click_exact_text` reports success from *the click landing*, which is
+        not the same as the handler running: `get_by_text` resolves to the leaf
+        text node, and a card whose handler sits on a wrapper can swallow a
+        click on a child that is styled `pointer-events: none`.
+
+        That is a **hypothesis, not a diagnosis** — the same poll that
+        escalates also records what the page looked like (`page_evidence`), and
+        that record is what should settle it. Escalating anyway is cheap and
+        bounded: the target is a control the page itself marks up as a button
+        (see `BUTTON_ANCESTOR_XPATH` for why the bare parent is not allowed),
+        and clicking the same card twice cannot pick the other one.
+
+        Returns the selector that was clicked, or None when there is no such
+        ancestor (which is itself a finding worth having in the failure).
+        """
+        timeout = get_settings().login_click_timeout_ms
+        try:
+            node = self._page.get_by_text(caption, exact=True).first
+            target = node.locator(BUTTON_ANCESTOR_XPATH).first
+            if not await target.count() or not await target.is_visible():
+                return None
+        except Exception:
+            return None
+        if await click_element(target, timeout):
+            return BUTTON_ANCESTOR_XPATH
+        return None
+
+    async def wait_for_challenge_progress(self) -> list[str]:
+        """Bounded wait for the page to answer the click. `[]` = it never did.
+
+        Polling once and hoping is what the caller used to do, via a fixed
+        `sleep`: whether the click worked was then decided by whichever frame
+        the *next* status request happened to land on. This asks the page
+        directly, and returns **which** signal moved so a failure can say what
+        was and was not seen.
+
+        Two signals, and the one that is missing matters:
+
+        * `chooser_gone` — none of the challenge captions are on screen.
+        * `sms_request_visible` — the platform's own "send me the code" button
+          has appeared, i.e. we are on the screen after the chooser.
+
+        A visible code *input* is deliberately not a signal. Douyin renders one
+        on the chooser itself, which is the whole reason the judge used to call
+        that screen `sms_required` and tell the user a code had been sent when
+        nothing had (2026-08-11). Reusing it here would rebuild that bug inside
+        the fix for it.
+        """
+        settings = get_settings()
+        spec = self._spec
+        page = self._page
+        attempts = settings.login_challenge_progress_attempts
+        for attempt in range(attempts):
+            signals: list[str] = []
+            remaining = await visible_marker_texts(
+                page, spec.identity_challenge_markers, exact=True
+            )
+            if not remaining:
+                signals.append("chooser_gone")
+            if await visible_marker_texts(page, spec.sms_request_texts, exact=True):
+                signals.append("sms_request_visible")
+            if signals:
+                return signals
+            if attempt + 1 < attempts:
+                await asyncio.sleep(settings.login_challenge_progress_poll_s)
+        return []
+
+    async def page_evidence(self, captions: Sequence[str] = ()) -> dict[str, Any]:
+        """What the page looked like, in a shape that fits in a JSON column.
+
+        Called on the failure paths, where the only thing worth having is an
+        answer to "what was the platform actually showing". Every field is
+        gathered defensively and independently: this runs *while a login is
+        already failing*, so a reader that raises would trade the one useful
+        artefact for a second, less informative failure.
+
+        Nothing here is a credential, and nothing may become one: page text
+        goes through `scrub_page_text`, which masks the two numbers a
+        verification screen puts on display (the code, the phone).
+        """
+        page = self._page
+        evidence: dict[str, Any] = {}
+
+        try:
+            evidence["url"] = scrub_page_text(page.url or "", max_len=200)
+        except Exception:
+            evidence["url"] = None
+
+        # The whole visible page rather than a guessed region selector. A
+        # region selector that misses returns nothing, and diagnostics that can
+        # return nothing are the thing being fixed here; truncation loses the
+        # tail of a long page, which is the cheaper failure.
+        try:
+            evidence["visible_text"] = scrub_page_text(
+                await first_text(page, ("body",)) or ""
+            )
+        except Exception:
+            evidence["visible_text"] = None
+
+        total, items = await describe_controls(
+            page,
+            "input",
+            attributes=_INPUT_ATTRIBUTES,
+            limit=EVIDENCE_CONTROL_LIMIT,
+        )
+        evidence["inputs"] = {"total": total, "items": items}
+
+        buttons: list[dict[str, Any]] = []
+        button_total = 0
+        for selector, attributes in _CONTROL_GROUPS:
+            group_total, group_items = await describe_controls(
+                page, selector, attributes=attributes, limit=EVIDENCE_CONTROL_LIMIT
+            )
+            button_total += group_total
+            buttons.extend(group_items)
+        evidence["buttons"] = {"total": button_total, "items": buttons}
+
+        evidence["click_targets"] = [
+            await self._describe_click_target(caption) for caption in captions
+        ]
+        return evidence
+
+    async def _describe_click_target(self, caption: str) -> dict[str, Any]:
+        """One caption we click: is it there, and what shape is it in?
+
+        Split in two on purpose. The locator half (does it resolve, is it
+        visible) works everywhere; the DOM-shape half needs real JavaScript and
+        is allowed to be absent — `shape_error` says which, so "we never looked"
+        is never mistaken for "nothing was covering it".
+        """
+        target: dict[str, Any] = {"caption": caption}
+        try:
+            locator = self._page.get_by_text(caption, exact=True).first
+            target["matches"] = int(await locator.count())
+            target["visible"] = (
+                bool(await locator.is_visible()) if target["matches"] else False
+            )
+        except Exception as exc:  # noqa: BLE001
+            target["matches"] = None
+            target["locator_error"] = type(exc).__name__
+            return target
+
+        evaluate = getattr(self._page, "evaluate", None)
+        if evaluate is None:
+            target["shape_error"] = "evaluate_unavailable"
+            return target
+        try:
+            shapes = await evaluate(_CLICK_TARGET_PROBE_JS, caption)
+        except Exception as exc:  # noqa: BLE001
+            target["shape_error"] = type(exc).__name__
+            return target
+        if isinstance(shapes, list):
+            target["shapes"] = shapes[:EVIDENCE_TARGET_LIMIT]
+        else:
+            target["shape_error"] = "unexpected_probe_result"
+        return target
+
     async def request_sms_code(self) -> str | None:
         """Click the platform's own "send me the code" button, if it is there.
 
@@ -318,6 +563,12 @@ class LoginDriver:
         captions are clicked, and Playwright's substring mode also matches
         every *ancestor* containing the text — `.first` on a generous match
         can be the page body.
+
+        The scroll is not decoration either. A card below the fold is visible
+        to `is_visible()` but its centre is off screen, and both of the things
+        we record about a click that did not work — whether it was in the
+        viewport, what was covering it — describe a different element than the
+        one the click found if the page moves in between.
         """
         if not texts:
             return None
@@ -331,6 +582,7 @@ class LoginDriver:
                 # A locator racing a re-render is not evidence of absence; the
                 # next poll looks again.
                 continue
+            await scroll_into_view(locator, timeout)
             if await click_element(locator, timeout):
                 return text
         return None

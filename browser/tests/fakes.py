@@ -32,6 +32,12 @@ class FakeDriver:
         # `choose_sms_challenge` (nobody answered the chooser).
         challenge_option: str | None = None,
         code_request_text: str | None = None,
+        # What the page does after the chooser is answered. The default says
+        # "it moved on", which is the healthy path; `[]` is the stall the
+        # escalation and the typed failure exist for.
+        challenge_progress: list[str] | None = None,
+        escalated_click: str | None = None,
+        evidence: dict[str, Any] | None = None,
     ):
         self.spec = spec
         self._snapshots = snapshots or [LoginPageSnapshot(url="https://x/", qrcode_visible=True)]
@@ -43,12 +49,19 @@ class FakeDriver:
         self._sms_input_present = sms_input_present
         self._challenge_option = challenge_option
         self._code_request_text = code_request_text
+        self._challenge_progress = (
+            ["chooser_gone"] if challenge_progress is None else challenge_progress
+        )
+        self._escalated_click = escalated_click
+        self._evidence = evidence if evidence is not None else {"url": "https://x/"}
         self.closed = False
         self.submitted_codes: list[str] = []
         self.refresh_calls = 0
         self.profile_calls = 0
         self.challenge_clicks = 0
         self.code_request_clicks = 0
+        self.escalation_clicks = 0
+        self.evidence_calls = 0
 
     async def snapshot(self) -> LoginPageSnapshot:
         current = self._snapshots[min(self._index, len(self._snapshots) - 1)]
@@ -70,6 +83,17 @@ class FakeDriver:
     async def request_sms_code(self) -> str | None:
         self.code_request_clicks += 1
         return self._code_request_text
+
+    async def escalate_challenge_click(self, _caption: str) -> str | None:
+        self.escalation_clicks += 1
+        return self._escalated_click
+
+    async def wait_for_challenge_progress(self) -> list[str]:
+        return list(self._challenge_progress)
+
+    async def page_evidence(self, _captions: Any = ()) -> dict[str, Any]:
+        self.evidence_calls += 1
+        return dict(self._evidence)
 
     async def submit_sms_code(self, code: str) -> bool:
         self.submitted_codes.append(code)
@@ -279,6 +303,11 @@ class FakePage:
         self.removed_overlays = 0
         # caption -> data-checked。缺键 = 读不出来（None），不是 False。
         self.data_checked: dict[str, bool] = {}
+        # caption -> what the click-target probe reports about that caption's
+        # nodes. The fake cannot run JavaScript, so it recognises the probe by
+        # the token in its source and answers from here; a caption with no
+        # entry answers `[]`, i.e. "that text is not on this page as a leaf".
+        self.dom_probe: dict[str, list[dict[str, Any]]] = {}
         self.keyboard = FakeKeyboard()
 
     @property
@@ -334,6 +363,8 @@ class FakePage:
         # next caption, None refuses the publish outright.
         if "data-checked" in (_script or ""):
             return self.data_checked.get(_arg)
+        if "__nous_click_target_probe__" in (_script or ""):
+            return self.dom_probe.get(_arg, [])
         self.removed_overlays += 1
         return 0
 

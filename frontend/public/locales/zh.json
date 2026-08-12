@@ -282,6 +282,7 @@
       "identityChallengeFailedLabel": "身份验证没能完成",
       "identityChallengeUnclickableHint": "平台要求身份验证，但没有提供我们能自动完成的方式，因此没有发出任何验证码。请重新获取二维码再扫一次，或先在手机上登录一次该账号。",
       "identityChallengeStalledHint": "已替你选择「接收短信验证码」，但平台一直停在验证页，没有发出验证码。请重新获取二维码再扫一次。",
+      "identityChallengeBlockedHint": "平台要求滑块或图形验证，这一步当前无法自动完成。请先在手机 App 里登录一次该账号，再回来重新绑定。",
       "smsIdentityChallenge": "平台退回到了身份验证步骤 —— 请等它回到输入验证码那一步再填。",
       "smsRequiredLabel": "需要短信验证码",
       "smsRequiredHint": "平台要求输入该账号的验证码。请按平台的提示获取验证码后填入。",

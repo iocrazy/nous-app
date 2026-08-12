@@ -83,6 +83,14 @@ class Settings:
     # Pause after submitting a code, so the sampled state is the platform's
     # answer rather than the pre-submit page.
     login_sms_settle_s: float
+    # After answering the identity chooser: how many times to re-read the page
+    # looking for it to move, and how long between reads. A wait rather than a
+    # sleep because "did the click work" is a question the page can answer, and
+    # the answer is what a failure has to report. Bounded twice over (attempts
+    # x interval), and kept well inside the backend's 20s read timeout on the
+    # status endpoint — this runs inside one of those requests.
+    login_challenge_progress_attempts: int
+    login_challenge_progress_poll_s: float
     # How often the reaper looks for expired sessions.
     login_reaper_interval_s: int
     # How long a released session stays queryable as a tombstone, so a caller
@@ -162,6 +170,12 @@ def get_settings() -> Settings:
         login_qrcode_poll_s=_float_env("BROWSER_LOGIN_QRCODE_POLL_S", 1.0),
         login_click_timeout_ms=_int_env("BROWSER_LOGIN_CLICK_TIMEOUT_MS", 10_000),
         login_sms_settle_s=_float_env("BROWSER_LOGIN_SMS_SETTLE_S", 3.0),
+        login_challenge_progress_attempts=max(
+            1, _int_env("BROWSER_LOGIN_CHALLENGE_PROGRESS_ATTEMPTS", 4)
+        ),
+        login_challenge_progress_poll_s=max(
+            0.0, _float_env("BROWSER_LOGIN_CHALLENGE_PROGRESS_POLL_S", 1.0)
+        ),
         login_reaper_interval_s=max(1, _int_env("BROWSER_LOGIN_REAPER_INTERVAL_S", 15)),
         login_terminal_grace_s=max(0, _int_env("BROWSER_LOGIN_TERMINAL_GRACE_S", 120)),
         login_state_grace_s=max(0, _int_env("BROWSER_LOGIN_STATE_GRACE_S", 60)),

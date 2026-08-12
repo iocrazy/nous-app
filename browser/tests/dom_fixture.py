@@ -16,7 +16,13 @@ everywhere.
 It implements exactly the surface `douyin_verify` uses — `locator(css)`,
 `count()`, `nth(i)`, `inner_text()`, `get_attribute()`, plus `get_by_text()`
 for the empty-state check — over the small selector grammar that module
-actually writes:
+actually writes.
+
+Since 2026-08-12 it also carries `click()` / `scroll_into_view_if_needed()`,
+for the login flow's page-evidence capture. The document is **immutable**: a
+click is recorded and changes nothing, which is not a shortcut but the exact
+shape of the failure being tested (the click landed, the platform stayed put).
+Selector grammar:
 
     tag                              a
     [class*="x"] / [class^="x"]      attribute contains / starts-with
@@ -41,6 +47,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from typing import Any
 
 _VOID = {"img", "br", "hr", "input", "meta", "link", "source"}
 
@@ -189,24 +196,71 @@ def _matches(node: Node, selector: str) -> bool:
 
 
 class FakeLocator:
-    def __init__(self, nodes: list[Node]):
+    def __init__(self, nodes: list[Node], page: "FakePage | None" = None):
         self._nodes = nodes
+        self._page = page
 
     async def count(self) -> int:
         return len(self._nodes)
 
     def nth(self, index: int) -> "FakeLocator":
-        return FakeLocator(self._nodes[index : index + 1])
+        return FakeLocator(self._nodes[index : index + 1], self._page)
 
     @property
     def first(self) -> "FakeLocator":
-        return FakeLocator(self._nodes[:1])
+        return FakeLocator(self._nodes[:1], self._page)
 
     def locator(self, selector: str) -> "FakeLocator":
+        # `xpath=…` is the escalation target's grammar (`ancestor-or-self`),
+        # and this shim has no XPath engine. Answering "no matches" would be a
+        # lie of the kind the module docstring forbids, so it is answered
+        # honestly as "unsupported here" — the escalation is exercised against
+        # the scripted fake in `tests/fakes.py`, where the target can be
+        # declared, and this shim's job is the HTML-shaped evidence.
+        if selector.startswith("xpath="):
+            return FakeLocator(self._button_ancestors(selector), self._page)
         out: list[Node] = []
         for node in self._nodes:
             out.extend(d for d in node.descendants() if _matches(d, selector))
-        return FakeLocator(out)
+        return FakeLocator(out, self._page)
+
+    def _button_ancestors(self, selector: str) -> list[Node]:
+        """The one XPath this shim understands: the escalation's target.
+
+        Compared against the production constant rather than re-spelt, so that
+        changing the escalation's XPath makes this raise (loudly, per the module
+        docstring) instead of quietly resolving to nothing — a shim that
+        answered "no such ancestor" for a selector it no longer recognised would
+        turn "the escalation stopped working" into a passing test.
+        """
+        from app.login import BUTTON_ANCESTOR_XPATH
+
+        if selector != BUTTON_ANCESTOR_XPATH:
+            raise UnsupportedSelector(selector)
+        out: list[Node] = []
+        for node in self._nodes:
+            current: Node | None = node
+            while current is not None and current.tag != "#root":
+                if current.tag == "button" or current.attrs.get("role") == "button":
+                    out.append(current)
+                    break
+                current = current.parent
+        return out
+
+    async def click(self, timeout: Any = None, force: bool = False) -> None:
+        """Records the click. The document does **not** change as a result.
+
+        That is the point rather than a shortcut: a fixture whose DOM never
+        moves is exactly the observed failure — the click landed, the platform
+        stayed put — and it is the one shape a mock cannot fake convincingly.
+        """
+        if not self._nodes:
+            raise RuntimeError("locator resolved to nothing")
+        if self._page is not None:
+            self._page.clicks.append(self._nodes[0])
+
+    async def scroll_into_view_if_needed(self, timeout: Any = None) -> None:
+        return None
 
     async def inner_text(self) -> str:
         if not self._nodes:
@@ -231,10 +285,15 @@ class FakePage:
     def __init__(self, html: str, url: str = "https://creator.douyin.com/creator-micro/content/manage"):
         self.root = parse_html(html)
         self.url = url
+        # Nodes that were clicked, in order. The document is immutable, so this
+        # is the only record that anything happened to it.
+        self.clicks: list[Node] = []
 
     def locator(self, selector: str) -> FakeLocator:
+        if selector.startswith("xpath="):
+            raise UnsupportedSelector(selector)
         return FakeLocator(
-            [n for n in self.root.descendants() if _matches(n, selector)]
+            [n for n in self.root.descendants() if _matches(n, selector)], self
         )
 
     def get_by_text(self, text: str, exact: bool = False) -> FakeLocator:
@@ -253,4 +312,4 @@ class FakePage:
                 continue
             if (own == text) if exact else (text in own):
                 out.append(node)
-        return FakeLocator(out)
+        return FakeLocator(out, self)

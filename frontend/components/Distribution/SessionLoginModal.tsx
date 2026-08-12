@@ -84,6 +84,16 @@ const IDENTITY_UNRESOLVED = 'identity_unresolved';
  */
 const IDENTITY_CHALLENGE_UNCLICKABLE = 'identity_challenge_unclickable';
 const IDENTITY_CHALLENGE_STALLED = 'identity_challenge_stalled';
+/**
+ * The third way it can end (2026-08-12): the platform escalated to a challenge
+ * no unattended browser may complete — a slider, a jigsaw.
+ *
+ * Kept apart from the other two because the remedy is different and would
+ * otherwise be actively misleading: "get a new code and scan again" produces
+ * the same screen again. The way out is to sign in to the account somewhere we
+ * are not driving first, so the platform stops asking.
+ */
+const IDENTITY_CHALLENGE_BLOCKED = 'identity_challenge_blocked';
 
 /** An i18n key with the English it falls back to. */
 type Copy = [key: string, fallback: string];
@@ -606,7 +616,8 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const identityChallengeFailed = !infraKind
     && status === 'failed'
     && (failureDetail?.reason === IDENTITY_CHALLENGE_UNCLICKABLE
-      || failureDetail?.reason === IDENTITY_CHALLENGE_STALLED);
+      || failureDetail?.reason === IDENTITY_CHALLENGE_STALLED
+      || failureDetail?.reason === IDENTITY_CHALLENGE_BLOCKED);
   // Whether a code has actually been requested on the user's behalf. Comes
   // from the browser service latching its own landed click — never inferred
   // from "there is a code field on screen", which is what made the old copy
@@ -633,15 +644,25 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
       'distribution.session.identityChallengeFailedLabel',
       'Identity verification could not be completed',
     );
-    hint = failureDetail?.reason === IDENTITY_CHALLENGE_STALLED
-      ? t(
+    if (failureDetail?.reason === IDENTITY_CHALLENGE_BLOCKED) {
+      // Deliberately does not say "scan again": it would produce the same
+      // screen. The only way past a slider is to satisfy the platform
+      // somewhere we are not driving.
+      hint = t(
+        'distribution.session.identityChallengeBlockedHint',
+        'The platform asked for a slider or picture check, which this sign-in cannot complete. Open the app on your phone and sign in to this account there first, then try linking again.',
+      );
+    } else if (failureDetail?.reason === IDENTITY_CHALLENGE_STALLED) {
+      hint = t(
         'distribution.session.identityChallengeStalledHint',
         'We selected "Receive SMS code" but the platform stayed on its verification screen, so no code was sent. Get a new code and scan again.',
-      )
-      : t(
+      );
+    } else {
+      hint = t(
         'distribution.session.identityChallengeUnclickableHint',
         'The platform asked to verify your identity and did not offer an option we can complete automatically, so no code was sent. Get a new code and scan again, or sign in to this account on your phone first.',
       );
+    }
   } else if (identityUnresolved) {
     label = t(
       'distribution.session.identityUnresolvedLabel',

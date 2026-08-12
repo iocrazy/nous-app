@@ -471,6 +471,44 @@ async def test_public_detail_only_lets_the_two_contract_keys_through():
     assert public == {"error_kind": "unreachable", "reason": "no session bound"}
 
 
+async def test_public_detail_carries_the_identity_challenge_diagnostics():
+    """身份验证失败的证据必须落到那条失败记录上（2026-08-12）。
+
+    上一次失败之所以只能靠猜，正是因为浏览器侧算出来的 ``options_seen`` /
+    ``polls`` 卡在这份白名单外面：排障时 ``SELECT metadata->'login'->'detail'``
+    只有一个 reason，而"点击没打中 handler"/"平台换了页但我们的文案还匹配"
+    /"平台上了滑块"三种情况在库里长得一模一样。
+
+    ⚠️ 这一组不是给 UI 的文案（UI 只认 ``reason``），是给排障的证据 —— 浏览器
+    context 在失败瞬间就释放了，页面没有第二次机会被观察。
+    """
+    public = m._public_detail(
+        {
+            "reason": "identity_challenge_stalled",
+            "options_seen": ["接收短信验证码", "发送短信验证"],
+            "polls": 12,
+            "identity_option": "接收短信验证码",
+            "progress_signals": [],
+            "escalated_click": 'xpath=ancestor-or-self::*[@role="button"][1]',
+            "page_evidence": {"url": "https://creator.douyin.com/"},
+            # 传输层内务照旧不透传。
+            "stage": "driver",
+            "status_code": 502,
+        }
+    )
+
+    assert public is not None
+    assert public["options_seen"] == ["接收短信验证码", "发送短信验证"]
+    assert public["polls"] == 12
+    assert public["page_evidence"] == {"url": "https://creator.douyin.com/"}
+    # 空列表必须活着穿过白名单：``progress_signals: []`` 的意思是"点了、页面
+    # 一动不动"，是结论本身，不是"没有值"。过滤条件写 ``is not None`` 而不是
+    # 真值判断，正是为了这个。
+    assert public["progress_signals"] == []
+    assert "stage" not in public
+    assert "status_code" not in public
+
+
 async def test_public_detail_is_none_when_there_is_nothing_to_say():
     """平台拒绝 → 没有 error_kind → 前端的 ``detail?.error_kind`` 落 undefined。"""
     assert m._public_detail({}) is None
