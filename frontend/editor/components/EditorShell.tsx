@@ -38,6 +38,7 @@ import {
   type ScriptCommit,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
+import { onSceneContentRefresh } from '../../components/agentActivity/shotFocusBus';
 import { planInsertScene } from '../insertScenePlan';
 import { fetchProjectEntities } from '../../services/projectsService';
 import { extractLibEntitiesFromScript } from '../../services/libEntitiesService';
@@ -358,6 +359,12 @@ export function EditorShell({
     // blocks from the still-stale scenes prop and change nothing.
     void reload().finally(() => setRollbackNonce((n) => n + 1));
   }, [reload]);
+
+  // An agent-run Undo reverted scene TEXT server-side — identical stale-sheet
+  // problem to a version rollback (same-id reseed guard in useSceneSync would
+  // swallow a plain reload), so reuse the exact rollback recipe: re-fetch,
+  // then bump the remount nonce. See handleRolledBack's comment above.
+  useEffect(() => onSceneContentRefresh(handleRolledBack), [handleRolledBack]);
 
   const selectRailView = useCallback((view: RailView) => {
     setDiffCommit(null);

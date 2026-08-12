@@ -1,6 +1,7 @@
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within, act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDoc } from '../types';
+import { requestSceneContentRefresh } from '../../components/agentActivity/shotFocusBus';
 
 // i18n: return the key so assertions are stable and language-independent.
 vi.mock('react-i18next', () => ({
@@ -348,5 +349,17 @@ describe('EditorShell', () => {
     );
     expect(screen.getByTestId('beats-subview-list')).toHaveAttribute('aria-selected', 'true');
     expect(localStorage.getItem('editor.beatsView.1')).toBe('list');
+  });
+
+  it('reloads scenes when an agent-run undo broadcasts scene content refresh', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    render(<EditorShell scriptId="1" />);
+    await waitFor(() => expect(svc.listScenes).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      requestSceneContentRefresh();
+    });
+
+    await waitFor(() => expect(svc.listScenes).toHaveBeenCalledTimes(2));
   });
 });
