@@ -1491,6 +1491,7 @@
     }
   },
   "projects": {
+    "openByIdFailed": "无法打开该项目 — 项目可能已删除或你已失去访问权限",
     "episodeViews": {
       "script": "剧本",
       "beats": "节拍",

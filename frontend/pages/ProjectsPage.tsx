@@ -6,7 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { useModuleStatus } from '../hooks/useModuleStatus';
-import { fetchProjects, fetchRecentItems } from '../services/projectsService';
+import { fetchProject, fetchProjects, fetchRecentItems } from '../services/projectsService';
+import { useToast } from '../components/Toast';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
 import { IdeationBoard } from '../components/ideation/IdeationBoard';
@@ -22,6 +23,7 @@ export function ProjectsPage() {
   const { teamId, projectId } = useParams();
   const [, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
+  const { addToast } = useToast();
   const { selectedTeamId, personalTeamId } = useTeamContext();
   // Default the create-project Team selector to the active workspace: a real
   // collaborative team pre-selects itself, personal stays "Personal" (empty →
@@ -55,7 +57,21 @@ export function ProjectsPage() {
         // Auto-select project from URL param
         if (projectId && !selectedProject) {
           const match = data.find(p => String(p.id) === projectId);
-          if (match) setSelectedProject(match);
+          if (match) {
+            setSelectedProject(match);
+          } else {
+            // The list only returns projects the caller OWNS; a project
+            // shared via an explicit project_members row is readable by id
+            // but absent from the list. A URL the caller has permission for
+            // must still load — fall back to the by-id endpoint.
+            try {
+              setSelectedProject(await fetchProject(projectId));
+            } catch (byIdErr) {
+              console.error('Failed to load project by id:', byIdErr);
+              addToast(t('projects.openByIdFailed'), 'error');
+              navigate(teamId ? `/team/${teamId}/projects` : '/projects', { replace: true });
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to load projects:', err);

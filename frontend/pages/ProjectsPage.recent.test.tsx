@@ -37,10 +37,16 @@ vi.mock('../contexts/TeamContext', () => ({
 }));
 
 const fetchProjects = vi.fn();
+const fetchProject = vi.fn();
 const fetchRecentItems = vi.fn();
 vi.mock('../services/projectsService', () => ({
   fetchProjects: (...args: unknown[]) => fetchProjects(...args),
+  fetchProject: (...args: unknown[]) => fetchProject(...args),
   fetchRecentItems: (...args: unknown[]) => fetchRecentItems(...args),
+}));
+
+vi.mock('../components/Toast', () => ({
+  useToast: () => ({ addToast: vi.fn() }),
 }));
 
 // ProjectFilterSidebar: render its projectCounts.recent (so the "eager
@@ -104,6 +110,7 @@ describe('ProjectsPage — Recent view wiring', () => {
   beforeEach(() => {
     navigateMock.mockReset();
     fetchProjects.mockReset().mockResolvedValue([]);
+    fetchProject.mockReset().mockRejectedValue(new Error('not in this test'));
     fetchRecentItems.mockReset().mockResolvedValue([scriptItem, canvasItem]);
   });
 
@@ -153,5 +160,51 @@ describe('ProjectsPage — Recent view wiring', () => {
     fireEvent.click(await screen.findByText('Board A'));
 
     expect(navigateMock).toHaveBeenCalledWith('/team/personal-team-1/canvas/c1');
+  });
+});
+
+describe('ProjectsPage — shared-project by-id fallback', () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    fetchProjects.mockReset().mockResolvedValue([]);
+    fetchProject.mockReset();
+    fetchRecentItems.mockReset().mockResolvedValue([]);
+  });
+
+  it('mounts the workspace via fetchProject when the URL project is absent from the list', async () => {
+    // GET /projects only lists projects the caller OWNS; a project shared
+    // via project_members is readable by id but never in the list. Real
+    // wire shape: the by-id endpoint returns a numeric Snowflake id.
+    fetchProject.mockResolvedValue({ id: 291022264100262, name: 'Shared Project' });
+
+    render(
+      <MemoryRouter initialEntries={['/team/team-A/projects/291022264100262']}>
+        <Routes>
+          <Route path="/team/:teamId/projects/:projectId" element={<ProjectsPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByTestId('project-workspace')).toBeInTheDocument();
+    expect(fetchProject).toHaveBeenCalledWith('291022264100262');
+  });
+
+  it('falls back to the project list when the by-id fetch is denied', async () => {
+    fetchProject.mockRejectedValue(new Error('403'));
+
+    render(
+      <MemoryRouter initialEntries={['/team/team-A/projects/291022264100262']}>
+        <Routes>
+          <Route path="/team/:teamId/projects/:projectId" element={<ProjectsPage />} />
+          <Route path="/team/:teamId/projects" element={<ProjectsPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(fetchProject).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith('/team/team-A/projects', { replace: true })
+    );
+    expect(screen.queryByTestId('project-workspace')).not.toBeInTheDocument();
   });
 });

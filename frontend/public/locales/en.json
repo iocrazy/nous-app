@@ -1491,6 +1491,7 @@
     }
   },
   "projects": {
+    "openByIdFailed": "Could not open this project — it may have been deleted or you no longer have access",
     "episodeViews": {
       "script": "Script",
       "beats": "Beats",
