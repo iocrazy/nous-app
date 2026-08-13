@@ -140,12 +140,20 @@ def test_bad_intents_are_refused_with_a_stable_reason_code(bad, expected_reason)
 # tests pin the *lookup*, because that is where the per-platform claim lives.
 
 
-def test_douyin_declares_video_only_today():
-    """The declaration a user can currently act on. Flipping it to include
-    "images" is T7's job and must happen in the same PR as the backend profile -
-    `backend/tests/test_capability_matches_browser.py` makes that mechanical.
+def test_douyin_declares_both_content_types_after_t7():
+    """The declaration a user can currently act on.
+
+    This was `test_douyin_declares_video_only_today` and its docstring said the
+    flip "is T7's job and must happen in the same PR as the backend profile" -
+    this edit *is* that flip. `_drive_images` (T3) landed first; the backend
+    guard in `backend/tests/test_capability_matches_browser.py` is what makes
+    "same PR" mechanical rather than a promise in a comment.
+
+    Still pinning the exact tuple: everything downstream - the backend profile,
+    `GET /distribution/capabilities`, the greyed-out Images tab - is derived
+    from this one value, so it should never move by accident.
     """
-    assert supported_content_types_for("douyin") == ("video",)
+    assert supported_content_types_for("douyin") == ("video", "images")
 
 
 def test_an_unknown_platform_publishes_nothing():
@@ -169,17 +177,40 @@ def test_an_unknown_platform_publishes_nothing():
 
 def test_a_platform_that_declares_only_video_refuses_an_image_post():
     """The reason the declaration is per platform rather than one module-level
-    tuple: the day Douyin learns galleries, a *global* set would open this gate
-    for every platform with a registered publisher - including ones that have
-    not written a line of gallery code. The gate would be answering "does
-    anybody support this?" while the caller asked about one account's platform.
+    tuple: Douyin has now learned galleries, and a *global* set would have
+    opened this gate for every platform with a registered publisher - including
+    ones that have not written a line of gallery code. The gate would be
+    answering "does anybody support this?" while the caller asked about one
+    account's platform.
+
+    That day has arrived, which is why this test no longer uses Douyin: it now
+    states the property directly with a video-only declaration. Leaving it
+    pointed at Douyin would have turned it into an assertion about a platform
+    that *does* support images - green for the wrong reason, and no longer a
+    guard on per-platform scoping at all.
+    """
+    problem = validate_intent(
+        intent(content_type="images", media=[image(0)]),
+        supported_content_types=("video",),
+    )
+    assert problem is not None
+    assert problem.reason == "unsupported_content_type"
+
+
+def test_douyin_now_accepts_an_image_post_through_the_neutral_gate():
+    """The user-visible effect of the T7 flip at this layer: a well-formed
+    gallery intent is no longer refused by the neutral gate for Douyin.
+
+    Paired with the test above so the two directions are pinned separately -
+    "Douyin accepts images" and "a video-only platform still refuses them" are
+    different claims, and collapsing them into one test loses whichever half
+    stops being checked.
     """
     problem = validate_intent(
         intent(content_type="images", media=[image(0)]),
         supported_content_types=supported_content_types_for("douyin"),
     )
-    assert problem is not None
-    assert problem.reason == "unsupported_content_type"
+    assert problem is None
 
 
 def test_the_lookup_follows_the_capability_table_rather_than_a_hardcoded_list(

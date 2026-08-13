@@ -38,19 +38,14 @@ OAUTH_ACCOUNT = {"id": "901", "platform": "douyin", "auth_type": "oauth"}
 
 
 @pytest.fixture
-def images_enabled(monkeypatch):
-    """让 douyin 暂时声明支持 images。
+def images_enabled():
+    """douyin 的画像。
 
-    生产声明仍是 ``{"video"}``（T7 才翻转，且必须与 browser 侧同一个 PR），
-    所以图集的每一条形状规则在此刻的生产里都够不着 —— 测试直接把画像翻过来
-    验，正是为了让这些规则在翻转那天之前就已经被验证过。
+    T7 翻转之后这里**不再 monkeypatch** —— 生产声明本身就含 ``images`` 了。
+    保留这个 fixture 名是刻意的：图集那批用例继续显式声明"我依赖 images 被
+    支持"这个前提，一旦哪天声明被改回去，它们会因为拿到真实画像而红，而不是
+    因为 fixture 悄悄替它们造了个支持 images 的假画像仍然绿。
     """
-    profile = SESSION_PLATFORM_PROFILES["douyin"]
-    monkeypatch.setitem(
-        SESSION_PLATFORM_PROFILES,
-        "douyin",
-        replace(profile, content_types=frozenset({"video", "images"})),
-    )
     return SESSION_PLATFORM_PROFILES["douyin"]
 
 
@@ -217,10 +212,28 @@ def test_resolves_to_session_never_drifts_from_decide_channel(channel, auth_type
 # ── 平台能力与形状 ────────────────────────────────────────────
 
 
-def test_images_are_rejected_while_the_platform_still_declares_video_only():
-    """生产此刻的声明是 ``{"video"}``（T7 才翻转）—— 图集请求必须被拒，
-    且理由是"这个平台不支持"，不是别的什么。"""
+def test_a_well_formed_image_post_passes_the_gate_now_that_douyin_declares_images():
+    """T7 翻转的用户可见效果：形状正确的图集请求不再被这道门拦下。
+
+    这条替换了原来那个 ``images_are_rejected_while_the_platform_still_declares
+    _video_only`` —— 它钉的是翻转前的状态，翻转当天必然过期。**能力声明被
+    改回 video-only 时它会红**，这正是想要的：那意味着 UI 又能选图集而后端
+    要拒，也就是 P2-1a 那个假声明重演。
+    """
     problems = publish_request_problems(_images(3), [SESSION_ACCOUNT], now=NOW)
+    assert _reasons(problems) == []
+
+
+def test_a_content_type_no_platform_declares_is_still_rejected():
+    """门本身没被拆掉：一个谁都没声明的类型仍然在提交时就被拒。
+
+    翻转 ``images`` 之后，如果没有这条，"不支持的内容类型"这条规则就再没有
+    任何用例覆盖了 —— 一条规则的守卫随着它第一次放行而消失，是最容易被忽略
+    的覆盖倒退。
+    """
+    body = _images(3)
+    body.content_type = "livestream"
+    problems = publish_request_problems(body, [SESSION_ACCOUNT], now=NOW)
     assert _reasons(problems) == [SHAPE_UNSUPPORTED_CONTENT_TYPE]
 
 

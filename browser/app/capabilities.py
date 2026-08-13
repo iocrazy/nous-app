@@ -35,14 +35,16 @@ last step).
 
 # platform -> the content types its publisher can actually drive.
 #
-# Douyin is ``("video",)`` because ``douyin_publish.py`` uploads exactly one
-# file (``job.assets[VIDEO_ROLE]``). Image posts are wanted and the neutral
-# layer is being built for them, but this line is a capability statement, not a
-# roadmap: it flips to ``("video", "images")`` in the same PR that makes the
-# gallery upload real (spec T7), and the backend guard makes "the same PR"
-# mechanical rather than a comment someone has to obey.
+# Douyin gained ``"images"`` here in spec T7, once ``douyin_publish.py`` had a
+# real gallery driver (``_drive_images``, T3) sitting behind it — the neutral
+# multi-image layer (T2), the submit-time shape gate (T4), the readback that
+# reads image cards (T5) and the UI that ungreys itself off this very value
+# (T6) all landed first. The order is the point: this line is a capability
+# statement, not a roadmap, and the backend guard
+# (``backend/tests/test_capability_matches_browser.py``) makes "declare only
+# what is implemented" mechanical rather than a comment someone has to obey.
 PLATFORM_CONTENT_TYPES = {
-    "douyin": ("video",),
+    "douyin": ("video", "images"),
 }
 
 

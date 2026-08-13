@@ -679,13 +679,22 @@ async def test_a_gallery_whose_images_all_stage_does_reach_the_publisher(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_the_capability_table_still_says_douyin_cannot_do_galleries():
-    """T3 writes the driver; **T7** flips the claim, in the same PR as the
-    backend profile (spec D1's CI guard makes that mechanical). Until then this
-    module is implemented-but-not-offered, which is the safe direction: the
-    reverse - offered but not implemented - is the failure the whole capability
-    chain exists to stop."""
-    assert caps.content_types_for("douyin") == ("video",)
+def test_the_capability_table_now_offers_galleries_on_douyin():
+    """T3 wrote the driver; **T7** flips the claim, in the same PR as the
+    backend profile (spec D1's CI guard makes that mechanical). This test was
+    `..._still_says_douyin_cannot_do_galleries` and asserted the pre-flip
+    value - it is the flip's counterpart in this module.
+
+    The property worth keeping is that the gate and the driver agree: for as
+    long as `_drive_images` exists, the table must offer `images`, and a
+    well-formed gallery intent must get past `validate_intent`. The opposite
+    direction - a platform without a gallery driver refusing image posts - is
+    pinned in `test_publish_units.py`, which is where the neutral layer's
+    per-platform scoping is tested."""
+    assert caps.content_types_for("douyin") == ("video", "images")
+    assert hasattr(dp, "_drive_images"), (
+        "能力表声明了 images，但图集驱动不见了 —— 这正是能力链要防的形状。"
+    )
     problem = publish_module.validate_intent(
         PublishIntent(
             content_type="images",
@@ -694,7 +703,7 @@ def test_the_capability_table_still_says_douyin_cannot_do_galleries():
         ),
         supported_content_types=caps.content_types_for("douyin"),
     )
-    assert problem is not None and problem.reason == "unsupported_content_type"
+    assert problem is None
 
 
 def test_the_done_marker_is_matched_exactly_because_of_the_substring_trap():

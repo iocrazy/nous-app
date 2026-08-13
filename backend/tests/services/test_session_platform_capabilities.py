@@ -99,16 +99,21 @@ def _intent():
 def test_douyin_declares_only_the_content_type_its_publisher_implements():
     """profile 是**能力声明**,不是愿望清单。
 
-    浏览器侧的唯一真相是 ``browser/app/publish.py`` 的
-    ``SUPPORTED_CONTENT_TYPES = ("video",)`` —— ``douyin_publish.py`` 只上传
-    单个视频文件,图集的多文件 + 排序 + 封面语义一行都没写。
+    ``images`` 是 spec T7 加进来的,在 ``douyin_publish.py::_drive_images``
+    (T3) 真的能驱动图集之后 —— 中立多图层(T2)、提交期形状门(T4)、认图文卡的
+    回读(T5)、按这个值自动解除置灰的 UI(T6) 都先落地了。
 
-    这里曾经是 ``{"video", "images"}``,三层声明打架(前端能选 / 后端放行 /
-    浏览器拒),用户填完整个表单才在最后一步拿到 ``unsupported_content_type``。
-    图集是要做的(P2-1 步骤 2),但**在浏览器侧写出来之前**,这一行必须只写
-    已经存在的能力。加回 "images" 时要和 browser 侧同一个 PR 落地。
+    这一行曾经骗过人:早先写着 ``{"video", "images"}`` 而浏览器侧只认 video,
+    三层声明打架(前端能选 / 后端放行 / 浏览器拒),用户填完整个表单才在最后
+    一步拿到 ``unsupported_content_type``。所以本用例钉的不是"只能有 video",
+    而是**这一行必须与浏览器侧逐字一致**:跨服务那半由
+    ``tests/test_capability_matches_browser.py`` 用 importlib 真读
+    ``browser/app/capabilities.py`` 断言,这里钉当前的确切集合,让任何一次单边
+    改动都在本文件留下痕迹。
     """
-    assert SESSION_PLATFORM_PROFILES["douyin"].content_types == frozenset({"video"})
+    assert SESSION_PLATFORM_PROFILES["douyin"].content_types == frozenset(
+        {"video", "images"}
+    )
 
 
 def test_every_profile_declares_the_capability_explicitly():
