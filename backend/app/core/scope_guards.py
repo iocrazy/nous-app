@@ -72,13 +72,20 @@ async def _resolve_project_access(
 ) -> Optional[ProjectAccess]:
     """THE project read/write verdict. ``None`` when the project row is gone.
 
-    Single source for both the raising guards (``_check_project_access`` →
-    ``verify_project_{read,write}_access``) and the non-raising predicate
-    (``can_write_project``) the canvas GET uses to tell the UI upfront
-    whether its writes would be accepted. Keeping one body is the point:
-    a second, UI-only copy of the role comparison is exactly how a client
-    ends up offering (or hiding) an action the real gate then disagrees
-    with — the failure mode this repo has hit repeatedly.
+    Single source for the raising guards (``_check_project_access`` →
+    ``verify_project_{read,write}_access``) AND for the ``can_edit`` the
+    canvas GET ships so the UI knows upfront whether its writes would be
+    accepted. Keeping one body is the point: a second, UI-only copy of the
+    role comparison is exactly how a client ends up offering (or hiding) an
+    action the real gate then disagrees with — the failure mode this repo
+    has hit repeatedly.
+
+    One call answers BOTH questions (that is what the two-field
+    ``ProjectAccess`` is for), so a read endpoint that also wants the write
+    verdict must go through ``resolve_project_read_access`` and read
+    ``.can_write`` off the returned tuple — never gate first and then ask a
+    second predicate, which used to re-run every query below for the same
+    (project, user) pair inside one request.
 
     Access: owner, or member of the project's team, or a row in
     project_members — any role for read, manager/editor for write.
@@ -138,30 +145,44 @@ async def _resolve_project_access(
     return ProjectAccess(False, False)
 
 
-async def _check_project_access(project_id: str, user_id: str, *, write: bool) -> None:
+async def _check_project_access(
+    project_id: str, user_id: str, *, write: bool
+) -> ProjectAccess:
     """Raising form of ``_resolve_project_access`` — 404 before 403, matching
-    the rest of this module."""
+    the rest of this module.
+
+    Returns the resolved verdict rather than ``None`` so a caller that needs
+    the OTHER half of it (a read endpoint reporting ``can_edit``) can take it
+    from here instead of resolving the same (project, user) pair twice.
+    """
     access = await _resolve_project_access(project_id, user_id)
     if access is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if access.can_write if write else access.can_read:
-        return
+        return access
     raise HTTPException(
         status_code=403, detail="You do not have access to this project"
     )
 
 
-async def can_write_project(project_id: str, user_id: str) -> bool:
-    """Non-raising twin of ``verify_project_write_access``.
+async def resolve_project_read_access(
+    project_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> ProjectAccess:
+    """``verify_project_read_access`` that also HANDS BACK what it resolved.
 
-    Same verdict, same query, no exception — for read endpoints that want to
-    tell the client whether a follow-up write would be accepted (canvas
-    ``can_edit``), so a read-only viewer never has to *discover* the answer
-    by firing a PUT that is guaranteed to 403. A missing project is False:
-    nobody can write a row that isn't there.
+    Same gate, same 404-before-403 ordering; the difference is that the
+    ``can_write`` half of the verdict — already computed to answer the read
+    question — is returned instead of discarded. Read endpoints that ship
+    ``can_edit`` (canvas GET, storyboard GET) use this: gating and reporting
+    then cost ONE ``_resolve_project_access``, not two identical ones.
+
+    The reported verdict is therefore the very same value the write guard
+    would branch on, which is the property that must not be traded away for
+    the saved query: a UI-side re-derivation of the role comparison is how
+    the client ends up disagreeing with the server.
     """
-    access = await _resolve_project_access(project_id, user_id)
-    return access is not None and access.can_write
+    return await _check_project_access(project_id, auth.user_id, write=False)
 
 
 async def verify_project_write_access(

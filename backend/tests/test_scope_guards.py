@@ -24,7 +24,7 @@ from fastapi import HTTPException
 
 from app.core.deps import AuthContext
 from app.core.scope_guards import (
-    can_write_project,
+    resolve_project_read_access,
     verify_project_write_access,
     verify_resource_write_access,
     verify_scope_access,
@@ -240,13 +240,35 @@ async def test_write_project_member_viewer_403(patch_session):
     assert ei.value.status_code == 403
 
 
-# ─── can_write_project: non-raising twin of the write guard ───────────
+# ─── the read gate's can_write half: what the canvas GET reports ──────
 #
 # The canvas GET ships this verdict to the client as ``can_edit`` so a
 # read-only viewer never has to learn its rights by firing a PUT that is
-# guaranteed to 403. The predicate and the guard MUST agree on every cell
-# — they share ``_resolve_project_access``, and these tests pin that by
-# asserting both against the same fixtures.
+# guaranteed to 403. Reported verdict and real guard MUST agree on every
+# cell — they share ``_resolve_project_access``, and these tests pin that
+# by asserting both against the same fixtures.
+#
+# It used to be a separate predicate (``can_write_project``) called right
+# AFTER the read gate, which meant every load resolved the same
+# (project, user) pair twice. The predicate is gone; the read gate returns
+# its ``ProjectAccess``, so the reported answer is now literally the object
+# the gate branched on — one resolution, and drift is structurally
+# impossible rather than merely tested for.
+
+
+async def _reported_can_write(patch_session, tables) -> bool:
+    """What GET /canvases/{id} would put in ``can_edit`` for these fixtures.
+
+    A read-gate rejection (non-member) is False: the caller never gets a
+    payload at all, so 'may not write' is the only consistent reading.
+    """
+    patch_session(tables)
+    try:
+        access = await resolve_project_read_access(project_id="1", auth=_auth("u1"))
+    except HTTPException as exc:
+        assert exc.status_code in (403, 404)
+        return False
+    return access.can_write
 
 
 @pytest.mark.parametrize(
@@ -268,9 +290,8 @@ async def test_write_project_member_viewer_403(patch_session):
         ),
     ],
 )
-async def test_can_write_project_matrix(patch_session, tables, expected):
-    patch_session(tables)
-    assert await can_write_project("1", "u1") is expected
+async def test_reported_can_write_matrix(patch_session, tables, expected):
+    assert await _reported_can_write(patch_session, tables) is expected
 
 
 @pytest.mark.parametrize(
@@ -283,11 +304,10 @@ async def test_can_write_project_matrix(patch_session, tables, expected):
         {"projects": [("owner", "t1")], "team_members": [], "project_members": []},
     ],
 )
-async def test_can_write_project_agrees_with_the_write_guard(patch_session, tables):
-    """No drift: whatever the predicate says, the guard must do — otherwise
-    the UI's read-only state and the server's 403 disagree."""
-    patch_session(tables)
-    predicted = await can_write_project("1", "u1")
+async def test_reported_can_write_agrees_with_the_write_guard(patch_session, tables):
+    """No drift: whatever the load response reports, the guard must do —
+    otherwise the UI's read-only state and the server's 403 disagree."""
+    predicted = await _reported_can_write(patch_session, tables)
 
     patch_session(tables)
     try:
@@ -300,11 +320,17 @@ async def test_can_write_project_agrees_with_the_write_guard(patch_session, tabl
     assert predicted is guard_allowed
 
 
-async def test_can_write_project_missing_project_is_false_not_404(patch_session):
-    """The guard 404s a missing project; the predicate has no HTTP status to
-    return, so 'nobody can write a row that isn't there' → False."""
+async def test_read_gate_404s_a_missing_project_before_reporting_anything(
+    patch_session,
+):
+    """A missing project is a 404 from the read gate itself — the caller
+    never reaches a payload, so there is no ``can_edit`` to report and no
+    way for a 'nobody can write a row that isn't there' verdict to leak out
+    as a 200."""
     patch_session({"projects": []})
-    assert await can_write_project("1", "u1") is False
+    with pytest.raises(HTTPException) as ei:
+        await resolve_project_read_access(project_id="1", auth=_auth("u1"))
+    assert ei.value.status_code == 404
 
 
 # ─── script/scene/shot family: read-access project_members fallback ───

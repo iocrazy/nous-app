@@ -29,6 +29,7 @@ import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 
@@ -89,6 +90,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const regenerating = useRegenStore((s) => !!s.running[regenKey(canvasId, id)]);
+  // Read-only: Rerun re-dispatches the source prompt, and Crop / Expand /
+  // Mask / Split each derive a NEW resource server-side and drop fresh
+  // nodes on the canvas — all writes. The recover cell's "Check Result"
+  // patches this node too. Preview, Download and the lightbox are reads
+  // and stay available; the editing chips stay VISIBLE but disabled, so
+  // the node keeps telling a viewer what it can do once they have access
+  // (same call the command palette made in #1828).
+  const readOnly = useCanvasReadOnly();
 
   const lightboxItems: LightboxItem[] =
     images && images.length > 0
@@ -365,6 +374,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onPreview={() => openLightbox(0)}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}
+          readOnly={readOnly}
         />
       )}
       <div className="mh-node-head">
@@ -378,7 +388,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               type="button"
               data-testid="regenerate-open"
               onClick={onRegenerate}
-              disabled={regenerating}
+              disabled={regenerating || readOnly}
               title="Re-run the source prompt"
               className="mh-chip"
             >
@@ -393,8 +403,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               type="button"
               data-testid="crop-open"
               onClick={openEditor}
+              disabled={readOnly}
               title="Crop the image"
-              className="mh-chip"
+              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
             >
               Crop
             </button>
@@ -404,8 +415,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               type="button"
               data-testid="outpaint-open"
               onClick={openOutpaintEditor}
+              disabled={readOnly}
               title="Extend the canvas beyond the image"
-              className="mh-chip"
+              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
             >
               Expand
             </button>
@@ -415,8 +427,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               type="button"
               data-testid="mask-cutout-open"
               onClick={openMaskEditor}
+              disabled={readOnly}
               title="Paint a region to cut out"
-              className="mh-chip"
+              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
             >
               Mask
             </button>
@@ -426,8 +439,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               type="button"
               data-testid="grid-split-open"
               onClick={openGridEditor}
+              disabled={readOnly}
               title="Split into a grid of tiles"
-              className="mh-chip"
+              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
             >
               Split
             </button>
@@ -521,6 +535,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               (data as { gen_slot?: { node_id?: string } }).gen_slot?.node_id ?? null
             }
             taskIds={gen_recover}
+            readOnly={readOnly}
           />
         )}
         {gen_failed > 0 && (
@@ -645,7 +660,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             const prev = latestHistoryImageUrl(id);
             return prev ? [{ url: prev }] : [];
           })()}
-          onRegenerate={canRegenerate ? onRegenerate : undefined}
+          onRegenerate={canRegenerate && !readOnly ? onRegenerate : undefined}
           regenerating={regenerating}
         />
       )}
@@ -658,9 +673,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
 function RecoverCell({
   promptId,
   taskIds,
+  readOnly,
 }: {
   promptId: string | null;
   taskIds: string[];
+  readOnly?: boolean;
 }) {
   const [querying, setQuerying] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -697,8 +714,9 @@ function RecoverCell({
       )}
       <button
         type="button"
+        data-testid="output-recover-query"
         onClick={() => void onQuery()}
-        disabled={querying || !promptId}
+        disabled={querying || !promptId || readOnly}
         className="nodrag mh-chip mt-1.5 !border-amber-400/60 !text-amber-500 disabled:opacity-50"
       >
         {querying ? 'Checking…' : 'Check Result'}

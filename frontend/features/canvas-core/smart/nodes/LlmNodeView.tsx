@@ -19,6 +19,7 @@ import type { LlmNodeData, PromptNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { RunStatusBadge } from './RunStatusBadge';
 import { useAgents } from './useAgents';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useTextModels } from './useTextModels';
 import { UiSelect } from '../../../../components/ui';
@@ -61,6 +62,10 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
   const textModels = useTextModels();
   const agents = useAgents();
   const [copied, setCopied] = useState(false);
+  // Read-only: model/agent pickers and the input all patch the node, and
+  // Run POSTs a prompt run AND writes its result back. Copy is pure
+  // reading and stays.
+  const readOnly = useCanvasReadOnly();
 
   const run = useCallback(async () => {
     const store = useCanvasCoreStore.getState();
@@ -114,6 +119,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
             value={d.provider_slug}
             onChange={(e) => patch({ provider_slug: e.target.value })}
             aria-label="LLM provider"
+            disabled={readOnly}
           >
             <option value="">Catalog default</option>
             {textModels.map((m) => (
@@ -128,6 +134,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
             value={d.agent_id ?? ''}
             onChange={(e) => patch({ agent_id: e.target.value || null })}
             aria-label="LLM agent"
+            disabled={readOnly}
           >
             <option value="">No agent</option>
             {agents.map((a) => (
@@ -142,18 +149,20 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           Input
         </div>
         <textarea
-          className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-canvas-line bg-transparent p-2 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+          className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-canvas-line bg-transparent p-2 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
           rows={3}
           placeholder="Type here, or wire in a Prompt node…"
           value={d.input_text}
           onChange={(e) => patch({ input_text: e.target.value })}
           aria-label="LLM input"
+          readOnly={readOnly}
         />
 
         <button
           type="button"
+          data-testid="llm-run"
           onClick={() => void run()}
-          disabled={d.run_status === 'running'}
+          disabled={d.run_status === 'running' || readOnly}
           className="nodrag mt-2 flex items-center gap-1.5 rounded-full border border-canvas-line px-3 py-1 text-xs font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] disabled:opacity-50"
         >
           <Play size={11} />

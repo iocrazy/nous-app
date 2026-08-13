@@ -22,6 +22,7 @@ import {
 import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 /** Which lightbox is open — a kind + the index within that kind's own
@@ -41,6 +42,10 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  // Read-only: every upload path goes (Add, the empty-state click, the
+  // file drop) — they POST an import AND patch the node. Thumbnails and
+  // the lightbox are pure viewing and stay.
+  const readOnly = useCanvasReadOnly();
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -110,13 +115,14 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       }`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.media }}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
+        if (!readOnly && e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
           setDragOver(true);
         }
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
+        if (readOnly) return;
         if (!e.dataTransfer.files?.length) return;
         e.preventDefault();
         e.stopPropagation();
@@ -131,8 +137,10 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         {(items?.length ?? 0) > 0 && (
           <button
             type="button"
-            className="nodrag text-[11px] text-canvas-muted transition-colors hover:text-canvas-text"
+            data-testid="media-node-add"
+            className="nodrag text-[11px] text-canvas-muted transition-colors hover:text-canvas-text disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => inputRef.current?.click()}
+            disabled={readOnly}
           >
             {t('canvas.mediaNode.add', '+ Add')}
           </button>
@@ -144,11 +152,16 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
             type="button"
             data-testid="media-node-empty"
             onClick={() => inputRef.current?.click()}
-            className="nodrag flex min-h-[96px] w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line text-canvas-muted transition-colors hover:border-[var(--accent-border)] hover:text-canvas-text"
+            disabled={readOnly}
+            className="nodrag flex min-h-[96px] w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line text-canvas-muted transition-colors hover:border-[var(--accent-border)] hover:text-canvas-text disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-canvas-line disabled:hover:text-canvas-muted"
           >
             <UploadCloud size={18} />
+            {/* An empty media node is only its upload invitation, so the
+                hint has to stop inviting when the session can't write. */}
             <span className="text-[11px]">
-              {t('canvas.mediaNode.emptyHint', 'Click or drop images / video')}
+              {readOnly
+                ? t('canvas.mediaNode.readOnlyHint', 'Read-only — cannot add media')
+                : t('canvas.mediaNode.emptyHint', 'Click or drop images / video')}
             </span>
           </button>
         ) : (

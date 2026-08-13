@@ -22,7 +22,8 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
-    can_write_project,
+    ProjectAccess,
+    resolve_project_read_access,
     verify_project_read_access,
     verify_project_write_access,
 )
@@ -88,19 +89,30 @@ async def _gate_canvas_write(canvas_id: str, auth: AuthDep) -> str:
     return project_id
 
 
-async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
-    """Resolve canvas → project, then run the read guard. Returns project_id.
+async def _gate_canvas_read_access(
+    canvas_id: str, auth: AuthDep
+) -> tuple[str, ProjectAccess]:
+    """Resolve canvas → project, run the read guard, return BOTH the
+    project_id and the access verdict the guard already resolved.
 
     Read = owner, or team member, or any project_members row (any role) —
     see ``verify_project_read_access``. Viewer-role project members can
     reach this but fail ``_gate_canvas_write``, which requires
-    manager/editor.
+    manager/editor; ``access.can_write`` is exactly that distinction, which
+    is why the load responses can report it as ``can_edit`` without asking
+    a second time.
     """
     svc = CanvasService()
     project_id = await svc.get_project_id(canvas_id)
     if project_id is None:
         raise HTTPException(status_code=404, detail="canvas not found")
-    await verify_project_read_access(project_id=project_id, auth=auth)
+    access = await resolve_project_read_access(project_id=project_id, auth=auth)
+    return project_id, access
+
+
+async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
+    """``_gate_canvas_read_access`` for callers that only need the gate."""
+    project_id, _access = await _gate_canvas_read_access(canvas_id, auth)
     return project_id
 
 
@@ -426,9 +438,13 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
     if existing is not None:
         # Pure read — any project member (owner / team / explicit
         # project_members row, any role) may fetch an existing storyboard.
-        await verify_project_read_access(project_id=project_id, auth=auth)
-        can_edit = await can_write_project(project_id, auth.user_id)
-        return {"success": True, "data": _to_response(existing, can_edit=can_edit)}
+        # The gate returns what it resolved, so ``can_edit`` is free here
+        # rather than a second identical resolution.
+        access = await resolve_project_read_access(project_id=project_id, auth=auth)
+        return {
+            "success": True,
+            "data": _to_response(existing, can_edit=access.can_write),
+        }
 
     # No canvas yet: this GET is about to CREATE one, so it must pass the
     # same gate a POST would (read-only visitors should not be able to
@@ -451,7 +467,7 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
         raise HTTPException(status_code=500, detail="storyboard canvas create failed")
     # This branch only runs AFTER verify_project_write_access passed, so the
     # caller demonstrably has write rights — no second round trip to re-ask
-    # the same question ``can_write_project`` would answer True.
+    # the same question the read gate's ``can_write`` would answer True.
     return {"success": True, "data": _to_response(row, can_edit=True)}
 
 
@@ -474,14 +490,18 @@ async def get_canvas(
     and reading the 403 off it: every viewer load cost one guaranteed-to-
     fail write, and until it came back the UI happily offered edit
     gestures whose results were silently discarded.
+
+    The read gate hands that verdict back (#1828 follow-up): gating and
+    reporting used to be two calls resolving the identical (project, user)
+    pair — up to three extra SELECTs per load, for an answer already in
+    hand.
     """
-    project_id = await _gate_canvas_read(canvas_id, auth)
+    _project_id, access = await _gate_canvas_read_access(canvas_id, auth)
     svc = CanvasService()
     row = await svc.get(canvas_id)
     if row is None:
         raise HTTPException(status_code=404, detail="canvas not found")
-    can_edit = await can_write_project(project_id, auth.user_id)
-    return {"success": True, "data": _to_response(row, can_edit=can_edit)}
+    return {"success": True, "data": _to_response(row, can_edit=access.can_write)}
 
 
 @router.put("/canvases/{canvas_id}")

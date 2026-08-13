@@ -8,6 +8,7 @@ import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useTextModels } from './useTextModels';
 import { useAgents } from './useAgents';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -49,6 +50,17 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const patch = useNodeDataPatch(id);
+  // Read-only: every control on this node writes — the body/negative text,
+  // the kind/model/agent/ratio/count pickers, the @-ref chips' remove
+  // button, the library loader (it mints a media node + connection) and
+  // Retry (re-dispatches the run). Nothing here is view-only.
+  //
+  // The two TEXT areas take `readOnly`, not `disabled`: a prompt body is
+  // exactly the kind of thing a viewer opens the canvas to read and copy,
+  // and a disabled textarea can't be focused or selected. Everything else
+  // here is a picker or a button, which has no text worth copying and no
+  // `readonly` semantics in HTML — those stay `disabled`.
+  const readOnly = useCanvasReadOnly();
   const genKind = gen?.kind ?? 'text';
   const genModels = useGenerationModels(gen ? gen.kind : undefined);
   // Text-mode model options come from the platform DB catalog (same source as
@@ -215,6 +227,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               }
             }}
             aria-label="Prompt kind"
+            disabled={readOnly}
           >
             <option value="text">Text</option>
             <option value="image">Image</option>
@@ -222,10 +235,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           </UiSelect>
           <button
             type="button"
-            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center`}
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
             onClick={() => setLibraryOpen(true)}
             aria-label="Load from library"
             data-testid="prompt-library-button"
+            disabled={readOnly}
           >
             <Library size={12} />
           </button>
@@ -249,7 +263,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
           placeholder="What should the model generate? Type @ to reference an asset"
           value={body}
           onChange={mention.handleChange}
@@ -257,6 +271,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           onBlur={mention.closePicker}
           aria-label="Prompt body"
           rows={3}
+          readOnly={readOnly}
         />
 
         {mention.pickerOpen && (
@@ -286,8 +301,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               value={negative_body ?? ''}
               onChange={(e) => patch({ negative_body: e.target.value })}
               placeholder="Negative prompt"
+              aria-label="Negative prompt"
               rows={2}
-              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40"
+              readOnly={readOnly}
+              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40 read-only:opacity-80 read-only:cursor-default"
             />
           </div>
         ) : null}
@@ -301,6 +318,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 value={provider_slug}
                 onChange={(e) => patch({ provider_slug: e.target.value })}
                 aria-label="Prompt provider"
+                disabled={readOnly}
               >
                 {/* Empty value → backend resolves the DB catalog default. */}
                 <option value="">Catalog default</option>
@@ -316,6 +334,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 value={agent_id ?? ''}
                 onChange={(e) => patch({ agent_id: e.target.value || null })}
                 aria-label="Prompt agent"
+                disabled={readOnly}
               >
                 {/* Empty → plain runner (no persona injected). */}
                 <option value="">No agent</option>
@@ -335,6 +354,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 value={gen.model}
                 onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
                 aria-label="Generation model"
+                disabled={readOnly}
               >
                 <option value="">Catalog default</option>
                 {genModels.map((m) => (
@@ -350,6 +370,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     value={gen.ratio ?? '1:1'}
                     onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
                     aria-label="Aspect ratio"
+                    disabled={readOnly}
                   >
                     {ASPECT_RATIOS.map((r) => (
                       <option key={r} value={r}>
@@ -372,6 +393,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                       })
                     }
                     aria-label="Image count"
+                    disabled={readOnly}
                   />
                 </>
               )}
@@ -381,6 +403,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                   value={gen.aspect ?? '16:9'}
                   onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
                   aria-label="Video aspect"
+                  disabled={readOnly}
                 >
                   {ASPECT_RATIOS.map((r) => (
                     <option key={r} value={r}>
@@ -404,8 +427,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               >
                 @{ref.name}
                 <button
-                  className="ml-0.5 opacity-70 hover:opacity-100"
+                  className="ml-0.5 opacity-70 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label={`Remove reference to ${ref.name}`}
+                  disabled={readOnly}
                   onMouseDown={(e) => {
                     // prevent blur from firing before the click is processed
                     e.preventDefault();
@@ -442,7 +466,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <button
               type="button"
               onClick={() => void rerunPrompt(id)}
-              className="nodrag mh-chip mt-1.5 !border-rose-400/60 !text-rose-500"
+              disabled={readOnly}
+              data-testid="prompt-retry"
+              className="nodrag mh-chip mt-1.5 !border-rose-400/60 !text-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Retry
             </button>

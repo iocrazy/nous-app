@@ -202,7 +202,7 @@ interface CanvasState {
    * This session may not write the canvas.
    *
    * Set UP FRONT from the load response's `can_edit` (the same verdict the
-   * PUT's write guard reaches — `scope_guards.can_write_project`), so a
+   * PUT's write guard reaches — `scope_guards.resolve_project_read_access`), so a
    * viewer never sends the doomed PUT that used to be the only way to find
    * out. `doSave`'s 403 latch is kept as the BACKSTOP for what the load
    * can't know: an older backend that doesn't send the field, and a

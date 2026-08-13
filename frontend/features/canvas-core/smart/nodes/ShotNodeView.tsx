@@ -64,6 +64,7 @@ import { ImageOff, ListX, MoreVertical, Sparkles } from 'lucide-react';
 
 import type { ShotNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { UiSelect } from '../../../../components/ui';
@@ -127,12 +128,16 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   /**
    * Read-only session — the storyboard canvas is the case this actually
    * happens on in production (a viewer-role member opening an episode's
-   * storyboard). Both in-node write affordances go: Generate (its POST is
-   * gated by `_gate_canvas_write`, so it would 403) and Promote to Shot
-   * (it creates a `script_shots` row). "Open in list" stays — it only
+   * storyboard). Every write affordance goes: Generate (its POST is gated
+   * by `_gate_canvas_write`, so it would 403), Promote to Shot (it creates
+   * a `script_shots` row), and — added here — the inline field edits. The
+   * unbound card's title/notes patch the canvas document; the bound card's
+   * chips/description PATCH `script_shots` through `updateShot`, which the
+   * server refuses too. Both were still typeable after #1828: the text
+   * appeared, then vanished on reload. "Open in list" stays — it only
    * navigates.
    */
-  const readOnly = useCanvasCoreStore((s) => s.readOnly);
+  const readOnly = useCanvasReadOnly();
   const bound = shot_id != null;
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -371,11 +376,12 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
         <div className="p-3">
           <input
             // nodrag = React Flow does not start a node drag from this input
-            className="nodrag w-full bg-transparent text-sm font-medium text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+            className="nodrag w-full bg-transparent text-sm font-medium text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             placeholder="Shot title"
             value={title}
             onChange={(e) => patch({ title: e.target.value })}
             aria-label="Shot title"
+            readOnly={readOnly}
           />
           {reference_resource_ids.length > 0 && (
             <div className="mt-1 text-xs text-canvas-muted">
@@ -385,12 +391,13 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
           )}
           <textarea
             // nowheel = wheel events don't pan the canvas while scrolling the textarea
-            className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-canvas-muted outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+            className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-canvas-muted outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             placeholder="Notes (optional)"
             rows={3}
             value={notes}
             onChange={(e) => patch({ notes: e.target.value })}
             aria-label="Shot notes"
+            readOnly={readOnly}
           />
         </div>
       ) : (
@@ -405,7 +412,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
                   value={current ?? ''}
                   onChange={handleChipChange(field, current)}
                   aria-label={CHIP_LABEL[field]}
-                  disabled={stale}
+                  disabled={stale || readOnly}
                 >
                   <option value="">{t('canvas.shotNode.unset')}</option>
                   {CHIP_VOCAB[field].map((v) => (
@@ -421,7 +428,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
               value={focal_length ?? ''}
               onChange={handleFocalChange}
               aria-label="Focal length"
-              disabled={stale}
+              disabled={stale || readOnly}
             >
               <option value="">{t('canvas.shotNode.unset')}</option>
               {focalOptions.map((v) => (
@@ -433,13 +440,14 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
           </div>
 
           <textarea
-            className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+            className="nodrag nowheel mt-2 w-full resize-none bg-transparent text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             placeholder="Shot description"
             rows={2}
             value={desc}
             onChange={handleDescChange}
             aria-label="Shot description"
             disabled={stale}
+            readOnly={readOnly}
           />
 
           <div className="mt-2 aspect-video w-full overflow-hidden rounded-lg border border-canvas-line bg-canvas-line/10">

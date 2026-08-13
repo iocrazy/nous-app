@@ -9,12 +9,17 @@ import { startLoopRun } from '../loopRun';
 import { useLoopRunStore } from '../loopRunStore';
 import { resolveSourceUrls } from '../promptInputs';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 export function LoopNodeView({ id, data, selected }: NodeProps) {
   const { t } = useTranslation();
   const d = data as unknown as LoopNodeData;
   const patch = useNodeDataPatch(id);
+  // Read-only: mode / toggles / prompts / counters all patch the node, and
+  // Run dispatches generations. Stop goes with Run — a viewer cannot have
+  // started the run it would stop.
+  const readOnly = useCanvasReadOnly();
   const running = useLoopRunStore((s) => Boolean(s.running[id]));
   const stopping = useLoopRunStore((s) => s.running[id]?.stopRequested ?? false);
 
@@ -55,6 +60,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`nodrag mh-loop-seg-btn ${mode === 'serial' ? 'active' : ''}`}
             onClick={() => patch({ mode: 'serial' })}
+            disabled={readOnly}
             aria-label="Serial"
           >
             {t('canvas.loopModeSerial')}
@@ -63,6 +69,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`nodrag mh-loop-seg-btn ${mode === 'parallel' ? 'active' : ''}`}
             onClick={() => patch({ mode: 'parallel' })}
+            disabled={readOnly}
             aria-label="Parallel"
           >
             {t('canvas.loopModeParallel')}
@@ -75,6 +82,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`nodrag mh-loop-toggle ${imageInput ? 'active' : ''}`}
             onClick={() => patch({ image_input: !imageInput })}
+            disabled={readOnly}
             aria-label="Toggle image input"
           >
             <ImageIcon size={12} />
@@ -84,6 +92,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`nodrag mh-loop-toggle ${showPrompt ? 'active' : ''}`}
             onClick={() => patch({ show_prompt: !showPrompt })}
+            disabled={readOnly}
             aria-label="Toggle prompt input"
           >
             <TextCursorInput size={12} />
@@ -103,6 +112,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 max={100}
                 value={safeBatch}
                 onChange={(e) => patch({ image_batch_size: clampBatchSize(Number(e.target.value)) })}
+                disabled={readOnly}
                 aria-label={t('canvas.loopBatch')}
               />
             </label>
@@ -122,18 +132,19 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 <div key={i} className="mh-loop-prompt-item">
                   <span className="mh-loop-prompt-index">{i + 1}</span>
                   <textarea
-                    className="nodrag mh-loop-text"
+                    className="nodrag mh-loop-text read-only:opacity-80 read-only:cursor-default"
                     placeholder={t('canvas.loopPromptPlaceholder')}
                     value={prompt}
                     rows={1}
                     onChange={(e) => patchPrompt(i, e.target.value)}
+                    readOnly={readOnly}
                     aria-label={`Loop prompt ${i + 1}`}
                   />
                   <button
                     type="button"
                     className="nodrag mh-loop-icon-btn"
                     onClick={() => patch({ prompts: safePrompts.filter((_p, j) => j !== i) })}
-                    disabled={safePrompts.length <= 1}
+                    disabled={readOnly || safePrompts.length <= 1}
                     aria-label={`Remove prompt ${i + 1}`}
                   >
                     <X size={12} />
@@ -146,6 +157,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 className="nodrag mh-loop-token"
                 onClick={() => insertCounter(safePrompts.length - 1)}
+                disabled={readOnly}
                 aria-label="Insert count token"
               >
                 {t('canvas.loopCounterToken')}
@@ -154,6 +166,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 className="nodrag mh-loop-add"
                 onClick={() => patch({ prompts: [...safePrompts, ''] })}
+                disabled={readOnly}
                 aria-label="Add prompt"
               >
                 <Plus size={12} />
@@ -173,6 +186,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
               max={9999}
               value={safeStart}
               onChange={(e) => patch({ round_start: clampRoundStart(Number(e.target.value)) })}
+              disabled={readOnly}
               aria-label={t('canvas.loopStart')}
             />
           </label>
@@ -185,6 +199,7 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
               max={100}
               value={safeRounds}
               onChange={(e) => patch({ rounds: clampRounds(Number(e.target.value)) })}
+              disabled={readOnly}
               aria-label={t('canvas.loopRounds')}
             />
           </label>
@@ -198,7 +213,8 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
               }
               startLoopRun(id).catch((err) => console.error('[LoopNodeView] loop run failed:', err));
             }}
-            disabled={stopping}
+            disabled={stopping || readOnly}
+            data-testid="loop-run"
             aria-label={running ? 'Stop loop' : 'Run loop'}
             title={running ? (stopping ? 'Stopping…' : 'Stop after this round') : t('canvas.loopRunAll')}
           >

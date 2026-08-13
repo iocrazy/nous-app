@@ -58,7 +58,8 @@ class CanvasResponse(BaseModel):
         None,
         description=(
             "Whether this caller may write the canvas — the same verdict the "
-            "PUT's write guard reaches (scope_guards.can_write_project). Set "
+            "PUT's write guard reaches (scope_guards."
+            "resolve_project_read_access → ProjectAccess.can_write). Set "
             "on the load responses (GET /canvases/{id}, GET "
             "/canvases/storyboard) so the client can render read-only up "
             "front instead of discovering it from a 403. None = not supplied "

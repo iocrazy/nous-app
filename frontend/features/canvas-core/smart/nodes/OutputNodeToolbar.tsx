@@ -18,6 +18,10 @@ export interface OutputNodeToolbarProps {
   /** Absent → no source prompt → the Rerun key is hidden. */
   onRerun?: () => void;
   rerunning?: boolean;
+  /** Read-only session: Rerun is disabled (it dispatches a generation and
+   *  writes the result back). Preview and Download are pure reads and stay
+   *  available — withholding them would take away viewing, not writing. */
+  readOnly?: boolean;
   /** Pin visible (the node is selected); otherwise hover reveals. */
   pinned?: boolean;
 }
@@ -27,6 +31,7 @@ export function OutputNodeToolbar({
   onPreview,
   onRerun,
   rerunning,
+  readOnly,
   pinned,
 }: OutputNodeToolbarProps) {
   const [downloadError, setDownloadError] = useState(false);
@@ -62,7 +67,11 @@ export function OutputNodeToolbar({
         <Download size={13} />
       </ToolbarButton>
       {onRerun && (
-        <ToolbarButton label="Rerun" onClick={onRerun} disabled={rerunning}>
+        <ToolbarButton
+          label="Rerun"
+          onClick={onRerun}
+          disabled={rerunning || readOnly}
+        >
           <RefreshCw size={13} className={rerunning ? 'animate-spin' : undefined} />
         </ToolbarButton>
       )}
