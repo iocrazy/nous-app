@@ -434,16 +434,16 @@ async def test_publish_rejects_bad_intent_before_calling_the_browser():
     assert is_infra_failure(outcome.result.to_dict()) is False
 
 
-async def test_publish_refuses_images_on_douyin_before_calling_the_browser():
-    """图集在**第一次字典查找**就被拒,而不是走到浏览器任务里才失败。
+async def test_publish_now_hands_an_image_post_to_the_browser():
+    """T7 翻转后:形状正确的图集**会**被交给浏览器,而不是在门口被拒。
 
-    抖音的图集发布一行都没实现(``browser/app/publish.py`` 的
-    ``SUPPORTED_CONTENT_TYPES = ("video",)``)。在 profile 改回单 "video" 之前,
-    这条路径的三道门全部放行,请求一路排队、起浏览器、才拿到
-    ``unsupported_content_type`` —— 用户已经填完表单等了几分钟。
+    这条替换了 ``publish_refuses_images_on_douyin_before_calling_the_browser``
+    —— 那是 P2-1a 止血期的断言,钉的是"图集还没实现所以必须早拒",翻转当天
+    必然过期。现在 ``douyin_publish.py::_drive_images``(T3)能驱动图集了,
+    profile 与 ``browser/app/capabilities.py`` 也同批声明了 ``images``。
 
-    断言 ``client.calls == []`` 就是"拒绝发生在最前面"这句话的可证伪形式:
-    浏览器一次都没被调用。
+    ``client.calls`` 非空是"请求真的走到了浏览器"的可证伪形式;下面那条
+    ``unsupported_content_type`` 用例保证早拒这条路本身没被拆掉。
     """
     client = FakePublishClient(_published())
     outcome = await _adapter(client).publish(
@@ -457,6 +457,28 @@ async def test_publish_refuses_images_on_douyin_before_calling_the_browser():
         ),
     )
 
+    assert client.calls, "图集应当被交给浏览器执行,而不是在 intent 校验就被拒"
+    assert outcome.result.success is True
+
+
+async def test_publish_still_refuses_a_content_type_nobody_implements():
+    """早拒这条路没被拆掉:谁都没声明的类型仍然在**调浏览器之前**被拒。
+
+    翻转 ``images`` 之后若没有这条,"拒绝发生在最前面"这个性质就再没有任何
+    用例覆盖了 —— 一条性质随着它第一次放行而失去守卫,是最容易被忽略的覆盖
+    倒退。``client.calls == []`` 正是那句话的可证伪形式。
+    """
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(
+        _account(),
+        _video_intent(
+            content_type="livestream",
+            media=(
+                PublishMedia(kind="image", url="https://s3/a.jpg", filename="a.jpg"),
+            ),
+        ),
+    )
+
     assert client.calls == []  # 浏览器一次都没被调用
     assert outcome.result.success is False
     assert outcome.result.detail["reason"] == "invalid_publish_intent"
@@ -466,22 +488,22 @@ async def test_publish_refuses_images_on_douyin_before_calling_the_browser():
     assert is_infra_failure(outcome.result.to_dict()) is False
 
 
-def test_images_intent_is_the_only_thing_wrong_with_it():
+def test_unsupported_content_type_is_the_only_thing_wrong_with_it():
     """正向对照:上面那条被拒**只**因为 content_type。
 
     否则一条"素材扩展名也不合法"的 intent 也能让上面的断言变绿,而它证明的
-    就不再是图集被拒了。
+    就不再是内容类型被拒了。
     """
     problems = _adapter().validate_publish_intent(
         _video_intent(
-            content_type="images",
+            content_type="livestream",
             media=(
                 PublishMedia(kind="image", url="https://s3/a.jpg", filename="a.jpg"),
             ),
         )
     )
     assert len(problems) == 1
-    assert "content_type" in problems[0] and "images" in problems[0]
+    assert "content_type" in problems[0] and "livestream" in problems[0]
 
 
 async def test_publish_without_session_state_is_session_invalid_not_infra():

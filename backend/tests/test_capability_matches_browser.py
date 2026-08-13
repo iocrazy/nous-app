@@ -132,20 +132,36 @@ def test_the_browser_capability_module_has_no_imports():
 def test_the_guard_would_actually_fail_on_an_over_claim(monkeypatch):
     """反向验证：证明这条守卫会红。
 
-    一个从不失败的断言和没有断言是一回事。这里把后端 profile 手改成声明
-    ``images`` 而不动浏览器侧 —— 正是 T7 只改一半时的形状 —— 断言守卫抓到它。
-    ``monkeypatch`` 保证只在本用例内生效。
+    一个从不失败的断言和没有断言是一回事。这里把后端 profile 手改成声明一个
+    浏览器侧没有实现的内容类型而不动浏览器侧 —— 正是"只改一半"时的形状 ——
+    断言守卫抓到它。``monkeypatch`` 保证只在本用例内生效。
+
+    ⚠️ 过度声明用的值**必须是浏览器侧永远不会实现的**。这里原本写的是
+    ``images``，而 T7 把 ``images`` 变成了合法声明，于是这条反向验证在那一刻
+    静默失效（`DID NOT RAISE`）—— 一条会随功能推进而失去意义的守卫，和没有
+    守卫的区别只是它看起来还在。``livestream`` 是刻意选的：它不在
+    ``PLATFORM_CONTENT_TYPES`` 里，也不在任何 publisher 的路线上；真要做直播
+    推流的那天，改的是这一行而不是悄悄地让断言变成恒真。
     """
     import dataclasses
+
+    never_implemented = "livestream"
+    implemented = set(
+        _load_browser_capabilities().PLATFORM_CONTENT_TYPES.get("douyin", ())
+    )
+    assert never_implemented not in implemented, (
+        f"{never_implemented!r} 已经被实现了，这条反向验证需要换一个"
+        "浏览器侧不认识的内容类型，否则它就变成恒真断言了。"
+    )
 
     original = SESSION_PLATFORM_PROFILES["douyin"]
     assert original.supports_publishing
     over_claimed = dataclasses.replace(
-        original, content_types=frozenset({"video", "images"})
+        original, content_types=frozenset({*original.content_types, never_implemented})
     )
     monkeypatch.setitem(SESSION_PLATFORM_PROFILES, "douyin", over_claimed)
 
-    with pytest.raises(AssertionError, match="images"):
+    with pytest.raises(AssertionError, match=never_implemented):
         test_backend_never_claims_a_content_type_the_browser_cannot_publish()
 
 

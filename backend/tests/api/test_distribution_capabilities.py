@@ -46,18 +46,20 @@ def client() -> TestClient:
     return TestClient(_make_app())
 
 
-def test_douyin_reports_video_only_today(client):
-    """用户可见口径：Images tab 现在该是灰的，而这是端点说的。
+def test_douyin_reports_both_content_types_after_t7(client):
+    """用户可见口径：Images tab 现在该是可用的，而这是端点说的。
 
-    钉 ``["video"]`` 这个具体值，不是钉"有 content_types 字段" —— T7 翻转声明
-    时这条会红，那正是它该做的：翻转是一次明确的、要连带改浏览器实现的改动。
+    这条原名 ``test_douyin_reports_video_only_today``，注释里写着"T7 翻转时这条
+    会红，那正是它该做的" —— 它按设计红了一次，这次更新就是那次翻转本身。
+    继续钉**具体值**而不是"有 content_types 字段"：前端的置灰与张数上限全部
+    读这个响应，所以它的每一次变化都该是一次明确的、连带改浏览器实现的改动。
     """
     body = client.get(_PATH).json()
 
     douyin = body["platforms"]["douyin"]
     assert douyin["supports_publishing"] is True
     assert douyin["is_placeholder"] is False
-    assert douyin["content_types"] == ["video"]
+    assert douyin["content_types"] == ["images", "video"]  # 响应按字典序排序
 
 
 def test_every_collection_field_is_sorted(client):
