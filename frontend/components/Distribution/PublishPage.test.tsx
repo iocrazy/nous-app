@@ -97,6 +97,7 @@ vi.mock('../../services/distributionService', () => ({
       schedule_max_ahead_seconds: 1209600,
       self_declarations: [],
       supports_collection: true,
+      supports_music: true,
     },
   }),
 }));
@@ -601,6 +602,10 @@ describe('PublishPage form fields', () => {
     expect(arg.self_declaration).toBeUndefined();
     expect(arg.scheduled_at).toBeUndefined();
     expect(arg.collection_name).toBeUndefined();
+    // Blank music is OMITTED, not sent as an empty string: "leave the music
+    // control alone" (publish on the platform default 原声) is what every post
+    // before this field existed did, and it has to keep meaning exactly that.
+    expect(arg.music_name).toBeUndefined();
   });
 
   // ── Schedule picker ──
@@ -728,6 +733,25 @@ describe('PublishPage form fields', () => {
     fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
     await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
     expect(createPublishTask.mock.calls.at(-1)?.[0].collection_name).toBe('Summer Trip');
+  });
+
+  it('sends a trimmed music name and warns about accounts that cannot honour it', async () => {
+    // Music is set by clicking through the creator page, so an OAuth account
+    // cannot honour it — the same group as the collection and the schedule.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    fireEvent.change(screen.getByLabelText(/^Music$/i), {
+      target: { value: '  Dream It Possible  ' },
+    });
+    expect(screen.queryByText(/connected by QR code/i)).toBeNull();
+    fireEvent.click(screen.getByText('OAuth One'));
+    expect(screen.getByText(/connected by QR code/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    expect(createPublishTask.mock.calls.at(-1)?.[0].music_name).toBe('Dream It Possible');
   });
 });
 

@@ -258,6 +258,8 @@ class PublishTasksRepository(AsyncpgRepository):
                 scheduled_at=f.get("scheduled_at"),
                 self_declaration=f.get("self_declaration"),
                 collection_name=f.get("collection_name"),
+                # mig 425 — music_name NULL = 不碰音乐控件（平台默认原声）。
+                music_name=f.get("music_name"),
             )
             .returning(*_TASK_COLS)
         )

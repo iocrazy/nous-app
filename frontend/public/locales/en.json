@@ -449,6 +449,10 @@
       "moreOptions": "More options",
       "collection": "Collection",
       "collectionPlaceholder": "Existing collection name",
+      "music": "Music",
+      "musicPlaceholder": "Track name to search",
+      "gateMusicNotSupported": "This account cannot have its music picked for it — clear the music field, or remove the account.",
+      "gateMusicInvalid": "That music name was refused — shorten it, or clear the field to publish with the platform default.",
       "change": "Change",
       "location": "Location",
       "add": "Add",
@@ -583,7 +587,11 @@
       "contentVideo": "Video",
       "contentImages": "Images",
       "contentArticle": "Article",
-      "accountsCount": "{{n}} accounts"
+      "accountsCount": "{{n}} accounts",
+      "noteMusicApproximate": "Published, but with the closest matching track rather than the one you named.",
+      "noteMusicNotFound": "The platform's music search found nothing for that name — nothing was published. Try another spelling.",
+      "noteMusicFailed": "The music could not be selected on the platform, so nothing was published.",
+      "noteCollectionSkipped": "Published, but the collection was not applied."
     },
     "platNoPublish": "Publishing not available yet",
     "unbind": "Unbind",

@@ -134,6 +134,9 @@ def _platform_options(body: "PublishTaskCreate") -> dict[str, Any]:
     collection = (body.collection_name or "").strip()
     if collection:
         opts["collection"] = collection
+    music = (body.music_name or "").strip()
+    if music:
+        opts["music"] = music
     return opts
 
 

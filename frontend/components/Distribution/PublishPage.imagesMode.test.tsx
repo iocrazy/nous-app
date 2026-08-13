@@ -70,6 +70,7 @@ const imagesCapableCaps = (over: { min_images?: number | null; max_images?: numb
     schedule_max_ahead_seconds: 1209600,
     self_declarations: [],
     supports_collection: true,
+    supports_music: true,
     ...over,
   },
 });
@@ -349,6 +350,16 @@ describe('PublishPage — the submit-time gate speaks in reasons, not prose', ()
       'unsupported_content_type',
       "content_type 'images' not supported on douyin session channel",
       'This account cannot publish this kind of post.',
+    ],
+    [
+      'music_not_supported',
+      'music selection is not supported on douyin',
+      'cannot have its music picked for it',
+    ],
+    [
+      'invalid_music_name',
+      'music name exceeds 100 characters',
+      'That music name was refused',
     ],
   ];
 

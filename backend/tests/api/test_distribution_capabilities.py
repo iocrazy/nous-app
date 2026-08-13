@@ -151,6 +151,25 @@ def test_the_response_follows_the_profile_rather_than_a_hardcoded_copy(client):
     assert cap["max_title_len"] == 42
 
 
+def test_music_support_is_projected_from_the_profile(client):
+    """前端要靠这个字段决定要不要显示配乐输入框。默认 False —— 一个还没接
+    发布的平台不该被宣称"能选配乐"（宣称一个不存在的能力比不宣称糟得多）。"""
+    platforms = client.get(_PATH).json()["platforms"]
+    assert platforms["douyin"]["supports_music"] is True
+    assert platforms["bilibili"]["supports_music"] is False
+
+    probe = dataclasses.replace(
+        SESSION_PLATFORM_PROFILES["douyin"], platform="testonly", supports_music=False
+    )
+    SESSION_PLATFORM_PROFILES["testonly"] = probe
+    try:
+        assert (
+            client.get(_PATH).json()["platforms"]["testonly"]["supports_music"] is False
+        )
+    finally:
+        SESSION_PLATFORM_PROFILES.pop("testonly")
+
+
 def test_projection_is_pure_and_needs_no_request():
     """投影函数本身可单测 —— 端点里没有它之外的逻辑。
 

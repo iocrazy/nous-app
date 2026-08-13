@@ -243,9 +243,15 @@ class FakeLocator:
 
     async def click(self, timeout: Any = None, force: bool = False) -> None:
         self.page.clicks.append(self.selector)
+        # The index too, separately. `clicks` cannot carry it without breaking
+        # every existing `selector in page.clicks` assertion, and *which* of
+        # several identically-captioned nodes was clicked is the whole question
+        # for 「选择音乐」 (exact=2 on the live page).
+        self.page.click_targets.append((self.selector, self.index))
 
     async def evaluate(self, _expression: str) -> None:
         self.page.clicks.append(self.selector)
+        self.page.click_targets.append((self.selector, self.index))
 
     async def fill(self, value: str, timeout: Any = None) -> None:
         self.page.fills.append((self.selector, value))
@@ -295,6 +301,9 @@ class FakePage:
         # files land" is expressible without scripting a call sequence.
         self._texts = dict(texts or {})
         self.clicks: list[str] = []
+        # (selector, nth index) per click. `clicks` keeps its old shape so the
+        # existing membership assertions still read the way they did.
+        self.click_targets: list[tuple[str, int]] = []
         self.fills: list[tuple[str, str]] = []
         self.file_inputs: list[tuple[str, str, int]] = []
         self.waits: list[tuple[str, str, Any]] = []
@@ -308,6 +317,15 @@ class FakePage:
         # the token in its source and answers from here; a caption with no
         # entry answers `[]`, i.e. "that text is not on this page as a leaf".
         self.dom_probe: dict[str, list[dict[str, Any]]] = {}
+        # The music dialog's result rows, in the order the probe would return
+        # them. A list of titles, or a callable taking the page — the same
+        # value-or-callable convention as `visible`, so "the rows only exist
+        # once something was typed into the search box" is expressible.
+        self.music_rows: Any = ()
+        # needle -> how many places on the page show it. Callable form takes
+        # (page, needle), which is how a test says "the preview starts showing
+        # the track only after its row was clicked".
+        self.music_mentions: Any = {}
         self.keyboard = FakeKeyboard()
 
     @property
@@ -365,6 +383,17 @@ class FakePage:
             return self.data_checked.get(_arg)
         if "__nous_click_target_probe__" in (_script or ""):
             return self.dom_probe.get(_arg, [])
+        if "__nous_music_rows_probe__" in (_script or ""):
+            rows = self.music_rows(self) if callable(self.music_rows) else self.music_rows
+            # Shaped like the real probe's return value, indices included: the
+            # driver clicks `[data-nous-music-row="<index>"]`, so a fake that
+            # only handed back names would not exercise the addressing at all.
+            return [{"index": i, "name": name} for i, name in enumerate(rows)]
+        if "__nous_music_readback_probe__" in (_script or ""):
+            mentions = self.music_mentions
+            if callable(mentions):
+                return int(mentions(self, _arg))
+            return int(mentions.get(_arg, 0))
         self.removed_overlays += 1
         return 0
 

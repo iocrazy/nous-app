@@ -449,6 +449,10 @@
       "moreOptions": "更多选项",
       "collection": "合集",
       "collectionPlaceholder": "已有合集的名称",
+      "music": "配乐",
+      "musicPlaceholder": "要搜索的曲名",
+      "gateMusicNotSupported": "该账号无法由我们代选配乐 — 请清空配乐，或移除该账号。",
+      "gateMusicInvalid": "配乐名称被拒绝 — 请缩短，或清空以使用平台默认音乐。",
       "change": "更改",
       "location": "位置",
       "add": "添加",
@@ -583,7 +587,11 @@
       "contentVideo": "视频",
       "contentImages": "图集",
       "contentArticle": "图文",
-      "accountsCount": "{{n}} 个账号"
+      "accountsCount": "{{n}} 个账号",
+      "noteMusicApproximate": "已发布，但用的是最接近的一首，不是你填的那首。",
+      "noteMusicNotFound": "平台的音乐搜索没有找到这个名字 — 本次未发布。换个写法再试。",
+      "noteMusicFailed": "配乐没能在平台页面上选中，本次未发布。",
+      "noteCollectionSkipped": "已发布，但合集没有挂上。"
     },
     "platNoPublish": "暂不支持发布",
     "unbind": "解绑",

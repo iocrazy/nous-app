@@ -203,6 +203,7 @@ class PlatformCapability(BaseModel):
     schedule_max_ahead_seconds: Optional[int] = None
     self_declarations: list[str] = Field(default_factory=list)
     supports_collection: bool = False
+    supports_music: bool = False
 
 
 class CapabilitiesResponse(BaseModel):

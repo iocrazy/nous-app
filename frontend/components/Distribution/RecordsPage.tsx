@@ -93,6 +93,54 @@ const formatTime = (iso: string): string => {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+/**
+ * `[reason] prose` → the i18n key that explains it.
+ *
+ * The browser service prefixes every publish outcome note with a typed reason
+ * (`publish_distribution.publish_notes`), and the reason is the contract — the
+ * English prose that follows it is written for logs. Echoing that prose is how
+ * a user ends up reading "published with 'X' — the closest match the platform's
+ * search returned", which can never be translated.
+ *
+ * `humanizeTaskError` stays the fallback: it is the right tool for the rows
+ * that carry no reason code at all (downloads, older publishes, raw exception
+ * chains). This table is the structured path, the same split
+ * `utils/errorCatalog.ts` describes.
+ */
+const PUBLISH_NOTE_KEYS: ReadonlyArray<{
+  test: RegExp;
+  key: string;
+  fallback: string;
+}> = [
+  {
+    // The music the platform actually attached is not the one that was typed —
+    // the search is fuzzy and rarely answers with a character-identical title.
+    // The post DID go out with music, so this is a caveat, not a failure.
+    test: /\[music_approximate\]/i,
+    key: 'distribution.records.noteMusicApproximate',
+    fallback: 'Published, but with the closest matching track rather than the one you named.',
+  },
+  {
+    test: /\[music_not_found\]/i,
+    key: 'distribution.records.noteMusicNotFound',
+    fallback: "The platform's music search found nothing for that name — nothing was published. Try another spelling.",
+  },
+  {
+    // Every other music reason is a control that could not be driven:
+    // music_entry_missing / music_dialog_stuck / music_click_failed /
+    // music_not_confirmed. One sentence, because the user's move is the same
+    // for all four and the raw reason is still on the `title` attribute.
+    test: /\[music_[a-z_]+\]/i,
+    key: 'distribution.records.noteMusicFailed',
+    fallback: 'The music could not be selected on the platform, so nothing was published.',
+  },
+  {
+    test: /\[collection_(not_found|control_missing|error)\]/i,
+    key: 'distribution.records.noteCollectionSkipped',
+    fallback: 'Published, but the collection was not applied.',
+  },
+];
+
 export const RecordsPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -111,6 +159,15 @@ export const RecordsPage: React.FC = () => {
       addToast(t('distribution.records.loadFailed', 'Failed to load records'), 'error');
     }
   }, [addToast, t]);
+
+  /** One row's `error_message` → translated copy. Reason codes first, raw-text
+   *  humanization second. Never the backend's own English. */
+  const noteText = useCallback((raw?: string | null): string => {
+    for (const row of PUBLISH_NOTE_KEYS) {
+      if (raw && row.test.test(raw)) return t(row.key, row.fallback);
+    }
+    return humanizeTaskError(raw).message;
+  }, [t]);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -412,13 +469,13 @@ export const RecordsPage: React.FC = () => {
                               caveat, never as a failure — the post did go out. */}
                           {a.status === 'success' && a.error_message && (
                             <span className="note" title={a.error_message}>
-                              {humanizeTaskError(a.error_message).message}
+                              {noteText(a.error_message)}
                             </span>
                           )}
                           {a.status === 'failed' && (
                             <>
                               <span className="err" title={a.error_message || undefined}>
-                                {humanizeTaskError(a.error_message).message}
+                                {noteText(a.error_message)}
                               </span>
                               <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onRetry(task.id)}>
                                 {t('distribution.records.retry', 'Retry')}
