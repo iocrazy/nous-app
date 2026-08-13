@@ -80,6 +80,20 @@ CODE_NOT_ACCEPTED_MESSAGE = (
     "the verification code was not accepted; the page is still asking for one"
 )
 
+# --- SMS-first platforms ----------------------------------------------------
+#
+# Terminal-ish `detail["reason"]` values for the phone-number step. Both are
+# *unverified selector* failures on a platform no account has ever completed a
+# bind on, and both are reported rather than retried in silence: a login that
+# quietly stays on `phone_required` is indistinguishable, from the user's side,
+# from the bug this whole change is about (waiting on a code nobody asked for).
+PHONE_INPUT_MISSING = "phone_input_missing"
+CODE_REQUEST_FAILED = "code_request_failed"
+# What the UI keys "we have your number, the platform is texting you" off. Set
+# only when the platform's own "send me the code" control was actually pressed —
+# never from the number being typed, which asks nobody for anything.
+PHONE_SUBMITTED_KEY = "phone_submitted"
+
 # How many polls may go by with the identity chooser still on screen before the
 # login is called off. At the backend's 3s poll interval this is ~36s.
 #
@@ -177,6 +191,30 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _opening_state(spec: LoginFlowSpec) -> tuple[SessionStatus, str]:
+    """The first status a freshly-started login reports, per login method.
+
+    Three cases, and only the first one existed before:
+
+    * QR platform → `waiting_scan`, the code is on screen.
+    * SMS platform that needs a number from us → `phone_required`. Saying
+      `sms_required` here would invite the user to type a code that cannot
+      exist yet.
+    * SMS platform whose code screen is reached without us supplying a number →
+      `sms_required`. Nothing declares this today; it is written out rather than
+      folded into one of the others so that adding such a platform does not
+      quietly inherit the wrong opening line.
+    """
+    if spec.qrcode_selectors:
+        return SessionStatus.WAITING_SCAN, "QR code ready; waiting for a scan"
+    if spec.requires_phone_number:
+        return (
+            SessionStatus.PHONE_REQUIRED,
+            "this platform signs in by text message; enter the account's phone number",
+        )
+    return SessionStatus.SMS_REQUIRED, "the platform is asking for a verification code"
+
+
 class LoginSession:
     """One live login. All page work is serialised behind a lock.
 
@@ -190,7 +228,7 @@ class LoginSession:
         session_id: str,
         spec: LoginFlowSpec,
         driver: LoginDriver,
-        qrcode_data_url: str,
+        qrcode_data_url: str | None,
     ):
         settings = get_settings()
         self.id = session_id
@@ -202,8 +240,10 @@ class LoginSession:
         self.expires_at = self.created_at + timedelta(seconds=settings.login_ttl_s)
         self.purge_at: datetime | None = None
         self.qrcode_data_url: str | None = qrcode_data_url
-        self.status = SessionStatus.WAITING_SCAN
-        self.message = "QR code ready; waiting for a scan"
+        # The opening frame is a property of the platform, not a constant. It
+        # used to be `waiting_scan` unconditionally, which is a lie on a
+        # platform with no code to scan — and the first thing the user sees.
+        self.status, self.message = _opening_state(spec)
         self.detail: dict[str, Any] = {}
         self._lock = asyncio.Lock()
         self._state_extended = False
@@ -216,6 +256,11 @@ class LoginSession:
         self._identity_option: str | None = None
         self._code_request_click: str | None = None
         self._sms_code_requested = False
+        # Has the user handed us the account's phone number *and* did the
+        # platform's own "send me the code" control accept the press? Latched
+        # together, because a number typed into a field nobody submitted asks
+        # the platform for nothing.
+        self._phone_submitted = False
         # What the page did after the click landed, as reported by
         # `wait_for_challenge_progress`. `None` = we have not clicked yet;
         # `[]` = we clicked and the page did not move, which is the state the
@@ -290,6 +335,26 @@ class LoginSession:
                 snapshot = await driver.snapshot()
                 judgement = self.spec.judge(snapshot)
 
+            # The one thing the page cannot tell us. Xiaohongshu's login screen
+            # renders its phone field and its code field at the same time, so
+            # the judge sees a code input from the very first poll and says
+            # `sms_required` — truthfully about the page, and misleadingly about
+            # what the user should do, because nobody has given us a number to
+            # send anything to. Whether that has happened is session state, so
+            # it is answered here rather than by widening the snapshot.
+            if (
+                judgement.status is SessionStatus.SMS_REQUIRED
+                and self.spec.requires_phone_number
+                and not self._phone_submitted
+            ):
+                self.qrcode_data_url = None
+                self._record(
+                    SessionStatus.PHONE_REQUIRED,
+                    "waiting for the phone number this account signs in with",
+                    {"reason": judgement.reason},
+                )
+                return self._snapshot()
+
             detail: dict[str, Any] = {"reason": judgement.reason}
             if self._identity_option:
                 detail["identity_option"] = self._identity_option
@@ -325,6 +390,71 @@ class LoginSession:
                     if self._code_request_click:
                         detail["code_request_click"] = self._code_request_click
 
+            self._record(judgement.status, judgement.reason, detail)
+            return self._snapshot()
+
+    async def submit_phone(self, phone: str) -> StatusSnapshot:
+        """Type the account's phone number and ask the platform to text a code.
+
+        Two actions, one call, and they are deliberately not separable by the
+        caller: a number sitting in a field is not a request, and a request
+        without a number is not sendable. What *is* separable is which of them
+        failed, and that rides in `detail["reason"]`:
+
+        * `phone_input_missing` — the page had no field matching this
+          platform's selectors. Everything about this platform's login form is
+          `[实测 2026-08-08]` but nothing has ever been driven end to end here,
+          so this is the honest failure for a selector that has drifted or was
+          read off a page state we never reach.
+        * `code_request_failed` — the number went in, and the platform's own
+          「发送验证码」-style control could not be pressed. Nothing was sent, and
+          saying so is the whole point: the alternative is the modal moving on to
+          a code field for a message that was never requested, which is the
+          Douyin identity-chooser bug (2026-08-11) rebuilt on a new screen.
+
+        Neither is terminal. The browser is still alive on the login page and
+        the user can correct the number and try again; only the TTL ends the
+        session. Both are reported as `phone_required` so the form stays in
+        front of them, with the reason attached.
+        """
+        async with self._operate() as driver:
+            if driver is None:
+                return self._tombstone_snapshot()
+
+            filled = await driver.fill_phone_number(phone)
+            if not filled:
+                self._record(
+                    SessionStatus.PHONE_REQUIRED,
+                    "no phone number field was found on the sign-in page",
+                    {"reason": PHONE_INPUT_MISSING},
+                )
+                return self._snapshot()
+
+            clicked = await driver.request_sms_code()
+            if not clicked:
+                self._record(
+                    SessionStatus.PHONE_REQUIRED,
+                    "the number was entered but the platform's "
+                    '"send verification code" control could not be pressed, '
+                    "so no code was requested",
+                    {"reason": CODE_REQUEST_FAILED},
+                )
+                return self._snapshot()
+
+            # Latched on the click landing, never on anything read back off the
+            # page (`_record` turns this into `code_requested`, which is the UI's
+            # licence to say a text is on its way).
+            self._phone_submitted = True
+            self._code_request_click = clicked
+            self._sms_code_requested = True
+
+            snapshot = await driver.snapshot()
+            judgement = self.spec.judge(snapshot)
+            detail: dict[str, Any] = {
+                "reason": judgement.reason,
+                PHONE_SUBMITTED_KEY: True,
+                "code_request_click": clicked,
+            }
             self._record(judgement.status, judgement.reason, detail)
             return self._snapshot()
 
@@ -797,25 +927,42 @@ class LoginSessionRegistry:
             )
             raise LoginError(status, scrub(raw), stage="open") from exc
 
-        try:
-            qrcode = await driver.read_qrcode()
-        except Exception as exc:  # noqa: BLE001
-            await driver.close()
-            raise LoginError(
-                SessionStatus.FAILED,
-                scrub(f"{type(exc).__name__}: {exc}"),
-                stage="qrcode",
-            ) from exc
+        # Only a QR platform has a code to read, and only a QR platform may fail
+        # for not having one.
+        #
+        # This was unconditional, and that is where the Xiaohongshu bind died —
+        # before a single judgement ran. Its `QRCODE_SELECTORS` is empty as a
+        # *statement of fact* (the creator platform has no scan sign-in at all),
+        # so `read_qrcode` could only ever return None and every attempt raised
+        # "login page rendered no QR code". The platform module had already been
+        # switched to the SMS channel; this line kept the whole flow from
+        # reaching it, and the user was told the platform had refused their
+        # account.
+        qrcode: str | None = None
+        if spec.qrcode_selectors:
+            try:
+                qrcode = await driver.read_qrcode()
+            except Exception as exc:  # noqa: BLE001
+                await driver.close()
+                raise LoginError(
+                    SessionStatus.FAILED,
+                    scrub(f"{type(exc).__name__}: {exc}"),
+                    stage="qrcode",
+                ) from exc
 
-        if not qrcode:
-            # No point keeping a browser open around a page with no code on it.
-            await driver.close()
-            raise LoginError(
-                SessionStatus.FAILED,
-                "login page rendered no QR code",
-                stage="qrcode",
-                selectors_tried=len(spec.qrcode_selectors),
-            )
+            if not qrcode:
+                # No point keeping a browser open around a page with no code on
+                # it. Still a hard failure *here*: this platform declares it
+                # renders one, so its absence means the selectors are wrong or
+                # the page never loaded — not that we should improvise a
+                # different sign-in.
+                await driver.close()
+                raise LoginError(
+                    SessionStatus.FAILED,
+                    "login page rendered no QR code",
+                    stage="qrcode",
+                    selectors_tried=len(spec.qrcode_selectors),
+                )
 
         session = LoginSession(uuid.uuid4().hex, spec, driver, qrcode)
         self._sessions[session.id] = session

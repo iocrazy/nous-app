@@ -27,7 +27,8 @@ So every constant below is tagged:
                 shared helpers allow it.
 
 **Calibration procedure** (do this before trusting publishing on this
-platform): bind one account through the QR flow, then use the live session to
+platform): bind one account through the SMS flow (there is no QR flow here —
+see `QRCODE_SELECTORS`), then use the live session to
 open the pages below and count matches for each string with
 `get_by_text(..., exact=True)`. Anything that is not exactly 1 is wrong. That
 is how the Douyin selectors were fixed, and it is the only method that has ever
@@ -176,6 +177,24 @@ SMS_INPUT_SELECTORS = (
     'input[placeholder="验证码"]',
     'input[placeholder*="验证码"]',
 )
+
+# 手机号输入框 —— 与上面那个 input 出自同一次实测,是同一张表单上的另一格。
+#
+# ⚠️ 它的存在是这条链路能跑通的**前提**,不是可选装饰:这个平台的登录页把手机号
+# 和验证码两个框同时画在一屏,所以 `sms_input_visible` 从第一次轮询就是 True。
+# 只配验证码框的后果不是报错,是 UI 一上来就说"把收到的验证码填进来" —— 而没有
+# 任何人填过手机号、没有任何人点过发送,那条短信根本不存在。同族的坑抖音刚踩过
+# (2026-08-11 身份验证选择页)。
+PHONE_INPUT_SELECTORS = (
+    'input[placeholder="手机号"]',
+    'input[placeholder*="手机号"]',
+)
+
+# [VERIFIED 2026-08-08] 「发送验证码」在页面文案里精确匹配数为 1(同 LOGIN_MARKERS)。
+# 它**只在用户提交手机号那一刻**被点(`LoginSession.submit_phone`),不进轮询的
+# 自动点击路径 —— 手机号为空时点它,平台什么都不会发,而 `code_requested` 会被
+# latch 成 True,UI 于是撒谎说"已请求平台发码"。
+SMS_REQUEST_TEXTS = ("发送验证码",)
 SMS_SUBMIT_SELECTORS = (
     'button:has-text("登 录")',
     ".beer-login-bt",
@@ -274,6 +293,11 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
 
     # 这个平台没有扫码,登录页 == 等待用户输入手机号并提交验证码。
     # 报 WAITING_SCAN 会让 UI 去等一张永远不出现的二维码。
+    #
+    # ⚠️ 这里报 SMS_REQUIRED 是**对页面**的真话,但它不是用户第一眼该看到的状态:
+    # 手机号还没人填。"填过没有"是会话状态、不是页面事实(两个输入框同屏),所以
+    # 由 `LoginSession.poll_status` 在判决之后降级成 `phone_required`。judge 保持
+    # 纯函数、只看页面,这条分界别挪。
     if snapshot.login_texts:
         return LoginJudgement(
             SessionStatus.SMS_REQUIRED,
@@ -334,6 +358,8 @@ LOGIN_SPEC = LoginFlowSpec(
     refresh_selectors=REFRESH_SELECTORS,
     sms_input_selectors=SMS_INPUT_SELECTORS,
     sms_submit_selectors=SMS_SUBMIT_SELECTORS,
+    phone_input_selectors=PHONE_INPUT_SELECTORS,
+    sms_request_texts=SMS_REQUEST_TEXTS,
     judge=judge_xiaohongshu_login,
     parse_profile=parse_xiaohongshu_profile,
     profile_text_selectors=PROFILE_TEXT_SELECTORS,

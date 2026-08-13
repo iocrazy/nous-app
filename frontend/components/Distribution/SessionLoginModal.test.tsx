@@ -9,6 +9,10 @@ vi.mock('react-i18next', () => ({
 const startSessionLogin = vi.fn();
 const submitSmsCode = vi.fn();
 const cancelSessionLogin = vi.fn();
+// The modal asks which sign-in this platform uses before it draws one. Mocked
+// rather than left to the real fetch so this file keeps testing the QR shape on
+// purpose instead of by accident — the SMS shape has its own file.
+const getPlatformCapabilities = vi.fn();
 
 // Spread the real module so SMS_CODE_PATTERN stays the one the service and
 // the backend agree on — a hand-copied literal here would let the submit gate
@@ -18,6 +22,7 @@ vi.mock('../../services/distributionService', async (importOriginal) => ({
   startSessionLogin: (...a: unknown[]) => startSessionLogin(...a),
   submitSmsCode: (...a: unknown[]) => submitSmsCode(...a),
   cancelSessionLogin: (...a: unknown[]) => cancelSessionLogin(...a),
+  getPlatformCapabilities: () => getPlatformCapabilities(),
 }));
 
 // Minimal Realtime double: captures the postgres_changes handler so a test can
@@ -87,6 +92,9 @@ describe('SessionLoginModal', () => {
     startSessionLogin.mockResolvedValue({ task_id: 'task-1' });
     submitSmsCode.mockResolvedValue({ success: true, status: 'success', message: 'ok', detail: {} });
     cancelSessionLogin.mockResolvedValue({ cancelled: true, context_released: true, message: 'ok' });
+    getPlatformCapabilities.mockResolvedValue({
+      douyin: { platform: 'douyin', login_method: 'qrcode' },
+    });
   });
 
   it('starts a login and subscribes to the task row', async () => {

@@ -60,6 +60,8 @@ from .schemas import (
     LoginStartResponse,
     LoginStateResponse,
     LoginStatusResponse,
+    PhoneNumberRequest,
+    PhoneNumberResponse,
     PublishRequest,
     PublishResponse,
     SessionResult,
@@ -524,7 +526,10 @@ async def post_login_start(request: LoginStartRequest) -> Any:
     return LoginStartResponse(
         login_session_id=session.id,
         status=session.status,
-        qrcode_data_url=session.qrcode_data_url or "",
+        # Null, not "", on an SMS platform: the caller renders a QR frame off
+        # this field, and an empty string is a value that reads as "we have a
+        # code, it just has no pixels".
+        qrcode_data_url=session.qrcode_data_url,
         expires_at=session.expires_at,
     )
 
@@ -563,6 +568,39 @@ async def get_login_status(login_session_id: str) -> Any:
         qrcode_data_url=snapshot.qrcode_data_url,
         message=snapshot.message,
         detail=snapshot.detail,
+    )
+
+
+@app.post(
+    "/session/login/{login_session_id}/phone",
+    response_model=PhoneNumberResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_login_phone(login_session_id: str, request: PhoneNumberRequest) -> Any:
+    """Hand the live page the account's phone number and ask for a code.
+
+    The counterpart of `/sms` for platforms that sign in by text message rather
+    than by scan. It exists because there is no other way for the number to
+    reach the page: the browser context lives in this process, the person who
+    knows the number is in front of a modal in another one, and nothing in the
+    unattended flow can supply it.
+
+    Answers with the same status envelope as `/sms`, including on failure — a
+    caller must never read the HTTP code to find out what the login is doing.
+    """
+    session = _require_session(login_session_id)
+    if isinstance(session, JSONResponse):
+        return session
+
+    try:
+        snapshot = await session.submit_phone(request.phone)
+    except LoginError as exc:
+        return PhoneNumberResponse(
+            status=exc.status, message=exc.message, detail=dict(exc.detail)
+        )
+
+    return PhoneNumberResponse(
+        status=snapshot.status, message=snapshot.message, detail=snapshot.detail
     )
 
 

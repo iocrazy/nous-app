@@ -5,13 +5,33 @@ import {
 } from 'lucide-react';
 import { getSupabaseClient } from '../../supabaseClient';
 import {
-  SMS_CODE_PATTERN, cancelSessionLogin, startSessionLogin, submitSmsCode,
+  PHONE_NUMBER_PATTERN, SMS_CODE_PATTERN, cancelSessionLogin, getPlatformCapabilities,
+  startSessionLogin, submitLoginPhone, submitSmsCode,
 } from '../../services/distributionService';
 import { SessionLoginState, SessionLoginStatus } from '../../types';
 import { PLATFORM_LABEL } from './platform';
 
 /**
- * QR-code account binding (session channel).
+ * Account binding over the session channel — QR **or** SMS, per platform.
+ *
+ * ## Why there are two shapes
+ *
+ * This modal drew one: a QR frame, a "scan with the app" subtitle, and a
+ * spinner waiting for an image. That is right for Douyin and Bilibili and
+ * simply wrong for Xiaohongshu, whose creator platform has no scan sign-in at
+ * all ([实测 2026-08-08]: zero elements containing 扫码/二维码/QR). A user
+ * clicking "connect Xiaohongshu" got a placeholder box waiting for an image the
+ * backend could never produce — the login session used to fail at `start` with
+ * "login page rendered no QR code", so the platform's own SMS logic never ran
+ * once in production.
+ *
+ * Which shape to draw comes from `GET /distribution/capabilities`
+ * (`login_method`), never from a platform name in this file. The chain is
+ * `browser/app/capabilities.py` (the only layer that actually opens the page,
+ * and pinned by test against each platform's `LoginFlowSpec`) → backend profile
+ * → that endpoint → here, read-only. A `platform === 'xiaohongshu'` branch would
+ * be a fourth copy of a fact, which is the shape of bug the capabilities
+ * endpoint exists to end.
  *
  * Data flow, deliberately: REST only *starts* / *answers* / *cancels* the
  * login. The QR image and every subsequent state change arrive over Supabase
@@ -95,6 +115,23 @@ const IDENTITY_CHALLENGE_STALLED = 'identity_challenge_stalled';
  */
 const IDENTITY_CHALLENGE_BLOCKED = 'identity_challenge_blocked';
 
+/**
+ * `detail.reason` for the two ways submitting a phone number can get nowhere on
+ * an SMS platform (`browser/app/login_sessions.py::submit_phone`).
+ *
+ * Every selector on that page is `[实测]` off a live page but **unverified
+ * against a completed bind** — no Xiaohongshu account has ever been bound. So
+ * these are the failures a wrong guess produces, and they must read as failures:
+ * the alternative is the modal advancing to a code field for a message nothing
+ * ever asked the platform to send, which is precisely the Douyin
+ * identity-chooser bug (2026-08-11) rebuilt on a new screen.
+ */
+const PHONE_INPUT_MISSING = 'phone_input_missing';
+const CODE_REQUEST_FAILED = 'code_request_failed';
+
+/** Platforms that render a code to scan, vs. platforms that text you one. */
+type LoginMethod = 'qrcode' | 'sms';
+
 /** An i18n key with the English it falls back to. */
 type Copy = [key: string, fallback: string];
 
@@ -149,6 +186,10 @@ export const SERVER_DETAIL_COPY: Record<SessionLoginStatus, Copy> = {
   identity_challenge: [
     'distribution.session.identityChallengeDetail',
     'The platform is showing its identity-verification step — no code has been sent yet.',
+  ],
+  phone_required: [
+    'distribution.session.phoneRequiredDetail',
+    'This platform signs in by text message — it has no code to scan.',
   ],
   sms_required: [
     'distribution.session.smsRequiredDetail',
@@ -210,6 +251,12 @@ export const SMS_SUBMIT_COPY: Record<SessionLoginStatus, Copy> = {
     'distribution.session.smsQrExpired',
     'The QR code expired before the code was accepted — get a new one and scan again.',
   ],
+  // The page went back to asking for the number, so the code belonged to a step
+  // that is no longer on screen. Says nothing about the digits.
+  phone_required: [
+    'distribution.session.smsBackToPhone',
+    'The sign-in went back to the phone number step — enter the number again to get a new code.',
+  ],
   // The page went *back* to the verification chooser. Nothing is wrong with
   // the digits; the step they belonged to is no longer the step on screen.
   identity_challenge: [
@@ -241,6 +288,9 @@ const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   scanned: 'info',
   qrcode_expired: 'warn',
   identity_challenge: 'info',
+  // Not `warn`: nothing has gone wrong, this is step one of a normal sign-in on
+  // a platform that texts you a code.
+  phone_required: 'info',
   sms_required: 'warn',
   success: 'ok',
   timeout: 'warn',
@@ -275,7 +325,36 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const [smsCode, setSmsCode] = useState('');
   const [smsBusy, setSmsBusy] = useState(false);
   const [smsError, setSmsError] = useState<string | null>(null);
+  const [phone, setPhone] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  // Which sign-in this platform actually uses. `null` = the capabilities
+  // response has not answered yet (or failed), and the copy stays neutral until
+  // it does — the previous behaviour, promising a QR code before knowing, is
+  // the bug.
+  const [loginMethod, setLoginMethod] = useState<LoginMethod | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // ── which sign-in does this platform use? ────────────────────────────
+  //
+  // One read, at open. A failure leaves `loginMethod` null rather than falling
+  // back to "qrcode": the fallback is what this whole change removes, and a
+  // neutral modal is honest where a wrong one is not. The server statuses still
+  // drive everything actionable, so nothing here blocks on this answer.
+  useEffect(() => {
+    let live = true;
+    getPlatformCapabilities()
+      .then((caps) => {
+        if (!live) return;
+        const declared = caps?.[platform]?.login_method;
+        if (declared === 'qrcode' || declared === 'sms') setLoginMethod(declared);
+        else console.error('distribution: unknown login_method', platform, declared);
+      })
+      .catch((err) => {
+        console.error('distribution: load platform capabilities failed', err);
+      });
+    return () => { live = false; };
+  }, [platform]);
 
   const reported: ViewStatus = startError
     ?? (sessionEnded
@@ -307,6 +386,8 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     setLogin(null);
     setSmsCode('');
     setSmsError(null);
+    setPhone('');
+    setPhoneError(null);
     try {
       const { task_id } = await startSessionLogin({
         platform, scope_type: scopeType, scope_id: scopeId,
@@ -448,6 +529,69 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   // is a pydantic error list rather than a SessionOpResult — so gate on the
   // same rule here instead of letting the user hit a shape we can't read.
   const smsValid = SMS_CODE_PATTERN.test(smsCode);
+  const phoneValid = PHONE_NUMBER_PATTERN.test(phone);
+
+  /**
+   * Send the number, and say what happened to it.
+   *
+   * The failure branches are the reason this is not three lines: a number that
+   * could not be entered, or a "send code" control that could not be pressed,
+   * both leave the platform having sent nothing. Reporting either as progress
+   * would put the user in front of a code field waiting on a text nobody
+   * requested — the exact state this modal was rewritten to stop producing.
+   */
+  const onSubmitPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!taskId || !phoneValid) return;
+    setPhoneBusy(true);
+    setPhoneError(null);
+    try {
+      const res = await submitLoginPhone(taskId, phone);
+      if (res && res.success === false) {
+        const reason = res.detail?.reason;
+        setPhoneError(
+          res.detail?.error_kind
+            ? t('distribution.session.smsInfraFailed', 'The browser service could not be reached — try again in a moment.')
+            : reason === PHONE_INPUT_MISSING
+              ? t(
+                'distribution.session.phoneInputMissing',
+                'The sign-in page did not show a phone number field, so nothing was sent. This is on our side — try again, and tell support if it keeps happening.',
+              )
+              : reason === CODE_REQUEST_FAILED
+                ? t(
+                  'distribution.session.phoneRequestFailed',
+                  'The number went in but the platform\'s "send code" button did not respond, so no code was sent. Try again in a moment.',
+                )
+                : t(
+                  'distribution.session.phoneFailed',
+                  'That number was not accepted — check it and try again.',
+                ),
+        );
+        // The untranslated original is worth keeping where a bug report can
+        // reach it — never on screen (it is our own machine English).
+        console.error('distribution: phone submit refused', res.status, reason);
+        // Deliberately NOT clearing the field: the next action is to correct
+        // what is on screen, and a wiped input forces the user to retype eleven
+        // digits for the sake of one.
+        return;
+      }
+      setPhoneError(null);
+    } catch (err) {
+      console.error('distribution: submit login phone failed', err);
+      const httpStatus = (err as { status?: number } | null)?.status;
+      if (httpStatus === 409 || httpStatus === 404) {
+        // Same reasoning as the SMS path: no further Realtime update is coming
+        // for this task, so leaving the form up implies a retry might work.
+        setSessionEnded(true);
+      } else if (httpStatus === 422) {
+        setPhoneError(t('distribution.session.phoneInvalid', 'Enter the phone number, digits only'));
+      } else {
+        setPhoneError(t('distribution.session.phoneFailed', 'That number was not accepted — check it and try again.'));
+      }
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
 
   const onSubmitSms = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,17 +680,21 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   };
 
   const platformLabel = PLATFORM_LABEL[platform] ?? platform;
+  const smsLogin = loginMethod === 'sms';
 
   const STATUS_LABEL: Record<ViewStatus, string> = {
     starting: t('distribution.session.startingLabel', 'Preparing a browser session'),
-    connecting: t('distribution.session.connectingLabel', 'Fetching the QR code'),
+    connecting: smsLogin
+      ? t('distribution.session.connectingSmsLabel', 'Opening the sign-in page')
+      : t('distribution.session.connectingLabel', 'Fetching the QR code'),
     start_failed: t('distribution.session.startFailedLabel', 'Could not start sign-in'),
-    start_unavailable: t('distribution.session.startUnavailableLabel', 'QR sign-in is not set up on this server'),
+    start_unavailable: t('distribution.session.startUnavailableLabel', 'Browser sign-in is not set up on this server'),
     session_ended: t('distribution.session.sessionEndedLabel', 'This sign-in has ended'),
     waiting_scan: t('distribution.session.waitingScanLabel', 'Waiting for the scan'),
     scanned: t('distribution.session.scannedLabel', 'Scanned — confirm on your phone'),
     qrcode_expired: t('distribution.session.qrcodeExpiredLabel', 'QR code expired'),
     identity_challenge: t('distribution.session.identityChallengeLabel', 'Identity verification'),
+    phone_required: t('distribution.session.phoneRequiredLabel', 'Phone number needed'),
     sms_required: t('distribution.session.smsRequiredLabel', 'SMS verification required'),
     success: t('distribution.session.successLabel', 'Account linked'),
     timeout: t('distribution.session.timeoutLabel', 'Sign-in timed out'),
@@ -556,20 +704,29 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
 
   const STATUS_HINT: Record<ViewStatus, string> = {
     starting: t('distribution.session.startingHint', 'Opening an isolated browser for this account.'),
-    connecting: t('distribution.session.connectingHint', 'The sign-in page is loading — the code appears in a moment.'),
+    connecting: smsLogin
+      ? t('distribution.session.connectingSmsHint', 'The sign-in page is loading — it will ask for the account\'s phone number.')
+      : t('distribution.session.connectingHint', 'The sign-in page is loading — the code appears in a moment.'),
     start_failed: t('distribution.session.startFailedHint', 'The request never reached the server. Check your connection and try again.'),
     start_unavailable: t('distribution.session.startUnavailableHint', 'The browser service this needs has not been configured. Retrying will not help — ask an administrator to set it up, or use Official Authorization instead.'),
-    session_ended: t('distribution.session.sessionEndedHint', 'The code expired while this was open, so the verification code can no longer be used. Get a new code and scan again.'),
+    session_ended: smsLogin
+      ? t('distribution.session.sessionEndedSmsHint', 'This sign-in ran out of time while the form was open, so the verification code can no longer be used. Start over to get a new one.')
+      : t('distribution.session.sessionEndedHint', 'The code expired while this was open, so the verification code can no longer be used. Get a new code and scan again.'),
     waiting_scan: t('distribution.session.waitingScanHint', 'Open the app on your phone and scan the code to link this account.'),
     scanned: t('distribution.session.scannedHint', 'Tap Confirm in the app to finish signing in.'),
     qrcode_expired: t('distribution.session.qrcodeExpiredHint', 'Codes are short-lived. A fresh one is being fetched — or request it now.'),
     identity_challenge: t('distribution.session.identityChallengeHint', 'The platform wants to confirm it is really you. Choosing "Receive SMS code" for you — nothing has been sent to your phone yet.'),
+    // Deliberately says nothing has been sent. This is step one, and the
+    // platform cannot text an account whose number it has not been given.
+    phone_required: t('distribution.session.phoneRequiredHint', 'This platform has no code to scan. Enter the phone number this account signs in with and we will ask the platform to text a verification code.'),
     // The default is deliberately the one that promises nothing. See
     // `smsRequestedHint` below for the case where we know a code was asked
     // for; claiming it unconditionally is the bug this replaces.
     sms_required: t('distribution.session.smsRequiredHint', 'The platform is asking for a verification code for this account. Enter the code it is showing you how to get.'),
     success: t('distribution.session.successHint', 'This account can now publish unattended.'),
-    timeout: t('distribution.session.timeoutHint', 'Nobody scanned the code in time. Nothing was changed — start over when you are ready.'),
+    timeout: smsLogin
+      ? t('distribution.session.timeoutSmsHint', 'The sign-in was not finished in time. Nothing was changed — start over when you are ready.')
+      : t('distribution.session.timeoutHint', 'Nobody scanned the code in time. Nothing was changed — start over when you are ready.'),
     failed: t('distribution.session.failedHint', 'The platform refused the sign-in. Try again, and check whether the account is restricted.'),
     proxy_failed: t('distribution.session.proxyFailedHint', 'The egress proxy for this account could not be reached — the account itself is fine. Fix the proxy, then retry.'),
   };
@@ -693,6 +850,17 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
   const canRetry = RETRYABLE.has(status);
+  // The dialog's own framing. Not decoration: "Sign in with QR code" over a
+  // form that asks for a phone number is the same wrong promise as the frame
+  // itself, one line higher up.
+  const title = smsLogin
+    ? t('distribution.session.smsTitle', 'Sign in with a verification code')
+    : t('distribution.session.title', 'Sign in with QR code');
+  const subtitle = relinkUsername
+    ? t('distribution.session.relinkSubtitle', 'Re-link {{name}} — the browser session expired.', { name: relinkUsername })
+    : smsLogin
+      ? t('distribution.session.smsSubtitle', '{{platform}} has no code to scan — sign in with the account\'s phone number.', { platform: platformLabel })
+      : t('distribution.session.subtitle', 'Scan with the {{platform}} app to link the account.', { platform: platformLabel });
   // "Cancel" only when there is a live login to abandon; otherwise "Close".
   const canCancel = Boolean(taskId) && !terminal;
 
@@ -702,17 +870,13 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
         className="picker sess"
         role="dialog"
         aria-modal="true"
-        aria-label={t('distribution.session.title', 'Sign in with QR code')}
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="picker-head">
           <div>
-            <h3>{t('distribution.session.title', 'Sign in with QR code')}</h3>
-            <p>
-              {relinkUsername
-                ? t('distribution.session.relinkSubtitle', 'Re-link {{name}} — the browser session expired.', { name: relinkUsername })
-                : t('distribution.session.subtitle', 'Scan with the {{platform}} app to link the account.', { platform: platformLabel })}
-            </p>
+            <h3>{title}</h3>
+            <p>{subtitle}</p>
           </div>
           <button
             type="button"
@@ -737,6 +901,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
                 {busy && <Loader2 size={30} className="spin" />}
                 {(status === 'qrcode_expired' || status === 'session_ended') && <QrCode size={30} />}
                 {status === 'sms_required' && <Smartphone size={30} />}
+                {status === 'phone_required' && <Smartphone size={30} />}
                 {status === 'identity_challenge' && <ShieldAlert size={30} />}
               </div>
             )}
@@ -757,6 +922,46 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
               <p className="sess-expiry">
                 {t('distribution.session.expiresIn', 'Expires in {{n}}s', { n: secondsLeft })}
               </p>
+            )}
+
+            {status === 'phone_required' && (
+              <form className="sess-sms" onSubmit={onSubmitPhone}>
+                <label htmlFor="sess-phone">
+                  {t('distribution.session.phoneLabel', 'Phone number')}
+                </label>
+                <div className="sess-sms-row">
+                  <input
+                    id="sess-phone"
+                    className="input"
+                    value={phone}
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    maxLength={20}
+                    aria-invalid={phone.length > 0 && !phoneValid}
+                    placeholder={t('distribution.session.phonePlaceholder', 'Digits only')}
+                    // Strip anything the server would 422 on as it is typed,
+                    // paste included — spaces and a +86 prefix are the two the
+                    // user is most likely to bring along.
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                    disabled={phoneBusy}
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-tint-indigo btn-sm"
+                    disabled={phoneBusy || !phoneValid}
+                  >
+                    {phoneBusy
+                      ? t('distribution.session.phoneSubmitting', 'Sending...')
+                      : t('distribution.session.phoneSubmit', 'Send code')}
+                  </button>
+                </div>
+                {phone.length > 0 && !phoneValid && (
+                  <p className="sess-detail tone-warn">
+                    {t('distribution.session.phoneInvalid', 'Enter the phone number, digits only')}
+                  </p>
+                )}
+                {phoneError && <p className="sess-detail tone-danger">{phoneError}</p>}
+              </form>
             )}
 
             {status === 'sms_required' && (
@@ -808,7 +1013,11 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
           </button>
           {canRetry && (
             <button type="button" className="btn btn-tint-indigo btn-sm" onClick={() => void restart()}>
-              <RefreshCw size={13} /> {t('distribution.session.retry', 'Get a new code')}
+              <RefreshCw size={13} />
+              {' '}
+              {smsLogin
+                ? t('distribution.session.retrySms', 'Start over')
+                : t('distribution.session.retry', 'Get a new code')}
             </button>
           )}
         </div>

@@ -127,6 +127,23 @@ class SessionSmsRequest(BaseModel):
     code: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
 
 
+class SessionPhoneRequest(BaseModel):
+    """只在 ``login_method == "sms"`` 的平台上用得到（当前只有小红书）。
+
+    与 nous-browser 的 ``PhoneNumberRequest`` **逐字相同**（纯数字、6–20 位），
+    理由同 ``SessionSmsRequest``：宽一格就会让一个输入错误在浏览器侧变成 422，
+    再被 ``BrowserClient`` 读成传输层失败，最后以"基建故障"的面目出现在用户
+    面前。
+
+    ⚠️ 位数刻意不钉死 11 位。那是中国大陆手机号的形状，把一个国家的号码格式焊进
+    通道契约，与"把一个平台的登录形态套到所有平台"是同一类错误。
+
+    手机号**不入库、不进日志**：它只经这一跳送进那一页的输入框。
+    """
+
+    phone: str = Field(min_length=6, max_length=20, pattern=r"^\d+$")
+
+
 class SessionOpResponse(BaseModel):
     """spec §7.8 的类型化结果信封，原样透给前端。
 
@@ -178,6 +195,14 @@ class PlatformCapability(BaseModel):
     """
 
     platform: str
+    # 这个平台怎么登录：``"qrcode"`` / ``"sms"``。前端据此决定画扫码框还是画
+    # 手机号+验证码表单。
+    #
+    # ⚠️ 它**不受 ``is_placeholder`` 清空**（见 ``project_capability``）：登录
+    # 与发布是两件事，而"能绑不能发"的平台恰恰只有登录这一件事可做。小红书就是
+    # 这一档 —— 在这个字段存在之前，前端对所有平台一律画二维码占位框，而后端
+    # 对它根本不会产出二维码，那条绑定链一次都没跑通过。
+    login_method: str
     # 能不能发布。False 时下面的能力字段**全部置空**，见 ``is_placeholder``。
     supports_publishing: bool
     # 占位声明：``supports_publishing=False`` 的平台，profile 里的

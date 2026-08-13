@@ -125,6 +125,32 @@ def test_a_platform_that_cannot_publish_ships_no_capability_values(client):
         assert cap["min_images"] is None
 
 
+def test_the_login_method_ships_even_for_a_platform_that_cannot_publish(client):
+    """上一条的**例外**，写成断言而不是靠人记得。
+
+    ``is_placeholder`` 清空的是**发布**能力的占位值。登录方式不属于那一档：它对
+    每个能绑账号的平台都是事实，而"能绑不能发"的平台（小红书 / B 站）除了绑定
+    根本没有别的事可做 —— 恰恰是它们最需要这个字段。
+
+    跟着清空的后果已经发生过一次：前端拿不到，只好沿用抖音的形状去画二维码，
+    而小红书的创作平台压根没有扫码登录，那张图永远不会出现。
+    """
+    body = client.get(_PATH).json()
+
+    xhs = body["platforms"]["xiaohongshu"]
+    assert xhs["is_placeholder"] is True
+    assert xhs["supports_publishing"] is False
+    # 清空发布能力的同时，登录方式必须还在，而且必须是 sms。
+    assert xhs["content_types"] == []
+    assert xhs["login_method"] == "sms"
+
+    for cap in body["platforms"].values():
+        assert cap["login_method"] in ("qrcode", "sms"), (
+            f"{cap['platform']} 的 login_method 是 {cap['login_method']!r} —— "
+            "前端按它二选一画界面，第三个值会静默落回默认分支"
+        )
+
+
 def test_the_response_follows_the_profile_rather_than_a_hardcoded_copy(client):
     """证明这是投影而不是手抄的第二份声明。
 

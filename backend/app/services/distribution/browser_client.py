@@ -106,6 +106,12 @@ class SessionStatus(str, Enum):
     # ⚠️ 少了这个值不会报错，只会让轮询循环走进 "unhandled login status" 分支
     # 直接判死（§7.8 两侧枚举必须对齐的那条，这里是活的例子）。
     IDENTITY_CHALLENGE = "identity_challenge"
+    # 平台压根没有扫码登录，只有「手机号 + 验证码」，而我们还没拿到手机号
+    # （2026-08-13，小红书创作平台：[实测 2026-08-08] 扫码/二维码/QR 相关可点
+    # 元素 0 个）。跟 ``sms_required`` 分开的理由与上一个成员完全同族：那个值
+    # 的意思是"把收到的码填进来"，而在没人给过手机号的时候这么说，等的是一条
+    # **不可能存在**的短信 —— 没人知道该发给谁。
+    PHONE_REQUIRED = "phone_required"
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"
@@ -217,6 +223,7 @@ LOGIN_STATUSES = frozenset(
         SessionStatus.SCANNED.value,
         SessionStatus.QRCODE_EXPIRED.value,
         SessionStatus.IDENTITY_CHALLENGE.value,
+        SessionStatus.PHONE_REQUIRED.value,
         SessionStatus.SMS_REQUIRED.value,
         SessionStatus.SUCCESS.value,
         SessionStatus.TIMEOUT.value,
@@ -237,6 +244,10 @@ LOGIN_PENDING_STATUSES = frozenset(
         SessionStatus.SCANNED.value,
         SessionStatus.QRCODE_EXPIRED.value,
         SessionStatus.IDENTITY_CHALLENGE.value,
+        # 与 ``sms_required`` 一样是**进行中**：浏览器还开着登录页，等的是用户
+        # 在弹窗里填手机号（走 ``/phone`` 端点送进去）。漏掉它，轮询循环会走进
+        # "unhandled login status" 分支把一次好端端的登录直接判死。
+        SessionStatus.PHONE_REQUIRED.value,
         SessionStatus.SMS_REQUIRED.value,
     }
 )
@@ -260,6 +271,19 @@ LOGIN_FAILURE_STATUSES = frozenset(
 # 被拒 —— 所以在共用的 ``_login_snapshot`` 里判它是安全的，第一次要码仍是
 # success=True。
 LOGIN_CODE_REJECTED_KEY = "code_rejected"
+
+# 同一条道理的手机号版本（``/phone``）。浏览器侧在两种情况下回
+# ``phone_required``：页面上找不到手机号输入框、或者号码填进去了但平台自己的
+# 「发送验证码」按钮点不动。两者都是 **用户刚做的动作没成**，而
+# ``phone_required`` 本身是进行中状态 —— 不特判的话这次调用会以 success=True
+# 回到前端，前端走成功分支（清空输入框、不提示任何东西），用户于是对着一个
+# 什么都没发生的表单发呆。这正是"验证码输错零反馈"那个 bug 的同一形状。
+#
+# 只有 ``/phone`` 会产生这两个 reason（轮询没人提交过号码），所以在共用的
+# ``_login_snapshot`` 里判它是安全的：第一次要号码仍然是 success=True。
+LOGIN_PHONE_NOT_ACCEPTED_REASONS = frozenset(
+    {"phone_input_missing", "code_request_failed"}
+)
 
 
 @dataclass(frozen=True)
@@ -1284,6 +1308,48 @@ class BrowserClient:
             return LoginSnapshot(result=self._transport_result(failure))
         return self._login_snapshot(data, login_session_id=login_session_id)
 
+    async def submit_login_phone(
+        self, login_session_id: str, phone: str
+    ) -> LoginSnapshot:
+        """``POST /session/login/{id}/phone`` —— 送手机号并请平台发验证码。
+
+        只对**没有扫码登录**的平台有意义（``login_method == "sms"``，唯一真相
+        在 ``browser/app/capabilities.py``）。那些平台的登录页要求先填手机号、
+        点「发送验证码」，而这两步没有任何自动化路径能替用户完成 —— 号码只有
+        用户知道。
+
+        返回的仍是状态快照：号码填不进去 / 发码按钮点不动时，浏览器侧回
+        ``phone_required`` + ``detail.reason``（``phone_input_missing`` /
+        ``code_request_failed``），而不是 HTTP 4xx。**这两个 reason 是这条链上
+        唯一能让"选择器猜错了"被用户看见的东西**：这个平台一个账号都没绑成功过，
+        每个选择器都还没被真实绑定验证过，猜错时必须落向可见失败而不是静默等待
+        （仓库纪律：触发路径必须类型化失败回显）。
+
+        ⚠️ 手机号绝不进日志、绝不入库 —— 它只进那一页的输入框。
+        """
+        if not (phone or "").strip():
+            raise ValueError("phone number must be a non-empty string")
+        try:
+            data = await self._call(
+                "POST",
+                f"/session/login/{login_session_id}/phone",
+                read_timeout=DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS,
+                payload={"phone": phone},
+            )
+        except _TransportFailure as failure:
+            typed = self._typed_failure_snapshot(failure, login_session_id)
+            if typed is not None:
+                logger.warning(f"[browser.login.phone] rejected: {typed.status}")
+                return typed
+            logger.warning(
+                f"[browser.login.phone] {failure.kind.value}: {failure.message}"
+            )
+            return LoginSnapshot(result=self._transport_result(failure))
+        # 号码本身绝不进日志。
+        snapshot = self._login_snapshot(data, login_session_id=login_session_id)
+        logger.info(f"[browser.login.phone] status={snapshot.status}")
+        return snapshot
+
     async def submit_login_sms(self, login_session_id: str, code: str) -> LoginSnapshot:
         """``POST /session/login/{id}/sms`` —— 提交短信验证码。
 
@@ -1481,9 +1547,12 @@ class BrowserClient:
         qrcode = data.get("qrcode_data_url")
         expires_at = data.get("expires_at")
         code_rejected = detail.get(LOGIN_CODE_REJECTED_KEY) is True
+        phone_not_accepted = detail.get("reason") in LOGIN_PHONE_NOT_ACCEPTED_REASONS
         return LoginSnapshot(
             result=SessionOpResult(
-                success=raw_status not in LOGIN_FAILURE_STATUSES and not code_rejected,
+                success=raw_status not in LOGIN_FAILURE_STATUSES
+                and not code_rejected
+                and not phone_not_accepted,
                 status=raw_status,
                 message=str(data.get("message") or ""),
                 detail=detail,

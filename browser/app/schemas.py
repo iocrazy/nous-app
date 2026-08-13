@@ -44,6 +44,15 @@ class SessionStatus(str, Enum):
     # `sms_required`, and the user waited out the full TTL for a code nobody
     # had asked for).
     IDENTITY_CHALLENGE = "identity_challenge"
+    # The platform signs in by text message and we do not have a number to send
+    # it to yet. Split from `SMS_REQUIRED` for the same reason
+    # `IDENTITY_CHALLENGE` is: the two license opposite sentences. `sms_required`
+    # means "type the code you were sent"; saying that before anybody has given
+    # us a phone number leaves the user waiting for a message that could not
+    # possibly have been sent — nothing was requested, because nothing knew
+    # where to send it (2026-08-13, Xiaohongshu: its creator platform has no QR
+    # sign-in, only 手机号 + 验证码).
+    PHONE_REQUIRED = "phone_required"
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"
@@ -120,7 +129,11 @@ class LoginStartRequest(BaseModel):
 class LoginStartResponse(BaseModel):
     login_session_id: str
     status: SessionStatus
-    qrcode_data_url: str
+    # Null on platforms that do not sign in with a QR code at all (see
+    # `capabilities.PLATFORM_LOGIN_METHODS`). It was non-optional while every
+    # login was assumed to be a scan, which is the assumption that made the
+    # SMS-only platform fail at `start` with "login page rendered no QR code".
+    qrcode_data_url: str | None = None
     # Hard deadline for the whole login attempt. The context is destroyed at
     # this point whether or not anybody scanned, so the caller must not keep
     # polling past it.
@@ -134,6 +147,38 @@ class LoginStatusResponse(BaseModel):
     # no longer meaningful, or when a refresh failed - null is how the caller
     # tells "here is a new code" from "there is no usable code".
     qrcode_data_url: str | None = None
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class PhoneNumberRequest(BaseModel):
+    """The account's phone number, on platforms that sign in by text message.
+
+    Digits only and bounded, like `SmsCodeRequest`: it is typed straight into a
+    page. Deliberately **not** pinned to 11 digits — that is the mainland mobile
+    format, and hard-coding one country's shape into the channel contract is the
+    same category of mistake as assuming every platform renders a QR code.
+
+    It is never logged and never persisted: it goes into the live page and
+    nothing else. `redaction.scrub_page_text` masks digit runs of five or more,
+    so it cannot ride back out inside captured page text either.
+    """
+
+    phone: str = Field(min_length=6, max_length=20, pattern=r"^\d+$")
+
+
+class PhoneNumberResponse(BaseModel):
+    """Same envelope as `SmsCodeResponse`, and for the same reason.
+
+    Submitting a number is a *user action*, so its failures have to be typed
+    and visible: `detail["reason"]` says whether the page had no number field
+    at all or whether the platform's own "send me the code" button could not be
+    pressed. Both are unverified-selector failures on a platform nobody has
+    bound yet, and both must land in front of the user rather than leaving the
+    modal sitting on a code field no code is coming to.
+    """
+
+    status: SessionStatus
     message: str
     detail: dict[str, Any] = Field(default_factory=dict)
 

@@ -86,6 +86,7 @@ _STATUS_SUBTITLE: dict[str, str] = {
     SessionStatus.SCANNED.value: "Confirm on your phone",
     SessionStatus.QRCODE_EXPIRED.value: "QR code refreshed",
     SessionStatus.IDENTITY_CHALLENGE.value: "Verifying identity",
+    SessionStatus.PHONE_REQUIRED.value: "Enter the phone number",
     SessionStatus.SMS_REQUIRED.value: "Enter the SMS code",
     SessionStatus.SUCCESS.value: "Signed in",
     SessionStatus.TIMEOUT.value: "Login timed out",
@@ -272,6 +273,8 @@ def _progress_for(status: str) -> int:
         SessionStatus.QRCODE_EXPIRED.value: 20,
         SessionStatus.SCANNED.value: 60,
         SessionStatus.IDENTITY_CHALLENGE.value: 65,
+        # 低于 sms_required：手机号是它的前一步，进度条不该在往回走。
+        SessionStatus.PHONE_REQUIRED.value: 30,
         SessionStatus.SMS_REQUIRED.value: 70,
         SessionStatus.SUCCESS.value: 90,
     }.get(status, 10)

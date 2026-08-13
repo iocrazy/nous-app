@@ -50,12 +50,53 @@ def test_login_status_enum_matches_spec_table():
         # 上平台还在等我们选验证方式，**一条短信都没发**。合并两者正是那次
         # 用户对着不存在的验证码干等到超时的直接原因。
         "identity_challenge",
+        # 没有扫码登录的平台（2026-08-13，小红书）。同样必须是独立值，理由与
+        # 上一个完全同族：``sms_required`` 的意思是"把收到的码填进来"，而在还
+        # 没有人给过手机号的时候，那条短信**不可能存在** —— 没人知道该发给谁。
+        "phone_required",
         "sms_required",
         "success",
         "timeout",
         "proxy_failed",
         "failed",
     }
+
+
+def test_the_phone_step_is_pending_and_a_refusal_is_not_a_success():
+    """两条不变量，各自对应一个真实事故形状。
+
+    1. ``phone_required`` 必须在 PENDING 集合里 —— 掉出去，``drive_login_loop``
+       会走进 "unhandled login status" 把一次正常等待的登录当场判死。
+    2. 用户提交了手机号却没成（页面上找不到输入框 / 发码按钮点不动）时，
+       ``success`` 必须是 False。它是进行中状态，不特判就会以 success=True 回到
+       前端，前端走成功分支——清空输入框、什么都不说，用户对着一个毫无变化的
+       表单发呆。这正是"验证码输错零反馈"那个 bug 的同一形状。
+    """
+    from app.services.distribution.browser_client import (
+        LOGIN_FAILURE_STATUSES,
+        LOGIN_PENDING_STATUSES,
+    )
+
+    assert SessionStatus.PHONE_REQUIRED.value in LOGIN_PENDING_STATUSES
+    assert SessionStatus.PHONE_REQUIRED.value not in LOGIN_FAILURE_STATUSES
+
+    snapshot = BrowserClient._login_snapshot(
+        {
+            "status": "phone_required",
+            "message": "no phone number field was found on the sign-in page",
+            "detail": {"reason": "phone_input_missing"},
+        },
+        login_session_id=SID,
+    )
+    assert snapshot.result.success is False
+    assert snapshot.result.detail["reason"] == "phone_input_missing"
+
+    # 第一次要号码（没有 reason）仍然是 success=True：那不是失败，是流程的一步。
+    fresh = BrowserClient._login_snapshot(
+        {"status": "phone_required", "message": "enter the phone number", "detail": {}},
+        login_session_id=SID,
+    )
+    assert fresh.result.success is True
 
 
 def test_the_identity_challenge_is_a_pending_status_not_a_verdict():
@@ -313,6 +354,67 @@ async def test_status_server_error_is_infra_not_login_failure():
 
     assert snapshot.is_infra_failure is True
     assert snapshot.result.error_kind == SessionErrorKind.SERVER_ERROR.value
+
+
+# ── /session/login/{id}/phone ───────────────────────────────
+
+
+@respx.mock
+async def test_submit_phone_sends_the_number_and_returns_the_next_state():
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "status": "sms_required",
+                "message": "the platform is asking for a verification code",
+                "detail": {"code_requested": True, "phone_submitted": True},
+            },
+        )
+
+    respx.post(f"{BASE}/session/login/{SID}/phone").mock(side_effect=_handler)
+    snapshot = await _client().submit_login_phone(SID, "13800000000")
+
+    assert captured["body"] == {"phone": "13800000000"}
+    assert snapshot.status == SessionStatus.SMS_REQUIRED.value
+    assert snapshot.success is True
+    # 只有平台自己的发码按钮真被点到，才允许前端说"短信在路上"。
+    assert snapshot.detail["code_requested"] is True
+
+
+@respx.mock
+async def test_a_phone_number_that_got_nowhere_is_not_a_successful_operation():
+    """与上面那条"码被拒"墓碑同族，换成手机号这一步。
+
+    ``phone_required`` 是进行中状态，所以"号码填不进去"天然会算 success=True ——
+    前端于是走成功分支：清空输入框、什么都不说。而这个平台的每一个选择器都还没
+    被任何一次真实绑定验证过，猜错时最不能做的就是**看起来像在等待**。
+    """
+    respx.post(f"{BASE}/session/login/{SID}/phone").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "status": "phone_required",
+                "message": "no phone number field was found on the sign-in page",
+                "detail": {"reason": "phone_input_missing"},
+            },
+        )
+    )
+    snapshot = await _client().submit_login_phone(SID, "13800000000")
+
+    assert snapshot.success is False
+    # 平台没问题、账号没问题 —— 是我们的选择器。别让前端把它说成账号被限制。
+    assert snapshot.is_infra_failure is False
+    assert snapshot.detail["reason"] == "phone_input_missing"
+
+
+async def test_submit_phone_refuses_an_empty_number_before_the_round_trip():
+    with pytest.raises(ValueError):
+        await _client().submit_login_phone(SID, "   ")
 
 
 # ── /session/login/{id}/sms ─────────────────────────────────

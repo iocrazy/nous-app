@@ -54,6 +54,11 @@ def test_supports_publishing_defaults_to_false():
 
     profile = PlatformSessionProfile(
         platform="whatever",
+        # 必填,**故意没有默认值**:默认 "qrcode" 会让一个只有短信登录的新平台
+        # 静默继承扫码形状,那正是小红书那条绑定链一次都没跑通的原因。
+        # supports_publishing 的默认值往安全塌陷,登录方式没有"安全的默认",
+        # 只有"说清楚"。
+        login_method="qrcode",
         content_types=frozenset({"video"}),
         video_extensions=frozenset({".mp4"}),
         image_extensions=frozenset({".jpg"}),

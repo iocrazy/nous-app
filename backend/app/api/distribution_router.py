@@ -36,6 +36,7 @@ from app.schemas.distribution import (
     SessionLoginRequest,
     SessionLoginResponse,
     SessionOpResponse,
+    SessionPhoneRequest,
     SessionSmsRequest,
 )
 from app.schemas.distribution_cover import (
@@ -567,7 +568,10 @@ async def start_session_login(body: SessionLoginRequest, user: CurrentUserDep):
     task id; the scan happens inside ``session_login_workflow`` and surfaces
     through ``task_tracking.metadata.login`` over Realtime (spec §4.1)."""
     from app.services.distribution.browser_client import BrowserClient
-    from app.services.distribution.session_adapter import supported_session_platforms
+    from app.services.distribution.session_adapter import (
+        SESSION_PLATFORM_PROFILES,
+        supported_session_platforms,
+    )
 
     uid = str(user["id"])
     scope_id = await _resolve_bind_scope(body.scope_type, body.scope_id, uid)
@@ -589,20 +593,28 @@ async def start_session_login(body: SessionLoginRequest, user: CurrentUserDep):
     # 路线 C: the SAME wf_id keys the task_tracking row and the dispatched
     # workflow — create the row first so the QR modal can subscribe to it
     # before the workflow writes the first metadata patch.
+    # The placeholder frame the modal renders until the workflow writes a real
+    # one. It has to match the platform's login method: seeding `waiting_scan`
+    # unconditionally is what put a QR placeholder in front of a user binding a
+    # platform that has no QR code, seconds before the workflow could correct it.
+    qr_login = SESSION_PLATFORM_PROFILES[body.platform].login_method == "qrcode"
+    opening_status = "waiting_scan" if qr_login else "phone_required"
+    opening_message = "Opening the QR code" if qr_login else "Opening the sign-in page"
+
     wf_id = str(_uuid.uuid4())
     await get_task_manager().create(
         user_id=uid,
         task_type=SESSION_LOGIN_TASK_TYPE,
         title=f"Connect {body.platform}"[:200],
-        subtitle="Opening the QR code",
+        subtitle=opening_message,
         dbos_workflow_id=wf_id,
         metadata={
             "login": {
                 "platform": body.platform,
-                "status": "waiting_scan",
+                "status": opening_status,
                 "qrcode_data_url": None,
                 "expires_at": None,
-                "message": "Opening the QR code",
+                "message": opening_message,
             }
         },
     )
@@ -618,6 +630,40 @@ async def start_session_login(body: SessionLoginRequest, user: CurrentUserDep):
         workflow_id=wf_id,
     )
     return {"task_id": wf_id}
+
+
+@router.post(
+    "/accounts/session/login/{task_id}/phone",
+    response_model=SessionOpResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def submit_session_login_phone(
+    task_id: str, body: SessionPhoneRequest, user: CurrentUserDep
+):
+    """Hand the account's phone number to the live browser context.
+
+    Only reachable on platforms whose ``login_method`` is ``"sms"`` — they have
+    no QR code, so signing in starts by typing a number and pressing the
+    platform's own "send verification code" control. Neither step can be
+    automated away: nobody but the user knows the number.
+
+    Same shape and same reasoning as ``/sms``: straight to nous-browser (the
+    number is only meaningful to that live page), and the verdict comes back in
+    *this* response rather than through a metadata field the user has to watch.
+    A number that could not be entered, or a code request that did not land,
+    answers ``success: false`` with a typed ``detail.reason`` — every selector
+    on that page is still unverified against a completed bind, so a wrong guess
+    has to be visible instead of looking like patience.
+    """
+    from app.services.distribution.browser_client import BrowserClient
+
+    task = await _load_login_task(task_id, user)
+    if task["phase"] not in ("queued", "in_progress"):
+        raise HTTPException(status_code=409, detail="Login task is no longer active")
+    snapshot = await BrowserClient().submit_login_phone(
+        _login_session_id(task), body.phone
+    )
+    return snapshot.result.to_dict()
 
 
 @router.post(

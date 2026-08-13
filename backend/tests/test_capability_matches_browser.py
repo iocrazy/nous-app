@@ -107,6 +107,59 @@ def test_every_publishable_platform_appears_in_the_browser_table():
         assert table[name], f"'{name}' 在浏览器表里是空的 —— 那它发不了任何东西。"
 
 
+def test_every_session_platform_declares_the_login_method_the_browser_implements():
+    """登录方式也走同一条单向链，且**不受 supports_publishing 影响**。
+
+    与上面两条守卫的差别正是这一点：``content_types`` 只对能发布的平台有意义，
+    而「怎么登录」对每个能绑账号的平台都有意义 —— 恰恰是**不能发布**的那些平台
+    最需要它，因为绑定是它们唯一做得到的事。
+
+    这条守卫的由来是一次真实事故：小红书的创作平台没有扫码登录（[实测
+    2026-08-08] 含扫码/二维码/QR 的可点元素 0 个），而前端对所有平台一律画二维码
+    占位框 —— 用户点绑定，看到一个永远不会出现的二维码。后端那时根本没有可以
+    下发的字段，前端也就无从知道该画别的。
+
+    红了的修法：去 ``browser/app/capabilities.py`` 核对真相（那边又被
+    ``browser/tests/test_sms_login_flow.py`` 钉在各平台真实的 ``LoginFlowSpec``
+    上），然后改后端 profile —— 而不是反过来。
+    """
+    browser = _load_browser_capabilities()
+    table = browser.PLATFORM_LOGIN_METHODS
+
+    for name, profile in SESSION_PLATFORM_PROFILES.items():
+        assert name in table, (
+            f"'{name}' 在后端会话通道里能绑账号，但 browser/app/capabilities.py 的 "
+            "PLATFORM_LOGIN_METHODS 没有这一行 —— 前端就不知道该画哪种登录界面。"
+        )
+        assert profile.login_method == table[name], (
+            f"后端说 '{name}' 用 {profile.login_method!r} 登录，浏览器侧实现的是 "
+            f"{table[name]!r}。浏览器是唯一真的开那个页面的层，以它为准。"
+        )
+
+
+def test_the_login_method_guard_would_actually_fail_on_a_stale_declaration(monkeypatch):
+    """反向验证：证明上一条会红。
+
+    模拟的正是真实的漂移形状 —— 平台其实没有扫码登录，而后端仍然声明 qrcode，
+    于是整个 UI 继续承诺一张永远不出现的图。
+    """
+    import dataclasses
+
+    original = SESSION_PLATFORM_PROFILES["xiaohongshu"]
+    assert original.login_method == "sms", (
+        "小红书不再是 SMS 登录的话，这条反向验证要换一个平台，"
+        "否则它会静默变成恒真断言。"
+    )
+    monkeypatch.setitem(
+        SESSION_PLATFORM_PROFILES,
+        "xiaohongshu",
+        dataclasses.replace(original, login_method="qrcode"),
+    )
+
+    with pytest.raises(AssertionError, match="qrcode"):
+        test_every_session_platform_declares_the_login_method_the_browser_implements()
+
+
 def test_the_browser_capability_module_has_no_imports():
     """``capabilities.py`` 必须零 import。
 
