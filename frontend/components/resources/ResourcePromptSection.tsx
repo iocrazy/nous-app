@@ -40,7 +40,9 @@ import {
 } from '../../services/resourceService';
 import { fetchAllTags } from '../../services/unifiedTagService';
 import { ensureDefaultTriggerTag } from '../../utils/promptTriggerTags';
+import { providerErrorMessage } from '../../utils/providerErrorMessage';
 import type { Resource, Tag } from '../../types';
+import { useOptionalToast } from '../Toast';
 import { PromptSection } from './PromptSection';
 
 // `slide_prompts` is fetched unconditionally rather than only in slide mode:
@@ -122,6 +124,9 @@ export function ResourcePromptSection({
   slideCount?: number;
 }) {
   const { t } = useTranslation();
+  // Optional: this block also mounts in provider-less hosts (isolated embeds,
+  // bare unit mounts). Every real surface sits under AppLayout's ToastProvider.
+  const toast = useOptionalToast();
   const [resource, setResource] = useState<PromptResource | null>(null);
   const [assignedTags, setAssignedTags] = useState<Array<{ tag: Tag }>>([]);
   const [loading, setLoading] = useState(true);
@@ -192,13 +197,24 @@ export function ResourcePromptSection({
     [resourceId, slideName],
   );
 
+  // A provider failure aborts the whole update (nothing is written), so the
+  // only thing that tells the user anything happened is this toast — without
+  // it, pressing Translate looks like a no-op. Known provider codes get their
+  // own copy; anything else degrades to the generic failure line.
   const handleTranslate = useCallback((lang: 'en' | 'zh') => {
     setTranslating(true);
     translateGenPrompt(resourceId, lang)
       .then((data) => setResource((prev) => (prev ? { ...prev, ...data } : prev)))
-      .catch((err) => console.error('Failed to translate prompt:', err))
+      .catch((err) => {
+        console.error('Failed to translate prompt:', err);
+        const typed = providerErrorMessage((err as { code?: unknown })?.code, t);
+        toast?.addToast(
+          typed ?? t('resources.infoPanel.promptTranslateFailed', 'Translation failed'),
+          'error',
+        );
+      })
       .finally(() => setTranslating(false));
-  }, [resourceId]);
+  }, [resourceId, toast, t]);
 
   const handleEnsureTriggerTag = useCallback(async () => {
     const allTags = await fetchAllTags();
