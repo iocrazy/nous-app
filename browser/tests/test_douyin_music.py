@@ -1,7 +1,8 @@
 """Picking a post's background music by name (「选择音乐」).
 
-Three layers, and the split is deliberate because only one of them could be
-verified against a live page:
+Three layers, and the split is deliberate. **None of them runs against a live
+page** — the dialog only ever appears part-way through a real publish — so what
+each layer pins is stated exactly:
 
 1. **Pure matching** (`judge_music_choice`) — which of the titles the dialog
    listed gets clicked. This is where the "exact first, otherwise the first
@@ -10,15 +11,17 @@ verified against a live page:
 2. **The step** (`_set_music`) driven through `tests.fakes.FakePage` — the
    refusals. Every one of them exists because the alternative is a post that
    went out silently music-less, which looks exactly like a successful publish.
-3. **The dialog's real shape**, as an HTML fixture (`tests.dom_fixture`). This
-   is the layer that pins the one measurement that changes how the code is
-   written: 「选择音乐」 matches **twice** on the live editor, so `.first` — what
-   every other entry point in `douyin_publish` uses — is a coin flip here.
+3. **The dialog's shape**, as an HTML fixture (`tests.dom_fixture`) built to
+   what the T0 survey read off the live editor. It pins the one measurement
+   that changes how the code is written: 「选择音乐」 matches **twice** there, so
+   `.first` — what every other entry point in `douyin_publish` uses — is a coin
+   flip here. ⚠️ The fixture cannot run the row probe: that is JavaScript and
+   this shim has no engine. The probe's own logic is therefore unproven; what
+   is proven is what happens when it comes back empty or wrong.
 
-⚠️ What none of this proves: that the selectors are right. The dialog only
-appears inside a real publish, so it could not be driven end to end. What the
-tests below do pin is that every way of being wrong about it lands on a typed
-failure the user sees, rather than on a published post with no music.
+⚠️ So: none of this proves the selectors are right. What it does prove is that
+every way of being wrong about them lands on a typed failure the user sees,
+rather than on a published post with no music on it.
 """
 
 from __future__ import annotations
