@@ -14,6 +14,7 @@ import {
   fetchEpisodesProgress,
   fetchProjectFiles,
   fetchProjectFolders,
+  fetchProject,
   fetchProjectMembers,
   fetchProjects,
   getProjectFileDownloadUrl,
@@ -64,6 +65,27 @@ describe('project CRUD', () => {
     stubResponse({});
     const result = await fetchProjects();
     expect(result).toEqual([]);
+  });
+
+  it('fetchProject GETs by id and unwraps envelope (real wire shape: numeric id)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () =>
+        JSON.stringify({ success: true, data: { id: 291022264100262, name: 'Shared' } }),
+      json: async () => ({ success: true, data: { id: 291022264100262, name: 'Shared' } }),
+    } as unknown as Response);
+
+    const project = await fetchProject('291022264100262');
+    expect(spy.mock.calls[0][0]).toContain('/api/v1/projects/291022264100262');
+    expect(String(project.id)).toBe('291022264100262');
+    expect(project.name).toBe('Shared');
+  });
+
+  it('fetchProject throws when the envelope has no data', async () => {
+    stubResponse({ success: true });
+    await expect(fetchProject('404404')).rejects.toThrow('Project not found');
   });
 
   it('createProject POSTs body and unwraps envelope', async () => {

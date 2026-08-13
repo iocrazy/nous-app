@@ -40,6 +40,16 @@ export const fetchProjects = async (params?: {
   return response.data || [];
 };
 
+// By-id fetch for projects the list endpoint doesn't return: GET /projects
+// only lists projects the caller OWNS, but the by-id endpoint grants read to
+// explicit project_members rows too (any role). URL-addressed navigation to a
+// shared project must fall back to this when the list has no match.
+export const fetchProject = async (id: string): Promise<Project> => {
+  const response = await apiClient.get<Envelope<Project>>(`/api/v1/projects/${id}`);
+  if (!response.data) throw new Error('Project not found');
+  return response.data;
+};
+
 export const createProject = async (data: {
   name: string;
   description?: string;
