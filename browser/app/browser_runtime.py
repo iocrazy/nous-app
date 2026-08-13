@@ -170,6 +170,19 @@ def build_context_kwargs(
     if env is None:
         return kwargs
 
+    # Applied when set, but account_environments.user_agent is deliberately
+    # NULL for every account - do NOT "improve" this by generating a per-account
+    # UA. Measured in this container on 2026-08-12 (Chromium 145.0.7632.6,
+    # headed, https origin): this option rewrites navigator.userAgent and the
+    # User-Agent header and NOTHING ELSE. Overriding it to Chrome/999.0.0.0 left
+    #   Sec-CH-UA:                        "Chromium";v="145"
+    #   navigator.userAgentData.uaFullVersion:  145.0.7632.6
+    # untouched. So a UA that disagrees with the real build is a self-
+    # CONTRADICTING fingerprint, which is a worse signal than several accounts
+    # sharing one honest UA. Modern Chrome's reduced UA (Chrome/145.0.0.0, minor
+    # and build zeroed by design) has no per-account entropy left in it anyway,
+    # and the platform token is pinned by Sec-CH-UA-Platform + navigator.platform.
+    # The per-account axis that DOES work is the viewport below.
     if env.user_agent:
         kwargs["user_agent"] = env.user_agent
     if env.locale:
