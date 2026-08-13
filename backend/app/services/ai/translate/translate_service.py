@@ -5,10 +5,20 @@ Provider-routed zh↔en translation for asset prompts (IC-port P1,
 the agent's IDENTITY/SOUL/AGENT prompt, build an adapter from the user's
 BYO provider config, run one turn, return the plain-text translation.
 
-The agent slug is resolved by ``resolve_translate_provider_config``
-(``task_assignment.translation``), so users pick the model/provider in
+The agent slug is resolved by ``resolve_task_ai_config`` (``task_key=
+"translation"``, called directly by ``resources_ai_router.translate_gen_prompt``
+— bypassing the ``resolve_task_provider_config`` tuple shim so
+``fallback_models`` rides along), so users pick the model/provider in
 Settings → AI exactly like summarize / visual analysis — the prompt
 agent and the model agent are the same one (#622/#623 rule).
+
+The LLM call runs through :func:`build_fallback_llm` (spec
+2026-08-11-batch-llm-fallback / 2026-08-12-batch-fallback-rollout §1-F3)
+instead of a bare per-instance adapter, so a primary-model outage fails
+over to the resolved agent's ``fallback_models`` pool. Unlike caption /
+classify this path has NO DBOS workflow behind it: the endpoint is
+synchronous, so LLM-class exceptions must reach the router (which lets
+them through to ``core/provider_errors.py``) instead of being swallowed.
 """
 
 from __future__ import annotations
@@ -18,15 +28,9 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters.base import AIAdapter
-from app.services.ai.adapters.factory import (
-    get_adapter_for_user,
-    provider_key_for_model,
-)
-from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
@@ -53,40 +57,6 @@ class TranslateService:
         self.agent_slug = agent_slug or DEFAULT_AGENT_SLUG
         self.model = self._provider_config.get("model") or ""
 
-    def _build_adapter(self, model: str) -> AIAdapter:
-        """Same adapter resolution as SummarizeService — derive the
-        provider key from the model prefix, wrap the user's BYO config,
-        fall back to a generic OpenAI-compatible adapter on unknown
-        prefixes."""
-        provider_key = self._provider_key
-        if not provider_key and model:
-            try:
-                provider_key = provider_key_for_model(model)
-            except ValueError:
-                provider_key = ""
-        if not provider_key:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
-        user_cfg_scoped = {
-            provider_key: {
-                "api_key": self._provider_config.get("api_key", ""),
-                "base_url": self._provider_config.get("base_url", "") or "",
-                "app_id": self._provider_config.get("app_id", ""),
-            }
-        }
-        try:
-            return get_adapter_for_user(model, user_cfg_scoped, settings)
-        except ValueError:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
     async def translate(
         self,
         *,
@@ -94,12 +64,20 @@ class TranslateService:
         target_lang: str,
         user_id: Optional[Any],
         resource_id: Optional[str] = None,
+        fallback_models: Optional[list[str]] = None,
     ) -> Optional[str]:
         """Translate ``text`` into ``target_lang`` ('en' | 'zh').
 
-        Returns the translated text, or None on any failure (callers keep
-        the stored fields untouched on None). Wraps with RunRecorder when
+        Returns the translated text, or None when the input is unusable /
+        the agent is paused / the run produced nothing (callers keep the
+        stored fields untouched on None). LLM-class failures RAISE — see
+        the tail of the recorder path. Wraps with RunRecorder when
         ``user_id`` is set so an ``agent_runs`` row lands.
+
+        ``fallback_models``: platform-preset fallback pool from the
+        resolved agent row (spec 2026-08-11-batch-llm-fallback §4),
+        threaded into :func:`build_fallback_llm` so a primary-model
+        outage fails over instead of erroring the whole translate call.
         """
         source = (text or "").strip()
         if not source:
@@ -122,7 +100,24 @@ class TranslateService:
             )
         )
 
-        adapter = self._build_adapter(composed.model or self.model)
+        from app.services.ai.llm.fallback_wiring import build_fallback_llm
+
+        model_for_chain = composed.model or self.model
+        adapter = await build_fallback_llm(
+            primary_model=model_for_chain,
+            fallback_models=list(fallback_models or []),
+            user_provider_config=self._provider_config,
+            # self._provider_config is the NARROWED flat single-provider
+            # shape ({"model","api_key","base_url"}), not the provider-keyed
+            # dict get_adapter_for_user expects — provider_key tells
+            # build_fallback_llm to wrap it per-attempt (final-review C1,
+            # spec 2026-08-11-batch-llm-fallback). "translation" matches
+            # resolve_task_ai_config's own task_key for this module so the
+            # pre-resolved platform-catalog gate agrees with the primary
+            # model's resolver.
+            provider_key=self._provider_key,
+            module="translation",
+        )
         runner = AgentRunner(
             adapter=adapter,
             skill_tool=SkillToolService(get_skill_repository()),
@@ -189,6 +184,9 @@ class TranslateService:
         except AgentPausedError as err:
             logger.warning(f"[Translate] agent paused: {err}")
             return None
-        except Exception as e:
-            logger.error(f"[Translate] run failed: {e}")
-            return None
+        # LLM 类异常(AllModelsFailed/LLMCallError 及其他意外)一律 propagate:
+        # 没有 workflow 兜着,这条是同步 API —— translate_gen_prompt 的
+        # catch-all 放行这两类,由 core/provider_errors.py 的全局 handler 产出
+        # 503 provider_rate_limit / 502 provider_auth。吞成 None 会让端点退化
+        # 成"Translation produced no result"的 502(且 5xx body 被 exceptions.py
+        # 掩成 Internal server error),用户永远看不到真因(spec §1-F3)。
