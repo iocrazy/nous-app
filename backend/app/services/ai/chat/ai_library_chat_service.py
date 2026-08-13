@@ -568,11 +568,21 @@ class AILibraryChatService:
             engine = None
 
         if engine is not None:
+            # Keep this dict and the ComposerInput below field-for-field
+            # identical: the engine branch is the only one that runs in
+            # production, so anything passed only to the fallback is
+            # effectively dead. tests/test_chat_context_engine_parity.py
+            # enforces it.
             payload = await engine.assemble(
                 {
                     "agent_slug": agent_slug,
                     "request_instructions": request_instructions,
                     "session_id": session_id,
+                    "graph_facts": stack.graph_facts,
+                    "user_context": stack.user_context,
+                    "agent_memory_facts": stack.agent_memory_facts,
+                    "override_user_id": user_id,
+                    "override_team_id": session.get("team_id"),
                 }
             )
             composed = payload.metadata["composed"]
@@ -582,6 +592,7 @@ class AILibraryChatService:
                 ComposerInput(
                     agent_slug=agent_slug,
                     request_instructions=request_instructions,
+                    session_id=session_id,
                     graph_facts=stack.graph_facts,
                     user_context=stack.user_context,
                     agent_memory_facts=stack.agent_memory_facts,

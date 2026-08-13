@@ -20,10 +20,26 @@ Request shape this engine accepts:
         "session_id": Optional[str],
         "model_override": Optional[str],
         "user_messages": list[dict],                # passed through verbatim
+        # Agent-overrides (mig 341) — without these the composer resolves
+        # the pristine system preset, so a caller's customized model /
+        # persona silently vanishes from the prompt and the run telemetry.
+        "override_user_id": Optional[Any],
+        "override_team_id": Optional[int],
+        # Memory injections the caller already paid to recall.
+        "graph_facts": list[str],
+        "user_context": Optional[str],
+        "agent_memory_facts": list[str],
     }
 
 Anything else in the dict is ignored — keeps the engine forward-compat
 with future call-sites that want to attach extra hints.
+
+Every key here maps 1:1 onto a ``ComposerInput`` field: this engine is
+the production path, so a field it fails to forward is a field that does
+not exist as far as the running system is concerned. Adding a field to
+``ComposerInput`` means adding it here too — see
+``tests/test_chat_context_engine_parity.py``, which fails when the engine
+path and the direct-composer path disagree on any field.
 """
 
 from __future__ import annotations
@@ -86,6 +102,11 @@ class ChatContextEngine:
                 request_instructions=request.get("request_instructions"),
                 session_id=request.get("session_id"),
                 model_override=request.get("model_override"),
+                override_user_id=request.get("override_user_id"),
+                override_team_id=request.get("override_team_id"),
+                graph_facts=list(request.get("graph_facts") or []),
+                user_context=request.get("user_context"),
+                agent_memory_facts=list(request.get("agent_memory_facts") or []),
             )
         )
 
