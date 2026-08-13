@@ -9,6 +9,7 @@ import {
   deriveGrid,
   deriveMaskCutout,
   deriveOutpaint,
+  getCanvas,
   getOrCreateStoryboardCanvas,
   saveCanvas,
 } from './canvasService';
@@ -120,6 +121,46 @@ describe('getOrCreateStoryboardCanvas', () => {
       }),
     );
     await expect(getOrCreateStoryboardCanvas('missing')).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// `can_edit` is the upfront write-permission signal the backend added
+// alongside the load payloads (scope_guards.can_write_project — the
+// non-raising twin of the guard the PUT runs). Fixtures below copy the
+// REAL wire shape of those two endpoints: the canvases router stringifies
+// its snowflake ids (`str(out["id"])`) and appends `can_edit` as a JSON
+// boolean, so `id`/`project_id` are strings and `can_edit` is a bare bool
+// — not the numbers the scenes/shots routers return for their ids.
+describe('can_edit passes through the load endpoints', () => {
+  it('getCanvas surfaces can_edit:false', async () => {
+    fetchMock.mockResolvedValueOnce(
+      envelope({ ...serverRow, id: '337610660408263', can_edit: false }),
+    );
+
+    const canvas = await getCanvas('337610660408263');
+
+    expect(canvas.can_edit).toBe(false);
+  });
+
+  it('getCanvas surfaces can_edit:true', async () => {
+    fetchMock.mockResolvedValueOnce(envelope({ ...serverRow, can_edit: true }));
+    expect((await getCanvas('4242')).can_edit).toBe(true);
+  });
+
+  it('getOrCreateStoryboardCanvas surfaces can_edit', async () => {
+    fetchMock.mockResolvedValueOnce(
+      envelope({ ...serverRow, id: '5150', kind: 'storyboard', episode_id: '900', can_edit: false }),
+    );
+
+    expect((await getOrCreateStoryboardCanvas('900')).can_edit).toBe(false);
+  });
+
+  it('a payload without the field yields undefined, not false', async () => {
+    // Matters because the store treats `undefined` as "no permission
+    // statement on this payload" (keep the current latch) rather than
+    // "read-only" — see canvasCoreStore.applyServerRow.
+    fetchMock.mockResolvedValueOnce(envelope(serverRow));
+    expect((await getCanvas('4242')).can_edit).toBeUndefined();
   });
 });
 

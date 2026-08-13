@@ -199,23 +199,28 @@ interface CanvasState {
   saveStatus: CanvasSaveStatus;
   saveError: string | null;
   /**
-   * The server refused this session's write (HTTP 403 — e.g. a viewer-role
-   * member opening a team canvas). Latched by `doSave` and cleared only by a
-   * fresh `applyServerRow` / `reset`.
+   * This session may not write the canvas.
    *
-   * Two consequences, both about not turning a permission fact into a
+   * Set UP FRONT from the load response's `can_edit` (the same verdict the
+   * PUT's write guard reaches — `scope_guards.can_write_project`), so a
+   * viewer never sends the doomed PUT that used to be the only way to find
+   * out. `doSave`'s 403 latch is kept as the BACKSTOP for what the load
+   * can't know: an older backend that doesn't send the field, and a
+   * permission revoked mid-session.
+   *
+   * Three consequences, all about not turning a permission fact into a
    * failure loop (2026-08-12 production: a viewer's load-time
    * sanitize/reconcile autosave 403'd, the debounce re-armed on every
    * subsequent change and the UI flashed "Save failed" — two PUTs inside the
    * same second observed on the real row):
    *   1. `markDirty` stops scheduling saves, and `doSave` early-returns, so
-   *      NO further PUT is ever sent from this load.
+   *      NO PUT is ever sent from a read-only load.
    *   2. The badge reads "Read-only" instead of the red "Save failed".
-   *
-   * Local editing (drag, delete) is deliberately still allowed — it just
-   * never lands. Follow-up: make the surface genuinely non-interactive
-   * (React Flow `nodesDraggable`/`elementsSelectable`) so a viewer isn't
-   * offered gestures whose result is silently discarded.
+   *   3. The surface withdraws its editing gestures — see `CanvasSurface`
+   *      (drag / connect / knife / create menu), `useCanvasShortcuts`
+   *      (delete / paste / duplicate / group / undo) and the command
+   *      palette. Panning, zooming and selecting-to-inspect stay live:
+   *      they are how a viewer reads the document, and none of them dirty it.
    */
   readOnly: boolean;
   conflict: Canvas | null;
@@ -382,7 +387,28 @@ export function createCanvasCoreStore(
   let mountEpochCounter = 0;
 
   const useStore = create<CanvasState>((set, get) => {
-    function applyServerRow(row: Canvas): void {
+    /**
+     * Adopt a server row as the document.
+     *
+     * `fromLoad` marks the two calls that are a NEW permission question —
+     * `loadCanvas` (a canvas the user just opened). Everything else
+     * (`applyRemoteUpdate`'s rebase, `resolveConflictWithServer`) is the
+     * SAME canvas in the same session, so it must not silently re-open a
+     * write channel the server already refused.
+     *
+     * Precedence, in order:
+     *   1. `row.can_edit` present → it decides. This is the upfront path:
+     *      the load response says so before a single PUT is attempted.
+     *   2. absent + `fromLoad` → writable (the pre-`can_edit` default; the
+     *      403 latch in `doSave` remains the backstop, e.g. against an
+     *      older backend or a mid-session permission change).
+     *   3. absent + not a load → keep the current latch. A realtime row
+     *      carries no permission statement, and treating "silent" as
+     *      "writable" would unlock a viewer's surface on every broadcast.
+     */
+    function applyServerRow(row: Canvas, opts: { fromLoad?: boolean } = {}): void {
+      const stated = typeof row.can_edit === 'boolean' ? !row.can_edit : undefined;
+      const readOnly = stated ?? (opts.fromLoad ? false : get().readOnly);
       set({
         canvasId: row.id,
         kind: row.kind,
@@ -407,11 +433,14 @@ export function createCanvasCoreStore(
         saveStatus: 'idle',
         saveError: null,
         // A new load is a new permission question. The store is a module-level
-        // singleton reused across mounts (and `applyServerRow` also runs for a
-        // realtime rebase / conflict resolve), so a latch left over from a
-        // canvas the user could only read would silently mute saves on the
-        // NEXT canvas they open with full rights.
-        readOnly: false,
+        // singleton reused across mounts, so this must be ASSIGNED on every
+        // load, never merely left alone: a latch left over from a canvas the
+        // user could only read would silently mute saves on the NEXT canvas
+        // they open with full rights, and (since `can_edit` landed) the
+        // reverse leak matters just as much — an unconditional `false` here
+        // would hand a viewer a writable surface for the 500ms until the
+        // doomed PUT came back 403.
+        readOnly,
         conflict: null,
         revision: 0,
         persistedRevision: 0,
@@ -674,7 +703,9 @@ export function createCanvasCoreStore(
         set({ loadStatus: 'loading', loadError: null, mountEpoch: mountEpochCounter });
         try {
           const row = await loadImpl(canvasId);
-          applyServerRow(row);
+          // `fromLoad` — this response is the authoritative permission
+          // statement for the canvas being opened (see applyServerRow).
+          applyServerRow(row, { fromLoad: true });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           set({ loadStatus: 'error', loadError: message });

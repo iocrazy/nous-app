@@ -72,6 +72,20 @@ function subsequenceMatch(query: string, target: string): boolean {
  * Returns a new array on every call; callers should memoize if needed.
  */
 export function buildCanvasCommands(): Command[] {
+  /**
+   * Read-only session (`can_edit:false` on the load, or a latched 403).
+   * Every command that would mutate the document is greyed out rather than
+   * hidden — the palette is also how a user learns what a canvas can do,
+   * and silently shrinking the list would read as "this build lost undo".
+   * Read commands (select all, clear selection) stay enabled.
+   *
+   * Read lazily inside each `enabled()` like every other predicate here,
+   * so a mid-session 403 latch takes effect without rebuilding the list.
+   */
+  function writable(): boolean {
+    return !useCanvasCoreStore.getState().readOnly;
+  }
+
   // ---- Store actions -------------------------------------------------------
 
   const storeActions: Command[] = [
@@ -83,7 +97,7 @@ export function buildCanvasCommands(): Command[] {
         useCanvasCoreStore.getState().undo();
       },
       enabled() {
-        return useCanvasCoreStore.getState().canUndo();
+        return writable() && useCanvasCoreStore.getState().canUndo();
       },
     },
     {
@@ -94,7 +108,7 @@ export function buildCanvasCommands(): Command[] {
         useCanvasCoreStore.getState().redo();
       },
       enabled() {
-        return useCanvasCoreStore.getState().canRedo();
+        return writable() && useCanvasCoreStore.getState().canRedo();
       },
     },
     {
@@ -123,13 +137,14 @@ export function buildCanvasCommands(): Command[] {
       run() {
         void useCanvasCoreStore.getState().flushSave();
       },
+      enabled: writable,
     },
   ];
 
   // ---- Node-add commands (smart canvas only) --------------------------------
 
   function smartOnly(): boolean {
-    return useCanvasCoreStore.getState().kind === 'smart';
+    return writable() && useCanvasCoreStore.getState().kind === 'smart';
   }
 
   const nodeAddCommands: Command[] = [

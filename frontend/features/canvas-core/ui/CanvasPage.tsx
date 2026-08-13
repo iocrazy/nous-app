@@ -132,6 +132,10 @@ export function CanvasView({
 
   useCanvasShortcuts({
     enabled: loadStatus === 'ready',
+    // Mutating chords (delete / paste / duplicate / group / undo / knife)
+    // are dropped for a read-only session; palette, help, copy, select-all
+    // and Esc stay — see the hook's own `readOnly` doc.
+    readOnly,
     onOpenPalette: () => setPaletteOpen(true),
     onOpenHelp: () => setHelpOpen(true),
   });
@@ -569,10 +573,18 @@ export function CanvasView({
           </div>
         </div>
       )}
-      {/* IC 普通画布's top node strip — Standard canvases only. */}
-      {kind === 'smart' && <TopNodeBar surfaceRef={surfaceRef} />}
-      {isSmartFamily(kind) && <ArrangeSelectedButton />}
-      {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
+      {/* Authoring chrome — every one of these three exists solely to WRITE
+          (add a node, re-lay-out the selection, run a generation into the
+          document), so a read-only session gets none of them. Unlike the
+          palette (which greys its write commands out to stay a discoverable
+          index of what a canvas can do), these are pure action affordances:
+          a disabled-but-present toolbar would just be furniture. The
+          "Read-only" badge is what explains their absence. */}
+      {kind === 'smart' && !readOnly && <TopNodeBar surfaceRef={surfaceRef} />}
+      {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
+      {isSmartFamily(kind) && !readOnly && (
+        <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />
+      )}
       <CanvasConflictDialog />
       <SaveBadge status={saveStatus} error={saveError} readOnly={readOnly} t={t} />
       <CommandPalette

@@ -95,6 +95,20 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const selection = useCanvasCoreStore((s) => s.selection);
   const kind = useCanvasCoreStore((s) => s.kind);
+  /**
+   * Read-only session (`can_edit:false` on the load, or a 403 latched
+   * later). Every EDIT gesture below is withdrawn — not merely ignored
+   * downstream: before this, a viewer could drag, wire, cut and delete,
+   * with the store swallowing all of it at `markDirty`, so the surface
+   * looked editable and quietly discarded the work.
+   *
+   * What stays live: panning, zooming, the minimap, node/edge SELECTION
+   * (view-only state — `select` changes never reach `connections_json` /
+   * `nodes_json` and never dirty the document) and React Flow's own
+   * measurement pass (`dimensions` changes; suppressing those would leave
+   * every node `visibility:hidden`, the 2026-08-12 blank-canvas symptom).
+   */
+  const readOnly = useCanvasCoreStore((s) => s.readOnly);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
@@ -217,6 +231,22 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       if (rest.length === 0) return;
       const current = useCanvasCoreStore.getState()
         .nodes as unknown as typeof rfNodes;
+      // Read-only: `dimensions` (React Flow's measurement pass) is the ONE
+      // change type that must still land — NodeWrapper keeps a node
+      // `visibility:hidden` until it has dimensions, which is exactly the
+      // 2026-08-12 blank-canvas symptom. Everything else is a document
+      // edit and is DROPPED, not merely left unsaved: `nodesDraggable=
+      // false` already stops position changes at the source, and this
+      // default-deny remainder is what keeps a future RF change type from
+      // slipping an edit past the prop switches.
+      if (readOnly) {
+        const measure = rest.filter((c) => c.type === 'dimensions');
+        if (measure.length === 0) return;
+        setNodesTransient(
+          applyNodeChanges(measure, current) as unknown as CanvasNode[],
+        );
+        return;
+      }
       const next = applyNodeChanges(rest, current);
       // Fix 1 — mid-drag ticks: ALL changes are position-type with dragging:true.
       // Route these through setNodesDragTick which skips the historyTimer reset,
@@ -240,7 +270,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         setNodesTransient(next as unknown as CanvasNode[]);
       }
     },
-    [rfNodes, setNodes, setNodesDragTick, setNodesTransient],
+    [readOnly, rfNodes, setNodes, setNodesDragTick, setNodesTransient],
   );
 
   const onEdgesChange = useCallback(
@@ -260,6 +290,9 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       }
       const docChanges = changes.filter((c) => c.type !== 'select');
       if (docChanges.length === 0) return;
+      // Read-only: edge selection (handled above) is view-only and stays;
+      // remove/replace changes never reach `connections_json`.
+      if (readOnly) return;
       // Strip view-only fields before the store: the run-state className
       // (and RF's selected flag) must never reach connections_json — stale
       // decoration in the DB row makes collaborators' saves diverge
@@ -272,13 +305,14 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       });
       setConnections(next as unknown as CanvasConnection[]);
     },
-    [rfEdges, setConnections],
+    [readOnly, rfEdges, setConnections],
   );
 
   // One-time solo-drop alignment snap committed through the store's setNodes
   // action so revision/persist stay consistent.
   const onNodesSnap = useCallback(
     (snapped: AnyNode[]) => {
+      if (readOnly) return;
       // The engine hands back RF-rendered nodes — strip RF-internal fields
       // (measured/width/height/selected/dragging) so size snapshots never
       // reach the document (stale ones clamp the node box on reload).
@@ -286,7 +320,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         (snapped as unknown as CanvasNode[]).map(stripRfInternals),
       );
     },
-    [setNodes],
+    [readOnly, setNodes],
   );
 
   // Drop membership (IC parity 1b): a solo node dropped with its center
@@ -295,6 +329,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   // snap-connect drops (their position is restored, not committed).
   const onNodeDragStop = useCallback(
     (node: AnyNode, ctx: NodeDragStopContext) => {
+      if (readOnly) return;
       if (!isSmartFamily(kind) || ctx.isGroupDrop || ctx.snapConnected) return;
       const store = useCanvasCoreStore.getState();
       const sizes = new Map(
@@ -329,7 +364,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       const next = applyDropMembership(store.nodes, String(node.id), sizes);
       if (next) store.setNodes(next);
     },
-    [kind],
+    [kind, readOnly],
   );
 
   const onMove = useCallback(
@@ -360,6 +395,10 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   // `toReactFlowEdges` round-trips them). Invalid wires are dropped silently.
   const onConnect = useCallback(
     (connection: Connection) => {
+      // Belt-and-braces: `allowConnect={false}` already detaches this
+      // handler from React Flow in a read-only session, but `onSnapConnect`
+      // calls it directly too.
+      if (readOnly) return;
       if (!validateCanvasConnection(connection, kind, nodeTypeById)) return;
       const sourceHandle = connection.sourceHandle ?? null;
       const targetHandle = connection.targetHandle ?? null;
@@ -382,7 +421,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       };
       setConnections([...connections, newEdge]);
     },
-    [kind, nodeTypeById, connections, setConnections],
+    [readOnly, kind, nodeTypeById, connections, setConnections],
   );
 
   // Drag-snap-connect (Infinite-Canvas parity G1, smart only): a ctrl-dropped
@@ -398,6 +437,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
 
   const onSnapConnect = useCallback(
     (args: { source: AnyNode; target: AnyNode; dragStartPosition: { x: number; y: number } }) => {
+      if (readOnly) return;
       onConnect({
         source: args.source.id,
         target: args.target.id,
@@ -413,13 +453,14 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         ) as CanvasNode[],
       );
     },
-    [onConnect, setNodes],
+    [readOnly, onConnect, setNodes],
   );
 
   const knifeActive = useKnifeStore((s) => s.active);
   const exitKnife = useKnifeStore((s) => s.exit);
   const onKnifeCut = useCallback(
     (edgeIds: string[]) => {
+      if (readOnly) return;
       const cut = new Set(edgeIds);
       const store = useCanvasCoreStore.getState();
       store.setConnections(
@@ -434,7 +475,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         return next;
       });
     },
-    [],
+    [readOnly],
   );
 
   // 'storyboard' is deliberately excluded from `isSmartFamily` (T4/T5 — it
@@ -480,14 +521,26 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       onEdgesChange={onEdgesChange}
       onMove={onMove}
       onSelectionChange={setSelection}
-      allowConnect
+      // ---- Read-only: withdraw the editing gestures ----
+      // Dragging a node and dragging a wire off a handle are the two
+      // gestures React Flow itself owns; `allowConnect` is the engine's
+      // documented read-only switch (it also detaches drag-create's
+      // magnetic connect). `paneCreateMenu` is off because both of its
+      // triggers (pane double-click / right-click) exist only to CREATE a
+      // node — with it off, double-click reverts to RF's zoom, which is a
+      // fine read gesture. `elementsSelectable` is deliberately NOT
+      // touched: selection is view-only state that never dirties the
+      // document, and it is how a viewer inspects a node.
+      nodesDraggable={!readOnly}
+      nodesConnectable={!readOnly}
+      allowConnect={!readOnly}
       onConnect={onConnect}
       isValidConnection={isConnectionValid}
-      allowSnapConnect={isSmartFamily(kind)}
+      allowSnapConnect={!readOnly && isSmartFamily(kind)}
       snapProbeFor={snapProbeFor}
       onSnapConnect={onSnapConnect}
-      allowDragCreate
-      paneCreateMenu
+      allowDragCreate={!readOnly}
+      paneCreateMenu={!readOnly}
       renderCreateMenu={(ctx, onClose) => (
         <DragCreateMenu
           screenPosition={ctx.screenPosition}
@@ -498,7 +551,10 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         />
       )}
       renderOverlay={(container) =>
-        knifeActive && container ? (
+        // Knife is a delete gesture — never mounted for a read-only
+        // session (the `x` shortcut that arms it is blocked too, so this
+        // is the second of two locks).
+        !readOnly && knifeActive && container ? (
           <KnifeOverlay
             sampleEdges={() => sampleEdgesFromDom(container)}
             sampleNodes={() => sampleNodesFromDom(container)}

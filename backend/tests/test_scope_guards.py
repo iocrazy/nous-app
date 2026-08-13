@@ -24,6 +24,7 @@ from fastapi import HTTPException
 
 from app.core.deps import AuthContext
 from app.core.scope_guards import (
+    can_write_project,
     verify_project_write_access,
     verify_resource_write_access,
     verify_scope_access,
@@ -237,6 +238,73 @@ async def test_write_project_member_viewer_403(patch_session):
     with pytest.raises(HTTPException) as ei:
         await verify_project_write_access(project_id="1", auth=_auth("u1"))
     assert ei.value.status_code == 403
+
+
+# ─── can_write_project: non-raising twin of the write guard ───────────
+#
+# The canvas GET ships this verdict to the client as ``can_edit`` so a
+# read-only viewer never has to learn its rights by firing a PUT that is
+# guaranteed to 403. The predicate and the guard MUST agree on every cell
+# — they share ``_resolve_project_access``, and these tests pin that by
+# asserting both against the same fixtures.
+
+
+@pytest.mark.parametrize(
+    "tables, expected",
+    [
+        # owner (personal project, no team, no member rows)
+        ({"projects": [("u1", None)]}, True),
+        # team member — any team role is a project writer here
+        ({"projects": [("owner", "t1")], "team_members": [("t1",)]}, True),
+        # explicit project_members rows
+        ({"projects": [("owner", None)], "project_members": [("manager",)]}, True),
+        ({"projects": [("owner", None)], "project_members": [("editor",)]}, True),
+        ({"projects": [("owner", None)], "project_members": [("viewer",)]}, False),
+        ({"projects": [("owner", None)], "project_members": [("external",)]}, False),
+        # non-member of a team project
+        (
+            {"projects": [("owner", "t1")], "team_members": [], "project_members": []},
+            False,
+        ),
+    ],
+)
+async def test_can_write_project_matrix(patch_session, tables, expected):
+    patch_session(tables)
+    assert await can_write_project("1", "u1") is expected
+
+
+@pytest.mark.parametrize(
+    "tables",
+    [
+        {"projects": [("u1", None)]},
+        {"projects": [("owner", "t1")], "team_members": [("t1",)]},
+        {"projects": [("owner", None)], "project_members": [("editor",)]},
+        {"projects": [("owner", None)], "project_members": [("viewer",)]},
+        {"projects": [("owner", "t1")], "team_members": [], "project_members": []},
+    ],
+)
+async def test_can_write_project_agrees_with_the_write_guard(patch_session, tables):
+    """No drift: whatever the predicate says, the guard must do — otherwise
+    the UI's read-only state and the server's 403 disagree."""
+    patch_session(tables)
+    predicted = await can_write_project("1", "u1")
+
+    patch_session(tables)
+    try:
+        await verify_project_write_access(project_id="1", auth=_auth("u1"))
+        guard_allowed = True
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        guard_allowed = False
+
+    assert predicted is guard_allowed
+
+
+async def test_can_write_project_missing_project_is_false_not_404(patch_session):
+    """The guard 404s a missing project; the predicate has no HTTP status to
+    return, so 'nobody can write a row that isn't there' → False."""
+    patch_session({"projects": []})
+    assert await can_write_project("1", "u1") is False
 
 
 # ─── script/scene/shot family: read-access project_members fallback ───

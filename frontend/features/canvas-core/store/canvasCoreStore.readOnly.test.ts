@@ -62,6 +62,134 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * Upfront permission (2026-08-13). The 403 latch above is the BACKSTOP;
+ * the load response's `can_edit` is now the primary source, so a viewer's
+ * session never sends the doomed PUT at all.
+ */
+describe('canvasCoreStore — can_edit on load', () => {
+  function stubs(row: Canvas) {
+    return {
+      loadImpl: vi.fn(async (): Promise<Canvas> => ({ ...row })),
+      saveImpl: vi.fn(
+        async (): Promise<CanvasSaveResult> => ({ ok: true, canvas: { ...row } }),
+      ),
+    };
+  }
+
+  it('can_edit:false → read-only, and ZERO PUTs for the whole session', async () => {
+    // The headline regression: before this, loading as a viewer cost one
+    // guaranteed-403 PUT (the load-time sanitize/reconcile autosave) just
+    // to discover a fact the server could have stated in the GET.
+    const s = stubs({ ...baseCanvas, can_edit: false });
+    const useStore = createCanvasCoreStore({ ...s, debounceMs: 500 });
+
+    await useStore.getState().loadCanvas('337610660408263');
+    expect(useStore.getState().readOnly).toBe(true);
+
+    // Every channel that would normally schedule or force a save.
+    useStore.getState().setNodes([{ id: 'shot-1', position: { x: 0, y: 0 } }]);
+    useStore.getState().setViewport({ x: 5, y: 5, zoom: 1 });
+    useStore.getState().patchNode('shot-1', { data: { run_status: 'running' } });
+    useStore.getState().flushViewportDirty();
+    await vi.advanceTimersByTimeAsync(5000);
+    await useStore.getState().flushSave();
+
+    expect(s.saveImpl).toHaveBeenCalledTimes(0);
+  });
+
+  it('can_edit:true → writable, saves normally', async () => {
+    const s = stubs({ ...baseCanvas, can_edit: true });
+    const useStore = createCanvasCoreStore({ ...s, debounceMs: 0 });
+
+    await useStore.getState().loadCanvas('337610660408263');
+    expect(useStore.getState().readOnly).toBe(false);
+
+    useStore.getState().setNodes([{ id: 'shot-1', position: { x: 0, y: 0 } }]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(s.saveImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('a load with no can_edit stays writable (older backend → 403 backstop)', async () => {
+    const s = stubs(baseCanvas); // field absent entirely
+    const useStore = createCanvasCoreStore({ ...s, debounceMs: 0 });
+
+    await useStore.getState().loadCanvas('337610660408263');
+
+    expect(useStore.getState().readOnly).toBe(false);
+  });
+
+  /** Serves `rows` in order, one per `loadCanvas` call. */
+  function sequencedLoad(rows: Canvas[]) {
+    let call = 0;
+    return vi.fn(async (): Promise<Canvas> => ({ ...rows[call++] }));
+  }
+
+  it('a read-only canvas does not leak its lock onto the NEXT canvas loaded', async () => {
+    // The store is a module-level singleton reused across mounts.
+    const loadImpl = sequencedLoad([
+      { ...baseCanvas, id: 'ro', can_edit: false },
+      { ...baseCanvas, id: 'rw', can_edit: true },
+    ]);
+    const saveImpl = vi.fn(
+      async (): Promise<CanvasSaveResult> => ({ ok: true, canvas: { ...baseCanvas } }),
+    );
+    const useStore = createCanvasCoreStore({ loadImpl, saveImpl, debounceMs: 0 });
+
+    await useStore.getState().loadCanvas('ro');
+    expect(useStore.getState().readOnly).toBe(true);
+
+    await useStore.getState().loadCanvas('rw');
+    expect(useStore.getState().readOnly).toBe(false);
+
+    useStore.getState().setNodes([{ id: 'n1', position: { x: 0, y: 0 } }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saveImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('the reverse leak too: a writable canvas does not unlock the NEXT read-only one', async () => {
+    const loadImpl = sequencedLoad([
+      { ...baseCanvas, id: 'rw', can_edit: true },
+      { ...baseCanvas, id: 'ro', can_edit: false },
+    ]);
+    const saveImpl = vi.fn(
+      async (): Promise<CanvasSaveResult> => ({ ok: true, canvas: { ...baseCanvas } }),
+    );
+    const useStore = createCanvasCoreStore({ loadImpl, saveImpl, debounceMs: 0 });
+
+    await useStore.getState().loadCanvas('rw');
+    await useStore.getState().loadCanvas('ro');
+
+    expect(useStore.getState().readOnly).toBe(true);
+    useStore.getState().setNodes([{ id: 'n1', position: { x: 0, y: 0 } }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saveImpl).toHaveBeenCalledTimes(0);
+  });
+
+  it('a realtime rebase carries no permission statement — the lock survives it', async () => {
+    // Supabase Realtime broadcasts the raw `canvases` row: no caller, so
+    // no can_edit. Treating "silent" as "writable" would unlock a viewer's
+    // surface on every broadcast.
+    const s = stubs({ ...baseCanvas, can_edit: false });
+    const useStore = createCanvasCoreStore({ ...s, debounceMs: 0 });
+    await useStore.getState().loadCanvas('337610660408263');
+    expect(useStore.getState().readOnly).toBe(true);
+
+    useStore.getState().applyRemoteUpdate({
+      ...baseCanvas, // no can_edit — exactly what Realtime delivers
+      base_updated_at: '2026-08-12T10:00:00+00:00',
+      nodes_json: [{ id: 'shot-remote', position: { x: 1, y: 1 } }],
+    });
+
+    expect(useStore.getState().readOnly).toBe(true);
+    expect(useStore.getState().nodes).toHaveLength(1); // the rebase still applied
+    useStore.getState().setNodes([{ id: 'x', position: { x: 0, y: 0 } }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.saveImpl).toHaveBeenCalledTimes(0);
+  });
+});
+
 describe('canvasCoreStore — read-only latch on 403', () => {
   it('starts writable', async () => {
     const useStore = createCanvasCoreStore({ ...makeForbiddenStubs(), debounceMs: 0 });

@@ -1,20 +1,22 @@
 import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clearClipboard } from '../store/clipboard';
+import { clearClipboard, copyToClipboard, readClipboard } from '../store/clipboard';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
 function Host({
   enabled,
+  readOnly,
   onOpenPalette,
   onOpenHelp,
 }: {
   enabled?: boolean;
+  readOnly?: boolean;
   onOpenPalette?: () => void;
   onOpenHelp?: () => void;
 }) {
-  useCanvasShortcuts({ enabled, onOpenPalette, onOpenHelp });
+  useCanvasShortcuts({ enabled, readOnly, onOpenPalette, onOpenHelp });
   return null;
 }
 
@@ -463,5 +465,83 @@ describe('useCanvasShortcuts — group / ungroup (P1-10)', () => {
     expect(
       useCanvasCoreStore.getState().nodes.some((n) => (n as { type?: string }).type === 'group'),
     ).toBe(false);
+  });
+});
+
+/**
+ * Read-only session (`can_edit:false` on the load, or a latched 403).
+ *
+ * Before this, the mutating chords still ran: the store swallowed the
+ * result at `markDirty`, so a viewer could press Delete, watch three nodes
+ * disappear, and be told nothing. `revision` is the sharpest assertion
+ * available — a real document edit always bumps it, and it is exactly what
+ * the save channel keys off — but the node/connection arrays are asserted
+ * too, because `markDirty` no-ops under `readOnly` and would otherwise
+ * leave a silent local mutation looking clean.
+ */
+describe('useCanvasShortcuts — read-only withdraws the write chords', () => {
+  function snapshot() {
+    const s = useCanvasCoreStore.getState();
+    return {
+      revision: s.revision,
+      nodeIds: s.nodes.map((n) => (n as { id: string }).id),
+      connectionIds: s.connections.map((c) => (c as { id: string }).id),
+    };
+  }
+
+  it.each([
+    ['Delete', { key: 'Delete' }],
+    ['Backspace', { key: 'Backspace' }],
+    ['mod+V (paste)', { key: 'v', meta: true }],
+    ['mod+D (duplicate)', { key: 'd', meta: true }],
+    ['mod+G (group)', { key: 'g', meta: true }],
+    ['mod+Shift+G (ungroup)', { key: 'g', meta: true, shift: true }],
+    ['mod+Z (undo)', { key: 'z', meta: true }],
+    ['mod+Shift+Z (redo)', { key: 'z', meta: true, shift: true }],
+    ['mod+Y (redo)', { key: 'y', meta: true }],
+  ])('%s does nothing', (_label, keys) => {
+    useCanvasCoreStore.setState({ kind: 'smart', readOnly: true, selection: ['a', 'b'] });
+    // Seed the clipboard so paste/duplicate would otherwise have material.
+    copyToClipboard('smart', [{ id: 'a', position: { x: 0, y: 0 } }], []);
+    render(<Host readOnly />);
+    const before = snapshot();
+
+    fireKey(keys as Parameters<typeof fireKey>[0]);
+
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('bare x cannot arm knife mode', async () => {
+    const { useKnifeStore } = await import('../../../canvas-kit/knifeStore');
+    useCanvasCoreStore.setState({ readOnly: true });
+    render(<Host readOnly />);
+
+    fireKey({ key: 'x' });
+
+    expect(useKnifeStore.getState().active).toBe(false);
+  });
+
+  it('the READ chords still work — a viewer must be able to navigate', () => {
+    useCanvasCoreStore.setState({ readOnly: true });
+    const onOpenPalette = vi.fn();
+    const onOpenHelp = vi.fn();
+    render(<Host readOnly onOpenPalette={onOpenPalette} onOpenHelp={onOpenHelp} />);
+
+    fireKey({ key: 'a', meta: true });
+    expect(useCanvasCoreStore.getState().selection).toEqual(['a', 'b', 'c']);
+
+    fireKey({ key: 'Escape' });
+    expect(useCanvasCoreStore.getState().selection).toEqual([]);
+
+    fireKey({ key: 'k', meta: true });
+    expect(onOpenPalette).toHaveBeenCalledTimes(1);
+    fireKey({ key: '?' });
+    expect(onOpenHelp).toHaveBeenCalledTimes(1);
+
+    // Copy is read-only by nature: it fills the in-memory clipboard, which
+    // is how a viewer lifts something into a canvas they CAN write.
+    useCanvasCoreStore.getState().setSelection(['a']);
+    fireKey({ key: 'c', meta: true });
+    expect(readClipboard()?.nodes).toHaveLength(1);
   });
 });

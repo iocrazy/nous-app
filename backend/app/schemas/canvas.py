@@ -54,6 +54,18 @@ class CanvasResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
+    can_edit: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether this caller may write the canvas — the same verdict the "
+            "PUT's write guard reaches (scope_guards.can_write_project). Set "
+            "on the load responses (GET /canvases/{id}, GET "
+            "/canvases/storyboard) so the client can render read-only up "
+            "front instead of discovering it from a 403. None = not supplied "
+            "on this payload (e.g. the 409 conflict body, which is only "
+            "reachable after the write guard already passed)."
+        ),
+    )
 
 
 class CanvasCreate(BaseModel):

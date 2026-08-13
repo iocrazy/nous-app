@@ -22,6 +22,7 @@ from loguru import logger
 
 from app.core.deps import AuthDep
 from app.core.scope_guards import (
+    can_write_project,
     verify_project_read_access,
     verify_project_write_access,
 )
@@ -48,13 +49,18 @@ from app.services.modules.gate import require_module
 router = APIRouter(dependencies=[Depends(require_module("projects"))])
 
 
-def _to_response(row: dict) -> dict:
+def _to_response(row: dict, *, can_edit: bool | None = None) -> dict:
     """Normalise raw DB row → CanvasResponse-shaped dict.
 
     Supabase returns BIGINT IDs as JSON numbers; we stringify so the
     frontend doesn't lose snowflake precision (the bigIntSafeFetch
     wrapper is for raw client fetches — going through FastAPI we hand
     the stringification ourselves).
+
+    ``can_edit`` (when passed) rides along on the LOAD responses so the
+    client knows its write rights before it attempts a write. Omitted
+    everywhere else — a list/summary payload has no single canvas whose
+    permission it would describe.
     """
     if not row:
         return row
@@ -67,6 +73,8 @@ def _to_response(row: dict) -> dict:
         out["episode_id"] = str(out["episode_id"])
     if "created_by" in out and out["created_by"] is not None:
         out["created_by"] = str(out["created_by"])
+    if can_edit is not None:
+        out["can_edit"] = bool(can_edit)
     return out
 
 
@@ -419,7 +427,8 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
         # Pure read — any project member (owner / team / explicit
         # project_members row, any role) may fetch an existing storyboard.
         await verify_project_read_access(project_id=project_id, auth=auth)
-        return {"success": True, "data": _to_response(existing)}
+        can_edit = await can_write_project(project_id, auth.user_id)
+        return {"success": True, "data": _to_response(existing, can_edit=can_edit)}
 
     # No canvas yet: this GET is about to CREATE one, so it must pass the
     # same gate a POST would (read-only visitors should not be able to
@@ -440,7 +449,10 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
     )
     if row is None:
         raise HTTPException(status_code=500, detail="storyboard canvas create failed")
-    return {"success": True, "data": _to_response(row)}
+    # This branch only runs AFTER verify_project_write_access passed, so the
+    # caller demonstrably has write rights — no second round trip to re-ask
+    # the same question ``can_write_project`` would answer True.
+    return {"success": True, "data": _to_response(row, can_edit=True)}
 
 
 # ============================================================
@@ -453,12 +465,23 @@ async def get_canvas(
     auth: AuthDep,
     canvas_id: str = Path(..., description="Snowflake canvas ID"),
 ) -> dict:
-    await _gate_canvas_read(canvas_id, auth)
+    """Load one canvas.
+
+    The payload carries ``can_edit`` — the SAME verdict
+    ``verify_project_write_access`` would reach on the PUT (both resolve
+    through ``scope_guards._resolve_project_access``). Before this the
+    client had no way to learn its rights except by sending a doomed PUT
+    and reading the 403 off it: every viewer load cost one guaranteed-to-
+    fail write, and until it came back the UI happily offered edit
+    gestures whose results were silently discarded.
+    """
+    project_id = await _gate_canvas_read(canvas_id, auth)
     svc = CanvasService()
     row = await svc.get(canvas_id)
     if row is None:
         raise HTTPException(status_code=404, detail="canvas not found")
-    return {"success": True, "data": _to_response(row)}
+    can_edit = await can_write_project(project_id, auth.user_id)
+    return {"success": True, "data": _to_response(row, can_edit=can_edit)}
 
 
 @router.put("/canvases/{canvas_id}")
