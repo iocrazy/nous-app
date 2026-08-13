@@ -19,7 +19,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Sequence
 
-from .browser_runtime import apply_stealth, build_launch_kwargs
+from .browser_runtime import apply_stealth, build_launch_kwargs, viewport_kwargs
 from .config import get_settings
 from .dom import (
     click_element,
@@ -812,4 +812,5 @@ def _login_context_kwargs(environment: EnvironmentConfig | None) -> dict[str, An
             "longitude": environment.geo_lng,
         }
         kwargs["permissions"] = ["geolocation"]
+    kwargs.update(viewport_kwargs(environment))
     return kwargs

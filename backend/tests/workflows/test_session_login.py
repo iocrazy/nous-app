@@ -934,3 +934,241 @@ async def test_session_login_error_survives_a_pickle_round_trip():
     mod = importlib.import_module("app.workflows.session_login")
     revived = pickle.loads(pickle.dumps(mod.SessionLoginError("x", status="timeout")))
     assert isinstance(revived, mod.SessionLoginError)
+
+
+# ── 每账号浏览器环境（P2-4，mig 402 + 424） ─────────────────────────
+
+
+def _login_client(**extra):
+    client = MagicMock()
+    client.start_login = AsyncMock(
+        return_value=_snap(SessionStatus.WAITING_SCAN.value, qr=QR)
+    )
+    for k, v in extra.items():
+        setattr(client, k, v)
+    return client
+
+
+def _patched_start(client, repo):
+    return (
+        patch(
+            "app.services.distribution.browser_client.BrowserClient",
+            return_value=client,
+        ),
+        patch(
+            "app.repositories.social_accounts_repository.SocialAccountsRepository",
+            return_value=repo,
+        ),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            return_value=_manager(),
+        ),
+    )
+
+
+async def test_start_step_opens_the_login_context_with_a_generated_environment():
+    """**这条钉的是 P2-4 的实际缺口。**
+
+    在此之前 ``start_login_step`` 调的是 ``client.start_login(platform)`` ——
+    不带 environment。于是浏览器侧 ``_login_context_kwargs`` 那句"账号的环境在
+    绑定那一刻就钉住"的承诺是空的：登录用的永远是库默认值。
+    """
+    client = _login_client()
+    repo = MagicMock()
+    repo.taken_viewports = AsyncMock(return_value=[])
+
+    a, b, c = _patched_start(client, repo)
+    with a, b, c:
+        out = await inspect.unwrap(m.start_login_step)("wf-1", "douyin", "user", _USER)
+
+    env = client.start_login.await_args.kwargs.get("environment")
+    assert env is not None, "登录 context 没拿到 environment —— P2-4 的缺口原样还在"
+    assert env.locale == "zh-CN"
+    assert env.timezone_id == "Asia/Shanghai"
+    assert env.viewport_width and env.viewport_height
+    # 登录用的那一套必须原样传给 finalize 去钉住，否则"绑定时见到的指纹"与
+    # "以后每次用的指纹"是两套。
+    assert out["environment"]["viewport_width"] == env.viewport_width
+    assert out["environment"]["viewport_height"] == env.viewport_height
+
+
+async def test_start_step_avoids_a_viewport_a_sibling_account_already_uses():
+    from app.services.distribution.account_environment import SESSION_VIEWPORTS
+
+    client = _login_client()
+    repo = MagicMock()
+    repo.taken_viewports = AsyncMock(return_value=list(SESSION_VIEWPORTS[:-1]))
+
+    a, b, c = _patched_start(client, repo)
+    with a, b, c:
+        out = await inspect.unwrap(m.start_login_step)("wf-1", "douyin", "user", _USER)
+
+    assert repo.taken_viewports.await_args.args == ("user", _USER, "douyin")
+    w, h = SESSION_VIEWPORTS[-1]
+    got = (out["environment"]["viewport_width"], out["environment"]["viewport_height"])
+    assert got == (w, h)
+
+
+async def test_start_step_still_binds_when_the_viewport_lookup_fails():
+    """避让是锦上添花，不是绑号的前置条件 —— DB 抖一下不该挡住用户绑账号。"""
+    client = _login_client()
+    repo = MagicMock()
+    repo.taken_viewports = AsyncMock(side_effect=RuntimeError("db down"))
+
+    a, b, c = _patched_start(client, repo)
+    with a, b, c:
+        out = await inspect.unwrap(m.start_login_step)("wf-1", "douyin", "user", _USER)
+
+    assert out["login_session_id"] == SID
+    assert out["environment"]["viewport_width"]
+
+
+def _finalize_fakes(pin=None):
+    from app.services.distribution.browser_client import LoginState
+
+    state = LoginState(
+        result=SessionOpResult(True, "success", "ok", {}),
+        storage_state={"cookies": []},
+        platform_user_id="uid-1",
+        username="Test Creator",
+    )
+    repo = MagicMock()
+    repo.upsert_session_account = AsyncMock(
+        return_value={"id": "900", "username": "Test Creator"}
+    )
+    repo.pin_environment = pin or AsyncMock(
+        return_value={"viewport_width": 1600, "viewport_height": 900}
+    )
+    client = MagicMock()
+    client.get_login_state = AsyncMock(return_value=state)
+    return repo, client
+
+
+async def test_finalize_step_pins_the_environment_the_login_actually_used():
+    """账号入库后立刻钉住**本次登录用过的**那一套。
+
+    传别的（比如现场重新生成一套）就等于：平台在绑定那一刻见到的指纹，与它
+    之后每次见到的不是同一个。
+    """
+    repo, client = _finalize_fakes()
+    env_payload = {
+        "locale": "zh-CN",
+        "timezone_id": "Asia/Shanghai",
+        "viewport_width": 1600,
+        "viewport_height": 900,
+    }
+    with (
+        patch(
+            "app.services.distribution.browser_client.BrowserClient",
+            return_value=client,
+        ),
+        patch(
+            "app.repositories.social_accounts_repository.SocialAccountsRepository",
+            return_value=repo,
+        ),
+    ):
+        await inspect.unwrap(m.finalize_login_step)(
+            SID, "douyin", "user", _USER, _USER, env_payload
+        )
+
+    repo.pin_environment.assert_awaited_once()
+    assert repo.pin_environment.await_args.args == ("900",)
+    written = repo.pin_environment.await_args.kwargs
+    assert written["viewport_width"] == 1600
+    assert written["viewport_height"] == 900
+    assert written["locale"] == "zh-CN"
+    assert written["timezone_id"] == "Asia/Shanghai"
+    # 决定不设的字段一个都不许出现 —— 显式 None 会让"决定不设"与"忘了设"同形
+    for absent in (
+        "user_agent",
+        "geo_lat",
+        "geo_lng",
+        "proxy_url",
+        "fingerprint_profile_id",
+    ):
+        assert absent not in written
+
+
+async def test_a_failed_pin_does_not_undo_a_successful_bind():
+    """账号已经绑上了，环境没钉住只是退回默认值（mig 424 之前的行为）。
+    为此把成功的扫码判成失败、让用户重扫，是拿降级当故障。"""
+    repo, client = _finalize_fakes(pin=AsyncMock(side_effect=RuntimeError("db down")))
+    with (
+        patch(
+            "app.services.distribution.browser_client.BrowserClient",
+            return_value=client,
+        ),
+        patch(
+            "app.repositories.social_accounts_repository.SocialAccountsRepository",
+            return_value=repo,
+        ),
+    ):
+        out = await inspect.unwrap(m.finalize_login_step)(
+            SID,
+            "douyin",
+            "user",
+            _USER,
+            _USER,
+            {"viewport_width": 1600, "viewport_height": 900},
+        )
+
+    assert out["account_id"] == "900"
+
+
+async def test_workflow_hands_the_login_environment_to_finalize():
+    """编排层的接线：``start`` 生成的环境必须一路走到 ``finalize``。
+
+    两个 step 各自对了、中间没接上，是这类改动最容易留的缺口 —— 结果就是
+    环境生成了、登录也用了，但一行都没落库。
+    """
+    finalize = AsyncMock(
+        return_value={
+            "account_id": "900",
+            "username": "Test Creator",
+            "platform_user_id": "uid-1",
+        }
+    )
+    start = AsyncMock(
+        return_value={
+            "login_session_id": SID,
+            "status": "waiting_scan",
+            "environment": {
+                "locale": "zh-CN",
+                "timezone_id": "Asia/Shanghai",
+                "viewport_width": 1680,
+                "viewport_height": 1050,
+            },
+        }
+    )
+    result, error, _mgr, _closed = await _run_workflow(
+        poll_outcome={"outcome": "success", "status": "success", "message": "ok"},
+        finalize=finalize,
+        start=start,
+    )
+
+    assert error is None and result["status"] == "completed"
+    passed = finalize.await_args.args[5]
+    assert passed["viewport_width"] == 1680
+    assert passed["viewport_height"] == 1050
+
+
+async def test_workflow_replays_a_pre_migration_start_step_without_an_environment():
+    """mig 424 之前起的 workflow 重放时，DBOS 记着的 step 返回值没有
+    ``environment`` 键。用 ``[...]`` 取会 KeyError，把一次本可完成的重放变成
+    引擎错误。"""
+    finalize = AsyncMock(
+        return_value={
+            "account_id": "900",
+            "username": "Test Creator",
+            "platform_user_id": "uid-1",
+        }
+    )
+    start = AsyncMock(return_value={"login_session_id": SID, "status": "waiting_scan"})
+    result, error, _mgr, _closed = await _run_workflow(
+        poll_outcome={"outcome": "success", "status": "success", "message": "ok"},
+        finalize=finalize,
+        start=start,
+    )
+
+    assert error is None and result["status"] == "completed"
+    assert finalize.await_args.args[5] is None

@@ -71,6 +71,14 @@ class EnvironmentConfig(BaseModel):
     timezone_id: str | None = "Asia/Shanghai"
     geo_lat: float | None = None
     geo_lng: float | None = None
+    # mig 424 — per-account window size, the one fingerprint axis that can
+    # differ between accounts without contradicting anything else (a UA
+    # override does NOT move Client Hints; a timezone must match the exit IP).
+    # Both None = Playwright's default 1280x720, i.e. every account bound
+    # before mig 424. Bounds mirror the DB CHECK: the floor is the size the
+    # Douyin DOM flow is known to work at, the ceiling is the Xvfb screen.
+    viewport_width: int | None = Field(default=None, ge=1280, le=1920)
+    viewport_height: int | None = Field(default=None, ge=720, le=1080)
 
 
 class SessionValidateRequest(BaseModel):

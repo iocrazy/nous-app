@@ -99,7 +99,9 @@ async def test_start_login_returns_session_and_qrcode():
 
     assert captured["headers"][INTERNAL_TOKEN_HEADER] == "tok_test"
     assert captured["body"]["platform"] == "douyin"
-    # environment 的 6 个键全部显式发出（与 /validate 同款契约）
+    # environment 的 8 个键全部显式发出（与 /validate 同款契约）。
+    # viewport_* 是 mig 424 加的 —— 登录用的 context 必须和之后每次校验/发布
+    # 用的是同一套尺寸，所以两条链的键集合必须一致。
     assert set(captured["body"]["environment"]) == {
         "proxy_url",
         "user_agent",
@@ -107,6 +109,8 @@ async def test_start_login_returns_session_and_qrcode():
         "timezone_id",
         "geo_lat",
         "geo_lng",
+        "viewport_width",
+        "viewport_height",
     }
     assert snapshot.success is True
     assert snapshot.login_session_id == SID

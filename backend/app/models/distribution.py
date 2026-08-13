@@ -150,6 +150,11 @@ class AccountEnvironments(Base):
     )
     geo_lat: Mapped[float | None] = mapped_column(Double(53))
     geo_lng: Mapped[float | None] = mapped_column(Double(53))
+    # mig 424 — the one fingerprint axis that can differ per account today (a
+    # window size cannot contradict any other surface). NULL/NULL = Playwright's
+    # default 1280x720, which is what every account bound before mig 424 uses.
+    viewport_width: Mapped[int | None] = mapped_column(Integer)
+    viewport_height: Mapped[int | None] = mapped_column(Integer)
     fingerprint_profile_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")

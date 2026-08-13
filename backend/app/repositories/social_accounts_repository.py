@@ -92,6 +92,8 @@ _ENV_COLS = (
     "timezone_id",
     "geo_lat",
     "geo_lng",
+    "viewport_width",
+    "viewport_height",
     "fingerprint_profile_id",
 )
 # Labeled because account_environments.account_id/created_at/updated_at would
@@ -395,6 +397,99 @@ class SocialAccountsRepository:
         async with write_scope() as session:
             row = (await session.execute(stmt)).mappings().first()
         return _public_row(dict(row))
+
+    async def pin_environment(self, account_id: int, **env: Any) -> dict:
+        """Write the account's browser environment — **once, for good** (mig 402/424).
+
+        ``ON CONFLICT (account_id) DO NOTHING``, and that is the entire point of
+        the method rather than an optimisation. An account whose fingerprint
+        changes every login looks more like a stolen session than an account
+        with a fixed one does, so "re-bind" must NOT re-roll: rescanning the QR
+        code of an already-bound account (which ``upsert_session_account``
+        deliberately routes onto the existing row, including waking a soft-
+        deleted one, mig 416) has to land on the environment that account has
+        been publishing from all along.
+
+        Returns **the environment actually in force**, which on conflict is the
+        pre-existing row, not the one the caller proposed. ``DO NOTHING`` makes
+        ``RETURNING`` produce nothing on conflict — hence the second read. It is
+        not a race window worth locking over: two concurrent binds of the same
+        account both end up returning the same winning row, which is exactly the
+        contract ("whatever is pinned"), and the loser's proposal is discarded
+        either way.
+
+        ⚠️ There is deliberately no update path here and no ``refresh_``
+        sibling. Assigning a proxy later is a separate, explicit action on an
+        existing row — not something a login should be able to do by accident.
+        """
+        stmt = (
+            pg_insert(AccountEnvironments)
+            .values(account_id=_bigint(account_id), **env)
+            .on_conflict_do_nothing(index_elements=["account_id"])
+            .returning(*(getattr(AccountEnvironments, c) for c in _ENV_COLS))
+        )
+        async with write_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
+            if row is None:
+                row = (
+                    (
+                        await session.execute(
+                            select(
+                                *(getattr(AccountEnvironments, c) for c in _ENV_COLS)
+                            ).where(
+                                AccountEnvironments.account_id == _bigint(account_id)
+                            )
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+        out = dict(row) if row else {}
+        if out.get("account_id") is not None:
+            out["account_id"] = str(out["account_id"])
+        return out
+
+    async def taken_viewports(
+        self, scope_type: str, scope_id: str, platform: str
+    ) -> list[tuple[int, int]]:
+        """Viewports already pinned by other accounts in the same scope+platform.
+
+        Feeds ``account_environment.choose_viewport`` so a new account does not
+        draw a size a sibling already has. Scope+platform is the right blast
+        radius: the linkage a risk engine can draw is between accounts that
+        publish to the SAME platform from the same place, and that is also the
+        set the user actually operates as a matrix.
+
+        Soft-deleted accounts are **included** — their rows survive (mig 416)
+        and a re-bind wakes them, so treating their sizes as free would let a
+        live account collide with one that can come back at any moment.
+        """
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            AccountEnvironments.viewport_width,
+                            AccountEnvironments.viewport_height,
+                        )
+                        .select_from(AccountEnvironments)
+                        .join(
+                            SocialAccounts,
+                            SocialAccounts.id == AccountEnvironments.account_id,
+                        )
+                        .where(
+                            SocialAccounts.scope_type == scope_type,
+                            SocialAccounts.scope_id == str(scope_id),
+                            SocialAccounts.platform == platform,
+                            AccountEnvironments.viewport_width.is_not(None),
+                            AccountEnvironments.viewport_height.is_not(None),
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [(int(r["viewport_width"]), int(r["viewport_height"])) for r in rows]
 
     async def update_session_state(
         self,

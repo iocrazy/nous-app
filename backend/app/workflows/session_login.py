@@ -429,18 +429,56 @@ async def mark_session_login_processing_step(
 
 
 @DBOS.step()
-async def start_login_step(workflow_id: str, platform: str) -> dict[str, Any]:
+async def start_login_step(
+    workflow_id: str,
+    platform: str,
+    scope_type: str = "user",
+    scope_id: str = "",
+) -> dict[str, Any]:
     """起浏览器侧的保活 login session，把第一张二维码送进 metadata。
 
-    返回值只有 ``login_session_id`` 与状态 —— **二维码不进 step 返回值**：
-    它会被 DBOS 持久化进引擎表（几十 KB base64 × 每次重放），而它的唯一去处
-    是 metadata，本 step 里已经写好了。
+    这里同时**生成这个账号将要长期使用的浏览器环境**（P2-4），并用它开登录
+    context —— 平台第一次见到的指纹，就是它之后每次都会见到的那个
+    （``login.py::_login_context_kwargs`` 的 docstring 早就这么承诺了，但在此
+    之前后端根本没传 ``environment``，那句承诺是空的）。
+
+    ⚠️ 环境**先生成、后落库**：扫码成功前账号还不存在（``platform_user_id``
+    要等浏览器读到才知道），所以这里只生成不写库，写库在
+    ``finalize_login_step``。登录失败就什么都没留下，不会产生孤儿环境行。
+
+    **重扫已绑账号的那一次会用一套新生成的环境，而它随后会被丢弃**
+    （``pin_environment`` 是 ON CONFLICT DO NOTHING，老账号保留自己那套）。
+    这是登录端点不带 account_id 的必然结果 —— 扫码之前无从知道会是谁。之所以
+    可以接受，正是因为唯一逐账号不同的轴是**窗口尺寸**：真人本来就会拖窗口，
+    "这次跟上次不一样"在这个轴上是正常现象。换成 UA / 时区 / 代理就完全不能
+    这么将就了 —— 见 ``account_environment`` 模块 docstring。
+
+    返回值带上环境（无密钥，见 ``GeneratedEnvironment`` 的 docstring），这样
+    DBOS 重放时拿到的是**同一套**，不会重新掷一次骰子。二维码则**不进 step
+    返回值**：它会被 DBOS 持久化进引擎表（几十 KB base64 × 每次重放），而它
+    的唯一去处是 metadata，本 step 里已经写好了。
     """
+    from app.repositories.social_accounts_repository import SocialAccountsRepository
+    from app.services.distribution.account_environment import generate_environment
     from app.services.distribution.browser_client import BrowserClient
     from app.services.infra.unified_task_manager import get_task_manager
 
+    taken: list[tuple[int, int]] = []
+    if scope_id:
+        try:
+            taken = await SocialAccountsRepository().taken_viewports(
+                scope_type, scope_id, platform
+            )
+        except Exception as e:  # noqa: BLE001
+            # 避让是"锦上添花"，不是登录的前置条件。查不到就退回纯随机 ——
+            # 让一次 DB 抖动挡住用户绑号是不成比例的。
+            logger.warning(f"[session_login.env] taken_viewports failed: {e}")
+    environment = generate_environment(platform, taken_viewports=taken)
+
     client = BrowserClient()
-    snapshot = await client.start_login(platform)
+    snapshot = await client.start_login(
+        platform, environment=environment.to_session_environment()
+    )
     if not snapshot.success or not snapshot.login_session_id:
         # 起不来就没有 context 要释放（login_session_id 为空），直接失败。
         raise SessionLoginError(
@@ -450,9 +488,14 @@ async def start_login_step(workflow_id: str, platform: str) -> dict[str, Any]:
         )
     writer = LoginMetadataWriter(get_task_manager(), workflow_id, platform)
     await writer.publish(snapshot)
+    logger.info(
+        f"[session_login.env] platform={platform} "
+        f"viewport={environment.viewport_width}x{environment.viewport_height}"
+    )
     return {
         "login_session_id": snapshot.login_session_id,
         "status": snapshot.status,
+        "environment": environment.to_payload(),
     }
 
 
@@ -500,16 +543,24 @@ async def finalize_login_step(
     scope_type: str,
     scope_id: str,
     user_id: str,
+    environment: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """取 storage_state → 加密入库 → 返回**公开**账号信息。
+    """取 storage_state → 加密入库 → 钉住浏览器环境 → 返回**公开**账号信息。
 
     明文凭证的整个生命周期都在这个函数体内（§7.6）：
     ``get_login_state`` 取出 → ``json.dumps`` → repository 的
     ``upsert_session_account`` 做 Fernet 加密 → 落 ``social_accounts.session_state``。
     返回值里只有 account_id / username / platform_user_id —— DBOS 会持久化
     step 输出，任何凭证进了返回值就等于写进了引擎表且不可撤回。
+
+    ``environment`` 是 ``start_login_step`` 生成、并且**本次登录真的用过**的
+    那一套（P2-4）。在账号入库之后立刻 ``pin_environment`` 钉住它，于是「平台
+    在绑定那一刻见到的指纹」与「之后每次校验/发布用的指纹」是同一个。
+    ``pin_environment`` 是 ON CONFLICT DO NOTHING —— 重扫一个已绑账号不会把
+    它的环境换掉，见该方法 docstring。
     """
     from app.repositories.social_accounts_repository import SocialAccountsRepository
+    from app.services.distribution.account_environment import GeneratedEnvironment
     from app.services.distribution.browser_client import BrowserClient
 
     state = await BrowserClient().get_login_state(login_session_id)
@@ -539,8 +590,29 @@ async def finalize_login_step(
         f"[session_login] bound account={account.get('id')} platform={platform} "
         f"scope={scope_type}:{scope_id}"
     )
+
+    account_id = account.get("id")
+    if account_id is not None:
+        env = GeneratedEnvironment.from_payload(environment)
+        try:
+            pinned = await SocialAccountsRepository().pin_environment(
+                account_id, **env.to_row()
+            )
+            logger.info(
+                f"[session_login.env] account={account_id} pinned "
+                f"viewport={pinned.get('viewport_width')}x{pinned.get('viewport_height')}"
+                f" locale={pinned.get('locale')} tz={pinned.get('timezone_id')}"
+            )
+        except Exception as e:  # noqa: BLE001
+            # 账号已经绑成功了，环境没钉住只是退回"用默认值"（mig 424 之前所有
+            # 账号的行为）。为此把一次成功的扫码判成失败、让用户重扫一遍，是拿
+            # 一个降级当故障。⚠️ 但必须留下 ERROR：silent no-op 不可接受。
+            logger.error(
+                f"[session_login.env] account={account_id} pin_environment failed: {e}"
+            )
+
     return {
-        "account_id": str(account.get("id")),
+        "account_id": str(account_id),
         "username": account.get("username"),
         "platform_user_id": str(state.platform_user_id),
     }
@@ -593,7 +665,9 @@ async def session_login_workflow(
     login_session_id: Optional[str] = None
     try:
         try:
-            started = await start_login_step(workflow_id, platform)
+            started = await start_login_step(
+                workflow_id, platform, scope_type, str(scope_id)
+            )
         except SessionLoginError as e:
             await manager.fail(
                 workflow_id,
@@ -609,6 +683,10 @@ async def session_login_workflow(
             )
             raise
         login_session_id = started["login_session_id"]
+        # 本次登录**真的用过**的那套环境，随账号一起钉住（P2-4）。
+        # ``.get`` 而不是 ``[...]``：重放一个 mig 424 之前起的 workflow 时，
+        # DBOS 里记着的 step 返回值没有这个键。
+        login_environment = started.get("environment")
         # login_session_id 进 metadata 是 /sms 与取消端点的**唯一**寻址方式：
         # 它们跑在 gateway 进程，而 context 活在浏览器容器里。它不是凭证 ——
         # 浏览器服务只在 docker 内网可达且校验 X-Internal-Token，前端拿到它
@@ -654,7 +732,12 @@ async def session_login_workflow(
 
         try:
             account = await finalize_login_step(
-                login_session_id, platform, scope_type, scope_id, user_id
+                login_session_id,
+                platform,
+                scope_type,
+                scope_id,
+                user_id,
+                login_environment,
             )
         except SessionLoginError as e:
             await manager.fail(

@@ -114,6 +114,76 @@ def test_null_environment_fields_do_not_leak_none_into_context_kwargs():
     assert set(kwargs) == {"storage_state"}
 
 
+# --- per-account viewport (mig 424, P2-4) -----------------------------------
+
+
+def test_pinned_viewport_reaches_the_context():
+    """The account's window size is the ONE fingerprint axis that can differ
+    per account without contradicting anything else, so it has to actually
+    arrive at new_context() - a column nobody applies is worse than no column.
+    """
+    env = EnvironmentConfig(viewport_width=1536, viewport_height=864)
+    kwargs = build_context_kwargs(env, {"cookies": []})
+    assert kwargs["viewport"] == {"width": 1536, "height": 864}
+
+
+def test_login_context_applies_the_same_viewport_as_validate_and_publish():
+    """The QR-login context and every later run must agree.
+
+    The whole point of pinning is that the platform sees ONE window size for an
+    account; a login that used a different size than every subsequent publish
+    would put a change signal exactly where the account is most scrutinised.
+    """
+    from app.login import _login_context_kwargs
+
+    env = EnvironmentConfig(viewport_width=1680, viewport_height=1050)
+    assert _login_context_kwargs(env)["viewport"] == {"width": 1680, "height": 1050}
+    assert (
+        _login_context_kwargs(env)["viewport"]
+        == build_context_kwargs(env, {"cookies": []})["viewport"]
+    )
+
+
+def test_partial_viewport_is_ignored():
+    """Both dimensions or neither. Passing only the half that is set would give
+    the account a size nobody chose, and it would look 'configured' in the DB.
+    """
+    from app.login import _login_context_kwargs
+
+    for env in (
+        EnvironmentConfig(viewport_width=1536),
+        EnvironmentConfig(viewport_height=864),
+    ):
+        assert "viewport" not in build_context_kwargs(env, {"cookies": []})
+        assert "viewport" not in _login_context_kwargs(env)
+
+
+def test_no_viewport_means_the_library_default():
+    """Every account bound before mig 424 has NULL/NULL and must keep behaving
+    exactly as before - we must NOT substitute a size of our own here, or the
+    backfilled accounts would silently get a new fingerprint."""
+    from app.login import _login_context_kwargs
+
+    assert "viewport" not in build_context_kwargs(EnvironmentConfig(), {"cookies": []})
+    assert "viewport" not in _login_context_kwargs(EnvironmentConfig())
+    assert "viewport" not in _login_context_kwargs(None)
+
+
+def test_viewport_bounds_are_enforced_at_the_schema_edge():
+    """Mirrors the DB CHECK. The floor is the size the Douyin DOM flow is known
+    to work at, so an account can only ever get MORE room than the automation
+    already copes with; the ceiling is the Xvfb screen a headed window must fit
+    inside."""
+    import pydantic
+
+    for bad in (
+        {"viewport_width": 1024, "viewport_height": 768},  # below the known-good floor
+        {"viewport_width": 2560, "viewport_height": 1440},  # bigger than Xvfb
+    ):
+        with pytest.raises(pydantic.ValidationError):
+            EnvironmentConfig(**bad)
+
+
 @pytest.mark.parametrize(
     "display,expected",
     [
