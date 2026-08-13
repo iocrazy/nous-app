@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from dbos import DBOS
 from loguru import logger
@@ -41,6 +41,90 @@ _SCORE_BATCH_SIZE = 6
 # Embedding pass bound: vectors per tick (one Ark call each). The feed catches
 # up over successive ticks; embeddings feed the Phase-3 cross-source clustering.
 _EMBED_MAX_ITEMS = 40
+
+# End-to-end freshness thresholds for the collection pipeline. The tick runs
+# every 30 min against 20+ continuously-refreshing hot lists, so a full day
+# without a single new row is already pathological and three days is an outage.
+# Generous on purpose: a short admin pause for maintenance must not cry wolf,
+# but a module left off for weeks has to be impossible to miss.
+_STALE_WARN_HOURS = 24
+_STALE_ERROR_HOURS = 72
+
+
+async def check_collection_freshness(
+    *,
+    hotspots_repo: HotspotsRepository | None = None,
+    module_enabled: bool = True,
+    now: datetime | None = None,
+) -> dict:
+    """Report how long since a hotspot actually landed, and name the CAUSE.
+
+    The probe this pipeline was missing. Between 2026-06-30 and 2026-08-13 the
+    collection was dead for 44 days while every observable signal said fine:
+    ``topic_fetch_workflow`` reported 2224 consecutive DBOS SUCCESSes (the tick
+    short-circuits on a disabled module and returns normally), the newsnow
+    container was Up, and ``signal_sources.health`` still read 'ok' on every
+    row. The only honest signal is the age of the newest row, because nothing
+    but a real ingest can advance it — that is what makes this falsifiable
+    where a "is the workflow running?" check is not.
+
+    Escalates by age and distinguishes the two causes that need opposite
+    responses: an admin PAUSED the module (flip it back on) versus collection
+    is RUNNING BUT PRODUCING NOTHING (a real defect to debug). Never raises —
+    it is a reporter, and it must still report when the caller is a tick that
+    is otherwise doing nothing.
+    """
+    hotspots_repo = hotspots_repo or HotspotsRepository()
+    now = now or datetime.now(timezone.utc)
+    try:
+        latest = await hotspots_repo.latest_created_at()
+    except Exception as e:  # noqa: BLE001 — a reporter must not break the tick
+        logger.error(f"topic freshness probe failed: {e}")
+        return {"ok": False, "probe_failed": True}
+
+    if latest is None:
+        # No hotspot has EVER landed. Normal on a fresh deploy, so this is not
+        # an outage — but it is still worth stating out loud rather than
+        # reporting nothing at all.
+        logger.warning(
+            "topic collection freshness: hotspots table is EMPTY "
+            f"(module_enabled={module_enabled})"
+        )
+        return {"ok": False, "empty": True, "module_enabled": module_enabled}
+
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    stale = now - latest
+    stale_hours = stale / timedelta(hours=1)
+    summary = {
+        "ok": stale_hours < _STALE_WARN_HOURS,
+        "latest_created_at": latest.isoformat(),
+        "stale_hours": round(stale_hours, 1),
+        "module_enabled": module_enabled,
+    }
+
+    # The cause decides the remedy, so it goes in the message, not just the dict.
+    cause = (
+        "module is DISABLED (topics.module.enabled=false) — no tick collects "
+        "anything while it is off, and the feed UI stays visible serving a "
+        "frozen feed"
+        if not module_enabled
+        else "module is ENABLED but nothing is landing — collection is broken"
+    )
+    msg = (
+        f"topic collection stale: no new hotspot for {stale_hours:.1f}h "
+        f"(newest {latest.isoformat()}); {cause}"
+    )
+    if stale_hours >= _STALE_ERROR_HOURS:
+        logger.error(msg)
+    elif stale_hours >= _STALE_WARN_HOURS:
+        logger.warning(msg)
+    else:
+        logger.info(
+            f"topic collection fresh: newest hotspot {stale_hours:.1f}h old "
+            f"(module_enabled={module_enabled})"
+        )
+    return summary
 
 
 def _embed_text(row: dict) -> str:
@@ -194,7 +278,17 @@ async def run_topic_fetch_once(
     # ONCE per tick — same gate applies to every source this run.
     prefilter_cfg = await load_prefilter_config()
 
+    if not sources:
+        # Zero enabled sources collects zero items forever, and silently. Say so
+        # instead of reporting a clean "written: 0" tick.
+        logger.warning("topic fetch: no ENABLED signal sources — nothing to collect")
+
     ok = failed = written = dropped = upstream = 0
+    # "Nothing was written" has several very different causes that used to be
+    # indistinguishable in the summary. Count them apart so the log says which:
+    upstream_items = 0  # raw items upstream handed us, across all groups
+    empty_upstream = 0  # groups where the UPSTREAM returned nothing
+    dropped_all = 0  # sources where WE dropped every item at the L0 gate
     for (kind, _cfg), group in groups.items():
         try:
             fetched = await get_adapter(kind).fetch(group[0])  # one upstream call
@@ -207,6 +301,17 @@ async def run_topic_fetch_once(
                 f"topic source group ({kind}, {group[0].get('name')}) failed: {e}"
             )
             continue
+        upstream_items += len(fetched)
+        if not fetched:
+            # An adapter that returns [] rather than raising (the newsnow one
+            # raises, but that is per-adapter policy) still means the upstream
+            # gave us nothing. Record it as its OWN outcome so it can never be
+            # confused with "we fetched fine and then discarded everything".
+            empty_upstream += 1
+            logger.warning(
+                f"topic source group ({kind}, {group[0].get('name')}) returned "
+                "0 items: UPSTREAM gave us nothing"
+            )
         for src in group:
             sid = str(src["id"])
             try:
@@ -217,6 +322,17 @@ async def run_topic_fetch_once(
                     config=prefilter_cfg,
                 )
                 dropped += len(fetched) - len(candidates)
+                if fetched and not candidates:
+                    # The opposite failure from the one above: upstream DID give
+                    # us items and the L0 keyword gate discarded all of them. A
+                    # mistuned keyword list looks exactly like a dead source
+                    # unless the two are reported separately.
+                    dropped_all += 1
+                    logger.warning(
+                        f"topic source {sid} ({src.get('name')}): L0 prefilter "
+                        f"dropped ALL {len(fetched)} fetched items — WE discarded "
+                        "them, the upstream was fine"
+                    )
                 rows = hotspots_repo.build_rows(
                     candidates,
                     source_id=sid,
@@ -235,12 +351,27 @@ async def run_topic_fetch_once(
         "sources": len(sources),
         "groups": len(groups),  # distinct (kind, config) = upstream fetch count
         "upstream_fetches": upstream,
+        "upstream_items": upstream_items,  # what upstream actually gave us
+        "empty_upstream": empty_upstream,  # groups where upstream gave 0
         "ok": ok,
         "failed": failed,
         "written": written,
         "prefiltered": dropped,  # items the L0 AI-relevance gate dropped
+        "dropped_all": dropped_all,  # sources where WE dropped 100%
     }
     logger.info(f"topic_fetch done: {summary}")
+
+    # A tick where EVERY upstream fetch failed collected nothing at all.
+    # Returning normally would let DBOS record SUCCESS for a run that did
+    # nothing — the exact "reports success but nothing happened" shape route C
+    # forbids. PARTIAL failure deliberately stays isolated (per-source health
+    # carries it, one dead feed must not stop the other 21); only TOTAL failure
+    # raises, because then there is no success left to report.
+    if groups and upstream == 0:
+        raise RuntimeError(
+            f"topic fetch collected nothing: all {len(groups)} upstream fetch(es) "
+            f"failed across {len(sources)} enabled source(s)"
+        )
     return summary
 
 
@@ -322,8 +453,25 @@ async def topic_fetch_workflow(scheduled_time: datetime, actual_time: datetime) 
 
     if not await is_module_enabled():
         logger.info("topic module disabled — skipping tick")
+        # A paused module still has to report its own staleness. Before this,
+        # the ONLY trace was the INFO line above: 1878 identical copies piled up
+        # between 2026-06-30 and 2026-08-13, indistinguishable from the ~7k
+        # INFO rows/day around them, while the feed UI stayed visible (the
+        # stored blob was {"enabled": false} with no "visible" key, so `visible`
+        # fell back to its default true) and served a frozen feed. Escalating by
+        # AGE is what turns "paused for maintenance" — fine, stays quiet — into
+        # "forgotten off for six weeks", which is now an ERROR nobody can miss.
+        await check_collection_freshness(module_enabled=False)
         return
     await run_topic_fetch_once()
+    try:
+        # Backstop for the enabled path: run_topic_fetch_once raises only on
+        # TOTAL upstream failure, so subtler ways of landing nothing (every item
+        # deduped, the L0 gate dropping 100%, a write failing) still need the
+        # end-to-end signal.
+        await check_collection_freshness(module_enabled=True)
+    except Exception as e:  # noqa: BLE001 — a reporter must never break the tick
+        logger.warning(f"topic freshness check failed: {e}")
     try:
         # L0.5 before scoring so the scorer (and embedder) see real article text.
         await enrich_content_once()

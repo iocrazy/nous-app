@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from loguru import logger
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -443,6 +443,24 @@ class HotspotsRepository:
         async with read_scope() as session:
             rows = (await session.execute(stmt, {"days": int(days)})).all()
         return {str(r[0]): int(r[1]) for r in rows}
+
+    async def latest_created_at(self) -> Optional[datetime.datetime]:
+        """Ingest timestamp of the newest hotspot row, or None when empty.
+
+        The one END-TO-END freshness signal for the collection pipeline: only a
+        real ingest can advance it, so it goes stale no matter WHY collection
+        stopped — module switch off, upstream dead, dedup swallowing every item,
+        the L0 gate dropping everything, a write silently failing.
+
+        Every PROXY signal stayed green through the 2026-06-30 → 2026-08-13
+        outage: DBOS recorded 2224 SUCCESS ticks, the newsnow container was Up,
+        and all 26 ``signal_sources`` rows still read ``health='ok'`` (because
+        ``mark_health`` only runs when the fetch loop runs, a health column that
+        freezes at its last value reads "ok" forever once the writer stops).
+        This value is the one that would have gone red on day one.
+        """
+        async with read_scope() as session:
+            return await session.scalar(select(func.max(Hotspots.created_at)))
 
     async def distinct_dates(self, limit_days: int = 60) -> list[str]:
         async with read_scope() as session:
