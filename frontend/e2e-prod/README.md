@@ -51,33 +51,52 @@ The walkthrough logs in as the project's dedicated Claude debug account
 Never paste the password into a conversation, commit, or this file. See
 `helpers.ts::loadProdCreds` for the exact resolution order.
 
-## Fixture data
+## Target data — the owner's real project (default)
 
-The walkthrough targets a small, permanent QA project living under the
-debug account's own **personal** workspace (not a team) — self-contained,
-so the walkthrough never depends on another human's data or grants:
+The walkthrough runs against **the owner's own production project**
+(个人项目测试 1), reached by the debug account through a standing
+`project_members` viewer row:
 
 | | id |
 |---|---|
-| team (URL scope segment) | `331438215859255` (`claude.debug's Workspace`, the account's own personal team) |
-| project ("QA Walkthrough") | `337650825568029` (`team_id: null` — a true personal project) |
-| episode ("Episode 1", auto-provisioned with the project) | `337650825711390` |
-| scene ("QA Walkthrough Room") | `337650952269612` |
-| shot ("QA walkthrough probe shot") | `337650953731886` |
+| team (URL scope segment) | `personal` (a literal, not a snowflake — the personal-project URL convention for `projects.team_id IS NULL`) |
+| project (个人项目测试 1) | `291022264100262` |
+| episode (Ep1) | `324362669885098` |
+| scene | `324838427143194` |
+| shot | `325601447269110` |
 
 All five are overridable via `PROD_TEST_TEAM_ID` / `PROD_TEST_PROJECT_ID` /
-`PROD_TEST_EPISODE_ID` / `PROD_TEST_SCENE_ID` / `PROD_TEST_SHOT_ID` if you
-ever need to point this at different fixture data — see `helpers.ts`.
+`PROD_TEST_EPISODE_ID` / `PROD_TEST_SCENE_ID` / `PROD_TEST_SHOT_ID` — see
+`helpers.ts`.
 
-**Why not the "个人项目测试 1" project (`291022264100262`) an earlier memory
-note mentions?** That project belongs to the *human* user's personal team,
-not the debug account's. `GET /api/v1/projects/291022264100262` 403s for
-the debug account (`"You do not have access to this project"`) — a
-temporary `project_members` grant existed only during B4's point-ignition
-and was removed afterward (see `project-b2-episode-workflow-and-followups`
-memory note). Rather than depend on a human re-granting access before every
-walkthrough run, this fixture lives entirely inside the debug account's own
-scope.
+### Why the owner's real project, not a purpose-built fixture
+
+A QA fixture is created by whoever writes the test, so it is shaped the way
+the test author already imagines the data looks. That is exactly the blind
+spot this suite exists to cover. Aiming the same walkthrough at the owner's
+real project — same assertions, same code, different data and a different
+permission path — immediately surfaced three defects that the green fixture
+run could not:
+
+| defect | why the fixture run was blind to it |
+|---|---|
+| #1816 — personal-project read gates ignored explicit `project_members` rows, 403ing scripts/scenes/shots/beats | the fixture project is OWNED by the test account, so it never took the invited-member code path |
+| #1817 — `GET /projects` lists only projects you OWN, so a shared project's URL never mounted the workspace at all | same: an owned project is always in the list, so the by-id fallback was never needed |
+| #1820 — a persisted viewport framing empty space renders the canvas blank (viewport culling), and a viewer's autosave 403 loops on "Save failed" | the fixture canvas was created with a default viewport that happens to frame its nodes; only a real, panned canvas drifts out of frame |
+
+The permission path matters as much as the data: running as an invited
+viewer exercises the read gates and the read-only save path, which an
+owner-only run structurally cannot reach.
+
+**Prerequisite:** the debug account needs a `project_members` row on the
+target project (`role='viewer'` is enough, and is the right level — the
+walkthrough is read-only). Without it the run fails at the workspace-shell
+assertion. If a run suddenly fails there, check that row still exists
+before suspecting the code. The earlier QA-fixture target
+(`331438215859255` / `337650825568029` / `337650825711390` /
+`337650952269612` / `337650953731886`, owned by the debug account itself)
+still exists and can be selected via the env overrides if you ever need a
+target that depends on no grants at all.
 
 **A non-obvious trap when creating personal-scope fixtures**: `POST
 /api/v1/projects` with an explicit `team_id` (even the caller's *own*
