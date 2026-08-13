@@ -119,6 +119,7 @@ async def caption_slide_workflow(
                     provider_config=cfg["provider_config"],
                     agent_slug=cfg.get("agent_slug") or "caption",
                     wf_id=wf_id,
+                    fallback_models=cfg.get("fallback_models") or [],
                 )
 
             await manager.update_progress(wf_id, 70, subtitle="Parsing result")
