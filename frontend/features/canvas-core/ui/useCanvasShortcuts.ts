@@ -39,6 +39,19 @@ interface UseCanvasShortcutsOptions {
   /** Disable the bindings without unmounting the host component. */
   enabled?: boolean;
   /**
+   * Read-only session (`can_edit:false`, or a latched 403). The MUTATING
+   * chords are dropped: paste, duplicate, group/ungroup, delete, undo/redo
+   * and the knife toggle. The read/navigation ones stay — palette, help,
+   * copy, select-all, Esc — because they don't touch the document and are
+   * how a viewer actually works with it.
+   *
+   * Without this, every one of those chords still edited the in-memory doc
+   * (the store swallowed the result at `markDirty`): a viewer could press
+   * Delete, watch nodes vanish, and lose nothing except their confidence
+   * that the canvas is intact.
+   */
+  readOnly?: boolean;
+  /**
    * Called when the user presses Cmd/Ctrl+K outside an editable element.
    * Provided by CanvasPage to open the command palette. Uses a ref internally
    * so stale-closure re-registration is never needed.
@@ -51,6 +64,7 @@ interface UseCanvasShortcutsOptions {
 
 export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
   const enabled = options.enabled ?? true;
+  const readOnly = options.readOnly ?? false;
 
   // Keep a stable ref so the window listener never goes stale without
   // re-subscribing (avoids adding onOpenPalette to the effect dep array).
@@ -87,12 +101,16 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       }
 
       if (meta && (key === 'z' || key === 'Z')) {
+        // Undo/redo replay document snapshots — a write, even though it
+        // only ever restores states this session already saw.
+        if (readOnly) return;
         event.preventDefault();
         if (event.shiftKey) store.redo();
         else store.undo();
         return;
       }
       if (meta && (key === 'y' || key === 'Y')) {
+        if (readOnly) return;
         event.preventDefault();
         store.redo();
         return;
@@ -104,7 +122,10 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       }
       if (!meta && (key === 'x' || key === 'X')) {
         // Knife mode toggle (Infinite parity ②-1). Bare x only — mod+x
-        // stays the browser's cut.
+        // stays the browser's cut. Knife exists to CUT wires, so a
+        // read-only session must not be able to arm it (the surface also
+        // refuses to render the overlay — two locks, see CanvasSurface).
+        if (readOnly) return;
         useKnifeStore.getState().toggle();
         return;
       }
@@ -132,6 +153,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         return;
       }
       if (meta && (key === 'v' || key === 'V')) {
+        if (readOnly) return;
         const buf = readClipboard();
         if (!buf || buf.nodes.length === 0) return;
         // Don't paste a selection copied from a canvas of a different kind:
@@ -157,6 +179,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
       if (meta && (key === 'g' || key === 'G')) {
         // Group / Ungroup (P1-10, Infinite's Ctrl+G / Ctrl+Shift+G). The
         // data model shipped with ②-3; this is the missing keyboard entry.
+        if (readOnly) return;
         event.preventDefault();
         if (event.shiftKey) {
           const sel = new Set(store.selection);
@@ -181,6 +204,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         // Duplicate in place (G6 — Infinite's alt-drag-copy, keyboard form).
         // Only preventDefault when we actually act: with nothing selected the
         // browser keeps its bookmark shortcut.
+        if (readOnly) return;
         if (store.selection.length === 0) return;
         event.preventDefault();
         const selected = collectSelectedNodes(store.nodes, store.selection);
@@ -202,6 +226,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         return;
       }
       if (key === 'Delete' || key === 'Backspace') {
+        if (readOnly) return;
         if (store.selection.length === 0) return;
         event.preventDefault();
         const selected = new Set(store.selection);
@@ -228,7 +253,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [enabled]);
+  }, [enabled, readOnly]);
 }
 
 function isInsideEditable(target: EventTarget | null): boolean {

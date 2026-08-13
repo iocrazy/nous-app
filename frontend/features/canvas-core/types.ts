@@ -79,6 +79,20 @@ export interface Canvas {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  /**
+   * May THIS caller write the canvas? The same verdict the PUT's write
+   * guard reaches (`scope_guards.can_write_project`), shipped with the read
+   * so the surface can render read-only up front instead of discovering it
+   * from a 403 (see `canvasCoreStore.applyServerRow`).
+   *
+   * Optional on purpose — only the two LOAD endpoints supply it (`GET
+   * /canvases/{id}`, `GET /canvases/storyboard`). A Supabase Realtime row
+   * (`applyRemoteUpdate`) is a raw `canvases` table row with no notion of a
+   * caller, and the 409 conflict body is only reachable after the write
+   * guard already passed. `undefined` therefore means "this payload carries
+   * no permission statement", NOT "false".
+   */
+  can_edit?: boolean;
 }
 
 export interface CanvasCreatePayload {

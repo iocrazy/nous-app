@@ -124,6 +124,15 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   const patch = useNodeDataPatch(id);
   const toast = useOptionalToast();
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
+  /**
+   * Read-only session — the storyboard canvas is the case this actually
+   * happens on in production (a viewer-role member opening an episode's
+   * storyboard). Both in-node write affordances go: Generate (its POST is
+   * gated by `_gate_canvas_write`, so it would 403) and Promote to Shot
+   * (it creates a `script_shots` row). "Open in list" stays — it only
+   * navigates.
+   */
+  const readOnly = useCanvasCoreStore((s) => s.readOnly);
   const bound = shot_id != null;
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -311,19 +320,24 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
                 className="absolute right-0 top-full z-10 mt-1 min-w-[9.5rem] rounded-lg border border-canvas-line bg-canvas-surface py-1 shadow-lg"
                 data-testid="shot-node-menu"
               >
+                {/* Promote creates a `script_shots` row, so it is withheld
+                    from a read-only session; "Open in list" below only
+                    navigates and stays available to everyone. */}
                 {!bound ? (
-                  <button
-                    type="button"
-                    className="nodrag flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-canvas-text hover:bg-canvas-line/30"
-                    data-testid="shot-node-promote"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      requestPromoteShot(id);
-                    }}
-                  >
-                    <Sparkles size={12} />
-                    {t('canvas.shotNode.promote')}
-                  </button>
+                  readOnly ? null : (
+                    <button
+                      type="button"
+                      className="nodrag flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-canvas-text hover:bg-canvas-line/30"
+                      data-testid="shot-node-promote"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        requestPromoteShot(id);
+                      }}
+                    >
+                      <Sparkles size={12} />
+                      {t('canvas.shotNode.promote')}
+                    </button>
+                  )
                 ) : (
                   <button
                     type="button"
@@ -451,7 +465,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className="nodrag mh-chip mt-2 w-full justify-center"
             data-testid="shot-node-generate"
-            disabled={generating || !canvasId || stale}
+            disabled={generating || !canvasId || stale || readOnly}
             onClick={handleGenerate}
           >
             {generating ? t('canvas.shotNode.generating') : t('canvas.generate')}

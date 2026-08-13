@@ -208,3 +208,64 @@ describe('buildCanvasCommands — run() delegates to store', () => {
     expect((nodes[0] as Record<string, unknown>).type).toBe('loop');
   });
 });
+
+/**
+ * Read-only session (`can_edit:false` on the load, or a latched 403).
+ * Write commands go DISABLED rather than disappearing: the palette is also
+ * how a user learns what a canvas can do, and a shrinking list would read
+ * as "this build lost undo" instead of "you may not edit here".
+ */
+describe('buildCanvasCommands — read-only', () => {
+  const WRITE_IDS = ['undo', 'redo', 'save', 'add-shot', 'add-prompt', 'add-output', 'add-loop'];
+  const READ_IDS = ['select-all', 'clear-selection'];
+
+  it('disables every write command, keeps them listed', () => {
+    useCanvasCoreStore.getState().setNodes([{ id: 'n1' }]); // gives undo something to do
+    useCanvasCoreStore.setState({ readOnly: true });
+
+    const cmds = buildCanvasCommands();
+
+    for (const id of WRITE_IDS) {
+      const cmd = cmds.find((c) => c.id === id);
+      expect(cmd, `${id} should still be listed`).toBeDefined();
+      expect(cmd!.enabled?.(), `${id} should be disabled`).toBe(false);
+    }
+  });
+
+  it('leaves the read commands alone', () => {
+    useCanvasCoreStore.setState({
+      readOnly: true,
+      nodes: [{ id: 'a' }],
+      selection: ['a'],
+    });
+
+    const cmds = buildCanvasCommands();
+
+    for (const id of READ_IDS) {
+      expect(cmds.find((c) => c.id === id)!.enabled?.() ?? true).toBe(true);
+    }
+  });
+
+  it('the same commands are enabled once the session is writable', () => {
+    useCanvasCoreStore.getState().setNodes([{ id: 'n1' }]);
+    useCanvasCoreStore.setState({ readOnly: false });
+
+    const cmds = buildCanvasCommands();
+
+    // `redo` is excluded: with an empty history future it is legitimately
+    // disabled for its OWN reason, so it can't distinguish the two states.
+    for (const id of WRITE_IDS.filter((id) => id !== 'redo')) {
+      expect(cmds.find((c) => c.id === id)!.enabled?.() ?? true, id).toBe(true);
+    }
+  });
+
+  it('the predicate is read lazily — a mid-session 403 latch takes effect on an already-built list', () => {
+    useCanvasCoreStore.getState().setNodes([{ id: 'n1' }]);
+    const cmds = buildCanvasCommands();
+    expect(cmds.find((c) => c.id === 'undo')!.enabled?.()).toBe(true);
+
+    useCanvasCoreStore.setState({ readOnly: true });
+
+    expect(cmds.find((c) => c.id === 'undo')!.enabled?.()).toBe(false);
+  });
+});

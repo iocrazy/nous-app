@@ -83,7 +83,7 @@ const BOUND_DATA = {
   scene_id: '42',
 };
 
-function seedAndRender(data: Record<string, unknown>) {
+function seedAndRender(data: Record<string, unknown>, readOnly = false) {
   useCanvasCoreStore.setState({
     kind: 'smart',
     canvasId: '9',
@@ -91,6 +91,7 @@ function seedAndRender(data: Record<string, unknown>) {
     nodes: [{ id: 'shot1', type: 'shot', position: { x: 0, y: 0 }, data }],
     connections: [],
     selection: [],
+    readOnly,
   });
   return render(
     <ReactFlowProvider>
@@ -305,5 +306,41 @@ describe('ShotNodeView — unbound legacy render', () => {
     seedAndRender(UNBOUND_DATA);
     expect(screen.queryByTestId('shot-node-chips')).toBeNull();
     expect(screen.queryByTestId('shot-node-generate')).toBeNull();
+  });
+});
+
+/**
+ * Read-only session (`can_edit:false` on the canvas load, or a latched
+ * 403). The storyboard canvas is where this actually happens in production
+ * — a viewer-role member opening an episode's storyboard — so the two
+ * in-node write affordances have to go with the rest of the surface's
+ * gestures, or "read-only" would stop at the edge of a node.
+ */
+describe('ShotNodeView — read-only', () => {
+  it('withholds Promote to Shot (it creates a script_shots row)', () => {
+    seedAndRender(UNBOUND_DATA, true);
+    fireEvent.click(screen.getByTestId('shot-node-menu-trigger'));
+
+    expect(screen.queryByTestId('shot-node-promote')).toBeNull();
+  });
+
+  it('still offers "Open in list" — that one only navigates', () => {
+    seedAndRender(BOUND_DATA, true);
+    fireEvent.click(screen.getByTestId('shot-node-menu-trigger'));
+
+    expect(screen.queryByTestId('shot-node-open-in-list')).not.toBeNull();
+  });
+
+  it('disables Generate (its POST is gated by the canvas write guard → 403)', () => {
+    seedAndRender(BOUND_DATA, true);
+
+    expect(screen.getByTestId('shot-node-generate')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('shot-node-generate'));
+    expect(dispatchGenerations).not.toHaveBeenCalled();
+  });
+
+  it('Generate is live again for a writable session', () => {
+    seedAndRender(BOUND_DATA, false);
+    expect(screen.getByTestId('shot-node-generate')).not.toBeDisabled();
   });
 });

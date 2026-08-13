@@ -222,6 +222,20 @@ export interface CanvasEngineProps {
   /** Escape while the surface is focused (default: no-op). */
   onClearSelection?: () => void;
 
+  /**
+   * When false, nodes cannot be dragged (React Flow's own `nodesDraggable`).
+   * Default true. A read-only surface passes false so a viewer is never
+   * offered a gesture whose result the store would silently discard —
+   * panning, zooming and selection stay live.
+   */
+  nodesDraggable?: boolean;
+  /**
+   * When false, handles stop offering new connections (React Flow's own
+   * `nodesConnectable`). Default true. Orthogonal to `allowConnect`, which
+   * detaches the commit handler: this one stops the DRAG from starting, so
+   * a read-only surface should pass both.
+   */
+  nodesConnectable?: boolean;
   /** When false (default true) no connection handler is attached — read-only wires. */
   allowConnect?: boolean;
   /** Commit a dragged wire (caller validates). */
@@ -293,6 +307,8 @@ export function CanvasEngine({
   onNodeDoubleClick,
   onSelectAll = NOOP,
   onClearSelection = NOOP,
+  nodesDraggable = true,
+  nodesConnectable = true,
   allowConnect = true,
   onConnect,
   isValidConnection,
@@ -674,6 +690,8 @@ export function CanvasEngine({
         onSelectionDragStop={onSelectionDragStop ? handleSelectionDragStop : undefined}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgesChange={onEdgesChange}
+        nodesDraggable={nodesDraggable}
+        nodesConnectable={nodesConnectable}
         onConnect={allowConnect ? onConnect : undefined}
         onConnectStart={allowDragCreate ? dragToCreate.onConnectStart : undefined}
         onConnectEnd={allowDragCreate ? dragToCreate.onConnectEnd : undefined}
