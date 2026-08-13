@@ -105,7 +105,21 @@ export interface DateSingleMode extends BaseProps {
 
 export type DateTimePopoverProps = DateRangeMode | DateSingleMode;
 
-const CALENDAR_WIDTH = 260;
+// The month grid is 7 columns of `w-8` cells with `gap-1` between them, so the
+// calendar column needs a hard 7*32 + 6*4 = 248px of *content* box, and the
+// popover adds `p-3` (12px a side) around it.
+//
+// These are not decorative numbers: CALENDAR_WIDTH was 260 on first release,
+// which left the grid 236px — twelve short. Grid columns then divided the
+// deficit among themselves, the `w-8` buttons overflowed their tracks, and the
+// month rendered as one run-on smear ("26272829303 1"). `DAY_CELL`/`DAY_GAP`
+// exist so the relationship is stated once and checked by a test rather than
+// re-derived by whoever next changes a cell size.
+const DAY_CELL = 32; // Tailwind `w-8`/`h-8` on the day buttons
+const DAY_GAP = 4; // Tailwind `gap-1` between grid tracks
+const POPOVER_PAD = 12; // Tailwind `p-3` on the popover shell
+export const CALENDAR_GRID_WIDTH = DAY_CELL * 7 + DAY_GAP * 6;
+const CALENDAR_WIDTH = CALENDAR_GRID_WIDTH + POPOVER_PAD * 2;
 const TIME_WIDTH = 104;
 /** Minutes are offered on a 5-minute grid — 60 rows of scroll is not a control. */
 const MINUTE_STEP = 5;
@@ -523,7 +537,12 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
       )}
 
       <div className="flex">
-        <div style={{ width: CALENDAR_WIDTH - 24 }}>
+        {/* `shrink-0`: the time columns beside this are flex items too, and a
+            flex child defaults to shrinking. Without it, any width the time
+            side wants past its share comes out of the calendar — which is the
+            same run-on-smear failure as an undersized CALENDAR_GRID_WIDTH,
+            except it only appears in `withTime` mode. */}
+        <div className="shrink-0" style={{ width: CALENDAR_GRID_WIDTH }}>
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"
