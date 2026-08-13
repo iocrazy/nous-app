@@ -90,22 +90,14 @@ export const getGalleryZipUrl = (platformId: string): string => {
   return `${getApiUrl()}/api/v1/media/download/${platformId}/gallery`;
 };
 
-/**
- * Mark downloads stuck in 'downloading' for too long as 'failed'.
- * Called once on library load to clean up stale records.
- */
-export const cleanupStaleDownloads = async (timeoutMinutes: number = 30): Promise<number> => {
-  try {
-    const result = await apiClient.post<{ cleaned?: number }>(
-      '/api/v1/media/cleanup-stale-downloads',
-      undefined,
-      { query: { timeout_minutes: timeoutMinutes } },
-    );
-    return result.cleaned || 0;
-  } catch {
-    return 0;
-  }
-};
+/* `cleanupStaleDownloads` was removed along with its only caller (the
+ * per-library-load poll in useLibrary). It POSTed /api/v1/media/
+ * cleanup-stale-downloads, which sweeps parsed_media rows whose
+ * *_download_status == 'downloading' — a value no backend path ever writes, so
+ * it matched zero rows on every call while its `catch { return 0 }` made a
+ * genuine failure indistinguishable from a clean run. The endpoint itself is
+ * still reachable (it has integration coverage); see its docstring in
+ * media_router.py. In-flight state now comes from task_tracking. */
 
 /**
  * Merge a resources row (with nested parsed_media from !inner join)

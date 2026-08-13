@@ -64,9 +64,13 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // source of truth for task state), never from parsed_media's status column —
   // see downloadInFlight.ts for why reading that column stranded every
   // never-downloaded video on a permanent spinner.
+  //
+  // platform_id, NOT video.id: task_tracking.media_id stores the platform id
+  // (0 of 59 prod download tasks matched a parsed_media.id, 59 matched a
+  // platform_id). Passing video.id here matches nothing at all.
   const { activeTasks } = useTaskManager();
   const downloadInFlight = isVideoDownloadInFlight(
-    activeTasks, video?.id, video?.video_download_status,
+    activeTasks, video?.platform_id, video?.video_download_status,
   );
 
   const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
@@ -431,7 +435,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       </div>
     )
   ) : video.media_type && isAlbumType(video.media_type) ? (
-    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} onSlideChange={handleSlideChange} />
+    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} isDownloading={downloadInFlight} onSlideChange={handleSlideChange} />
   ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
     <VideoPlayer
       src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
