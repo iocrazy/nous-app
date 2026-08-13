@@ -1,19 +1,19 @@
 /**
  * CurrentNodeCard — the active workflow node's control panel on the workspace
  * Overview (spec §5). Owner / members through the shared OwnerPicker, a
- * planned_start/due range through NodeSchedulePicker, the deliverable line, and
+ * planned_start/due range through the shared DateTimePopover, the deliverable line, and
  * the two flow actions: Open in Todolist (jump to the mirror issue's module)
  * and Complete stage (opens the server-computed advance gate). Every in-place
  * edit writes the instance node only (PATCH), then reloads the shared workflow.
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, ChevronDown, ClipboardList, ExternalLink, FileCheck2, Rocket } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, CalendarDays, ChevronDown, ClipboardList, ExternalLink, FileCheck2, Rocket } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
-import { NodeSchedulePicker } from './NodeSchedulePicker';
+import { DateTimePopover } from '../common/DateTimePopover';
 import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL, unmetDeps } from './nodeStatus';
 import { countFilledFields } from './formFieldFill';
 import { BriefField } from './BriefField';
@@ -83,6 +83,7 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
   // Auto-open when the node is overdue so the schedule stays discoverable
   // without a click when it actually needs attention.
   const [detailsOpen, setDetailsOpen] = useState(() => isNodeOverdue(node));
+  const [scheduleAnchor, setScheduleAnchor] = useState<HTMLElement | null>(null);
   const meta = NODE_STATUS_CONFIG[node.status];
   const overdue = isNodeOverdue(node);
 
@@ -251,7 +252,7 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
           collapsible "Details" block, collapsed by default so the card leads
           with the current action + completion condition and keeps the
           management surface one click away at the bottom. Every editor
-          (OwnerPicker, NodeSchedulePicker) is untouched — just relocated. The
+          (OwnerPicker, the schedule popover) is untouched — just relocated. The
           overdue chip peeks on the toggle even while collapsed so an at-risk
           schedule stays visible without opening (and the node auto-expands when
           overdue on mount). */}
@@ -312,13 +313,29 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
 
             <Row label={t('projects.workflow.schedule')}>
               <div className={overdue ? 'text-danger' : undefined} data-testid="workflow-card-schedule">
-                <NodeSchedulePicker
-                  start={node.planned_start}
-                  due={node.planned_due}
+                <button
+                  type="button"
+                  data-testid="workflow-schedule-trigger"
                   disabled={!canWrite || saving}
-                  onChange={(start, dueDate) =>
-                    void patch({ planned_start: start, planned_due: dueDate })
-                  }
+                  onClick={(e) => setScheduleAnchor(e.currentTarget)}
+                  className="flex h-8 w-full items-center gap-2 rounded-md border border-line px-2 text-[13px] text-ink-200 transition hover:border-line-strong disabled:opacity-50"
+                >
+                  <CalendarDays size={14} className="shrink-0 text-ink-500" aria-hidden />
+                  <span className={`truncate ${node.planned_start ? '' : 'text-ink-500'}`}>
+                    {node.planned_start
+                      ? `${node.planned_start} → ${node.planned_due ?? '…'}`
+                      : t('projects.workflow.setSchedule')}
+                  </span>
+                </button>
+                <DateTimePopover
+                  anchorEl={scheduleAnchor}
+                  start={node.planned_start}
+                  end={node.planned_due}
+                  onChange={(start, dueDate) => {
+                    setScheduleAnchor(null);
+                    void patch({ planned_start: start, planned_due: dueDate });
+                  }}
+                  onClose={() => setScheduleAnchor(null)}
                 />
                 {overdue && (
                   <span

@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { DateTimePicker } from './DateTimePicker';
+import { DateTimePopover } from './common/DateTimePopover';
 import { createShare } from '../services/sharesService';
 import { Share, ShareType } from '../types';
 
@@ -51,7 +51,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [passwordEnabled, setPasswordEnabled] = useState(false);
   const [password, setPassword] = useState('');
   const [expirationEnabled, setExpirationEnabled] = useState(false);
+  // Local wall clock ('YYYY-MM-DDTHH:mm'), the shape the API already stores.
   const [expirationDate, setExpirationDate] = useState('');
+  const [expirationAnchor, setExpirationAnchor] = useState<HTMLElement | null>(null);
   const [allowDownload, setAllowDownload] = useState(true);
   const [watermark, setWatermark] = useState(false);
 
@@ -282,6 +284,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     </span>
                   </div>
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={expirationEnabled}
+                    aria-label={t('shares.expiration', 'Expiration')}
                     onClick={() => setExpirationEnabled(!expirationEnabled)}
                     className={`relative w-10 h-6 rounded-full transition-colors ${
                       expirationEnabled ? 'bg-indigo-600' : 'bg-ink-600'
@@ -295,10 +301,35 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   </button>
                 </div>
                 {expirationEnabled && (
-                  <DateTimePicker
-                    value={expirationDate}
-                    onChange={setExpirationDate}
-                  />
+                  <>
+                    {/* Same picker the workspace and the publish page use — this
+                        was the app's only caller of the now-deleted
+                        DateTimePicker, whose month and weekday names were
+                        hardcoded English. A share cannot expire in the past, so
+                        the window floors at "now". */}
+                    <button
+                      type="button"
+                      data-testid="share-expiration-trigger"
+                      aria-label={t('shares.expirationPlaceholder', 'Select date and time')}
+                      onClick={(e) => setExpirationAnchor(e.currentTarget)}
+                      className="w-full bg-ink-800 border border-ink-700 rounded-xl px-4 py-2.5 text-sm text-left transition-colors hover:border-ink-600 focus:outline-none"
+                    >
+                      <span className={expirationDate ? 'text-ink-50' : 'text-ink-500'}>
+                        {expirationDate.replace('T', ' ')
+                          || t('shares.expirationPlaceholder', 'Select date and time')}
+                      </span>
+                    </button>
+                    <DateTimePopover
+                      mode="single"
+                      withTime
+                      quickOptions
+                      anchorEl={expirationAnchor}
+                      value={expirationDate || null}
+                      minAt={new Date()}
+                      onChange={(next) => setExpirationDate(next ?? '')}
+                      onClose={() => setExpirationAnchor(null)}
+                    />
+                  </>
                 )}
 
                 {/* Allow download */}

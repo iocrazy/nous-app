@@ -21,7 +21,7 @@
  * without this component knowing anything about routing.
  *
  * The node form reuses `CurrentNodeCard`'s editing idiom directly
- * (`OwnerPicker` owner/members + `DateRangePopover` schedule + `BriefField`
+ * (`OwnerPicker` owner/members + `DateTimePopover` schedule + `BriefField`
  * brief, each `disabled` when `!canEditFor(selectedEpisodeId)`) rather than
  * `EpisodeNodeCard`'s compact trigger+menu — this is a fuller settings
  * surface, not an accordion summary card. The episode-owner row instead
@@ -49,7 +49,7 @@ import { useOptionalToast } from '../Toast';
 import { WorkflowStrip } from '../workflow/WorkflowStrip';
 import { OwnerPicker, type AgentOption, type PersonOption } from '../workflow/OwnerPicker';
 import { OwnerCandidateList } from '../workflow/OwnerCandidateList';
-import { DateRangePopover } from '../common/DateRangePopover';
+import { DateTimePopover } from '../common/DateTimePopover';
 import { BriefField } from '../workflow/BriefField';
 import type {
   EpisodeProgress,
@@ -377,7 +377,7 @@ export function WorkspaceNodeSettings({
               {selectedNode.planned_start ?? '—'} → {selectedNode.planned_due ?? '—'}
             </button>
           </Row>
-          <DateRangePopover
+          <DateTimePopover
             anchorEl={scheduleAnchor}
             start={selectedNode.planned_start}
             end={selectedNode.planned_due}

@@ -194,6 +194,24 @@
       "weekdayThu": "Th",
       "weekdayFri": "Fr",
       "weekdaySat": "Sa"
+    },
+    "duration": {
+      "days": "{{value}} days",
+      "hours": "{{value}} hours",
+      "minutes": "{{value}} minutes",
+      "hoursMinutes": "{{hours}} hours {{minutes}} minutes"
+    },
+    "dateTimePopover": {
+      "title": "Select date and time",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "thisSunday": "This Sunday",
+      "inThreeDays": "In 3 Days",
+      "hours": "Hours",
+      "minutes": "Minutes",
+      "hourOption": "Hour {{value}}",
+      "minuteOption": "Minute {{value}}",
+      "done": "Done"
     }
   },
   "distribution": {
@@ -422,9 +440,9 @@
       "scheduleNow": "Now",
       "schedule": "Schedule",
       "scheduleAt": "Scheduled time",
-      "scheduleWindow": "Douyin accepts a time between 2 hours and 14 days from now — we ask for 2h10m so the upload has room.",
-      "scheduleTooSoon": "Pick a time at least 2 hours 10 minutes from now — the platform minimum is 2 hours and the upload needs room.",
-      "scheduleTooFar": "Pick a time within 14 days from now.",
+      "scheduleWindow": "Anything outside {{min}} to {{max}} from now is greyed out — the platform refuses it, and the extra lead time leaves room for the upload.",
+      "scheduleTooSoon": "Pick a time at least {{min}} from now — the platform minimum plus room for the upload.",
+      "scheduleTooFar": "Pick a time within {{max}} from now.",
       "scheduleEmpty": "Choose when this should publish.",
       "creatorPageOnlyWarning": "Scheduling, self declaration and collections need accounts connected by QR code — {{n}} selected account(s) will fail.",
       "notScheduled": "Not scheduled",
@@ -525,7 +543,8 @@
       "gateCollectionRejected": "The collection name was refused — clear it, or use one this account already has.",
       "gateDeclarationRejected": "The self declaration was refused — pick another one, or leave it unset.",
       "gateUnknownVisibility": "That visibility is not available on this platform.",
-      "gateUnknownReason": "The publish request was refused ({{reason}})."
+      "gateUnknownReason": "The publish request was refused ({{reason}}).",
+      "schedulePick": "Pick a time"
     },
     "records": {
       "title": "Records",
@@ -1409,7 +1428,8 @@
     "views": "Views",
     "active": "Active",
     "expired": "Expired",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "expirationPlaceholder": "Select date and time"
   },
   "share": {
     "title": "Shared Content",
@@ -2005,11 +2025,6 @@
       "genericMember": "Member",
       "days_one": "{{count}} day",
       "days_other": "{{count}} days",
-      "dateRange": {
-        "cancel": "Cancel",
-        "done": "Done",
-        "clear": "Clear"
-      },
       "create": {
         "title": "Workflow",
         "shortForm": "Short-form",

@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { I18nextProvider, initReactI18next } from 'react-i18next';
+import { createInstance, type i18n as I18n } from 'i18next';
 
-import { DateRangePopover, monthGrid } from './DateRangePopover';
+import enJson from '../../public/locales/en.json';
+import zhJson from '../../public/locales/zh.json';
+import { DateTimePopover, monthGrid } from './DateTimePopover';
 
 afterEach(() => {
   cleanup();
@@ -39,7 +43,7 @@ describe('monthGrid', () => {
   });
 });
 
-describe('DateRangePopover', () => {
+describe('DateTimePopover — range mode', () => {
   let anchor: HTMLButtonElement;
 
   beforeEach(() => {
@@ -53,15 +57,15 @@ describe('DateRangePopover', () => {
 
   it('renders null (no portal) when anchorEl is null', () => {
     const { container } = render(
-      <DateRangePopover anchorEl={null} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={null} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
     );
     expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByTestId('date-range-popover')).toBeNull();
+    expect(screen.queryByTestId('date-time-popover')).toBeNull();
   });
 
   it('renders into document.body via portal when anchored, with position:fixed', () => {
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start="2026-07-15"
         end="2026-08-03"
@@ -69,14 +73,14 @@ describe('DateRangePopover', () => {
         onClose={vi.fn()}
       />,
     );
-    const pop = screen.getByTestId('date-range-popover');
+    const pop = screen.getByTestId('date-time-popover');
     expect(pop.parentElement).toBe(document.body);
     expect(pop.style.position).toBe('fixed');
   });
 
   it('shows the month derived from `start` on open, with the committed range read out', () => {
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start="2026-07-15"
         end="2026-08-03"
@@ -94,7 +98,7 @@ describe('DateRangePopover', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
     );
     expect(screen.getByRole('button', { name: '2026-07-15' })).toBeTruthy();
   });
@@ -104,7 +108,7 @@ describe('DateRangePopover', () => {
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026, so start=null opens on July.
     const onChange = vi.fn();
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
     );
     const day15 = screen.getByRole('button', { name: '2026-07-15' });
     fireEvent.click(day15);
@@ -121,7 +125,7 @@ describe('DateRangePopover', () => {
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026, so start=null opens on July.
     const onChange = vi.fn();
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole('button', { name: '2026-07-15' }));
     expect(onChange).not.toHaveBeenCalled();
@@ -136,7 +140,7 @@ describe('DateRangePopover', () => {
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026
     const onChange = vi.fn();
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start={null}
         end={null}
@@ -154,7 +158,7 @@ describe('DateRangePopover', () => {
   it('a click after a complete range starts a fresh draft (no onChange until it completes again)', () => {
     const onChange = vi.fn();
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start="2026-07-05"
         end="2026-07-10"
@@ -174,7 +178,7 @@ describe('DateRangePopover', () => {
     const onChangeEsc = vi.fn();
     const onCloseEsc = vi.fn();
     const { unmount } = render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start={null}
         end={null}
@@ -192,7 +196,7 @@ describe('DateRangePopover', () => {
     const onChangeOutside = vi.fn();
     const onCloseOutside = vi.fn();
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start={null}
         end={null}
@@ -213,7 +217,7 @@ describe('DateRangePopover', () => {
 
   it('‹ › navigate months without mutating the pending selection', () => {
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start="2026-07-15"
         end={null}
@@ -233,7 +237,7 @@ describe('DateRangePopover', () => {
   it('Clear resets both start and end to null', () => {
     const onChange = vi.fn();
     render(
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={anchor}
         start="2026-07-05"
         end="2026-07-10"
@@ -241,7 +245,7 @@ describe('DateRangePopover', () => {
         onClose={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId('date-range-clear'));
+    fireEvent.click(screen.getByTestId('date-time-clear'));
     expect(onChange).toHaveBeenLastCalledWith(null, null);
     expect(screen.getByTestId('date-range-start-cell')).not.toHaveTextContent('2026-07-05');
   });
@@ -249,7 +253,7 @@ describe('DateRangePopover', () => {
   it('Escape closes the popover', () => {
     const onClose = vi.fn();
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
     );
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -258,13 +262,13 @@ describe('DateRangePopover', () => {
   it('an outside click closes the popover, but an inside click does not', async () => {
     const onClose = vi.fn();
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
     );
     // The listener is attached via a deferred setTimeout(0) to dodge the
     // opening click; flush it first.
     await new Promise((r) => setTimeout(r, 0));
 
-    const inside = screen.getByTestId('date-range-clear');
+    const inside = screen.getByTestId('date-time-clear');
     fireEvent.mouseDown(inside);
     expect(onClose).not.toHaveBeenCalled();
 
@@ -278,7 +282,7 @@ describe('DateRangePopover', () => {
   it('scrolling the window closes the popover', async () => {
     const onClose = vi.fn();
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={onClose} />,
     );
     fireEvent.scroll(window);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -291,9 +295,9 @@ describe('DateRangePopover', () => {
       ({ top: 500, bottom: 520, left: 50, right: 150, width: 100, height: 20 }) as DOMRect;
 
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
     );
-    const pop = screen.getByTestId('date-range-popover');
+    const pop = screen.getByTestId('date-time-popover');
     // jsdom always reports offsetHeight 0, so stub a real measured height to
     // exercise the overflow branch deterministically.
     Object.defineProperty(pop, 'offsetHeight', { configurable: true, value: 320 });
@@ -316,12 +320,260 @@ describe('DateRangePopover', () => {
       ({ top: 100, bottom: 120, left: 50, right: 150, width: 100, height: 20 }) as DOMRect;
 
     render(
-      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
+      <DateTimePopover anchorEl={anchor} start={null} end={null} onChange={vi.fn()} onClose={vi.fn()} />,
     );
-    const pop = screen.getByTestId('date-range-popover');
+    const pop = screen.getByTestId('date-time-popover');
     Object.defineProperty(pop, 'offsetHeight', { configurable: true, value: 300 });
     fireEvent(window, new Event('resize'));
 
     expect(parseFloat(pop.style.top)).toBe(120 + 6);
+  });
+});
+
+// ── single mode: one point in time, optional clock, hard window ──
+//
+// This is the half `DateRangePopover` never had, and `DateTimePicker` had but
+// nobody could reach (one caller, hardcoded English month/weekday names). The
+// tests below are what "the publish module is just the canvas control plus a
+// time" has to mean concretely.
+
+describe('DateTimePopover — single mode', () => {
+  let anchor: HTMLButtonElement;
+
+  beforeEach(() => {
+    anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+  });
+
+  afterEach(() => {
+    anchor.remove();
+  });
+
+  it('commits a bare date and closes when there is no time dimension', () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <DateTimePopover
+        mode="single"
+        anchorEl={anchor}
+        value="2026-07-15"
+        onChange={onChange}
+        onClose={onClose}
+      />,
+    );
+    // No clock: no time columns, no Done — one click is the whole interaction.
+    expect(screen.queryByTestId('date-time-columns')).toBeNull();
+    expect(screen.queryByTestId('date-time-done')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('2026-07-20'));
+    expect(onChange).toHaveBeenCalledWith('2026-07-20');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('commits the datetime-local shape and stays open while the time is set', () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        anchorEl={anchor}
+        value="2026-07-15T08:30"
+        onChange={onChange}
+        onClose={onClose}
+      />,
+    );
+    // The committed value's own time is what the columns open on.
+    expect(screen.getByTestId('date-time-value-cell')).toHaveTextContent('2026-07-15 08:30');
+
+    fireEvent.click(screen.getByLabelText('2026-07-20'));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-20T08:30');
+    // Closing on the day click would put the clock out of reach.
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('date-time-hour-21'));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-20T21:30');
+    fireEvent.click(screen.getByTestId('date-time-minute-45'));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-20T21:45');
+
+    fireEvent.click(screen.getByTestId('date-time-done'));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('disables everything outside [minAt, maxAt] instead of accepting then complaining', () => {
+    // Window: 2026-07-15 14:20 → 2026-07-18 09:00.
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        anchorEl={anchor}
+        value={null}
+        minAt={new Date(2026, 6, 15, 14, 20)}
+        maxAt={new Date(2026, 6, 18, 9, 0)}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('2026-07-14')).toBeDisabled();
+    expect(screen.getByLabelText('2026-07-15')).not.toBeDisabled();
+    expect(screen.getByLabelText('2026-07-18')).not.toBeDisabled();
+    expect(screen.getByLabelText('2026-07-19')).toBeDisabled();
+
+    // Month nav is bounded too — paging into a month of dead cells is not a
+    // feature, it is a dead end that looks like one.
+    expect(screen.getByLabelText('Previous Month')).toBeDisabled();
+    expect(screen.getByLabelText('Next Month')).toBeDisabled();
+
+    // On the floor day, hours below the floor are dead; on the ceiling day the
+    // dead ones are at the other end. Same window, both directions.
+    fireEvent.click(screen.getByLabelText('2026-07-15'));
+    expect(screen.getByTestId('date-time-hour-14')).not.toBeDisabled();
+    expect(screen.getByTestId('date-time-hour-13')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('2026-07-18'));
+    expect(screen.getByTestId('date-time-hour-09')).not.toBeDisabled();
+    expect(screen.getByTestId('date-time-hour-10')).toBeDisabled();
+  });
+
+  it('snaps the held time forward when the picked day would make it illegal', () => {
+    const onChange = vi.fn();
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        anchorEl={anchor}
+        // 06:00 is fine on the 16th and impossible on the 15th.
+        value="2026-07-16T06:00"
+        minAt={new Date(2026, 6, 15, 14, 20)}
+        maxAt={new Date(2026, 6, 18, 9, 0)}
+        onChange={onChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('2026-07-15'));
+    // 14:20 is on the 5-minute grid, so it is itself the first legal slot.
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-15T14:20');
+  });
+
+  it('offers shortcuts, and greys out the ones the window forbids', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 15, 10, 0, 0));
+    const onChange = vi.fn();
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        quickOptions
+        anchorEl={anchor}
+        value={null}
+        // Only today and tomorrow are reachable.
+        maxAt={new Date(2026, 6, 16, 23, 0)}
+        onChange={onChange}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Today' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Tomorrow' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'In 3 Days' })).toBeDisabled();
+    // 2026-07-15 is a Wednesday, so "This Sunday" is the 19th — past the ceiling.
+    expect(screen.getByRole('button', { name: 'This Sunday' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tomorrow' }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining('2026-07-16T'));
+  });
+
+  it('clears to null without closing the caller out of a fresh pick', () => {
+    const onChange = vi.fn();
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        anchorEl={anchor}
+        value="2026-07-15T08:30"
+        onChange={onChange}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('date-time-clear'));
+    expect(onChange).toHaveBeenCalledWith(null);
+    expect(screen.getByTestId('date-time-value-cell')).toHaveTextContent('–');
+  });
+});
+
+// ── the reason the native input had to go ──
+//
+// `<input type="datetime-local">` renders its own chrome from the BROWSER's
+// locale, so in a zh-CN browser it reads `mm/dd/yyyy, --:-- --` and no locale
+// file of ours can touch it. Rendering this component under the real shipped
+// locale JSON is the falsifiable version of "it speaks Chinese now": every
+// visible word comes from zh.json, and the value read-out is ISO, never m/d/y.
+
+function makeI18n(lng: 'en' | 'zh'): I18n {
+  const inst = createInstance();
+  void inst.use(initReactI18next).init({
+    lng,
+    fallbackLng: 'en',
+    resources: { en: { translation: enJson }, zh: { translation: zhJson } },
+    interpolation: { escapeValue: false },
+    react: { useSuspense: false },
+  });
+  return inst;
+}
+
+describe('DateTimePopover — locale', () => {
+  let anchor: HTMLButtonElement;
+
+  beforeEach(() => {
+    anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+  });
+
+  afterEach(() => {
+    anchor.remove();
+  });
+
+  const renderUnder = (lng: 'en' | 'zh') =>
+    render(
+      <I18nextProvider i18n={makeI18n(lng)}>
+        <DateTimePopover
+          mode="single"
+          withTime
+          quickOptions
+          anchorEl={anchor}
+          value="2026-07-15T08:30"
+          onChange={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </I18nextProvider>,
+    );
+
+  it('renders every label from zh.json, with no English or m/d/y left over', () => {
+    renderUnder('zh');
+    // The popover is a portal onto document.body, so the render container is
+    // empty by design — read the popover itself.
+    const text = screen.getByTestId('date-time-popover').textContent ?? '';
+
+    expect(screen.getByText('2026年 7月')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '今天' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '本周日' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '完成' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清除' })).toBeInTheDocument();
+    // Weekday headers: the old DateTimePicker hardcoded Su/Mo/Tu…
+    expect(screen.getByText('日')).toBeInTheDocument();
+    // The value read-out is ISO, so no `07/15/2026` and no `mm/dd/yyyy`.
+    expect(text).toContain('2026-07-15 08:30');
+    expect(text).not.toMatch(/\d{2}\/\d{2}\/\d{4}/);
+    expect(text).not.toMatch(/mm\/dd\/yyyy/i);
+    // No raw i18n key leaked (the failure mode when a key exists in en only).
+    expect(text).not.toMatch(/\bcommon\.date(Range|Time)Popover\.[a-zA-Z]/);
+  });
+
+  it('renders the English labels under en, from the same keys', () => {
+    renderUnder('en');
+    expect(screen.getByText('July 2026')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This Sunday' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
   });
 });

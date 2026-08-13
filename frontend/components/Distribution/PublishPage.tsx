@@ -21,6 +21,7 @@ import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublis
 import { AccountAvatar } from './platform';
 import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
+import { DateTimePopover } from '../common/DateTimePopover';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import { PageHeader } from '../layout/PageHeader';
@@ -85,14 +86,18 @@ const SELF_DECLARATIONS: Array<{ value: SelfDeclaration; key: string; label: str
 const DECLARATION_AI: SelfDeclaration = '内容由AI生成';
 
 /**
+ * Fallback schedule window, used only until `GET /distribution/capabilities`
+ * answers (or when the platforms in play state no bound of their own).
+ *
  * Douyin accepts a scheduled time between 2 hours and 14 days out — and the
  * time is typed into the creator page only AFTER the upload finishes, which
- * takes minutes. So the lead time offered here is the platform's 2 hours plus
- * a 10-minute upload margin: a request in the 2h00–2h10 band would pass every
- * check we make and then be refused by Douyin after a few hundred MB went up.
- * The same effective bound is enforced in the request schema, before the
- * browser opens, and in the browser service (SCHEDULE_LEAD_SLACK) — all three
- * must agree or the user gets accepted-then-rejected.
+ * takes minutes. So the lead time is the platform's 2 hours plus a 10-minute
+ * upload margin: a request in the 2h00–2h10 band would pass every check we make
+ * and then be refused by Douyin after a few hundred MB went up. The backend
+ * profile carries that same 7800s in `schedule_min_lead_seconds`, the request
+ * schema re-checks it, and the browser service enforces it again
+ * (SCHEDULE_LEAD_SLACK) — all of them must agree or the user gets
+ * accepted-then-rejected.
  *
  * No margin on the upper bound: time passing only moves the target closer.
  */
@@ -101,29 +106,33 @@ const SCHEDULE_MAX_AHEAD_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type ScheduleProblem = 'empty' | 'tooSoon' | 'tooFar' | null;
 
-/** `<input type="datetime-local">` value (local wall clock, no offset) → the
- *  window verdict. Exported so the boundaries are unit-testable without a DOM. */
+/**
+ * A local wall-clock value (`YYYY-MM-DDTHH:mm`, no offset) → the window verdict.
+ * Exported so the boundaries are unit-testable without a DOM.
+ *
+ * The picker already refuses to *offer* anything outside the window, so this is
+ * the second line rather than the first: it still catches `empty`, a value that
+ * aged out of the window while the form sat open, and any future caller that
+ * writes `scheduledAt` without going through the picker.
+ */
 export const scheduleProblem = (
   localValue: string,
   now: number = Date.now(),
+  minLeadMs: number = SCHEDULE_MIN_LEAD_MS,
+  maxAheadMs: number = SCHEDULE_MAX_AHEAD_MS,
 ): ScheduleProblem => {
   if (!localValue) return 'empty';
   const at = new Date(localValue).getTime();
   if (Number.isNaN(at)) return 'empty';
   const delta = at - now;
-  if (delta < SCHEDULE_MIN_LEAD_MS) return 'tooSoon';
-  if (delta > SCHEDULE_MAX_AHEAD_MS) return 'tooFar';
+  if (delta < minLeadMs) return 'tooSoon';
+  if (delta > maxAheadMs) return 'tooFar';
   return null;
 };
 
-/** Date → the `YYYY-MM-DDTHH:mm` shape a datetime-local input wants, in LOCAL
- *  time (toISOString would shift by the offset and hand the user a min/max in
- *  the wrong timezone). */
-const toLocalInputValue = (d: Date): string => {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
+/** Default seconds used when the capabilities response is not in yet. */
+const DEFAULT_MIN_LEAD_S = SCHEDULE_MIN_LEAD_MS / 1000;
+const DEFAULT_MAX_AHEAD_S = SCHEDULE_MAX_AHEAD_MS / 1000;
 
 // Deterministic gradient pick per account id — keeps avatars visually
 // distinct without needing per-user color config.
@@ -217,9 +226,12 @@ export const PublishPage: React.FC = () => {
   // and nothing else.
   const [declarationAuto, setDeclarationAuto] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<'now' | 'schedule'>('now');
-  // datetime-local value (local wall clock, no offset) — converted to an
-  // absolute ISO instant only at submit time.
+  // Local wall clock, no offset ('YYYY-MM-DDTHH:mm') — converted to an absolute
+  // ISO instant only at submit time. Kept in that shape after the native input
+  // was replaced by DateTimePopover, which speaks it too.
   const [scheduledAt, setScheduledAt] = useState('');
+  // The picker's anchor; non-null = open.
+  const [scheduleAnchor, setScheduleAnchor] = useState<HTMLElement | null>(null);
   const [collectionName, setCollectionName] = useState('');
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
@@ -727,11 +739,69 @@ export const PublishPage: React.FC = () => {
   const declarationConflict =
     aiContent && selfDeclaration !== '' && selfDeclaration !== DECLARATION_AI;
 
-  const scheduleIssue = scheduleMode === 'schedule' ? scheduleProblem(scheduledAt) : null;
-  const scheduleBounds = useMemo(() => ({
-    min: toLocalInputValue(new Date(Date.now() + SCHEDULE_MIN_LEAD_MS)),
-    max: toLocalInputValue(new Date(Date.now() + SCHEDULE_MAX_AHEAD_MS)),
-  }), []);
+  /**
+   * The schedule window, in the platforms' own numbers.
+   *
+   * Same discipline as `imageLimits`: read from the capabilities response, not
+   * restated here, and when several platforms are in play the STRICTEST stated
+   * bound wins (max of the minima, min of the maxima). A platform that states
+   * nothing contributes nothing; if none of them state anything the module
+   * fallback applies, so the picker is never unbounded.
+   */
+  const scheduleLimits = useMemo(() => {
+    const caps = targetAccounts
+      .map((a) => capabilities?.[a.platform])
+      .filter((c): c is PlatformCapability => Boolean(c));
+    const leads = caps
+      .map((c) => c.schedule_min_lead_seconds)
+      .filter((n): n is number => typeof n === 'number');
+    const aheads = caps
+      .map((c) => c.schedule_max_ahead_seconds)
+      .filter((n): n is number => typeof n === 'number');
+    return {
+      minLeadMs: (leads.length ? Math.max(...leads) : DEFAULT_MIN_LEAD_S) * 1000,
+      maxAheadMs: (aheads.length ? Math.min(...aheads) : DEFAULT_MAX_AHEAD_S) * 1000,
+    };
+  }, [targetAccounts, capabilities]);
+
+  const scheduleIssue = scheduleMode === 'schedule'
+    ? scheduleProblem(scheduledAt, Date.now(), scheduleLimits.minLeadMs, scheduleLimits.maxAheadMs)
+    : null;
+
+  /**
+   * Window edges as instants, handed to the picker so out-of-window days /
+   * hours / minutes render disabled — the user cannot select an illegal time in
+   * the first place. Recomputed every time the popover opens rather than once
+   * on mount: a form left sitting for an hour would otherwise offer a floor
+   * that has already passed.
+   */
+  const scheduleWindow = useMemo(() => {
+    const now = Date.now();
+    return {
+      minAt: new Date(now + scheduleLimits.minLeadMs),
+      maxAt: new Date(now + scheduleLimits.maxAheadMs),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleLimits, scheduleAnchor]);
+
+  /** A duration → the words a person reads ("2 hours 10 minutes", "14 days"). */
+  const leadWords = (ms: number): string => {
+    const totalMinutes = Math.round(ms / 60000);
+    const dayMinutes = 24 * 60;
+    if (totalMinutes >= dayMinutes && totalMinutes % dayMinutes === 0) {
+      return t('common.duration.days', '{{value}} days', { value: totalMinutes / dayMinutes });
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours === 0) return t('common.duration.minutes', '{{value}} minutes', { value: minutes });
+    if (minutes === 0) return t('common.duration.hours', '{{value}} hours', { value: hours });
+    return t('common.duration.hoursMinutes', '{{hours}} hours {{minutes}} minutes', {
+      hours,
+      minutes,
+    });
+  };
+  const minLeadWords = leadWords(scheduleLimits.minLeadMs);
+  const maxAheadWords = leadWords(scheduleLimits.maxAheadMs);
 
   // Scheduling / declaration / collection are creator-page controls: only an
   // account bound by QR code publishes through that page. On any other account
@@ -1400,7 +1470,8 @@ export const PublishPage: React.FC = () => {
                 <span>
                   {t(
                     'distribution.publish.scheduleWindow',
-                    'Douyin accepts a time between 2 hours and 14 days from now — we ask for 2h10m so the upload has room.',
+                    'Anything outside {{min}} to {{max}} from now is greyed out — the platform refuses it, and the extra lead time leaves room for the upload.',
+                    { min: minLeadWords, max: maxAheadWords },
                   )}
                 </span>
               </div>
@@ -1409,7 +1480,7 @@ export const PublishPage: React.FC = () => {
                   <button
                     type="button"
                     className={scheduleMode === 'now' ? 'on' : ''}
-                    onClick={() => setScheduleMode('now')}
+                    onClick={() => { setScheduleMode('now'); setScheduleAnchor(null); }}
                   >
                     {t('distribution.publish.scheduleNow', 'Now')}
                   </button>
@@ -1422,32 +1493,62 @@ export const PublishPage: React.FC = () => {
                   </button>
                 </div>
                 {scheduleMode === 'schedule' ? (
-                  <input
-                    type="datetime-local"
-                    className="input"
-                    style={{ width: 'auto', flex: '1 1 200px' }}
-                    value={scheduledAt}
-                    min={scheduleBounds.min}
-                    max={scheduleBounds.max}
-                    aria-label={t('distribution.publish.scheduleAt', 'Scheduled time')}
-                    aria-invalid={scheduleIssue !== null}
-                    onChange={(e) => setScheduledAt(e.target.value)}
-                  />
+                  <>
+                    {/* Same control the workspace canvas schedules nodes with —
+                        the native <input type="datetime-local"> that used to sit
+                        here rendered as `mm/dd/yyyy, --:-- --` in a zh-CN
+                        browser and could not be bounded past a whole-minute
+                        min/max the browser was free to ignore. */}
+                    <button
+                      type="button"
+                      className="sched-input"
+                      style={{ flex: '1 1 200px' }}
+                      data-testid="publish-schedule-trigger"
+                      aria-label={t('distribution.publish.scheduleAt', 'Scheduled time')}
+                      aria-invalid={scheduleIssue !== null}
+                      onClick={(e) => setScheduleAnchor(e.currentTarget)}
+                    >
+                      <Calendar />
+                      {scheduledAt.replace('T', ' ')
+                        || t('distribution.publish.schedulePick', 'Pick a time')}
+                    </button>
+                    <DateTimePopover
+                      mode="single"
+                      withTime
+                      quickOptions
+                      anchorEl={scheduleAnchor}
+                      value={scheduledAt || null}
+                      minAt={scheduleWindow.minAt}
+                      maxAt={scheduleWindow.maxAt}
+                      onChange={(next) => setScheduledAt(next ?? '')}
+                      onClose={() => setScheduleAnchor(null)}
+                    />
+                  </>
                 ) : (
                   <span className="sched-input"><Calendar />{t('distribution.publish.notScheduled', 'Not scheduled')}</span>
                 )}
               </div>
-              {/* The window is re-checked in the request schema and again before
-                  a browser opens; saying it here is what keeps the user from
-                  finding out after a full upload. */}
+              {/* The picker cannot offer an out-of-window time, so these two
+                  now only fire for a value that aged out while the form sat
+                  open. Kept because the window is re-checked in the request
+                  schema and again before a browser opens — finding out after a
+                  full upload is the failure this whole block exists to stop. */}
               {scheduleIssue === 'tooSoon' && (
                 <p className="field-err">
-                  {t('distribution.publish.scheduleTooSoon', 'Pick a time at least 2 hours 10 minutes from now — the platform minimum is 2 hours and the upload needs room.')}
+                  {t(
+                    'distribution.publish.scheduleTooSoon',
+                    'Pick a time at least {{min}} from now — the platform minimum plus room for the upload.',
+                    { min: minLeadWords },
+                  )}
                 </p>
               )}
               {scheduleIssue === 'tooFar' && (
                 <p className="field-err">
-                  {t('distribution.publish.scheduleTooFar', 'Pick a time within 14 days from now.')}
+                  {t(
+                    'distribution.publish.scheduleTooFar',
+                    'Pick a time within {{max}} from now.',
+                    { max: maxAheadWords },
+                  )}
                 </p>
               )}
               {scheduleIssue === 'empty' && (
