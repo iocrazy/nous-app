@@ -44,26 +44,31 @@ from app.services.library.media_storage import materialize
 
 @DBOS.step()
 async def resolve_caption_provider(user_id: Optional[str]) -> dict[str, Any]:
-    """Resolve provider key + config + model + agent slug for caption."""
+    """Resolve provider key + config + model + agent slug + fallback models
+    for caption.
+
+    Calls ``resolve_task_ai_config`` directly instead of the tuple-shim
+    ``resolve_caption_provider_config`` (which discards ``fallback_models``
+    down to 4 positional fields) so the typed ``ResolvedAIConfig.fallback_models``
+    rides along into the step's return dict, threaded to ``call_caption`` ->
+    ``CaptionService`` (spec 2026-08-12-batch-fallback-rollout §1-F1,
+    mirrors ``analyze_l1.resolve_analyze_provider``)."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_caption_provider_config,
+        DEFAULT_CAPTION_AGENT_SLUG,
+        resolve_task_ai_config,
     )
 
-    (
-        provider_key,
-        provider_config,
-        agent_model,
-        agent_slug,
-    ) = await resolve_caption_provider_config(user_id)
+    cfg = await resolve_task_ai_config(user_id, "caption", DEFAULT_CAPTION_AGENT_SLUG)
     return {
-        "provider_key": provider_key,
-        "provider_config": provider_config or {},
-        "agent_model": agent_model,
-        "agent_slug": agent_slug,
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config or {},
+        "agent_model": cfg.model,
+        "agent_slug": cfg.agent_slug,
+        "fallback_models": list(cfg.fallback_models),
     }
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step(retries_allowed=True, max_attempts=1)
 async def call_caption(
     abs_path: str,
     user_id: str,
@@ -72,6 +77,7 @@ async def call_caption(
     provider_config: dict[str, Any],
     agent_slug: str,
     wf_id: Optional[str] = None,
+    fallback_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run the multimodal caption call.
 
@@ -83,6 +89,11 @@ async def call_caption(
 
     Raises on no-result so the workflow is marked FAILED with the actual
     reason (rule 4) instead of completing with nothing written.
+
+    ``max_attempts=1`` (was 2): retry + fallback now live entirely in
+    ``LLMFallbackChain`` (via ``CaptionService.caption()``'s
+    ``build_fallback_llm`` wiring) — a step-level retry on top would
+    multiply attempts (spec 2026-08-12-batch-fallback-rollout §1-F1).
     """
     from app.services.ai.caption import CaptionService
 
@@ -96,6 +107,7 @@ async def call_caption(
         user_id=user_id,
         resource_id=resource_id,
         task_id=wf_id,
+        fallback_models=fallback_models,
     )
     if not result:
         raise RuntimeError(
@@ -161,6 +173,7 @@ async def caption_asset_workflow(
                     provider_config=cfg["provider_config"],
                     agent_slug=cfg.get("agent_slug") or "caption",
                     wf_id=wf_id,
+                    fallback_models=cfg.get("fallback_models") or [],
                 )
 
             await manager.update_progress(wf_id, 70, subtitle="Parsing result")

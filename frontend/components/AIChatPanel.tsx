@@ -54,6 +54,7 @@ import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
+import { providerErrorMessage } from '../utils/providerErrorMessage';
 
 export interface AIChatPanelProps {
   /** String form of the project's BIGINT id, for display + session tagging.
@@ -100,26 +101,6 @@ function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
       entry !== null &&
       typeof (entry as ChatToolCall).name === 'string',
   );
-}
-
-/** 已知 provider 错误码 → i18n 文案;未知码返回 null 走原有兜底。 */
-export function providerErrorMessage(
-  code: unknown,
-  t: (key: string, fallback: string) => string,
-): string | null {
-  const KNOWN = [
-    'provider_rate_limit',
-    'provider_unreachable',
-    'provider_auth',
-    'provider_bad_model',
-    'task_timeout',
-  ];
-  if (typeof code !== 'string' || !KNOWN.includes(code)) return null;
-  const key = code
-    .split('_')
-    .map((w, i) => (i === 0 ? w : w[0].toUpperCase() + w.slice(1)))
-    .join('');
-  return t(`errors.provider.${key}`, code);
 }
 
 /** Persisted assistant message metadata_json.run_id (BIGINT snowflake, kept

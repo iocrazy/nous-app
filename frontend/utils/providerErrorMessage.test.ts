@@ -2,11 +2,14 @@
  * chat-stream 的 `error` SSE event 现在带 `code`(spec §2)。providerErrorMessage
  * 是纯函数：已知的 5 个 provider 错误码映射到 i18n 文案，未知码/非字符串一律
  * 返回 null 让调用方走原有兜底（旧 shape 的 `evt.data.error` 或固定文案）。
+ *
+ * REST 侧的 `ErrorResponse.code` 走同一份映射（见 ResourcePromptSection 的翻译
+ * 失败回显），所以这个纯函数住在 utils/ 而不是某个组件里。
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { providerErrorMessage } from './AIChatPanel';
+import { providerErrorMessage } from './providerErrorMessage';
 
 // 最小 t() stub：直接回显 key,能验证映射选中了哪个 key,不需要真的加载 i18n 资源。
 const t = (key: string, fallback: string) => `${key}|${fallback}`;

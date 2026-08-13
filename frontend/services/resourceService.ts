@@ -307,11 +307,16 @@ export async function translateGenPrompt(
     },
   );
   if (!response.ok) {
-    const detail = await response
-      .json()
-      .then((j) => j?.detail)
-      .catch(() => null);
-    throw new Error(detail || 'Failed to translate prompt');
+    // The backend envelope is ErrorResponse — `{success, error, code,
+    // request_id, details}`; there is no `detail`. Provider failures arrive
+    // here already classified (`code: 'provider_rate_limit'`, …), so the code
+    // travels on the Error for callers that render typed copy.
+    const body = await response.json().catch(() => null);
+    const err: Error & { code?: string } = new Error(
+      body?.error || 'Failed to translate prompt',
+    );
+    if (typeof body?.code === 'string') err.code = body.code;
+    throw err;
   }
   const json = await response.json();
   return json.data;

@@ -84,8 +84,11 @@ async def translate_gen_prompt(
     The source side is never modified.
     """
     from app.api.media_permissions import check_media_access
+    from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
+    from app.services.ai.llm.llm_retry_middleware import LLMCallError
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_translate_provider_config,
+        DEFAULT_TRANSLATE_AGENT_SLUG,
+        resolve_task_ai_config,
     )
     from app.services.ai.translate import TranslateService
 
@@ -101,13 +104,18 @@ async def translate_gen_prompt(
         raise HTTPException(status_code=400, detail="No prompt text to translate from")
 
     try:
-        provider_key, provider_config, _model, agent_slug = (
-            await resolve_translate_provider_config(auth.user_id)
+        # resolve_task_ai_config directly, NOT the resolve_translate_provider_config
+        # tuple shim — the shim narrows to 4 positional fields and drops
+        # ``fallback_models``, which is exactly what the chain needs
+        # (spec 2026-08-12-batch-fallback-rollout §1-F3, mirrors
+        # caption_asset/classify_asset's resolve steps).
+        cfg = await resolve_task_ai_config(
+            auth.user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
         )
         svc = TranslateService(
-            provider_key=provider_key,
-            provider_config=provider_config,
-            agent_slug=agent_slug,
+            provider_key=cfg.provider_key,
+            provider_config=cfg.provider_config or {},
+            agent_slug=cfg.agent_slug,
         )
         patch: dict = {}
         for _source_field, target_field, source_text in plan:
@@ -116,10 +124,19 @@ async def translate_gen_prompt(
                 target_lang=data.target_lang,
                 user_id=auth.user_id,
                 resource_id=str(resource_id),
+                fallback_models=list(cfg.fallback_models),
             )
             if translated:
                 patch[target_field] = translated
     except HTTPException:
+        raise
+    except (AllModelsFailed, LLMCallError):
+        # Let the typed provider surface handle these: core/provider_errors.py
+        # maps them to 503 provider_rate_limit / 502 provider_auth / 504
+        # task_timeout with a user-actionable message. Swallowing them into the
+        # catch-all below would produce a bare 500 whose body core/exceptions.py
+        # masks to "Internal server error" — the P1 typed echo would be invisible
+        # on this (workflow-less, synchronous) path.
         raise
     except Exception as e:
         logger.error(f"Translate gen_prompt failed for {resource_id}: {e}")
