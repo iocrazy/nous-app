@@ -5,7 +5,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../public/locales/en.json';
 import zhJson from '../../public/locales/zh.json';
-import { DateTimePopover, monthGrid } from './DateTimePopover';
+import { CALENDAR_GRID_WIDTH, DateTimePopover, monthGrid } from './DateTimePopover';
 
 afterEach(() => {
   cleanup();
@@ -575,5 +575,30 @@ describe('DateTimePopover — locale', () => {
     expect(screen.getByText('July 2026')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'This Sunday' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+  });
+});
+
+describe('DateTimePopover geometry', () => {
+  // jsdom does not lay anything out, so no rendering test can catch a calendar
+  // that is too narrow for its own grid — the first release shipped exactly
+  // that (CALENDAR_WIDTH 260 gave the grid 236px against the 248px its seven
+  // `w-8` cells and six `gap-1` tracks need, and the month rendered as a
+  // run-on smear). What *is* checkable is the arithmetic the layout rests on,
+  // so it is stated here rather than left to a visual pass someone has to
+  // remember to do.
+  const DAY_CELL = 32; // `w-8` on the day buttons
+  const DAY_GAP = 4; // `gap-1` between grid tracks
+  const COLUMNS = 7;
+
+  it('gives the month grid at least the width its seven cells occupy', () => {
+    const needed = DAY_CELL * COLUMNS + DAY_GAP * (COLUMNS - 1);
+    expect(CALENDAR_GRID_WIDTH).toBeGreaterThanOrEqual(needed);
+  });
+
+  it('keeps the grid width in step with the cell size it is derived from', () => {
+    // Pins the *relationship*, not the number: bump `w-8` to `w-9` without
+    // touching the constant and this fails instead of silently re-crushing the
+    // month. The class names live in the component; this is the arithmetic.
+    expect(CALENDAR_GRID_WIDTH).toBe(DAY_CELL * COLUMNS + DAY_GAP * (COLUMNS - 1));
   });
 });
