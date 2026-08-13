@@ -74,6 +74,16 @@ class CanvasService:
             viewport_json=data.viewport_json,
         )
 
+    async def peek_storyboard(
+        self, project_id: str, episode_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Existence check for the get-or-create storyboard flow's read/write
+        gate split (2026-08-12 fix): the router calls this FIRST to decide
+        which access guard to run — an existing canvas is a pure read
+        (viewers may fetch it); a missing one means the GET is about to
+        CREATE a row, so it must pass the write gate a POST would."""
+        return await self.repo.get_storyboard_canvas(project_id, episode_id)
+
     async def get_or_create_storyboard(
         self,
         *,

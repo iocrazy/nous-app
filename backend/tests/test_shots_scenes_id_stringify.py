@@ -25,8 +25,11 @@ from httpx import ASGITransport, AsyncClient
 from app.core.deps import AuthContext, get_auth
 from app.core.scope_guards import (
     verify_scene_access,
+    verify_scene_read_access,
     verify_script_access,
+    verify_script_read_access,
     verify_shot_access,
+    verify_shot_read_access,
 )
 from app.main import app
 
@@ -59,14 +62,22 @@ def _override_auth():
 def _bypass_guards():
     """These tests target the response serialization contract, not authz —
     pass every scope guard unconditionally (mirrors the pattern in
-    test_episodes_scenes_authz_wiring.py's `_bypass_scene_guard`)."""
+    test_episodes_scenes_authz_wiring.py's `_bypass_scene_guard`). Includes
+    the *_read_access variants (2026-08-12 gate split) since the GET routes
+    under test now declare those instead of the write-semantics guards."""
     app.dependency_overrides[verify_shot_access] = lambda: None
+    app.dependency_overrides[verify_shot_read_access] = lambda: None
     app.dependency_overrides[verify_scene_access] = lambda: None
+    app.dependency_overrides[verify_scene_read_access] = lambda: None
     app.dependency_overrides[verify_script_access] = lambda: None
+    app.dependency_overrides[verify_script_read_access] = lambda: None
     yield
     app.dependency_overrides.pop(verify_shot_access, None)
+    app.dependency_overrides.pop(verify_shot_read_access, None)
     app.dependency_overrides.pop(verify_scene_access, None)
+    app.dependency_overrides.pop(verify_scene_read_access, None)
     app.dependency_overrides.pop(verify_script_access, None)
+    app.dependency_overrides.pop(verify_script_read_access, None)
 
 
 @pytest_asyncio.fixture

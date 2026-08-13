@@ -31,7 +31,11 @@ from sqlalchemy.dialects import postgresql
 import app.repositories.script_beat_repository as beat_mod
 from app.api.script_beats_router import router as beats_router
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_beat_access, verify_script_access
+from app.core.scope_guards import (
+    verify_beat_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.main import app
 from app.models.scripts import ScriptBeats
 from app.repositories.script_beat_repository import ScriptBeatRepository
@@ -46,7 +50,7 @@ _BEAT_ID = 900000000000000002
 # 1a. Structural: every route declares a guard
 # --------------------------------------------------------------------------- #
 
-KNOWN_GUARDS = {verify_script_access, verify_beat_access}
+KNOWN_GUARDS = {verify_script_access, verify_script_read_access, verify_beat_access}
 FAKE_USER_ID = str(uuid4())
 
 

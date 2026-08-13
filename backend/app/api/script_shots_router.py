@@ -1,12 +1,17 @@
 """Script Shots Router — shot CRUD + reorder (Phase B P3).
 
 Endpoints:
-  GET  /scenes/{scene_id}/shots   — verify_scene_access
+  GET  /scenes/{scene_id}/shots   — verify_scene_read_access
   POST /scenes/{scene_id}/shots   — verify_scene_access
-  GET    /shots/{shot_id}         — verify_shot_access
+  GET    /shots/{shot_id}         — verify_shot_read_access
   PATCH  /shots/{shot_id}         — verify_shot_access
   DELETE /shots/{shot_id}         — verify_shot_access
   POST /shots/{shot_id}/move      — verify_shot_access
+
+The GET routes use the *_read_access variants (team membership OR an
+explicit project_members row on the parent project — 2026-08-12 fix); the
+write routes (including PATCH — a viewer-role project member still 403s)
+keep the team-only gate unchanged.
 
 Shots are the storyboard tier that hangs off a scene. This router owns the
 manual CRUD + sparse reorder; Auto Storyboard (AI breakdown) and single-shot
@@ -24,7 +29,12 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_scene_access, verify_shot_access
+from app.core.scope_guards import (
+    verify_scene_access,
+    verify_scene_read_access,
+    verify_shot_access,
+    verify_shot_read_access,
+)
 from app.repositories.script_shot_repository import get_script_shot_repository
 from app.schemas.script import ShotCreate, ShotMoveRequest, ShotUpdate
 from app.services.infra.unified_task_manager import get_task_manager
@@ -71,7 +81,7 @@ def _to_response_list(shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def list_shots(
     scene_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_scene_access),
+    _guard: None = Depends(verify_scene_read_access),
 ) -> Dict[str, Any]:
     """List all shots for a scene, ordered by sort_order."""
     try:
@@ -105,7 +115,7 @@ async def create_shot(
 async def get_shot(
     shot_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_shot_access),
+    _guard: None = Depends(verify_shot_read_access),
 ) -> Dict[str, Any]:
     """Get a single shot by id."""
     try:

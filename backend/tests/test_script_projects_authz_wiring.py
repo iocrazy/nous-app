@@ -2,9 +2,11 @@
 IDOR close-out, Phase B PR-G2 review).
 
 Structural half mirrors test_projects_authz_wiring.py: every `/{script_id}`
-route MUST declare verify_script_access, so a future endpoint added without a
-guard fails here instead of shipping an IDOR. Collection routes (create / list)
-have no script target and are exempt, matching the projects router.
+route MUST declare verify_script_access (write routes) or
+verify_script_read_access (the GET route — 2026-08-12 fix, gets the
+project_members fallback), so a future endpoint added without a guard fails
+here instead of shipping an IDOR. Collection routes (create / list) have no
+script target and are exempt, matching the projects router.
 
 Behavior half pins the same-project reassign check: PUT with an episode_id that
 belongs to a DIFFERENT project is a 404 (no cross-project reassign, no leak).
@@ -20,12 +22,14 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.script_projects_router import router
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_script_access
+from app.core.scope_guards import verify_script_access, verify_script_read_access
 from app.main import app
 
 pytestmark = pytest.mark.unit
 
 FAKE_USER_ID = str(uuid4())
+
+_KNOWN_GUARDS = {verify_script_access, verify_script_read_access}
 
 # Collection routes: no {script_id} target, nothing script-scoped to guard.
 EXEMPT = {
@@ -50,7 +54,9 @@ def test_script_project_route_declares_guard(route):
     if key in EXEMPT:
         pytest.skip("no script_id target")
     calls = set(_flat_dependency_calls(route.dependant))
-    assert verify_script_access in calls, f"{key} has no verify_script_access guard"
+    assert (
+        calls & _KNOWN_GUARDS
+    ), f"{key} has no verify_script_access/verify_script_read_access guard"
 
 
 # --------------------------------------------------------------------------- #

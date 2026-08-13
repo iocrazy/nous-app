@@ -237,3 +237,145 @@ async def test_write_project_member_viewer_403(patch_session):
     with pytest.raises(HTTPException) as ei:
         await verify_project_write_access(project_id="1", auth=_auth("u1"))
     assert ei.value.status_code == 403
+
+
+# ─── script/scene/shot family: read-access project_members fallback ───
+#
+# 2026-08-12 finding: script_projects.team_id is NOT projects.team_id — it
+# is NOT NULL on every row, including scripts under a personal
+# (projects.team_id NULL) project, which get the OWNER's auto-created
+# single-member personal team. So an invited project_members row (e.g. a
+# viewer added to someone else's personal project) was never a member of
+# THAT team and always 403'd, even after #1742 folded "explicit member row
+# wins" into resolve_effective_role — this family never consulted it. The
+# *_read_access variants now fall back to _check_project_access once the
+# team check fails; the write variants are deliberately unchanged (this
+# family has never graded project_members roles for writes).
+
+_PERSONAL_TEAM = "800001001"  # the owner's auto-created single-member team
+_SHARED_TEAM = "800001002"
+_SCRIPT_PROJECT_ID = "500001"
+
+
+async def test_script_read_access_personal_project_member_passes(
+    patch_session, monkeypatch
+):
+    from app.core.scope_guards import verify_script_read_access
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_script_get(self, script_id):
+        return {
+            "id": script_id,
+            "team_id": _PERSONAL_TEAM,
+            "project_id": _SCRIPT_PROJECT_ID,
+        }
+
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    patch_session(
+        {
+            "team_members": [],  # caller not in the owner's personal team
+            "projects": [("owner-uuid", None)],  # personal project
+            "project_members": [("viewer",)],  # explicit invited row
+        }
+    )
+    await verify_script_read_access(script_id="1", auth=_auth("u1"))
+
+
+async def test_script_write_access_personal_project_viewer_still_403(
+    patch_session, monkeypatch
+):
+    """The WRITE variant keeps the team-only gate — no project_members
+    fallback — so a viewer-role member is still denied writes. Extending
+    the fallback to writes would silently widen access, not fix a read
+    gap."""
+    from app.core.scope_guards import verify_script_access
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_script_get(self, script_id):
+        return {
+            "id": script_id,
+            "team_id": _PERSONAL_TEAM,
+            "project_id": _SCRIPT_PROJECT_ID,
+        }
+
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    patch_session({"team_members": []})
+
+    with pytest.raises(HTTPException) as ei:
+        await verify_script_access(script_id="1", auth=_auth("u1"))
+    assert ei.value.status_code == 403
+
+
+async def test_script_read_access_team_member_passes_without_project_lookup(
+    patch_session, monkeypatch
+):
+    """Team membership still short-circuits — the fallback is additive."""
+    from app.core.scope_guards import verify_script_read_access
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_script_get(self, script_id):
+        return {
+            "id": script_id,
+            "team_id": _SHARED_TEAM,
+            "project_id": _SCRIPT_PROJECT_ID,
+        }
+
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    patch_session({"team_members": [(_SHARED_TEAM,)]})
+    await verify_script_read_access(script_id="1", auth=_auth("u1"))
+
+
+async def test_script_read_access_non_member_403(patch_session, monkeypatch):
+    from app.core.scope_guards import verify_script_read_access
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_script_get(self, script_id):
+        return {
+            "id": script_id,
+            "team_id": _PERSONAL_TEAM,
+            "project_id": _SCRIPT_PROJECT_ID,
+        }
+
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    patch_session(
+        {
+            "team_members": [],
+            "projects": [("owner-uuid", None)],
+            "project_members": [],
+        }
+    )
+    with pytest.raises(HTTPException) as ei:
+        await verify_script_read_access(script_id="1", auth=_auth("u1"))
+    assert ei.value.status_code == 403
+
+
+async def test_scene_read_access_personal_project_member_passes(
+    patch_session, monkeypatch
+):
+    """One hop further: scene → script → project. Confirms the fallback
+    propagates through verify_scene_read_access, not just the script-scoped
+    entry point."""
+    from app.core.scope_guards import verify_scene_read_access
+    from app.repositories.script_repository import ScriptProjectRepository
+    from app.repositories.script_scene_repository import ScriptSceneRepository
+
+    async def fake_scene_get(self, scene_id):
+        return {"id": scene_id, "script_id": "1"}
+
+    async def fake_script_get(self, script_id):
+        return {
+            "id": script_id,
+            "team_id": _PERSONAL_TEAM,
+            "project_id": _SCRIPT_PROJECT_ID,
+        }
+
+    monkeypatch.setattr(ScriptSceneRepository, "get_by_id", fake_scene_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_script_get)
+    patch_session(
+        {
+            "team_members": [],
+            "projects": [("owner-uuid", None)],
+            "project_members": [("viewer",)],
+        }
+    )
+    await verify_scene_read_access(scene_id="9", auth=_auth("u1"))

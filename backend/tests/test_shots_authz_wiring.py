@@ -19,12 +19,22 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.script_shots_router import router as shots_router
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_scene_access, verify_shot_access
+from app.core.scope_guards import (
+    verify_scene_access,
+    verify_scene_read_access,
+    verify_shot_access,
+    verify_shot_read_access,
+)
 from app.main import app
 
 pytestmark = pytest.mark.unit
 
-KNOWN_GUARDS = {verify_scene_access, verify_shot_access}
+KNOWN_GUARDS = {
+    verify_scene_access,
+    verify_scene_read_access,
+    verify_shot_access,
+    verify_shot_read_access,
+}
 
 FAKE_USER_ID = str(uuid4())
 

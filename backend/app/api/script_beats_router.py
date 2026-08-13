@@ -1,11 +1,15 @@
 """Script Beats Router — beat CRUD + reorder (Beats view, PR-BT1).
 
 Endpoints:
-  GET  /scripts/{script_id}/beats  — verify_script_access
+  GET  /scripts/{script_id}/beats  — verify_script_read_access
   POST /scripts/{script_id}/beats  — verify_script_access
   PATCH  /beats/{beat_id}          — verify_beat_access
   DELETE /beats/{beat_id}          — verify_beat_access
   POST /beats/{beat_id}/move       — verify_beat_access
+
+The GET route uses the *_read_access variant (team membership OR an explicit
+project_members row on the parent project — 2026-08-12 fix); the write
+routes keep the team-only gate unchanged.
 
 A classic beat sheet: ordered beat cards (title + summary + optional linked
 scene ids) hanging off a script. Pure synchronous CRUD — no AI, no workflow, no
@@ -18,7 +22,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_beat_access, verify_script_access
+from app.core.scope_guards import (
+    verify_beat_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.repositories.script_beat_repository import get_script_beat_repository
 from app.schemas.script import BeatCreate, BeatMoveRequest, BeatUpdate
 
@@ -29,7 +37,7 @@ router = APIRouter()
 async def list_beats(
     script_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     """List all beats for a script, ordered by sort_order."""
     try:

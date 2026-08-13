@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep, require_team_id
-from app.core.scope_guards import verify_script_access
+from app.core.scope_guards import verify_script_access, verify_script_read_access
 from app.repositories.episode_repository import get_episode_repository
 from app.repositories.script_repository import get_script_project_repository
 from app.repositories.script_scene_repository import get_script_scene_repository
@@ -98,7 +98,7 @@ async def list_script_projects(
 async def get_script_project(
     auth: AuthDep,
     script_id: str,
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     try:
         svc = ScriptService()

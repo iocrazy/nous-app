@@ -35,7 +35,11 @@ from sqlalchemy.dialects import postgresql
 import app.repositories.beat_memo_repository as memo_mod
 from app.api.beat_memos_router import router as memos_router
 from app.core.deps import AuthContext, get_auth
-from app.core.scope_guards import verify_memo_access, verify_script_access
+from app.core.scope_guards import (
+    verify_memo_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.main import app
 from app.models.scripts import BeatMemos
 from app.repositories.beat_memo_repository import BeatMemoRepository
@@ -50,7 +54,7 @@ _MEMO_ID = 900000000000000002
 # 1. Structural: every mutating route declares a guard
 # --------------------------------------------------------------------------- #
 
-KNOWN_GUARDS = {verify_script_access, verify_memo_access}
+KNOWN_GUARDS = {verify_script_access, verify_script_read_access, verify_memo_access}
 FAKE_USER_ID = str(uuid4())
 
 

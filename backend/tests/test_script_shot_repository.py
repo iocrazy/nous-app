@@ -393,9 +393,7 @@ async def test_get_project_id_compiles_expected_join_and_where():
     )
     assert "WHERE PUBLIC.SCRIPT_SHOTS.ID" in sql_u
     assert _SHOT_ID in params.values()  # bigint-coerced (str in → int bound)
-    assert all(
-        not isinstance(v, str) or v != str(_SHOT_ID) for v in params.values()
-    )
+    assert all(not isinstance(v, str) or v != str(_SHOT_ID) for v in params.values())
 
 
 @pytest.mark.asyncio

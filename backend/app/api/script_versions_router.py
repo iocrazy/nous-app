@@ -2,10 +2,14 @@
 
 Endpoints:
   POST   /scripts/{script_id}/commits                        — verify_script_access
-  GET    /scripts/{script_id}/commits                        — verify_script_access
-  GET    /scripts/{script_id}/commits/{commit_id}/diff       — verify_script_access
+  GET    /scripts/{script_id}/commits                        — verify_script_read_access
+  GET    /scripts/{script_id}/commits/{commit_id}/diff       — verify_script_read_access
   POST   /scripts/{script_id}/commits/{commit_id}/rollback   — verify_script_access
   DELETE /commits/{commit_id}                                — verify_commit_access
+
+The two GET routes use the *_read_access variant (team membership OR an
+explicit project_members row on the parent project — 2026-08-12 fix); the
+write routes keep the team-only gate unchanged.
 
 Version control rides the append-only ``script_ops`` ledger (spec v3 §5-1): a
 commit is a manual tag (per-scene op_seq watermark + scene-set snapshot); diff
@@ -26,7 +30,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
-from app.core.scope_guards import verify_commit_access, verify_script_access
+from app.core.scope_guards import (
+    verify_commit_access,
+    verify_script_access,
+    verify_script_read_access,
+)
 from app.repositories.script_commit_repository import get_script_commit_repository
 from app.schemas.script import CommitCreate
 from app.services.script.version_service import get_version_service
@@ -68,7 +76,7 @@ async def create_commit(
 async def list_commits(
     script_id: str,
     auth: AuthDep,
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     """List a script's commits, newest first."""
     try:
@@ -87,7 +95,7 @@ async def diff_commit(
     against: Optional[str] = Query(
         None, description="commit id to diff against, or 'current' / omitted for live"
     ),
-    _guard: None = Depends(verify_script_access),
+    _guard: None = Depends(verify_script_read_access),
 ) -> Dict[str, Any]:
     """Diff ``commit_id`` → ``against`` (``against`` = another commit id, or
     'current'/omitted for the live state). Reports element-level scene changes
