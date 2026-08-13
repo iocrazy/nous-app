@@ -18,6 +18,15 @@ interface SlidePlayerProps {
   mediaToken?: string;
   downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
   /**
+   * Is a download actually running for this media? Derived from task_tracking
+   * by the host (see downloadInFlight.ts) — do NOT infer it from
+   * `downloadStatus`: `'pending'` is that column's DDL default ("待下载") set
+   * on every media at parse time, so treating it as in-flight pinned a
+   * permanent "Downloading..." spinner on albums that were never downloaded.
+   * `downloadStatus` is still read for the terminal `'failed'` branch.
+   */
+  isDownloading?: boolean;
+  /**
    * Reports which slide is on screen, so a host can follow along — the detail
    * page uses it to point its right-hand Prompt block at the current slide's
    * entry. Fires once for slide 0 as soon as the list lands, then on every
@@ -26,7 +35,7 @@ interface SlidePlayerProps {
   onSlideChange?: (slideName: string, index: number, total: number) => void;
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, onSlideChange }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, isDownloading, onSlideChange }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -166,7 +175,9 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
 
   // Error state — distinguish between downloading and actual failure
   if (loadError) {
-    const isStillDownloading = !downloadStatus || downloadStatus === 'pending' || downloadStatus === 'downloading' || downloadStatus === 'skipped';
+    // Host-supplied, task-backed. The old inference (`!downloadStatus ||
+    // 'pending' || 'skipped'`) called every never-downloaded album "in flight".
+    const isStillDownloading = isDownloading === true;
     return (
       <div className="w-full h-full bg-ink-950 rounded-lg flex flex-col items-center justify-center gap-3">
         {isStillDownloading ? (

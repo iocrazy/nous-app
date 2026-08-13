@@ -5,7 +5,6 @@ import {
   fetchLibraryPaginated,
   updateItem,
   deleteItem,
-  cleanupStaleDownloads,
   type FetchLibraryFilterParams,
   type LibraryCursor,
 } from '../services/dataService';
@@ -264,15 +263,20 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterParamsKey]);
 
-  // Fetch collections + cleanup AFTER initial data load (reduce concurrent NAS requests)
+  // Fetch collections AFTER initial data load (reduce concurrent NAS requests).
+  //
+  // The cleanupStaleDownloads() poll that used to live here was removed: it
+  // sweeps parsed_media rows whose *_download_status == 'downloading', and no
+  // backend path ever writes that value (the column only moves pending →
+  // completed / failed / skipped). It matched zero rows on every run — a fired
+  // -and-forgotten request per library load whose result was swallowed, so it
+  // read as "cleanup is running" while being incapable of doing anything.
+  // Stuck *tasks* are reconciled by the DBOS reaper against task_tracking; the
+  // endpoint itself is left in place (see media_router) for a deliberate
+  // keep-or-drop call.
   useEffect(() => {
     if (!initialLoadComplete || !isAuthenticated) return;
     fetchMyCollections().then(setCollections).catch(console.error);
-    // Defer cleanup further to avoid competing with collections fetch
-    const timer = setTimeout(() => {
-      cleanupStaleDownloads().catch(() => {});
-    }, 3000);
-    return () => clearTimeout(timer);
   }, [initialLoadComplete, isAuthenticated]);
 
   // Reset on logout
