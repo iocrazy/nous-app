@@ -68,13 +68,31 @@ export function loadProdCreds(): ProdCreds {
   return { email, password };
 }
 
-/** The real-stack QA fixture this walkthrough exercises — see README.md
- * "Fixture data" for how it was created and why it isn't the project id
- * an older memory note mentions (that one 403s for the debug account). */
+/** The real-stack target this walkthrough exercises.
+ *
+ * Default: the OWNER'S OWN production project (个人项目测试 1) — real
+ * scripts, scenes, shots and a storyboard canvas the owner actually uses,
+ * reached by the debug account through an explicit `project_members`
+ * viewer row. That is deliberate and is the whole point of this suite:
+ * a purpose-built QA fixture only proves the code works on data shaped
+ * the way the test author imagined. Pointing the walkthrough at the real
+ * project is what surfaced three defects a green fixture run never
+ * would have (see README.md "Why the owner's real project"):
+ *   - #1816 personal-project read gates ignored explicit member rows
+ *   - #1817 a shared project's URL never mounted the workspace at all
+ *   - #1820 a persisted viewport framing empty space rendered the canvas
+ *     blank, and a viewer's autosave 403 looped on "Save failed"
+ *
+ * `teamId: 'personal'` is the personal-project URL convention (团队 id
+ * literal, `projects.team_id IS NULL` — see ProjectsPage.tsx), not a
+ * Snowflake id. Every field is env-overridable so the suite can be aimed
+ * at the QA fixture team project (331438215859255 / 337650825568029 /
+ * 337650825711390 / 337650952269612 / 337650953731886) or any other
+ * target without touching the code. */
 export const WALKTHROUGH_IDS = {
-  teamId: process.env.PROD_TEST_TEAM_ID || '331438215859255',
-  projectId: process.env.PROD_TEST_PROJECT_ID || '337650825568029',
-  episodeId: process.env.PROD_TEST_EPISODE_ID || '337650825711390',
-  sceneId: process.env.PROD_TEST_SCENE_ID || '337650952269612',
-  shotId: process.env.PROD_TEST_SHOT_ID || '337650953731886',
+  teamId: process.env.PROD_TEST_TEAM_ID || 'personal',
+  projectId: process.env.PROD_TEST_PROJECT_ID || '291022264100262',
+  episodeId: process.env.PROD_TEST_EPISODE_ID || '324362669885098',
+  sceneId: process.env.PROD_TEST_SCENE_ID || '324838427143194',
+  shotId: process.env.PROD_TEST_SHOT_ID || '325601447269110',
 };
