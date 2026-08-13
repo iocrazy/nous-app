@@ -29,6 +29,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.deps import AuthContext, get_auth
+from app.core.scope_guards import ProjectAccess
 from app.main import app
 
 # ``app.api.__init__`` rebinds ``canvases_router`` to the APIRouter instance,
@@ -112,7 +113,7 @@ def _stub_episode_repo(
 
 def _allow_write_gate(monkeypatch):
     """Bypass BOTH ``verify_project_write_access`` and
-    ``verify_project_read_access`` — membership itself is not under test
+    ``resolve_project_read_access`` — membership itself is not under test
     here (see ``test_canvas_gates.py`` / ``test_scope_guards.py`` for that);
     this pins that the handler CALLS the appropriate gate with the
     episode's resolved project_id, not that the gate's internals are
@@ -122,11 +123,15 @@ def _allow_write_gate(monkeypatch):
     fires passes."""
     calls: list = []
 
-    async def _fake(*, project_id, auth):
+    async def _fake_write(*, project_id, auth):
         calls.append(project_id)
 
-    monkeypatch.setattr(canvases_router, "verify_project_write_access", _fake)
-    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
+    async def _fake_read(*, project_id, auth):
+        calls.append(project_id)
+        return ProjectAccess(can_read=True, can_write=True)
+
+    monkeypatch.setattr(canvases_router, "verify_project_write_access", _fake_write)
+    monkeypatch.setattr(canvases_router, "resolve_project_read_access", _fake_read)
     return calls
 
 
@@ -149,14 +154,14 @@ def _deny_read_gate(monkeypatch):
             status_code=403, detail="You do not have access to this project"
         )
 
-    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
+    monkeypatch.setattr(canvases_router, "resolve_project_read_access", _fake)
 
 
 def _allow_read_gate(monkeypatch):
     async def _fake(*, project_id, auth):
-        return None
+        return ProjectAccess(can_read=True, can_write=True)
 
-    monkeypatch.setattr(canvases_router, "verify_project_read_access", _fake)
+    monkeypatch.setattr(canvases_router, "resolve_project_read_access", _fake)
 
 
 class _FakeCanvasService:
@@ -196,20 +201,6 @@ class _FakeCanvasService:
 def _stub_canvas_service(monkeypatch):
     _FakeCanvasService.store = {}
     monkeypatch.setattr(canvases_router, "CanvasService", _FakeCanvasService)
-
-
-@pytest.fixture(autouse=True)
-def _stub_can_write_project(monkeypatch):
-    """The read branch now also asks ``can_write_project`` so the response
-    can carry ``can_edit`` (2026-08-13 — see test_canvas_can_edit.py for
-    that behaviour's own coverage). It's a real DB read; stub it out here
-    the same way the gates are, since permission is not what this module
-    tests."""
-
-    async def _fake(project_id, user_id):
-        return True
-
-    monkeypatch.setattr(canvases_router, "can_write_project", _fake)
 
 
 # --------------------------------------------------------------------------- #
