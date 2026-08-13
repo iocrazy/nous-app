@@ -24,6 +24,11 @@ let tagQuery = '';
 // disabled "Creating..." state; a failure surfaces inline (never silent).
 let isCreatingQuick = false;
 let quickCreateError = '';
+// Did the tag list actually load? `allTags` is [] both when the user has no
+// tags and when the fetch failed, and the two must not behave alike: create-on-
+// push keys on "the search found nothing", which is only a real signal if we
+// hold the real list. On a failed load every query looks like zero results.
+let tagsLoaded = false;
 
 // Show the extension version beside the header — read at runtime from the
 // manifest so it never drifts from manifest.json.
@@ -113,6 +118,7 @@ async function loadTags(config) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     allTags = data.tags || [];
+    tagsLoaded = true;
 
     renderTags(allTags);
   } catch (err) {
@@ -298,9 +304,12 @@ function createErrorRow(message) {
 // Search-or-create fast path: POST /tags {name} (default color), then select
 // the new tag and clear the search so it surfaces as a selected pill. Mirrors
 // the web app's handleQuickCreate (optimistic append, no auto-translate detour).
+// Returns the created tag on success, null otherwise, so callers that need to
+// branch on the outcome (the push handler) can tell "created" from "failed"
+// instead of guessing from quickCreateError.
 async function quickCreateTag(rawQuery) {
   const name = (rawQuery || '').trim();
-  if (!name || isCreatingQuick) return;
+  if (!name || isCreatingQuick) return null;
 
   isCreatingQuick = true;
   quickCreateError = '';
@@ -342,10 +351,12 @@ async function quickCreateTag(rawQuery) {
     tagQuery = '';
     tagSearch.value = '';
     renderTags(allTags);
+    return created;
   } catch (err) {
     isCreatingQuick = false;
     quickCreateError = err.message;
     renderTags(allTags);
+    return null;
   }
 }
 
@@ -368,6 +379,36 @@ pushBtn.addEventListener('click', async () => {
   pushBtn.disabled = true;
   pushBtn.textContent = 'Pushing...';
   pushStatus.textContent = '';
+
+  // Search-or-create on push: a query that returned *no results at all* is text
+  // the user typed meaning to tag with, so Push alone completes it — no separate
+  // click on the "Create" affordance. Runs before the fetch so the new tag ships
+  // in the same request (quickCreateTag selects it).
+  //
+  // Deliberately keyed on "zero matches", not on hasExactMatch: clicking a pill
+  // leaves the query in the box, so typing "赛博", picking the offered
+  // "赛博朋克", then pushing would otherwise also mint a junk "赛博" tag.
+  // Any match at all means the user had real options and chose among them.
+  // tagsLoaded gates the whole thing: after a failed tag fetch allTags is [],
+  // so every query would read as "zero results" and Push would mint a tag that
+  // may well already exist (409 → the push is blocked for no good reason).
+  const pendingTag = tagSearch.value.trim();
+  const pendingHasMatch = allTags.some((t) => matchesQuery(t, pendingTag.toLowerCase()));
+  if (tagsLoaded && pendingTag && !pendingHasMatch) {
+    pushBtn.textContent = `Creating "${pendingTag}"...`;
+    const created = await quickCreateTag(pendingTag);
+    if (!created) {
+      // Creating failed (403 missing tags:write, 409, network). Stop rather
+      // than pushing without the tag the user asked for — a silent drop would
+      // look like success while losing their intent.
+      pushStatus.textContent =
+        `Tag "${pendingTag}" failed: ${quickCreateError || 'unknown error'}`;
+      pushStatus.className = 'status error';
+      pushBtn.disabled = false;
+      updatePushBtn();
+      return;
+    }
+  }
 
   const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
 
