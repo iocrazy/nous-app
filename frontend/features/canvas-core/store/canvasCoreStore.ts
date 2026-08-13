@@ -131,6 +131,20 @@ function isStaleNode(node: CanvasNode): boolean {
 export type CanvasLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CanvasSaveStatus = 'idle' | 'saving' | 'error';
 
+/**
+ * Does this error mean "you may read this canvas but not write it"?
+ *
+ * Duck-typed on `status` rather than `instanceof ApiError`: `saveImpl` is an
+ * injectable dependency (tests, and any future transport), so the store must
+ * not require one specific Error subclass to recognise the wire condition it
+ * cares about. `canvasService.saveCanvas` throws `ApiError(message, 403)` for
+ * a viewer-role PUT, which satisfies this.
+ */
+function isForbidden(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  return (err as { status?: unknown }).status === 403;
+}
+
 /** Document-state snapshot pushed onto the undo stack. Selection is
  *  NOT part of history (UI state), and viewport is NOT either (panning
  *  / zooming is too noisy to keep on undo and users don't expect it). */
@@ -184,6 +198,26 @@ interface CanvasState {
   baseUpdatedAt: string | null;
   saveStatus: CanvasSaveStatus;
   saveError: string | null;
+  /**
+   * The server refused this session's write (HTTP 403 — e.g. a viewer-role
+   * member opening a team canvas). Latched by `doSave` and cleared only by a
+   * fresh `applyServerRow` / `reset`.
+   *
+   * Two consequences, both about not turning a permission fact into a
+   * failure loop (2026-08-12 production: a viewer's load-time
+   * sanitize/reconcile autosave 403'd, the debounce re-armed on every
+   * subsequent change and the UI flashed "Save failed" — two PUTs inside the
+   * same second observed on the real row):
+   *   1. `markDirty` stops scheduling saves, and `doSave` early-returns, so
+   *      NO further PUT is ever sent from this load.
+   *   2. The badge reads "Read-only" instead of the red "Save failed".
+   *
+   * Local editing (drag, delete) is deliberately still allowed — it just
+   * never lands. Follow-up: make the surface genuinely non-interactive
+   * (React Flow `nodesDraggable`/`elementsSelectable`) so a viewer isn't
+   * offered gestures whose result is silently discarded.
+   */
+  readOnly: boolean;
   conflict: Canvas | null;
   /** Monotonic counter — bumped by every mutation, used by the save tick
    *  to know whether the snapshot it grabbed is still the latest. */
@@ -372,6 +406,12 @@ export function createCanvasCoreStore(
         loadError: null,
         saveStatus: 'idle',
         saveError: null,
+        // A new load is a new permission question. The store is a module-level
+        // singleton reused across mounts (and `applyServerRow` also runs for a
+        // realtime rebase / conflict resolve), so a latch left over from a
+        // canvas the user could only read would silently mute saves on the
+        // NEXT canvas they open with full rights.
+        readOnly: false,
         conflict: null,
         revision: 0,
         persistedRevision: 0,
@@ -383,6 +423,11 @@ export function createCanvasCoreStore(
     }
 
     function markDirty(): void {
+      // Read-only session: no revision bump, no debounce re-arm. Bailing out
+      // BEFORE the bump also keeps `revision === persistedRevision`, so an
+      // incoming realtime row rebases cleanly instead of raising a conflict
+      // dialog a viewer has no way to resolve.
+      if (get().readOnly) return;
       const next = get().revision + 1;
       set({ revision: next, saveStatus: 'idle', saveError: null });
       scheduleSave();
@@ -436,6 +481,11 @@ export function createCanvasCoreStore(
     async function doSave(): Promise<void> {
       const state = get();
       if (!state.canvasId || !state.baseUpdatedAt) return;
+      // Hard stop for a session the server already refused. `markDirty` no
+      // longer schedules, but `flushSave()` is also called directly (surface
+      // unmount / route leave) — this guard is what makes "no further PUT"
+      // true for EVERY path, not just the debounced one.
+      if (state.readOnly) return;
       if (state.persistedRevision >= state.revision) return; // nothing new
       if (state.conflict) return; // user must resolve first
 
@@ -497,6 +547,28 @@ export function createCanvasCoreStore(
       try {
         result = await saveImpl(state.canvasId, snapshot.payload);
       } catch (err) {
+        // 403 is not a failure to retry — it's a standing fact about this
+        // session's rights. Latch read-only and land on a CLEAN save status:
+        // the badge's read-only branch takes over, and nothing re-arms the
+        // debounce. Epoch-guarded like every other post-await write below so
+        // a stale mount's refusal can't mute a newer mount's writable load.
+        if (isForbidden(err)) {
+          if (get().mountEpoch !== epochAtSnapshot) return;
+          set({
+            readOnly: true,
+            saveStatus: 'idle',
+            saveError: null,
+            // Retire the "unsaved edits" signal along with the ability to
+            // save: `applyRemoteUpdate` reads `revision > persistedRevision`
+            // to decide dirty-vs-clean, and edits that can NEVER be persisted
+            // must not make an incoming realtime row look like a conflict —
+            // a viewer has no way to resolve that dialog. Clean state means
+            // the newer row simply rebases, which is the truth they should
+            // be looking at.
+            persistedRevision: get().revision,
+          });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         set({ saveStatus: 'error', saveError: message });
         return;
@@ -554,6 +626,7 @@ export function createCanvasCoreStore(
       baseUpdatedAt: null,
       saveStatus: 'idle',
       saveError: null,
+      readOnly: false,
       conflict: null,
       revision: 0,
       persistedRevision: 0,
@@ -583,6 +656,7 @@ export function createCanvasCoreStore(
           baseUpdatedAt: null,
           saveStatus: 'idle',
           saveError: null,
+          readOnly: false,
           conflict: null,
           revision: 0,
           persistedRevision: 0,

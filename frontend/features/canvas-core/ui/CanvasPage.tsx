@@ -39,6 +39,7 @@ import { PromoteShotDialog } from '../smart/PromoteShotDialog';
 import type { ShotNodeData, SmartNode } from '../smart/types';
 import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { viewportFramesAnyNode } from '../utils/viewport';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { fetchScriptProjects } from '../../../services/scriptService';
 import { listScenes, listShots, createShot } from '../../../editor/sceneService';
@@ -114,6 +115,7 @@ export function CanvasView({
   const loadError = useCanvasCoreStore((s) => s.loadError);
   const saveStatus = useCanvasCoreStore((s) => s.saveStatus);
   const saveError = useCanvasCoreStore((s) => s.saveError);
+  const readOnly = useCanvasCoreStore((s) => s.readOnly);
   const kind = useCanvasCoreStore((s) => s.kind);
   const name = useCanvasCoreStore((s) => s.name);
   const projectId = useCanvasCoreStore((s) => s.projectId);
@@ -433,6 +435,52 @@ export function CanvasView({
     setRfReady(true);
   }, []);
 
+  // Empty-viewport self-heal (2026-08-12 production incident, canvas
+  // 337610660408263): that row's saved `viewport_json`
+  // ({x:181.47,y:106.68,zoom:0.514}) frames world x≈-352..2138 while all six
+  // shot nodes sit at x=2240 — and `CanvasEngine` runs with
+  // `onlyRenderVisibleElements`, so off-screen nodes never enter the DOM at
+  // all. The user opens the canvas and sees a blank grid; only the minimap
+  // hints anything exists. A saved viewport that frames NOTHING carries no
+  // information worth preserving, so we fit once instead of honouring it.
+  //
+  // Runs here rather than in the store: it needs both the rendered surface's
+  // pixel size and React Flow's imperative instance, and it is purely a
+  // VISUAL correction — going through the store would route it into the
+  // viewport dirty channel (`setViewport` → `markDirty`) and persist a
+  // viewport the user never chose. `instance.fitView()` moves React Flow's
+  // own transform; the store's `viewport` follows via `onMove` →
+  // `setViewportOnMove`, which by design does NOT bump revision (only the
+  // RAF `flushViewportDirty` does, and no user gesture fired here).
+  //
+  // One shot per canvas id, and only once nodes exist: a storyboard canvas
+  // whose shot nodes arrive from the Task 4 reconcile a tick after load gets
+  // the same protection (the effect simply hasn't armed yet while
+  // `nodeCount === 0`). An unmeasurable surface (0×0 — hidden tab, layout
+  // not settled) means we cannot know what is framed, so we skip WITHOUT
+  // latching and re-evaluate on the next render that changes the node list.
+  const viewportHealedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadStatus !== 'ready' || !canvasId) return;
+    if (viewportHealedForRef.current === canvasId) return;
+    if (nodeCount === 0) return;
+    const instance = rfInstanceRef.current;
+    const el = surfaceRef.current;
+    if (!instance || !el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    viewportHealedForRef.current = canvasId;
+    const { viewport, nodes } = useCanvasCoreStore.getState();
+    if (viewportFramesAnyNode(viewport, nodes, { width: rect.width, height: rect.height })) {
+      return;
+    }
+    console.warn(
+      '[CanvasView] saved viewport frames no node — fitting view instead',
+      { canvasId, viewport, nodeCount },
+    );
+    instance.fitView({ padding: 0.2 });
+  }, [loadStatus, canvasId, nodeCount, rfReady]);
+
   // Viewport focus (Task 5 — the three entry points: a shot card click, the
   // `?view=canvas&shot=` URL deep link, and `shotFocusBus`, all converge on
   // the `focusShotId` prop by the time they reach this component). Gated on
@@ -526,7 +574,7 @@ export function CanvasView({
       {isSmartFamily(kind) && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />}
       <CanvasConflictDialog />
-      <SaveBadge status={saveStatus} error={saveError} />
+      <SaveBadge status={saveStatus} error={saveError} readOnly={readOnly} t={t} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -602,10 +650,29 @@ function CanvasStatus({
 function SaveBadge({
   status,
   error,
+  readOnly,
+  t,
 }: {
   status: 'idle' | 'saving' | 'error';
   error: string | null;
+  /** The server refused this session's writes — see the store's `readOnly`. */
+  readOnly: boolean;
+  t: (key: string, fallback: string) => string;
 }) {
+  // Read-only wins over every save state: once the latch is set no save can
+  // be in flight or pending, so "Saving…"/"Save failed" would be describing a
+  // channel that is closed. A viewer needs the standing fact, not an error.
+  if (readOnly) {
+    return (
+      <div
+        className="pointer-events-none absolute right-4 top-4 rounded-md bg-slate-900/80 px-3 py-1 text-xs font-medium text-white shadow"
+        role="status"
+        aria-live="polite"
+      >
+        {t('canvas.readOnly', 'Read-only')}
+      </div>
+    );
+  }
   if (status === 'idle') return null;
   const label =
     status === 'saving'
