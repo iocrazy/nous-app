@@ -2296,6 +2296,7 @@
       "title": "画布为空",
       "hint": "这里还没有任何内容。"
     },
+    "readOnly": "只读",
     "backToList": "返回画布列表",
     "classicRetired": "经典画布已下线",
     "dragCreate": {

@@ -2296,6 +2296,7 @@
       "title": "This canvas is empty",
       "hint": "It doesn't have any content yet."
     },
+    "readOnly": "Read-only",
     "backToList": "Back to canvases",
     "classicRetired": "Classic canvases have been retired",
     "dragCreate": {
