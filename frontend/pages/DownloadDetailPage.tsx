@@ -25,6 +25,8 @@ import { getApiUrl } from '../utils/apiConfig';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { fetchMediaByType, extractAudio, downloadSodaTracks } from '../services/parserService';
 import { sodaTrackId } from './DownloadDetailPage/sodaTrackId';
+import { isVideoDownloadInFlight } from './DownloadDetailPage/downloadInFlight';
+import { useTaskManager } from '../contexts/TaskManagerContext';
 import { useDownloadDetail } from './DownloadDetailPage/useDownloadDetail';
 import { DownloadMenuDropdown, MobileDownloadMenu } from './DownloadDetailPage/DownloadMenuDropdown';
 import { DeleteDialog } from './DownloadDetailPage/DeleteDialog';
@@ -57,6 +59,15 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     handleRatingChange, handleNotesChange, handleNotesBlur,
     handleUpdate, handleDelete, handleBack, addToast,
   } = detail;
+
+  // Real in-flight download state comes from task_tracking (the UI's single
+  // source of truth for task state), never from parsed_media's status column —
+  // see downloadInFlight.ts for why reading that column stranded every
+  // never-downloaded video on a permanent spinner.
+  const { activeTasks } = useTaskManager();
+  const downloadInFlight = isVideoDownloadInFlight(
+    activeTasks, video?.id, video?.video_download_status,
+  );
 
   const { infoIslandEl, setInfoVisible, setInfoAvailable } = useIslandWork();
   // Island desktop layout: stage in the work island + panel portaled to the info
@@ -432,7 +443,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     />
   ) : (
     <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
-      {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
+      {downloadInFlight ? (
         <>
           <Loader2 size={48} className="text-[var(--accent-text)] animate-spin" />
           <p className="text-ink-300 text-sm font-medium">Downloading...</p>
@@ -444,9 +455,14 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           <p className="text-ink-400 text-sm font-medium">Video not available for streaming</p>
         </>
       )}
-      <p className="text-ink-500 text-xs max-w-[300px] text-center">
-        This video hasn't been downloaded yet. Use the Download button to fetch the media file.
-      </p>
+      {/* Only when nothing is running — telling the user to press Download
+          while a download is in flight is the contradiction that made the
+          stuck-spinner state so confusing to read. */}
+      {!downloadInFlight && (
+        <p className="text-ink-500 text-xs max-w-[300px] text-center">
+          This video hasn't been downloaded yet. Use the Download button to fetch the media file.
+        </p>
+      )}
       {video.original_url && (
         <a
           href={video.original_url}

@@ -81,6 +81,20 @@ async def cleanup_stale_downloads(
 ):
     """
     Mark downloads stuck in 'downloading' state as 'failed'.
+
+    ⚠️ Currently a guaranteed no-op: nothing writes ``'downloading'`` to
+    ``parsed_media.*_download_status``. That column only ever moves
+    ``pending`` (the DDL default, "待下载") → ``completed`` / ``failed`` /
+    ``skipped``; grep for ``DownloadStatus.DOWNLOADING`` finds only the enum
+    definition and this sweep's own predicate. Production held 0 rows in that
+    state, so every call returns ``cleaned: 0``.
+
+    Kept reachable rather than deleted (it has integration coverage, and the
+    value is the semantically right one should a writer ever appear), but the
+    frontend's per-library-load poll was removed — it looked like cleanup was
+    running while being unable to match anything. Stuck *tasks* are reconciled
+    by the DBOS reaper against task_tracking, which is where in-flight state
+    actually lives.
     """
     try:
         repo = MediaRepository()
