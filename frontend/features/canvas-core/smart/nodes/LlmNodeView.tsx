@@ -149,13 +149,13 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           Input
         </div>
         <textarea
-          className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-canvas-line bg-transparent p-2 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 disabled:opacity-60"
+          className="nodrag nowheel mt-1 w-full resize-none rounded-lg border border-canvas-line bg-transparent p-2 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
           rows={3}
           placeholder="Type here, or wire in a Prompt node…"
           value={d.input_text}
           onChange={(e) => patch({ input_text: e.target.value })}
           aria-label="LLM input"
-          disabled={readOnly}
+          readOnly={readOnly}
         />
 
         <button

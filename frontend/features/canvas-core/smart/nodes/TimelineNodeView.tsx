@@ -318,7 +318,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
               </div>
             </div>
             <textarea
-              className="nodrag nowheel w-full resize-none bg-transparent text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+              className="nodrag nowheel w-full resize-none bg-transparent text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
               rows={2}
               placeholder="Segment prompt…"
               value={active.prompt}
@@ -326,7 +326,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 patch({ segments: updateSegment(segments, active.id, { prompt: e.target.value }) })
               }
               aria-label="Segment prompt"
-              disabled={readOnly}
+              readOnly={readOnly}
             />
           </div>
         )}

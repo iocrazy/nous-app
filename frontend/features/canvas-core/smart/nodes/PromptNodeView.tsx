@@ -54,6 +54,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // the kind/model/agent/ratio/count pickers, the @-ref chips' remove
   // button, the library loader (it mints a media node + connection) and
   // Retry (re-dispatches the run). Nothing here is view-only.
+  //
+  // The two TEXT areas take `readOnly`, not `disabled`: a prompt body is
+  // exactly the kind of thing a viewer opens the canvas to read and copy,
+  // and a disabled textarea can't be focused or selected. Everything else
+  // here is a picker or a button, which has no text worth copying and no
+  // `readonly` semantics in HTML — those stay `disabled`.
   const readOnly = useCanvasReadOnly();
   const genKind = gen?.kind ?? 'text';
   const genModels = useGenerationModels(gen ? gen.kind : undefined);
@@ -257,7 +263,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
           placeholder="What should the model generate? Type @ to reference an asset"
           value={body}
           onChange={mention.handleChange}
@@ -265,7 +271,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           onBlur={mention.closePicker}
           aria-label="Prompt body"
           rows={3}
-          disabled={readOnly}
+          readOnly={readOnly}
         />
 
         {mention.pickerOpen && (
@@ -297,8 +303,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               placeholder="Negative prompt"
               aria-label="Negative prompt"
               rows={2}
-              disabled={readOnly}
-              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40"
+              readOnly={readOnly}
+              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40 read-only:opacity-80 read-only:cursor-default"
             />
           </div>
         ) : null}

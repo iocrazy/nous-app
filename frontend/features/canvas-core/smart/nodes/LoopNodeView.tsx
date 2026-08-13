@@ -132,12 +132,12 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
                 <div key={i} className="mh-loop-prompt-item">
                   <span className="mh-loop-prompt-index">{i + 1}</span>
                   <textarea
-                    className="nodrag mh-loop-text"
+                    className="nodrag mh-loop-text read-only:opacity-80 read-only:cursor-default"
                     placeholder={t('canvas.loopPromptPlaceholder')}
                     value={prompt}
                     rows={1}
                     onChange={(e) => patchPrompt(i, e.target.value)}
-                    disabled={readOnly}
+                    readOnly={readOnly}
                     aria-label={`Loop prompt ${i + 1}`}
                   />
                   <button

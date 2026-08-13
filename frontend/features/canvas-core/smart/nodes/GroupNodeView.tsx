@@ -98,12 +98,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       }}
     >
       <input
-        className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text disabled:opacity-60"
+        className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text read-only:opacity-80 read-only:cursor-default"
         value={label ?? ''}
         placeholder={t('canvas.groupNode.title', 'Group')}
         onChange={(e) => patch({ label: e.target.value })}
         aria-label="Group label"
-        disabled={readOnly}
+        readOnly={readOnly}
       />
       {isEmpty ? (
         // IC's smart-group-empty: dashed drop-zone + "拖入图片自动收进分组".

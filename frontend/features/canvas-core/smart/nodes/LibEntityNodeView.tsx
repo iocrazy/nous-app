@@ -23,7 +23,9 @@ export function LibEntityNodeView({ id, type, data, selected }: NodeProps) {
   const { name, badge_tag, description, cover_url } =
     data as unknown as LibEntityNodeData;
   const patch = useNodeDataPatch(id);
-  // Inline edits write the canvas document — see useCanvasReadOnly.
+  // Inline edits write the canvas document. Text fields take `readOnly`,
+  // never `disabled` — a viewer must still be able to select and copy the
+  // card's text. See useCanvasReadOnly.
   const readOnly = useCanvasReadOnly();
   const meta = META[(type as keyof typeof META) ?? 'location'] ?? META.location;
   const { Icon } = meta;
@@ -63,20 +65,20 @@ export function LibEntityNodeView({ id, type, data, selected }: NodeProps) {
         </div>
         <div className="min-w-0 flex-1">
           <input
-            className="nodrag w-full bg-transparent text-[13px] font-semibold text-ink-100 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 disabled:opacity-60"
+            className="nodrag w-full bg-transparent text-[13px] font-semibold text-ink-100 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             value={name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder={`${meta.title} name`}
             aria-label={`${meta.title} name`}
-            disabled={readOnly}
+            readOnly={readOnly}
           />
           <textarea
-            className="nodrag nowheel mt-1 h-12 w-full resize-none bg-transparent text-[11px] leading-snug text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 disabled:opacity-60"
+            className="nodrag nowheel mt-1 h-12 w-full resize-none bg-transparent text-[11px] leading-snug text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             value={description}
             onChange={(e) => patch({ description: e.target.value })}
             placeholder="Look, mood, period, materials…"
             aria-label={`${meta.title} description`}
-            disabled={readOnly}
+            readOnly={readOnly}
           />
         </div>
       </div>

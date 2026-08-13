@@ -16,8 +16,20 @@
  * renderers exist" — an inventory typed out by hand is how a new node type
  * quietly escapes the rule). For each write affordance it asserts:
  *
- *   readOnly:false → present AND enabled   (the fix didn't break editing)
- *   readOnly:true  → disabled, or gone     (no lit button that does nothing)
+ *   readOnly:false → present, enabled, editable  (editing still works)
+ *   readOnly:true  → withheld                    (nothing lit that no-ops)
+ *
+ * "Withheld" has TWO correct shapes and the distinction is not cosmetic:
+ *
+ *   buttons / selects / toggles / steppers → `disabled`, or removed. There
+ *     is no text in them worth copying, and `<select>` has no `readonly`
+ *     semantics in HTML at all.
+ *   free-text `<input>` / `<textarea>`     → `readonly`, NEVER `disabled`.
+ *     A disabled field cannot be focused, selected or copied — and reading
+ *     is precisely what a read-only viewer came to do. Disabling the shot
+ *     description or the prompt body would take away the one thing they
+ *     ARE entitled to. `readonly` is the HTML feature for exactly this:
+ *     not editable, still focusable and selectable.
  *
  * View-only affordances get the opposite treatment: they must survive a
  * read-only session, because withholding them would take away *reading*,
@@ -96,6 +108,13 @@ const baseProps = {
 /** How to find one affordance. `label` = aria-label, `testId` = data-testid. */
 type Locator = { label: string } | { testId: string };
 
+/**
+ * `text: true` marks a free-text field — the ones that must degrade to
+ * `readonly` rather than `disabled` so their content stays selectable.
+ * Anything without it is a button / picker / stepper and takes `disabled`.
+ */
+type Affordance = { what: string; text?: true } & Locator;
+
 interface NodeCase {
   /** Row name — also the `type` prop React Flow would pass. */
   name: string;
@@ -103,7 +122,7 @@ interface NodeCase {
   type: keyof typeof SMART_NODE_TYPES;
   data: Record<string, unknown>;
   /** Anything that writes the document or dispatches a run. */
-  writes: Array<{ what: string } & Locator>;
+  writes: Affordance[];
   /** Pure viewing — must stay usable for a viewer. */
   reads?: Array<{ what: string } & Locator>;
 }
@@ -143,8 +162,8 @@ const CASES: NodeCase[] = [
     type: 'character',
     data: { name: 'Ada', role_tag: 'lead', description: 'engineer', portrait_url: '' },
     writes: [
-      { what: 'name', label: 'Character name' },
-      { what: 'description', label: 'Character description' },
+      { what: 'name', label: 'Character name', text: true },
+      { what: 'description', label: 'Character description', text: true },
     ],
   },
   {
@@ -152,8 +171,8 @@ const CASES: NodeCase[] = [
     type: 'location',
     data: { name: 'Dock', badge_tag: '', description: 'foggy', cover_url: '' },
     writes: [
-      { what: 'name', label: 'Location name' },
-      { what: 'description', label: 'Location description' },
+      { what: 'name', label: 'Location name', text: true },
+      { what: 'description', label: 'Location description', text: true },
     ],
   },
   {
@@ -161,8 +180,8 @@ const CASES: NodeCase[] = [
     type: 'prop',
     data: { name: 'Lamp', badge_tag: '', description: 'brass', cover_url: '' },
     writes: [
-      { what: 'name', label: 'Prop name' },
-      { what: 'description', label: 'Prop description' },
+      { what: 'name', label: 'Prop name', text: true },
+      { what: 'description', label: 'Prop description', text: true },
     ],
   },
   {
@@ -170,8 +189,8 @@ const CASES: NodeCase[] = [
     type: 'shot',
     data: { title: 'Wide', reference_resource_ids: [], notes: 'n' },
     writes: [
-      { what: 'title', label: 'Shot title' },
-      { what: 'notes', label: 'Shot notes' },
+      { what: 'title', label: 'Shot title', text: true },
+      { what: 'notes', label: 'Shot notes', text: true },
     ],
   },
   {
@@ -196,7 +215,7 @@ const CASES: NodeCase[] = [
       { what: 'camera angle chip', label: 'Camera angle' },
       { what: 'camera movement chip', label: 'Camera movement' },
       { what: 'focal length chip', label: 'Focal length' },
-      { what: 'description', label: 'Shot description' },
+      { what: 'description', label: 'Shot description', text: true },
       { what: 'Generate', testId: 'shot-node-generate' },
     ],
   },
@@ -230,12 +249,12 @@ const CASES: NodeCase[] = [
       resource_refs: [
         { resource_id: 'r1', name: 'clip', kind: 'video', mime: '', scope: 'user' },
       ],
-      negative_body: '',
+      negative_body: 'blurry, watermark',
       gen: null,
     },
     writes: [
-      { what: 'body', label: 'Prompt body' },
-      { what: 'negative body', label: 'Negative prompt' },
+      { what: 'body', label: 'Prompt body', text: true },
+      { what: 'negative body', label: 'Negative prompt', text: true },
       { what: 'kind picker', label: 'Prompt kind' },
       { what: 'provider picker', label: 'Prompt provider' },
       { what: 'agent picker', label: 'Prompt agent' },
@@ -278,7 +297,7 @@ const CASES: NodeCase[] = [
     writes: [
       { what: 'provider picker', label: 'LLM provider' },
       { what: 'agent picker', label: 'LLM agent' },
-      { what: 'input', label: 'LLM input' },
+      { what: 'input', label: 'LLM input', text: true },
       { what: 'Run', testId: 'llm-run' },
     ],
     reads: [{ what: 'Copy output', label: 'Copy output' }],
@@ -287,7 +306,7 @@ const CASES: NodeCase[] = [
     name: 'group',
     type: 'group',
     data: { label: 'Refs', items: [], uploading: 0 },
-    writes: [{ what: 'label', label: 'Group label' }],
+    writes: [{ what: 'label', label: 'Group label', text: true }],
   },
   {
     name: 'timeline',
@@ -306,7 +325,7 @@ const CASES: NodeCase[] = [
       { what: 'add segment', label: 'Add segment' },
       { what: 'remove segment', label: 'Remove segment' },
       { what: 'segment seconds', label: 'Segment seconds' },
-      { what: 'segment prompt', label: 'Segment prompt' },
+      { what: 'segment prompt', label: 'Segment prompt', text: true },
       { what: 'resize grip', testId: 'timeline-resize-s1' },
       { what: 'Run', testId: 'timeline-run' },
     ],
@@ -331,7 +350,7 @@ const CASES: NodeCase[] = [
       { what: 'image input toggle', label: 'Toggle image input' },
       { what: 'prompt input toggle', label: 'Toggle prompt input' },
       { what: 'image batch size', label: 'canvas.loopBatch' },
-      { what: 'prompt text', label: 'Loop prompt 1' },
+      { what: 'prompt text', label: 'Loop prompt 1', text: true },
       { what: 'remove prompt', label: 'Remove prompt 1' },
       { what: 'insert count token', label: 'Insert count token' },
       { what: 'add prompt', label: 'Add prompt' },
@@ -365,8 +384,17 @@ describe('smart nodes — no dead write buttons in a read-only session', () => {
     it.each(c.writes)('withholds $what when read-only', (affordance) => {
       renderCase(c, true);
       const el = find(affordance);
-      // Either shape is a valid answer to the click BEFORE it happens:
-      // greyed out (kept for discoverability) or withdrawn entirely.
+      if (affordance.text) {
+        // A text field is withheld by going `readonly` — and it must NOT
+        // have gone `disabled`, which would cost the viewer the ability to
+        // select and copy it.
+        expect(el).not.toBeNull();
+        expect(el).toHaveAttribute('readonly');
+        expect(el).not.toBeDisabled();
+        return;
+      }
+      // Everything else: greyed out (kept for discoverability) or
+      // withdrawn entirely — both are an answer given before the click.
       if (el !== null) expect(el).toBeDisabled();
     });
 
@@ -375,6 +403,7 @@ describe('smart nodes — no dead write buttons in a read-only session', () => {
       const el = find(affordance);
       expect(el).not.toBeNull();
       expect(el).not.toBeDisabled();
+      if (affordance.text) expect(el).not.toHaveAttribute('readonly');
     });
 
     const reads = c.reads ?? [];
@@ -387,6 +416,45 @@ describe('smart nodes — no dead write buttons in a read-only session', () => {
       });
     }
   });
+
+  // ---------------------------------------------------------------- //
+  // Semantic regression fence: text stays readable.
+  //
+  // The first version of this fix reached for `disabled` on the text
+  // fields too, "for consistency" with the existing `stale` handling.
+  // `disabled` means "this control takes no part in interaction" — it
+  // cannot be focused, and its content cannot be selected or copied.
+  // Applied to a read-only session that is a straight downgrade: it takes
+  // away READING from the one user whose entire session is reading. HTML
+  // already has the right word for "not editable but still yours to read":
+  // `readonly`. This block pins that choice so nobody trades it back.
+  // ---------------------------------------------------------------- //
+  const TEXT_FIELDS = CASES.flatMap((c) =>
+    c.writes
+      .filter((w) => w.text)
+      .map((w) => ({ case: c, what: `${c.name} · ${w.what}`, locator: w })),
+  );
+
+  it.each(TEXT_FIELDS)(
+    'keeps $what focusable and copyable when read-only',
+    ({ case: c, locator }) => {
+      renderCase(c, true);
+      const el = find(locator) as HTMLInputElement | HTMLTextAreaElement | null;
+      expect(el).not.toBeNull();
+
+      // Never `disabled` — that is the regression this test exists for.
+      expect(el).not.toBeDisabled();
+      expect(el).toHaveAttribute('readonly');
+
+      // Focusable, which is what makes select-and-copy possible at all.
+      el!.focus();
+      expect(document.activeElement).toBe(el);
+
+      // And the content is still THERE to be read — a field emptied or
+      // replaced by a placeholder would pass every check above.
+      expect(el!.value.length).toBeGreaterThan(0);
+    },
+  );
 
   it('covers every type registered in SMART_NODE_TYPES', () => {
     // The registry — not this file's imagination — decides the inventory.

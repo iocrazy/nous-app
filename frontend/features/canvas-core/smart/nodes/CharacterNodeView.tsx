@@ -25,8 +25,9 @@ export function CharacterNodeView({ id, data, selected }: NodeProps) {
   const { name, role_tag, description, portrait_url } =
     data as unknown as CharacterNodeData;
   const patch = useNodeDataPatch(id);
-  // Both fields write the canvas document — disabled rather than left
-  // typeable-but-discarded in a read-only session (see useCanvasReadOnly).
+  // Both fields write the canvas document. `readOnly` (not `disabled`):
+  // a viewer's whole purpose is reading, and a disabled field can't be
+  // focused, selected or copied — see useCanvasReadOnly.
   const readOnly = useCanvasReadOnly();
 
   return (
@@ -67,20 +68,20 @@ export function CharacterNodeView({ id, data, selected }: NodeProps) {
         </div>
         <div className="min-w-0 flex-1">
           <input
-            className="nodrag w-full bg-transparent text-[13px] font-semibold text-ink-100 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 disabled:opacity-60"
+            className="nodrag w-full bg-transparent text-[13px] font-semibold text-ink-100 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             value={name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder="Character name"
             aria-label="Character name"
-            disabled={readOnly}
+            readOnly={readOnly}
           />
           <textarea
-            className="nodrag nowheel mt-1 h-16 w-full resize-none bg-transparent text-[11px] leading-snug text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 disabled:opacity-60"
+            className="nodrag nowheel mt-1 h-16 w-full resize-none bg-transparent text-[11px] leading-snug text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
             value={description}
             onChange={(e) => patch({ description: e.target.value })}
             placeholder="Bio, look, temperament…"
             aria-label="Character description"
-            disabled={readOnly}
+            readOnly={readOnly}
           />
         </div>
       </div>
