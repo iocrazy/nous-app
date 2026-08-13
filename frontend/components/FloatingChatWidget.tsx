@@ -20,7 +20,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { GripHorizontal, MessageSquare, Minus } from 'lucide-react';
+import { GripHorizontal, GripVertical, MessageSquare, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
 import {
@@ -251,8 +251,17 @@ export function FloatingChatWidget(): React.ReactElement | null {
       {/* Title bar — drag handle + module chip + minimize */}
       <div
         onPointerDown={onDragStart}
-        className="flex h-8 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
+        className="flex h-10 flex-shrink-0 cursor-grab select-none items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-2 active:cursor-grabbing"
       >
+        {/* Grab affordance. A <span>, not a <button> — onDragStart skips
+            anything inside a button, so a button here would never drag. */}
+        <span
+          data-testid="chat-drag-handle"
+          aria-hidden="true"
+          className="flex cursor-grab items-center text-ink-500 active:cursor-grabbing"
+        >
+          <GripVertical size={14} />
+        </span>
         <button
           type="button"
           onClick={() => setSessionsOpen((v) => !v)}
