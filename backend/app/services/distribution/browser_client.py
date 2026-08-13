@@ -327,9 +327,14 @@ class SessionEnvironment:
     timezone_id: str = DEFAULT_TIMEZONE_ID
     geo_lat: Optional[float] = None
     geo_lng: Optional[float] = None
+    # mig 424 —— 逐账号的窗口尺寸。两个都为 None 时浏览器侧不传 viewport，
+    # 即 Playwright 默认 1280x720（mig 424 之前所有账号的行为）。半套值
+    # （只有宽或只有高）浏览器侧会整体忽略 —— DB 侧有 CHECK 挡着。
+    viewport_width: Optional[int] = None
+    viewport_height: Optional[int] = None
 
     def to_payload(self) -> dict[str, Any]:
-        """契约固定的 6 个键 —— 全部显式发出（含 null），浏览器侧不必
+        """契约固定的 8 个键 —— 全部显式发出（含 null），浏览器侧不必
         猜缺省值。"""
         return {
             "proxy_url": self.proxy_url,
@@ -338,6 +343,8 @@ class SessionEnvironment:
             "timezone_id": self.timezone_id or DEFAULT_TIMEZONE_ID,
             "geo_lat": self.geo_lat,
             "geo_lng": self.geo_lng,
+            "viewport_width": self.viewport_width,
+            "viewport_height": self.viewport_height,
         }
 
     def __repr__(self) -> str:  # pragma: no cover - 防呆
@@ -345,7 +352,8 @@ class SessionEnvironment:
         return (
             f"SessionEnvironment(proxy={'set' if self.proxy_url else 'none'}, "
             f"locale={self.locale!r}, timezone_id={self.timezone_id!r}, "
-            f"geo={'set' if self.geo_lat is not None else 'none'})"
+            f"geo={'set' if self.geo_lat is not None else 'none'}, "
+            f"viewport={self.viewport_width}x{self.viewport_height})"
         )
 
 

@@ -671,6 +671,13 @@ def build_environment(row: Optional[Mapping[str, Any]]) -> SessionEnvironment:
             proxy = None
     lat = row.get("geo_lat")
     lng = row.get("geo_lng")
+    # mig 424 —— 半套 viewport 一律当没有：只有宽或只有高无法交给
+    # ``new_context(viewport=...)``，静默传半套的后果是浏览器侧忽略它，而库里
+    # 那行看起来是"配过的"。DB 有 CHECK 挡，这里是第二道（读侧也要说得清）。
+    vw = row.get("viewport_width")
+    vh = row.get("viewport_height")
+    if vw is None or vh is None:
+        vw = vh = None
     return SessionEnvironment(
         proxy_url=proxy or None,
         user_agent=row.get("user_agent") or None,
@@ -678,6 +685,8 @@ def build_environment(row: Optional[Mapping[str, Any]]) -> SessionEnvironment:
         timezone_id=row.get("timezone_id") or DEFAULT_TIMEZONE_ID,
         geo_lat=float(lat) if lat is not None else None,
         geo_lng=float(lng) if lng is not None else None,
+        viewport_width=int(vw) if vw is not None else None,
+        viewport_height=int(vh) if vh is not None else None,
     )
 
 

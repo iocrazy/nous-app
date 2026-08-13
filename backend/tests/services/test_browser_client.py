@@ -78,6 +78,8 @@ async def test_validate_sends_token_header_and_full_environment():
         timezone_id="Asia/Shanghai",
         geo_lat=39.9,
         geo_lng=116.4,
+        viewport_width=1536,
+        viewport_height=864,
     )
     await _client().validate_session("douyin", STORAGE_STATE, env)
 
@@ -86,7 +88,7 @@ async def test_validate_sends_token_header_and_full_environment():
     assert body["platform"] == "douyin"
     # storage_state 明文原样透传（解密是 backend 的责任，browser 不碰密钥）
     assert body["storage_state"] == STORAGE_STATE
-    # 契约固定的 6 个 environment 键必须全部显式发出（含 null）
+    # 契约固定的 8 个 environment 键必须全部显式发出（含 null）
     assert set(body["environment"]) == {
         "proxy_url",
         "user_agent",
@@ -94,8 +96,12 @@ async def test_validate_sends_token_header_and_full_environment():
         "timezone_id",
         "geo_lat",
         "geo_lng",
+        "viewport_width",
+        "viewport_height",
     }
     assert body["environment"]["geo_lat"] == 39.9
+    assert body["environment"]["viewport_width"] == 1536
+    assert body["environment"]["viewport_height"] == 864
 
 
 @respx.mock

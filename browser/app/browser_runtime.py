@@ -138,6 +138,26 @@ def build_launch_kwargs(env: EnvironmentConfig | None) -> dict[str, Any]:
     return kwargs
 
 
+def viewport_kwargs(env: EnvironmentConfig | None) -> dict[str, Any]:
+    """`{"viewport": {...}}` for the account's pinned window size, or `{}`.
+
+    Shared by the validate/publish contexts and the login context so both apply
+    the same size - the whole point of pinning is that the platform sees ONE
+    window size for an account, and a login that used a different one than every
+    later run would defeat it.
+
+    BOTH dimensions or neither. A half-set viewport cannot be handed to
+    new_context(), and silently passing the half that is set would give the
+    account a size nobody chose. The DB has a CHECK for this; this is the second
+    line, because the browser is what actually applies the value.
+    """
+    if env is None or env.viewport_width is None or env.viewport_height is None:
+        return {}
+    return {
+        "viewport": {"width": env.viewport_width, "height": env.viewport_height}
+    }
+
+
 def build_context_kwargs(
     env: EnvironmentConfig | None, storage_state: dict[str, Any]
 ) -> dict[str, Any]:
@@ -160,6 +180,7 @@ def build_context_kwargs(
         kwargs["geolocation"] = {"latitude": env.geo_lat, "longitude": env.geo_lng}
         # Without the grant the page gets a permission prompt instead of coords.
         kwargs["permissions"] = ["geolocation"]
+    kwargs.update(viewport_kwargs(env))
     return kwargs
 
 
