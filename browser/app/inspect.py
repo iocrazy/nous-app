@@ -88,7 +88,7 @@ SEED_ROLE_PREFIX = "seed"
 # a typo downgrade a request that carries session cookies.
 ALLOWED_SCHEME = "https"
 
-_KIND_TO_STATUS = {
+KIND_TO_STATUS = {
     ProbeKind.INVALID: SessionStatus.SESSION_INVALID,
     ProbeKind.PROXY_FAILED: SessionStatus.PROXY_FAILED,
     ProbeKind.TIMEOUT: SessionStatus.TIMEOUT,
@@ -147,8 +147,8 @@ def url_refusal(url: str, allowed_hosts: Sequence[str]) -> str | None:
     return None
 
 
-def _session_lost(
-    url: str, allowed_hosts: Sequence[str], visible_login: list[str]
+def session_refusal(
+    url: str, allowed_hosts: Sequence[str], visible_login: Sequence[str]
 ) -> str | None:
     """Why this is not a usable console page, or None. Pure.
 
@@ -156,6 +156,11 @@ def _session_lost(
     `verify._session_lost`: a logged-out redirect keeps the original path in a
     `redirect_url` query parameter, so a page that still mentions the path can
     be the login screen.
+
+    Public because the typed-probe module reuses it verbatim. "Is this still
+    an authenticated console page" is a security-shaped judgement, and a
+    second copy of one of those is a second thing to forget when a platform
+    changes how being logged out looks.
     """
     host = (urlsplit(url or "").hostname or "").lower()
     if host not in tuple(allowed_hosts):
@@ -344,7 +349,14 @@ async def _observe(page: Any, request: InspectRequest) -> _Observation:
     )
 
 
-async def _seed(page: Any, request: InspectRequest, paths: list[str]) -> None:
+async def seed_file_input(
+    page: Any,
+    *,
+    selector: str,
+    index: int,
+    wait_ms: int,
+    paths: Sequence[str],
+) -> None:
     """Hand the probe files to one file input, so a lazy form renders.
 
     `state="attached"` rather than visible: these inputs sit hidden behind
@@ -355,12 +367,21 @@ async def _seed(page: Any, request: InspectRequest, paths: list[str]) -> None:
     because the first has already been the wrong one on this platform: the
     cover dialog exposes four hidden inputs and index 0 is an AI reference
     image, which accepts a file and silently does nothing with it.
+
+    Public, and taking plain arguments rather than a request object, because
+    the typed-probe module needs the same step. On the reconnaissance path
+    this is the one call that hands data to a page, and there must stay
+    exactly one of it, or the guard below ("`set_input_files` appears once")
+    stops meaning anything. The posting flow has its own — that is not the
+    same claim, and conflating the two would make this comment false.
     """
     settings = get_settings()
-    locator = page.locator(request.seed_selector).nth(request.seed_input_index)
+    locator = page.locator(selector).nth(index)
     await locator.wait_for(state="attached", timeout=settings.inspect_form_timeout_ms)
-    await locator.set_input_files(paths, timeout=settings.inspect_upload_wait_s * 1000)
-    await page.wait_for_timeout(request.seed_wait_ms)
+    await locator.set_input_files(
+        list(paths), timeout=settings.inspect_upload_wait_s * 1000
+    )
+    await page.wait_for_timeout(wait_ms)
 
 
 @asynccontextmanager
@@ -382,7 +403,7 @@ def _failure(kind: ProbeKind, message: str, detail: dict[str, Any]) -> InspectRe
     body.setdefault("reason", kind.value)
     return InspectResponse(
         success=False,
-        status=_KIND_TO_STATUS[kind],
+        status=KIND_TO_STATUS[kind],
         message=message,
         detail=body,
     )
@@ -428,7 +449,7 @@ async def _run_once(spec: InspectSpec, request: InspectRequest) -> InspectRespon
                     visible_login = await visible_marker_texts(
                         page, spec.login_text_markers
                     )
-                    lost = _session_lost(page.url, spec.allowed_hosts, visible_login)
+                    lost = session_refusal(page.url, spec.allowed_hosts, visible_login)
                     if lost is not None:
                         return _failure(
                             ProbeKind.INVALID,
@@ -442,7 +463,13 @@ async def _run_once(spec: InspectSpec, request: InspectRequest) -> InspectRespon
                         )
 
                     if staged:
-                        await _seed(page, request, [asset.path for asset in staged])
+                        await seed_file_input(
+                            page,
+                            selector=request.seed_selector,
+                            index=request.seed_input_index,
+                            wait_ms=request.seed_wait_ms,
+                            paths=[asset.path for asset in staged],
+                        )
 
                     observation = await _observe(page, request)
 
@@ -536,9 +563,12 @@ async def run_inspect(spec: InspectSpec, request: InspectRequest) -> InspectResp
 
 __all__ = [
     "ALLOWED_SCHEME",
+    "KIND_TO_STATUS",
     "InspectSpec",
     "MAX_INPUT_SUMMARY",
     "MAX_VISIBILITY_SAMPLE",
     "run_inspect",
+    "seed_file_input",
+    "session_refusal",
     "url_refusal",
 ]

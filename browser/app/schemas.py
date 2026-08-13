@@ -481,3 +481,187 @@ class InspectResponse(BaseModel):
     # authenticated page load renews the session, and dropping the renewal
     # would make recon a net drain on how long the account stays bound.
     updated_storage_state: dict[str, Any] | None = None
+
+
+# --- typed-input reconnaissance ---------------------------------------------
+#
+# The second recon endpoint. `/session/inspect` reads a page that is sitting
+# still; this one puts a probe string into one editable node and reports the
+# network the page produced **as a result** — the only way to learn where an
+# as-you-type suggestion list comes from. See `app/probe.py` for the boundary
+# (same allow-list, same source-text guard, plus `focus`/`press_sequentially`).
+
+MAX_TARGET_SELECTORS = 8
+MAX_OBSERVE_SELECTORS = 12
+MAX_CAPTURE_FILTERS = 16
+MAX_CAPTURES = 24
+MAX_CAPTURE_BODY_CHARS = 8_000
+DEFAULT_CAPTURE_BODY_CHARS = 3_000
+MAX_PROBE_TEXT_CHARS = 64
+
+
+class ProbeRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    # Plaintext, decrypted by the backend. Memory only (spec 7.6).
+    storage_state: dict[str, Any]
+    environment: EnvironmentConfig | None = None
+    # Same allow-list as `/session/inspect`, enforced by the same function.
+    url: str = Field(min_length=1, max_length=2048)
+
+    # Reaching the box. Douyin only renders a description editor after an
+    # upload, so the probe needs the same seeding path the read-only recon has.
+    seed_files: list[MediaItem] = Field(default_factory=list, max_length=MAX_SEED_FILES)
+    seed_selector: str = Field(
+        default=DEFAULT_SEED_SELECTOR, min_length=1, max_length=200
+    )
+    seed_input_index: int = Field(default=0, ge=0, le=20)
+    seed_wait_ms: int = Field(default=10_000, ge=0, le=120_000)
+
+    # Where to type. A list because the post editor ships in two parallel gray
+    # releases whose description boxes carry different attributes; the first
+    # candidate that becomes visible wins.
+    target_selectors: list[str] = Field(
+        min_length=1, max_length=MAX_TARGET_SELECTORS
+    )
+    target_index: int = Field(default=0, ge=0, le=20)
+    target_wait_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+    # What to type. Bounded hard: this string goes into a real account's
+    # composer, and there is no reason a reconnaissance probe needs a sentence.
+    probe_text: str = Field(min_length=1, max_length=MAX_PROBE_TEXT_CHARS)
+    # Per-keystroke delay. Real platforms debounce; typing instantly is the
+    # classic way to observe zero requests and conclude the wrong thing.
+    keystroke_delay_ms: int = Field(default=120, ge=0, le=2_000)
+
+    settle_ms: int = Field(default=5_000, ge=0, le=60_000)
+    # How long to keep listening after the last keystroke.
+    capture_settle_ms: int = Field(default=6_000, ge=0, le=60_000)
+
+    # Which recorded responses get the detailed treatment. Empty = all of them,
+    # which is the right default the first time you look at an unknown page.
+    capture_url_contains: list[str] = Field(
+        default_factory=list, max_length=MAX_CAPTURE_FILTERS
+    )
+    max_captures: int = Field(default=12, ge=1, le=MAX_CAPTURES)
+    capture_body_chars: int = Field(
+        default=DEFAULT_CAPTURE_BODY_CHARS, ge=0, le=MAX_CAPTURE_BODY_CHARS
+    )
+    max_replay_targets: int = Field(default=2, ge=0, le=4)
+
+    # Nodes to read after typing — the suggestion dropdown, typically. Its
+    # rendered rows answer "what does a suggestion look like" even when the
+    # data never crossed the network.
+    observe_selectors: list[str] = Field(
+        default_factory=list, max_length=MAX_OBSERVE_SELECTORS
+    )
+
+    budget_s: int = Field(default=240, ge=30, le=600)
+
+
+class CapturedParam(BaseModel):
+    """One query parameter. The value is masked when the name looks credential-
+    shaped; the length survives either way, because "there is a 172-character
+    signature parameter here" is a stronger finding than "there is one"."""
+
+    name: str = ""
+    value: str = ""
+    redacted: bool = False
+    length: int = 0
+
+
+class CapturedCall(BaseModel):
+    """One response the page produced while we typed.
+
+    Headers are **names only**. There is no redaction rule for header values
+    that would be safe here — `cookie` is a header — and the names alone
+    answer the question this endpoint exists for ("what does this call need").
+    """
+
+    method: str = ""
+    host: str = ""
+    path: str = ""
+    query_param_names: list[str] = Field(default_factory=list)
+    query_params: list[CapturedParam] = Field(default_factory=list)
+    # The subset that means "this request is signed". Empty is the finding
+    # that decides whether we can call it from our own server.
+    signature_params: list[str] = Field(default_factory=list)
+    # Which parameter carried the string we typed, detected by value.
+    keyword_param: str | None = None
+    request_header_names: list[str] = Field(default_factory=list)
+    post_data_param_names: list[str] = Field(default_factory=list)
+    status: int = 0
+    response_content_type: str = ""
+    resource_type: str = ""
+    body_chars: int = 0
+    # JSON bodies keep their numbers (a play count is public data about a
+    # topic); anything unparseable falls back to the digit-masking scrubber.
+    body_excerpt: str = ""
+    body_json_top_keys: list[str] = Field(default_factory=list)
+
+
+class ObservedNode(BaseModel):
+    """One element inside the box we typed into. Attribute **names**, and a
+    short text excerpt — enough to see whether the platform turned `#word`
+    into a styled entity node or left it as literal text."""
+
+    tag: str = ""
+    class_name: str = ""
+    attr_names: list[str] = Field(default_factory=list)
+    text: str = ""
+
+
+class ObservedSelector(BaseModel):
+    selector: str = ""
+    total: int = 0
+    visible: int = 0
+    texts: list[str] = Field(default_factory=list)
+    class_names: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class ReplayTarget(BaseModel):
+    """A call worth trying **without** a browser. Carries a raw URL.
+
+    The one un-redacted thing this endpoint emits, and it is internal
+    transport: the backend consumes it to run the decisive experiment (does
+    the same URL still answer when the keyword changes and no browser is
+    involved?) and never forwards it. Same class as `updated_storage_state`.
+    """
+
+    method: str = "GET"
+    url: str = ""
+    referer: str = ""
+    keyword_param: str | None = None
+    keyword_value: str = ""
+    header_names: list[str] = Field(default_factory=list)
+
+
+class ProbeResponse(BaseModel):
+    success: bool
+    status: SessionStatus
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    url_after: str = ""
+    page_title: str = ""
+
+    target_selector_used: str = ""
+    # Falsifiability. Without this, "the platform issued no request" and "our
+    # keystrokes never landed" produce identical output, and we would report
+    # the first while the second was true.
+    typed_text_landed: bool = False
+    target_text_before: str = ""
+    target_text_after: str = ""
+    target_child_total: int = 0
+    target_nodes: list[ObservedNode] = Field(default_factory=list)
+    observed_selectors: list[ObservedSelector] = Field(default_factory=list)
+
+    # Every response, by host, for the whole run — a histogram, not a log.
+    host_totals: dict[str, int] = Field(default_factory=dict)
+    captures: list[CapturedCall] = Field(default_factory=list)
+    captures_dropped: int = 0
+
+    replay_targets: list[ReplayTarget] = Field(default_factory=list)
+    replay_user_agent: str = ""
+
+    seeded_files: list[str] = Field(default_factory=list)
+    updated_storage_state: dict[str, Any] | None = None

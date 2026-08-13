@@ -49,6 +49,7 @@ from .platforms import (
     supported_platforms,
     verify_platforms,
 )
+from .probe import run_probe
 from .publish import run_publish
 from .redaction import scrub
 from .schemas import (
@@ -62,6 +63,8 @@ from .schemas import (
     LoginStatusResponse,
     PhoneNumberRequest,
     PhoneNumberResponse,
+    ProbeRequest,
+    ProbeResponse,
     PublishRequest,
     PublishResponse,
     SessionResult,
@@ -449,6 +452,87 @@ async def post_session_inspect(request: InspectRequest) -> Any:
     except Exception as exc:  # noqa: BLE001 - run_inspect is total; this is a bug net
         logger.exception("page read raised for platform=%s", request.platform)
         return InspectResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message=scrub(f"{type(exc).__name__}: {exc}"),
+            detail={"stage": "endpoint", "platform": request.platform},
+        )
+    finally:
+        slots.release()
+
+
+# --- typed-input recon ------------------------------------------------------
+
+
+@app.post(
+    "/session/probe",
+    response_model=ProbeResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_session_probe(request: ProbeRequest) -> Any:
+    """Type one probe string into one allow-listed page; report the traffic.
+
+    The question `/session/inspect` structurally cannot answer: a suggestion
+    list that only exists as a consequence of keystrokes. Everything else is
+    the same endpoint — same registry, same allow-list function, same two
+    pre-browser refusals, same admission slot.
+
+    It reuses `get_inspect_spec` rather than owning a second registry: "which
+    hosts may we open for this platform" has one answer, and giving the typing
+    endpoint its own copy is how the two would eventually disagree.
+    """
+    spec = get_inspect_spec(request.platform)
+    if spec is None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"no inspection target registered for platform '{request.platform}'",
+            reason="not_supported",
+            supported=inspect_platforms(),
+        )
+
+    refusal = url_refusal(request.url, spec.allowed_hosts)
+    if refusal is not None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            refusal,
+            reason="url_not_allowed",
+            platform=request.platform,
+            allowed_hosts=list(spec.allowed_hosts),
+        )
+
+    settings = get_settings()
+    slots = _slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=settings.browser_slot_wait_s)
+    except asyncio.TimeoutError:
+        return ProbeResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message="browser pool saturated; no slot became available",
+            detail={
+                "error_kind": "pool_saturated",
+                "stage": "admission",
+                "platform": request.platform,
+            },
+        )
+
+    try:
+        return await asyncio.wait_for(
+            run_probe(spec, request),
+            timeout=request.budget_s + INSPECT_HARD_TIMEOUT_SLACK_S,
+        )
+    except asyncio.TimeoutError:
+        return ProbeResponse(
+            success=False,
+            status=SessionStatus.TIMEOUT,
+            message="typed probe exceeded its hard timeout and was abandoned",
+            detail={"stage": "hard_timeout", "platform": request.platform},
+        )
+    except Exception as exc:  # noqa: BLE001 - run_probe is total; this is a bug net
+        logger.exception("typed probe raised for platform=%s", request.platform)
+        return ProbeResponse(
             success=False,
             status=SessionStatus.FAILED,
             message=scrub(f"{type(exc).__name__}: {exc}"),

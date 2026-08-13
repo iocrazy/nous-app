@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from app.inspect import ALLOWED_SCHEME, InspectSpec, _observe, _seed, url_refusal
+from app.inspect import (
+    ALLOWED_SCHEME,
+    InspectSpec,
+    _observe,
+    seed_file_input,
+    url_refusal,
+)
 from app.platforms import get_inspect_spec, inspect_platforms
 from app.schemas import (
     MAX_EXCERPT_CHARS,
@@ -345,10 +351,12 @@ async def test_the_seed_targets_the_requested_input_index():
         async def wait_for_timeout(self, ms):
             picked["settled"] = ms
 
-    await _seed(
+    await seed_file_input(
         _SeedPage(),
-        _request(seed_selector='input[type="file"]', seed_input_index=1, seed_wait_ms=5),
-        ["/tmp/probe-image-1.jpg"],
+        selector='input[type="file"]',
+        index=1,
+        wait_ms=5,
+        paths=["/tmp/probe-image-1.jpg"],
     )
 
     assert picked["selector"] == 'input[type="file"]'

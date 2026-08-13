@@ -590,6 +590,46 @@ class InspectResult:
 
 
 @dataclass(frozen=True)
+class ProbeResult:
+    """``POST /session/probe`` 的传输层结果（打字式勘探）。
+
+    与 ``InspectResult`` 的唯一结构差别是 ``replay_targets``。
+
+    ⚠️ **``replay_targets`` 里是没脱敏的完整 URL**（可能带 ``msToken`` /
+    ``a_bogus`` 这类参数）。它存在的理由只有一个：那个决定性的问题——"不开
+    浏览器能不能调"——只能靠真调一次来回答，而真调的那一方是 backend（它本
+    来就持有这个账号的明文会话）。所以它跟 ``updated_storage_state`` 同级：
+    **backend 消费完就地丢弃，永远不进 HTTP 响应、不进日志**
+    （``session_probe.probe_account_page`` 有测试守着这一点）。
+    """
+
+    result: SessionOpResult
+    observation: dict[str, Any] = field(default_factory=dict)
+    replay_targets: list[dict[str, Any]] = field(default_factory=list)
+    replay_user_agent: str = ""
+    updated_storage_state: Optional[dict[str, Any]] = None
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        # observation 有页面文本、replay_targets 有原始 URL，两者都绝不进
+        # repr（repr 会被 loguru 的 f-string 带进日志）。
+        return (
+            f"ProbeResult(status={self.status!r}, "
+            f"observation_keys={sorted(self.observation)}, "
+            f"replay_targets={len(self.replay_targets)}, "
+            f"updated_storage_state="
+            f"{'set' if self.updated_storage_state else 'none'})"
+        )
+
+
+@dataclass(frozen=True)
 class BrowserHealth:
     """``GET /healthz`` 的类型化结果 —— 同样不抛异常。
 
@@ -1218,6 +1258,151 @@ class BrowserClient:
             updated_storage_state=updated_state,
         )
 
+    async def probe_page(
+        self,
+        platform: str,
+        storage_state: Mapping[str, Any],
+        url: str,
+        *,
+        probe_text: str,
+        target_selectors: Sequence[str],
+        environment: Optional[SessionEnvironment] = None,
+        seed_files: Optional[Sequence[Mapping[str, Any]]] = None,
+        observe_selectors: Optional[Sequence[str]] = None,
+        capture_url_contains: Optional[Sequence[str]] = None,
+        options: Optional[Mapping[str, Any]] = None,
+    ) -> ProbeResult:
+        """``POST /session/probe`` —— 往一个白名单页面里打字，记录它因此发出的请求。
+
+        存在的理由：``inspect_page`` 只能读**静止**的页面，而"边打字边弹出的
+        建议列表"这一整类行为在静止页面上不存在。抖音描述框里输入 ``#南通``
+        会弹出带累计播放量的官方话题下拉 —— 那份数据从哪来（XHR？流？还是
+        bundle 里早就有？），决定了我们能不能在自己的发布页做同样的体验，而
+        静态计数无论如何数不出来。
+
+        **这个方法同样不投放任何内容**：浏览器侧那个模块里没有激活控件的路径
+        （有逐字读源码的测试守着），能做的只有导航、交给 file input、聚焦、
+        逐字符输入、读。
+
+        ``url`` 白名单与 ``inspect_page`` 是**同一个函数**（浏览器侧
+        ``inspect.url_refusal``），不是第二份拷贝。
+
+        ⚠️ 账号级串行锁同样不在这里 —— 见 ``session_probe.probe_account_page``。
+
+        永不抛传输异常；参数非法才 raise ``ValueError``。
+        """
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            raise ValueError("storage_state must be a non-empty JSON object")
+        if not url or not url.strip():
+            raise ValueError("url must be a non-empty string")
+        if not probe_text or not probe_text.strip():
+            raise ValueError("probe_text must be a non-empty string")
+        targets = [str(s) for s in (target_selectors or []) if str(s).strip()]
+        if not targets:
+            raise ValueError("target_selectors must contain at least one selector")
+        env = environment or SessionEnvironment()
+        payload: dict[str, Any] = {
+            "platform": platform,
+            "storage_state": dict(storage_state),
+            "environment": env.to_payload(),
+            "url": url.strip(),
+            "probe_text": probe_text,
+            "target_selectors": targets,
+            "seed_files": [dict(item) for item in (seed_files or [])],
+            "observe_selectors": list(observe_selectors or []),
+            "capture_url_contains": list(capture_url_contains or []),
+        }
+        # 其余旋钮原样透传，上下界由浏览器侧的 pydantic 兜住 —— 与 inspect 同
+        # 理由：在这里复述一遍边界值就是第二处声明。
+        payload.update({k: v for k, v in (options or {}).items() if v is not None})
+        try:
+            data = await self._call(
+                "POST",
+                "/session/probe",
+                read_timeout=self._publish_timeout,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.probe] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            if failure.body and isinstance(failure.body.get("detail"), Mapping):
+                return ProbeResult(
+                    result=SessionOpResult(
+                        success=False,
+                        status=str(
+                            failure.body.get("status") or SessionStatus.FAILED.value
+                        ),
+                        message=str(failure.body.get("message") or failure.message),
+                        detail=dict(failure.body["detail"]),
+                    )
+                )
+            return ProbeResult(result=self._transport_result(failure))
+
+        raw_status = data.get("status")
+        # 与 /session/inspect 同一套枚举：成功值也是 ``session_valid``，因为
+        # "带着这个会话打开了那一页并读到了东西"是同一个结论。
+        if raw_status not in _INSPECT_STATUSES:
+            logger.warning(
+                f"[browser.probe] platform={platform} illegal status={raw_status!r}"
+            )
+            return ProbeResult(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    f"browser service returned unknown status {raw_status!r}",
+                )
+            )
+
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        updated = data.get("updated_storage_state")
+        updated_state = (
+            dict(updated) if isinstance(updated, Mapping) and updated else None
+        )
+        observation = {
+            key: data.get(key)
+            for key in (
+                "url_after",
+                "page_title",
+                "target_selector_used",
+                "typed_text_landed",
+                "target_text_before",
+                "target_text_after",
+                "target_child_total",
+                "target_nodes",
+                "observed_selectors",
+                "host_totals",
+                "captures",
+                "captures_dropped",
+                "seeded_files",
+            )
+            if key in data
+        }
+        raw_targets = data.get("replay_targets")
+        targets_out = [
+            dict(item) for item in (raw_targets or []) if isinstance(item, Mapping)
+        ]
+        logger.info(
+            f"[browser.probe] platform={platform} status={raw_status} "
+            f"captures={len(observation.get('captures') or [])} "
+            f"landed={observation.get('typed_text_landed')} "
+            f"state_refreshed={bool(updated_state)}"
+        )
+        return ProbeResult(
+            result=SessionOpResult(
+                success=raw_status == SessionStatus.SESSION_VALID.value,
+                status=raw_status,
+                message=str(data.get("message") or ""),
+                detail=detail,
+            ),
+            observation=observation,
+            replay_targets=targets_out,
+            replay_user_agent=str(data.get("replay_user_agent") or ""),
+            updated_storage_state=updated_state,
+        )
+
     # ── /session/login/* (S2 扫码登录) ──────────────────────
 
     async def start_login(
@@ -1583,6 +1768,7 @@ __all__ = [
     "InspectResult",
     "LoginSnapshot",
     "LoginState",
+    "ProbeResult",
     "PublishResult",
     "SessionEnvironment",
     "SessionErrorKind",
