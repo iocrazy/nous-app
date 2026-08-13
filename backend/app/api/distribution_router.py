@@ -7,7 +7,7 @@ import secrets
 import uuid as _uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert
@@ -51,6 +51,11 @@ from app.schemas.distribution_publish import (
     PublishTaskOut,
     ShareSchemaResponse,
     TaskAccountOut,
+    TopicRef,
+)
+from app.schemas.distribution_topics import (
+    TopicSuggestionOut,
+    TopicSuggestResponse,
 )
 from app.services.distribution.credentials import (
     CredentialsNotConfigured,
@@ -58,6 +63,11 @@ from app.services.distribution.credentials import (
 )
 from app.services.distribution.publish_gate import publish_request_problems
 from app.services.distribution.registry import get_adapter
+from app.services.distribution.topic_suggest import (
+    MAX_KEYWORD_LEN,
+    TopicSuggestError,
+    suggest_topics,
+)
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
 from app.workflows.publish_distribution import (
@@ -742,6 +752,49 @@ async def cancel_session_login(task_id: str, user: CurrentUserDep):
 # ── Publish tasks (PR-D2) ─────────────────────────────────────────────
 
 
+@router.get(
+    "/topics/suggest",
+    response_model=TopicSuggestResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def suggest_topics_endpoint(
+    user: CurrentUserDep,
+    platform: str = Query("douyin", description="Platform to ask. Only douyin today."),
+    keyword: str = Query(..., min_length=1, max_length=MAX_KEYWORD_LEN),
+) -> TopicSuggestResponse:
+    """平台话题实时建议（打字联想的数据源）。
+
+    **失败一律是带类型化 ``detail.reason`` 的 HTTP 错误，绝不是 200 + 空列表。**
+    "这个词没有话题"和"接口挂了"在下拉里长得一模一样，用 200 空列表表达后者
+    等于把一次故障说成一个结论。空列表只在上游真的回了空建议时出现。
+
+    - 400 ``platform_unsupported`` / ``keyword_empty`` —— 请求本身不成立
+    - 502 ``upstream_unreachable`` / ``upstream_status`` / ``upstream_shape``
+      —— 上游的问题（网络 / 状态码 / 响应形状变了，比如哪天加了签名）
+    """
+    try:
+        result = await suggest_topics(platform=platform, keyword=keyword)
+    except TopicSuggestError as exc:
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail={"reason": exc.reason, "message": exc.message},
+        ) from exc
+    return TopicSuggestResponse(
+        platform=platform.strip().lower(),
+        keyword=keyword,
+        suggestions=[
+            TopicSuggestionOut(
+                name=s.name,
+                topic_id=s.topic_id,
+                view_count=s.view_count,
+                is_new=s.is_new,
+            )
+            for s in result.suggestions
+        ],
+        cached=result.cached,
+    )
+
+
 def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
     """Assemble the API response: per-account rows + the rolled-up status."""
     rollup = aggregate_task_status([a.get("status", "pending") for a in accounts])
@@ -751,6 +804,11 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
         title=task["title"],
         description=task.get("description"),
         topics=task.get("topics") or [],
+        topic_refs=[
+            TopicRef.model_validate(r)
+            for r in (task.get("topic_refs") or [])
+            if isinstance(r, dict)
+        ],
         visibility=task.get("visibility", "public"),
         distribution_mode=task.get("distribution_mode", "broadcast"),
         status=rollup,
@@ -828,6 +886,9 @@ async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
         title=body.title,
         description=body.description,
         topics=body.topics,
+        # 话题实体绑定（mig 426）。发布链**不读**它 —— 存的是"用户选中建议那一
+        # 刻平台给了哪个 cid"，事后无法重建，将来才有对照组可比。
+        topic_refs=[ref.model_dump() for ref in body.topic_refs],
         cover_vertical_resource_id=body.cover_vertical_resource_id,
         cover_horizontal_resource_id=body.cover_horizontal_resource_id,
         visibility=body.visibility,

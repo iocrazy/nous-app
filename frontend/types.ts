@@ -2547,12 +2547,29 @@ export type SelfDeclaration =
   | '虚构演绎，仅供娱乐'
   | '无需添加自主声明';
 
+/**
+ * A topic name bound to the platform's own topic ENTITY (Douyin challenge
+ * `cid`), captured at the moment the user picked it out of the suggestions.
+ *
+ * Parallel to `topics` (the plain names), never a replacement: hand-typed
+ * topics have no id and simply do not appear here. The publish path does not
+ * read this yet — it is stored because the cid exists only at pick time and
+ * cannot be reconstructed afterwards.
+ */
+export interface TopicRef {
+  name: string;
+  topic_id: string;
+  /** Cumulative play count as shown when the user picked it. */
+  view_count: number;
+}
+
 export interface PublishTask {
   id: string;
   content_type: 'video' | 'images' | 'article';
   title: string;
   description: string | null;
   topics: string[];
+  topic_refs?: TopicRef[];
   visibility: 'public' | 'friends' | 'private';
   distribution_mode: 'broadcast' | 'one_to_one';
   status: 'pending' | 'publishing' | 'pending_share' | 'success' | 'partial' | 'failed';
@@ -2576,6 +2593,12 @@ export interface PublishRequest {
   title: string;
   description?: string;
   topics?: string[];
+  /**
+   * Entity bindings for whichever of `topics` came from the suggestion
+   * dropdown. Omit when nothing was picked from it — the backend treats a
+   * missing list and an empty one the same way.
+   */
+  topic_refs?: TopicRef[];
   visibility?: 'public' | 'friends' | 'private';
   ai_content?: boolean;
   allow_download?: boolean;

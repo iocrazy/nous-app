@@ -238,6 +238,9 @@ class PublishTasksRepository(AsyncpgRepository):
                 title=f["title"],
                 description=f.get("description"),
                 topics=f.get("topics") or [],
+                # mig 426 — 选中建议时采到的话题实体绑定。默认 [] 与库里的
+                # server_default 一致：没从下拉里选过就是空数组，不是 NULL。
+                topic_refs=f.get("topic_refs") or [],
                 cover_vertical_resource_id=(
                     self._bigint(f["cover_vertical_resource_id"])
                     if f.get("cover_vertical_resource_id")
