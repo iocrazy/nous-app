@@ -81,7 +81,7 @@ export interface Canvas {
   created_by: string | null;
   /**
    * May THIS caller write the canvas? The same verdict the PUT's write
-   * guard reaches (`scope_guards.can_write_project`), shipped with the read
+   * guard reaches (`scope_guards.resolve_project_read_access`), shipped with the read
    * so the surface can render read-only up front instead of discovering it
    * from a 403 (see `canvasCoreStore.applyServerRow`).
    *

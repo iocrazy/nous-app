@@ -125,7 +125,7 @@ describe('getOrCreateStoryboardCanvas', () => {
 });
 
 // `can_edit` is the upfront write-permission signal the backend added
-// alongside the load payloads (scope_guards.can_write_project — the
+// alongside the load payloads (scope_guards.resolve_project_read_access — the
 // non-raising twin of the guard the PUT runs). Fixtures below copy the
 // REAL wire shape of those two endpoints: the canvases router stringifies
 // its snowflake ids (`str(out["id"])`) and appends `can_edit` as a JSON

@@ -21,6 +21,7 @@ import {
 } from '../mediaImport';
 import { GRID_CELL, GRID_MAX, gridColsFor } from '../grouping';
 import type { GeneratedImageRef, GroupNodeData } from '../types';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 export function GroupNodeView({ id, data, selected }: NodeProps) {
@@ -29,6 +30,9 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const [dragOver, setDragOver] = useState(false);
+  // Read-only: the label edit and the file drop both write (the drop also
+  // POSTs an import), so both go. The thumbnail grid stays fully visible.
+  const readOnly = useCanvasReadOnly();
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -76,13 +80,16 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
+        // No drag-over highlight in a read-only session: a ring that
+        // promises a drop we then refuse is the same lie as a lit button.
+        if (!readOnly && e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
           setDragOver(true);
         }
       }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
+        if (readOnly) return;
         if (!e.dataTransfer.files?.length) return;
         e.preventDefault();
         e.stopPropagation();
@@ -91,11 +98,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       }}
     >
       <input
-        className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text"
+        className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text disabled:opacity-60"
         value={label ?? ''}
         placeholder={t('canvas.groupNode.title', 'Group')}
         onChange={(e) => patch({ label: e.target.value })}
         aria-label="Group label"
+        disabled={readOnly}
       />
       {isEmpty ? (
         // IC's smart-group-empty: dashed drop-zone + "拖入图片自动收进分组".
@@ -104,8 +112,13 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           className="flex flex-1 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line bg-canvas-card/30 px-2 py-3 text-center"
         >
           <Plus size={14} className="text-canvas-muted" />
+          {/* The empty group is nothing BUT its drop invitation, so the
+              hint itself has to change — withdrawing the drop while still
+              saying "drop images here" is the same broken promise. */}
           <span className="text-[10px] font-semibold leading-snug text-canvas-muted">
-            {t('canvas.groupNode.dropHint', 'Drop images to auto-collect')}
+            {readOnly
+              ? t('canvas.groupNode.readOnlyHint', 'Read-only — cannot add images')
+              : t('canvas.groupNode.dropHint', 'Drop images to auto-collect')}
           </span>
         </div>
       ) : (

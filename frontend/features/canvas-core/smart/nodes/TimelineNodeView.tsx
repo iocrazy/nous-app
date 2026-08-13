@@ -29,6 +29,7 @@ import {
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { ASPECT_RATIOS } from '../aspectPresets';
+import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { UiSelect } from '../../../../components/ui';
 
@@ -46,6 +47,11 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
     segment_thumbs = [],
   } = data as unknown as TimelineNodeData;
   const patch = useNodeDataPatch(id);
+  // Read-only: everything that reshapes the strip goes — edge-resize,
+  // drag-reorder, add / remove segment, the Delete-key shortcut, the
+  // seconds + prompt editors, the aspect picker and Run. Clicking a block
+  // to inspect its prompt is view-only and stays.
+  const readOnly = useCanvasReadOnly();
   const running = useTimelineRunStore((s) => !!s.running[id]) || run_status === 'running' || run_status === 'queued';
   const [activeId, setActiveId] = useState<string | null>(segments[0]?.id ?? null);
   const active = segments.find((s) => s.id === activeId) ?? null;
@@ -62,6 +68,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   } | null>(null);
 
   const onResizeDown = (seg: TimelineSegment) => (e: React.PointerEvent) => {
+    if (readOnly) return;
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -100,6 +107,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
 
   const onBlockDown = (seg: TimelineSegment) => (e: React.PointerEvent) => {
+    if (readOnly) return;
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     reorderDrag.current = { segId: seg.id, startX: e.clientX, moved: false };
@@ -143,6 +151,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   // letting React Flow delete the whole node (P3-B). Guarded to when the
   // keystroke isn't inside a text field and there's more than one segment.
   const onNodeKeyDown = (e: React.KeyboardEvent) => {
+    if (readOnly) return;
     if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     if (!activeId || segments.length <= 1) return;
     const target = e.target as HTMLElement;
@@ -172,6 +181,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
             value={aspect}
             onChange={(e) => patch({ aspect: e.target.value })}
             aria-label="Aspect ratio"
+            disabled={readOnly}
           >
             {/* Auto (empty) + the shared composer presets — kept in lockstep
                 with the Prompt node via ASPECT_RATIOS (P2). */}
@@ -237,15 +247,19 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 {seg.prompt || '—'}
               </div>
               {/* Right-edge resize grip (P2-1): drag to change seconds. */}
-              <span
-                data-testid={`timeline-resize-${seg.id}`}
-                role="presentation"
-                onPointerDown={onResizeDown(seg)}
-                onPointerMove={onResizeMove}
-                onPointerUp={onResizeEnd}
-                onPointerCancel={onResizeEnd}
-                className="absolute inset-y-0 right-0 w-2 cursor-ew-resize touch-none rounded-r-lg hover:bg-canvas-strong/30"
-              />
+              {/* The grip is pure affordance — with resize withdrawn it
+                  would be a handle that doesn't handle, so it goes. */}
+              {!readOnly && (
+                <span
+                  data-testid={`timeline-resize-${seg.id}`}
+                  role="presentation"
+                  onPointerDown={onResizeDown(seg)}
+                  onPointerMove={onResizeMove}
+                  onPointerUp={onResizeEnd}
+                  onPointerCancel={onResizeEnd}
+                  className="absolute inset-y-0 right-0 w-2 cursor-ew-resize touch-none rounded-r-lg hover:bg-canvas-strong/30"
+                />
+              )}
             </button>
           ))}
           {segments.length < MAX_TIMELINE_SEGMENTS && (
@@ -253,7 +267,8 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
               type="button"
               aria-label="Add segment"
               onClick={() => patch({ segments: addSegment(segments) })}
-              className="nodrag flex w-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-canvas-line text-canvas-muted hover:border-canvas-line-strong hover:text-canvas-text"
+              disabled={readOnly}
+              className="nodrag flex w-7 shrink-0 items-center justify-center rounded-lg border border-dashed border-canvas-line text-canvas-muted hover:border-canvas-line-strong hover:text-canvas-text disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus size={12} />
             </button>
@@ -274,6 +289,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                   max={10}
                   value={active.seconds}
                   aria-label="Segment seconds"
+                  disabled={readOnly}
                   onChange={(e) =>
                     patch({
                       segments: updateSegment(segments, active.id, {
@@ -288,12 +304,13 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                   <button
                     type="button"
                     aria-label="Remove segment"
+                    disabled={readOnly}
                     onClick={() => {
                       const next = removeSegment(segments, active.id);
                       patch({ segments: next });
                       setActiveId(next[0]?.id ?? null);
                     }}
-                    className="text-canvas-muted hover:text-rose-400"
+                    className="text-canvas-muted hover:text-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <X size={12} />
                   </button>
@@ -309,6 +326,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 patch({ segments: updateSegment(segments, active.id, { prompt: e.target.value }) })
               }
               aria-label="Segment prompt"
+              disabled={readOnly}
             />
           </div>
         )}
@@ -339,7 +357,8 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
           <button
             type="button"
             onClick={() => void startTimelineRun(id)}
-            disabled={running || segments.every((s) => !s.prompt.trim())}
+            data-testid="timeline-run"
+            disabled={readOnly || running || segments.every((s) => !s.prompt.trim())}
             className="mh-chip !border-canvas-line-strong !text-canvas-text disabled:opacity-50"
           >
             {running ? 'Running…' : 'Run'}

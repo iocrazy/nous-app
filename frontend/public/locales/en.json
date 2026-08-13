@@ -2370,12 +2370,14 @@
       "title": "Media",
       "add": "+ Add",
       "emptyHint": "Click or drop images / video",
+      "readOnlyHint": "Read-only — cannot add media",
       "rejected": "Only images/videos up to 50MB",
       "uploadFailed": "Upload failed"
     },
     "groupNode": {
       "title": "Group",
-      "dropHint": "Drop images to auto-collect"
+      "dropHint": "Drop images to auto-collect",
+      "readOnlyHint": "Read-only — cannot add images"
     },
     "shotNode": {
       "menu": "Shot menu",
