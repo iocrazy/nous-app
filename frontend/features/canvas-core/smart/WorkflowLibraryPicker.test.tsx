@@ -1,18 +1,18 @@
 // features/canvas-core/smart/WorkflowLibraryPicker.test.tsx
 //
 // Portal + fixed-positioning behavior (T8 review fix round 1): scroll-close
-// must use the same capture-phase listener as DateRangePopover so a scroll
+// must use the same capture-phase listener as DateTimePopover so a scroll
 // of the composer's own `overflow-x-auto` toolbar (the anchor button's
 // scrollable ancestor) closes the panel instead of leaving it floating with
 // no anchor underneath it. Height-flip fallback mirrors
-// DateRangePopover.test.tsx's paired "flips"/"places" tests, adapted for
+// DateTimePopover.test.tsx's paired "flips"/"places" tests, adapted for
 // this panel's inverted default (opens upward, flips to below).
 //
 // Review fix round 2: round 1's capture-phase scroll listener was
 // unconditional (`() => onClose()`), which also fires for scrolls of the
 // panel's OWN internal file-row list (`max-h-56 overflow-y-auto` — this
 // mock seeds enough rows to make that list actually scrollable). Unlike
-// DateRangePopover (no internal scroll region), a bare `onClose()` there
+// DateTimePopover (no internal scroll region), a bare `onClose()` there
 // self-closes the panel the instant the user scrolls its own row list.
 // Fixed with the same target-containment filter `onMouseDown` already uses.
 
@@ -109,7 +109,7 @@ describe('WorkflowLibraryPicker', () => {
   });
 
   // Review fix round 1 (Important): the original outside-click/Escape effect
-  // was missing DateRangePopover's `window.addEventListener('scroll', ...,
+  // was missing DateTimePopover's `window.addEventListener('scroll', ...,
   // true)` capture-phase registration. The anchor button lives inside the
   // composer's own `overflow-x-auto` toolbar — scrolling *that* container
   // (not the window) must still close the panel, or a narrow viewport with
@@ -164,10 +164,10 @@ describe('WorkflowLibraryPicker', () => {
   });
 
   // Review fix round 1 (Minor): pair the "places above" case with the flip
-  // branch — same discipline as DateRangePopover.test.tsx's "flips
+  // branch — same discipline as DateTimePopover.test.tsx's "flips
   // above"/"places below" pair, just mirrored for this panel's inverted
   // default direction (opens upward, flips to *below* when there's no room
-  // above, vs. DateRangePopover which opens downward and flips *above*).
+  // above, vs. DateTimePopover which opens downward and flips *above*).
   it('flips below the anchor when there is no room above (measured height)', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
     anchor.getBoundingClientRect = () =>

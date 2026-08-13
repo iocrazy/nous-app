@@ -8,7 +8,7 @@
  * Task 9 (角色门控行内编辑) adds the editable owner/schedule branch: when
  * `canEditConfig` is true, the owner fact renders as a real trigger button
  * that opens a candidate menu (people from `people`/agents from `agents`),
- * and the schedule fact renders as a trigger that opens `DateRangePopover`.
+ * and the schedule fact renders as a trigger that opens `DateTimePopover`.
  * Both call `onPatchNode(nodeId, patch)` and fire-and-forget it — this
  * component holds NO optimistic/local override state and never
  * shows a toast itself. The optimistic-update / 403-revert / toast
@@ -280,7 +280,7 @@ describe('EpisodeNodeCard', () => {
     expect(schedule.textContent).toMatch(/Not set/);
   });
 
-  it('editable schedule button opens DateRangePopover and a completed range patches via onPatchNode', () => {
+  it('editable schedule button opens DateTimePopover and a completed range patches via onPatchNode', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 1, 12, 0, 0)); // August 2026
     const onPatchNode = vi.fn().mockResolvedValue(undefined);

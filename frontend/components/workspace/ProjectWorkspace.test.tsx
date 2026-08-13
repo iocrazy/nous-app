@@ -1426,7 +1426,7 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     // 1) Schedule PATCH: planned_start is already set (from baseNode), so a
-    // SINGLE day click completes the range (DateRangePopover's
+    // SINGLE day click completes the range (DateTimePopover's
     // commit-on-complete: pendingStart pre-seeded from the prop, pendingEnd
     // null → this click completes rather than starting a fresh draft).
     fireEvent.click(await screen.findByTestId('node-card-schedule'));

@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { CoverFramesMeta } from '../../types';
 
 // vi.mock is hoisted above top-level consts, so the fns it references must be
@@ -89,7 +89,11 @@ vi.mock('../../services/distributionService', () => ({
       max_title_len: null,
       max_topics: null,
       supports_scheduling: true,
-      schedule_min_lead_seconds: 7200,
+      // The production douyin profile's own numbers: 7800s (the platform's 2h
+      // plus a 10-minute upload margin) and 14 days. The page reads the window
+      // from here now — a fixture that disagreed with the backend would make
+      // the greyed-out days/hours in these tests prove the wrong bound.
+      schedule_min_lead_seconds: 7800,
       schedule_max_ahead_seconds: 1209600,
       self_declarations: [],
       supports_collection: true,
@@ -497,21 +501,14 @@ describe('PublishPage', () => {
 
 import { scheduleProblem } from './PublishPage';
 
-// datetime-local values are LOCAL wall clock, so build them the same way the
-// component's min/max do — an ISO string here would be off by the tz offset.
-const localInput = (msFromNow: number): string => {
-  const d = new Date(Date.now() + msFromNow);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 describe('scheduleProblem', () => {
-  // The effective floor is the platform's 2h PLUS a 10 min upload margin —
-  // the browser service enforces the same number, and a looser bound here
-  // would produce "accepted here, refused there" in the 2h00–2h10 band.
+  // The DEFAULT floor is the platform's 2h PLUS a 10 min upload margin — used
+  // only until the capabilities response answers (which states the same 7800s).
+  // A looser bound here would produce "accepted here, refused there" in the
+  // 2h00–2h10 band.
   const now = Date.parse('2026-08-06T12:00:00Z');
   const at = (ms: number) => new Date(now + ms).toISOString();
 
@@ -528,6 +525,17 @@ describe('scheduleProblem', () => {
   it('treats an empty or unparseable value as unfinished, not as valid', () => {
     expect(scheduleProblem('', now)).toBe('empty');
     expect(scheduleProblem('not a date', now)).toBe('empty');
+  });
+
+  it('honours a caller-supplied window instead of the module defaults', () => {
+    // The page passes the platforms' own numbers (strictest wins across the
+    // selected accounts) — the defaults above are only the not-answered-yet
+    // fallback, so a bound arriving from the backend has to actually apply.
+    const oneHour = HOUR;
+    const twoDays = 2 * DAY;
+    expect(scheduleProblem(at(90 * 60 * 1000), now, oneHour, twoDays)).toBeNull();
+    expect(scheduleProblem(at(30 * 60 * 1000), now, oneHour, twoDays)).toBe('tooSoon');
+    expect(scheduleProblem(at(3 * DAY), now, oneHour, twoDays)).toBe('tooFar');
   });
 });
 
@@ -595,43 +603,111 @@ describe('PublishPage form fields', () => {
     expect(arg.collection_name).toBeUndefined();
   });
 
-  it('blocks publishing until the scheduled time is inside the window', async () => {
-    render(<MemoryRouter><PublishPage /></MemoryRouter>);
-    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
-    await pickContentAndAccount();
+  // ── Schedule picker ──
+  //
+  // The control here is the app-wide DateTimePopover (the same component the
+  // workspace canvas schedules nodes with), NOT `<input type="datetime-local">`.
+  // Two things are being pinned, and each has a matching way to break it:
+  //   1. it IS the shared popover (put the native input back → the popover
+  //      assertions below go red);
+  //   2. the platform window is ENFORCED BY DISABLING, not by scolding after
+  //      the fact (drop minAt/maxAt, or the hour/day disabled branches → the
+  //      `toBeDisabled` assertions below go red).
+  //
+  // The clock is pinned so "1 hour from now" and "15 days from now" land on a
+  // known calendar day and hour — otherwise a run at 23:30 would roll the
+  // assertion onto the next day and the test would be flaky rather than wrong.
+  describe('schedule picker', () => {
+    // 2026-08-06 09:57:30 LOCAL. Window (douyin fixture): +2h10m → 12:07:30
+    // today, +14 days → 2026-08-20 09:57:30.
+    //
+    // Deliberately NOT on a 5-minute boundary: the clock keeps advancing under
+    // `shouldAdvanceTime`, so a floor of exactly 12:10:00 would sometimes land
+    // a few ms past the 12:10 slot and snap to 12:15 instead. 12:07:30 puts the
+    // first legal slot unambiguously at 12:10 with seconds of slack either way.
+    const PINNED = new Date(2026, 7, 6, 9, 57, 30, 0);
 
-    const publishBtn = screen.getByRole('button', { name: /Publish now/i });
-    expect(publishBtn).not.toBeDisabled();
-
-    // Switching to Schedule with nothing picked must not publish "now".
-    fireEvent.click(screen.getByRole('button', { name: /^Schedule$/i }));
-    expect(publishBtn).toBeDisabled();
-
-    // Inside the 2h10m floor → rejected before submitting, with the reason.
-    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
-      target: { value: localInput(1 * HOUR) },
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(PINNED);
     });
-    expect(screen.getByText(/at least 2 hours 10 minutes/i)).toBeInTheDocument();
-    expect(publishBtn).toBeDisabled();
-
-    // Beyond 14 days → same treatment, different reason.
-    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
-      target: { value: localInput(15 * DAY) },
+    afterEach(() => {
+      vi.useRealTimers();
     });
-    expect(screen.getByText(/within 14 days/i)).toBeInTheDocument();
-    expect(publishBtn).toBeDisabled();
 
-    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
-      target: { value: localInput(6 * HOUR) },
+    const openScheduler = async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Schedule$/i }));
+      fireEvent.click(screen.getByTestId('publish-schedule-trigger'));
+      return screen.getByTestId('date-time-popover');
+    };
+
+    it('uses the shared DateTimePopover, not a native datetime-local input', async () => {
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+      await pickContentAndAccount();
+      await openScheduler();
+
+      expect(screen.getByTestId('date-time-popover')).toBeInTheDocument();
+      // The time columns are the half `DateRangePopover` used to be missing —
+      // "the publish module is just the canvas control plus a time".
+      expect(screen.getByTestId('date-time-columns')).toBeInTheDocument();
+      expect(document.querySelector('input[type="datetime-local"]')).toBeNull();
     });
-    expect(publishBtn).not.toBeDisabled();
-    fireEvent.click(publishBtn);
 
-    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
-    const arg = createPublishTask.mock.calls.at(-1)?.[0];
-    // Sent as an absolute instant — the backend refuses a value with no offset.
-    expect(arg.scheduled_at).toMatch(/Z$/);
-    expect(new Date(arg.scheduled_at).getTime() - Date.now()).toBeGreaterThan(5 * HOUR);
+    it('greys out every day and hour outside the platform window', async () => {
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+      await pickContentAndAccount();
+      await openScheduler();
+
+      // Yesterday is unreachable, and so is day 15 — both bounds, not just one.
+      expect(screen.getByLabelText('2026-08-05')).toBeDisabled();
+      expect(screen.getByLabelText('2026-08-21')).toBeDisabled();
+      // Inside the window, days are live.
+      expect(screen.getByLabelText('2026-08-06')).not.toBeDisabled();
+      expect(screen.getByLabelText('2026-08-20')).not.toBeDisabled();
+
+      // Picking today snaps the time forward to the first legal slot (12:10)
+      // rather than committing 00:00, and every earlier hour stays dead.
+      fireEvent.click(screen.getByLabelText('2026-08-06'));
+      expect(screen.getByTestId('date-time-hour-11')).toBeDisabled();
+      expect(screen.getByTestId('date-time-hour-12')).not.toBeDisabled();
+      expect(screen.getByTestId('date-time-value-cell')).toHaveTextContent('2026-08-06 12:10');
+      // 12:05 is inside the selected hour but still under the floor.
+      expect(screen.getByTestId('date-time-minute-05')).toBeDisabled();
+      expect(screen.getByTestId('date-time-minute-10')).not.toBeDisabled();
+    });
+
+    it('blocks publishing until a time is picked, then sends an absolute instant', async () => {
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+      await pickContentAndAccount();
+
+      const publishBtn = screen.getByRole('button', { name: /Publish now/i });
+      expect(publishBtn).not.toBeDisabled();
+
+      // Switching to Schedule with nothing picked must not publish "now".
+      fireEvent.click(screen.getByRole('button', { name: /^Schedule$/i }));
+      expect(publishBtn).toBeDisabled();
+      expect(screen.getByText(/Choose when this should publish/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('publish-schedule-trigger'));
+      fireEvent.click(screen.getByLabelText('2026-08-06'));
+      fireEvent.click(screen.getByTestId('date-time-hour-16'));
+      fireEvent.click(screen.getByTestId('date-time-minute-30'));
+      fireEvent.click(screen.getByTestId('date-time-done'));
+
+      expect(publishBtn).not.toBeDisabled();
+      fireEvent.click(publishBtn);
+
+      await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+      const arg = createPublishTask.mock.calls.at(-1)?.[0];
+      // Sent as an absolute instant — the backend refuses a value with no offset.
+      expect(arg.scheduled_at).toMatch(/Z$/);
+      expect(new Date(arg.scheduled_at).getTime()).toBe(
+        new Date(2026, 7, 6, 16, 30).getTime(),
+      );
+    });
   });
 
   it('sends a trimmed collection name and warns about accounts that cannot honour it', async () => {

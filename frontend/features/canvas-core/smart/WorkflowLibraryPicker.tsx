@@ -4,8 +4,8 @@
 // lists the team library's workflow JSON files (search endpoint, name
 // filtered to *.json) — one click imports into the open canvas.
 //
-// Portal-rendered to document.body + `position: fixed` (DateRangePopover's
-// pattern, frontend/components/common/DateRangePopover.tsx) so it floats
+// Portal-rendered to document.body + `position: fixed` (DateTimePopover's
+// pattern, frontend/components/common/DateTimePopover.tsx) so it floats
 // above the composer's toolbar regardless of the toolbar's own overflow
 // clipping: `overflow-x-auto` on the composer's `role="toolbar"` implicitly
 // computes `overflow-y: auto` per CSS 2.1 §11.1.1 (only one axis can stay
@@ -13,7 +13,7 @@
 // placement — real clicks landed on nothing (canvas-feel.spec.ts:228).
 // Positioned off the trigger button's `getBoundingClientRect()`, opening
 // upward by default with a measured-height flip to below when the viewport
-// doesn't have room above (mirrors DateRangePopover's `place()`). Also
+// doesn't have room above (mirrors DateTimePopover's `place()`). Also
 // mirrors its scroll handling: since the anchor button lives inside the
 // composer's own `overflow-x-auto` toolbar, scrolling *that* container (not
 // just `window`) must close the panel or it stays fixed in place while the
@@ -55,7 +55,7 @@ export function WorkflowLibraryPicker({
     const h = ref.current.offsetHeight;
     // Default: open upward, 8px gap above the anchor (old `mb-2`). Flip to
     // below when there isn't room — measured against the *real* height, not
-    // an estimate, same as DateRangePopover.
+    // an estimate, same as DateTimePopover.
     let top = r.top - 8 - h;
     if (top < 8) top = r.bottom + 8;
     const centerX = r.left + r.width / 2;
@@ -86,7 +86,7 @@ export function WorkflowLibraryPicker({
         onClose();
       }
     };
-    // Close (not follow) on scroll — same call as DateRangePopover. The
+    // Close (not follow) on scroll — same call as DateTimePopover. The
     // anchor button lives inside the composer's own `overflow-x-auto`
     // toolbar, so a plain bubble-phase listener on `window` would miss a
     // scroll of that inner container; capture phase (`true`) catches the
@@ -96,7 +96,7 @@ export function WorkflowLibraryPicker({
     // it on a narrow viewport with many toolbar buttons — a floating panel
     // with no anchor under it.
     //
-    // Unlike DateRangePopover, this panel has its own internal scrollable
+    // Unlike DateTimePopover, this panel has its own internal scrollable
     // region (the file-row list, `max-h-56 overflow-y-auto` below) — with a
     // bare unconditional `onClose()`, scrolling that internal list closes
     // the panel out from under the user's mouse the moment the row count

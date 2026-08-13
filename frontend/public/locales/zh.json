@@ -194,6 +194,24 @@
       "weekdayThu": "四",
       "weekdayFri": "五",
       "weekdaySat": "六"
+    },
+    "duration": {
+      "days": "{{value}} 天",
+      "hours": "{{value}} 小时",
+      "minutes": "{{value}} 分钟",
+      "hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟"
+    },
+    "dateTimePopover": {
+      "title": "选择日期与时间",
+      "today": "今天",
+      "tomorrow": "明天",
+      "thisSunday": "本周日",
+      "inThreeDays": "3 天后",
+      "hours": "小时",
+      "minutes": "分钟",
+      "hourOption": "{{value}} 时",
+      "minuteOption": "{{value}} 分",
+      "done": "完成"
     }
   },
   "distribution": {
@@ -422,9 +440,9 @@
       "scheduleNow": "立即",
       "schedule": "定时发布",
       "scheduleAt": "定时时间",
-      "scheduleWindow": "抖音只接受 2 小时后至 14 天内的时间 —— 这里要求 2 小时 10 分，给上传留出余量。",
-      "scheduleTooSoon": "请选择 2 小时 10 分之后的时间 —— 平台底线是 2 小时，多出的余量留给上传。",
-      "scheduleTooFar": "请选择 14 天以内的时间。",
+      "scheduleWindow": "此刻起 {{min}} 至 {{max}} 之外的时间会置灰 —— 平台不接受，多留的提前量是给上传的余地。",
+      "scheduleTooSoon": "请选择 {{min}} 之后的时间 —— 平台底线加上上传所需的余量。",
+      "scheduleTooFar": "请选择 {{max}} 以内的时间。",
       "scheduleEmpty": "请选择发布时间。",
       "creatorPageOnlyWarning": "定时发布、自主声明、合集需要扫码绑定的账号 —— 已选账号中有 {{n}} 个会失败。",
       "notScheduled": "未设置定时",
@@ -525,7 +543,8 @@
       "gateCollectionRejected": "合集名称被拒绝 — 请清空，或填写该账号已有的合集。",
       "gateDeclarationRejected": "自主声明被拒绝 — 请换一项，或保持不设置。",
       "gateUnknownVisibility": "该平台不支持这个可见性设置。",
-      "gateUnknownReason": "发布请求被拒绝（{{reason}}）。"
+      "gateUnknownReason": "发布请求被拒绝（{{reason}}）。",
+      "schedulePick": "选择时间"
     },
     "records": {
       "title": "记录",
@@ -1409,7 +1428,8 @@
     "views": "浏览次数",
     "active": "活跃",
     "expired": "已过期",
-    "cancelled": "已取消"
+    "cancelled": "已取消",
+    "expirationPlaceholder": "选择日期与时间"
   },
   "share": {
     "title": "分享内容",
@@ -2005,11 +2025,6 @@
       "genericMember": "成员",
       "days_one": "{{count}} 天",
       "days_other": "{{count}} 天",
-      "dateRange": {
-        "cancel": "取消",
-        "done": "完成",
-        "clear": "清除"
-      },
       "create": {
         "title": "工作流",
         "shortForm": "短视频",

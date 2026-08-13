@@ -211,6 +211,12 @@
 .dist-v4 .toggle.on::after { left: 16px; }
 .dist-v4 .sched-input { display: inline-flex; align-items: center; gap: 8px; background: var(--island-2); border: 1px solid var(--line-strong); border-radius: 10px; padding: 7px 12px; font-size: 12.5px; color: var(--content); font-variant-numeric: tabular-nums; opacity: .55; }
 .dist-v4 .sched-input svg { width: 14px; height: 14px; color: var(--content-3); }
+/* The same chip as an actual trigger (the schedule picker). The base rule's
+   .55 opacity is the "Not scheduled" resting state — a button the user is
+   meant to press must not look disabled. */
+.dist-v4 button.sched-input { opacity: 1; cursor: pointer; font: inherit; font-size: 12.5px; text-align: left; transition: border-color .12s; }
+.dist-v4 button.sched-input:hover { border-color: var(--accent-border, var(--line-strong)); }
+.dist-v4 button.sched-input[aria-invalid="true"] { border-color: var(--danger); }
 /* Inline field feedback (schedule window, declaration conflict). Semantic
    tokens, not hue names — see the K1 palette remap. */
 .dist-v4 .field-err { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--danger); }

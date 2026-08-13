@@ -24,7 +24,7 @@
  * chrome with no way to inject this card's pill/quiet-button styling or a
  * `data-testid` on the actual clickable element, so this menu reuses its
  * `PersonOption`/`AgentOption` wire shapes but renders its own trigger+list).
- * Schedule opens the real `DateRangePopover` (Task 8) anchored on the
+ * Schedule opens the real `DateTimePopover` (Task 8) anchored on the
  * trigger button, which fits perfectly — it already takes an `anchorEl`.
  *
  * Deliberately NO local optimistic/revert state and NO toast here: both
@@ -69,7 +69,7 @@ import {
 import type { ProjectNodePatch, ProjectStageNode, WorkflowMemberRef } from '../../types';
 import { resolveSurface } from './nodeSurface';
 import { NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from '../workflow/nodeStatus';
-import { DateRangePopover } from '../common/DateRangePopover';
+import { DateTimePopover } from '../common/DateTimePopover';
 import { OwnerCandidateList, type AgentOption, type PersonOption } from '../workflow/OwnerCandidateList';
 
 /** The subset of `ProjectNodePatch` this card's editable facts ever send —
@@ -229,7 +229,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
   const selectOwner = (ref: WorkflowMemberRef) =>
     patchOwner({ owner_user_id: ref.user_id ?? null, owner_agent_id: ref.agent_id ?? null });
 
-  // ── Task 9: schedule popover (DateRangePopover, anchored on the trigger). ─
+  // ── Task 9: schedule popover (DateTimePopover, anchored on the trigger). ─
   const [scheduleAnchor, setScheduleAnchor] = useState<HTMLElement | null>(null);
 
   return (
@@ -327,7 +327,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
           </span>
         )}
       </Fact>
-      <DateRangePopover
+      <DateTimePopover
         anchorEl={scheduleAnchor}
         start={node.planned_start}
         end={node.planned_due}
