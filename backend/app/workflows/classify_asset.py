@@ -21,7 +21,12 @@ Conventions (mirrors caption_asset / analyze_l1):
     keyword auto-tagging (tags/tag_groups are shared vocabulary tables,
     not tenant rows; a USER scope would reject or mis-filter the
     find-or-create paths).
-  - Failure paths RAISE (路线 C rule 4).
+  - Failure paths RAISE (路线 C rule 4). The tail-catch also records an
+    ``error_catalog`` code into ``metadata.error_code`` (added
+    2026-08-12-batch-fallback-rollout §1-F2 — caption_asset already had
+    this, classify_asset did not) — ``error_msg`` is trigger-owned, so
+    that is the only place a user-actionable classification can live (see
+    ``app/services/ai/error_catalog.py``).
 """
 
 from __future__ import annotations
@@ -45,26 +50,35 @@ __all__ = [
 
 @DBOS.step()
 async def resolve_classify_provider(user_id: Optional[str]) -> dict[str, Any]:
-    """Resolve provider key + config + model + agent slug for classify."""
+    """Resolve provider key + config + model + agent slug + fallback models
+    for classify.
+
+    Calls ``resolve_task_ai_config`` directly instead of the tuple-shim
+    ``resolve_classify_provider_config`` (which discards ``fallback_models``
+    down to 4 positional fields) so the typed ``ResolvedAIConfig.fallback_models``
+    rides along into the step's return dict, threaded to ``call_classify`` ->
+    ``ClassifyService`` (spec 2026-08-12-batch-fallback-rollout §1-F2,
+    mirrors ``caption_asset.resolve_caption_provider``). ⚠️ the agent slug
+    is ``classify`` but the module gate / task_assignment key is
+    ``classification``."""
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_classify_provider_config,
+        DEFAULT_CLASSIFY_AGENT_SLUG,
+        resolve_task_ai_config,
     )
 
-    (
-        provider_key,
-        provider_config,
-        agent_model,
-        agent_slug,
-    ) = await resolve_classify_provider_config(user_id)
+    cfg = await resolve_task_ai_config(
+        user_id, "classification", DEFAULT_CLASSIFY_AGENT_SLUG
+    )
     return {
-        "provider_key": provider_key,
-        "provider_config": provider_config or {},
-        "agent_model": agent_model,
-        "agent_slug": agent_slug,
+        "provider_key": cfg.provider_key,
+        "provider_config": cfg.provider_config or {},
+        "agent_model": cfg.model,
+        "agent_slug": cfg.agent_slug,
+        "fallback_models": list(cfg.fallback_models),
     }
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
+@DBOS.step(retries_allowed=True, max_attempts=1)
 async def call_classify(
     abs_path: str,
     user_id: str,
@@ -73,9 +87,16 @@ async def call_classify(
     provider_config: dict[str, Any],
     agent_slug: str,
     wf_id: Optional[str] = None,
+    fallback_models: Optional[list[str]] = None,
 ) -> list[dict[str, str]]:
     """Run the multimodal classification. Returns normalized tag dicts
-    (``{dimension, group, en, zh}``). Raises on no-result (rule 4)."""
+    (``{dimension, group, en, zh}``). Raises on no-result (rule 4).
+
+    ``max_attempts=1`` (was 2): retry + fallback now live entirely in
+    ``LLMFallbackChain`` (via ``ClassifyService.classify()``'s
+    ``build_fallback_llm`` wiring) — a step-level retry on top would
+    multiply attempts (spec 2026-08-12-batch-fallback-rollout §1-F2).
+    """
     from app.services.ai.classify import ClassifyService
 
     service = ClassifyService(
@@ -88,6 +109,7 @@ async def call_classify(
         user_id=user_id,
         resource_id=resource_id,
         task_id=wf_id,
+        fallback_models=fallback_models,
     )
     if not tags:
         raise RuntimeError(
@@ -114,6 +136,7 @@ async def classify_asset_workflow(
     (find-or-create + ON CONFLICT junction upsert) so replays are safe.
     """
     from app.repositories.resources_repository import ResourcesRepository
+    from app.services.ai.error_catalog import record_ai_error_code
     from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._failure_handler import record_workflow_failure
 
@@ -141,6 +164,7 @@ async def classify_asset_workflow(
                 provider_config=cfg["provider_config"],
                 agent_slug=cfg.get("agent_slug") or "classify",
                 wf_id=wf_id,
+                fallback_models=cfg.get("fallback_models") or [],
             )
 
         await manager.update_progress(
@@ -171,6 +195,13 @@ async def classify_asset_workflow(
         )
         return {"status": "ok", "resource_id": resource_id, "tags_added": attached}
     except Exception as e:  # noqa: BLE001
+        # Translate the raw failure into a stable error code the frontend
+        # can turn into actionable copy (a provider 401/429 otherwise
+        # reaches the user as "Step … exceeded its maximum of N retries").
+        # Writes metadata only — error_msg/phase stay trigger-owned — and
+        # never raises, so the failure path below is unchanged (mirrors
+        # caption_asset.py / ai_summary.py).
+        await record_ai_error_code(wf_id, e)
         # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
         # DBOS records ERROR — returning the dict made DBOS mark this
         # workflow SUCCESS while task_tracking said failed (same violation

@@ -5,9 +5,17 @@
 downscaled data-URL image block → one agent turn → JSON parse →
 ``normalize_classification`` flattening.
 
-The agent slug is resolved by ``resolve_classify_provider_config``
-(``task_assignment.classification``); the assigned model must be a
-vision one — the classify workflow surfaces a clear error otherwise.
+The agent slug is resolved by ``resolve_task_ai_config`` (``task_key=
+"classification"``, called directly by the workflow's
+``resolve_classify_provider`` step — bypassing the
+``resolve_task_provider_config`` tuple shim so ``fallback_models`` rides
+along); the assigned model must be a vision one — the classify workflow
+surfaces a clear error otherwise.
+
+The LLM call runs through :func:`build_fallback_llm` (spec
+2026-08-11-batch-llm-fallback / 2026-08-12-batch-fallback-rollout §1-F2)
+instead of a bare per-instance adapter, so a primary-model outage fails
+over to the resolved agent's ``fallback_models`` pool.
 """
 
 from __future__ import annotations
@@ -19,15 +27,9 @@ from uuid import UUID
 
 from loguru import logger
 
-from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
-from app.services.ai.adapters.base import AIAdapter
-from app.services.ai.adapters.factory import (
-    get_adapter_for_user,
-    provider_key_for_model,
-)
-from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
+from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.caption.caption_service import _encode_image_sync
 from app.services.ai.classify.normalize import (
     ClassifiedTag,
@@ -79,37 +81,6 @@ class ClassifyService:
         )
         self.model = self._provider_config.get("model") or ""
 
-    def _build_adapter(self, model: str) -> AIAdapter:
-        """Same adapter resolution as Caption/VisualAnalysis services."""
-        provider_key = self._provider_key
-        if not provider_key and model:
-            try:
-                provider_key = provider_key_for_model(model)
-            except ValueError:
-                provider_key = ""
-        if not provider_key:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
-        user_cfg_scoped = {
-            provider_key: {
-                "api_key": self._provider_config.get("api_key", ""),
-                "base_url": self._provider_config.get("base_url", "") or "",
-                "app_id": self._provider_config.get("app_id", ""),
-            }
-        }
-        try:
-            return get_adapter_for_user(model, user_cfg_scoped, settings)
-        except ValueError:
-            return OpenAICompatibleAdapter(
-                api_url=self._provider_config.get("base_url", "") or "",
-                api_key=self._provider_config.get("api_key", "") or "",
-                default_model=model,
-            )
-
     async def classify(
         self,
         *,
@@ -117,12 +88,18 @@ class ClassifyService:
         user_id: Optional[Any],
         resource_id: Optional[str] = None,
         task_id: Optional[str] = None,
+        fallback_models: Optional[list[str]] = None,
     ) -> Optional[List[ClassifiedTag]]:
         """Classify a local image. Returns normalized tags, None on failure.
 
         An empty list (model answered but nothing usable survived
         normalization) is returned as None too — callers treat both as
         "classification produced nothing".
+
+        ``fallback_models``: platform-preset fallback pool from the
+        resolved agent row (spec 2026-08-11-batch-llm-fallback §4),
+        threaded into :func:`build_fallback_llm` so a primary-model
+        outage fails over instead of erroring the whole classify run.
         """
         data_url = await asyncio.to_thread(_encode_image_sync, file_path)
         if not data_url:
@@ -136,7 +113,24 @@ class ClassifyService:
             )
         )
 
-        adapter = self._build_adapter(composed.model or self.model)
+        from app.services.ai.llm.fallback_wiring import build_fallback_llm
+
+        model_for_chain = composed.model or self.model
+        adapter = await build_fallback_llm(
+            primary_model=model_for_chain,
+            fallback_models=list(fallback_models or []),
+            user_provider_config=self._provider_config,
+            # self._provider_config is the NARROWED flat single-provider
+            # shape ({"model","api_key","base_url"}), not the provider-keyed
+            # dict get_adapter_for_user expects — provider_key tells
+            # build_fallback_llm to wrap it per-attempt (final-review C1,
+            # spec 2026-08-11-batch-llm-fallback). "classification" matches
+            # resolve_task_ai_config's own task_key for this module so the
+            # pre-resolved platform-catalog gate agrees with the primary
+            # model's resolver.
+            provider_key=self._provider_key,
+            module="classification",
+        )
         runner = AgentRunner(
             adapter=adapter,
             skill_tool=SkillToolService(get_skill_repository()),
@@ -205,6 +199,9 @@ class ClassifyService:
         except AgentPausedError as err:
             logger.warning(f"[Classify] agent paused: {err}")
             return None
-        except Exception as e:
-            logger.error(f"[Classify] run failed: {e}")
-            return None
+        # LLM 类异常(AllModelsFailed/LLMCallError 及其他意外)一律 propagate:
+        # classify_asset_workflow 的 tail except 会先 await
+        # record_ai_error_code(wf_id, e)(classify_ai_error 落
+        # task_tracking.metadata.error_code),再 record_workflow_failure +
+        # raise(路线 C rule 4)——吞成 None 会让 workflow 只看到合成
+        # RuntimeError,两个机制都够不着真因(本次接线的动机,spec §1-F2)。
