@@ -189,18 +189,27 @@ class ScriptAIService:
         Callers without a user_id (rare — e.g. internal smoke tests) still
         work but skip telemetry.
         """
+        # Resolve user_id: explicit arg wins, else fall back to instance's.
+        # Resolved before composing because it also selects the agent
+        # override layer, not just the telemetry subject.
+        effective_user = user_id if user_id is not None else self._user_id
+
         composer = self._build_composer()
         composed = await composer.compose(
             ComposerInput(
                 agent_slug=self.AGENT_SLUG,
                 request_instructions=request_instructions,
+                # Agent-overrides (mig 341): the script editor is a
+                # user-triggered path, so it composes against the caller's
+                # customized agent. User layer only — a personal override
+                # must not leak into shared context, same rule as
+                # conversation_agent_turn (which for the inverse reason
+                # resolves the team layer only).
+                override_user_id=effective_user,
             )
         )
         runner = await self._build_runner(composed.model or "")
         user_messages = [{"role": "user", "content": user_content}]
-
-        # Resolve user_id: explicit arg wins, else fall back to instance's
-        effective_user = user_id if user_id is not None else self._user_id
 
         if effective_user is None:
             # No-telemetry path (same behaviour as pre-C0).
