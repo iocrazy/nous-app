@@ -183,10 +183,24 @@ async def get_project(
     auth: AuthDep,
     _project_guard: None = Depends(verify_project_read_access),
 ):
-    """Get a single project by ID with file count."""
+    """Get a single project by ID with file count, plus this caller's
+    ``effective_role``.
+
+    ``effective_role`` (manager / editor / viewer / external / null) comes
+    from ``workflow_roles.resolve_effective_role`` — the same resolver the
+    workflow write surface already gates on — so the workspace UI has ONE
+    place to learn what the current user may do in this project, instead of
+    inferring it from whichever endpoint happens to 403 first.
+    """
     try:
+        from app.core.workflow_roles import resolve_effective_role
+
         svc = ProjectsService()
         project = await svc.get_project(project_id)
+        if isinstance(project, dict):
+            project["effective_role"] = await resolve_effective_role(
+                auth.user_id, project_id=project_id
+            )
         return {"success": True, "data": project}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

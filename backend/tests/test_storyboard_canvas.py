@@ -198,6 +198,20 @@ def _stub_canvas_service(monkeypatch):
     monkeypatch.setattr(canvases_router, "CanvasService", _FakeCanvasService)
 
 
+@pytest.fixture(autouse=True)
+def _stub_can_write_project(monkeypatch):
+    """The read branch now also asks ``can_write_project`` so the response
+    can carry ``can_edit`` (2026-08-13 — see test_canvas_can_edit.py for
+    that behaviour's own coverage). It's a real DB read; stub it out here
+    the same way the gates are, since permission is not what this module
+    tests."""
+
+    async def _fake(project_id, user_id):
+        return True
+
+    monkeypatch.setattr(canvases_router, "can_write_project", _fake)
+
+
 # --------------------------------------------------------------------------- #
 # Happy path: idempotent get-or-create
 # --------------------------------------------------------------------------- #

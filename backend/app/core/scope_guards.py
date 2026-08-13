@@ -14,6 +14,8 @@ Each guard returns None on success and raises HTTPException on failure.
 Routes consume them as: `_guard: None = Depends(verify_scope_access)`.
 """
 
+from typing import NamedTuple, Optional
+
 from fastapi import Depends, HTTPException, Query
 
 from app.core.deps import AuthContext, get_auth
@@ -58,8 +60,25 @@ async def verify_scope_access(
 _PROJECT_WRITE_ROLES = ("manager", "editor")
 
 
-async def _check_project_access(project_id: str, user_id: str, *, write: bool) -> None:
-    """Shared body for the project read/write guards.
+class ProjectAccess(NamedTuple):
+    """What a caller may do with one project — the raw verdict, no HTTP."""
+
+    can_read: bool
+    can_write: bool
+
+
+async def _resolve_project_access(
+    project_id: str, user_id: str
+) -> Optional[ProjectAccess]:
+    """THE project read/write verdict. ``None`` when the project row is gone.
+
+    Single source for both the raising guards (``_check_project_access`` →
+    ``verify_project_{read,write}_access``) and the non-raising predicate
+    (``can_write_project``) the canvas GET uses to tell the UI upfront
+    whether its writes would be accepted. Keeping one body is the point:
+    a second, UI-only copy of the role comparison is exactly how a client
+    ends up offering (or hiding) an action the real gate then disagrees
+    with — the failure mode this repo has hit repeatedly.
 
     Access: owner, or member of the project's team, or a row in
     project_members — any role for read, manager/editor for write.
@@ -84,13 +103,13 @@ async def _check_project_access(project_id: str, user_id: str, *, write: bool) -
             )
         ).first()
         if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
+            return None
 
         # owner_id is a uuid column → ORM yields a native UUID; user_id is a
         # str, so ``==`` would never match without str() (#1006).
         owner_id, team_id = project
         if str(owner_id) == user_id:
-            return
+            return ProjectAccess(True, True)
 
         if team_id:
             member = (
@@ -102,7 +121,7 @@ async def _check_project_access(project_id: str, user_id: str, *, write: bool) -
                 )
             ).first()
             if member is not None:
-                return
+                return ProjectAccess(True, True)
 
         pm = (
             await session.execute(
@@ -114,13 +133,35 @@ async def _check_project_access(project_id: str, user_id: str, *, write: bool) -
         ).first()
 
     if pm is not None:
-        role = pm[0]
-        if not write or role in _PROJECT_WRITE_ROLES:
-            return
+        return ProjectAccess(True, pm[0] in _PROJECT_WRITE_ROLES)
 
+    return ProjectAccess(False, False)
+
+
+async def _check_project_access(project_id: str, user_id: str, *, write: bool) -> None:
+    """Raising form of ``_resolve_project_access`` — 404 before 403, matching
+    the rest of this module."""
+    access = await _resolve_project_access(project_id, user_id)
+    if access is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if access.can_write if write else access.can_read:
+        return
     raise HTTPException(
         status_code=403, detail="You do not have access to this project"
     )
+
+
+async def can_write_project(project_id: str, user_id: str) -> bool:
+    """Non-raising twin of ``verify_project_write_access``.
+
+    Same verdict, same query, no exception — for read endpoints that want to
+    tell the client whether a follow-up write would be accepted (canvas
+    ``can_edit``), so a read-only viewer never has to *discover* the answer
+    by firing a PUT that is guaranteed to 403. A missing project is False:
+    nobody can write a row that isn't there.
+    """
+    access = await _resolve_project_access(project_id, user_id)
+    return access is not None and access.can_write
 
 
 async def verify_project_write_access(
