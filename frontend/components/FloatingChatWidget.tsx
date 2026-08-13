@@ -20,7 +20,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { GripHorizontal, GripVertical, MessageSquare, Minus } from 'lucide-react';
+import { GripVertical, History, MessageSquare, Minus } from 'lucide-react';
 
 import { AIChatPanel } from './AIChatPanel';
 import {
@@ -51,7 +51,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
   const setRect = useGlobalChatStore((s) => s.setRect);
 
   const minimize = useCallback(() => setOpen(false), [setOpen]);
-  // Laper-style Chat History: the title-bar grip button slides the session
+  // Laper-style Chat History: the title-bar history button slides the session
   // list out from the left edge of the window.
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const sessionsOpenRef = useRef(sessionsOpen);
@@ -269,7 +269,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
           aria-label="Toggle session history"
           className="rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
         >
-          <GripHorizontal size={14} />
+          <History size={14} />
         </button>
         {pageContext?.moduleLabel && (
           <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">

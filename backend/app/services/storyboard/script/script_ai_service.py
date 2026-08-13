@@ -193,6 +193,21 @@ class ScriptAIService:
         # Resolved before composing because it also selects the agent
         # override layer, not just the telemetry subject.
         effective_user = user_id if user_id is not None else self._user_id
+        # Callers hand this in as a raw str (only the chat router coerces),
+        # while both the override lookup and RunRecorder want a UUID.
+        # Convert once, here, so the agent that gets composed and the subject
+        # that gets recorded can never be different values — and so a type
+        # mismatch can't silently compose against the base agent row
+        # (get_override swallows its errors and returns None).
+        uid = (
+            None
+            if effective_user is None
+            else (
+                effective_user
+                if isinstance(effective_user, UUID)
+                else UUID(str(effective_user))
+            )
+        )
 
         composer = self._build_composer()
         composed = await composer.compose(
@@ -201,25 +216,29 @@ class ScriptAIService:
                 request_instructions=request_instructions,
                 # Agent-overrides (mig 341): the script editor is a
                 # user-triggered path, so it composes against the caller's
-                # customized agent. User layer only — a personal override
-                # must not leak into shared context, same rule as
-                # conversation_agent_turn (which for the inverse reason
-                # resolves the team layer only).
-                override_user_id=effective_user,
+                # customized agent. User layer only, because this surface is
+                # single-user and team context was never wired into it:
+                # _run_agent accepts team_id, but none of its call sites pass
+                # one, so it is always None here.
+                #
+                # This differs from 1:1 chat, which resolves BOTH layers
+                # (user ?? team, ai_library_chat_service). Skipping the team
+                # layer here is not a leak guard — group chat's team-only
+                # rule (conversation_agent_turn) guards the opposite
+                # direction. It simply means a team-level override does not
+                # apply in the script editor. Whoever wires team context into
+                # this path must pass override_team_id here as well, or that
+                # gap stays.
+                override_user_id=uid,
             )
         )
         runner = await self._build_runner(composed.model or "")
         user_messages = [{"role": "user", "content": user_content}]
 
-        if effective_user is None:
+        if uid is None:
             # No-telemetry path (same behaviour as pre-C0).
             result = await runner.run_turn(composed, user_messages=user_messages)
         else:
-            uid = (
-                effective_user
-                if isinstance(effective_user, UUID)
-                else UUID(str(effective_user))
-            )
             model = composed.model or ""
             try:
                 provider = provider_key_for_model(model) if model else None

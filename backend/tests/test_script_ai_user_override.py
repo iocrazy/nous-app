@@ -8,10 +8,12 @@ path ignored it end to end: a user who set a different model for
 ``script_ai`` in Settings got the preset's model, persona and
 instructions everywhere in the script editor.
 
-Only the user layer is resolved here, matching
-``conversation_agent_turn``'s rule that a personal override must not leak
-into shared context: this is a single-user writing path, so there is no
-team layer to apply.
+Only the user layer is resolved here — not as a leak guard, but because
+this is a single-user writing surface that team context was never wired
+into (1:1 chat, by contrast, resolves user ?? team). The user id also
+reaches the repo as a real UUID regardless of what the caller passed:
+``get_override`` swallows its errors, so a str/UUID mismatch would fall
+back to the base agent without a word.
 """
 
 from __future__ import annotations
@@ -126,6 +128,26 @@ async def test_run_agent_composes_with_user_override() -> None:
     assert agent_repo.calls == [
         {"user": _USER_ID, "team": None}
     ], "override resolution must be user-layer only on this path"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_coerces_str_user_id_before_override_lookup() -> None:
+    """The production callers pass a str — it must reach the repo as a UUID.
+
+    ``AgentRepository.get_by_slug`` declares ``Optional[UUID]`` and
+    ``get_override`` returns None on any error, so handing it a str is the
+    kind of mismatch that degrades to the base agent silently rather than
+    raising. Asserting the type (not just the resolved model) is what makes
+    this fail if the raw value is ever passed through again.
+    """
+    composed, agent_repo = await _run_once(str(_USER_ID))
+
+    assert composed.model == _OVERRIDE_MODEL
+    assert agent_repo.calls == [{"user": _USER_ID, "team": None}]
+    assert isinstance(agent_repo.calls[0]["user"], UUID), (
+        "override lookup got the caller's raw str instead of a UUID — "
+        f"got {type(agent_repo.calls[0]['user']).__name__}"
+    )
 
 
 @pytest.mark.asyncio
