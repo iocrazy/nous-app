@@ -251,6 +251,17 @@ class LoginFlowSpec:
     # Empty tuples = this platform has no such screen modelled, and the flow
     # behaves exactly as it did before. Every platform but Douyin is in that
     # state today; none of them is worse off than before it existed.
+    # Where the account's phone number goes, on platforms that sign in by text
+    # message instead of by scan. Empty = this platform never asks us for one,
+    # either because it is a QR platform or because its code screen is reached
+    # some other way.
+    #
+    # Its presence is what makes `phone_required` a state at all. A page that
+    # shows a phone field *and* a code field at the same time (Xiaohongshu shows
+    # five inputs on one form) cannot be read to find out whether anybody has
+    # entered a number, so that fact is tracked by the session, and this tuple
+    # is how the session knows the question applies at all.
+    phone_input_selectors: tuple[str, ...] = ()
     identity_challenge_markers: tuple[str, ...] = ()
     # Priority order. Clicked at most once per login.
     sms_challenge_option_texts: tuple[str, ...] = ()
@@ -272,6 +283,29 @@ class LoginFlowSpec:
     profile_attr_selectors: Mapping[str, tuple[tuple[str, ...], str]] = field(
         default_factory=dict
     )
+
+    @property
+    def login_method(self) -> str:
+        """``"qrcode"`` or ``"sms"`` — how a human signs this platform in.
+
+        **Derived, never declared.** A separate field would be a second place to
+        state the same fact, and the two would eventually disagree: the failure
+        mode is a platform whose QR selectors were emptied (because the platform
+        turned out not to have a QR login at all) while a stale
+        ``login_method="qrcode"`` kept a whole UI promising a code. That is the
+        exact shape of the Xiaohongshu bug, so it is made unrepresentable rather
+        than documented.
+
+        ``capabilities.PLATFORM_LOGIN_METHODS`` mirrors this for consumers that
+        cannot import Playwright-dependent modules, and a test pins the two
+        together.
+        """
+        return "qrcode" if self.qrcode_selectors else "sms"
+
+    @property
+    def requires_phone_number(self) -> bool:
+        """Does signing in start by us typing the account's phone number?"""
+        return bool(self.phone_input_selectors)
 
 
 # --- driver -----------------------------------------------------------------
@@ -586,6 +620,33 @@ class LoginDriver:
             if await click_element(locator, timeout):
                 return text
         return None
+
+    async def fill_phone_number(self, phone: str) -> bool:
+        """Type the account's phone number. False = no field to type it into.
+
+        False is a **finding**, not a shrug, and the caller turns it into a typed
+        failure the user can see. On this platform every selector below is one
+        nobody has ever watched work on a live bind (no Xiaohongshu account has
+        ever been bound), and the whole point of failing loudly is that a wrong
+        guess must not read as "waiting" — that is how a user ends up staring at
+        a code field for a message nothing ever asked the platform to send.
+
+        Deliberately does **not** press anything: requesting the code is a
+        separate, separately-latched action (`request_sms_code`), because it is
+        the one that costs a real text message.
+        """
+        settings = get_settings()
+        for selector in self._spec.phone_input_selectors:
+            try:
+                locator = self._page.locator(selector).first
+                if not await locator.count() or not await locator.is_visible():
+                    continue
+            except Exception:
+                # A locator racing a re-render is not evidence of absence.
+                continue
+            await locator.fill(phone, timeout=settings.login_click_timeout_ms)
+            return True
+        return False
 
     async def submit_sms_code(self, code: str) -> bool:
         """Type the code and submit. False = no input to type into."""

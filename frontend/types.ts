@@ -2470,6 +2470,15 @@ export type SessionLoginStatus =
    * SMS" on their behalf, and only what follows is `sms_required`.
    */
   | 'identity_challenge'
+  /**
+   * The platform has no QR sign-in at all and we do not have a phone number to
+   * text yet. Distinct from `sms_required` for the same reason
+   * `identity_challenge` is: that status licenses "enter the code you were
+   * sent", and saying it before anyone has supplied a number leaves the user
+   * waiting on a message that could not have been sent — nobody knew where to
+   * send it. Xiaohongshu's creator platform is this case.
+   */
+  | 'phone_required'
   | 'sms_required'
   | 'success'
   | 'timeout'

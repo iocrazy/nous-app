@@ -192,6 +192,13 @@ def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
         # `sms_required` licenses "enter the code we sent you", and on this
         # screen nothing has been sent to anybody.
         "identity_challenge",
+        # The SMS-first platforms (2026-08-13). Same rule, same reason: added to
+        # BOTH sides in one change. Flattened to `failed` it would read as "the
+        # platform refused the sign-in" on a screen that is simply waiting for
+        # the account's phone number — and it exists apart from `sms_required`
+        # because that member licenses "type the code you were sent", which
+        # cannot be true before anyone has told us where to send it.
+        "phone_required",
         "sms_required",
         "success",
         "published",

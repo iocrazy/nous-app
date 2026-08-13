@@ -48,6 +48,46 @@ PLATFORM_CONTENT_TYPES = {
 }
 
 
+# platform -> how a human signs this platform in, as this service drives it.
+#
+# Two values today: ``"qrcode"`` (a code is rendered, the user scans it with the
+# platform's app) and ``"sms"`` (there is no code to scan — the user types a
+# phone number and the verification code the platform texts back).
+#
+# This is a **login-channel** fact, not a publishing one, so it is declared for
+# every platform that can bind an account — including the ones that cannot
+# publish. Xiaohongshu is exactly that case, and it is why this table exists:
+# its creator platform has no QR sign-in at all ([实测 2026-08-08]: zero large
+# images, zero canvases, zero clickable elements containing 扫码/二维码/QR),
+# while the UI rendered the Douyin shape for it — a QR placeholder waiting for
+# an image the backend can never produce. Copying one platform's *form* onto
+# another is the bug; declaring the form is the fix.
+#
+# The declaration is not free-floating: ``browser/tests/test_login_method_capability.py``
+# asserts each entry against the platform's own registered ``LoginFlowSpec``
+# (QR selectors present ⇔ ``"qrcode"``), so a platform whose selectors change
+# cannot leave a stale claim here.
+PLATFORM_LOGIN_METHODS = {
+    "douyin": "qrcode",
+    "bilibili": "qrcode",
+    "xiaohongshu": "sms",
+}
+
+LOGIN_METHOD_QRCODE = "qrcode"
+LOGIN_METHOD_SMS = "sms"
+
+
+def login_method_for(platform):
+    """How ``platform`` is signed in. Unknown platform -> ``""``.
+
+    Empty rather than a default, for the same reason ``content_types_for``
+    returns an empty tuple: guessing "qrcode" for a platform nobody declared is
+    how the Xiaohongshu modal came to promise a QR code in the first place. A
+    caller that gets "" has to say it does not know, which is true.
+    """
+    return PLATFORM_LOGIN_METHODS.get(platform, "")
+
+
 def content_types_for(platform):
     """The content types ``platform`` can publish. Unknown platform -> empty.
 

@@ -230,6 +230,19 @@ class PlatformSessionProfile:
     """
 
     platform: str
+    # 这个平台**怎么登录**：``"qrcode"``（渲染二维码，用户拿 app 扫）或
+    # ``"sms"``（没有码可扫，用户填手机号 + 平台短信下发的验证码）。
+    #
+    # 与下面所有字段不同，它跟"能不能发布"无关，所以 ``supports_publishing=False``
+    # 的平台**也必须填准** —— 绑定恰恰是这些平台唯一做得到的事。小红书就是这个
+    # 位置的由来：它的创作平台根本没有扫码登录（[实测 2026-08-08] 含
+    # 扫码/二维码/QR 的可点元素 0 个），而 UI 照着抖音的形状给它画了一个二维码
+    # 占位框 —— 用户永远等不到那张图，因为后端从来就不会产出它。
+    #
+    # 唯一真相在 ``browser/app/capabilities.py::PLATFORM_LOGIN_METHODS``（那边
+    # 又被测试钉在各平台真实的 ``LoginFlowSpec`` 上）。本字段是它在后端的镜像，
+    # ``backend/tests/test_capability_matches_browser.py`` 断言两者逐平台相等。
+    login_method: str
     content_types: frozenset[str]
     video_extensions: frozenset[str]
     image_extensions: frozenset[str]
@@ -262,6 +275,8 @@ class PlatformSessionProfile:
 SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
     "douyin": PlatformSessionProfile(
         platform="douyin",
+        # 扫码：登录页渲染二维码，用户拿抖音 app 扫。
+        login_method="qrcode",
         # video + images —— 这是对浏览器侧实现的忠实记录，不是产品决定。
         # 唯一真相是 ``browser/app/capabilities.py`` 的
         # ``PLATFORM_CONTENT_TYPES["douyin"]``，本字段必须是它的子集。
@@ -310,6 +325,11 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
     # 实测填准；在 supports_publishing=False 的前提下它们不会被用到。
     "xiaohongshu": PlatformSessionProfile(
         platform="xiaohongshu",
+        # ⚠️ **不是**扫码。创作平台只有「手机号 + 验证码」（[实测 2026-08-08]：
+        # 大图 0 个、canvas 0 个、含扫码/二维码/QR 的可点元素 0 个）。这一行是
+        # 前端画哪种登录界面的唯一依据 —— 在它存在之前，UI 一律照抖音画二维码，
+        # 于是小红书那条绑定链一次都没跑通过。
+        login_method="sms",
         content_types=frozenset({"video", "images"}),
         video_extensions=frozenset({".mp4", ".mov"}),
         image_extensions=frozenset({".jpg", ".jpeg", ".png", ".webp"}),
@@ -317,6 +337,7 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
     ),
     "bilibili": PlatformSessionProfile(
         platform="bilibili",
+        login_method="qrcode",
         content_types=frozenset({"video"}),
         video_extensions=frozenset({".mp4", ".mov", ".flv"}),
         image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
@@ -587,12 +608,18 @@ def project_capability(profile: PlatformSessionProfile) -> "PlatformCapability":
     if not profile.supports_publishing:
         return PlatformCapability(
             platform=profile.platform,
+            # ⚠️ 这一档也必须带 ``login_method``。它不是发布能力，是**绑定**
+            # 能力，而绑定恰恰是这些平台唯一做得到的事 —— 把它跟着占位值一起
+            # 清空，等于让唯一需要它的平台（小红书）拿不到它，前端只好退回
+            # 猜测，也就是退回二维码。
+            login_method=profile.login_method,
             supports_publishing=False,
             is_placeholder=True,
         )
 
     return PlatformCapability(
         platform=profile.platform,
+        login_method=profile.login_method,
         supports_publishing=True,
         is_placeholder=False,
         content_types=sorted(profile.content_types),

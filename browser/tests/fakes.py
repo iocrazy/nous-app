@@ -26,6 +26,10 @@ class FakeDriver:
         storage: dict[str, Any] | None = None,
         profile: LoginProfile | None = None,
         sms_input_present: bool = True,
+        # Whether the login page has a field to type the account's phone number
+        # into. False is the "our selector is wrong" case, which must surface as
+        # a typed failure rather than a silent wait.
+        phone_input_present: bool = True,
         # What the two identity-challenge clicks resolve to. `None` = "that
         # anchor is not on this page", which is a legitimate state for
         # `request_sms_code` (some flows send on their own) and a finding for
@@ -47,6 +51,8 @@ class FakeDriver:
         self._storage = storage or {"cookies": [{"name": "sessionid", "value": "s"}]}
         self._profile = profile or LoginProfile(platform_user_id="uid", username="Test Creator")
         self._sms_input_present = sms_input_present
+        self._phone_input_present = phone_input_present
+        self.filled_phones: list[str] = []
         self._challenge_option = challenge_option
         self._code_request_text = code_request_text
         self._challenge_progress = (
@@ -56,6 +62,7 @@ class FakeDriver:
         self._evidence = evidence if evidence is not None else {"url": "https://x/"}
         self.closed = False
         self.submitted_codes: list[str] = []
+        self.read_qrcode_calls = 0
         self.refresh_calls = 0
         self.profile_calls = 0
         self.challenge_clicks = 0
@@ -69,6 +76,7 @@ class FakeDriver:
         return current
 
     async def read_qrcode(self) -> str | None:
+        self.read_qrcode_calls += 1
         return self._qrcode
 
     async def refresh_qrcode(self) -> str | None:
@@ -94,6 +102,10 @@ class FakeDriver:
     async def page_evidence(self, _captions: Any = ()) -> dict[str, Any]:
         self.evidence_calls += 1
         return dict(self._evidence)
+
+    async def fill_phone_number(self, phone: str) -> bool:
+        self.filled_phones.append(phone)
+        return self._phone_input_present
 
     async def submit_sms_code(self, code: str) -> bool:
         self.submitted_codes.append(code)
@@ -138,20 +150,36 @@ def always(status: SessionStatus, reason: str = "scripted"):
 
 
 def make_spec(
-    judge=None, platform: str = "testplatform", identity_cookie: str = "test_uid"
+    judge=None,
+    platform: str = "testplatform",
+    identity_cookie: str = "test_uid",
+    *,
+    qrcode_selectors: tuple[str, ...] = ("img",),
+    phone_input_selectors: tuple[str, ...] = (),
+    sms_request_texts: tuple[str, ...] = (),
 ) -> LoginFlowSpec:
+    """A QR platform by default; pass no QR selectors for an SMS one.
+
+    The two keyword arguments are what makes an SMS-first platform expressible
+    here at all. Before them every fake spec declared a QR code, so every test
+    in this suite agreed with the one assumption that was wrong (that a login
+    *is* a scan) — and the platform that broke it had no coverage of its own
+    shape whatsoever.
+    """
     return LoginFlowSpec(
         platform=platform,
         identity_cookie=identity_cookie,
         login_url="https://example.test/login",
         profile_url="https://example.test/home",
-        qrcode_selectors=("img",),
+        qrcode_selectors=qrcode_selectors,
         login_markers=(),
         scanned_markers=(),
         expired_markers=(),
         refresh_selectors=(),
         sms_input_selectors=(),
         sms_submit_selectors=(),
+        phone_input_selectors=phone_input_selectors,
+        sms_request_texts=sms_request_texts,
         judge=judge or always(SessionStatus.WAITING_SCAN),
         parse_profile=lambda _fields: LoginProfile(),
     )

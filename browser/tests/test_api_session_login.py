@@ -35,8 +35,8 @@ def wired(monkeypatch):
     """
     installed: dict = {}
 
-    def install(judge=None, driver=None, platform="testplatform"):
-        spec = make_spec(judge=judge, platform=platform)
+    def install(judge=None, driver=None, platform="testplatform", **spec_kwargs):
+        spec = make_spec(judge=judge, platform=platform, **spec_kwargs)
         drv = driver or FakeDriver(spec)
         registry = LoginSessionRegistry(open_driver=driver_factory(drv))
         monkeypatch.setattr(login_sessions, "_registry", registry)
@@ -63,6 +63,7 @@ def _start(client, platform="testplatform", **body):
     [
         ("post", "/session/login/start"),
         ("get", "/session/login/abc/status"),
+        ("post", "/session/login/abc/phone"),
         ("post", "/session/login/abc/sms"),
         ("get", "/session/login/abc/state"),
         ("post", "/session/login/abc/close"),
@@ -264,6 +265,103 @@ def test_a_nonsense_code_is_rejected_before_it_reaches_the_page(client, wired, c
 def test_sms_on_an_unknown_session_is_404(client, wired):
     wired()
     resp = client.post("/session/login/nope/sms", json={"code": "123456"}, headers=AUTH)
+    assert resp.status_code == 404
+
+
+# --- phone (SMS-first platforms) --------------------------------------------
+#
+# The endpoint exists because there is no other route for the number: the page
+# lives in this process, the person who knows it is looking at a modal in
+# another one, and no unattended flow can supply it.
+
+
+SMS_SPEC_SHAPE = dict(
+    qrcode_selectors=(),
+    phone_input_selectors=('input[placeholder="手机号"]',),
+    sms_request_texts=("发送验证码",),
+)
+
+
+def _sms_platform(wired, **driver_kwargs):
+    """Wire a platform shaped like Xiaohongshu: no QR code, a phone field."""
+    judge = always(SessionStatus.SMS_REQUIRED, "the platform is asking for a code")
+    driver = FakeDriver(make_spec(**SMS_SPEC_SHAPE), qrcode=None, **driver_kwargs)
+    installed = wired(judge=judge, driver=driver, **SMS_SPEC_SHAPE)
+    return installed, installed["spec"], driver
+
+
+def test_starting_a_platform_with_no_qr_code_succeeds_and_says_what_it_needs(
+    client, wired
+):
+    """The whole bug, at the HTTP boundary: this used to be a 502.
+
+    `POST /start` raised `login page rendered no QR code` for every Xiaohongshu
+    bind ever attempted, so the platform's SMS judge never ran once.
+    """
+    _sms_platform(wired)
+
+    resp = _start(client)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == SessionStatus.PHONE_REQUIRED.value
+    # Null, not "": an empty string reads as "there is a code, it has no pixels".
+    assert body["qrcode_data_url"] is None
+
+
+def test_submitting_a_phone_number_asks_the_platform_to_text_a_code(client, wired):
+    _installed, _spec, driver = _sms_platform(wired, code_request_text="发送验证码")
+    session_id = _start(client).json()["login_session_id"]
+
+    resp = client.post(
+        f"/session/login/{session_id}/phone", json={"phone": "13800000000"}, headers=AUTH
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == SessionStatus.SMS_REQUIRED.value
+    assert body["detail"]["code_requested"] is True
+    # The number is never echoed back — not in the message, not in the detail.
+    assert "13800000000" not in resp.text
+    assert driver.filled_phones == ["13800000000"]
+
+
+def test_a_phone_number_that_cannot_be_entered_answers_with_a_typed_reason(
+    client, wired
+):
+    """A wrong selector must look like a failure, never like patience."""
+    _installed, _spec, driver = _sms_platform(wired, phone_input_present=False)
+    session_id = _start(client).json()["login_session_id"]
+
+    resp = client.post(
+        f"/session/login/{session_id}/phone", json={"phone": "13800000000"}, headers=AUTH
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == SessionStatus.PHONE_REQUIRED.value
+    assert body["detail"]["reason"] == "phone_input_missing"
+    assert driver.code_request_clicks == 0
+
+
+@pytest.mark.parametrize("phone", ["", "123", "abcdefgh", "138 0000 0000", "+8613800000000"])
+def test_a_nonsense_phone_number_never_reaches_the_page(client, wired, phone):
+    _installed, _spec, driver = _sms_platform(wired)
+    session_id = _start(client).json()["login_session_id"]
+
+    resp = client.post(
+        f"/session/login/{session_id}/phone", json={"phone": phone}, headers=AUTH
+    )
+
+    assert resp.status_code == 422
+    assert driver.filled_phones == []
+
+
+def test_phone_on_an_unknown_session_is_404(client, wired):
+    wired()
+    resp = client.post(
+        "/session/login/nope/phone", json={"phone": "13800000000"}, headers=AUTH
+    )
     assert resp.status_code == 404
 
 

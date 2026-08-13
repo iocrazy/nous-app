@@ -71,6 +71,11 @@ describe('session login copy maps', () => {
           // wording is load-bearing rather than cosmetic: it is what stops the
           // UI promising a code that has not been asked for yet.
           'identity_challenge',
+          // Platforms with no QR code at all, waiting for the account's phone
+          // number. Same load-bearing role as the state above, one step
+          // earlier: it is what stops the UI asking for a code before anyone
+          // has told the platform where to send one.
+          'phone_required',
           'sms_required',
           'success',
           'timeout',

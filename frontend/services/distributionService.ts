@@ -159,6 +159,36 @@ export const submitSmsCode = (taskId: string, code: string): Promise<SessionOpRe
   });
 
 /**
+ * What the backend's `SessionPhoneRequest` (and the browser container's
+ * `PhoneNumberRequest`) accept, to the digit.
+ *
+ * Deliberately not "11 digits": that is the mainland mobile format, and baking
+ * one country's shape into the client is the same species of assumption as
+ * baking one platform's QR sign-in into every platform's modal.
+ */
+export const PHONE_NUMBER_PATTERN = /^\d{6,20}$/;
+
+/**
+ * Give the live sign-in page the account's phone number and ask the platform
+ * to text a code (`status === 'phone_required'`).
+ *
+ * Only reachable on platforms whose capability says `login_method: 'sms'` —
+ * they render no QR code, so this is the *first* step of the sign-in rather
+ * than a fallback. A `success: false` here means the number went nowhere
+ * (`detail.reason` is `phone_input_missing` or `code_request_failed`), and the
+ * one thing the caller must not do with it is carry on to a code field: no
+ * message was requested, so none is coming.
+ */
+export const submitLoginPhone = (
+  taskId: string,
+  phone: string,
+): Promise<SessionOpResult> =>
+  request<SessionOpResult>(`/accounts/session/login/${encodeURIComponent(taskId)}/phone`, {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+
+/**
  * Abandon a login. MUST be called when the user closes the modal mid-scan —
  * the browser container holds a live context per pending login, and without
  * this it spins until the server-side timeout.
@@ -221,6 +251,22 @@ export const getBrowserHealth = (): Promise<BrowserHealth> =>
  */
 export interface PlatformCapability {
   platform: string;
+  /**
+   * How this platform is signed in: `'qrcode'` (a code is rendered, the user
+   * scans it) or `'sms'` (no code exists — the user types a phone number and
+   * the verification code the platform texts back).
+   *
+   * The one capability field that is **not** blanked out by `is_placeholder`,
+   * because it is about binding rather than publishing, and a platform that can
+   * only bind is exactly the one that needs it. Before this field existed the
+   * modal drew a QR frame for every platform, including one whose creator site
+   * has no scan sign-in at all — so the user watched a placeholder for an image
+   * the backend could never produce.
+   *
+   * Typed as a plain string: a value added server-side must not break parsing,
+   * and the modal falls back to a neutral shape for anything it does not know.
+   */
+  login_method: string;
   supports_publishing: boolean;
   is_placeholder: boolean;
   content_types: string[];
