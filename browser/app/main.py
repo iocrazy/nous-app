@@ -480,6 +480,12 @@ async def post_session_probe(request: ProbeRequest) -> Any:
     It reuses `get_inspect_spec` rather than owning a second registry: "which
     hosts may we open for this platform" has one answer, and giving the typing
     endpoint its own copy is how the two would eventually disagree.
+
+    `pre_steps` / `post_steps` may name controls to activate around the typing
+    — a panel that has to be opened before its box exists, a tab that has to be
+    taken before its list loads. They are **labels, never selectors**, and only
+    labels in `probe_actions.PROBE_LABELS` parse at all: anything else is a 422
+    from the schema, before this function runs and before a browser exists.
     """
     spec = get_inspect_spec(request.platform)
     if spec is None:

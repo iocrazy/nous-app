@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SessionStatus(str, Enum):
@@ -509,6 +509,51 @@ MAX_CAPTURES = 24
 MAX_CAPTURE_BODY_CHARS = 8_000
 DEFAULT_CAPTURE_BODY_CHARS = 3_000
 MAX_PROBE_TEXT_CHARS = 64
+MAX_PRE_STEPS = 6
+MAX_POST_STEPS = 8
+MAX_REPLAY_FILTERS = 8
+
+
+class ProbeActivationStep(BaseModel):
+    """One control the recon run may activate, named by its rendered caption.
+
+    ⚠️ `label` is checked against `probe_actions.PROBE_LABELS` **here**, at the
+    schema layer, which means a request naming anything else is a 422 before a
+    browser process exists. `probe_actions.activate_label` checks the same rule
+    again at call time; two checks of one rule, because the schema one protects
+    the endpoint and the runtime one protects any caller that builds the model
+    in code.
+
+    There is deliberately no way to name a **selector** to activate. The list
+    of activatable things is a closed vocabulary in our own source, not
+    something a request can widen.
+    """
+
+    label: str = Field(min_length=1, max_length=32)
+    #: Read-only predicate: which selector becoming visible means this
+    #: activation did what it was supposed to. Without it, "the caption was
+    #: pressed" and "the panel opened" are the same observation, and the first
+    #: one is not the finding.
+    until_selectors: list[str] = Field(default_factory=list, max_length=4)
+    #: How many identically-captioned nodes to try. 「选择音乐」 is exact=2 on
+    #: the live page (heading + button) and the heading is inert.
+    candidates: int = Field(default=4, ge=1, le=6)
+    settle_ms: int = Field(default=4_000, ge=0, le=30_000)
+    #: Snapshot taken right after this step — how the panel/tab renders, which
+    #: is the fallback answer when the data never crossed the network.
+    observe_selectors: list[str] = Field(
+        default_factory=list, max_length=MAX_OBSERVE_SELECTORS
+    )
+
+    @field_validator("label")
+    @classmethod
+    def _label_is_allow_listed(cls, value: str) -> str:
+        from .probe_actions import label_refusal
+
+        refusal = label_refusal(value)
+        if refusal is not None:
+            raise ValueError(refusal)
+        return value
 
 
 class ProbeRequest(BaseModel):
@@ -537,6 +582,22 @@ class ProbeRequest(BaseModel):
     target_index: int = Field(default=0, ge=0, le=20)
     target_wait_ms: int = Field(default=60_000, ge=1_000, le=300_000)
 
+    # Activations, in two positions relative to the typing. `pre_steps` reach
+    # a box that does not exist yet (the 「选择音乐」 panel and its search
+    # field); `post_steps` change what is being listed once we are inside it
+    # (its tab row). Both are recorded with the traffic they caused, which is
+    # what makes "this tab has its own endpoint" answerable at all.
+    pre_steps: list[ProbeActivationStep] = Field(
+        default_factory=list, max_length=MAX_PRE_STEPS
+    )
+    post_steps: list[ProbeActivationStep] = Field(
+        default_factory=list, max_length=MAX_POST_STEPS
+    )
+    # Some panels only search on Enter. Off by default; when on, the key goes
+    # through `probe_actions.press_confirmed_key`, which refuses any key but
+    # Enter and any target that is not verifiably an `input` / `textarea`.
+    press_enter_after_typing: bool = False
+
     # What to type. Bounded hard: this string goes into a real account's
     # composer, and there is no reason a reconnaissance probe needs a sentence.
     probe_text: str = Field(min_length=1, max_length=MAX_PROBE_TEXT_CHARS)
@@ -557,7 +618,16 @@ class ProbeRequest(BaseModel):
     capture_body_chars: int = Field(
         default=DEFAULT_CAPTURE_BODY_CHARS, ge=0, le=MAX_CAPTURE_BODY_CHARS
     )
-    max_replay_targets: int = Field(default=2, ge=0, le=4)
+    max_replay_targets: int = Field(default=2, ge=0, le=8)
+    # A recorded call becomes replayable when it carried our typed word **or**
+    # when its URL matches one of these. The second door exists because a list
+    # that loads when a panel opens — a recommendation feed, a chart tab —
+    # never carries a keyword, and refusing to replay it would leave the
+    # decisive question ("can we call this without a browser?") unanswerable
+    # for exactly the endpoints a sidebar would need.
+    replay_url_contains: list[str] = Field(
+        default_factory=list, max_length=MAX_REPLAY_FILTERS
+    )
 
     # Nodes to read after typing — the suggestion dropdown, typically. Its
     # rendered rows answer "what does a suggestion look like" even when the
@@ -608,6 +678,11 @@ class CapturedCall(BaseModel):
     # topic); anything unparseable falls back to the digit-masking scrubber.
     body_excerpt: str = ""
     body_json_top_keys: list[str] = Field(default_factory=list)
+    #: Which run step this response arrived during — `"load"`, `"type"`, or
+    #: `"activate:<label>"`. Attribution is the whole point once a run has more
+    #: than one step: "the platform fetched something" is weak, "taking the
+    #: 热门榜 tab fetched this" is the finding.
+    phase: str = ""
 
 
 class ObservedNode(BaseModel):
@@ -645,6 +720,30 @@ class ReplayTarget(BaseModel):
     keyword_param: str | None = None
     keyword_value: str = ""
     header_names: list[str] = Field(default_factory=list)
+    #: The step this call belonged to, carried through so a replay result can
+    #: be attributed to the tab that produced it.
+    phase: str = ""
+
+
+class ProbeStepResult(BaseModel):
+    """One step of a recon run, and what the page did during it.
+
+    `activated=False` with a non-empty `error` is a *result*, not an exception:
+    a caption that moved and a control that vanished look identical from the
+    outside, and `text_mismatches` is what tells them apart.
+    """
+
+    kind: str = ""  # "activate" | "type"
+    label: str = ""
+    phase: str = ""
+    matches: int = 0
+    index: int = -1
+    activated: bool = False
+    error: str = ""
+    text_mismatches: list[str] = Field(default_factory=list)
+    #: How many responses the page produced while this step ran.
+    responses: int = 0
+    observed: list[ObservedSelector] = Field(default_factory=list)
 
 
 class ProbeResponse(BaseModel):
@@ -656,6 +755,11 @@ class ProbeResponse(BaseModel):
     page_title: str = ""
 
     target_selector_used: str = ""
+    #: Non-empty when the typing target never became visible. The run then
+    #: reports **everything it did capture** rather than throwing the evidence
+    #: away — a panel that failed to open and a panel that opened and fetched
+    #: nothing are different findings, and only this field separates them.
+    target_error: str | None = None
     # Falsifiability. Without this, "the platform issued no request" and "our
     # keystrokes never landed" produce identical output, and we would report
     # the first while the second was true.
@@ -665,6 +769,8 @@ class ProbeResponse(BaseModel):
     target_child_total: int = 0
     target_nodes: list[ObservedNode] = Field(default_factory=list)
     observed_selectors: list[ObservedSelector] = Field(default_factory=list)
+    #: One entry per activation and for the typing itself, in order.
+    steps: list[ProbeStepResult] = Field(default_factory=list)
 
     # Every response, by host, for the whole run — a histogram, not a log.
     host_totals: dict[str, int] = Field(default_factory=dict)

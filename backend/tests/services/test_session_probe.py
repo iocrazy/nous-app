@@ -263,3 +263,172 @@ def test_a_non_json_replay_still_produces_a_typed_answer():
     assert out["json"] is False
     assert out["contains_mutation"] is False
     assert out["body_chars"] == 20
+
+
+# ── 参数剥离阶梯：「最小可用请求」这句话的依据 ────────────────
+
+
+def test_keeping_a_subset_drops_everything_else_including_the_signature():
+    from app.services.distribution.session_probe import keep_query_params
+
+    kept = keep_query_params(SIGNED_URL + "&aid=2906", ["aid", "keyword"])
+    assert "a_bogus" not in kept and "msToken" not in kept
+    assert "aid=2906" in kept and "keyword=" in kept
+
+
+def test_dropping_one_parameter_leaves_the_others_alone():
+    from app.services.distribution.session_probe import drop_query_param
+
+    left = drop_query_param(SIGNED_URL, "a_bogus")
+    assert "a_bogus" not in left
+    assert "msToken=TOKEN-MATERIAL" in left
+
+
+def test_the_ladder_moves_exactly_one_variable_per_rung():
+    """每一档只动一样东西 —— 同时动两样的实验答不出"最小是什么"。"""
+    from app.services.distribution.session_probe import _replay_ladder
+
+    full = {
+        "accept": "*/*",
+        "cookie": "sessionid=s",
+        "user-agent": "UA",
+        "referer": "R",
+    }
+    bare = {"accept": "*/*"}
+    plan = _replay_ladder(
+        SIGNED_URL + "&aid=2906",
+        keyword_param="keyword",
+        mutation_text="上海",
+        keep_params=["aid", "keyword"],
+        full_headers=full,
+        bare_headers=bare,
+    )
+    labels = [label for label, _, _ in plan]
+    assert labels == [
+        "verbatim",
+        "keyword",
+        "no_cookie",
+        "bare_headers",
+        "kept_params",
+        "drop_aid",
+        "drop_keyword",
+    ]
+
+    by_label = {label: (url, headers) for label, url, headers in plan}
+    # ① 原样：URL 与 headers 都没动。
+    assert by_label["verbatim"] == (SIGNED_URL + "&aid=2906", full)
+    # ② 只换词：签名一个字没变。
+    assert "a_bogus=SIGNATURE-MATERIAL" in by_label["keyword"][0]
+    # ③ 只去 cookie：URL 没动，其它头还在。
+    assert by_label["no_cookie"][0] == SIGNED_URL + "&aid=2906"
+    assert "cookie" not in by_label["no_cookie"][1]
+    assert by_label["no_cookie"][1]["user-agent"] == "UA"
+    # ⑥ 才是"最小"这个词的依据：在 ⑤ 的基础上逐个再拿掉一个。
+    assert "aid=" not in by_label["drop_aid"][0]
+    assert "keyword=" in by_label["drop_aid"][0]
+
+
+def test_a_target_with_no_keyword_still_gets_a_ladder():
+    """面板一打开就加载的榜单不带关键词。跳过它 = 把最该问的那条排除在外。"""
+    from app.services.distribution.session_probe import _replay_ladder
+
+    plan = _replay_ladder(
+        "https://creator.douyin.com/aweme/v1/music/list/?aid=2906&type=1",
+        keyword_param=None,
+        mutation_text="上海",
+        keep_params=["aid"],
+        full_headers={"accept": "*/*"},
+        bare_headers={"accept": "*/*"},
+    )
+    labels = [label for label, _, _ in plan]
+    assert "keyword" not in labels  # 没有词可换，这一档就不该假装做过
+    assert labels == [
+        "verbatim",
+        "no_cookie",
+        "bare_headers",
+        "kept_params",
+        "drop_aid",
+    ]
+
+
+def test_a_keep_param_that_is_not_in_the_url_is_not_invented():
+    from app.services.distribution.session_probe import _replay_ladder
+
+    plan = _replay_ladder(
+        "https://creator.douyin.com/x?aid=2906",
+        keyword_param=None,
+        mutation_text="",
+        keep_params=["aid", "cursor"],
+        full_headers={},
+        bare_headers={},
+    )
+    assert [label for label, _, _ in plan if label.startswith("drop_")] == ["drop_aid"]
+
+
+class _FakeResponse:
+    def __init__(self, url: str):
+        self.url = url
+        self.status_code = 200
+        self.headers = {"content-type": "application/json"}
+        self.text = '{"status_code":0,"music_list":[{"title":"t"}]}'
+
+
+class _RecordingClient:
+    def __init__(self, log: list):
+        self._log = log
+
+    async def get(self, url, headers=None):
+        self._log.append((url, dict(headers or {})))
+        return _FakeResponse(url)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_a_keywordless_target_is_replayed_instead_of_skipped(monkeypatch):
+    """老实现 ``if not url or not param: continue`` 会把它整条丢掉 —— 而它正是
+    "音乐侧边栏能不能自己拉数据"要问的那一条。"""
+    import app.boundary as boundary
+    from app.services.distribution.session_probe import _run_replays
+
+    log: list = []
+    monkeypatch.setattr(
+        boundary, "safe_async_client", lambda **kw: _RecordingClient(log)
+    )
+
+    out = await _run_replays(
+        [
+            {
+                "url": "https://creator.douyin.com/aweme/v1/music/list/?aid=2906&cursor=0",
+                "keyword_param": None,
+                "referer": URL,
+                "phase": "activate:热门榜",
+            }
+        ],
+        {"cookies": [{"name": "sessionid", "value": "s", "domain": ".douyin.com"}]},
+        user_agent="UA",
+        mutation_text="",
+        proxy_url=None,
+        keep_params=["aid"],
+    )
+
+    assert len(out) == 1
+    row = out[0]
+    assert row["phase"] == "activate:热门榜"
+    assert row["keyword_param"] is None
+    assert set(row["attempts"]) == {
+        "verbatim",
+        "no_cookie",
+        "bare_headers",
+        "kept_params",
+        "drop_aid",
+    }
+    # 每一档都是一次**真调**，不是纸面计划。
+    assert len(log) == 5
+    # ①带 cookie，③④不带 —— 这个差是"必须以某个账号身份才能问"的唯一证据。
+    assert "cookie" in log[0][1]
+    assert "cookie" not in log[1][1]
+    assert log[2][1] == {"accept": "*/*"}

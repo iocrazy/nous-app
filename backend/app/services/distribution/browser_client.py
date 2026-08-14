@@ -1280,9 +1280,16 @@ class BrowserClient:
         bundle 里早就有？），决定了我们能不能在自己的发布页做同样的体验，而
         静态计数无论如何数不出来。
 
-        **这个方法同样不投放任何内容**：浏览器侧那个模块里没有激活控件的路径
-        （有逐字读源码的测试守着），能做的只有导航、交给 file input、聚焦、
-        逐字符输入、读。
+        **这个方法同样不投放任何内容**。浏览器侧的 ``probe.py`` 里仍然没有任
+        何激活调用（逐字读源码的测试守着）；受限激活整体委托给
+        ``probe_actions.activate_label``，它只能激活**渲染文案精确等于一份写死
+        封闭词表**里某一项的节点（面板入口与列表 tab，不含任何提交/确认/发布
+        类控件），且点之前会把节点当下的文案读回来比对。词表外的标签在 schema
+        层就被拒 —— 浏览器进程还没起就 422。
+
+        ``options`` 里可以带 ``pre_steps`` / ``post_steps``（激活步骤）与
+        ``replay_url_contains``（把不带关键词的面板加载也标成可重放目标），
+        上下界同样由浏览器侧 pydantic 兜住。
 
         ``url`` 白名单与 ``inspect_page`` 是**同一个函数**（浏览器侧
         ``inspect.url_refusal``），不是第二份拷贝。
@@ -1367,7 +1374,9 @@ class BrowserClient:
                 "url_after",
                 "page_title",
                 "target_selector_used",
+                "target_error",
                 "typed_text_landed",
+                "steps",
                 "target_text_before",
                 "target_text_after",
                 "target_child_total",
