@@ -174,14 +174,38 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   const cHoverSurface = 'hover:bg-island-2';
 
   // ─── Editable filename ──────────────────────────────
+  //
+  // ⚠️ All three editable fields below (filename / notes / url) seed their local
+  // draft from the `resource` prop DURING RENDER (React's documented "adjusting
+  // state when a prop changes" recipe), never in a `useEffect`.
+  //
+  // A passive effect is a DEFERRED write: React commits the DOM first and
+  // flushes passive effects in a later scheduler task. Under CPU contention the
+  // seed can flush in the SAME batch as a keystroke and, landing after it,
+  // silently overwrite what the user just typed. The draft snaps back to the
+  // server value, the blur commit below then compares equal, and NO update is
+  // sent at all — the rename/notes edit is lost with zero user-visible feedback
+  // (the repo's "silent no-op is unacceptable" rule).
+  //
+  // Same defect class and same fix as `editor/beats/BeatCard.tsx` and
+  // `components/workflow/BriefField.tsx`. It presents as a "flaky" test whose
+  // failure is `Number of calls: 0` — the update was never called, not called
+  // late, which is why no `waitFor` or timeout can fix it.
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(resource.filename);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  // ⚠️ Re-seed during RENDER, never in a `useEffect` — see the note above
+  // `commitName` for why. Same key as the old effect deps (id + filename).
+  const [seededName, setSeededName] = useState({
+    id: resource.id,
+    filename: resource.filename,
+  });
+  if (seededName.id !== resource.id || seededName.filename !== resource.filename) {
+    setSeededName({ id: resource.id, filename: resource.filename });
     setNameValue(resource.filename);
     setEditingName(false);
-  }, [resource.id, resource.filename]);
+  }
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();
@@ -205,10 +229,15 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   const [editingNotes, setEditingNotes] = useState(false);
   const notesTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => {
+  const [seededNotes, setSeededNotes] = useState({
+    id: resource.id,
+    notes: resource.notes,
+  });
+  if (seededNotes.id !== resource.id || seededNotes.notes !== resource.notes) {
+    setSeededNotes({ id: resource.id, notes: resource.notes });
     setNotesValue(resource.notes || '');
     setEditingNotes(false);
-  }, [resource.id, resource.notes]);
+  }
 
   const commitNotes = useCallback(() => {
     clearTimeout(notesTimerRef.current);
@@ -222,10 +251,12 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   const [urlValue, setUrlValue] = useState(resource.url || '');
   const [editingUrl, setEditingUrl] = useState(false);
 
-  useEffect(() => {
+  const [seededUrl, setSeededUrl] = useState({ id: resource.id, url: resource.url });
+  if (seededUrl.id !== resource.id || seededUrl.url !== resource.url) {
+    setSeededUrl({ id: resource.id, url: resource.url });
     setUrlValue(resource.url || '');
     setEditingUrl(false);
-  }, [resource.id, resource.url]);
+  }
 
   const commitUrl = useCallback(() => {
     const val = urlValue.trim();
