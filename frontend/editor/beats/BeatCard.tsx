@@ -53,22 +53,53 @@ export function BeatCard({
 }: Props) {
   const { t } = useTranslation();
 
+  // ⚠️ Every draft below is re-seeded from its prop during RENDER (React's
+  // documented "adjusting state when a prop changes" recipe), never in a
+  // `useEffect`. A passive effect is a DEFERRED write: React commits the DOM
+  // first and flushes passive effects in a later scheduler task, so under CPU
+  // contention the mount seed can flush in the SAME batch as a keystroke and,
+  // landing after it, silently overwrite what the user just typed. The draft
+  // snaps back to the server value, the blur commit then compares equal, and
+  // no PATCH is sent at all — the edit is lost with zero user-visible feedback
+  // (the repo's "silent no-op is unacceptable" rule).
+  //
+  // Not hypothetical: the effect version made this file's inline title/duration
+  // regressions intermittently red with `Number of calls: 0` — `updateBeat` was
+  // never called, not "called late", which is why no `waitFor` or timeout could
+  // ever have fixed it. Instrumented runs show the two orderings directly:
+  //   pass  seed-effect ran prop="Setup" | commit draft="Opening Image"
+  //   fail  seed-effect ran prop="Setup" | commit draft="Setup"   <- typing lost
+  // Same defect class and same fix as `components/workflow/BriefField.tsx`.
+  //
+  // Seed keys stay PER FIELD (not one key off the whole `beat` object): the
+  // parent merges optimistic updates into a fresh beat object on every commit,
+  // so an object-identity key would re-seed — and clobber — the other two
+  // fields' in-flight drafts.
   const [titleDraft, setTitleDraft] = useState(beat.title);
-  useEffect(() => setTitleDraft(beat.title), [beat.title]);
+  const [seededTitle, setSeededTitle] = useState(beat.title);
+  if (seededTitle !== beat.title) {
+    setSeededTitle(beat.title);
+    setTitleDraft(beat.title);
+  }
 
   const [notesOpen, setNotesOpen] = useState(
     !!beat.summary || beat.duration_sec != null || !!beat.color,
   );
-  const [summaryDraft, setSummaryDraft] = useState(beat.summary ?? '');
-  useEffect(() => setSummaryDraft(beat.summary ?? ''), [beat.summary]);
+  const summaryValue = beat.summary ?? '';
+  const [summaryDraft, setSummaryDraft] = useState(summaryValue);
+  const [seededSummary, setSeededSummary] = useState(summaryValue);
+  if (seededSummary !== summaryValue) {
+    setSeededSummary(summaryValue);
+    setSummaryDraft(summaryValue);
+  }
 
-  const [durationDraft, setDurationDraft] = useState(
-    beat.duration_sec == null ? '' : String(beat.duration_sec),
-  );
-  useEffect(
-    () => setDurationDraft(beat.duration_sec == null ? '' : String(beat.duration_sec)),
-    [beat.duration_sec],
-  );
+  const durationValue = beat.duration_sec == null ? '' : String(beat.duration_sec);
+  const [durationDraft, setDurationDraft] = useState(durationValue);
+  const [seededDuration, setSeededDuration] = useState(durationValue);
+  if (seededDuration !== durationValue) {
+    setSeededDuration(durationValue);
+    setDurationDraft(durationValue);
+  }
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
