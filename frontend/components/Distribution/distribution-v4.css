@@ -198,7 +198,19 @@
 .dist-v4 .chip-soon { opacity: .55; cursor: not-allowed; }
 .dist-v4 .chip-soon .soon { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 4px; border-radius: 999px; background: var(--line-strong); color: var(--content-4); }
 .dist-v4 .topic-input-row { display: flex; }
-.dist-v4 .topics .trending-label { font-size: 10.5px; color: var(--content-4); align-self: center; letter-spacing: .05em; text-transform: uppercase; font-weight: 600; }
+/* Live topic suggestions (platform topic library). Rendered in flow rather
+   than absolutely positioned: the composer card scrolls with the page, and a
+   floating layer would need scroll/resize plumbing to earn nothing. */
+.dist-v4 .topic-suggest { margin-top: 6px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--island-2); overflow: hidden; max-height: 232px; overflow-y: auto; }
+.dist-v4 .topic-suggest-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 7px 12px; border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--content); cursor: pointer; text-align: left; }
+.dist-v4 .topic-suggest-row + .topic-suggest-row { border-top: 1px solid var(--line); }
+.dist-v4 .topic-suggest-row:hover, .dist-v4 .topic-suggest-row:focus-visible { background: var(--island-3, rgba(99, 102, 241, .08)); outline: none; }
+.dist-v4 .topic-suggest-row .ts-name { font-weight: 550; }
+.dist-v4 .topic-suggest-row .ts-views { color: var(--content-4); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.dist-v4 .topic-suggest-row .ts-new { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 5px; border-radius: 999px; background: var(--line-strong); color: var(--content-3); }
+.dist-v4 .topic-suggest-note { display: flex; align-items: center; gap: 7px; padding: 8px 12px; font-size: 12px; color: var(--content-4); }
+.dist-v4 .topic-suggest-note svg { width: 13px; height: 13px; flex-shrink: 0; }
+.dist-v4 .topic-suggest-error { color: var(--t-danger, var(--content-3)); }
 
 /* ═══ frow (options rows) ═══ */
 .dist-v4 .frow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

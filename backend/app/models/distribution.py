@@ -192,6 +192,12 @@ class PublishTasks(Base):
     topics: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    # mig 426 — 话题名 → 平台话题实体 id（抖音 challenge cid）的绑定记录，
+    # [{"name","topic_id","view_count"}]。与 topics **平行**：发布链读的仍是
+    # topics，这一列是"用户从建议下拉里选中当刻"的凭据，事后补不回来。
+    topic_refs: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     cover_vertical_resource_id: Mapped[int | None] = mapped_column(BigInteger)
     cover_horizontal_resource_id: Mapped[int | None] = mapped_column(BigInteger)
     visibility: Mapped[str] = mapped_column(

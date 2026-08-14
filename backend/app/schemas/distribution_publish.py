@@ -74,6 +74,59 @@ def normalize_topics(topics: Optional[list[str]]) -> list[str]:
     return out
 
 
+class TopicRef(BaseModel):
+    """一个话题名 → 平台话题实体 id 的绑定（mig 426）。
+
+    ``topic_id`` 是抖音建议接口回的 ``cid``。它**现在还没有被发布链使用** ——
+    发布时话题依然是打进描述框的 `#词`，这一版刻意不改（见
+    ``services/distribution/topic_suggest.py`` 模块头的边界说明）。
+
+    那为什么现在就存？因为它是"这条话题绑到了平台上哪个实体"的**唯一凭据**，
+    而且只在用户从下拉里选中的那一刻存在 —— 事后无法补。等到要回答"带 cid
+    发布和纯打字发布出来的作品有没有区别"时，没有这份记录就只能重新做一遍
+    实验。存下来，将来才有东西可比。
+
+    ``topics``（纯名字列表）保持不变，仍是发布链读的那一份；``topic_refs`` 是
+    平行的、可缺失的装饰记录，两者不互相依赖。
+    """
+
+    name: str
+    topic_id: str = ""
+    # 选中当刻的累计播放量。同样是"事后补不回来"的量 —— 它随时间涨，一个月后
+    # 再查到的数字回答不了"用户当时看到的是什么"。
+    view_count: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        cleaned = normalize_topics([v])
+        if not cleaned:
+            raise ValueError("topic ref name is empty")
+        return cleaned[0]
+
+
+def normalize_topic_refs(refs: Optional[list["TopicRef"]]) -> list["TopicRef"]:
+    """去掉没有 ``topic_id`` 的条目（它们不带任何 ``topics`` 之外的信息）、按
+    name 去重（大小写不敏感，与前端 addTopic 同口径）、封顶 ``MAX_TOPICS``。
+
+    ⚠️ 超上限**截断而不是 raise**：``topic_refs`` 是装饰记录，让它把一次本来
+    合法的发布 422 掉是本末倒置 —— ``topics`` 自己已经有硬上限了。
+    """
+    if not refs:
+        return []
+    seen: set[str] = set()
+    out: list[TopicRef] = []
+    for ref in refs:
+        if not ref.topic_id:
+            continue
+        key = ref.name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ref)
+    return out[:MAX_TOPICS]
+
+
 class AccountConfigOverride(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -91,6 +144,9 @@ class PublishTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     description: Optional[str] = None
     topics: list[str] = Field(default_factory=list)
+    # 与 topics 平行的实体绑定记录（mig 426）。缺失完全合法 —— 手打的话题本来
+    # 就没有 cid，只有从建议下拉里选中的才有。
+    topic_refs: list[TopicRef] = Field(default_factory=list)
     visibility: Visibility = "public"
     ai_content: bool = False
     allow_download: bool = True
@@ -119,6 +175,11 @@ class PublishTaskCreate(BaseModel):
     @classmethod
     def _clean_topics(cls, v: list[str]) -> list[str]:
         return normalize_topics(v)
+
+    @field_validator("topic_refs")
+    @classmethod
+    def _clean_topic_refs(cls, v: list[TopicRef]) -> list[TopicRef]:
+        return normalize_topic_refs(v)
 
     @field_validator("collection_name")
     @classmethod
@@ -173,6 +234,9 @@ class PublishTaskOut(BaseModel):
     title: str
     description: Optional[str] = None
     topics: list[str] = Field(default_factory=list)
+    # 回显（同 scheduled_at / self_declaration 的理由）：写进去却读不回来，就等
+    # 于没人能证明它真的存下来了。
+    topic_refs: list[TopicRef] = Field(default_factory=list)
     visibility: str = "public"
     distribution_mode: str = "broadcast"
     status: str  # aggregated display status (see aggregate_task_status)

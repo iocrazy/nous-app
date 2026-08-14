@@ -299,6 +299,70 @@ export const getPlatformCapabilities = (): Promise<Record<string, PlatformCapabi
   request<{ platforms: Record<string, PlatformCapability> }>('/capabilities')
     .then((r) => r.platforms);
 
+/**
+ * One live topic suggestion from the platform's own topic library.
+ *
+ * `topic_id` is the platform's topic ENTITY id (Douyin's challenge `cid`).
+ * Empty means the platform has no entity for that word yet — which is exactly
+ * what `is_new` says out loud, so no caller has to know what an empty string
+ * is supposed to mean.
+ *
+ * `view_count` is the raw cumulative play count. Formatting is the UI's job
+ * (locale-aware compact notation) — the API never sends a pre-formatted string.
+ */
+export interface TopicSuggestion {
+  name: string;
+  topic_id: string;
+  view_count: number;
+  is_new: boolean;
+}
+
+/**
+ * Typed reasons a topic lookup can fail. The dropdown branches on these codes;
+ * it never parses the English `message`.
+ *
+ * There is deliberately NO "empty list" failure mode: an empty `suggestions`
+ * array always means the platform had nothing to suggest. Anything that went
+ * wrong arrives as a rejection carrying one of these — otherwise "the API is
+ * down" and "no such topic" would look identical in the dropdown.
+ */
+export const TOPIC_SUGGEST_REASONS = [
+  'platform_unsupported',
+  'keyword_empty',
+  'upstream_unreachable',
+  'upstream_status',
+  'upstream_shape',
+] as const;
+export type TopicSuggestReason = (typeof TOPIC_SUGGEST_REASONS)[number];
+
+/** Pull the typed reason out of a rejected `suggestTopics`, or null. */
+export const topicSuggestReason = (err: unknown): TopicSuggestReason | null => {
+  if (!(err instanceof DistributionApiError)) return null;
+  const detail = err.detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const reason = (detail as { reason?: unknown }).reason;
+  return TOPIC_SUGGEST_REASONS.includes(reason as TopicSuggestReason)
+    ? (reason as TopicSuggestReason)
+    : null;
+};
+
+/**
+ * Ask the platform what topics start with `keyword` (type-ahead).
+ *
+ * Backed by the creator site's own suggest API, so the numbers are the real
+ * ones the platform shows its own creators. Rejects (never resolves to `[]`)
+ * when the lookup itself failed.
+ */
+export const suggestTopics = (
+  keyword: string,
+  platform = 'douyin',
+  signal?: AbortSignal,
+): Promise<TopicSuggestion[]> =>
+  request<{ suggestions: TopicSuggestion[] }>(
+    `/topics/suggest?platform=${encodeURIComponent(platform)}&keyword=${encodeURIComponent(keyword)}`,
+    { signal },
+  ).then((r) => r.suggestions ?? []);
+
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
 

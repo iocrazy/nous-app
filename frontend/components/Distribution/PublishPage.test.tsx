@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { CoverFramesMeta } from '../../types';
@@ -7,7 +7,7 @@ import type { CoverFramesMeta } from '../../types';
 // hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
 const {
   createPublishTask, promoteGeneratedVideo, uploadResource, getGalleryItems,
-  extractCoverFrames, selectCoverFrame,
+  extractCoverFrames, selectCoverFrame, suggestTopics,
 } = vi.hoisted(() => ({
   createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
   promoteGeneratedVideo: vi.fn().mockResolvedValue('900'),
@@ -15,6 +15,13 @@ const {
   getGalleryItems: vi.fn().mockResolvedValue([]),
   extractCoverFrames: vi.fn(),
   selectCoverFrame: vi.fn(),
+  // Real wire shape of GET /distribution/topics/suggest (CLAUDE.md: boundary
+  // mocks copy the backend's JSON, including that view_count is a number and
+  // an unseeded topic's id is an empty string — not null, not absent).
+  suggestTopics: vi.fn().mockResolvedValue([
+    { name: 'goldenhour', topic_id: '1583761434171470', view_count: 30909355369, is_new: false },
+    { name: 'goldenhourphotography', topic_id: '', view_count: 0, is_new: true },
+  ]),
 }));
 
 // Stable toast spy so the upload-failure test can assert on it.
@@ -67,6 +74,10 @@ vi.mock('../../services/distributionService', () => ({
   createPublishTask,
   extractCoverFrames,
   selectCoverFrame,
+  suggestTopics,
+  // The page branches on this code to pick its wording; the real one digs the
+  // reason out of a DistributionApiError.
+  topicSuggestReason: (err: unknown) => (err as { reason?: string })?.reason ?? null,
   // The Images tab is gated on what the BACKEND says each platform can post.
   // The real answer today is video-only — no publisher can drive a gallery yet
   // — so the images coverage in this file (gallery expand, inline upload, pick
@@ -211,13 +222,14 @@ describe('PublishPage', () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
-    // Open the topic input via the "# Topic" chip, type tags (Enter commits;
-    // a trending chip adds one too), then run the standard publish flow.
+    // Open the topic input via the "# Topic" chip and type two tags (Enter
+    // commits each), then run the standard publish flow.
     fireEvent.click(screen.getByRole('button', { name: /# Topic/i }));
     const topicInput = screen.getByLabelText(/Add a topic/i);
     fireEvent.change(topicInput, { target: { value: '#goldenhour' } });
     fireEvent.keyDown(topicInput, { key: 'Enter' });
-    fireEvent.click(screen.getByRole('button', { name: '#cityscape' }));
+    fireEvent.change(topicInput, { target: { value: 'cityscape' } });
+    fireEvent.keyDown(topicInput, { key: 'Enter' });
 
     fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
     fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
@@ -230,8 +242,77 @@ describe('PublishPage', () => {
 
     await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
     const arg = createPublishTask.mock.calls.at(-1)?.[0];
-    // Leading '#' is stripped; both the typed and trending tag are present.
+    // Leading '#' is stripped; both typed tags are present.
     expect(arg.topics).toEqual(['goldenhour', 'cityscape']);
+    // Nothing came from the suggestion list, so there is no entity binding to
+    // send — and an empty array must not be invented for one.
+    expect(arg.topic_refs).toBeUndefined();
+  });
+
+  it('suggests real platform topics while typing and carries the picked id into the payload', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /# Topic/i }));
+    fireEvent.change(screen.getByLabelText(/Add a topic/i), { target: { value: 'golden' } });
+
+    // Scoped to the suggestion list on purpose: the page also renders a native
+    // <select> for the self declaration, and its <option> elements carry the
+    // same ARIA role — an unscoped query would "find" rows that resolve before
+    // the lookup has even run.
+    const list = await screen.findByTestId('topic-suggest');
+    // Debounced: one request for the burst, not one per keystroke.
+    const options = await within(list).findAllByRole('option');
+    expect(suggestTopics).toHaveBeenCalledWith('golden');
+    expect(suggestTopics).toHaveBeenCalledTimes(1);
+    const [row, newRow] = options;
+    // The play count is shown, compactly, derived from the raw integer.
+    expect(row).toHaveTextContent('#goldenhour');
+    expect(row).toHaveTextContent('30.9B');
+    // A topic the platform does not have yet is labelled, not shown as 0 plays.
+    expect(newRow).toHaveTextContent('#goldenhourphotography');
+    expect(newRow).toHaveTextContent('New');
+
+    fireEvent.click(row);
+    // The chip now carries the platform's entity id — visible proof the pick
+    // was captured rather than degraded into plain text.
+    await waitFor(() => expect(
+      document.querySelector('.chip-topic[data-topic-id="1583761434171470"]'),
+    ).not.toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Golden day' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.topics).toEqual(['goldenhour']);
+    // ⚠️ Reverse-verification target: drop `topic_refs` from the submit payload
+    // and this line goes red. The cid only exists at pick time.
+    expect(arg.topic_refs).toEqual([
+      { name: 'goldenhour', topic_id: '1583761434171470', view_count: 30909355369 },
+    ]);
+  });
+
+  it('says the lookup failed instead of showing an empty topic list', async () => {
+    // The whole point of the typed reason: "no such topic" and "we could not
+    // ask" must not both render as an empty dropdown.
+    suggestTopics.mockRejectedValueOnce({ reason: 'upstream_unreachable' });
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /# Topic/i }));
+    fireEvent.change(screen.getByLabelText(/Add a topic/i), { target: { value: 'golden' } });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Could not reach the topic list/i);
+    // And it is NOT the "nothing found" sentence.
+    expect(screen.queryByText(/No topics found/i)).toBeNull();
   });
 
   it('states per account whether publishing needs the user afterwards', async () => {

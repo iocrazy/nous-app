@@ -8,8 +8,9 @@ import {
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
-  listLibraryMedia, promoteGeneratedVideo, publishGateProblems, GeneratedVideo,
-  PlatformCapability, PublishGateProblem,
+  listLibraryMedia, promoteGeneratedVideo, publishGateProblems, suggestTopics,
+  topicSuggestReason, GeneratedVideo, PlatformCapability, PublishGateProblem,
+  TopicSuggestion, TopicSuggestReason,
 } from '../../services/distributionService';
 import {
   uploadResource, getGalleryItems, getResourceCoverUrl, GALLERY_MIME,
@@ -19,7 +20,7 @@ import {
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { AccountAvatar } from './platform';
-import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
+import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
 import { DateTimePopover } from '../common/DateTimePopover';
 import { useToast } from '../Toast';
@@ -52,12 +53,34 @@ const PLATFORM_LABEL: Record<string, string> = {
 // services/toPublishService.ts so the Resources context-menu "Mark to publish"
 // action and this picker filter share one source of truth.
 
-// Suggested topics shown under the composer. Clicking one adds it like any
-// typed topic (they map to Douyin hashtags — # + word).
-const TRENDING_TOPICS = ['goldenhour', 'cityscape', '4k'];
 // Mirrors the backend schema bounds (normalize_topics): ≤20 tags, ≤50 chars.
 const MAX_TOPICS = 20;
 const MAX_TOPIC_LEN = 50;
+// Type-ahead debounce. Long enough that a normal typing burst produces one
+// request instead of one per keystroke, short enough that the list feels like
+// it belongs to the keyboard rather than to a spinner.
+const TOPIC_SUGGEST_DEBOUNCE_MS = 250;
+
+/**
+ * Cumulative play count, written the way the reader's own locale writes large
+ * numbers: `31B` in English, `309亿` in Chinese.
+ *
+ * Delegated to `Intl` on purpose. A hand-rolled 亿/万 table would be wrong in
+ * English and a hand-rolled B/M table would be wrong in Chinese (the buckets
+ * are 10^8/10^4 vs 10^9/10^6 — they do not line up), so the one thing we must
+ * not do is pick one and translate the suffix.
+ */
+const formatViewCount = (n: number, lang: string): string => {
+  try {
+    return new Intl.NumberFormat(lang || 'en', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(n);
+  } catch (err) {
+    console.error('distribution: compact view count formatting failed', err);
+    return String(n);
+  }
+};
 // Cap concurrent image uploads so a large multi-select can't open dozens of
 // parallel requests at once — pick order is preserved regardless of timing.
 const UPLOAD_CONCURRENCY = 3;
@@ -184,7 +207,7 @@ const MusicIcon: React.FC = () => (
 );
 
 export const PublishPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const { scopeId } = useWorkspaceScope();
@@ -212,6 +235,26 @@ export const PublishPage: React.FC = () => {
   const [topics, setTopics] = useState<string[]>([]);
   const [topicInput, setTopicInput] = useState('');
   const [topicInputOpen, setTopicInputOpen] = useState(false);
+  /**
+   * Entity bindings for the topics that came out of the suggestion dropdown,
+   * keyed by lowercased name (the same key `addTopic` de-duplicates on).
+   *
+   * A hand-typed topic has no entry and that is fine — this map is a parallel
+   * record, never the source of truth for what gets published. It exists
+   * because the platform's `cid` is only observable at pick time.
+   */
+  const [topicRefs, setTopicRefs] = useState<Record<string, TopicRef>>({});
+  const [suggestions, setSuggestions] = useState<TopicSuggestion[]>([]);
+  /**
+   * The dropdown has four distinct things to say and they must not collapse
+   * into one another — an empty list rendered for a failed lookup is the exact
+   * "silent no-op" this repo keeps getting burned by.
+   */
+  const [suggestState, setSuggestState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [suggestError, setSuggestError] = useState<TopicSuggestReason | 'unknown' | null>(null);
+  // Monotonic request id — a response whose id is no longer the latest is a
+  // stale answer to an older word and must never repaint the list.
+  const suggestSeq = useRef(0);
   const [visibility, setVisibility] = useState<Visibility>('public');
   // The 3:4 / 4:3 pair derived from a video frame. Null = let the platform
   // pick its own frame at publish time.
@@ -531,6 +574,95 @@ export const PublishPage: React.FC = () => {
       e.preventDefault();
       setTopics((prev) => prev.slice(0, -1));
     }
+  };
+
+  /**
+   * Take one suggestion: add it like any other topic AND remember the platform
+   * entity it came from. The id is only knowable here — the same word typed by
+   * hand carries no binding — so this is the single place it can be captured.
+   */
+  const pickSuggestion = useCallback((s: TopicSuggestion) => {
+    addTopic(s.name);
+    if (s.topic_id) {
+      setTopicRefs((prev) => ({
+        ...prev,
+        [s.name.toLowerCase()]: {
+          name: s.name,
+          topic_id: s.topic_id,
+          view_count: s.view_count,
+        },
+      }));
+    }
+    setTopicInput('');
+    setSuggestions([]);
+    setSuggestState('idle');
+    setSuggestError(null);
+  }, [addTopic]);
+
+  /**
+   * Type-ahead against the platform's own topic library, debounced.
+   *
+   * Two things this deliberately does NOT do:
+   *  - it never turns a failed lookup into an empty list (the dropdown shows a
+   *    typed error line instead — "nothing found" and "we could not ask" are
+   *    different sentences);
+   *  - it never lets a slow response overwrite a newer one: every run bumps a
+   *    sequence number and a stale resolution is dropped on the floor.
+   */
+  useEffect(() => {
+    const term = topicInput.replace(/^#+/, '').trim();
+    if (!topicInputOpen || !term) {
+      setSuggestions([]);
+      setSuggestState('idle');
+      setSuggestError(null);
+      return;
+    }
+    const seq = ++suggestSeq.current;
+    setSuggestState('loading');
+    setSuggestError(null);
+    const timer = window.setTimeout(() => {
+      suggestTopics(term)
+        .then((rows) => {
+          if (seq !== suggestSeq.current) return;
+          setSuggestions(rows);
+          setSuggestState('ready');
+        })
+        .catch((err) => {
+          if (seq !== suggestSeq.current) return;
+          console.error('distribution: topic suggest failed', err);
+          setSuggestions([]);
+          setSuggestError(topicSuggestReason(err) ?? 'unknown');
+          setSuggestState('error');
+        });
+    }, TOPIC_SUGGEST_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [topicInput, topicInputOpen]);
+
+  /**
+   * The entity bindings that belong to the topics actually being published,
+   * in chip order. Deriving it here (instead of pruning `topicRefs` on every
+   * removal) means the two lists cannot drift apart.
+   */
+  const pickedTopicRefs: TopicRef[] = useMemo(
+    () => topics
+      .map((tag) => topicRefs[tag.toLowerCase()])
+      .filter((ref): ref is TopicRef => Boolean(ref)),
+    [topics, topicRefs],
+  );
+
+  /** Human sentence for a typed lookup failure. Branches on the code, never
+   *  on the backend's English prose. */
+  const suggestErrorText = (): string => {
+    if (suggestError === 'platform_unsupported') {
+      return t(
+        'distribution.publish.topicSuggestUnsupported',
+        'This platform has no topic library we can search.',
+      );
+    }
+    return t(
+      'distribution.publish.topicSuggestFailed',
+      'Could not reach the topic list — your typed topic still works.',
+    );
   };
 
   // Only the videos the user actually picked are shown as content thumbs —
@@ -1026,6 +1158,10 @@ export const PublishPage: React.FC = () => {
         title: title.trim(),
         description: description.trim() || undefined,
         topics: topics.length ? topics : undefined,
+        // Derived from the CURRENT topic list rather than tracked alongside it:
+        // removing a chip therefore drops its binding for free, and a binding
+        // for a topic that is no longer in the post can never leak out.
+        topic_refs: pickedTopicRefs.length ? pickedTopicRefs : undefined,
         visibility,
         ai_content: aiContent,
         allow_download: allowDownload,
@@ -1383,7 +1519,14 @@ export const PublishPage: React.FC = () => {
                 <em className="soon">{t('distribution.publish.soon', 'Soon')}</em>
               </span>
               {topics.map((tag) => (
-                <span key={tag} className="chip chip-topic">
+                <span
+                  key={tag}
+                  className="chip chip-topic"
+                  /* Present only when this topic is bound to a platform topic
+                     entity. It is also how a test (and a human with devtools)
+                     can see that the binding survived the pick. */
+                  data-topic-id={topicRefs[tag.toLowerCase()]?.topic_id || undefined}
+                >
                   #{tag}
                   <button
                     type="button"
@@ -1403,6 +1546,8 @@ export const PublishPage: React.FC = () => {
                   value={topicInput}
                   maxLength={MAX_TOPIC_LEN}
                   aria-label={t('distribution.publish.topicInputAria', 'Add a topic')}
+                  aria-expanded={suggestState === 'ready' && suggestions.length > 0}
+                  aria-controls="topic-suggest-list"
                   placeholder={t('distribution.publish.topicInputPlaceholder', 'Type a topic, press Enter (comma or space also adds)')}
                   onChange={(e) => setTopicInput(e.target.value)}
                   onKeyDown={onTopicKeyDown}
@@ -1410,19 +1555,66 @@ export const PublishPage: React.FC = () => {
                 />
               </div>
             )}
-            <div className="topics" style={{ marginTop: 7 }}>
-              <span className="trending-label">{t('distribution.publish.trending', 'Trending')}</span>
-              {TRENDING_TOPICS.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  className="chip chip-mute"
-                  onClick={() => addTopic(tag)}
-                >
-                  #{tag}
-                </button>
-              ))}
-            </div>
+            {/* Live suggestions from the platform's own topic library.
+                Deliberately four separate states — an empty list is only ever
+                shown for "the platform had nothing", never for a failure. */}
+            {topicInputOpen && suggestState !== 'idle' && (
+              <div
+                className="topic-suggest"
+                id="topic-suggest-list"
+                role="listbox"
+                data-testid="topic-suggest"
+              >
+                {suggestState === 'loading' && (
+                  <div className="topic-suggest-note">
+                    <Loader2 className="spin" />
+                    {t('distribution.publish.topicSuggestLoading', 'Looking up topics…')}
+                  </div>
+                )}
+                {suggestState === 'error' && (
+                  <div className="topic-suggest-note topic-suggest-error" role="alert">
+                    <AlertCircle />
+                    {suggestErrorText()}
+                  </div>
+                )}
+                {suggestState === 'ready' && suggestions.length === 0 && (
+                  <div className="topic-suggest-note">
+                    {t('distribution.publish.topicSuggestEmpty', 'No topics found for that word.')}
+                  </div>
+                )}
+                {suggestState === 'ready' && suggestions.map((s) => (
+                  <button
+                    key={`${s.name}-${s.topic_id}`}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    className="topic-suggest-row"
+                    data-topic-id={s.topic_id || undefined}
+                    /* The input commits its text on blur, and blur fires before
+                       click — without this the typed prefix would be added as a
+                       topic and the row's own handler would never run. */
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pickSuggestion(s)}
+                  >
+                    <span className="ts-name">#{s.name}</span>
+                    {s.is_new ? (
+                      <span className="ts-new">{t('distribution.publish.topicNew', 'New')}</span>
+                    ) : (
+                      <span className="ts-views">
+                        {/* The number is rendered directly rather than
+                            interpolated into a sentence: it is the one part of
+                            this row that must survive regardless of how the
+                            translation layer is wired. Only the unit word is
+                            translated. */}
+                        <b>{formatViewCount(s.view_count, i18n.language)}</b>
+                        {' '}
+                        {t('distribution.publish.topicPlays', 'plays')}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="fcard">
