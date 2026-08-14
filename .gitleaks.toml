@@ -26,12 +26,26 @@ useDefault = true
 [allowlist]
 description = "Known false positives that aren't real secrets"
 
-# Test UUIDs that appear in fixtures + integration tests.
+# Legacy fixture UUIDs, allowlisted so the scanner stops re-reporting
+# them. They are NOT a licence to keep using them.
+#
+# ⚠️ These are NOT all synthetic. Two of the three USER_* values below
+# resolve to accounts that exist and have signed in; only one was ever a
+# throwaway. The original "test uuid" comments were wrong, and because
+# the allowlist silences the scanner, the mislabel propagated into 20+
+# files before anyone checked. This repo is public and git history is
+# permanent, so those occurrences cannot be recalled — the only thing
+# left to control is whether the count keeps growing.
+#
+# New code MUST use synthetic placeholders (`00000000-…-0001`, …).
+# Do not copy a USER_* value into a new fixture, test, script, doc, PR
+# body, or commit message. Removing these entries instead would only
+# turn CI red on the existing occurrences without deleting anything.
 regexes = [
-    '''8e1584e3-9c29-4a5b-90fe-125b74259f7f''',  # USER_A test uuid
-    '''61f15833-2b2b-4a53-b126-16897f9184a8''',  # USER_B test uuid
-    '''81e49ea8-c3d5-4bc7-a904-7bdf109e0cd9''',  # USER_C test uuid
-    '''00000000-0000-0000-0000-000000000099''',  # smoke test uuid
+    '''8e1584e3-9c29-4a5b-90fe-125b74259f7f''',  # USER_A — legacy, do not reuse
+    '''61f15833-2b2b-4a53-b126-16897f9184a8''',  # USER_B — legacy, do not reuse
+    '''81e49ea8-c3d5-4bc7-a904-7bdf109e0cd9''',  # USER_C — legacy, do not reuse
+    '''00000000-0000-0000-0000-000000000099''',  # synthetic smoke-test uuid
 ]
 
 paths = [
