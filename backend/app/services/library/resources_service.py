@@ -1002,6 +1002,20 @@ class ResourcesService:
         if media_id:
             exclude["parsed_media"] = [media_id]
 
+        # ⛔ 永远不要在这里接 ``resolve_resource_file_path``（PR-B 阶梯）。
+        #
+        # 别处那样做是对的 —— 读文件时 ``resources.file_path`` 为空要回落到
+        # ``parsed_media.download_path``。**删除路径正好相反**：这一列为空恰恰
+        # 表示"这一行没有自己的文件"，也就是**没有东西该由它来删**。
+        #
+        # parsed_media 那份是**多个用户共享的下载**（同一条素材被 N 个用户存进
+        # 各自的库，每人一行 resources、共指同一个对象）。顺着阶梯删下去，就是
+        # 用户删自己的信封时，把别人还在引用的共享文件一起删掉 —— 静默的跨租户
+        # 数据丢失，而且发现时已经找不回来了。
+        #
+        # 共享那份由 ``_delete_media_record`` 走自己的引用检查回收，那才是它的
+        # 归属地。本仓库已经为"内容寻址存储的删除必须先查引用"吃过一次亏，这条
+        # 注释是为了不吃第二次。
         file_path = resource.get("file_path")
         if file_path:
             loc = resolve_media_source(file_path)
