@@ -52,13 +52,35 @@ export const FilterChip: React.FC<FilterChipProps> = ({
   // Close on outside click / Esc.
   useEffect(() => {
     if (!isOpen) return;
+    /**
+     * A floating layer that a dropdown opened ON TOP of itself — the date
+     * chip's DateTimePopover renders through `createPortal(document.body)`,
+     * so it is visually inside this dropdown but DOM-wise outside `rootRef`.
+     * Without this, clicking a calendar day reads as an outside click and
+     * closes the chip out from under the picker.
+     *
+     * The `!contains(rootRef)` clause keeps the ordinary case intact: a modal
+     * dialog that CONTAINS this chip is not a layer above it, so clicking the
+     * modal's own body still closes the dropdown exactly as before.
+     */
+    const inFloatingLayer = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      const layer = target.closest('[role="dialog"]');
+      return !!layer && !!rootRef.current && !layer.contains(rootRef.current);
+    };
     const handleClick = (e: MouseEvent) => {
+      if (inFloatingLayer(e.target)) return;
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      // Escape belongs to the topmost layer: while a portalled popover is
+      // open it dismisses that, not the dropdown underneath.
+      const openLayer = document.querySelector('[role="dialog"]');
+      if (openLayer && rootRef.current && !openLayer.contains(rootRef.current)) return;
+      onClose();
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
