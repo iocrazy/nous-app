@@ -11,13 +11,22 @@ T0 那条链回答的是"这一页上有什么"。本链回答的是另一类问
 "带 cookie 直接调"还是"每次都得驱动一个浏览器"。所以这条链比 T0 多一步，而
 且那一步是它存在的主要理由：
 
-    浏览器打字 → 抓到那条请求 → **在这里、用 httpx、不开浏览器**再打两次
+    浏览器操作 → 抓到那条请求 → **在这里、用 httpx、不开浏览器**跑一遍阶梯
       ① 原样重放           → 这条 URL 离开浏览器还成不成立
       ② 只改关键词重放     → 签名跟关键词绑不绑（这条才是决定性的）
+      ③ 只去掉 cookie      → 是不是"必须以某个账号身份"才能问
+      ④ 连 UA/referer 也去 → 还剩不剩浏览器痕迹依赖
+      ⑤ 参数只留白名单     → 最小可用请求的候选
+      ⑥ 逐个再拿掉一个     → 其中**哪一个**是真必需的
 
 ②成立就意味着我们可以自己拼 URL、自己发；②失败而①成功，说明签名是一次性的，
-只能靠浏览器现算。**"看起来是个普通 GET 所以能直接调"不是结论**，这两次实调
-才是。
+只能靠浏览器现算。**"看起来是个普通 GET 所以能直接调"不是结论**，这几次实调
+才是。⑥ 是"最小"这个词的唯一依据 —— 只做到 ⑤ 得到的是"第一个碰巧能用的组
+合"。话题那次的结论「``aid`` 是唯一必需的」就是这么问出来的。
+
+⚠️ 目标不再限于"带了我们输入的那个词"的请求。面板一打开就加载的推荐/榜单
+列表天生不带关键词，而它恰恰是"能不能在自己界面里列出来"要问的那一条；浏览
+器侧用 ``replay_url_contains`` 把这类调用也标成可重放目标。
 
 明文纪律（spec §7.6）与它的一个新面
 ==================================
@@ -48,8 +57,12 @@ REASON_PLATFORM_UNSUPPORTED = "platform_unsupported"
 # 重放最多打几条。抓到的可重放目标通常只有一条（携带了我们输入的那个词的那
 # 条）；上限存在只是为了让"页面同时发了两条候选接口"这种情况也能一次问清，
 # 而不是让一次勘探变成压测。
-MAX_REPLAY_TARGETS = 2
+MAX_REPLAY_TARGETS = 4
 REPLAY_TIMEOUT_SECONDS = 20.0
+
+# 一次勘探最多真发这么多次。阶梯（见 `_replay_ladder`）每个目标 4 + N 次，
+# N 是保留参数个数；这个上界是为了让"多开几个 tab"不至于变成对上游的压测。
+MAX_REPLAY_CALLS = 40
 
 # 重放响应只读这么多字节。我们不回显 body（形状已经由浏览器侧那份脱敏摘要
 # 给过了），读它只是为了数长度、解析 JSON 顶层键、判断新关键词在不在里面。
@@ -128,6 +141,43 @@ def swap_query_value(url: str, param: str, value: str) -> str:
     )
 
 
+def keep_query_params(url: str, keep: Sequence[str]) -> str:
+    """只留下 ``keep`` 里的查询参数，顺序保持原样。纯函数。
+
+    "最小可用请求"不能靠看一眼 URL 猜。话题那次剥到只剩 ``aid+keyword``，是
+    **一次一次真调**出来的；这个函数只是把"剥"这个动作写成可复现的一步，而不
+    是每次勘探都现写一段脚本。
+    """
+    parts = urlsplit(url)
+    wanted = {str(k) for k in keep}
+    pairs = [
+        (name, value)
+        for name, value in parse_qsl(parts.query, keep_blank_values=True)
+        if name in wanted
+    ]
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment)
+    )
+
+
+def drop_query_param(url: str, name: str) -> str:
+    """去掉一个查询参数，其余不动。纯函数。
+
+    与 ``keep_query_params`` 配对使用：先剥到一个还能用的小集合，再逐个拿掉，
+    才知道**哪一个是必需的**。少了这一步，"最小"只是"我们试出来的第一个能用
+    的组合"，不是最小。
+    """
+    parts = urlsplit(url)
+    pairs = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != name
+    ]
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment)
+    )
+
+
 def summarise_replay_body(raw: str, *, needles: Mapping[str, str]) -> dict[str, Any]:
     """一次重放响应的**结构性**摘要。纯函数，不回显内容。
 
@@ -189,6 +239,55 @@ async def _replay_once(
     }
 
 
+def _replay_ladder(
+    url: str,
+    *,
+    keyword_param: Optional[str],
+    mutation_text: str,
+    keep_params: Sequence[str],
+    full_headers: Mapping[str, str],
+    bare_headers: Mapping[str, str],
+) -> list[tuple[str, str, Mapping[str, str]]]:
+    """``(标签, URL, headers)`` 的实验序列。纯函数，不发请求。
+
+    顺序是按"每一步只动一个变量"排的，因为这条链的产物是一句结论 ——「最小可
+    用请求是什么」—— 而同时动两样东西的实验答不出这句话：
+
+    ① ``verbatim``      原样：这条 URL 离开浏览器还成不成立
+    ② ``keyword``       只换关键词：签名跟关键词绑不绑（有关键词参数时才有）
+    ③ ``no_cookie``     只去掉 cookie：这是不是一次"必须以某个账号身份"的查询
+    ④ ``bare_headers``  连 UA / referer 也去掉：还剩不剩"浏览器痕迹"依赖
+    ⑤ ``kept_params``   查询参数只留 ``keep_params``，配 ④ 的 headers
+    ⑥ ``drop_<名>``     在 ⑤ 的基础上逐个拿掉 —— **哪一个才是必需的**
+
+    ⑥ 存在的理由：只做到 ⑤ 得到的是"我们试出来的第一个能用的组合"，不是最小。
+    话题那次的结论「``aid`` 是唯一必需的」正是 ⑥ 才能说出口的话。
+    """
+    plan: list[tuple[str, str, Mapping[str, str]]] = [("verbatim", url, full_headers)]
+    if keyword_param and mutation_text:
+        plan.append(
+            (
+                "keyword",
+                swap_query_value(url, keyword_param, mutation_text),
+                full_headers,
+            )
+        )
+    no_cookie = {k: v for k, v in full_headers.items() if k != "cookie"}
+    plan.append(("no_cookie", url, no_cookie))
+    plan.append(("bare_headers", url, bare_headers))
+
+    present = {
+        name for name, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    }
+    kept = [name for name in keep_params if name in present]
+    if kept:
+        minimal = keep_query_params(url, kept)
+        plan.append(("kept_params", minimal, bare_headers))
+        for name in kept:
+            plan.append((f"drop_{name}", drop_query_param(minimal, name), bare_headers))
+    return plan
+
+
 async def _run_replays(
     targets: Sequence[Mapping[str, Any]],
     storage_state: Mapping[str, Any],
@@ -196,8 +295,9 @@ async def _run_replays(
     user_agent: str,
     mutation_text: str,
     proxy_url: Optional[str],
+    keep_params: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
-    """对每个目标做两次实调：原样、只换关键词。
+    """对每个目标跑一遍 ``_replay_ladder``，每一档都是一次**真调**。
 
     用的是 ``safe_async_client`` 而不是裸 httpx —— 它是本仓库对外发请求的唯一
     入口（SSRF 校验 + 跨源重定向剥 Cookie）。``trust_env=False``：出口代理是
@@ -217,16 +317,20 @@ async def _run_replays(
     if proxy_url:
         client_kwargs["proxy"] = proxy_url
 
+    budget = MAX_REPLAY_CALLS
     async with safe_async_client(**client_kwargs) as client:
         for target in list(targets)[:MAX_REPLAY_TARGETS]:
             url = str(target.get("url") or "")
-            param = target.get("keyword_param")
+            # ⚠️ 没有关键词参数**不再跳过**。面板一打开就加载的推荐/榜单列表
+            # 天生不带关键词，而它正是"能不能在自己界面里列出来"要问的那一条；
+            # 跳过它等于把最该问的目标排除在外。少的只是 ② 那一档。
+            param = target.get("keyword_param") or None
             original = str(target.get("keyword_value") or "")
-            if not url or not param:
+            if not url:
                 continue
             host = (urlsplit(url).hostname or "").lower()
             jar = cookies_for_host(cookies if isinstance(cookies, list) else [], host)
-            headers = {
+            full_headers = {
                 "accept": "application/json, text/plain, */*",
                 "accept-language": "zh-CN,zh;q=0.9",
                 "referer": str(target.get("referer") or ""),
@@ -234,27 +338,55 @@ async def _run_replays(
                 or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             }
             if jar:
-                headers["cookie"] = "; ".join(f"{n}={v}" for n, v in jar)
+                full_headers["cookie"] = "; ".join(f"{n}={v}" for n, v in jar)
+            bare_headers = {"accept": "*/*"}
 
             needles = {"original": original, "mutation": mutation_text}
-            verbatim = await _replay_once(client, url, headers=headers, needles=needles)
-            mutated_url = swap_query_value(url, str(param), mutation_text)
-            mutated = await _replay_once(
-                client, mutated_url, headers=headers, needles=needles
+            ladder = _replay_ladder(
+                url,
+                keyword_param=str(param) if param else None,
+                mutation_text=mutation_text,
+                keep_params=keep_params,
+                full_headers=full_headers,
+                bare_headers=bare_headers,
             )
+            attempts: dict[str, Any] = {}
+            for label, variant_url, variant_headers in ladder:
+                if budget <= 0:
+                    attempts[label] = {"ok": False, "error": "replay_budget_exhausted"}
+                    continue
+                budget -= 1
+                attempts[label] = await _replay_once(
+                    client, variant_url, headers=variant_headers, needles=needles
+                )
             results.append(
                 {
                     "host": host,
                     "path": urlsplit(url).path or "/",
-                    "keyword_param": str(param),
+                    "phase": str(target.get("phase") or ""),
+                    "keyword_param": str(param) if param else None,
                     # 名字不是凭证，值才是。带名字是为了让"没带上会话 cookie
                     # 所以 403"与"带了还是 403"两种失败能被分开。
                     "cookie_names": sorted(name for name, _ in jar),
                     "cookies_sent": len(jar),
                     "proxied": bool(proxy_url),
-                    "verbatim": verbatim,
                     "mutated_to": mutation_text,
-                    "mutated": mutated,
+                    "kept_params": [
+                        name
+                        for name in keep_params
+                        if name
+                        in {
+                            n
+                            for n, _ in parse_qsl(
+                                urlsplit(url).query, keep_blank_values=True
+                            )
+                        }
+                    ],
+                    "attempts": attempts,
+                    # 旧形状保留：调用方（和它的测试）按这两个键读结论已有先例，
+                    # 阶梯只是在旁边多摆了几档，不该把已经在用的读法弄坏。
+                    "verbatim": attempts.get("verbatim", {}),
+                    "mutated": attempts.get("keyword", {}),
                 }
             )
     return results
@@ -273,6 +405,7 @@ async def probe_account_page(
     observe_selectors: Optional[Sequence[str]] = None,
     capture_url_contains: Optional[Sequence[str]] = None,
     replay_mutation_text: str = "",
+    replay_keep_params: Optional[Sequence[str]] = None,
     options: Optional[Mapping[str, Any]] = None,
     client: Any = None,
 ) -> dict[str, Any]:
@@ -366,7 +499,8 @@ async def probe_account_page(
             # 重放留在锁里：它用的是同一份会话，一次真实发布同时在跑的时候
             # 平台可能已经轮换过 cookie，那样这次实调测的就不是我们以为的
             # 那个会话了。
-            if replay_mutation_text and getattr(result, "replay_targets", None):
+            wants_replay = bool(replay_mutation_text or replay_keep_params)
+            if wants_replay and getattr(result, "replay_targets", None):
                 try:
                     replay = await _run_replays(
                         result.replay_targets,
@@ -374,6 +508,7 @@ async def probe_account_page(
                         user_agent=getattr(result, "replay_user_agent", "") or "",
                         mutation_text=replay_mutation_text,
                         proxy_url=environment.proxy_url if environment else None,
+                        keep_params=replay_keep_params or (),
                     )
                 except Exception as exc:  # noqa: BLE001
                     # 重放炸了不该吞掉已经拿到的抓包结果 —— 那是本次调用的
@@ -413,7 +548,11 @@ async def probe_account_page(
 
 
 __all__ = [
+    "MAX_REPLAY_CALLS",
     "MAX_REPLAY_TARGETS",
+    "_replay_ladder",
+    "drop_query_param",
+    "keep_query_params",
     "REASON_ACCOUNT_BUSY",
     "REASON_ACCOUNT_MISSING",
     "REASON_AUTH_TYPE_MISMATCH",

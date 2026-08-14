@@ -179,6 +179,123 @@ def test_an_empty_filter_reports_everything():
     assert url_matches("https://a/other", ["sug"]) is False
 
 
+def test_a_call_that_carried_no_word_can_still_be_opted_in_by_url():
+    """面板一打开就加载的推荐列表**不带关键词**。没有这道门，"不开浏览器能不
+    能调"对这类接口永远问不出答案 —— 而它恰恰是最想在自己界面里做的那一类。"""
+    row = {
+        "phase": "activate:选择音乐",
+        "method": "GET",
+        "url": "https://creator.douyin.com/aweme/v1/music/list/?aid=2906&type=1",
+        "status": 200,
+        "body": '{"music_list":[]}',
+        "header_names": ["cookie"],
+    }
+    _, none_target = build_capture(row, probe_text="夜曲", limit=500)
+    assert none_target is None
+
+    call, target = build_capture(
+        row, probe_text="夜曲", limit=500, replay_url_contains=["/music/"]
+    )
+    assert target is not None
+    assert target.keyword_param is None and target.keyword_value == ""
+    # 归属跟着走：一条重放结果能说清它属于哪个 tab。
+    assert call.phase == "activate:选择音乐"
+    assert target.phase == "activate:选择音乐"
+
+
+def test_an_empty_opt_in_filter_does_not_open_the_flood_gate():
+    """`url_matches` 对空过滤器答 True（"全都报"），那对**报告**是对的，对重放
+    正好相反 —— 会把每一条抓包都变成重放目标。空判必须在前面。"""
+    row = {
+        "method": "GET",
+        "url": "https://creator.douyin.com/anything?aid=2906",
+        "status": 200,
+        "body": "{}",
+        "header_names": [],
+    }
+    _, target = build_capture(row, probe_text="夜曲", limit=500, replay_url_contains=[])
+    assert target is None
+
+
+# --- 步骤驱动：归属与再次校验主机 --------------------------------------------
+
+
+class _StepPage:
+    """只有 `_run_activation_step` 真正会碰的那几个方法。"""
+
+    def __init__(self, url: str, nodes: dict, visible=()):
+        self.url = url
+        self._nodes = nodes
+        self.visible = visible
+        self.activated: list = []
+        self.evaluated: list = []
+
+    def get_by_text(self, text, exact=False):
+        from tests.test_probe_actions_units import _Matches, _Node
+
+        return _Matches(
+            self,
+            text,
+            [
+                _Node(self, text, i, value, "DIV")
+                for i, value in enumerate(self._nodes.get(text, []))
+            ],
+        )
+
+    def locator(self, selector):
+        from tests.test_probe_actions_units import _Visible
+
+        return _Visible(self, selector)
+
+    async def wait_for_timeout(self, _ms):
+        return None
+
+    async def evaluate(self, _script, _arg=None):
+        self.evaluated.append(str(_arg))
+        return {"total": 0, "items": []}
+
+
+async def test_a_step_stamps_its_phase_on_the_traffic_it_caused():
+    from app.probe import _Recorder, _run_activation_step
+    from app.schemas import ProbeActivationStep
+    from app.platforms import get_inspect_spec
+
+    recorder = _Recorder(filters=[], limit=8)
+    recorder.recording = True
+    page = _StepPage(
+        "https://creator.douyin.com/creator-micro/content/upload",
+        {"选择音乐": ["选择音乐"]},
+        visible=('input[placeholder*="搜索音乐"]',),
+    )
+    step = ProbeActivationStep(
+        label="选择音乐", until_selectors=['input[placeholder*="搜索音乐"]']
+    )
+
+    result = await _run_activation_step(page, get_inspect_spec("douyin"), recorder, step)
+
+    assert result.activated is True
+    assert result.phase == "activate:选择音乐"
+    # 录制器现在按这个阶段打标 —— 后续到达的响应才能归到这一步名下。
+    assert recorder.phase == "activate:选择音乐"
+
+
+async def test_a_step_re_checks_the_host_and_never_activates_off_it():
+    """激活可能导航。开跑时成立的白名单，对第二个页面不自动成立。"""
+    from app.probe import _Recorder, _run_activation_step
+    from app.schemas import ProbeActivationStep
+    from app.platforms import get_inspect_spec
+
+    recorder = _Recorder(filters=[], limit=8)
+    page = _StepPage("https://evil.example/", {"推荐": ["推荐"]})
+    result = await _run_activation_step(
+        page, get_inspect_spec("douyin"), recorder, ProbeActivationStep(label="推荐")
+    )
+
+    assert result.activated is False
+    assert result.error
+    assert page.activated == []
+
+
 # --- 可证伪性 ---------------------------------------------------------------
 
 

@@ -22,12 +22,18 @@ The boundary is the same one T0 drew, moved by exactly one step — from "reads
 only" to "reads, and may put text into a caller-named editable node". Nothing
 else moved:
 
-* **No control is ever activated.** There is no path here that presses a
-  button, confirms a dialog, or hands anything to a platform.
-  `tests/test_probe_units.py` reads this file and fails if a word from that
-  vocabulary appears anywhere in it, comments included — the same mechanism
-  T0 uses, with `focus` / `press_sequentially` added to the allowed set and
-  nothing subtracted from the forbidden one.
+* **This file still activates nothing.** The forbidden-vocabulary scan over
+  this source is unchanged — `tests/test_probe_units.py` reads it and fails if
+  any of that vocabulary appears, comments included. What changed is that a
+  bounded activation now exists *somewhere*: `probe_actions.activate_label`,
+  imported here the same way `seed_file_input` is imported from T0. It can
+  only reach controls whose rendered caption equals one of a closed list
+  written in that file (panel entry points and list tabs — nothing that
+  applies or commits anything), it verifies that caption on the live node
+  before acting, and `ProbeActivationStep` rejects anything else at the schema
+  layer so an out-of-list request is a 422 with no browser started.
+  `tests/test_probe_actions_units.py` holds all of it, including that the
+  whole recon surface contains exactly one activation call.
 * **The URL allow-list is `inspect.url_refusal`, imported, not restated.**
   An endpoint holding a live account's cookies that opens an arbitrary URL is
   a credentialed SSRF; a second copy of that check is a second thing to
@@ -80,14 +86,17 @@ from .inspect import (
     seed_file_input,
     session_refusal,
 )
+from .probe_actions import activate_label, press_confirmed_key
 from .redaction import scrub, scrub_page_text
 from .schemas import (
     CapturedCall,
     CapturedParam,
     ObservedNode,
     ObservedSelector,
+    ProbeActivationStep,
     ProbeRequest,
     ProbeResponse,
+    ProbeStepResult,
     ReplayTarget,
     SessionStatus,
 )
@@ -348,6 +357,10 @@ class _Recorder:
         self.records: list[dict[str, Any]] = []
         self.recording = False
         self.seen_while_recording = 0
+        # Which step is running. Stamped onto every detailed record, because a
+        # run with several steps produces one undifferentiated pile otherwise,
+        # and "which step caused this request" is the question.
+        self.phase = "load"
         self._pending: set[asyncio.Task] = set()
 
     def attach(self, context: Any) -> None:
@@ -387,6 +400,7 @@ class _Recorder:
                 body = ""
             self.records.append(
                 {
+                    "phase": self.phase,
                     "method": str(request.method or ""),
                     "url": url,
                     "status": int(response.status),
@@ -434,9 +448,13 @@ def _post_data_keys(request: Any) -> list[str]:
         return []
 
 
-def build_capture(record: Mapping[str, Any], *, probe_text: str, limit: int) -> tuple[
-    CapturedCall, ReplayTarget | None
-]:
+def build_capture(
+    record: Mapping[str, Any],
+    *,
+    probe_text: str,
+    limit: int,
+    replay_url_contains: Sequence[str] = (),
+) -> tuple[CapturedCall, ReplayTarget | None]:
     """One recorded response → what we report, and what we may replay. Pure."""
     url = str(record.get("url") or "")
     parts = urlsplit(url)
@@ -444,7 +462,9 @@ def build_capture(record: Mapping[str, Any], *, probe_text: str, limit: int) -> 
     names = [name for name, _ in query]
     keyword = find_keyword_param(query, probe_text)
     excerpt, top_keys = body_excerpt(str(record.get("body") or ""), limit=limit)
+    phase = str(record.get("phase") or "")
     call = CapturedCall(
+        phase=phase,
         method=str(record.get("method") or ""),
         host=(parts.hostname or "").lower(),
         path=parts.path or "/",
@@ -461,17 +481,27 @@ def build_capture(record: Mapping[str, Any], *, probe_text: str, limit: int) -> 
         body_excerpt=excerpt,
         body_json_top_keys=top_keys,
     )
-    # Only a call that carried our probe text is worth replaying: it is the one
-    # whose answer changes when the word changes, which is the whole experiment.
-    if keyword is None:
+    # Two ways in. A call that carried our probe text is the classic one: its
+    # answer changes when the word changes, which is the experiment. The second
+    # is a caller-named URL fragment, and it exists because a list that appears
+    # when a panel opens carries no keyword at all — refusing to replay those
+    # would leave "can we call this without a browser" unanswered for exactly
+    # the endpoints that would feed a list in our own UI.
+    # ⚠️ `url_matches` answers True for an *empty* filter list ("report
+    # everything"), which is right for the reporting filter and exactly wrong
+    # here — it would make every recorded call a replay target. The emptiness
+    # test has to come first.
+    opted_in = bool(replay_url_contains) and url_matches(url, replay_url_contains)
+    if keyword is None and not opted_in:
         return call, None
     target = ReplayTarget(
         method=call.method or "GET",
         url=url,
         referer=str(record.get("referer") or ""),
         keyword_param=keyword,
-        keyword_value=dict(query).get(keyword, ""),
+        keyword_value=dict(query).get(keyword, "") if keyword else "",
         header_names=call.request_header_names,
+        phase=phase,
     )
     return call, target
 
@@ -573,6 +603,60 @@ async def _read_selectors(page: Any, selectors: Sequence[str]) -> list[ObservedS
     return out
 
 
+async def _run_activation_step(
+    page: Any,
+    spec: InspectSpec,
+    recorder: _Recorder,
+    step: ProbeActivationStep,
+) -> ProbeStepResult:
+    """One allow-listed activation, plus what the page did because of it.
+
+    Total: every failure becomes a `ProbeStepResult` with a reason, never an
+    exception. A step that could not reach its control is a finding about the
+    page, and the steps after it still run — a run that dies on the first
+    caption change reports nothing at all about the rest.
+
+    The host is re-checked here, not only at the start. Activating something
+    can navigate, and the URL allow-list that was true for the first page is
+    not automatically true for the second; this is the same `session_refusal`
+    the entry gate uses, applied again where the page can have moved.
+    """
+    label = step.label
+    phase = f"activate:{label}"
+    recorder.phase = phase
+    seen_before = recorder.seen_while_recording
+
+    lost = session_refusal(str(page.url), spec.allowed_hosts, [])
+    if lost is not None:
+        return ProbeStepResult(
+            kind="activate", label=label, phase=phase, error=scrub(lost)
+        )
+
+    outcome = await activate_label(
+        page,
+        label,
+        until_selectors=step.until_selectors,
+        candidates=step.candidates,
+        timeout_ms=get_settings().inspect_form_timeout_ms,
+        settle_ms=step.settle_ms,
+    )
+    observed = await _read_selectors(page, step.observe_selectors)
+    return ProbeStepResult(
+        kind="activate",
+        label=label,
+        phase=phase,
+        matches=outcome.matches,
+        index=outcome.index,
+        activated=outcome.activated,
+        error=scrub(outcome.error),
+        text_mismatches=[
+            scrub_page_text(item, max_len=60) for item in outcome.text_mismatches
+        ],
+        responses=max(recorder.seen_while_recording - seen_before, 0),
+        observed=observed,
+    )
+
+
 async def _run_once(spec: InspectSpec, request: ProbeRequest) -> ProbeResponse:
     # patchright, not playwright: drop-in fork covering the CDP-layer leaks.
     # All import sites must agree — `test_patchright_everywhere` enforces it.
@@ -646,22 +730,75 @@ async def _run_once(spec: InspectSpec, request: ProbeRequest) -> ProbeResponse:
                             paths=paths,
                         )
 
-                    locator, used_selector = await _reach_target(page, request)
-                    before_text, _, _ = await _read_node(locator)
-
-                    # Everything from here is "caused by the keystrokes", which
-                    # is the only traffic worth a detailed record.
+                    # Everything from here is "caused by what we did", which
+                    # is the only traffic worth a detailed record. Recording
+                    # starts before the first step, not before the typing:
+                    # what a panel fetches *as it opens* is a separate finding
+                    # from what it fetches as you type in it.
                     recorder.recording = True
                     referer = str(page.url)
-                    await locator.focus(timeout=settings.inspect_form_timeout_ms)
-                    await locator.press_sequentially(
-                        request.probe_text,
-                        delay=request.keystroke_delay_ms,
-                        timeout=settings.inspect_form_timeout_ms,
-                    )
-                    await page.wait_for_timeout(request.capture_settle_ms)
+                    steps: list[ProbeStepResult] = []
 
-                    after_text, nodes, child_total = await _read_node(locator)
+                    for step in request.pre_steps:
+                        steps.append(
+                            await _run_activation_step(page, spec, recorder, step)
+                        )
+
+                    recorder.phase = "type"
+                    before_text = ""
+                    after_text = ""
+                    nodes: list[ObservedNode] = []
+                    child_total = 0
+                    used_selector = ""
+                    target_error: str | None = None
+                    seen_before_typing = recorder.seen_while_recording
+                    try:
+                        locator, used_selector = await _reach_target(page, request)
+                    except Exception as exc:  # noqa: BLE001
+                        # Deliberately not fatal. A step list that failed to
+                        # reach the box still produced traffic worth reading,
+                        # and discarding it would report "the platform fetches
+                        # nothing" for a run that never got that far.
+                        locator = None
+                        target_error = scrub(f"{type(exc).__name__}: {exc}")
+
+                    if locator is not None:
+                        before_text, _, _ = await _read_node(locator)
+                        await locator.focus(timeout=settings.inspect_form_timeout_ms)
+                        await locator.press_sequentially(
+                            request.probe_text,
+                            delay=request.keystroke_delay_ms,
+                            timeout=settings.inspect_form_timeout_ms,
+                        )
+                        if request.press_enter_after_typing:
+                            key_error = await press_confirmed_key(
+                                locator,
+                                "Enter",
+                                timeout_ms=settings.inspect_form_timeout_ms,
+                            )
+                            if key_error:
+                                target_error = key_error
+                        await page.wait_for_timeout(request.capture_settle_ms)
+                        after_text, nodes, child_total = await _read_node(locator)
+
+                    steps.append(
+                        ProbeStepResult(
+                            kind="type",
+                            label=used_selector,
+                            phase="type",
+                            activated=locator is not None,
+                            error=target_error or "",
+                            responses=max(
+                                recorder.seen_while_recording - seen_before_typing, 0
+                            ),
+                        )
+                    )
+
+                    for step in request.post_steps:
+                        steps.append(
+                            await _run_activation_step(page, spec, recorder, step)
+                        )
+
                     observed = await _read_selectors(page, request.observe_selectors)
                     await recorder.settle()
 
@@ -677,6 +814,7 @@ async def _run_once(spec: InspectSpec, request: ProbeRequest) -> ProbeResponse:
                             {**record, "referer": referer},
                             probe_text=request.probe_text,
                             limit=request.capture_body_chars,
+                            replay_url_contains=request.replay_url_contains,
                         )
                         captures.append(call)
                         if target is not None and len(targets) < request.max_replay_targets:
@@ -695,15 +833,26 @@ async def _run_once(spec: InspectSpec, request: ProbeRequest) -> ProbeResponse:
                     # evidence about the platform if the keystrokes actually
                     # landed; without this flag "no requests" and "no typing"
                     # look identical, and we would report the wrong one.
-                    landed = _text_landed(before_text, after_text, request.probe_text)
+                    landed = locator is not None and _text_landed(
+                        before_text, after_text, request.probe_text
+                    )
 
                     return ProbeResponse(
-                        success=True,
+                        # The session is valid either way — that is what the
+                        # status means here. `success` is about whether the run
+                        # did what it was asked, and a run that never reached
+                        # its box did not, however much it captured on the way.
+                        success=target_error is None,
                         status=SessionStatus.SESSION_VALID,
-                        message="typed probe complete",
+                        message=(
+                            "typed probe complete"
+                            if target_error is None
+                            else "probe reported what it captured; "
+                            "the typing step did not complete"
+                        ),
                         detail={
                             "platform": spec.platform,
-                            "stage": "observe",
+                            "stage": "observe" if target_error is None else "degraded",
                             "elapsed_s": round(time.monotonic() - started, 1),
                             "seeded": len(paths),
                             "responses_while_typing": recorder.seen_while_recording,
@@ -711,7 +860,9 @@ async def _run_once(spec: InspectSpec, request: ProbeRequest) -> ProbeResponse:
                         url_after=scrub(page.url),
                         page_title=scrub(await _title(page), max_len=200),
                         target_selector_used=used_selector,
+                        target_error=target_error,
                         typed_text_landed=landed,
+                        steps=steps,
                         target_text_before=before_text,
                         target_text_after=after_text,
                         target_child_total=child_total,
