@@ -43,6 +43,8 @@ import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import PermissionChangeLog from './PermissionChangeLog';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
+import { buildModelHealth } from '../../utils/modelHealth';
+import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
@@ -178,6 +180,25 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     }
     return base;
   }, [aiSettings, nousEnabled, nousLlm]);
+
+  // Platform-model self-check, surfaced next to the picker (spec
+  // 2026-08-14 §F2). Only platform models carry it — a BYOK provider's models
+  // are never probed, so they stay absent from the map and the UI silent.
+  const modelHealth = useMemo(() => buildModelHealth(nousLlm), [nousLlm]);
+  const unhealthyModelLabels = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [name, health] of Object.entries(modelHealth)) {
+      if (health.status !== 'fail') continue;
+      const checked = health.testedAt
+        ? t('aiLibrary.agents.modelHealthCheckedAgo', 'checked {{ago}}', {
+            ago: formatRelativeTime(health.testedAt, t),
+          })
+        : '';
+      const failed = t('aiLibrary.agents.modelHealthFailedShort', 'health check failed');
+      out[name] = checked ? `${failed}, ${checked}` : failed;
+    }
+    return out;
+  }, [modelHealth, t]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const sub = resolveSubTab(searchParams.get('tab'));
@@ -700,6 +721,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           readOnly={readOnly}
           catalogLocked={catalogLocked}
           modelGroups={modelGroups}
+          modelHealth={modelHealth}
+          unhealthyModelLabels={unhealthyModelLabels}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}

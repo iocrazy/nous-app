@@ -639,6 +639,17 @@ export interface NousModelPublic {
   type: NousModelType;
   pricing_type: 'per_hour' | 'per_request' | 'per_token';
   pricing_value: number;
+  /**
+   * Last hourly connectivity probe (backend scheduled_health). `null` /
+   * absent means never probed — which is neither healthy nor broken, so the
+   * UI must say nothing rather than assume.
+   *
+   * NOTE: the failure REASON (`last_test_detail`) is deliberately not part of
+   * this public payload — probe errors routinely embed the upstream host and
+   * private base_url. Users get the status; admin gets the reason.
+   */
+  last_test_status?: 'ok' | 'fail' | null;
+  last_tested_at?: string | null;
 }
 
 // Points System Types

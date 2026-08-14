@@ -29,6 +29,7 @@ import {
   Languages,
   ExternalLink,
   Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { AISettings as AISettingsType, AIProviderConfig, NousModelPublic, AILibraryAgent, AIGovernanceFlags } from '../types';
 import {
@@ -40,6 +41,7 @@ import {
   GOVERNANCE_ALL_ALLOWED,
 } from '../services/aiService';
 import { relativeTime } from '../utils/taskDisplay';
+import { buildModelHealth } from '../utils/modelHealth';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MCPServersPanel } from './MCPServersPanel';
 import { HotwordChipInput } from './settings/HotwordChipInput';
@@ -621,6 +623,24 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   // point can drift: admin master switch on AND user master toggle on AND the
   // model is not in the user's blacklist. Per-module governance (nous_modules)
   // is applied on top of this at each picker.
+  // Platform-model self-check (spec 2026-08-14 §F2). The backend probes every
+  // enabled platform model hourly; until now the verdict never left the admin
+  // surface, so picking a model whose probe was failing looked identical to
+  // picking a healthy one — right up until the job failed.
+  //
+  // A failing model is MARKED, never removed and never disabled: the probe has
+  // returned a false negative in production (2026-08-14), so it advises rather
+  // than vetoes. `relativeTime` (already imported for this file's English UI)
+  // carries the check age — hourly cadence means a 50-minute-old verdict is
+  // not a statement about right now.
+  const nousHealth = useMemo(() => buildModelHealth(nousModels), [nousModels]);
+  const nousHealthWarning = (modelName: string): string | null => {
+    const health = nousHealth[modelName];
+    if (health?.status !== 'fail') return null;
+    const checked = relativeTime(health.testedAt ?? undefined);
+    return checked ? `health check failed, checked ${checked}` : 'health check failed';
+  };
+
   const nousConfig = localSettings.providers.nous;
   const visibleNousModels = useMemo(() => {
     if (!governance.nous_enabled) return [];
@@ -829,9 +849,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
           : model.pricing_type === 'per_request'
             ? `${model.pricing_value} pts`
             : `${model.pricing_value} pts/1k tokens`;
+      const warning = nousHealthWarning(model.name);
       options.push({
         value: `nous:${model.name}`,
-        label: `${model.display_name} (Platform · ${pricingLabel})`,
+        label: `${model.display_name} (Platform · ${pricingLabel})${warning ? ` — ${warning}` : ''}`,
       });
     }
 
@@ -919,7 +940,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const nousLlmOptions = nousAllowed
       ? visibleNousModels
           .filter((m) => m.type === 'llm')
-          .map((m) => ({ value: `nous:${m.name}`, label: `${m.display_name} (Platform)` }))
+          .map((m) => {
+            const warning = nousHealthWarning(m.name);
+            return {
+              value: `nous:${m.name}`,
+              label: `${m.display_name} (Platform)${warning ? ` — ${warning}` : ''}`,
+            };
+          })
       : [];
     const knownSlugs = new Set([
       ...options.map((o) => o.value),
@@ -1596,6 +1623,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                               <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
                                 {m.type}
                               </span>
+                              {nousHealthWarning(m.name) && (
+                                <span
+                                  data-testid="model-health-badge"
+                                  className="shrink-0 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-warn-line bg-warn-soft text-warn"
+                                >
+                                  <AlertTriangle size={10} />
+                                  {nousHealthWarning(m.name)}
+                                </span>
+                              )}
                             </div>
                             {renderToggle(modelEnabled, () => toggleNousModel(m.name))}
                           </div>

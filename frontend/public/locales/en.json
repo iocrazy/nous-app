@@ -2906,6 +2906,10 @@
       "providerDisabledBody": "Model {{model}} belongs to a provider this account hasn't configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.",
       "switchToModel": "Switch to {{model}}",
       "goToAISettings": "Go to AI Settings",
+      "modelHealthFailed": "Last health check failed — chats using this model may fail.",
+      "modelHealthFailedShort": "health check failed",
+      "modelHealthPassed": "Health check passed",
+      "modelHealthCheckedAgo": "checked {{ago}}",
       "usage": {
         "title": "Used By",
         "empty": "No module uses this agent yet — invoke it from chat or bind it to a workflow.",

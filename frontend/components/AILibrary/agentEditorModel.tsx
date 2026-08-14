@@ -70,6 +70,11 @@ export function getAvailableModels(
  * any provider group (e.g. the user has disabled the provider that owned it),
  * we still show it as a leading disabled option so the user sees the stale
  * selection rather than it silently flipping to the first option.
+ *
+ * ``unhealthyLabels`` maps a model name to an already-localized warning suffix
+ * (built by the caller, so this module stays free of i18n). A marked option is
+ * still SELECTABLE: the health probe has produced a false negative in
+ * production, so it advises rather than vetoes.
  */
 export function renderModelSelect(params: {
   value: string;
@@ -78,9 +83,17 @@ export function renderModelSelect(params: {
   onChange: (v: string) => void;
   providerNotEnabledLabel: string;
   noModelsLabel: string;
+  unhealthyLabels?: Record<string, string>;
 }): React.ReactElement {
-  const { value, groups, disabled, onChange, providerNotEnabledLabel, noModelsLabel } =
-    params;
+  const {
+    value,
+    groups,
+    disabled,
+    onChange,
+    providerNotEnabledLabel,
+    noModelsLabel,
+    unhealthyLabels,
+  } = params;
   const knownModels = new Set(groups.flatMap((g) => g.models));
   const showOrphan = value !== '' && !knownModels.has(value);
 
@@ -101,11 +114,18 @@ export function renderModelSelect(params: {
       )}
       {groups.map((group) => (
         <optgroup key={group.providerKey} label={group.providerName}>
-          {group.models.map((m) => (
-            <option key={`${group.providerKey}:${m}`} value={m}>
-              {m}
-            </option>
-          ))}
+          {group.models.map((m) => {
+            const warning = unhealthyLabels?.[m];
+            return (
+              <option
+                key={`${group.providerKey}:${m}`}
+                value={m}
+                data-health={warning ? 'fail' : undefined}
+              >
+                {warning ? `${m} — ${warning}` : m}
+              </option>
+            );
+          })}
         </optgroup>
       ))}
     </UiSelect>

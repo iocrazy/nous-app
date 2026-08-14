@@ -2906,6 +2906,10 @@
       "providerDisabledBody": "模型 {{model}} 所属的提供方尚未在此账户配置。该 Agent 的调用将失败。请在下方选择其它模型，或在 AI 设置中配置该提供方。",
       "switchToModel": "切换到 {{model}}",
       "goToAISettings": "去 AI 设置",
+      "modelHealthFailed": "上次自检失败 — 使用该模型的对话可能会失败。",
+      "modelHealthFailedShort": "自检失败",
+      "modelHealthPassed": "自检通过",
+      "modelHealthCheckedAgo": "检查于 {{ago}}",
       "usage": {
         "title": "使用方",
         "empty": "暂无模块使用此 Agent — 可在会话中调用它，或将它绑定到工作流。",
