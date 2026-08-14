@@ -521,7 +521,7 @@ PUBLISH_SMS_UNREACHABLE = "unreachable"
 
 @dataclass(frozen=True)
 class PublishSmsStatus:
-    """"那次发布此刻在不在等验证码"。纯状态，不含码。
+    """ "那次发布此刻在不在等验证码"。纯状态，不含码。
 
     ``waiting`` 是唯一会驱动 UI 的字段，语义**很窄**：它表示那次发布此刻正停在
     一个 await 上，不是"页面上看见了一个验证码输入框"。宽松的那种读法，正是

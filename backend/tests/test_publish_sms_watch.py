@@ -44,7 +44,9 @@ class FakeManager:
 
 
 class FakeStatus:
-    def __init__(self, waiting, outcome=None, message="", attempts_left=3, max_attempts=3):
+    def __init__(
+        self, waiting, outcome=None, message="", attempts_left=3, max_attempts=3
+    ):
         self.waiting = waiting
         self.outcome = outcome
         self.message = message
@@ -107,7 +109,9 @@ async def test_a_parked_publish_shows_up_in_task_tracking_metadata():
     client = FakeClient([FakeStatus(waiting=True)])
     await _run(FakeAdapter(0.25), client, manager)
 
-    waiting = [p for p in manager.patches if (p.get(PUBLISH_SMS_KEY) or {}).get("waiting")]
+    waiting = [
+        p for p in manager.patches if (p.get(PUBLISH_SMS_KEY) or {}).get("waiting")
+    ]
     assert waiting, "发布停在验证码上，但 metadata 里什么都没写"
     block = waiting[0][PUBLISH_SMS_KEY]
     assert block["account_id"] == 42
@@ -131,7 +135,9 @@ async def test_the_block_is_cleared_even_when_the_publish_raises():
     manager = FakeManager()
     client = FakeClient([FakeStatus(waiting=True)])
     with pytest.raises(RuntimeError, match="publish blew up"):
-        await _run(FakeAdapter(0.25, boom=RuntimeError("publish blew up")), client, manager)
+        await _run(
+            FakeAdapter(0.25, boom=RuntimeError("publish blew up")), client, manager
+        )
 
     assert manager.patches[-1] == {PUBLISH_SMS_KEY: None}
 
@@ -139,14 +145,17 @@ async def test_the_block_is_cleared_even_when_the_publish_raises():
 async def test_a_challenge_that_ends_is_announced_as_ended():
     """挑战结束不说一声，输入框就会一直挂着。"""
     manager = FakeManager()
-    client = FakeClient([
-        FakeStatus(waiting=True),
-        FakeStatus(waiting=False, outcome="expired", message="window closed"),
-    ])
+    client = FakeClient(
+        [
+            FakeStatus(waiting=True),
+            FakeStatus(waiting=False, outcome="expired", message="window closed"),
+        ]
+    )
     await _run(FakeAdapter(0.4), client, manager)
 
     ended = [
-        p[PUBLISH_SMS_KEY] for p in manager.patches
+        p[PUBLISH_SMS_KEY]
+        for p in manager.patches
         if p.get(PUBLISH_SMS_KEY) and p[PUBLISH_SMS_KEY].get("outcome") == "expired"
     ]
     assert ended, "挑战结束了，但没有任何一次 patch 说明它是怎么结束的"
@@ -204,9 +213,9 @@ async def test_the_watcher_never_touches_the_phase_columns():
     await _run(FakeAdapter(0.25), client, manager)
 
     for patch in manager.patches:
-        assert set(patch) == {PUBLISH_SMS_KEY}, (
-            f"观察者写了业务装饰字段以外的键: {set(patch)}"
-        )
+        assert set(patch) == {
+            PUBLISH_SMS_KEY
+        }, f"观察者写了业务装饰字段以外的键: {set(patch)}"
 
 
 # --- correlation id 与降级 ----------------------------------------------------
@@ -232,11 +241,17 @@ async def test_without_a_workflow_id_the_channel_still_exists():
     """
     adapter = FakeAdapter(0.01)
     result = await publish_with_sms_channel(
-        adapter=adapter, account={"id": 1}, intent=object(),
-        workflow_id="", account_id=42, platform="douyin",
+        adapter=adapter,
+        account={"id": 1},
+        intent=object(),
+        workflow_id="",
+        account_id=42,
+        platform="douyin",
     )
     assert result == {"ok": True}
-    assert adapter.correlation_ids[0], "降级路径把 correlation_id 一起丢了 —— 那就真的没有通道了"
+    assert adapter.correlation_ids[
+        0
+    ], "降级路径把 correlation_id 一起丢了 —— 那就真的没有通道了"
 
 
 async def test_the_watcher_stops_when_the_publish_does():

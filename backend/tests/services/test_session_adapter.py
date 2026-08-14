@@ -60,7 +60,9 @@ class FakeBrowserClient:
         )
         return self.result
 
-    async def publish(self, platform, storage_state, intent, environment=None):
+    async def publish(
+        self, platform, storage_state, intent, environment=None, correlation_id=None
+    ):
         self.calls.append(
             {
                 "op": "publish",
@@ -68,6 +70,9 @@ class FakeBrowserClient:
                 "storage_state": storage_state,
                 "intent": intent,
                 "environment": environment,
+                # 发布中途供验证码的通道靠它寻址（browser/app/publish_sms.py）。
+                # 记下来是为了让 adapter「原样透传、不解释」这条能被断言。
+                "correlation_id": correlation_id,
             }
         )
         return self.publish_result
@@ -564,3 +569,39 @@ def test_session_adapter_does_not_pretend_to_be_an_oauth_adapter():
 
     assert not issubclass(SessionAdapter, PlatformAdapter)
     assert not hasattr(SessionAdapter, "get_auth_url")
+
+
+@pytest.mark.asyncio
+async def test_publish_passes_the_correlation_id_through_untouched():
+    """adapter 对 ``correlation_id`` **原样透传，不解释**。
+
+    这个 id 是「发布中途要验证码」整条通道的机制：发布是一次阻塞调用，没有"先返回
+    一个 id"的时机，所以只有调用方事先给它取名，才能在它还在飞的时候寻址到它。
+    adapter 把它吞掉的话，浏览器侧就永远建不起挑战注册表 —— 而**表现是完全静默的**：
+    发布照常跑，只是撞上验证码时退回老的死路，没有任何一条日志说得清为什么。
+
+    所以这里钉的是"它到达了 BrowserClient"，而不是"adapter 没报错"。
+    """
+    client = FakePublishClient(_published())
+    await _adapter(client).publish(
+        _account(), _video_intent(), correlation_id="cid-abc123"
+    )
+
+    publish_calls = [c for c in client.calls if c["op"] == "publish"]
+    assert publish_calls, "发布请求压根没走到浏览器客户端"
+    assert publish_calls[0]["correlation_id"] == "cid-abc123"
+
+
+@pytest.mark.asyncio
+async def test_publish_without_a_correlation_id_still_works():
+    """不传 == 这次发布没有供码通道，撞上验证码按老样子失败。
+
+    对一个本来就联系不到用户的调用方，那才是诚实的答案 —— 所以它必须是合法调用，
+    而不是一个会炸的必填参数。
+    """
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(_account(), _video_intent())
+
+    assert outcome.result.success is True
+    publish_calls = [c for c in client.calls if c["op"] == "publish"]
+    assert publish_calls[0]["correlation_id"] is None

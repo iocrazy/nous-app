@@ -603,8 +603,10 @@ class _FakeSessionAdapter:
             else (self._real.validate_publish_intent(intent))
         )
 
-    async def publish(self, account, intent, *, environment=None):
-        self.publish_calls.append({"account": account, "intent": intent})
+    async def publish(self, account, intent, *, environment=None, correlation_id=None):
+        self.publish_calls.append(
+            {"account": account, "intent": intent, "correlation_id": correlation_id}
+        )
         return self.outcome
 
 

@@ -66,8 +66,8 @@ ENV_CASES: list[dict[str, str]] = [
     {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "600"},
     {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "3600", "BROWSER_PUBLISH_SMS_WAIT_S": "300"},
     {"BROWSER_PUBLISH_SMS_WAIT_S": "0"},
-    {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1"},          # 撞下限
-    {"BROWSER_PUBLISH_SMS_WAIT_S": "-5"},              # 撞下限
+    {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1"},  # 撞下限
+    {"BROWSER_PUBLISH_SMS_WAIT_S": "-5"},  # 撞下限
     {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "not-a-number"},
     {"BROWSER_PUBLISH_SMS_WAIT_S": ""},
 ]
@@ -95,8 +95,12 @@ def test_the_two_services_compute_the_same_numbers(env):
     browser = _load_browser_budget()
     assert backend_budget.work_budget_s(env) == browser.work_budget_s(env)
     assert backend_budget.sms_wait_s(env) == browser.sms_wait_s(env)
-    assert backend_budget.browser_hard_ceiling_s(env) == browser.browser_hard_ceiling_s(env)
-    assert backend_budget.backend_read_timeout_s(env) == browser.backend_read_timeout_s(env)
+    assert backend_budget.browser_hard_ceiling_s(env) == browser.browser_hard_ceiling_s(
+        env
+    )
+    assert backend_budget.backend_read_timeout_s(env) == browser.backend_read_timeout_s(
+        env
+    )
 
 
 def test_the_two_services_read_the_same_env_var_names():
@@ -116,9 +120,9 @@ def test_the_constants_match_across_services():
         "HARD_SLACK_S",
         "BACKEND_MARGIN_S",
     ):
-        assert getattr(backend_budget, name) == getattr(browser, name), (
-            f"{name} 两侧不一致 —— 公式的输入漂了，算出来的数就不可能一致。"
-        )
+        assert getattr(backend_budget, name) == getattr(
+            browser, name
+        ), f"{name} 两侧不一致 —— 公式的输入漂了，算出来的数就不可能一致。"
 
 
 def test_the_shipped_client_timeout_is_the_derived_one_not_a_literal():
@@ -140,12 +144,21 @@ def test_the_sms_window_is_not_taken_out_of_the_work_budget():
     步，作品还是没了，而且没有任何地方说得清为什么。
     """
     browser = _load_browser_budget()
-    env = {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1200", "BROWSER_PUBLISH_SMS_WAIT_S": "180"}
-    no_sms = {"BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1200", "BROWSER_PUBLISH_SMS_WAIT_S": "0"}
+    env = {
+        "BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1200",
+        "BROWSER_PUBLISH_SMS_WAIT_S": "180",
+    }
+    no_sms = {
+        "BROWSER_PUBLISH_TOTAL_TIMEOUT_S": "1200",
+        "BROWSER_PUBLISH_SMS_WAIT_S": "0",
+    }
 
     assert browser.work_budget_s(env) == browser.work_budget_s(no_sms) == 1200
     # 天花板整整高出一个窗口 —— 干活预算一秒没被动过。
-    assert browser.browser_hard_ceiling_s(env) - browser.browser_hard_ceiling_s(no_sms) == 180
+    assert (
+        browser.browser_hard_ceiling_s(env) - browser.browser_hard_ceiling_s(no_sms)
+        == 180
+    )
 
 
 def test_the_browser_budget_module_stays_importable_alone():
@@ -163,6 +176,6 @@ def test_the_browser_budget_module_stays_importable_alone():
                 assert alias.name.split(".")[0] in allowed, f"非法 import: {alias.name}"
         elif isinstance(node, ast.ImportFrom):
             assert node.level == 0, f"相对 import 会让按路径加载失败: {ast.dump(node)}"
-            assert (node.module or "").split(".")[0] in allowed, (
-                f"非法 import: {node.module}"
-            )
+            assert (node.module or "").split(".")[
+                0
+            ] in allowed, f"非法 import: {node.module}"

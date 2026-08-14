@@ -273,7 +273,7 @@ class ShareSchemaResponse(BaseModel):
 
 
 class PublishSmsStateResponse(BaseModel):
-    """"这次发布此刻在不在等验证码"—— 前端渲染输入框的唯一依据。
+    """ "这次发布此刻在不在等验证码"—— 前端渲染输入框的唯一依据。
 
     ``waiting`` 语义很窄：它表示**有一个发布协程此刻正停在 await 上**，不是
     "页面上看见了验证码输入框"。放宽它就会给一个没人在等的用户弹输入框，那是

@@ -209,8 +209,15 @@ def test_publish_intent_with_nothing_optional_filled_still_validates(browser):
 
 
 def test_publish_request_envelope_matches(browser):
-    """信封的四个键（platform / storage_state / environment / intent）也必须
-    对齐 —— intent 本身合法但外层键名错了，同样是每次发布都 422。"""
+    """信封的五个键（platform / storage_state / environment / intent /
+    correlation_id）必须对齐 —— intent 本身合法但外层键名错了，同样是每次发布
+    都 422。
+
+    ``correlation_id`` 是后加的、可选的：它是发布中途供验证码通道的寻址方式
+    （browser/app/publish_sms.py）。可选**不代表**可以漂 —— 键名写错的后果比 422
+    更隐蔽：请求照常成功，只是浏览器侧永远建不起挑战注册表，于是撞上验证码时
+    静默退回老的死路。所以它照样进这个等值断言。
+    """
     from app.services.distribution.browser_client import SessionEnvironment
     from app.services.distribution.session_adapter import PublishIntent, PublishMedia
 
@@ -223,9 +230,15 @@ def test_publish_request_envelope_matches(browser):
             media=(PublishMedia(kind="video", url="http://x/a.mp4", filename="a.mp4"),),
             title="T",
         ).to_payload(),
+        "correlation_id": "cid-abc123",
     }
     assert set(envelope) == set(browser.PublishRequest.model_fields)
     browser.PublishRequest.model_validate(envelope)
+
+    # 不带它也必须合法：没有供码通道的调用方（不联系用户的那种）就是这么发的，
+    # 它们撞上验证码按老样子失败，那对它们而言是诚实的答案。
+    without = {k: v for k, v in envelope.items() if k != "correlation_id"}
+    assert browser.PublishRequest.model_validate(without).correlation_id is None
 
 
 def test_self_declaration_labels_are_identical_on_both_sides():
