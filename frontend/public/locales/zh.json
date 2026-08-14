@@ -2351,6 +2351,16 @@
       "hint": "这里还没有任何内容。"
     },
     "readOnly": "只读",
+    "saveBadge": {
+      "saving": "保存中…",
+      "failed": "保存失败",
+      "conflict": "冲突",
+      "conflictTitle": "已有其他人先保存了这张画布。解决冲突后才能继续保存。",
+      "reasonUnreachable": "无响应",
+      "titleServer": "服务器拒绝了本次保存。",
+      "titleUnreachable": "保存请求没有到达服务器 — 请检查网络连接。你的编辑仍在本页，下一次改动时会自动重试。",
+      "titleUnknown": "保存失败，原因未知。"
+    },
     "backToList": "返回画布列表",
     "classicRetired": "经典画布已下线",
     "dragCreate": {

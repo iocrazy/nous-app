@@ -36,6 +36,7 @@ import type {
   CanvasNode,
   CanvasViewport,
 } from '../types';
+import { CONFLICT_SAVE_ERROR, readErrorStatus } from '../utils/saveFailure';
 import {
   IDENTITY_VIEWPORT,
   clampZoom,
@@ -198,6 +199,18 @@ interface CanvasState {
   baseUpdatedAt: string | null;
   saveStatus: CanvasSaveStatus;
   saveError: string | null;
+  /**
+   * HTTP status of the failure `saveError` describes, or `null` when the
+   * request produced no response at all (offline / DNS / TLS / timeout).
+   *
+   * The thrown value only exists inside `doSave`'s catch, so the status is
+   * extracted there and carried alongside the message; `classifySaveFailure`
+   * (utils/saveFailure.ts) turns the pair into the badge's category. Written
+   * ONLY by the two branches that set `saveStatus: 'error'`, which is what
+   * keeps it from going stale: a status can never outlive the message it
+   * belongs to.
+   */
+  saveErrorStatus: number | null;
   /**
    * This session may not write the canvas.
    *
@@ -432,6 +445,7 @@ export function createCanvasCoreStore(
         loadError: null,
         saveStatus: 'idle',
         saveError: null,
+        saveErrorStatus: null,
         // A new load is a new permission question. The store is a module-level
         // singleton reused across mounts, so this must be ASSIGNED on every
         // load, never merely left alone: a latch left over from a canvas the
@@ -458,7 +472,7 @@ export function createCanvasCoreStore(
       // dialog a viewer has no way to resolve.
       if (get().readOnly) return;
       const next = get().revision + 1;
-      set({ revision: next, saveStatus: 'idle', saveError: null });
+      set({ revision: next, saveStatus: 'idle', saveError: null, saveErrorStatus: null });
       scheduleSave();
     }
 
@@ -570,7 +584,7 @@ export function createCanvasCoreStore(
         },
       };
 
-      set({ saveStatus: 'saving', saveError: null });
+      set({ saveStatus: 'saving', saveError: null, saveErrorStatus: null });
 
       let result;
       try {
@@ -587,6 +601,7 @@ export function createCanvasCoreStore(
             readOnly: true,
             saveStatus: 'idle',
             saveError: null,
+            saveErrorStatus: null,
             // Retire the "unsaved edits" signal along with the ability to
             // save: `applyRemoteUpdate` reads `revision > persistedRevision`
             // to decide dirty-vs-clean, and edits that can NEVER be persisted
@@ -598,8 +613,11 @@ export function createCanvasCoreStore(
           });
           return;
         }
+        // Keep the status alongside the message: it is the ONLY thing that
+        // distinguishes "the server refused this" from "the request never
+        // got there", and it stops existing the moment this catch returns.
         const message = err instanceof Error ? err.message : String(err);
-        set({ saveStatus: 'error', saveError: message });
+        set({ saveStatus: 'error', saveError: message, saveErrorStatus: readErrorStatus(err) });
         return;
       }
 
@@ -622,6 +640,7 @@ export function createCanvasCoreStore(
           baseUpdatedAt: result.canvas.base_updated_at,
           saveStatus: 'idle',
           saveError: null,
+          saveErrorStatus: null,
           persistedRevision: snapshot.revision,
         });
         if (!accepted) scheduleSave();
@@ -632,7 +651,8 @@ export function createCanvasCoreStore(
         // already-successful state.
         set({
           saveStatus: 'error',
-          saveError: 'conflict',
+          saveError: CONFLICT_SAVE_ERROR,
+          saveErrorStatus: 409,
           conflict: result.conflict,
         });
       }
@@ -655,6 +675,7 @@ export function createCanvasCoreStore(
       baseUpdatedAt: null,
       saveStatus: 'idle',
       saveError: null,
+      saveErrorStatus: null,
       readOnly: false,
       conflict: null,
       revision: 0,
@@ -685,6 +706,7 @@ export function createCanvasCoreStore(
           baseUpdatedAt: null,
           saveStatus: 'idle',
           saveError: null,
+          saveErrorStatus: null,
           readOnly: false,
           conflict: null,
           revision: 0,
@@ -908,7 +930,7 @@ export function createCanvasCoreStore(
       },
 
       dismissConflict() {
-        set({ conflict: null, saveStatus: 'idle', saveError: null });
+        set({ conflict: null, saveStatus: 'idle', saveError: null, saveErrorStatus: null });
       },
 
       // ---- Phase 6e performance: drag-tick + viewport throttle ----
