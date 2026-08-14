@@ -133,6 +133,31 @@ Every canvas assertion here checks `.react-flow__node:visible`.
    visible.
 7. **Script module** — the inline-mounted editor shell loads.
 
+## Troubleshooting: "waiting for element to be visible, enabled and stable"
+
+If a click times out with that message while the element is clearly fine
+(resolved, `opacity:1`, unmoving, nothing covering it, and `force: true`
+would have worked), **do not go looking for a jittery animation in the
+product.** On the release host this symptom came from the browser, not the
+page: headless Chromium was producing no frames at all — `requestAnimation
+Frame` never fired, `document.timeline.currentTime` stayed at `0`, CSS
+animations were frozen, and `page.screenshot()` hung to its timeout.
+Playwright's "stable" gate compares an element's box across two consecutive
+rAF callbacks, so with no frames *every* `click()` in *any* suite fails
+that way.
+
+The fix is the two Chromium launch args in `playwright.config.ts`
+(`--disable-gpu --disable-software-rasterizer`) — neither works alone; the
+comment there has the measurements. The spec now asserts frame production
+up front, so this failure mode announces itself instead of being blamed on
+a button.
+
+⚠️ The same host breakage hits the repo's stubbed suite (`npm run
+test:e2e`, root `playwright.config.ts`) identically — that config has *not*
+been changed here. It is not a CI gate (`ci.yml` deliberately installs no
+Playwright browsers), so the blast radius is local runs only, but expect
+the same misleading timeout there until the same two args are added.
+
 ## Extending it
 
 Keep it read-only. If a future check needs to verify a write path, that's a

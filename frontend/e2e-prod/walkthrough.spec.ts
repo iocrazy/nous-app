@@ -44,10 +44,46 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   // no seeded localStorage session: this exercises the actual login path a
   // user goes through, not a shortcut around it). ─────────────────────────
   await page.goto('/login');
+
+  // Preflight: the browser must actually be producing animation frames.
+  // Playwright's actionability "stable" gate compares an element's box
+  // across two consecutive requestAnimationFrame callbacks, so on a host
+  // whose compositor issues no BeginFrames, rAF never fires and EVERY
+  // click() dies on `waiting for element to be visible, enabled and
+  // stable` — pointing the blame at a perfectly healthy button. That cost
+  // a full misdiagnosis once (see playwright.config.ts's launch args for
+  // the measurements and the fix). Assert the capability up front so the
+  // failure names itself instead of masquerading as a product break.
+  const framesFlow = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        requestAnimationFrame(() => resolve(true));
+        setTimeout(() => resolve(false), 3_000);
+      }),
+  );
+  expect(
+    framesFlow,
+    'Chromium produced no animation frame in 3s — the compositor is not ticking on this host, ' +
+      'so every click() will fail the actionability "stable" check regardless of the page. ' +
+      'See e2e-prod/playwright.config.ts (launchOptions.args) before suspecting the product.',
+  ).toBe(true);
+
   // Landing page's nav "Log in" (lowercase "in") opens the auth modal —
   // distinct string from the modal's own "Log In" tab/submit labels below,
   // so this is unambiguous even before the modal exists.
-  await page.getByText('Log in', { exact: true }).click();
+  //
+  // Deliberately a plain click(): the full actionability contract
+  // (visible + enabled + stable + hit-target) is exactly what we want
+  // guarding the release gate. `force: true` would make this line pass on
+  // a button that is covered by an overlay or disabled — the walkthrough
+  // would go green on a login page real users cannot use. The two
+  // assertions below state the product contract explicitly, so a future
+  // failure separates "the button is wrong" (these fail) from "the
+  // browser is not painting" (the preflight above fails).
+  const loginTrigger = page.getByText('Log in', { exact: true });
+  await expect(loginTrigger).toBeVisible();
+  await expect(loginTrigger).toBeEnabled();
+  await loginTrigger.click();
 
   // Email/password inputs are unique on the page once the modal is open
   // (the landing page itself has neither) — no scoping needed.
