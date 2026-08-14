@@ -364,6 +364,12 @@ class MediahubModels(Base):
             "last_test_status IS NULL OR last_test_status IN ('ok', 'fail')",
             name="mediahub_models_last_test_status_check",
         ),
+        CheckConstraint(
+            "last_test_code IS NULL OR last_test_code IN ('timeout', 'unreachable', "
+            "'auth', 'rate_limit', 'model_not_found', 'upstream_error', "
+            "'bad_response', 'other')",
+            name="mediahub_models_last_test_code_check",
+        ),
         PrimaryKeyConstraint("id", name="mediahub_models_pkey"),
         UniqueConstraint("name", name="mediahub_models_name_key"),
         {"schema": "public"},
@@ -404,6 +410,11 @@ class MediahubModels(Base):
     last_test_status: Mapped[Optional[str]] = mapped_column(Text)
     last_test_detail: Mapped[Optional[str]] = mapped_column(Text)
     last_tested_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+    # Closed-enum classification of the last FAILED probe (migration 427). Unlike
+    # last_test_detail — which embeds upstream hosts and private base_urls and
+    # therefore stays admin-only — this is derived from the exception type and
+    # HTTP status alone, so it is safe on the public model list.
+    last_test_code: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class AgentOverrides(Base):
