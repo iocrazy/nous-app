@@ -685,6 +685,9 @@
     "successRate": "Success Rate"
   },
   "settings": {
+    "api": {
+      "expirationDate": "Expiration date"
+    },
     "progressStyle": "Download Progress Style",
     "neonBorder": "Neon Border",
     "neonBorderDesc": "Glowing border animation",

@@ -685,6 +685,9 @@
     "successRate": "成功率"
   },
   "settings": {
+    "api": {
+      "expirationDate": "过期日期"
+    },
     "progressStyle": "下载进度样式",
     "neonBorder": "霓虹边框",
     "neonBorderDesc": "发光边框动画",
