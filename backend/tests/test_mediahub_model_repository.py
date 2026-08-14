@@ -281,6 +281,41 @@ async def test_record_test_result_writes_test_columns_only(
 
 
 @pytest.mark.asyncio
+async def test_record_test_result_persists_the_reason_code(
+    repo: MediahubModelRepository, fake_session: _FakeSession
+) -> None:
+    """The classified failure reason must actually reach the column — the
+    classifier being correct is worth nothing if the value stops at the repo."""
+    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    await repo.record_test_result(
+        "1", "fail", "HTTP 429: SetLimitExceeded", "rate_limit"
+    )
+
+    sql, binds = fake_session.calls[-1]
+    assert "last_test_code" in sql.split("WHERE")[0]
+    assert "rate_limit" in list(binds.values())
+
+
+@pytest.mark.asyncio
+async def test_record_test_result_clears_a_stale_code_on_success(
+    repo: MediahubModelRepository, fake_session: _FakeSession
+) -> None:
+    """A recovered model must not keep showing last week's reason.
+
+    The column is written on EVERY probe, so the pass path binds NULL rather
+    than omitting the column — omitting it would leave 'rate limited' sitting
+    next to a green light indefinitely, since the hourly poll is the only
+    writer most rows ever get.
+    """
+    fake_session.scalar_rows = [MediahubModels(id=1, name="m1")]
+    await repo.record_test_result("1", "ok", "chat ok")
+
+    sql, binds = fake_session.calls[-1]
+    assert "last_test_code" in sql.split("WHERE")[0]
+    assert None in list(binds.values())
+
+
+@pytest.mark.asyncio
 async def test_update_parity_bigint_numeric_timestamp(
     repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:

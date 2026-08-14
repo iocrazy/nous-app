@@ -43,7 +43,7 @@ import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import PermissionChangeLog from './PermissionChangeLog';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
-import { buildModelHealth } from '../../utils/modelHealth';
+import { buildModelHealth, healthReasonKey } from '../../utils/modelHealth';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
@@ -194,7 +194,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             ago: formatRelativeTime(health.testedAt, t),
           })
         : '';
-      const failed = t('aiLibrary.agents.modelHealthFailedShort', 'health check failed');
+      // The reason is a closed enum from the backend (mig 427), so it is safe
+      // to render inside the picker; the probe's raw text never leaves admin.
+      // A missing/unknown code degrades to the reason-less wording.
+      const reasonKey = healthReasonKey(health.code);
+      const failed = reasonKey
+        ? t('aiLibrary.agents.modelHealthFailedReasonShort', 'health check failed: {{reason}}', {
+            reason: t(reasonKey),
+          })
+        : t('aiLibrary.agents.modelHealthFailedShort', 'health check failed');
       out[name] = checked ? `${failed}, ${checked}` : failed;
     }
     return out;

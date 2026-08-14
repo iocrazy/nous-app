@@ -78,6 +78,13 @@ _NOUS_ATTRS = {p.key for p in MediahubModels.__mapper__.column_attrs}
 # ``description``: a probe failure text routinely embeds the upstream host and
 # private base_url. The status alone is what a user can act on; the reason
 # belongs to admin. Guarded by test_public_projection_never_exposes_credentials.
+#
+# ``last_test_code`` (migration 427) is the part of the reason that IS safe to
+# publish: a closed enum derived from the exception type and HTTP status, never
+# from message text (see PROBE_FAILURE_CODES). It exists precisely so the status
+# can gain a "why" without last_test_detail ever leaving admin — "timed out"
+# (wait) and "rate limited" (go fix quota) are opposite user actions that looked
+# identical under #1838.
 _PUBLIC_COLS = (
     MediahubModels.id,
     MediahubModels.name,
@@ -88,6 +95,7 @@ _PUBLIC_COLS = (
     MediahubModels.sort_order,
     MediahubModels.last_test_status,
     MediahubModels.last_tested_at,
+    MediahubModels.last_test_code,
 )
 
 
@@ -271,13 +279,19 @@ class MediahubModelRepository:
             return None
 
     async def record_test_result(
-        self, model_id: str, status: str, detail: str
+        self, model_id: str, status: str, detail: str, code: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Persist the last connectivity-test result on the row.
 
         Distinct from ``update``: writes only the last_test_* columns + a
         server-side ``last_tested_at``, leaving ``updated_at`` untouched (a
         connectivity probe is not an edit).
+
+        ``code`` is the closed-enum failure classification (migration 427) and
+        is written UNCONDITIONALLY, including as NULL: a passing probe must
+        erase the previous failure's code, or a recovered model would keep
+        showing "rate limited" next to a green light. Default ``None`` keeps
+        older three-arg callers correct rather than merely compiling.
         """
         try:
             async with write_scope() as session:
@@ -287,6 +301,7 @@ class MediahubModelRepository:
                     .values(
                         last_test_status=status,
                         last_test_detail=detail,
+                        last_test_code=code,
                         last_tested_at=func.now(),
                     )
                     .returning(MediahubModels)

@@ -24,6 +24,11 @@ const TRANSLATIONS: Record<string, string> = {
   'common.time.minutesAgo': '{{count}}m ago',
   'common.time.hoursAgo': '{{count}}h ago',
   'common.time.daysAgo': '{{count}}d ago',
+  // Failure-reason wording lives only in the locale files (the component passes
+  // no default for these — the key comes from a lookup table), so the mock has
+  // to carry them or the reason would render as an empty string.
+  'aiSettings.healthReason.timeout': 'Request timed out',
+  'aiSettings.healthReason.rate_limit': 'Rate limited',
 };
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -199,7 +204,9 @@ describe('AgentPersonaTab — persona hint banner', () => {
  * minutes ago is not a statement about right now.
  */
 describe('AgentPersonaTab — selected model health', () => {
-  const health = { 'mediahub-deepseek-v4-flash': { status: 'fail' as const, testedAt: null } };
+  const health = {
+    'mediahub-deepseek-v4-flash': { status: 'fail' as const, testedAt: null, code: null },
+  };
 
   it('warns when the selected model failed its last health check', () => {
     renderTab({
@@ -210,12 +217,71 @@ describe('AgentPersonaTab — selected model health', () => {
     expect(el.textContent).toContain('may fail');
   });
 
+  it('names the reason when the backend classified the failure', () => {
+    // The point of the whole reason-code change: "timed out" (a local engine
+    // still loading — usually wait) and "rate limited" (quota — go act) were
+    // the same sentence under #1838, and they ask for opposite things.
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-flash' },
+      modelHealth: {
+        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: null, code: 'timeout' },
+      },
+    });
+    expect(screen.getByTestId('model-health-warning').textContent).toContain(
+      'Request timed out',
+    );
+  });
+
+  it('keeps the plain wording for a failure with no code', () => {
+    // Rows probed before the column existed. Saying "unknown reason" would be
+    // inventing a diagnosis out of our own missing data.
+    renderTab({ draft: { model: 'mediahub-deepseek-v4-flash' }, modelHealth: health });
+    const text = screen.getByTestId('model-health-warning').textContent ?? '';
+    expect(text).toContain('may fail');
+    expect(text).not.toContain('(');
+  });
+
+  it('keeps the plain wording for a code this build cannot name', () => {
+    // The backend enum can grow ahead of a frontend deploy; the user must never
+    // see a raw key or an untranslated code string.
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-flash' },
+      modelHealth: {
+        'mediahub-deepseek-v4-flash': {
+          status: 'fail',
+          testedAt: null,
+          code: 'quota_exhausted',
+        },
+      },
+    });
+    const text = screen.getByTestId('model-health-warning').textContent ?? '';
+    expect(text).toContain('may fail');
+    expect(text).not.toContain('quota_exhausted');
+    expect(text).not.toContain('healthReason');
+  });
+
+  it('still lets the user keep an unhealthy model selected', () => {
+    // #1838's rule, unchanged: the probe has produced a false negative in
+    // production, so a red light advises and never vetoes. Nothing here
+    // disables the picker or clears the draft's model.
+    const updateDraft = vi.fn();
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-flash' },
+      modelHealth: {
+        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: null, code: 'rate_limit' },
+      },
+      updateDraft,
+    });
+    expect(screen.getByTestId('model-health-warning')).toBeTruthy();
+    expect(updateDraft).not.toHaveBeenCalled();
+  });
+
   it('stays quiet when the selected model is healthy', () => {
     renderTab({
       draft: { model: 'mediahub-deepseek-v4-pro' },
       modelHealth: {
         ...health,
-        'mediahub-deepseek-v4-pro': { status: 'ok' as const, testedAt: null },
+        'mediahub-deepseek-v4-pro': { status: 'ok' as const, testedAt: null, code: null },
       },
     });
     expect(screen.queryByTestId('model-health-warning')).toBeNull();
@@ -233,7 +299,11 @@ describe('AgentPersonaTab — selected model health', () => {
     renderTab({
       draft: { model: 'mediahub-deepseek-v4-flash' },
       modelHealth: {
-        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: fortyMinutesAgo },
+        'mediahub-deepseek-v4-flash': {
+          status: 'fail',
+          testedAt: fortyMinutesAgo,
+          code: null,
+        },
       },
     });
     expect(screen.getByTestId('model-health-warning').textContent).toContain('40m ago');
@@ -243,7 +313,9 @@ describe('AgentPersonaTab — selected model health', () => {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     renderTab({
       draft: { model: 'mediahub-deepseek-v4-pro' },
-      modelHealth: { 'mediahub-deepseek-v4-pro': { status: 'ok', testedAt: tenMinutesAgo } },
+      modelHealth: {
+        'mediahub-deepseek-v4-pro': { status: 'ok', testedAt: tenMinutesAgo, code: null },
+      },
     });
     expect(screen.getByTestId('model-health-ok').textContent).toContain('10m ago');
   });

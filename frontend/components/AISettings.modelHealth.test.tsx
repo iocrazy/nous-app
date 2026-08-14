@@ -54,6 +54,13 @@ const WELL_LLM: NousModelPublic = {
   last_test_status: 'ok',
   last_tested_at: twentyMinutesAgo,
 };
+/** Same red light as SICK_LLM, but the backend classified WHY (mig 427). */
+const RATE_LIMITED_LLM: NousModelPublic = {
+  ...SICK_LLM,
+  name: 'mediahub-doubao-seed-2-0-pro',
+  display_name: 'Doubao Seed 2.0 Pro',
+  last_test_code: 'rate_limit',
+};
 /** Recorded as failing by construction — see the no-badge test below. */
 const SICK_IMAGE: NousModelPublic = {
   name: 'mediahub-doubao-seedream-t2i',
@@ -180,6 +187,37 @@ describe('AISettings — platform model health', () => {
     const marked = screen.getAllByText(/DeepSeek V4 Flash \(Platform\).*health check failed/);
     expect(marked.length).toBeGreaterThan(0);
     expect(marked[0].textContent).toContain('20m ago');
+  });
+
+  it('says WHY the check failed, when the backend classified it', async () => {
+    // 2026-08-14 produced both of these in one round, and they ask for opposite
+    // things: the timeout was a local engine still loading (wait), the 429 was
+    // a quota (go act). Under #1838 both rendered as "health check failed".
+    // The wording resolves through the shipped en.json, so a missing
+    // healthReason key fails here instead of showing users a raw key.
+    await renderWith([RATE_LIMITED_LLM, WELL_LLM]);
+    const badge = within(cardRow('Doubao Seed 2.0 Pro')).getByTestId('model-health-badge');
+    expect(badge.textContent).toContain('Rate limited');
+    expect(badge.textContent).toContain('20m ago');
+  });
+
+  it('falls back to the plain wording when there is no code to name', async () => {
+    // Rows probed before the column existed. The badge must still appear —
+    // losing the warning to gain a reason would be a straight regression.
+    await renderWith([SICK_LLM, WELL_LLM]);
+    const badge = within(cardRow('DeepSeek V4 Flash')).getByTestId('model-health-badge');
+    expect(badge.textContent).toContain('health check failed');
+    expect(badge.textContent).not.toContain(':');
+  });
+
+  it('still offers a rate-limited model in the picker — reason shown, not vetoed', async () => {
+    // #1838's rule survives the added reason: knowing why it failed is not a
+    // reason to start blocking the choice.
+    await renderWith([RATE_LIMITED_LLM, WELL_LLM]);
+    const marked = screen.getAllByText(
+      /Doubao Seed 2\.0 Pro \(Platform\).*health check failed: Rate limited/,
+    );
+    expect(marked.length).toBeGreaterThan(0);
   });
 
   it('keeps the healthy model label clean in the task picker', async () => {

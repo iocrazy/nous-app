@@ -2845,7 +2845,19 @@
   },
   "aiSettings": {
     "modelHealthFailed": "自检失败",
-    "modelHealthFailedAgo": "自检失败，检查于 {{ago}}"
+    "modelHealthFailedAgo": "自检失败，检查于 {{ago}}",
+    "modelHealthFailedReason": "自检失败：{{reason}}",
+    "modelHealthFailedReasonAgo": "自检失败：{{reason}}，检查于 {{ago}}",
+    "healthReason": {
+      "timeout": "请求超时",
+      "unreachable": "无法连接",
+      "auth": "凭证被拒绝",
+      "rate_limit": "触发限流",
+      "model_not_found": "模型不存在",
+      "upstream_error": "服务商报错",
+      "bad_response": "响应异常",
+      "other": "原因未知"
+    }
   },
   "aiLibrary": {
     "title": "AI 库",
@@ -2926,7 +2938,9 @@
       "switchToModel": "切换到 {{model}}",
       "goToAISettings": "去 AI 设置",
       "modelHealthFailed": "上次自检失败 — 使用该模型的对话可能会失败。",
+      "modelHealthFailedReason": "上次自检失败（{{reason}}）— 使用该模型的对话可能会失败。",
       "modelHealthFailedShort": "自检失败",
+      "modelHealthFailedReasonShort": "自检失败：{{reason}}",
       "modelHealthPassed": "自检通过",
       "modelHealthCheckedAgo": "检查于 {{ago}}",
       "usage": {

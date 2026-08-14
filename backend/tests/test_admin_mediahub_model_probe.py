@@ -138,6 +138,7 @@ async def test_test_endpoint_persists_result():
                     "detail": "chat ok",
                     "error": None,
                     "dims": None,
+                    "code": None,
                 }
             ),
         ):
@@ -145,12 +146,17 @@ async def test_test_endpoint_persists_result():
 
     assert resp.ok is True
     assert resp.tested_at == "2026-06-25T03:00:00+00:00"
-    repo.record_test_result.assert_awaited_once_with("42", "ok", "chat ok")
+    # code=None on a pass is not a formality: it is what erases a previous
+    # failure's reason code from the row (migration 427).
+    repo.record_test_result.assert_awaited_once_with("42", "ok", "chat ok", None)
 
 
 @pytest.mark.asyncio
 async def test_test_endpoint_persists_failure_detail():
-    """On failure the error text is persisted as the detail (status='fail')."""
+    """On failure the error text is persisted as the detail (status='fail'),
+    together with the probe's closed-enum reason code — the manual Test path
+    must reach the DB with the same shape the hourly poll does, or a model
+    someone just tested by hand would show a reason-less red light."""
     from app.api.admin.mediahub_model_router import test_mediahub_model
 
     row = {"id": "7", "type": "embedding", "actual_model": "bad-embed"}
@@ -172,10 +178,13 @@ async def test_test_endpoint_persists_failure_detail():
                     "detail": "",
                     "error": "HTTP 401: bad key",
                     "dims": None,
+                    "code": "auth",
                 }
             ),
         ):
             resp = await test_mediahub_model("7", MagicMock())
 
     assert resp.ok is False
-    repo.record_test_result.assert_awaited_once_with("7", "fail", "HTTP 401: bad key")
+    repo.record_test_result.assert_awaited_once_with(
+        "7", "fail", "HTTP 401: bad key", "auth"
+    )

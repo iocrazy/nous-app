@@ -217,7 +217,9 @@ async def test_mediahub_model(model_id: str, auth: AdminAuthDep):
 
     status = "ok" if result.get("ok") else "fail"
     detail = result.get("detail") or (result.get("error") or "")
-    saved = await repo.record_test_result(model_id, status, detail[:200])
+    saved = await repo.record_test_result(
+        model_id, status, detail[:200], result.get("code")
+    )
     tested_at = (
         str(saved["last_tested_at"]) if saved and saved.get("last_tested_at") else None
     )

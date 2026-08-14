@@ -70,6 +70,23 @@ def test_public_projection_exposes_health_status_and_time():
     assert "last_tested_at" in col_names
 
 
+def test_public_projection_exposes_the_reason_code_but_not_the_reason_text():
+    """The whole point of the closed enum (migration 427): the failure REASON
+    reaches users while the failure TEXT never does.
+
+    ``last_test_code`` is derived from the exception type and HTTP status alone,
+    so 'timed out' (wait) and 'rate limited' (go fix quota) become tellable
+    apart — under #1838 both rendered as the same bare red light. Its sibling
+    ``last_test_detail`` stays out for the reason asserted above: on 2026-08-14
+    it held a URL fragment.
+    """
+    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+
+    col_names = {c.key for c in _PUBLIC_COLS}
+    assert "last_test_code" in col_names
+    assert "last_test_detail" not in col_names
+
+
 @pytest.mark.asyncio
 async def test_governance_includes_nous_enabled_and_modules():
     from app.api.ai_settings_router import get_ai_governance

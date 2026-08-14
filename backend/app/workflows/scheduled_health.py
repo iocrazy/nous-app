@@ -180,7 +180,9 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
         result = await probe_mediahub_model(row)
         status = "ok" if result.get("ok") else "fail"
         detail = result.get("detail") or (result.get("error") or "")
-        await repo.record_test_result(str(row.get("id")), status, detail[:200])
+        await repo.record_test_result(
+            str(row.get("id")), status, detail[:200], result.get("code")
+        )
         if result.get("ok"):
             ok += 1
         else:
@@ -190,7 +192,8 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
             # now the second, independent place the reason survives.
             logger.warning(
                 f"[mediahub_model_health] {row.get('name') or row.get('id')} "
-                f"status={status} reason={detail or '<no detail>'}"
+                f"status={status} code={result.get('code') or '<none>'} "
+                f"reason={detail or '<no detail>'}"
             )
 
     return {"total": len(enabled), "ok": ok, "failed": len(enabled) - ok}

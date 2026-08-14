@@ -644,12 +644,22 @@ export interface NousModelPublic {
    * absent means never probed — which is neither healthy nor broken, so the
    * UI must say nothing rather than assume.
    *
-   * NOTE: the failure REASON (`last_test_detail`) is deliberately not part of
-   * this public payload — probe errors routinely embed the upstream host and
-   * private base_url. Users get the status; admin gets the reason.
+   * NOTE: the failure REASON TEXT (`last_test_detail`) is deliberately not part
+   * of this public payload — probe errors routinely embed the upstream host and
+   * private base_url. Users get the status plus the classified code below;
+   * admin gets the raw text.
    */
   last_test_status?: 'ok' | 'fail' | null;
   last_tested_at?: string | null;
+  /**
+   * Closed-enum classification of the last FAILED probe (migration 427):
+   * `timeout` | `unreachable` | `auth` | `rate_limit` | `model_not_found` |
+   * `upstream_error` | `bad_response` | `other`. Typed as a plain string on
+   * purpose — the backend enum may grow before a frontend deploy catches up,
+   * and `healthReasonKey` already degrades gracefully on a value it doesn't
+   * know. `null` / absent = never probed, or probed before the column existed.
+   */
+  last_test_code?: string | null;
 }
 
 // Points System Types

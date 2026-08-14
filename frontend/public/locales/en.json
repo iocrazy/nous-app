@@ -2845,7 +2845,19 @@
   },
   "aiSettings": {
     "modelHealthFailed": "health check failed",
-    "modelHealthFailedAgo": "health check failed, checked {{ago}}"
+    "modelHealthFailedAgo": "health check failed, checked {{ago}}",
+    "modelHealthFailedReason": "health check failed: {{reason}}",
+    "modelHealthFailedReasonAgo": "health check failed: {{reason}}, checked {{ago}}",
+    "healthReason": {
+      "timeout": "Request timed out",
+      "unreachable": "Could not connect",
+      "auth": "Credentials rejected",
+      "rate_limit": "Rate limited",
+      "model_not_found": "Model not found",
+      "upstream_error": "Provider error",
+      "bad_response": "Unexpected response",
+      "other": "Unknown reason"
+    }
   },
   "aiLibrary": {
     "title": "AI Library",
@@ -2926,7 +2938,9 @@
       "switchToModel": "Switch to {{model}}",
       "goToAISettings": "Go to AI Settings",
       "modelHealthFailed": "Last health check failed — chats using this model may fail.",
+      "modelHealthFailedReason": "Last health check failed ({{reason}}) — chats using this model may fail.",
       "modelHealthFailedShort": "health check failed",
+      "modelHealthFailedReasonShort": "health check failed: {{reason}}",
       "modelHealthPassed": "Health check passed",
       "modelHealthCheckedAgo": "checked {{ago}}",
       "usage": {
