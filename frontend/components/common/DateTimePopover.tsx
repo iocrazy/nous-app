@@ -44,6 +44,21 @@
  * `start`). Escape / outside-click / scroll close without calling `onChange`,
  * discarding any mid-flight draft.
  *
+ * Range ALSO has a segment-edit mode, because "nudge the deadline by two days"
+ * should not cost a full re-pick of both ends. The Start / End cells in the
+ * footer are buttons: pressing one arms that end (`editing`), the next day click
+ * writes ONLY that end and commits `onChange(start, end)` with the other end
+ * untouched, then disarms back to the two-click flow. Pressing the armed cell
+ * again cancels. `editing === null` — the default on every open — is the
+ * original two-click behaviour, unchanged.
+ *
+ * While a segment is armed, days that would invert the range (a start after the
+ * held end, or an end before the held start) render `disabled`, exactly like the
+ * `minAt`/`maxAt` window does. The tempting alternative — accept the click and
+ * quietly drag the OTHER end along — is rejected on purpose: the end the user
+ * did not touch is not ours to move, and a picker that silently rewrites a field
+ * you were not editing is worse than one that greys out the impossible.
+ *
  * Single selection commits on every interaction (day, hour, minute) because its
  * callers drive live validation off the value; `withTime` keeps the popover open
  * so the time is still reachable, and closes on Done.
@@ -277,6 +292,8 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
 
   const [pendingStart, setPendingStart] = useState<string | null>(rangeStart);
   const [pendingEnd, setPendingEnd] = useState<string | null>(rangeEnd);
+  /** Range only. null = the default two-click flow; otherwise the armed end. */
+  const [editing, setEditing] = useState<'start' | 'end' | null>(null);
   const [selDate, setSelDate] = useState<string | null>(() => splitValue(singleValue).date);
   const [selHour, setSelHour] = useState(0);
   const [selMinute, setSelMinute] = useState(0);
@@ -293,6 +310,7 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
     if (isOpen && !wasOpenRef.current) {
       setPendingStart(rangeStart);
       setPendingEnd(rangeEnd);
+      setEditing(null);
       const parsed = splitValue(singleValue);
       setSelDate(parsed.date);
       // With nothing committed yet the calendar opens on today, CLAMPED into
@@ -384,6 +402,19 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
     props.onChange(withTime ? `${iso}T${pad2(hour)}:${pad2(minute)}` : iso);
   };
 
+  /**
+   * Days the ARMED segment cannot legally take, because writing them would
+   * invert the range against the end the user is not editing. Only ever true
+   * while a segment is armed and the opposite end is actually set — with the
+   * other end empty there is nothing to invert against, so the whole month is
+   * fair game. ISO-8601 date strings sort lexically in calendar order.
+   */
+  const segmentBlocks = (iso: string): boolean => {
+    if (editing === 'start') return !!pendingEnd && iso > pendingEnd;
+    if (editing === 'end') return !!pendingStart && iso < pendingStart;
+    return false;
+  };
+
   const handleDayClick = (iso: string) => {
     if (!dayAllowed(iso, minMs, maxMs, withTime)) return;
 
@@ -404,6 +435,19 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
       setSelMinute(minute);
       emitSingle(iso, hour, minute);
       if (!withTime) onClose();
+      return;
+    }
+
+    // Range, segment edit: write ONE end, leave the other exactly as it was,
+    // commit, and fall back to the two-click flow.
+    if (editing) {
+      if (segmentBlocks(iso)) return;
+      const s = editing === 'start' ? iso : pendingStart;
+      const e = editing === 'end' ? iso : pendingEnd;
+      setPendingStart(s);
+      setPendingEnd(e);
+      setEditing(null);
+      props.onChange(s, e);
       return;
     }
 
@@ -446,7 +490,25 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
     }
     setPendingStart(null);
     setPendingEnd(null);
+    setEditing(null);
     props.onChange(null, null);
+  };
+
+  /**
+   * Arm / disarm a range end. Arming jumps the calendar to the month that end
+   * already lives in — segment editing is overwhelmingly a small nudge, and
+   * making the user page back to August to move an August date is the friction
+   * this mode exists to remove. An empty end has no month to jump to, so the
+   * current view stands.
+   */
+  const toggleSegment = (seg: 'start' | 'end') => {
+    if (editing === seg) {
+      setEditing(null);
+      return;
+    }
+    setEditing(seg);
+    const held = parseISO(seg === 'start' ? pendingStart : pendingEnd);
+    if (held) setView({ year: held.getFullYear(), month: held.getMonth() });
   };
 
   if (!anchorEl) return null;
@@ -499,6 +561,21 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
     if (active) return `${base} bg-agent-soft font-medium text-ink-100`;
     return `${base} text-ink-400 hover:bg-line hover:text-ink-100`;
   };
+
+  const segments = [
+    {
+      seg: 'start' as const,
+      label: t('common.dateRangePopover.start', 'Start'),
+      value: pendingStart,
+      hint: t('common.dateRangePopover.editStart', 'Edit start date only'),
+    },
+    {
+      seg: 'end' as const,
+      label: t('common.dateRangePopover.end', 'End'),
+      value: pendingEnd,
+      hint: t('common.dateRangePopover.editEnd', 'Edit end date only'),
+    },
+  ];
 
   const selectedLabel = selDate
     ? (withTime ? `${selDate} ${pad2(selHour)}:${pad2(selMinute)}` : selDate)
@@ -578,7 +655,8 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
 
           <div className="grid grid-cols-7 gap-1">
             {cells.map((cell) => {
-              const disabled = !dayAllowed(cell.iso, minMs, maxMs, withTime);
+              const disabled =
+                !dayAllowed(cell.iso, minMs, maxMs, withTime) || segmentBlocks(cell.iso);
               return (
                 <button
                   key={cell.iso}
@@ -652,20 +730,31 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
         </div>
       ) : (
         <div className="mt-2 flex items-center gap-2 border-t border-line pt-2 text-[12px]">
-          <div
-            data-testid="date-range-start-cell"
-            className="flex-1 truncate rounded-md border border-line px-2 py-1 text-ink-200"
-          >
-            <span className="mr-1 text-ink-500">{t('common.dateRangePopover.start', 'Start')}</span>
-            {pendingStart ?? t('common.dateRangePopover.empty', '–')}
-          </div>
-          <div
-            data-testid="date-range-end-cell"
-            className="flex-1 truncate rounded-md border border-line px-2 py-1 text-ink-200"
-          >
-            <span className="mr-1 text-ink-500">{t('common.dateRangePopover.end', 'End')}</span>
-            {pendingEnd ?? t('common.dateRangePopover.empty', '–')}
-          </div>
+          {/* Buttons, not read-outs: pressing one arms that end for a
+              single-end edit (see the file header). `aria-pressed` is the whole
+              state read-out — the armed cell is also highlighted, and a picker
+              this small does not need a sentence explaining a highlight. */}
+          {segments.map(({ seg, label, value, hint }) => {
+            const active = editing === seg;
+            return (
+              <button
+                key={seg}
+                type="button"
+                data-testid={`date-range-${seg}-cell`}
+                aria-pressed={active}
+                title={hint}
+                onClick={() => toggleSegment(seg)}
+                className={`flex-1 truncate rounded-md border px-2 py-1 text-left transition-colors motion-reduce:transition-none ${
+                  active
+                    ? 'border-agent-line bg-agent-soft text-ink-100'
+                    : 'border-line text-ink-200 hover:border-line-strong hover:text-ink-100'
+                }`}
+              >
+                <span className={`mr-1 ${active ? 'text-ink-300' : 'text-ink-500'}`}>{label}</span>
+                {value ?? t('common.dateRangePopover.empty', '–')}
+              </button>
+            );
+          })}
         </div>
       )}
 

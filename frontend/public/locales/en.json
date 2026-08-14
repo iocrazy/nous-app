@@ -185,6 +185,8 @@
       "nextMonth": "Next Month",
       "start": "Start",
       "end": "End",
+      "editStart": "Edit start date only",
+      "editEnd": "Edit end date only",
       "empty": "–",
       "clear": "Clear",
       "weekdaySun": "Su",

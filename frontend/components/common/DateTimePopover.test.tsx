@@ -330,6 +330,187 @@ describe('DateTimePopover — range mode', () => {
   });
 });
 
+// ── range mode: single-end (segment) editing ──
+//
+// "Nudge the deadline two days" used to cost a full re-pick of BOTH ends,
+// because the only way into the range was the two-click flow. The Start / End
+// cells are now buttons that arm one end; the next day click writes only that
+// end. The two-click flow above is untouched and is still what an un-armed
+// popover does.
+
+describe('DateTimePopover — range segment editing', () => {
+  let anchor: HTMLButtonElement;
+
+  beforeEach(() => {
+    anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+  });
+
+  afterEach(() => {
+    anchor.remove();
+  });
+
+  const renderRange = (
+    start: string | null,
+    end: string | null,
+    onChange = vi.fn(),
+  ) => {
+    render(
+      <DateTimePopover
+        anchorEl={anchor}
+        start={start}
+        end={end}
+        onChange={onChange}
+        onClose={vi.fn()}
+      />,
+    );
+    return onChange;
+  };
+
+  it('opens un-armed, arms the pressed end, and disarms when pressed again', () => {
+    renderRange('2026-07-05', '2026-07-10');
+    const startCell = screen.getByTestId('date-range-start-cell');
+    const endCell = screen.getByTestId('date-range-end-cell');
+    // Default is the two-click flow — neither end is armed on open.
+    expect(startCell).toHaveAttribute('aria-pressed', 'false');
+    expect(endCell).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(startCell);
+    expect(startCell).toHaveAttribute('aria-pressed', 'true');
+    expect(endCell).toHaveAttribute('aria-pressed', 'false');
+
+    // Pressing the armed cell is the way back out, with nothing committed.
+    fireEvent.click(startCell);
+    expect(startCell).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('arming the other end moves the arm rather than arming both', () => {
+    renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(screen.getByTestId('date-range-start-cell')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('armed start: one click rewrites start and commits, leaving end exactly as it was', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-03' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-03', '2026-07-10');
+    expect(screen.getByTestId('date-range-end-cell')).toHaveTextContent('2026-07-10');
+  });
+
+  it('armed end: one click rewrites end and commits, leaving start exactly as it was', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-22' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-05', '2026-07-22');
+    expect(screen.getByTestId('date-range-start-cell')).toHaveTextContent('2026-07-05');
+  });
+
+  it('an armed segment with nothing on the other side is unconstrained', () => {
+    // Start held, end empty — the state the schedule cell opens in most often.
+    const onChange = renderRange('2026-07-05', null);
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    // No end to invert against, so even a far-future day is live.
+    expect(screen.getByRole('button', { name: '2026-07-28' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-28' }));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-28', null);
+  });
+
+  it('disables the days that would invert the range instead of dragging the other end along', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    // A start after the held end is impossible — and it is greyed out, not
+    // accepted-then-silently-clamped. The end the user did not touch stays put.
+    expect(screen.getByRole('button', { name: '2026-07-20' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '2026-07-10' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-20' }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('date-range-end-cell')).toHaveTextContent('2026-07-10');
+
+    // Same rule mirrored on the other end.
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(screen.getByRole('button', { name: '2026-07-01' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '2026-07-05' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-01' }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('date-range-start-cell')).toHaveTextContent('2026-07-05');
+  });
+
+  it('arming jumps the calendar to the month that end already lives in', () => {
+    renderRange('2026-07-15', '2026-09-03');
+    // Opens on the start's month.
+    expect(screen.getByRole('button', { name: '2026-07-15' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '2026-09-03' })).toBeNull();
+
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(screen.getByRole('button', { name: '2026-09-03' })).toBeTruthy();
+
+    // Back to the start's month when the start is armed instead.
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    expect(screen.getByRole('button', { name: '2026-07-15' })).toBeTruthy();
+  });
+
+  it('arming an empty end leaves the current month alone (nothing to jump to)', () => {
+    renderRange('2026-07-15', null);
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(screen.getByRole('button', { name: '2026-07-15' })).toBeTruthy();
+  });
+
+  it('disarms after the single-end commit, so the very next clicks are the two-click flow again', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-03' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('date-range-start-cell')).toHaveAttribute('aria-pressed', 'false');
+
+    // Two-click flow: the first click only drafts...
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-18' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // ...the second completes and commits BOTH ends.
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-25' }));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-18', '2026-07-25');
+  });
+
+  it('Clear disarms as well as emptying both ends', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByTestId('date-time-clear'));
+    expect(onChange).toHaveBeenLastCalledWith(null, null);
+    expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'false');
+
+    // And a cleared, un-armed popover is back on the two-click flow.
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-18' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '2026-07-25' }));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-18', '2026-07-25');
+  });
+
+  it('still honours the minAt/maxAt window while a segment is armed', () => {
+    render(
+      <DateTimePopover
+        anchorEl={anchor}
+        start="2026-07-15"
+        end="2026-07-20"
+        minAt={new Date(2026, 6, 10, 0, 0)}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    // Blocked by the window (below the floor), not by the segment rule.
+    expect(screen.getByRole('button', { name: '2026-07-09' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '2026-07-11' })).not.toBeDisabled();
+  });
+});
+
 // ── single mode: one point in time, optional clock, hard window ──
 //
 // This is the half `DateRangePopover` never had, and `DateTimePicker` had but

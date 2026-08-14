@@ -185,6 +185,8 @@
       "nextMonth": "下个月",
       "start": "开始",
       "end": "结束",
+      "editStart": "仅修改开始日期",
+      "editEnd": "仅修改结束日期",
       "empty": "–",
       "clear": "清除",
       "weekdaySun": "日",
