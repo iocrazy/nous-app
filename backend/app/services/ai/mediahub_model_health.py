@@ -10,16 +10,84 @@ implementation avoids the two drifting apart.
 The probe performs a real minimal inference per model TYPE (chat / embedding /
 asr) so account-level limits surface (e.g. a Volcengine ``SetLimitExceeded`` on
 a specific model), not just key reachability. It never raises.
+
+Every failure also carries a CODE from a closed enum (``classify_probe_failure``)
+alongside the free-text reason: the reason is admin-only (it embeds upstream
+hosts, private base_urls and upstream model ids), the code is what users see.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import httpx
 
 from app.services.ai.providers.ai_provider import AIProviderFactory
 from app.services.ai.providers.embedding_config import _is_multimodal
+
+# Closed enum of failure reasons. Closed is the whole point: a user-facing
+# value derived ONLY from the exception type and the HTTP status can never
+# leak what the message would (2026-08-14 recorded
+# "UnsupportedProtocol: URL missing 'ht..." — a URL fragment — into the DB).
+# Anything added here must stay derivable from those two signals alone.
+PROBE_FAILURE_CODES = (
+    "timeout",
+    "unreachable",
+    "auth",
+    "rate_limit",
+    "model_not_found",
+    "upstream_error",
+    "bad_response",
+    "other",
+)
+
+
+def classify_probe_failure(
+    *,
+    status_code: Optional[int] = None,
+    exc: Optional[BaseException] = None,
+    bad_response: bool = False,
+) -> str:
+    """Map the signals a failed probe already holds onto ``PROBE_FAILURE_CODES``.
+
+    Pure and side-effect free — the classification rule is worth reading and
+    testing on its own, separately from the I/O around it.
+
+    Deliberately does NOT look at any message text. Two failing models on
+    2026-08-14 needed opposite responses (a ``ReadTimeout`` on a local engine:
+    wait; an ``HTTP 429``: go fix quota), and both signals were already
+    structured. Matching substrings would make this a text parser whose output
+    is shown to every user — the exact thing the closed enum rules out.
+
+    ``exc`` outranks ``status_code``: an exception means the request never
+    completed, so any status alongside it describes some earlier attempt.
+    """
+    if exc is not None:
+        # TimeoutException is itself a TransportError subclass — check first.
+        if isinstance(exc, httpx.TimeoutException):
+            return "timeout"
+        if isinstance(exc, httpx.TransportError):
+            # ConnectError / UnsupportedProtocol / ReadError / ProtocolError /
+            # ProxyError: all "no answer came back from the network".
+            return "unreachable"
+        return "other"
+
+    if status_code is not None and status_code != 200:
+        if status_code in (401, 403):
+            return "auth"
+        if status_code == 429:
+            return "rate_limit"
+        if status_code == 404:
+            return "model_not_found"
+        # Includes the <400 non-200 statuses (a 3xx the client didn't follow is
+        # still "the upstream answered with something we can't use").
+        return "upstream_error"
+
+    if bad_response:
+        return "bad_response"
+
+    return "other"
+
 
 # Per-request budget for a probe. Was 20s, which is a plausible cause of the
 # 2026-08-14 false red on ``mediahub-deepseek-v4-flash``: cold starts (upstream
@@ -32,8 +100,10 @@ _PROBE_TIMEOUT = 60.0
 async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
 
-    Returns ``{ok, detail, error, dims}``. Never raises — a transport/HTTP
-    failure is reported as ``ok=False`` with the error text.
+    Returns ``{ok, detail, error, dims, code}``. Never raises — a transport/HTTP
+    failure is reported as ``ok=False`` with the error text plus a
+    ``PROBE_FAILURE_CODES`` value. ``code`` is ``None`` on success, so writing
+    it on every probe clears a previous failure's code.
     """
     typ = (row.get("type") or "").strip()
     model = (row.get("actual_model") or "").strip()
@@ -66,6 +136,13 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                 "detail": "reachable" if ok else "",
                 "error": None if ok else (err or "asr probe failed with no message"),
                 "dims": None,
+                # ALWAYS ``other`` when it fails, never a guess. This branch has
+                # free text and nothing else — no status_code, no exception
+                # object — so any code here would have to come from reading that
+                # text, and a code read from a message is no longer a value that
+                # is safe to show a user by construction. Making the provider
+                # layer return structured codes is the real fix (design §3).
+                "code": None if ok else "other",
             }
 
         if typ == "embedding":
@@ -87,6 +164,7 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                     "detail": "",
                     "error": f"HTTP {r.status_code}: {r.text[:160]}",
                     "dims": None,
+                    "code": classify_probe_failure(status_code=r.status_code),
                 }
             data = (r.json() or {}).get("data")
             emb = None
@@ -100,6 +178,13 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                 "detail": f"{dims} dims" if dims else "",
                 "error": None if dims else "no embedding vector in response",
                 "dims": dims,
+                "code": (
+                    None
+                    if dims
+                    else classify_probe_failure(
+                        status_code=r.status_code, bad_response=True
+                    )
+                ),
             }
 
         # llm (and any chat-completions provider)
@@ -117,6 +202,7 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                 "detail": "",
                 "error": f"HTTP {r.status_code}: {r.text[:160]}",
                 "dims": None,
+                "code": classify_probe_failure(status_code=r.status_code),
             }
         ok = bool((r.json() or {}).get("choices"))
         return {
@@ -124,6 +210,13 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
             "detail": "chat ok" if ok else "",
             "error": None if ok else "no choices in response",
             "dims": None,
+            "code": (
+                None
+                if ok
+                else classify_probe_failure(
+                    status_code=r.status_code, bad_response=True
+                )
+            ),
         }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
         # Qualify the reason with the exception TYPE, never bare str(e):
@@ -132,4 +225,10 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
         # with a blank reason — indistinguishable from a genuinely broken model.
         # See test_mediahub_model_health_diagnosable.py.
         reason = f"{type(e).__name__}: {str(e) or '<no message>'}"
-        return {"ok": False, "detail": "", "error": reason[:200], "dims": None}
+        return {
+            "ok": False,
+            "detail": "",
+            "error": reason[:200],
+            "dims": None,
+            "code": classify_probe_failure(exc=e),
+        }
