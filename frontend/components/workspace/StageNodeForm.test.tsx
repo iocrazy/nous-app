@@ -68,7 +68,9 @@ describe('StageNodeForm — rendering', () => {
     expect(screen.getByTestId('stage-form-field-budget')).toHaveAttribute('type', 'number');
     expect(screen.getByTestId('stage-form-field-category').tagName).toBe('SELECT');
     expect(screen.getByTestId('stage-form-field-approved')).toHaveAttribute('type', 'checkbox');
-    expect(screen.getByTestId('stage-form-field-due')).toHaveAttribute('type', 'date');
+    // `date` is a trigger button for the shared DateTimePopover, not a native
+    // `<input type="date">` — the testid is unchanged, the element is not.
+    expect(screen.getByTestId('stage-form-field-due').tagName).toBe('BUTTON');
   });
 
   it('seeds each control from `data`', () => {
@@ -85,7 +87,8 @@ describe('StageNodeForm — rendering', () => {
     expect(screen.getByTestId('stage-form-field-budget')).toHaveValue(42);
     expect(screen.getByTestId('stage-form-field-category')).toHaveValue('B');
     expect(screen.getByTestId('stage-form-field-approved')).toBeChecked();
-    expect(screen.getByTestId('stage-form-field-due')).toHaveValue('2026-08-01');
+    // Button, so the seeded value reads off the label rather than `value`.
+    expect(screen.getByTestId('stage-form-field-due').textContent).toBe('2026-08-01');
   });
 
   it('disabled prop disables every control', () => {
@@ -158,12 +161,19 @@ describe('StageNodeForm — blur-save fires onSave with only the changed key', (
     expect(onSave).toHaveBeenCalledWith({ approved: true });
   });
 
+  // The popover has no blur to commit on, so the pick IS the commit — same
+  // single-key patch, same string value.
   it('date field', () => {
     const onSave = vi.fn();
-    renderForm([{ key: 'due', label: 'Due', type: 'date', required: false }], {}, { onSave });
-    const field = screen.getByTestId('stage-form-field-due');
-    fireEvent.change(field, { target: { value: '2026-08-01' } });
-    fireEvent.blur(field);
+    // Seeded so the calendar opens on the month under test rather than on
+    // whatever month the machine clock happens to be in.
+    renderForm(
+      [{ key: 'due', label: 'Due', type: 'date', required: false }],
+      { due: '2026-08-15' },
+      { onSave },
+    );
+    fireEvent.click(screen.getByTestId('stage-form-field-due'));
+    fireEvent.click(screen.getByLabelText('2026-08-01'));
     expect(onSave).toHaveBeenCalledWith({ due: '2026-08-01' });
   });
 
@@ -246,12 +256,17 @@ describe('StageNodeForm — fresh node (key absent from form_data): focus+blur w
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  // The popover's equivalent of "blurred without editing": opened, then
+  // dismissed without picking anything.
   it('date field', () => {
     const onSave = vi.fn();
-    renderForm([{ key: 'due', label: 'Due', type: 'date', required: false }], {}, { onSave });
-    const field = screen.getByTestId('stage-form-field-due');
-    fireEvent.focus(field);
-    fireEvent.blur(field);
+    renderForm(
+      [{ key: 'due', label: 'Due', type: 'date', required: false }],
+      { due: '2026-08-15' },
+      { onSave },
+    );
+    fireEvent.click(screen.getByTestId('stage-form-field-due'));
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -323,5 +338,52 @@ describe('StageNodeForm — required badge (mirrors backend _form_incomplete)', 
     expect(screen.getByTestId('stage-form-required-summary')).toHaveAttribute('data-filled', 'false');
     fireEvent.change(field, { target: { value: 'typed but not blurred yet' } });
     expect(screen.getByTestId('stage-form-required-summary')).toHaveAttribute('data-filled', 'true');
+  });
+});
+
+describe('StageNodeForm — the date field is the shared DateTimePopover', () => {
+  const DATE_SCHEMA: FormFieldDef[] = [
+    { key: 'due', label: 'Due', type: 'date', required: false },
+  ];
+
+  it('keeps its data-testid on the trigger (tests and e2e locate the field by it)', () => {
+    renderForm(DATE_SCHEMA);
+    const trigger = screen.getByTestId('stage-form-field-due');
+    expect(trigger.tagName).toBe('BUTTON');
+    // Still the target of the field's own <label>, so it keeps an accessible name.
+    expect(trigger.id).toBe('stage-form-field-due');
+  });
+
+  it('the trigger opens the popover', () => {
+    renderForm(DATE_SCHEMA, { due: '2026-08-15' });
+    expect(screen.queryByTestId('date-time-popover')).toBeNull();
+    fireEvent.click(screen.getByTestId('stage-form-field-due'));
+    expect(screen.getByTestId('date-time-popover')).toBeTruthy();
+  });
+
+  it('disabled: the popover cannot be opened and nothing is saved', () => {
+    const onSave = vi.fn();
+    renderForm(DATE_SCHEMA, { due: '2026-08-15' }, { disabled: true, onSave });
+    const trigger = screen.getByTestId('stage-form-field-due');
+    expect(trigger).toBeDisabled();
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId('date-time-popover')).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("Clear saves an empty string, matching the old input's clearable behaviour", () => {
+    const onSave = vi.fn();
+    renderForm(DATE_SCHEMA, { due: '2026-08-15' }, { onSave });
+    fireEvent.click(screen.getByTestId('stage-form-field-due'));
+    fireEvent.click(screen.getByTestId('date-time-clear'));
+    expect(onSave).toHaveBeenCalledWith({ due: '' });
+  });
+
+  it('re-picking the day already held saves nothing (no phantom PATCH)', () => {
+    const onSave = vi.fn();
+    renderForm(DATE_SCHEMA, { due: '2026-08-15' }, { onSave });
+    fireEvent.click(screen.getByTestId('stage-form-field-due'));
+    fireEvent.click(screen.getByLabelText('2026-08-15'));
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
