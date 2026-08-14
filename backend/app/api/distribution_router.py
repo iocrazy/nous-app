@@ -666,9 +666,10 @@ async def submit_session_login_phone(
     has to be visible instead of looking like patience.
     """
     from app.services.distribution.browser_client import BrowserClient
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES
 
     task = await _load_login_task(task_id, user)
-    if task["phase"] not in ("queued", "in_progress"):
+    if task["phase"] not in ACTIVE_PHASES:
         raise HTTPException(status_code=409, detail="Login task is no longer active")
     snapshot = await BrowserClient().submit_login_phone(
         _login_session_id(task), body.phone
@@ -693,9 +694,10 @@ async def submit_session_login_sms(
     on its next tick either way.
     """
     from app.services.distribution.browser_client import BrowserClient
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES
 
     task = await _load_login_task(task_id, user)
-    if task["phase"] not in ("queued", "in_progress"):
+    if task["phase"] not in ACTIVE_PHASES:
         # A terminal task's browser context is already released — submitting a
         # code would 404 inside the container. Say so instead of pretending.
         raise HTTPException(status_code=409, detail="Login task is no longer active")
