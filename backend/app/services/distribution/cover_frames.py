@@ -260,8 +260,15 @@ async def load_source_video(
     视频"，并且**不读文件内容** —— 视频动辄几个 GB，不能像图片那样整个读进
     内存，抽帧走的是 ``materialize`` 给出的本地路径。
 
+    ⚠️ 调用方必须已经建立 ambient tenant scope（HTTP 侧 request_scope /
+    ScopedRequestDep，workflow 侧 request_scope）。没有 scope 时
+    ``get_resource_by_id`` 抛 ``UnscopedQueryError``，本函数**故意不接**它 ——
+    那是调用方的缺陷，不是"源不存在"，让它冒到 router 变成 500。曾经它被 repo
+    吞成 None，于是下面这个 404 把服务端 bug 说成了"该视频已不可用"。
+
     Raises:
         CoverFrameError: 404 资源/文件不存在，400 不是视频或没有 scope 归属。
+        UnscopedQueryError: 调用方没开 tenant scope（穿透，不翻译成 404）。
     """
     source = await repo.get_resource_by_id(source_resource_id)
     if not source:

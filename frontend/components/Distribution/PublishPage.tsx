@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, ChevronLeft,
-  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Plus, Radio, Search,
-  Send, Sparkles, TrendingUp, X,
+  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Play, Plus, Radio,
+  Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
@@ -13,8 +13,9 @@ import {
   TopicSuggestion, TopicSuggestReason,
 } from '../../services/distributionService';
 import {
-  uploadResource, getGalleryItems, getResourceCoverUrl, GALLERY_MIME,
+  uploadResource, getGalleryItems, getResourceCoverUrl, getResourceFileUrl, GALLERY_MIME,
 } from '../../services/resourceService';
+import { getSupabaseClient } from '../../supabaseClient';
 import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
@@ -81,6 +82,80 @@ const formatViewCount = (n: number, lang: string): string => {
     return String(n);
   }
 };
+// ── Picker metadata formatting ────────────────────────────────────────
+//
+// The publish picker used to show a thumbnail and a filename, nothing else.
+// That is not enough to answer the only question the picker exists to answer
+// when the library holds several cuts of the same piece: WHICH ONE IS THIS?
+// Duration, resolution, size and date are what tell two versions apart.
+//
+// The shared rule for all four: **a missing value renders as an em dash, never
+// as a guess.** No "0:00" for an unknown duration, no size back-computed from
+// bitrate. An invented number here is worse than a blank one — the user would
+// publish the wrong cut and never know why.
+
+/** Em dash for "we do not have this value". One constant so the fallback is
+ *  identical everywhere and greppable. */
+const NO_VALUE = '—';
+
+/** `154` → `2:34`; `3616` → `1:00:16`. Null/negative → em dash. */
+const formatDuration = (seconds: number | null | undefined): string => {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return NO_VALUE;
+  const whole = Math.floor(seconds);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+};
+
+/**
+ * `19364154` → `18.5 MB`; `550133695` → `525 MB`. Binary units (MiB semantics,
+ * MB labels) to match what the OS file manager shows for the same file.
+ *
+ * The decimal is dropped at ≥100 because by then a tenth of a megabyte is
+ * noise, not a signal that separates two cuts.
+ */
+const formatBytes = (bytes: number | null | undefined): string => {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return NO_VALUE;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+};
+
+/**
+ * `"1080x2142"` → `"1080×2142"` (real multiplication sign).
+ *
+ * Deliberately NOT normalised to "1080p"-style shorthand: the picker's job is
+ * telling near-identical files apart, and a vertical 1080×1920 and a landscape
+ * 1920×1080 would collapse to the same label under that scheme.
+ */
+const formatResolution = (resolution: string | null | undefined): string => {
+  if (!resolution) return NO_VALUE;
+  return resolution.replace(/x/i, '×');
+};
+
+/** Locale-aware short date. Unparseable/absent → em dash. */
+const formatShortDate = (iso: string | null | undefined, lang: string): string => {
+  if (!iso) return NO_VALUE;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return NO_VALUE;
+  try {
+    return new Intl.DateTimeFormat(lang || 'en', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    }).format(d);
+  } catch (err) {
+    console.error('distribution: picker date formatting failed', err);
+    return d.toISOString().slice(0, 10);
+  }
+};
+
 // Cap concurrent image uploads so a large multi-select can't open dozens of
 // parallel requests at once — pick order is preserved regardless of timing.
 const UPLOAD_CONCURRENCY = 3;
@@ -299,6 +374,26 @@ export const PublishPage: React.FC = () => {
   const [pickerQuery, setPickerQuery] = useState('');
   const [pickerTab, setPickerTab] = useState<'library' | 'generated'>('library');
   const [toPublishOnly, setToPublishOnly] = useState(false);
+  /**
+   * The video being previewed inside the picker, or null.
+   *
+   * Metadata narrows the choice; playback settles it. Two exports of the same
+   * cut can match on duration, resolution and size and still differ in the
+   * only way that matters (wrong take, wrong grade, missing subtitles), so the
+   * picker has to be able to actually show the video — not just describe it.
+   *
+   * Kept as an id rather than a boolean so opening one preview closes any
+   * other: exactly one <video> element is ever mounted, which is what stops a
+   * grid of autoplaying decoders from being possible at all.
+   */
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  /**
+   * Supabase JWT for `<video src>`. A media element cannot send an
+   * Authorization header, so the file endpoint takes the token as `?token=`
+   * (same transport CoverPicker uses for its frame `<img>`s). Unsigned is the
+   * fallback, not the plan.
+   */
+  const [mediaToken, setMediaToken] = useState<string | undefined>(undefined);
   const [generated, setGenerated] = useState<GeneratedVideo[]>([]);
   // genId → promoted resource id (seeded from the backlink, extended on pick).
   const [genResourceIds, setGenResourceIds] = useState<Record<string, string>>({});
@@ -378,13 +473,37 @@ export const PublishPage: React.FC = () => {
     setGateProblems([]);
   }, [contentType, selectedVideos, selectedAccounts, title]);
 
-  // Close the library picker on Escape while it is open.
+  // Escape closes the preview first, the picker second. Backing out of a
+  // preview should not also discard the search and scroll position the user
+  // built up to find it.
   useEffect(() => {
     if (!pickerOpen) return undefined;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPickerOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (previewId) setPreviewId(null);
+      else setPickerOpen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [pickerOpen, previewId]);
+
+  // Closing the picker must tear the <video> down. Without this the element
+  // stays mounted in a hidden tree and keeps buffering — the user closed the
+  // dialog, so the download should stop too.
+  useEffect(() => {
+    if (!pickerOpen) setPreviewId(null);
   }, [pickerOpen]);
+
+  // Read the session token once for `<video src>` (see `mediaToken`).
+  useEffect(() => {
+    let alive = true;
+    const supabase = getSupabaseClient();
+    if (!supabase) return undefined;
+    void supabase.auth.getSession()
+      .then(({ data }) => { if (alive) setMediaToken(data?.session?.access_token); })
+      .catch((err) => console.error('distribution: read session for preview failed', err));
+    return () => { alive = false; };
+  }, []);
 
   const toggle = (list: string[], id: string): string[] =>
     (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -2222,6 +2341,14 @@ export const PublishPage: React.FC = () => {
                   const on = selectedVideos.includes(v.id);
                   const marked = markedIds.has(v.id);
                   const hasImg = Boolean(v.thumbnail_url);
+                  const previewing = previewId === v.id;
+                  // Built once per card so the title attribute (hover) and the
+                  // visible line can never drift apart.
+                  const meta = [
+                    formatResolution(v.resolution),
+                    formatBytes(v.file_size_bytes),
+                    formatShortDate(v.created_at, i18n.language),
+                  ];
                   return (
                     <button
                       type="button"
@@ -2232,34 +2359,98 @@ export const PublishPage: React.FC = () => {
                     >
                       <span
                         className={`pi-thumb ${hasImg ? '' : 'ph'}`}
-                        style={hasImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
+                        style={hasImg && !previewing
+                          ? { backgroundImage: `url(${v.thumbnail_url})` }
+                          : undefined}
                       >
+                        {previewing ? (
+                          // Inline, in the tile it replaces — a separate modal
+                          // would hide the very grid the user is comparing
+                          // against. No autoPlay: a preview that starts making
+                          // noise on its own is a worse default than one click.
+                          <video
+                            className="pi-video"
+                            src={getResourceFileUrl(v.id, mediaToken)}
+                            controls
+                            preload="metadata"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className={`pi-mark ${marked ? 'on' : ''}`}
+                              aria-label={marked
+                                ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
+                                : t('distribution.publish.pickerMark', 'Mark to publish')}
+                              title={marked
+                                ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
+                                : t('distribution.publish.pickerMark', 'Mark to publish')}
+                              onClick={(e) => { e.stopPropagation(); void onToggleMark(v.id); }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void onToggleMark(v.id);
+                                }
+                              }}
+                            >
+                              <Bookmark size={11} strokeWidth={2.5} />
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="pi-play"
+                              aria-label={t('distribution.publish.pickerPreview', 'Preview video')}
+                              title={t('distribution.publish.pickerPreview', 'Preview video')}
+                              onClick={(e) => { e.stopPropagation(); setPreviewId(v.id); }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setPreviewId(v.id);
+                                }
+                              }}
+                            >
+                              <Play size={12} strokeWidth={2.5} />
+                            </span>
+                            <span className="pi-dur">{formatDuration(v.duration_seconds)}</span>
+                            {on && (
+                              <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
+                            )}
+                          </>
+                        )}
+                      </span>
+                      <span className="pi-name" title={v.filename}>{v.filename}</span>
+                      {/* Resolution · size · date — the line that tells two cuts
+                          of the same content apart. Em dashes where we have no
+                          value; nothing here is inferred. */}
+                      <span className="pi-meta" title={meta.join(' · ')}>
+                        {meta.map((part, idx) => (
+                          <React.Fragment key={part + String(idx)}>
+                            {idx > 0 && <span className="pi-dot" aria-hidden="true">·</span>}
+                            <span>{part}</span>
+                          </React.Fragment>
+                        ))}
+                      </span>
+                      {previewing && (
                         <span
                           role="button"
                           tabIndex={0}
-                          className={`pi-mark ${marked ? 'on' : ''}`}
-                          aria-label={marked
-                            ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
-                            : t('distribution.publish.pickerMark', 'Mark to publish')}
-                          title={marked
-                            ? t('distribution.publish.pickerUnmark', 'Unmark to publish')
-                            : t('distribution.publish.pickerMark', 'Mark to publish')}
-                          onClick={(e) => { e.stopPropagation(); void onToggleMark(v.id); }}
+                          className="pi-close-preview"
+                          onClick={(e) => { e.stopPropagation(); setPreviewId(null); }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               e.stopPropagation();
-                              void onToggleMark(v.id);
+                              setPreviewId(null);
                             }
                           }}
                         >
-                          <Bookmark size={11} strokeWidth={2.5} />
+                          {t('distribution.publish.pickerClosePreview', 'Close preview')}
                         </span>
-                        {on && (
-                          <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
-                        )}
-                      </span>
-                      <span className="pi-name" title={v.filename}>{v.filename}</span>
+                      )}
                     </button>
                   );
                 })}

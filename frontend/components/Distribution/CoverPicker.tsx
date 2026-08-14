@@ -258,6 +258,14 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
     if (startErrorStatus === 422) {
       return t('distribution.publish.coverSourceUnusable', 'Frames can only be sampled from a video file. Pick a video, or set the cover on the platform.');
     }
+    if (startErrorStatus >= 500) {
+      // A 5xx is an assertion about US, not about the user's video. Saying
+      // "that video is no longer available" here — which is what a bug once
+      // made this component do for five straight attempts on a perfectly good
+      // file — sends the user off to re-upload something that was never
+      // broken. Name the side that actually failed.
+      return t('distribution.publish.coverServerError', 'Something went wrong on our side while starting the sampling. Try again — if it keeps failing, the video itself is fine.');
+    }
     if (startErrorStatus != null) {
       return t('distribution.publish.coverStartFailed', 'The request to sample frames did not go through. Check your connection and try again.');
     }

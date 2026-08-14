@@ -18,6 +18,7 @@ from app.core.config import settings
 # already binds Depends(get_current_user) internally) — imported so tests can
 # target the same dependency callable via ``dr.get_current_user`` overrides.
 from app.core.deps import CurrentUserDep, get_current_user  # noqa: F401
+from app.db.scope import Scope, UnscopedQueryError, request_scope
 from app.db.session import write_scope
 from app.models import DistributionOauthStates
 from app.repositories.publish_tasks_repository import (
@@ -1120,10 +1121,32 @@ async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
 
     try:
         # IDOR：ResourcesRepository 的读走租户 scope 选择点，别人的 resource
-        # 在这里本来就查不到 —— 与 canvas derive 系服务同一个seam。
-        source = await load_source_video(ResourcesRepository(), body.resource_id)
+        # 在这里本来就查不到 —— 与 canvas derive 系服务同一个 seam。
+        #
+        # ⚠️ 那个 seam 只有在**有 ambient scope 时**才成立，而 scope 不会凭空
+        # 出现：它由入口边界建立（HTTP 侧是 ScopedRequestDep / request_scope，
+        # workflow 侧是 request_scope）。本路由整个没有 ScopedRequestDep，所以
+        # 这两个封面端点此前是在"零 scope"下读 resources 的 —— 选择点 fail-closed
+        # 抛 UnscopedQueryError，repo 把它吞成 None，load_source_video 判成
+        # "source resource not found"，用户看到的是"该视频已不可用"。视频一直
+        # 好好的。修法是补上入口边界，而不是去松 IDOR。
+        #
+        # 用显式 request_scope 而不是给端点挂 ScopedRequestDep：user 已由
+        # CurrentUserDep 解出来了，再挂一个走 get_auth 的依赖等于同一个 JWT 解
+        # 两次，还会让只 override get_current_user 的既有测试拿不到身份。同款
+        # 内联写法见 media_fetch_helpers.py 与 resources_crud_router.py。
+        async with request_scope(Scope(user_id=user["id"])):
+            source = await load_source_video(ResourcesRepository(), body.resource_id)
     except CoverFrameError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except UnscopedQueryError as e:
+        # 到这里说明上面的 scope 边界被改坏了。500 而不是 404：源不存在是数据
+        # 事实，缺 scope 是服务端缺陷，两者必须给用户不同的回显（前端据 status
+        # 分别显示 coverSourceMissing / coverServerError）。
+        logger.error("cover extract ran without a tenant scope: %s", e)
+        raise HTTPException(
+            status_code=500, detail="cover extraction is misconfigured"
+        ) from e
 
     wf_id = str(_uuid.uuid4())
     await get_task_manager().create(
@@ -1190,11 +1213,21 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
         await _authorize_task(task_id, user)
 
     try:
-        pair = await derive_cover_pair(
-            frame_resource_id=body.frame_resource_id, user_id=user["id"]
-        )
+        # 与 /covers/extract 同一个入口边界。这一步同样读 + 写 resources
+        # （load_source_image → persist_derived_image），所以缺 scope 时的表现
+        # 与抽帧完全一致：404 "帧不存在"。用户没先撞上它，只是因为抽帧失败得更
+        # 早、他根本走不到选帧这一步。
+        async with request_scope(Scope(user_id=user["id"])):
+            pair = await derive_cover_pair(
+                frame_resource_id=body.frame_resource_id, user_id=user["id"]
+            )
     except CoverFrameError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except UnscopedQueryError as e:
+        logger.error("cover select ran without a tenant scope: %s", e)
+        raise HTTPException(
+            status_code=500, detail="cover selection is misconfigured"
+        ) from e
 
     if task_id is not None:
         await publish_repo.set_task_covers(

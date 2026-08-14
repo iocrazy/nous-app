@@ -88,16 +88,25 @@ async def extract_cover_frames_step(
 
     全程 heartbeat：这一步里最长的是 materialize 的下载，期间没有任何进度
     信号，stall detector 会把安静的任务判成 lost。
+
+    ⚠️ 必须自建 ambient scope。这一步既读 resources（源视频）又写 resources
+    （每个候选帧一行），而 workflow 跑在 DBOS 的执行任务里 —— HTTP 请求的
+    scope 早就随响应结束被 reset 了，contextvar 不会跨过来。没有它，选择点
+    fail-closed，抽帧在 workflow 侧同样失败。用 USER scope 而非 SYSTEM：候选
+    帧本来就归发起人所有（``persist_derived_image`` 的既有口径），比 SYSTEM
+    更紧。同款写法见 upload_postprocess / caption_asset / soda_download。
     """
+    from app.db.scope import Scope, request_scope
     from app.services.distribution.cover_frames import extract_cover_candidates
     from app.services.workflow_heartbeat import async_heartbeat_loop
 
-    async with async_heartbeat_loop(workflow_id=workflow_id):
-        result = await extract_cover_candidates(
-            source_resource_id=source_resource_id,
-            user_id=user_id,
-            num_frames=num_frames,
-        )
+    async with request_scope(Scope(user_id=user_id)):
+        async with async_heartbeat_loop(workflow_id=workflow_id):
+            result = await extract_cover_candidates(
+                source_resource_id=source_resource_id,
+                user_id=user_id,
+                num_frames=num_frames,
+            )
     logger.info(
         f"[cover_frames] resource={source_resource_id} "
         f"extracted={len(result.candidates)} duration={result.duration_seconds}"

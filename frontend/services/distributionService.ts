@@ -472,8 +472,25 @@ interface ResourceItemRow {
     thumbnail_path?: unknown;
     mime_type?: unknown;
     gallery_count?: unknown;
+    // The backend projects the WHOLE resources row (`row_to_json(r.*)`), so
+    // these have always been on the wire — the picker just never read them.
+    // `unknown` here (not `number`) because this is a raw HTTP response body:
+    // shapes get asserted at the mapper, never assumed at the boundary.
+    duration_seconds?: unknown;
+    resolution?: unknown;
+    file_size_bytes?: unknown;
+    created_at?: unknown;
   } | null;
 }
+
+/** Narrow a JSON number field, rejecting the shapes that would render as
+ *  nonsense. Returns `null` (→ an em dash in the UI) rather than a guess. */
+const num = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null;
+
+/** Narrow a JSON string field, treating `''` as absent. */
+const str = (v: unknown): string | null =>
+  typeof v === 'string' && v !== '' ? v : null;
 
 export const listLibraryMedia = async (
   scopeId: string,
@@ -514,6 +531,13 @@ export const listLibraryMedia = async (
           : null,
         mime_type: mimeType != null ? String(mimeType) : null,
         gallery_count: typeof galleryCount === 'number' ? galleryCount : undefined,
+        duration_seconds: num(r.resource?.duration_seconds),
+        resolution: str(r.resource?.resolution),
+        file_size_bytes: num(r.resource?.file_size_bytes),
+        // The resource's own created_at, not the top-level one — that is the
+        // `resource_items` join row's timestamp (when it was filed into this
+        // folder), which is not what "when was this video made" means.
+        created_at: str(r.resource?.created_at),
       };
     });
   } catch (err) {
