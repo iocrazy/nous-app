@@ -89,7 +89,7 @@ The import runs in the background service worker, so closing the popup does not 
 
 No automated test harness exists for this vanilla-JS extension (no build step) — verify with `node --check <file>.js` on every touched file, then walk through this checklist against a real backend:
 
-- [ ] `chrome://extensions` → reload the unpacked extension, confirm version shows `1.3.0` in the popup header
+- [ ] `chrome://extensions` → reload the unpacked extension, confirm the popup header version matches `chrome-extension/manifest.json`'s `version` field — the `release/chrome-extension/` build also appends a `(<commit>)` suffix, while loading the `chrome-extension/` source folder directly does not
 - [ ] Settings: enter API URL / API Key / Web URL, Save, reopen popup → all three persist
 - [ ] Right-click an image on any page → **Analyze Prompt (nous)** appears in the context menu and only for images (not on plain page right-click)
 - [ ] Click it → panel opens top-right, dark card, progress bar animates through "Uploading image…" → "Starting analysis…" → "Analyzing image…"
