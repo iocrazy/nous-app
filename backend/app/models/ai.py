@@ -361,7 +361,8 @@ class MediahubModels(Base):
             name="mediahub_models_pricing_type_check",
         ),
         CheckConstraint(
-            "last_test_status IS NULL OR last_test_status IN ('ok', 'fail')",
+            "last_test_status IS NULL OR last_test_status IN "
+            "('ok', 'fail', 'not_probed')",
             name="mediahub_models_last_test_status_check",
         ),
         CheckConstraint(
@@ -407,6 +408,9 @@ class MediahubModels(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     # Last connectivity-test result (persisted by the admin "Test" probe so the
     # status dot + last-tested time survive navigation). See migration 317.
+    # Three values (migration 428): ok / fail / not_probed. ``not_probed`` means
+    # the probe has no protocol for this model's type and checked nothing — it
+    # is not a fault, and it is distinct from NULL ("never probed at all").
     last_test_status: Mapped[Optional[str]] = mapped_column(Text)
     last_test_detail: Mapped[Optional[str]] = mapped_column(Text)
     last_tested_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))

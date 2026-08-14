@@ -27,8 +27,15 @@ interface NousModel {
   sort_order: number
   created_at: string
   updated_at: string
-  // Persisted connectivity-test result (survives navigation). NULL = untested.
-  last_test_status?: 'ok' | 'fail' | null
+  // Persisted connectivity-test result (survives navigation).
+  //   ok         reachable
+  //   fail       probed and failed
+  //   not_probed the backend probe has no protocol for this model TYPE
+  //              (image / video / tts) and checked nothing — NOT a fault
+  //   null       never probed
+  // Before migration 428 the unprobeable types were recorded as `fail`, which
+  // is why this page carried three permanent red lights for healthy models.
+  last_test_status?: 'ok' | 'fail' | 'not_probed' | null
   last_test_detail?: string | null
   last_tested_at?: string | null
 }
@@ -87,33 +94,59 @@ function timeAgo(iso?: string | null): string {
 }
 
 // Provider health = aggregate of its models' persisted results: any fail → red,
-// else any ok → green, else gray (untested).
-function aggregateStatus(models: NousModel[]): 'ok' | 'fail' | undefined {
+// else any ok → green, else any not_probed → neutral, else gray (untested).
+//
+// `not_probed` ranks below `ok` on purpose: a provider with one working LLM and
+// one unprobeable image model is reachable, and its dot should say so.
+function aggregateStatus(
+  models: NousModel[],
+): 'ok' | 'fail' | 'not_probed' | undefined {
   if (models.some((m) => m.last_test_status === 'fail')) return 'fail'
   if (models.some((m) => m.last_test_status === 'ok')) return 'ok'
+  if (models.some((m) => m.last_test_status === 'not_probed')) return 'not_probed'
   return undefined
 }
 
 // Failing models with their persisted probe reason (e.g. "HTTP 402: ..."),
 // so the card can SHOW why a dot is red instead of hiding it in a hover.
+//
+// `not_probed` is NOT in here, and that is the point of this change: it is not
+// a failure, so it gets no red line and does not drag the provider dot red.
 function failingModels(models: NousModel[]): NousModel[] {
   return models.filter((m) => m.last_test_status === 'fail')
 }
 
 // Connectivity dot from the LAST persisted Test: green = reachable, red =
-// failed, gray = untested. Tooltip carries the detail + when it was tested.
+// failed, mid-gray = not probed, pale = never tested. Tooltip carries the
+// detail + when it was tested.
+//
+// `not_probed` gets its own neutral shade rather than reusing the pale
+// never-tested one: "we don't check this type" and "nobody has checked yet" are
+// different facts about the same model, and only the first is permanent.
+// Neither is red — a probe that cannot speak the protocol has no verdict to
+// give, and rendering one as a fault is what this whole change removes.
+const DOT_COLORS: Record<string, string> = {
+  ok: '#00b42a',
+  fail: '#f53f3f',
+  not_probed: 'var(--color-text-4)',
+}
+const DOT_LABELS: Record<string, string> = {
+  ok: 'Reachable',
+  fail: 'Failed',
+  not_probed: 'Not probed',
+}
+
 function StatusDot({
   status,
   detail,
   at,
 }: {
-  status?: 'ok' | 'fail' | null
+  status?: 'ok' | 'fail' | 'not_probed' | null
   detail?: string | null
   at?: string | null
 }) {
-  const color =
-    status === 'ok' ? '#00b42a' : status === 'fail' ? '#f53f3f' : 'var(--color-fill-3)'
-  const label = status === 'ok' ? 'Reachable' : status === 'fail' ? 'Failed' : 'Not tested'
+  const color = (status && DOT_COLORS[status]) || 'var(--color-fill-3)'
+  const label = (status && DOT_LABELS[status]) || 'Not tested'
   const ago = timeAgo(at)
   const title = [label, detail || undefined, ago ? `tested ${ago}` : undefined]
     .filter(Boolean)
@@ -255,17 +288,30 @@ export function AIModelsPage() {
     setModalVisible(true)
   }
 
-  // Probe one model and persist + reflect the result. Returns ok. Shared by
-  // the per-model Test and the provider "Test all" button.
-  const runModelTest = async (m: NousModel): Promise<boolean> => {
+  // Probe one model and persist + reflect the result. Returns the three-way
+  // outcome — a boolean would force every caller to fold `not_probed` back into
+  // "failed", which is the bug. Shared by the per-model Test and the provider
+  // "Test all" button.
+  const runModelTest = async (
+    m: NousModel,
+  ): Promise<'ok' | 'fail' | 'not_probed'> => {
     try {
       const res = await fetch(`${apiBase}/api/v1/admin/mediahub-models/${m.id}/test`, {
         method: 'POST',
         headers,
       })
       const data = await res.json()
-      const status: 'ok' | 'fail' = data.ok ? 'ok' : 'fail'
-      const detail = data.ok ? data.detail || 'ok' : data.error || 'failed'
+      // Mirror the backend's three-way mapping, not `ok ? green : red`. The
+      // backend persisted `not_probed` for this row; painting it red here would
+      // undo that on the very click meant to check it.
+      const status: 'ok' | 'fail' | 'not_probed' = data.ok
+        ? 'ok'
+        : data.not_probed
+          ? 'not_probed'
+          : 'fail'
+      const detail = data.ok || data.not_probed
+        ? data.detail || 'ok'
+        : data.error || 'failed'
       // The backend persisted this; mirror it into the row so the dot + "tested
       // Xm ago" update instantly (and stay correct after the next list fetch).
       setModels((prev) =>
@@ -280,7 +326,7 @@ export function AIModelsPage() {
             : x,
         ),
       )
-      return data.ok
+      return status
     } catch {
       setModels((prev) =>
         prev.map((x) =>
@@ -289,7 +335,9 @@ export function AIModelsPage() {
             : x,
         ),
       )
-      return false
+      // A request that never reached the backend IS a failure — of this page's
+      // call, which is a real thing that went wrong, unlike `not_probed`.
+      return 'fail'
     }
   }
 
@@ -316,9 +364,26 @@ export function AIModelsPage() {
           }),
         ),
       )
-      const ok = results.filter(Boolean).length
-      if (ok === total) Message.success(`${g.provider}: all ${total} models reachable`)
-      else Message.warning(`${g.provider}: ${ok}/${total} models reachable`)
+      // Unprobeable models are excluded from the denominator, not counted as
+      // losses: "2/3 models reachable" on a card whose third model was never
+      // checked is a warning about nothing, and the fastest way to teach an
+      // admin to ignore this button.
+      const ok = results.filter((r) => r === 'ok').length
+      const skipped = results.filter((r) => r === 'not_probed').length
+      const checked = total - skipped
+      const suffix = skipped ? ` (${skipped} not probed)` : ''
+      if (checked === 0) {
+        // Every model on the card was unprobeable, so this run verified
+        // NOTHING. `ok === checked` would be 0 === 0 here and paint a green
+        // "all 0 models reachable" — an affirmative reachability claim on top
+        // of zero evidence, which is the same dishonest-signal bug as the red
+        // lights this change removes, just inverted. Neutral, not success.
+        Message.info(`${g.provider}: nothing to probe (${skipped} not probed)`)
+      } else if (ok === checked) {
+        Message.success(`${g.provider}: all ${checked} models reachable${suffix}`)
+      } else {
+        Message.warning(`${g.provider}: ${ok}/${checked} models reachable${suffix}`)
+      }
     } finally {
       setTestingProvider(null)
       setTestProgress((p) => {
@@ -550,9 +615,13 @@ export function AIModelsPage() {
   const handleTestModel = async (m: NousModel) => {
     setTestingId(m.id)
     try {
-      const ok = await runModelTest(m)
-      if (ok) Message.success(`${m.actual_model}: OK`)
-      else Message.error(`${m.actual_model}: connectivity test failed`)
+      const outcome = await runModelTest(m)
+      if (outcome === 'ok') Message.success(`${m.actual_model}: OK`)
+      // Says what happened instead of claiming a failure: nothing was checked,
+      // and the reason is the model's type, not the model.
+      else if (outcome === 'not_probed') {
+        Message.info(`${m.actual_model}: not probed — no ${m.type} probe exists`)
+      } else Message.error(`${m.actual_model}: connectivity test failed`)
     } finally {
       setTestingId(null)
     }

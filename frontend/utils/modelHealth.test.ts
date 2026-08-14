@@ -66,6 +66,19 @@ describe('buildModelHealth', () => {
     },
   );
 
+  it('treats not_probed as no claim at all, not as a failure', () => {
+    // Backend migration 428: the probe now records "I have no protocol for this
+    // type" instead of a guaranteed-red `fail`. The value reaches this public
+    // payload, so it needs a rule here too — and the rule is the same one that
+    // covers never-probed rows: no check happened, so there is nothing to say.
+    // The `type` below is deliberately a probeable one: this must hold on the
+    // status alone, without leaning on the PROBED_TYPES filter above it.
+    const map = buildModelHealth([
+      model({ name: 'a', type: 'llm', last_test_status: 'not_probed' }),
+    ]);
+    expect(map).toEqual({});
+  });
+
   it('carries the failure reason code so a picker can say WHY', () => {
     // #1838 could only say "health check failed". The two rows below are the
     // real 2026-08-14 pair, and they ask the user for opposite things: wait out

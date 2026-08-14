@@ -188,3 +188,81 @@ async def test_test_endpoint_persists_failure_detail():
     repo.record_test_result.assert_awaited_once_with(
         "7", "fail", "HTTP 401: bad key", "auth"
     )
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_persists_not_probed_not_fail():
+    """Clicking Test on an image/video model must not repaint it red.
+
+    The hourly poll and this endpoint are two writers of the same column, and
+    the whole point of ``not_probed`` is lost if one of them still writes
+    ``fail`` — an admin pressing "Test" on a provider card would undo the fix
+    for every unprobeable model on it. The flag is echoed back too, so the page
+    can show the neutral badge without waiting for a list refetch.
+    """
+    from app.api.admin.mediahub_model_router import test_mediahub_model
+
+    row = {"id": "11", "type": "image", "actual_model": "jimeng-4.0"}
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=[row])
+    repo.record_test_result = AsyncMock(
+        return_value={"last_tested_at": "2026-08-14T03:00:00+00:00"}
+    )
+
+    with patch(
+        "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.api.admin.mediahub_model_router._probe_mediahub_model",
+            new=AsyncMock(
+                return_value={
+                    "ok": False,
+                    "not_probed": True,
+                    "detail": "no protocol probe for type=image",
+                    "error": None,
+                    "dims": None,
+                    "code": None,
+                }
+            ),
+        ):
+            resp = await test_mediahub_model("11", MagicMock())
+
+    assert resp.ok is False
+    assert resp.not_probed is True
+    repo.record_test_result.assert_awaited_once_with(
+        "11", "not_probed", "no protocol probe for type=image", None
+    )
+
+
+@pytest.mark.asyncio
+async def test_test_endpoint_defaults_not_probed_false():
+    """An ordinary probe result carries no such flag; the response must still
+    answer the question, with False rather than a missing key."""
+    from app.api.admin.mediahub_model_router import test_mediahub_model
+
+    repo = MagicMock()
+    repo.list_all = AsyncMock(
+        return_value=[{"id": "3", "type": "llm", "actual_model": "deepseek-chat"}]
+    )
+    repo.record_test_result = AsyncMock(return_value={})
+
+    with patch(
+        "app.api.admin.mediahub_model_router.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.api.admin.mediahub_model_router._probe_mediahub_model",
+            new=AsyncMock(
+                return_value={
+                    "ok": True,
+                    "detail": "chat ok",
+                    "error": None,
+                    "dims": None,
+                    "code": None,
+                }
+            ),
+        ):
+            resp = await test_mediahub_model("3", MagicMock())
+
+    assert resp.not_probed is False

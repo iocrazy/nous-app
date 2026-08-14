@@ -49,7 +49,7 @@ async def test_poll_probes_only_enabled_and_persists():
         ):
             summary = await probe_mediahub_models_step()
 
-    assert summary == {"total": 2, "ok": 1, "failed": 1}
+    assert summary == {"total": 2, "ok": 1, "failed": 1, "not_probed": 0}
     # Disabled row (id=3) never probed/persisted.
     persisted = {c.args[0] for c in repo.record_test_result.await_args_list}
     assert persisted == {"1", "2"}
@@ -186,5 +186,119 @@ async def test_poll_no_models_is_noop():
     ):
         summary = await probe_mediahub_models_step()
 
-    assert summary == {"total": 0, "ok": 0, "failed": 0}
+    assert summary == {"total": 0, "ok": 0, "failed": 0, "not_probed": 0}
     repo.record_test_result.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_poll_counts_not_probed_separately_and_stays_quiet():
+    """A type the probe can't judge is neither a success nor a failure.
+
+    Counting it as failed is what put 3 permanent red lights on the admin page
+    (2026-08-14) and logged a WARNING per model per hour for models that were
+    working. It gets its own bucket, it is persisted as ``not_probed`` so the
+    row stops reading as broken, and it logs nothing: killing that hourly noise
+    is half the point of this change.
+    """
+    from app.workflows.scheduled_health import probe_mediahub_models_step
+
+    rows = [
+        {
+            "id": "1",
+            "name": "mediahub-deepseek-v4-pro",
+            "is_enabled": True,
+            "type": "llm",
+            "actual_model": "good",
+        },
+        {
+            "id": "2",
+            "name": "jimeng-cli-image",
+            "is_enabled": True,
+            "type": "image",
+            "actual_model": "jimeng-4.0",
+        },
+        {
+            "id": "3",
+            "name": "mediahub-doubao-seed-2-0-pro",
+            "is_enabled": True,
+            "type": "llm",
+            "actual_model": "bad",
+        },
+    ]
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=rows)
+    repo.record_test_result = AsyncMock(return_value={})
+
+    async def _fake_probe(row):
+        if row["type"] == "image":
+            return {
+                "ok": False,
+                "not_probed": True,
+                "detail": "no protocol probe for type=image",
+                "error": None,
+                "dims": None,
+                "code": None,
+            }
+        if row["actual_model"] == "good":
+            return {
+                "ok": True,
+                "detail": "chat ok",
+                "error": None,
+                "dims": None,
+                "code": None,
+            }
+        return {
+            "ok": False,
+            "detail": "",
+            "error": "HTTP 429: SetLimitExceeded",
+            "dims": None,
+            "code": "rate_limit",
+        }
+
+    logger = MagicMock()
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            new=AsyncMock(side_effect=_fake_probe),
+        ):
+            with patch("app.workflows.scheduled_health.logger", logger):
+                summary = await probe_mediahub_models_step()
+
+    assert summary == {"total": 3, "ok": 1, "failed": 1, "not_probed": 1}
+    repo.record_test_result.assert_any_await(
+        "2", "not_probed", "no protocol probe for type=image", None
+    )
+    # The genuinely failing model still warns — the positive control that the
+    # noise reduction did not swallow real red lights along with the fake ones.
+    assert logger.warning.call_count == 1
+    message = logger.warning.call_args[0][0]
+    assert "mediahub-doubao-seed-2-0-pro" in message
+    assert "jimeng-cli-image" not in message
+
+
+@pytest.mark.asyncio
+async def test_poll_summary_log_distinguishes_all_three_buckets():
+    """The hourly summary line must not report "1/2 unreachable" for a run whose
+    only non-green row was one nobody ever checked."""
+    import inspect
+
+    from app.workflows.scheduled_health import mediahub_model_health_workflow
+
+    # Unwrap past @DBOS.scheduled + @DBOS.workflow: the decorators refuse to run
+    # outside an initialized DBOS, and what is under test here is the sentence
+    # the workflow body logs, not DBOS's dispatch.
+    body = inspect.unwrap(mediahub_model_health_workflow)
+    logger = MagicMock()
+    with patch(
+        "app.workflows.scheduled_health.probe_mediahub_models_step",
+        new=AsyncMock(return_value={"total": 4, "ok": 3, "failed": 0, "not_probed": 1}),
+    ):
+        with patch("app.workflows.scheduled_health.logger", logger):
+            await body(None, None)
+
+    logger.warning.assert_not_called()
+    message = logger.info.call_args[0][0]
+    assert "3" in message and "not_probed=1" in message

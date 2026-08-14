@@ -642,14 +642,17 @@ export interface NousModelPublic {
   /**
    * Last hourly connectivity probe (backend scheduled_health). `null` /
    * absent means never probed — which is neither healthy nor broken, so the
-   * UI must say nothing rather than assume.
+   * UI must say nothing rather than assume. `not_probed` (backend migration
+   * 428) is the same non-claim for a different reason: the probe has no
+   * protocol for that model TYPE and checked nothing. Neither is a failure,
+   * and `buildModelHealth` keeps both out of the map.
    *
    * NOTE: the failure REASON TEXT (`last_test_detail`) is deliberately not part
    * of this public payload — probe errors routinely embed the upstream host and
    * private base_url. Users get the status plus the classified code below;
    * admin gets the raw text.
    */
-  last_test_status?: 'ok' | 'fail' | null;
+  last_test_status?: 'ok' | 'fail' | 'not_probed' | null;
   last_tested_at?: string | null;
   /**
    * Closed-enum classification of the last FAILED probe (migration 427):

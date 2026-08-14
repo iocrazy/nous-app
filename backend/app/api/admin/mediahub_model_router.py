@@ -27,6 +27,9 @@ from app.schemas.mediahub_model import (
 from app.services.ai.mediahub_model_health import (
     probe_mediahub_model as _probe_mediahub_model,
 )
+from app.services.ai.mediahub_model_health import (
+    probe_result_status as _probe_result_status,
+)
 from app.services.ai.providers.ai_provider import AIProviderFactory
 
 router = APIRouter()
@@ -207,6 +210,9 @@ async def test_mediahub_model(model_id: str, auth: AdminAuthDep):
 
     The result is persisted on the row (last_test_status / detail / tested_at)
     so the admin's status dot + "last tested" hint survive navigation.
+
+    Types the probe has no protocol for (image / video / tts) are persisted as
+    ``not_probed`` rather than ``fail`` — see ``PROBEABLE_TYPES``.
     """
     repo = get_mediahub_model_repository()
     rows = await repo.list_all()
@@ -215,7 +221,10 @@ async def test_mediahub_model(model_id: str, auth: AdminAuthDep):
         raise HTTPException(status_code=404, detail="Model not found")
     result = await _probe_mediahub_model(row)
 
-    status = "ok" if result.get("ok") else "fail"
+    # Shared with the hourly poll: two hand-written copies of this mapping would
+    # drift, and a manual Test that wrote ``fail`` where the poll writes
+    # ``not_probed`` would repaint every unprobeable model red on one click.
+    status = _probe_result_status(result)
     detail = result.get("detail") or (result.get("error") or "")
     saved = await repo.record_test_result(
         model_id, status, detail[:200], result.get("code")
