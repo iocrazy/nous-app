@@ -189,6 +189,8 @@
       "editEnd": "仅修改结束日期",
       "empty": "–",
       "clear": "清除",
+      "clearStart": "清除开始",
+      "clearEnd": "清除结束",
       "weekdaySun": "日",
       "weekdayMon": "一",
       "weekdayTue": "二",

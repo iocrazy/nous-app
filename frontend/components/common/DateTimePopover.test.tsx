@@ -78,6 +78,37 @@ describe('DateTimePopover — range mode', () => {
     expect(pop.style.position).toBe('fixed');
   });
 
+  /**
+   * CONTRACT — `role="dialog"` on the portal root is load-bearing, not decor.
+   *
+   * `components/resources/filter/FilterChip.tsx` closes its dropdown on any
+   * mousedown outside its own subtree, and this popover portals to
+   * `document.body`, so every click inside it lands "outside". FilterChip's
+   * `inFloatingLayer` guard is what stops that from unmounting the dropdown
+   * mid-pick, and it identifies the layer above it BY THIS ATTRIBUTE.
+   *
+   * Remove or rename it and the Resources "Date added → Custom range" filter
+   * breaks: the dropdown closes the instant the user clicks the first calendar
+   * day, with nothing failing anywhere near this file. Change it only together
+   * with FilterChip's guard.
+   */
+  it('CONTRACT: the portal root carries role="dialog" (FilterChip\'s outside-click guard keys off it)', () => {
+    render(
+      <DateTimePopover
+        anchorEl={anchor}
+        start={null}
+        end={null}
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const pop = screen.getByTestId('date-time-popover');
+    expect(pop).toHaveAttribute('role', 'dialog');
+    // The guard walks up with `closest()`, so the attribute has to sit on the
+    // portal ROOT — a descendant carrying it would not cover clicks on days.
+    expect(pop.closest('[role="dialog"]')).toBe(pop);
+  });
+
   it('shows the month derived from `start` on open, with the committed range read out', () => {
     render(
       <DateTimePopover
@@ -477,20 +508,61 @@ describe('DateTimePopover — range segment editing', () => {
     expect(onChange).toHaveBeenLastCalledWith('2026-07-18', '2026-07-25');
   });
 
-  it('Clear disarms as well as emptying both ends', () => {
+  // Clear follows the arming, because a half-bounded range ("after Aug 1, no
+  // upper bound") has to stay reachable: the two native <input type="date">
+  // fields this control replaced could each be emptied on their own, and a
+  // single all-or-nothing Clear would have quietly taken that away.
+  it('Clear with END armed empties only the end, leaving start untouched', () => {
     const onChange = renderRange('2026-07-05', '2026-07-10');
     fireEvent.click(screen.getByTestId('date-range-end-cell'));
     expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByTestId('date-time-clear'));
+    expect(onChange).toHaveBeenLastCalledWith('2026-07-05', null);
+    // Disarms, exactly like a segment day-click does.
+    expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('date-range-start-cell')).toHaveTextContent('2026-07-05');
+    expect(screen.getByTestId('date-range-end-cell')).toHaveTextContent('–');
+  });
+
+  it('Clear with START armed empties only the start, leaving end untouched', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+
+    fireEvent.click(screen.getByTestId('date-time-clear'));
+    expect(onChange).toHaveBeenLastCalledWith(null, '2026-07-10');
+    expect(screen.getByTestId('date-range-start-cell')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('date-range-end-cell')).toHaveTextContent('2026-07-10');
+  });
+
+  it('Clear with NOTHING armed still empties both ends and returns to the two-click flow', () => {
+    const onChange = renderRange('2026-07-05', '2026-07-10');
+
+    fireEvent.click(screen.getByTestId('date-time-clear'));
     expect(onChange).toHaveBeenLastCalledWith(null, null);
     expect(screen.getByTestId('date-range-end-cell')).toHaveAttribute('aria-pressed', 'false');
 
-    // And a cleared, un-armed popover is back on the two-click flow.
     fireEvent.click(screen.getByRole('button', { name: '2026-07-18' }));
     expect(onChange).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '2026-07-25' }));
     expect(onChange).toHaveBeenLastCalledWith('2026-07-18', '2026-07-25');
+  });
+
+  it('the Clear label names the end it would empty', () => {
+    renderRange('2026-07-05', '2026-07-10');
+    const clear = screen.getByTestId('date-time-clear');
+    // A button that says plain "Clear" while it would only empty one end is a
+    // button that lies about what it is about to do.
+    expect(clear).toHaveTextContent('Clear');
+
+    fireEvent.click(screen.getByTestId('date-range-start-cell'));
+    expect(clear).toHaveTextContent('Clear start');
+
+    fireEvent.click(screen.getByTestId('date-range-start-cell')); // disarm
+    expect(clear).toHaveTextContent('Clear');
+
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    expect(clear).toHaveTextContent('Clear end');
   });
 
   it('still honours the minAt/maxAt window while a segment is armed', () => {

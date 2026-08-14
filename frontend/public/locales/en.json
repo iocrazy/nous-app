@@ -189,6 +189,8 @@
       "editEnd": "Edit end date only",
       "empty": "–",
       "clear": "Clear",
+      "clearStart": "Clear start",
+      "clearEnd": "Clear end",
       "weekdaySun": "Su",
       "weekdayMon": "Mo",
       "weekdayTue": "Tu",

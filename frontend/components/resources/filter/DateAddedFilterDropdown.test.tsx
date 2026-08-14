@@ -117,6 +117,25 @@ describe('DateAddedFilterDropdown — custom range via DateTimePopover', () => {
     });
   });
 
+  // The half-bounded filter the two native inputs used to allow ("added after
+  // Aug 4, no upper bound") stays reachable: arm the end, then Clear.
+  it('clears ONE bound via the armed segment, keeping the other', () => {
+    const { onChange } = renderBare({
+      preset: 'custom',
+      customAfter: '2026-08-04',
+      customBefore: '2026-08-11',
+    });
+    fireEvent.click(screen.getByTestId('filter-date-before'));
+    fireEvent.click(screen.getByTestId('date-range-end-cell'));
+    fireEvent.click(screen.getByTestId('date-time-clear'));
+
+    expect(onChange).toHaveBeenCalledWith({
+      preset: 'custom',
+      customAfter: '2026-08-04',
+      customBefore: null,
+    });
+  });
+
   it('shows the picked bounds on the triggers, and an en-dash when unset', () => {
     renderBare({ preset: 'custom', customAfter: '2026-08-04', customBefore: null });
     expect(screen.getByTestId('filter-date-after').textContent).toBe('2026-08-04');
