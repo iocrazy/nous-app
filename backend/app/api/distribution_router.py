@@ -49,6 +49,8 @@ from app.schemas.distribution_cover import (
 )
 from app.schemas.distribution_publish import (
     PublishTaskCreate,
+    PublishSmsStateResponse,
+    PublishSmsVerdictResponse,
     PublishTaskListResponse,
     PublishTaskOut,
     ShareSchemaResponse,
@@ -76,6 +78,7 @@ from app.workflows.publish_distribution import (
     publish_distribution_workflow,
     visibility_to_private_status,
 )
+from app.services.distribution.publish_sms_watch import PUBLISH_SMS_KEY
 from app.workflows.session_login import TASK_TYPE as SESSION_LOGIN_TASK_TYPE
 from app.workflows.session_login import session_login_workflow
 
@@ -1028,6 +1031,127 @@ async def get_task(task_id: int, user: CurrentUserDep):
     task = await _authorize_task(task_id, user)
     accounts = await publish_repo.get_task_accounts(task_id)
     return _task_out(task, accounts)
+
+
+async def _publish_sms_state(task: dict) -> dict:
+    """Read the ``publish_sms`` block the watcher mirrors into task_tracking.
+
+    Route-C rule 1: ``task_tracking`` is the UI's only source, so this reads
+    there and never at ``dbos.workflow_status``. The block is a *business*
+    decoration written by ``publish_sms_watch`` — no phase column is involved
+    on either the write or the read side.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    wf_id = task.get("dbos_workflow_id")
+    if not wf_id:
+        return {"phase": None, "sms": {}}
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == str(wf_id))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        # Read off the ORM object inside the session and via ``metadata_``: the
+        # column is mapped under that name because the ORM reserves
+        # ``metadata``, and a ``.mappings()`` lookup by the wrong one silently
+        # returns None — which here would read as "nothing is waiting" forever.
+        if row is None:
+            return {"phase": None, "sms": {}}
+        meta = row.metadata_ or {}
+        return {"phase": row.phase, "sms": meta.get(PUBLISH_SMS_KEY) or {}}
+
+
+@router.get(
+    "/tasks/{task_id}/sms",
+    response_model=PublishSmsStateResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def get_publish_sms_state(task_id: int, user: CurrentUserDep):
+    """Is this publish parked on a verification code right now?
+
+    Polled by the UI while a batch is running. It is the only way the user ever
+    learns the platform interrupted their publish to ask for a code — the
+    publish itself is one blocking call inside a workflow step, so nothing on
+    that path can report it (``publish_sms_watch`` explains the whole shape).
+
+    ``waiting`` is narrow: it means a publish is stopped on an await *now*, not
+    that a code field was spotted somewhere. Widening it would put an input box
+    in front of a user nobody is waiting on — the same class of lie as telling
+    someone a code was sent when nothing asked for one.
+    """
+    task = await _authorize_task(task_id, user)
+    state = await _publish_sms_state(task)
+    sms = state["sms"]
+    return {
+        "waiting": bool(sms.get("waiting")),
+        "account_id": sms.get("account_id"),
+        "platform": sms.get("platform"),
+        "attempts_left": int(sms.get("attempts_left") or 0),
+        "max_attempts": int(sms.get("max_attempts") or 0),
+        "seconds_remaining": float(sms.get("seconds_remaining") or 0.0),
+        "outcome": sms.get("outcome"),
+        "message": sms.get("message") or "",
+    }
+
+
+@router.post(
+    "/tasks/{task_id}/sms",
+    response_model=PublishSmsVerdictResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def submit_publish_sms(
+    task_id: int, body: SessionSmsRequest, user: CurrentUserDep
+):
+    """Hand an SMS verification code to the publish that is waiting for one.
+
+    Goes straight to nous-browser rather than through the workflow, for the
+    same reason ``submit_session_login_sms`` does: the code is only meaningful
+    to that one live browser context, and the user gets the platform's verdict
+    ("code rejected") in *this* response instead of having to watch a metadata
+    field flip. The watcher picks the resulting state change up on its next
+    tick either way.
+
+    The one structural difference from login is where the id comes from. Login
+    gets a ``login_session_id`` back from ``/start``; a publish never returns
+    anything until it is over, so the backend minted the ``correlation_id``
+    itself and the watcher wrote it here. Reading it back out of task_tracking
+    (rather than taking it from the client) is also what keeps one user's code
+    from being addressable to another user's publish — the id never leaves the
+    server.
+
+    A refused code is **200 with ``outcome: "rejected"``**, not a 4xx: it is a
+    verdict, and it carries ``retryable`` so a mistyped digit costs a retype
+    instead of the post.
+    """
+    from app.services.distribution.browser_client import BrowserClient
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES
+
+    task = await _authorize_task(task_id, user)
+    state = await _publish_sms_state(task)
+    if state["phase"] not in ACTIVE_PHASES:
+        # A terminal task has no live browser context left to talk to. Say so
+        # rather than forwarding a code into a container that will 404 it.
+        raise HTTPException(status_code=409, detail="Publish task is no longer active")
+
+    correlation_id = (state["sms"] or {}).get("correlation_id")
+    if not correlation_id or not state["sms"].get("waiting"):
+        # Not an error condition worth a 500, and not a silent success either:
+        # the publish moved on (or gave up) while the user was typing, which is
+        # exactly what they need told.
+        raise HTTPException(
+            status_code=409,
+            detail="This publish is not waiting for a verification code",
+        )
+
+    verdict = await BrowserClient().submit_publish_sms(str(correlation_id), body.code)
+    return verdict.to_dict()
 
 
 @router.post(

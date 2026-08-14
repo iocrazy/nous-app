@@ -521,6 +521,20 @@ async def _settle_session_outcome(
     return "failed"
 
 
+def _current_workflow_id() -> str:
+    """The task_tracking row this publish belongs to, or "" outside DBOS.
+
+    Tolerant on purpose. This value only decides whether the *UI mirroring* of
+    an SMS challenge happens; a unit test with no DBOS runtime must still be
+    able to exercise the publish path, and an attribute error raised from a
+    decoration lookup would take a real publish down with it.
+    """
+    try:
+        return DBOS.workflow_id or ""
+    except Exception:  # noqa: BLE001 - no DBOS runtime (unit tests)
+        return ""
+
+
 async def _publish_one_account_session(
     account: dict, task: dict, repo, accounts_repo, *, adapter=None, lock=None
 ) -> str:
@@ -551,6 +565,7 @@ async def _publish_one_account_session(
         SessionOpResult,
         decrypt_failure_result,
     )
+    from app.services.distribution.publish_sms_watch import publish_with_sms_channel
     from app.services.distribution.session_lock import account_session_lock
 
     account_row_id = int(account["id"])
@@ -591,7 +606,23 @@ async def _publish_one_account_session(
                 raise RuntimeError(
                     "another browser session is already running for this account"
                 )
-            outcome = await adapter.publish(account, intent)
+            # Not a bare `adapter.publish`: this wrapper mints the correlation
+            # id the browser needs to be able to *ask* for a verification code
+            # mid-publish, and runs the watcher that turns that request into
+            # something the user can see. The return value is unchanged, so
+            # settlement below is untouched.
+            #
+            # `DBOS.workflow_id` is what task_tracking is keyed by. Empty in
+            # unit tests, and the wrapper degrades to a plain call then — the
+            # channel still exists, only the UI mirroring is skipped.
+            outcome = await publish_with_sms_channel(
+                adapter=adapter,
+                account=account,
+                intent=intent,
+                workflow_id=_current_workflow_id(),
+                account_id=account_id,
+                platform=account.get("platform", "douyin"),
+            )
             return await _settle_session_outcome(
                 outcome,
                 account_row_id=account_row_id,

@@ -48,6 +48,8 @@ from typing import Any, Mapping, Optional, Sequence
 import httpx
 from loguru import logger
 
+from . import publish_budget
+
 # ── 超时 ─────────────────────────────────────────────────────
 # 校验会真的开一个有头浏览器（Xvfb）、加载 storage_state、goto 平台页面并
 # 重试 3 次（§7.1），90s 是给足余量后的**上界** —— 不是"等到好为止"。
@@ -63,9 +65,17 @@ DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS = 30.0
 DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS = 15.0
 # 发布 (S3)。一次调用里包含：起 context + 会话校验 + 下载素材到 /tmp +
 # DOM 上传（几百 MB）+ 等发布页表单渲染（§7.4 实测约 40s，等待给到 120s）+
-# 提交。因此它比其余端点大一个量级 —— 但**仍然有上界**（§7.2）：15 分钟没
-# 回来就是卡住了，继续等只会把 DBOS step 也一起挂死。
-DEFAULT_PUBLISH_TIMEOUT_SECONDS = 900.0
+# 可能停下来等人供一次短信验证码 + 提交。因此它比其余端点大一个量级 ——
+# 但**仍然有上界**（§7.2）。
+#
+# ⚠️ **不再是字面量**。它曾经是 900.0，而浏览器那侧的天花板是 1320s —— 倒挂，
+# 于是"发布还在跑"会被记成失败，且回程的 storage_state 一并丢掉。现在由
+# ``publish_budget`` 从浏览器的天花板推导，两侧同一个公式、同一批环境变量，
+# 顺序由 ``tests/test_publish_budget_matches_browser.py`` 钉死。
+DEFAULT_PUBLISH_TIMEOUT_SECONDS = publish_budget.backend_read_timeout_s()
+# 供码是一次极短的往返（浏览器那侧最多等 ``VERDICT_WAIT_S`` 就会带着类型化
+# 裁决返回），所以沿用登录侧的轮询超时，不需要发布那个量级。
+DEFAULT_PUBLISH_SMS_TIMEOUT_SECONDS = 45.0
 # 连接握手与业务处理分开设上界：容器没起来时应当 5s 内就报 unreachable，
 # 而不是耗满 90s 的读超时。
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
@@ -501,6 +511,53 @@ class PublishResult:
             f"updated_storage_state="
             f"{'set' if self.updated_storage_state else 'none'})"
         )
+
+
+# 浏览器根本没答话时的 outcome。**刻意不复用 ``rejected``** —— 那会告诉用户
+# "你的码不对"，而真相是我们没能把码送到。两者要用户做的事正相反（重输 vs
+# 等一下再试），合并就等于让一次容器抖动去污蔑一个正确的验证码。
+PUBLISH_SMS_UNREACHABLE = "unreachable"
+
+
+@dataclass(frozen=True)
+class PublishSmsStatus:
+    """"那次发布此刻在不在等验证码"。纯状态，不含码。
+
+    ``waiting`` 是唯一会驱动 UI 的字段，语义**很窄**：它表示那次发布此刻正停在
+    一个 await 上，不是"页面上看见了一个验证码输入框"。宽松的那种读法，正是
+    登录侧曾经在没人发码时告诉用户"码已发出"的那个 bug。
+    """
+
+    waiting: bool
+    correlation_id: Optional[str] = None
+    outcome: Optional[str] = None
+    message: str = ""
+    attempts_left: int = 0
+    max_attempts: int = 0
+    seconds_remaining: float = 0.0
+
+
+@dataclass(frozen=True)
+class PublishSmsVerdict:
+    """页面对这个码做了什么。反向通道的落点。
+
+    ``retryable`` 由浏览器算好后透传，不在这里重新推导：两处各自从
+    ``outcome`` + ``attempts_left`` 推一遍，就是两次和浏览器产生分歧的机会，
+    而分歧的具体形态会是"UI 说还能再试，发布其实已经放弃了"。
+    """
+
+    outcome: str
+    message: str
+    attempts_left: int = 0
+    retryable: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "message": self.message,
+            "attempts_left": self.attempts_left,
+            "retryable": self.retryable,
+        }
 
 
 @dataclass(frozen=True)
@@ -947,6 +1004,7 @@ class BrowserClient:
         storage_state: Mapping[str, Any],
         intent: Mapping[str, Any],
         environment: Optional[SessionEnvironment] = None,
+        correlation_id: Optional[str] = None,
     ) -> PublishResult:
         """``POST /session/publish``。
 
@@ -970,12 +1028,19 @@ class BrowserClient:
         if not isinstance(intent, Mapping) or not intent:
             raise ValueError("intent must be a non-empty object")
         env = environment or SessionEnvironment()
-        payload = {
+        payload: dict[str, Any] = {
             "platform": platform,
             "storage_state": dict(storage_state),
             "environment": env.to_payload(),
             "intent": dict(intent),
         }
+        if correlation_id:
+            # **由调用方先取名**，这是整条供码通道成立的机制：发布是一次阻塞
+            # 调用，没有"先返回一个 id"的时机，所以只有事先命名才能在它还在
+            # 飞的时候寻址到它（详见 browser/app/publish_sms.py）。
+            # 不传 == 这次发布没有供码通道，撞上验证码就按老样子失败 —— 对一个
+            # 本来就联系不到用户的调用方，那才是诚实的答案。
+            payload["correlation_id"] = correlation_id
         try:
             data = await self._call(
                 "POST",
@@ -1034,6 +1099,82 @@ class BrowserClient:
             platform_item_id=str(item_id) if item_id else None,
             published_url=str(published_url) if published_url else None,
             updated_storage_state=updated_state,
+        )
+
+    # ── 发布中途的短信验证码通道 ────────────────────────────
+
+    async def get_publish_sms(self, correlation_id: str) -> PublishSmsStatus:
+        """``GET /session/publish/{cid}/sms`` —— 那次发布此刻是不是在等码。
+
+        **这是发布调用还没返回时，我们唯一能问的问题**，所以"需要供码"这件事
+        能不能到达用户，全靠它。纯读浏览器内存里的注册表，不碰页面，轮询它
+        既不花钱也不会打扰正在跑的发布。
+
+        传输失败一律回 ``waiting=False``：这个信号只用来**决定要不要给用户弹
+        输入框**，猜错成 True 会让用户对着一个没人在等的框输码。宁可少弹一次
+        （下一轮轮询还会再问），不可弹一个假的。
+        """
+        try:
+            data = await self._call(
+                "GET",
+                f"/session/publish/{correlation_id}/sms",
+                read_timeout=DEFAULT_PUBLISH_SMS_TIMEOUT_SECONDS,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.publish.sms] poll {failure.kind.value}: {failure.message}"
+            )
+            return PublishSmsStatus(waiting=False)
+        return PublishSmsStatus(
+            waiting=bool(data.get("waiting")),
+            correlation_id=correlation_id,
+            outcome=(str(data["outcome"]) if data.get("outcome") else None),
+            message=str(data.get("message") or ""),
+            attempts_left=int(data.get("attempts_left") or 0),
+            max_attempts=int(data.get("max_attempts") or 0),
+            seconds_remaining=float(data.get("seconds_remaining") or 0.0),
+        )
+
+    async def submit_publish_sms(
+        self, correlation_id: str, code: str
+    ) -> PublishSmsVerdict:
+        """``POST /session/publish/{cid}/sms`` —— 把码交给那个活着的上下文。
+
+        与登录侧 ``submit_login_sms`` 同构，理由也同一条：**码只对那一个上下文
+        有意义**，所以直连它，并把平台的裁决当场带回这次响应，而不是让用户去
+        盯另一个字段翻牌。
+
+        ``outcome`` 是闭集（见 browser/app/publish_sms.py）。``rejected`` 是
+        **裁决不是错误** —— 它带着 ``retryable``，输错一位数字的代价是重输一次，
+        不是这条作品。传输失败也回类型化 ``outcome``，不抛异常：调用它的是
+        HTTP handler，一次容器抖动不该在用户那里变成 500。
+        """
+        if not (code or "").strip():
+            raise ValueError("sms code must be a non-empty string")
+        try:
+            data = await self._call(
+                "POST",
+                f"/session/publish/{correlation_id}/sms",
+                read_timeout=DEFAULT_PUBLISH_SMS_TIMEOUT_SECONDS,
+                payload={"code": code},
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.publish.sms] submit {failure.kind.value}: {failure.message}"
+            )
+            return PublishSmsVerdict(
+                outcome=PUBLISH_SMS_UNREACHABLE,
+                message=failure.message,
+                retryable=False,
+            )
+        # 验证码本身绝不进日志。
+        outcome = str(data.get("outcome") or PUBLISH_SMS_UNREACHABLE)
+        logger.info(f"[browser.publish.sms] outcome={outcome}")
+        return PublishSmsVerdict(
+            outcome=outcome,
+            message=str(data.get("message") or ""),
+            attempts_left=int(data.get("attempts_left") or 0),
+            retryable=bool(data.get("retryable")),
         )
 
     # ── /session/verify-publish (P1-3 回读) ─────────────────
@@ -1767,6 +1908,7 @@ __all__ = [
     "DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS",
     "DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS",
     "DEFAULT_PUBLISH_TIMEOUT_SECONDS",
+    "DEFAULT_PUBLISH_SMS_TIMEOUT_SECONDS",
     "INTERNAL_TOKEN_HEADER",
     "LOGIN_CODE_REJECTED_KEY",
     "LOGIN_FAILURE_STATUSES",
@@ -1779,6 +1921,9 @@ __all__ = [
     "LoginState",
     "ProbeResult",
     "PublishResult",
+    "PublishSmsStatus",
+    "PublishSmsVerdict",
+    "PUBLISH_SMS_UNREACHABLE",
     "SessionEnvironment",
     "SessionErrorKind",
     "SessionOpResult",
