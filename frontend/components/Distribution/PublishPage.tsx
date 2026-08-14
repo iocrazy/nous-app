@@ -1153,6 +1153,17 @@ export const PublishPage: React.FC = () => {
           .map(([id, cfg]) => [id, { title: cfg.title.trim() }]),
       );
       await createPublishTask({
+        // Which workspace this batch belongs to. The page already knew — it
+        // lists Library media with the same `scopeId` — but never told the
+        // backend, so every publish_task landed with `team_id = NULL`, the
+        // issue mirrored from it inherited no team, and the To-do list (whose
+        // every scope filters on `team_id`) hid the user's own failed batches.
+        //
+        // Sent in BOTH workspaces: a personal workspace is a real team row, so
+        // there is no "no team" case to special-case here. Omitted only while
+        // the team context is still loading — the backend then falls back to
+        // the caller's personal team rather than writing NULL.
+        team_id: scopeId || undefined,
         content_type: contentType,
         resource_ids: selectedVideos,
         title: title.trim(),

@@ -139,6 +139,18 @@ class AccountConfigOverride(BaseModel):
 
 
 class PublishTaskCreate(BaseModel):
+    # 这一批属于哪个 workspace。**字符串**（Snowflake），全程不 Number() 化。
+    #
+    # `publish_tasks.team_id` 这一列从建表起就在，缺的一直是把值送到那里的
+    # 字段 —— 于是每一行都落 NULL，从它镜像出的 issue 也就没有 team，而待办
+    # 列表的每一种 scope 都带 `team_id` 过滤（连 `my` 都带），那些 issue 被
+    # AND 掉，用户永远看不见自己发布失败的工单。
+    #
+    # 省略 = 「没说」，不是「没有」：路由回落到调用者的个人 team（个人空间
+    # 本身就是一行 `teams.kind='personal'`）。这里不写默认值，是因为 schema
+    # 拿不到调用者身份，猜不出该填谁 —— 归属由路由解析并**校验成员资格**，
+    # 客户端传什么都不能直接当授权用。
+    team_id: Optional[str] = None
     content_type: ContentType = "video"
     resource_ids: list[str] = Field(default_factory=list)
     title: str = Field(min_length=1, max_length=500)

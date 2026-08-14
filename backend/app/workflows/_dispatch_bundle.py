@@ -33,6 +33,9 @@ from app.workflows.backfill_normalize_personal_project_team_ids import (  # noqa
 from app.workflows.backfill_project_stage_issue_team_ids import (  # noqa: F401
     backfill_project_stage_issue_team_ids_workflow,
 )
+from app.workflows.backfill_publish_task_team_ids import (  # noqa: F401
+    backfill_publish_task_team_ids_workflow,
+)
 from app.workflows.canvas_generation import (  # noqa: F401
     canvas_generation_workflow,
 )

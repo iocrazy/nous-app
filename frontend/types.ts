@@ -2609,6 +2609,22 @@ export interface PublishTask {
 }
 
 export interface PublishRequest {
+  /**
+   * Which workspace this batch belongs to — the active team's Snowflake, as a
+   * STRING (never Number()'d).
+   *
+   * The personal workspace is not team-less: it IS a team row
+   * (`teams.kind='personal'`), so `useWorkspaceScope().scopeId` is the right
+   * value in both workspaces. Omitting it is how every publish_task ended up
+   * with `team_id = NULL`, which left the issue mirrored from it with no team
+   * — and the To-do list filters every scope by `team_id`, so those work items
+   * were invisible to the person who created them.
+   *
+   * Optional on the wire: the backend falls back to the caller's personal team
+   * (and validates membership when it IS supplied — this is a claim, not an
+   * authorization).
+   */
+  team_id?: string;
   content_type?: 'video' | 'images' | 'article';
   resource_ids: string[];
   title: string;

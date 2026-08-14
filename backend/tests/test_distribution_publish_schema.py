@@ -111,3 +111,19 @@ def test_session_is_an_accepted_publish_channel():
         title="Launch", account_ids=["1"], resource_ids=["30"], channel="session"
     )
     assert body.channel == "session"
+
+
+def test_team_id_is_carried_as_a_string():
+    """归属的 Snowflake 必须原样是字符串走完全程。
+
+    `publish_tasks.team_id` 这一列一直存在，缺的是把值送到那里的字段 —— 于是
+    每个批次都落 NULL，镜像出的 issue 也就没有 team，被待办的过滤 AND 掉。
+    声明成 int 会在 2^53 之上失真，且一个失真的 id 永远匹配不回原行。
+    """
+    big = "9007199254740993"  # 2^53 + 1
+    assert _make(team_id=big).team_id == big
+
+
+def test_team_id_is_optional():
+    """省略即「没说」。路由据此回落到调用者的个人 team —— schema 不替它猜。"""
+    assert _make().team_id is None

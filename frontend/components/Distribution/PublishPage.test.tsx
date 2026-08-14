@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { CoverFramesMeta } from '../../types';
 
@@ -1057,5 +1057,58 @@ describe('PublishPage cover from video frames', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
     expect(await screen.findByText(/there is no video to sample/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Pick a frame from the video/i })).toBeNull();
+  });
+});
+
+/**
+ * Workspace attribution on the publish payload.
+ *
+ * The page has always known its workspace — `useWorkspaceScope().scopeId` is
+ * what it lists Library media with — but it never told the backend which
+ * workspace the BATCH belonged to. So `publish_tasks.team_id` was NULL on every
+ * row, the issue mirrored from it inherited no team, and the To-do list (whose
+ * every scope carries a `team_id` filter) AND-ed those issues away: a real user
+ * published twice, both failed, and the blocked work items were invisible.
+ *
+ * These two cases pin the scope the page actually submits, in both workspaces.
+ */
+describe('PublishPage workspace attribution', () => {
+  const publishOnce = async () => {
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Attribution day' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    return createPublishTask.mock.calls.at(-1)?.[0];
+  };
+
+  it('submits the personal team id when publishing from the personal workspace', async () => {
+    // No `/team/:teamId` in the URL — the personal workspace. It is NOT
+    // team-less: the personal workspace IS a team row (`teams.kind='personal'`),
+    // which is exactly why sending its id makes the To-do filter match.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+
+    // ⚠️ Reverse-verification target: drop `team_id` from the submit payload
+    // and this line goes red.
+    expect((await publishOnce()).team_id).toBe('pt1');
+  });
+
+  it('submits the URL team id when publishing from a real team workspace', async () => {
+    // Positive control for the line above: proves the value tracks the ACTIVE
+    // workspace rather than being hardcoded to the personal team.
+    render(
+      <MemoryRouter initialEntries={['/team/990088776655/distribution/publish']}>
+        <Routes>
+          <Route path="/team/:teamId/distribution/publish" element={<PublishPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((await publishOnce()).team_id).toBe('990088776655');
   });
 });

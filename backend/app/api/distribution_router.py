@@ -6,6 +6,7 @@ import logging
 import secrets
 import uuid as _uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -103,6 +104,55 @@ async def _user_team_ids(user_id: str) -> list[str]:
 
     teams = await TeamRepository().get_user_teams(user_id)
     return [str(t["id"]) for t in teams]
+
+
+async def _personal_team_id(user_id: str) -> Optional[str]:
+    """The caller's personal-team snowflake as a str, or None if unresolvable.
+
+    A separate seam from ``_user_team_ids`` because it answers a different
+    question ("which team means *just me*") and because tests need to pin it
+    without a database.
+
+    Never raises. Attribution is a decoration on the management view, not a
+    precondition for publishing — refusing a user's publish because we could
+    not look up a team id would be a worse failure than the missing id.
+    """
+    from app.repositories.team_repository import TeamRepository
+
+    try:
+        return await TeamRepository().get_personal_team_id(user_id)
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.warning(
+            f"[distribution] personal team lookup failed for {user_id}: {exc!r}"
+        )
+        return None
+
+
+async def _resolve_task_team_id(team_id: Optional[str], uid: str) -> Optional[str]:
+    """Which workspace a publish batch belongs to.
+
+    Two rules, and the order matters:
+
+    1. **A supplied ``team_id`` is a claim, never an authorization.** It is
+       client input, and a publish batch is mirrored into that team's to-do
+       list — so without this check anyone could drop work items into a team
+       they have no business in. Same 403 as ``_resolve_bind_scope``.
+    2. **Nothing supplied → the caller's personal team.** The personal
+       workspace IS a team row (``teams.kind='personal'``, at most one per
+       user via ``uq_teams_owner_personal``), which is the whole reason this
+       fallback is safe: it is single-member and owned by the creator, so
+       attributing to it exposes the batch to exactly the person who made it.
+       Leaving NULL instead is what made the mirrored issues invisible; a
+       client that forgets the field must not be able to re-open that hole.
+
+    Returns None only when the user has no personal team at all — the same
+    NULL as before, and still a publishable batch.
+    """
+    if team_id:
+        if str(team_id) not in await _user_team_ids(uid):
+            raise HTTPException(status_code=403, detail="Not a member of this team")
+        return str(team_id)
+    return await _personal_team_id(uid)
 
 
 async def _authorize_account(account_id: int, user: dict) -> dict:
@@ -881,8 +931,16 @@ async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
             },
         )
 
+    # 归属在建行之前解析：非成员的 team_id 必须在这里 403，跟前移门禁同一条
+    # 纪律 —— 被拒的批次一行都不该留下。
+    team_id = await _resolve_task_team_id(body.team_id, str(user["id"]))
+
     task = await publish_repo.create_task(
         user_id=user["id"],
+        # 这一批属于哪个 workspace。写不进这里，`publish_issue_mirror` 就没有
+        # team 可以给镜像出的 issue，待办列表的 team 过滤会把它 AND 掉 ——
+        # 用户发布失败却在待办里看不到任何东西，正是这么来的。
+        team_id=team_id,
         content_type=body.content_type,
         resource_ids=body.resource_ids,
         title=body.title,
