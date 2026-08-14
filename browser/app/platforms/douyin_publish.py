@@ -345,6 +345,58 @@ SELF_DECLARATION_OPTIONS: tuple[str, ...] = (
 COLLECTION_ENTRY_TEXT = "添加合集"
 COLLECTION_OPTION_SELECTOR = ".semi-select-option"
 
+# --- background music (选择音乐) --------------------------------------------
+#
+# [实测 2026-08-12, T0] on the live image-post editor. What was measured, and
+# what was NOT, matters here more than anywhere else in this module:
+#
+#   * 「选择音乐」 has **exact=2** — the block heading and the button both carry
+#     that string. Every other entry point in this file resolves with `.first`;
+#     doing that here is a coin flip, so the entry is *tried* rather than
+#     assumed (`_open_music_dialog`).
+#   * the aside next to it reads 点击添加合适作品风格音乐.
+#   * the preview shows 「HEYGO创作的原声」 before anything is chosen: the
+#     platform default is 原声, it does not block publishing, and that is why
+#     an intent without a music name never opens this dialog at all.
+#   * the dialog itself: title 选择音乐, a search box with placeholder 搜索音乐,
+#     a tab row (推荐 / 热门榜 / 收藏 / 飙升榜 / 原创榜 / 卡点…), and result
+#     rows shaped `歌名` + `作者·时长` + `N万人使用`.
+#
+# ⚠️ NOT measured, and therefore not encoded as a selector anywhere below: the
+# row's markup (class names), whether a row commits on click or needs a 「使用」
+# button, and what the modal's own container class is. The step is built so
+# that each of those unknowns fails **loudly and specifically** rather than
+# publishing a post with no music on it — see `_set_music`.
+#
+# ⚠️ Measured on the IMAGE editor only. The video editor is assumed to use the
+# same copy (as it does for the declaration / collection / visibility blocks),
+# but that assumption has not been run. If it is wrong, a video publish that
+# asked for music fails with `music_entry_missing` — visible, attributable, and
+# not a silently music-less post.
+
+MUSIC_ENTRY_TEXT = "选择音乐"
+# The dialog's search box. The one node in there whose *copy* was measured and
+# which is unique, so it doubles as "is the dialog open" — safer than a modal
+# class, since this page already runs two different modal shells
+# (`.semi-modal-content` for the declaration, `div.dy-creator-content-modal`
+# for the cover).
+MUSIC_SEARCH_INPUT_SELECTORS: tuple[str, ...] = (
+    'input[placeholder*="搜索音乐"]',
+    '[placeholder*="搜索音乐"]',
+)
+# How many of the 「选择音乐」 nodes we are willing to click looking for the one
+# that opens the dialog. Two were measured; the ceiling leaves room for a third
+# without becoming "click everything on the page".
+MUSIC_ENTRY_CANDIDATES = 4
+# Tried only if the dialog is still open after a row was clicked. Unverified —
+# the dialog may well close on the row click alone — so these are a fallback,
+# never the primary commit.
+MUSIC_CONFIRM_TEXTS: tuple[str, ...] = ("确定", "完成", "使用")
+# The attribute `_music_rows` stamps on each result row so the row it decided
+# on can be clicked by an exact selector. Clicking by the song's text instead
+# would resolve against any node on the page carrying the same string.
+MUSIC_ROW_ATTRIBUTE = "data-nous-music-row"
+
 # --- scheduled publishing (定时发布) ----------------------------------------
 
 SCHEDULE_RADIO_TEXT = "定时发布"
@@ -671,6 +723,11 @@ class PlatformOptions:
 
     self_declaration: str | None = None
     collection: str | None = None
+    # The name typed into the publish form's music field. `None` = the user did
+    # not ask for music, and the whole music step is then skipped - the platform
+    # default (原声) is what every post published before this field existed got,
+    # so "absent" has to keep meaning exactly that.
+    music: str | None = None
     # Keys present but holding something that is not a string. Kept rather than
     # discarded: a caller sending `{"self_declaration": true}` has a bug, and
     # answering it with "no declaration requested" hides that bug behind a post
@@ -684,7 +741,7 @@ def read_platform_options(raw: Mapping[str, Any] | None) -> PlatformOptions:
     values: dict[str, str | None] = {}
     bad: list[str] = []
 
-    for key in ("self_declaration", "collection"):
+    for key in ("self_declaration", "collection", "music"):
         if key not in source:
             continue
         value = source[key]
@@ -699,6 +756,7 @@ def read_platform_options(raw: Mapping[str, Any] | None) -> PlatformOptions:
     return PlatformOptions(
         self_declaration=values.get("self_declaration"),
         collection=values.get("collection"),
+        music=values.get("music"),
         bad_types=tuple(bad),
     )
 
@@ -755,6 +813,82 @@ def judge_self_declaration(
         return DeclarationChoice(None, f"'{requested}' is not among the options on screen")
 
     return DeclarationChoice(on_screen[key], "matched an option on screen")
+
+
+# --- music matching ---------------------------------------------------------
+
+
+def canonical_music(text: str | None) -> str:
+    """Fold a track title to a comparison key. Pure.
+
+    Deliberately weaker than a fuzzy match and stronger than equality: casing
+    and whitespace differ constantly between what a person types and what the
+    platform renders (「Dream  It Possible」 vs 「dream it possible」), and none
+    of that is a disagreement about *which song*. Nothing else is folded -
+    punctuation, brackets and 「(Live)」 suffixes genuinely distinguish
+    different uploads of the same title, and treating them as noise would let
+    an exact match silently become a near one.
+    """
+    return "".join((text or "").split()).casefold()
+
+
+@dataclass(frozen=True)
+class MusicChoice:
+    """Which row of the search results to click, and how sure we are.
+
+    `match` is the field the caller reports back to the user:
+
+    * ``exact`` - a row's title equals the requested one (modulo case and
+      whitespace). Nothing to warn about.
+    * ``approximate`` - no title matched, so the first result was taken. The
+      post gets music, and the user is told **which track** it actually got,
+      because "published with music" and "published with the music you asked
+      for" are not the same claim.
+    * ``none`` - the search came back empty. The caller must fail the publish;
+      see `_set_music` for why that is not over-reaction.
+    """
+
+    name: str | None
+    index: int | None
+    match: str
+    reason: str
+
+
+def judge_music_choice(requested: str, candidates: Sequence[str]) -> MusicChoice:
+    """Given the titles the dialog listed, which row gets clicked. Pure.
+
+    **Exact first, then first-result**, which is the opposite of the collection
+    step's "anchored match or nothing", and the asymmetry is deliberate:
+
+    * a collection is filing, so a *wrong* collection is worse than none - the
+      wrong answer looks like a right one and nobody re-checks it;
+    * music is reach. The user asked for music because a post without any is
+      distributed worse, and the platform's own search is a fuzzy matcher we
+      cannot out-guess: it answers 「起风了」 with a dozen uploads that all
+      differ in punctuation, uploader and suffix. Refusing everything that is
+      not character-identical would reject the common case.
+
+    What keeps that from becoming "silently posted the wrong song" is that the
+    approximation is *named* in the result (`music_selected`), not merely
+    counted, and that an empty result set is a failure rather than a shrug.
+    """
+    # Indices stay the ones the caller handed in: they address a DOM row, and
+    # re-numbering a filtered list would click the row next to the chosen one.
+    ordered = [
+        (index, name) for index, name in enumerate(candidates) if (name or "").strip()
+    ]
+    if not ordered:
+        return MusicChoice(None, None, "none", "the search returned no music")
+
+    key = canonical_music(requested)
+    for index, name in ordered:
+        if canonical_music(name) == key:
+            return MusicChoice(name, index, "exact", "a result title matched exactly")
+
+    index, name = ordered[0]
+    return MusicChoice(
+        name, index, "approximate", "no exact title match; took the first result"
+    )
 
 
 # --- scheduling -------------------------------------------------------------
@@ -1773,6 +1907,288 @@ async def _set_collection(page: Any, job: PublishJob, deadline: Deadline) -> dic
     return {"collection": "applied", "collection_requested": requested}
 
 
+# The dialog's result rows, read structurally rather than by class name.
+#
+# The anchor is 「N万人使用」 — a *measured* piece of copy that appears once per
+# row and nowhere else on the page. Walking up from it to the row container and
+# taking that container's first line as the title is the only reading available
+# without markup we never measured; a made-up `[class*="music-item"]` would be a
+# selector that fires on the wrong thing rather than one that fires on nothing.
+#
+# Each row is stamped with an index attribute so the decision (pure, taken in
+# Python) can be executed with an exact selector. Clicking by the song's text
+# instead would resolve against any node carrying that string.
+_MUSIC_ROWS_JS = """
+(attribute) => {
+  // __nous_music_rows_probe__
+  const USAGE = /\\d+(?:\\.\\d+)?\\s*[万亿]?\\s*人使用/;
+  const anchors = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const own = (el.innerText || el.textContent || '').trim();
+    if (own && USAGE.test(own)) anchors.push(el);
+  }
+  const rows = [];
+  const seen = new Set();
+  for (const anchor of anchors) {
+    let node = anchor.parentElement;
+    let row = null;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      const lines = (node.innerText || '')
+        .split('\\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (lines.length >= 2) { row = node; break; }
+    }
+    if (!row || seen.has(row)) continue;
+    seen.add(row);
+    const lines = (row.innerText || '')
+      .split('\\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    rows.push({ name: lines[0] || '', row });
+  }
+  return rows.map((entry, index) => {
+    entry.row.setAttribute(attribute, String(index));
+    return { index, name: entry.name };
+  });
+}
+"""
+
+# How many places on the page say the chosen track's name.
+#
+# Compared **before and after** rather than checked once, which is what makes it
+# falsifiable: a user whose title happens to contain the song name would satisfy
+# a plain "is this string on the page" check without any music having been
+# selected. Editable regions are excluded outright for the same reason - the
+# description box is a contenteditable, and what the user typed into it is not
+# evidence about a control.
+_MUSIC_READBACK_JS = """
+(needle) => {
+  // __nous_music_readback_probe__
+  const want = (needle || '').replace(/\\s+/g, '').toLowerCase();
+  if (!want) return 0;
+  let hits = 0;
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    if (el.closest('[contenteditable="true"], input, textarea')) continue;
+    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, '').toLowerCase();
+    if (!text) continue;
+    // Containment, plus the truncated-with-an-ellipsis form the preview uses
+    // for long titles ("我在人民广场吃…"), which a plain containment test would
+    // read as "the music never got applied".
+    const trimmed = text.replace(/[…]+$|\\.{3}$/, '');
+    if (text.includes(want) || (trimmed.length >= 2 && want.startsWith(trimmed))) hits += 1;
+  }
+  return hits;
+}
+"""
+
+
+async def _music_mentions(page: Any, name: str) -> int:
+    """How many non-editable places on the page currently show `name`.
+
+    Never raises: this is a *reading*, and a probe that blew up on a re-render
+    would turn a healthy publish into a music failure.
+    """
+    try:
+        return int(await page.evaluate(_MUSIC_READBACK_JS, name))
+    except Exception:
+        return 0
+
+
+async def _music_dialog_open(page: Any) -> bool:
+    for selector in MUSIC_SEARCH_INPUT_SELECTORS:
+        if await _visible(page, selector):
+            return True
+    return False
+
+
+async def _open_music_dialog(page: Any, click_ms: int, settle_ms: int) -> int | None:
+    """Click 「选择音乐」 until the dialog is up. Returns which node did it.
+
+    The one place in this module that iterates entry candidates instead of
+    taking `.first`, because 「选择音乐」 was measured at **exact=2** (the block
+    heading and the button). `.first` is a coin flip, and the losing side looks
+    identical to "the control is gone".
+
+    Clicking the heading is inert, so trying it costs a click and nothing else.
+    """
+    entry = page.get_by_text(MUSIC_ENTRY_TEXT, exact=True)
+    try:
+        total = int(await entry.count())
+    except Exception:
+        total = 0
+
+    for index in range(min(total, MUSIC_ENTRY_CANDIDATES)):
+        if not await click_element(entry.nth(index), click_ms):
+            continue
+        await page.wait_for_timeout(settle_ms)
+        if await _music_dialog_open(page):
+            return index
+    return None
+
+
+async def _music_rows(page: Any) -> list[str]:
+    """The titles the dialog is listing, in order. Never raises."""
+    try:
+        rows = await page.evaluate(_MUSIC_ROWS_JS, MUSIC_ROW_ATTRIBUTE)
+    except Exception:
+        return []
+    out: list[str] = []
+    for row in rows or []:
+        try:
+            out.append(str(row.get("name") or ""))
+        except AttributeError:
+            continue
+    return out
+
+
+async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
+    """Pick the post's background music by name. **Fails the publish on a miss.**
+
+    Which side of the collection/declaration split this lands on was the whole
+    design question, and it lands on the declaration side:
+
+    * a user who typed a track name did so *because* a post published on 原声
+      is distributed worse - that is the entire reason the field exists. Going
+      out silently music-less is not a partial success, it is the one outcome
+      the field was added to prevent, and it is invisible: the post looks fine,
+      it simply reaches fewer people, and nobody re-checks a published post's
+      audio track;
+    * unlike a collection, it cannot be repaired afterwards either - the
+      platform does not let a published post swap its music.
+
+    So every miss below raises. A refused publish leaves a draft on the platform
+    that costs an inspection; the alternative costs a post's reach with no
+    signal that anything happened.
+
+    An intent **without** music never touches any of this (`not_requested`), so
+    the ordinary publish does not depend on a single selector here - the same
+    affordance that lets `_apply_options` refuse a missing visibility control.
+    """
+    settings = get_settings()
+    requested = read_platform_options(job.intent.platform_options).music
+    if requested is None:
+        return {"music": "not_requested"}
+
+    click_ms = deadline.slice_ms(settings.publish_click_timeout_ms)
+    settle_ms = deadline.slice_ms(settings.publish_settle_ms)
+    await remove_nodes(page, OVERLAY_SELECTORS)
+
+    # Taken **before the dialog opens**, so the read-back at the end is a
+    # comparison rather than a presence check. A user whose title happens to be
+    # the song's name would satisfy a presence check with no music selected at
+    # all, and that is exactly the kind of evidence this module refuses to
+    # accept elsewhere (`_set_download_toggle`).
+    baseline = await _music_mentions(page, requested)
+
+    entry_index = await _open_music_dialog(page, click_ms, settle_ms)
+    if entry_index is None:
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "could not open the music dialog; refusing to publish without the "
+            "music the user asked for",
+            reason="music_entry_missing",
+            stage="music",
+            requested_music=requested,
+        )
+
+    search = await _first_visible(page, MUSIC_SEARCH_INPUT_SELECTORS, click_ms)
+    if search is None:
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "the music dialog has no search box",
+            reason="music_search_missing",
+            stage="music",
+            requested_music=requested,
+        )
+    await search.fill(requested, timeout=click_ms)
+    await page.keyboard.press("Enter")
+    await page.wait_for_timeout(settle_ms)
+
+    candidates = await _music_rows(page)
+    choice = judge_music_choice(requested, candidates)
+    if choice.name is None or choice.index is None:
+        raise StepFailure(
+            SessionStatus.FAILED,
+            f"no music named '{requested}' came back from the platform's search",
+            reason="music_not_found",
+            stage="music",
+            requested_music=requested,
+        )
+
+    row = page.locator(f'[{MUSIC_ROW_ATTRIBUTE}="{choice.index}"]').first
+    if not await click_element(row, click_ms):
+        raise StepFailure(
+            SessionStatus.FAILED,
+            f"the music result '{choice.name}' would not take a click",
+            reason="music_click_failed",
+            stage="music",
+            requested_music=requested,
+            music_selected=choice.name,
+        )
+    await page.wait_for_timeout(settle_ms)
+
+    if await _music_dialog_open(page):
+        # Unverified whether this dialog needs a confirmation at all; a row may
+        # commit on its own click. Tried only once the dialog has proved it is
+        # still up, and scoped to nothing riskier than three button captions.
+        for caption in MUSIC_CONFIRM_TEXTS:
+            button = page.get_by_role("button", name=caption, exact=True).first
+            try:
+                if not await button.count():
+                    continue
+            except Exception:
+                continue
+            if await click_element(button, click_ms):
+                await page.wait_for_timeout(settle_ms)
+                break
+
+    if await _music_dialog_open(page):
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "the music dialog stayed open after choosing a track, so the "
+            "selection cannot be assumed to have registered",
+            reason="music_dialog_stuck",
+            stage="music",
+            requested_music=requested,
+            music_selected=choice.name,
+        )
+
+    # **The click is not the evidence.** Clicking a row is idempotent and a
+    # click that landed on nothing looks exactly like one that worked - the
+    # same trap `_set_download_toggle` documents. The evidence is that the page
+    # now says the track's name somewhere it did not before.
+    #
+    # The floor is the pre-dialog count only when the two names fold together;
+    # a track the platform named differently from what was typed cannot have
+    # been on the page beforehand, so its floor is zero.
+    floor = baseline if canonical_music(choice.name) == canonical_music(requested) else 0
+    if await _music_mentions(page, choice.name) <= floor:
+        raise StepFailure(
+            SessionStatus.FAILED,
+            f"the editor does not show '{choice.name}' after selecting it, so "
+            "the post cannot be assumed to have the requested music",
+            reason="music_not_confirmed",
+            stage="music",
+            requested_music=requested,
+            music_selected=choice.name,
+        )
+
+    return {
+        "music": "applied",
+        "music_requested": requested,
+        "music_selected": choice.name,
+        # `exact` / `approximate`. The caller turns the second one into a
+        # user-visible note on an otherwise successful publish: a post that came
+        # back with a different track than the one that was typed is a fact the
+        # user has to be told, not a detail to bury.
+        "music_match": choice.match,
+        "music_entry_index": entry_index,
+    }
+
+
 async def _set_schedule(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
     """Switch the editor from 立即发布 to 定时发布 and fill the time.
 
@@ -1939,6 +2355,10 @@ async def _drive(page: Any, job: PublishJob, deadline: Deadline) -> PublishOutco
     # no reason to spend the collection dropdown's seconds on a publish that is
     # about to be refused.
     detail.update(await _set_self_declaration(page, job, deadline))
+    # Music before collection for the same reason the declaration comes first:
+    # it is a step that can abort, and the collection dropdown's seconds should
+    # not be spent on a publish that is about to be refused.
+    detail.update(await _set_music(page, job, deadline))
     detail.update(await _set_collection(page, job, deadline))
     detail.update(await _apply_options(page, job, deadline))
     # Last before the button. Switching to 定时发布 re-renders the block the
@@ -2008,6 +2428,10 @@ async def _drive_images(page: Any, job: PublishJob, deadline: Deadline) -> Publi
     # the first one could not be measured without opening its dialog, which the
     # read-only survey could not do. T7 confirms it on a real post.
     detail.update(await _set_self_declaration(page, job, deadline))
+    # Shared with the video flow, and the block this step drives is the one the
+    # T0 survey actually measured (it ran on this editor). Same function, so a
+    # selector fix lands on both flows at once.
+    detail.update(await _set_music(page, job, deadline))
     detail.update(await _set_collection(page, job, deadline))
     detail.update(await _apply_options(page, job, deadline))
     detail.update(await _set_schedule(page, job, deadline))

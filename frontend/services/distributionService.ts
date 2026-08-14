@@ -281,6 +281,10 @@ export interface PlatformCapability {
   schedule_max_ahead_seconds: number | null;
   self_declarations: string[];
   supports_collection: boolean;
+  /** Whether the platform's editor has a music picker we can drive. False for
+   *  every platform that cannot publish at all, so the Publish form can hide
+   *  the field rather than offering something that would be refused. */
+  supports_music: boolean;
 }
 
 /**

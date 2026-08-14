@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.services.distribution.publish_options import (
     SELF_DECLARATIONS,
     normalize_collection,
+    normalize_music,
     validate_scheduled_at,
 )
 
@@ -105,6 +106,12 @@ class PublishTaskCreate(BaseModel):
     # services/distribution/publish_options.py::resolve_self_declaration。
     self_declaration: Optional[SelfDeclaration] = None
     collection_name: Optional[str] = None
+    # ── 「选择音乐」（mig 425） ──
+    # 曲名原文。None = 不碰音乐控件 = 平台默认（原声），也就是这个字段存在
+    # 之前每条作品的行为。没有白名单：曲名不是封闭词表，存在性由浏览器侧在
+    # 平台自己的搜索结果里判定，搜不到那一行失败（**不**静默发一条没配乐的
+    # 作品）。
+    music_name: Optional[str] = None
     # 定时发布。必须带时区（naive 会被拒），窗口 2h~14d —— 见 _validate_content。
     scheduled_at: Optional[datetime] = None
 
@@ -117,6 +124,11 @@ class PublishTaskCreate(BaseModel):
     @classmethod
     def _clean_collection(cls, v: Optional[str]) -> Optional[str]:
         return normalize_collection(v)
+
+    @field_validator("music_name")
+    @classmethod
+    def _clean_music(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_music(v)
 
     @model_validator(mode="after")
     def _validate_content(self) -> "PublishTaskCreate":
@@ -171,6 +183,7 @@ class PublishTaskOut(BaseModel):
     scheduled_at: Optional[datetime] = None
     self_declaration: Optional[str] = None
     collection_name: Optional[str] = None
+    music_name: Optional[str] = None
     accounts: list[TaskAccountOut] = Field(default_factory=list)
 
 

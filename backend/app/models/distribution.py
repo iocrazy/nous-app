@@ -214,6 +214,9 @@ class PublishTasks(Base):
     # 关系见 services/distribution/publish_options.py::resolve_self_declaration。
     self_declaration: Mapped[str | None] = mapped_column(Text)
     collection_name: Mapped[str | None] = mapped_column(Text)
+    # mig 425 — 「选择音乐」。存曲名原文，浏览器侧拿它去发布页的音乐弹窗里搜。
+    # NULL = 不碰那个控件 = 平台默认（原声），也就是这一列存在之前的行为。
+    music_name: Mapped[str | None] = mapped_column(Text)
     dbos_workflow_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")

@@ -55,6 +55,7 @@ const VIDEO_ONLY = {
     schedule_max_ahead_seconds: 1209600,
     self_declarations: [],
     supports_collection: true,
+    supports_music: true,
   },
 };
 

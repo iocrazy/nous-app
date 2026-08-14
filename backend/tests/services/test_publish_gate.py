@@ -25,6 +25,7 @@ from app.services.distribution.session_adapter import (
     SHAPE_COVER_NOT_SUPPORTED_FOR_IMAGES,
     SHAPE_DECLARATION_UNSUPPORTED,
     SHAPE_INVALID_SCHEDULE,
+    SHAPE_MUSIC_UNSUPPORTED,
     SHAPE_TITLE_TOO_LONG,
     SHAPE_TOO_FEW_IMAGES,
     SHAPE_TOO_MANY_IMAGES,
@@ -308,6 +309,43 @@ def test_ai_content_is_resolved_into_a_declaration_before_the_check():
             _body(ai_content=True), [SESSION_ACCOUNT], now=NOW
         )
     assert _reasons(problems) == [SHAPE_DECLARATION_UNSUPPORTED]
+
+
+def test_a_music_name_reaches_the_browser_as_a_platform_option():
+    """这道门与 workflow 用**同一份**组装逻辑。少了这一步，一个带配乐的批次
+    在提交时看不到 music，到了 workflow 才带上它 —— 两道门看到的不是同一个
+    请求，正是最难查的一类不一致。"""
+    from app.services.distribution.publish_gate import _platform_options
+
+    assert _platform_options(_body(music_name="起风了"))["music"] == "起风了"
+    assert (
+        publish_request_problems(_body(music_name="起风了"), [SESSION_ACCOUNT], now=NOW)
+        == []
+    )
+
+
+def test_music_on_a_platform_without_a_music_picker_is_refused_not_dropped():
+    """宣称一个不存在的能力比不宣称糟得多。平台没有配乐控件时，带 music 的
+    批次必须在**提交那一刻**被拒 —— 而不是排队、起浏览器、传完素材，最后发出
+    一条静默走了平台默认音乐的作品。"""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(
+            SESSION_PLATFORM_PROFILES,
+            "douyin",
+            replace(SESSION_PLATFORM_PROFILES["douyin"], supports_music=False),
+        )
+        problems = publish_request_problems(
+            _body(music_name="起风了"), [SESSION_ACCOUNT], now=NOW
+        )
+    assert _reasons(problems) == [SHAPE_MUSIC_UNSUPPORTED]
+
+
+def test_a_blank_music_name_is_not_a_music_request():
+    """空白 = 不碰那个控件 = 平台默认（原声），也就是这个字段存在之前每条
+    作品的行为。"""
+    from app.services.distribution.publish_gate import _platform_options
+
+    assert "music" not in _platform_options(_body(music_name="   "))
 
 
 def test_an_explicit_declaration_still_wins_over_ai_content():

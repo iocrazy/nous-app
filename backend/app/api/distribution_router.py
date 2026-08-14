@@ -758,6 +758,7 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
         scheduled_at=task.get("scheduled_at"),
         self_declaration=task.get("self_declaration"),
         collection_name=task.get("collection_name"),
+        music_name=task.get("music_name"),
         accounts=[
             TaskAccountOut(
                 id=a["id"],
@@ -836,6 +837,7 @@ async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
         scheduled_at=body.scheduled_at,
         self_declaration=body.self_declaration,
         collection_name=body.collection_name,
+        music_name=body.music_name,
     )
     task_id = int(task["id"])
 

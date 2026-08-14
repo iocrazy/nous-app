@@ -36,8 +36,13 @@ vi.mock('../../services/distributionService', () => ({
       created_at: '2026-07-08T00:00:00Z',
       // 会话通道的常态:发布成功,但拿不到作品直链(抖音发布后重定向不带
       // item id,作品卡无 href/id,列表接口也不返回)。
+      // …and this row also carries a caveat: the post went out, but with the
+      // closest matching track rather than the one that was typed. The row is
+      // still success — the caveat has to be readable WITHOUT being an error.
       accounts: [{ id: '5', account_id: '14', username: 'Sessioned', avatar_url: null,
-        channel: 'session', status: 'success', error_message: null, published_url: null,
+        channel: 'session', status: 'success',
+        error_message: "[music_approximate] published with '起风了 (Cover)' — the closest match the platform's search returned for '起风了'",
+        published_url: null,
         platform_item_id: null, published_at: '2026-07-08T03:00:00Z' }] },
     { id: '702', content_type: 'video', title: 'Done One', description: null, topics: [],
       visibility: 'public', distribution_mode: 'broadcast', status: 'success',
@@ -137,6 +142,21 @@ describe('RecordsPage', () => {
       'href',
       'https://creator.douyin.com/creator-micro/content/manage',
     );
+  });
+
+  it('近似匹配的配乐用翻译文案回显,而不是把后端英文原样打给用户', async () => {
+    // 后端那句 prose 是写给日志的(它带着平台原文曲名与 reason code)。用户
+    // 看到的必须是按 reason 键控的翻译文案 —— 这与提交时那道门的口径同族:
+    // reason 是契约,message 不是。
+    render(<MemoryRouter><RecordsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Session No Link')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Session No Link'));
+
+    expect(
+      await screen.findByText(/closest matching track rather than the one you named/i),
+    ).toBeInTheDocument();
+    // 后端原句不出现在页面上(它仍留在 title 属性里供排查)。
+    expect(screen.queryByText(/the closest match the platform.s search returned/i)).toBeNull();
   });
 
   it('兜底入口的文案不能写成 View post —— 那会谎报跳转目标', async () => {

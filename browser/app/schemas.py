@@ -272,10 +272,21 @@ class PublishIntent(BaseModel):
     scheduled_at: datetime | None = None
     # Passed through untouched, and read only by the platform that understands
     # it. Douyin reads `self_declaration` (one of the platform's six declaration
-    # strings verbatim) and `collection` (a collection name). An absent key
-    # means "leave that control alone" - which for `self_declaration` is
-    # distinct from the user choosing 无需添加自主声明, a declaration the
-    # platform actually records.
+    # strings verbatim), `collection` (a collection name) and `music` (a track
+    # name, searched for and selected in the editor's 选择音乐 dialog). An
+    # absent key means "leave that control alone" - which for `self_declaration`
+    # is distinct from the user choosing 无需添加自主声明, a declaration the
+    # platform actually records, and for `music` means the post keeps the
+    # platform default (原声).
+    #
+    # ⚠️ `music` is here rather than as a field of its own **on purpose**. The
+    # channel contract above is stated in channel terms; a top-level `music`
+    # would assert that picking a track by name is something every platform
+    # does, while only this one implements it - and it would route around the
+    # `supports_music` gate the backend applies to `platform_options` keys it
+    # recognises (`session_adapter._option_shape_problems`), which is what turns
+    # "that platform has no music picker" into a refusal instead of a field
+    # quietly dropped on the floor.
     platform_options: dict[str, Any] = Field(default_factory=dict)
 
 

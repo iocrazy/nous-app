@@ -71,6 +71,7 @@ from app.services.distribution.browser_client import (
 from app.services.distribution.publish_options import (
     DOUYIN_SELF_DECLARATIONS,
     MAX_COLLECTION_NAME_LEN,
+    MAX_MUSIC_NAME_LEN,
     SCHEDULE_MAX_AHEAD,
     SCHEDULE_MIN_LEAD,
     validate_scheduled_at,
@@ -154,6 +155,13 @@ class PublishIntent:
     - ``self_declaration``：「自主声明」下拉的**原文**（六个之一，见
       ``publish_options.SELF_DECLARATIONS``）。缺省/None = 不碰那个控件。
     - ``collection``：「合集」名称，按名匹配账号已有的合集；缺省 = 不选。
+    - ``music``：「选择音乐」的曲名。浏览器在发布页的音乐弹窗里搜这个名字并
+      选中；缺省 = 不碰那个控件（平台默认原声）。
+
+    ``music`` 刻意留在 platform_options 而不是升成通道级字段：按名字在平台
+    自己的曲库里搜一首歌是抖音发布页的具体操作，只有这一个平台实现了它。
+    升上去等于宣称这是通道级能力，而且会绕过下面 ``supports_music`` 那道
+    ——「这个平台没有音乐选择器」就会从"类型化拒绝"退化成"字段被默默丢掉"。
 
     "只透传不解释"指的是**语义**：backend 不知道这两个键会被点在页面的哪里。
     但**取值合法性**仍然要在起浏览器前拦（§7.7），因为一次浏览器 + 一次上传
@@ -262,6 +270,10 @@ class PlatformSessionProfile:
     # 带 self_declaration 的意图会被拒，而不是被浏览器侧静默丢掉。
     self_declarations: frozenset[str] = frozenset()
     supports_collection: bool = False
+    # 能不能在发布页上挑配乐。默认 False，与 supports_collection 同口径：
+    # 缺失往安全方向塌陷 —— 漏填只会让带 music 的意图被类型化拒绝（可见、
+    # 可查），填成 True 却没实现，才会让请求一路走到浏览器上瞎试。
+    supports_music: bool = False
     # 能不能**发布**。默认 False —— 绑定账号和发布是两件事,新平台通常先有
     # 前者:浏览器侧的会话校验 + 扫码登录是通用机制,而发布流程是一整套只能
     # 对着真实页面写的 DOM 操作。
@@ -312,6 +324,10 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
         schedule_max_ahead=SCHEDULE_MAX_AHEAD,
         self_declarations=DOUYIN_SELF_DECLARATIONS,
         supports_collection=True,
+        # [实测 2026-08-12, T0] 发布页上有「选择音乐」区块 + 弹窗（搜索框
+        # 「搜索音乐」+ 推荐/热门榜/… 分页 + 结果列表）。不填时预览显示
+        # 「…创作的原声」，即平台默认，不阻塞发布。
+        supports_music=True,
         supports_publishing=True,
     ),
     # 小红书 / B 站：**只做到账号绑定 + 会话保活**，发布未实现。
@@ -411,6 +427,8 @@ SHAPE_DECLARATION_UNSUPPORTED = "self_declaration_not_supported"
 SHAPE_DECLARATION_UNKNOWN = "unknown_self_declaration"
 SHAPE_COLLECTION_UNSUPPORTED = "collections_not_supported"
 SHAPE_COLLECTION_INVALID = "invalid_collection_name"
+SHAPE_MUSIC_UNSUPPORTED = "music_not_supported"
+SHAPE_MUSIC_INVALID = "invalid_music_name"
 # D4：图集不接受独立封面。抖音图文页确实有「封面设置」，但 [实测 2026-08-11]
 # （§3.4 V8）它是**从已上传的图片里挑一张**，不是视频那种在弹窗里独立上传的
 # 第五个文件。所以带 cover 素材的图集请求是语义错误，不是可以忽略的多余字段。
@@ -577,6 +595,28 @@ def _option_shape_problems(
                     f"collection name exceeds {MAX_COLLECTION_NAME_LEN} characters",
                 )
             )
+
+    # 配乐。同样只校验"形状"——曲名存不存在是平台搜索结果说了算，backend 无从
+    # 判断。但平台有没有这个控件是我们知道的事，不拦就会变成：用户填了曲名、
+    # 批次照发、作品静默走平台默认音乐。
+    music = opts.get("music")
+    if music is not None:
+        if not profile.supports_music:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_MUSIC_UNSUPPORTED,
+                    f"music selection is not supported on {profile.platform}",
+                )
+            )
+        elif not isinstance(music, str) or not music.strip():
+            problems.append(ShapeProblem(SHAPE_MUSIC_INVALID, "music name is empty"))
+        elif len(music) > MAX_MUSIC_NAME_LEN:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_MUSIC_INVALID,
+                    f"music name exceeds {MAX_MUSIC_NAME_LEN} characters",
+                )
+            )
     return problems
 
 
@@ -639,6 +679,7 @@ def project_capability(profile: PlatformSessionProfile) -> "PlatformCapability":
         schedule_max_ahead_seconds=_seconds(profile.schedule_max_ahead),
         self_declarations=sorted(profile.self_declarations),
         supports_collection=profile.supports_collection,
+        supports_music=profile.supports_music,
     )
 
 

@@ -114,8 +114,8 @@ def _account_publish_opts(account: dict, task: dict) -> dict:
 def unsupported_options(task: dict, channel: str) -> list[str]:
     """本次批次里 ``channel`` 这条通道**接不住**的表单字段。
 
-    定时发布 / 自主声明 / 合集全都是"在创作页上操作"的能力，只有会话通道
-    （浏览器真的在页面上点）能做到。official 走开放平台 create API（无这些
+    定时发布 / 自主声明 / 合集 / 配乐全都是"在创作页上操作"的能力，只有会话
+    通道（浏览器真的在页面上点）能做到。official 走开放平台 create API（无这些
     参数），h5 把内容甩给用户手机上的抖音 App（我们连页面都碰不到）。
 
     返回非空时调用方**让这一行失败**，而不是把字段丢掉照发。理由与浏览器侧
@@ -134,6 +134,8 @@ def unsupported_options(task: dict, channel: str) -> list[str]:
         unsupported.append("self declaration")
     if (task.get("collection_name") or "").strip():
         unsupported.append("collection")
+    if (task.get("music_name") or "").strip():
+        unsupported.append("music")
     return unsupported
 
 
@@ -368,6 +370,9 @@ async def _build_publish_intent(account: dict, task: dict, repo):
     collection = (task.get("collection_name") or "").strip()
     if collection:
         platform_options["collection"] = collection
+    music = (task.get("music_name") or "").strip()
+    if music:
+        platform_options["music"] = music
 
     return PublishIntent(
         content_type=content_type,
@@ -404,6 +409,41 @@ def collection_note(detail: dict) -> Optional[str]:
     requested = (detail or {}).get("collection_requested")
     named = f" '{requested}'" if requested else ""
     return f"[collection_{state}] published, but the collection{named} was not applied"
+
+
+def music_note(detail: dict) -> Optional[str]:
+    """browser 的 ``detail`` → "发了，但用的不是你填的那首歌"。纯函数。
+
+    与 ``collection_note`` 是同一个机制、不同的触发条件，原因也不同：配乐**没
+    选上**在浏览器侧是硬失败（那一行会 failed，不会走到这里），能走到这里的
+    只有一种情况 —— 选上了，但用的是近似匹配。
+
+    平台的搜索是模糊的：搜「起风了」会回一打不同上传者、不同后缀的版本，
+    没有一条与输入逐字相同是常态。这时取第一条比不配乐好，但**用户必须知道
+    最后用的是哪一首** —— "发出去了" 与 "发出去的是你要的那首" 不是同一个
+    断言。不回显它，就退化成 CLAUDE.md 明令禁止的 silent no-op。
+
+    ``None`` = 精确匹配、或本来就没要求配乐。
+    """
+    if (detail or {}).get("music_match") != "approximate":
+        return None
+    requested = (detail or {}).get("music_requested")
+    selected = (detail or {}).get("music_selected")
+    return (
+        f"[music_approximate] published with '{selected}' — the closest match "
+        f"the platform's search returned for '{requested}'"
+    )
+
+
+def publish_notes(detail: dict) -> Optional[str]:
+    """一次成功发布上所有需要回显的告诫，合成一条。``None`` = 没有。
+
+    ``publish_task_accounts.error_message`` 是 UI 唯一能显示的自由文本，一行
+    只有一列，所以两条告诫必须共用它。分隔符用 ``' | '`` 而不是换行：记录页
+    把它渲染成一行 chip 后的提示。
+    """
+    notes = [note for note in (collection_note(detail), music_note(detail)) if note]
+    return " | ".join(notes) if notes else None
 
 
 async def _settle_session_outcome(
@@ -464,7 +504,7 @@ async def _settle_session_outcome(
             # 的自由文本。合集没挂上不该把整行标 failed（作品真的发出去了），
             # 也不该无声无息 —— 记录页把 success + 非空 error_message 渲染成
             # 一条提示而不是错误。
-            error_message=collection_note(detail),
+            error_message=publish_notes(detail),
         )
         return "success"
 

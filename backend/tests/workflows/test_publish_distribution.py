@@ -1179,6 +1179,23 @@ async def test_collection_name_rides_in_platform_options():
     assert intent.platform_options["collection"] == "Summer Trip"
 
 
+@pytest.mark.asyncio
+async def test_music_name_rides_in_platform_options():
+    """配乐是抖音发布页上的控件，与合集同族：backend 只透传曲名，浏览器侧去
+    弹窗里搜。空白 = 不碰控件（平台默认原声）。"""
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    intent = await _build_publish_intent(
+        _session_account(), _form_task(music_name="  起风了 "), _FakeRepo()
+    )
+    assert intent.platform_options["music"] == "起风了"
+
+    blank = await _build_publish_intent(
+        _session_account(), _form_task(music_name="   "), _FakeRepo()
+    )
+    assert "music" not in blank.platform_options
+
+
 @pytest.mark.parametrize(
     "task,expected",
     [
@@ -1187,6 +1204,11 @@ async def test_collection_name_rides_in_platform_options():
         ({"self_declaration": "内容由AI生成"}, ["self declaration"]),
         ({"collection_name": "Trip"}, ["collection"]),
         ({"collection_name": "   "}, []),
+        # 配乐同理：official/h5 碰不到发布页，带 music 的批次必须失败而不是
+        # 把字段丢掉照发 —— 用户填了曲名却发出去没配乐，正是这个字段要消灭
+        # 的那种"看起来成功了"。
+        ({"music_name": "起风了"}, ["music"]),
+        ({"music_name": "   "}, []),
         (
             {"scheduled_at": "2026-09-01T00:00:00Z", "collection_name": "Trip"},
             ["scheduled publishing", "collection"],
@@ -1244,6 +1266,61 @@ def test_collection_note_only_speaks_up_when_the_collection_was_dropped(
         assert note is None
     else:
         assert expected_fragment in note
+
+
+@pytest.mark.parametrize(
+    "detail,expected_fragment",
+    [
+        ({}, None),
+        ({"music": "not_requested"}, None),
+        # 精确命中不需要打扰用户。
+        (
+            {"music": "applied", "music_match": "exact", "music_selected": "起风了"},
+            None,
+        ),
+        # 近似命中必须回显**实际用的那首**："发出去了"与"发出去的是你要的那
+        # 首"不是同一个断言。
+        (
+            {
+                "music": "applied",
+                "music_match": "approximate",
+                "music_requested": "起风了",
+                "music_selected": "起风了 (Cover)",
+            },
+            "起风了 (Cover)",
+        ),
+    ],
+)
+def test_music_note_only_speaks_up_when_the_track_is_not_the_one_asked_for(
+    detail, expected_fragment
+):
+    from app.workflows.publish_distribution import music_note
+
+    note = music_note(detail)
+    if expected_fragment is None:
+        assert note is None
+    else:
+        assert expected_fragment in note
+        assert "music_approximate" in note
+
+
+def test_two_caveats_on_one_row_are_both_kept():
+    """``error_message`` 是这一行 UI 唯一的自由文本，两条提示只能共用它 ——
+    先到的那条把后到的挤掉，就是把 silent no-op 换了个地方犯。"""
+    from app.workflows.publish_distribution import publish_notes
+
+    note = publish_notes(
+        {
+            "collection": "not_found",
+            "collection_requested": "Summer Trip",
+            "music": "applied",
+            "music_match": "approximate",
+            "music_requested": "起风了",
+            "music_selected": "起风了 (Cover)",
+        }
+    )
+    assert "collection_not_found" in note
+    assert "music_approximate" in note
 
 
 @pytest.mark.asyncio

@@ -2563,6 +2563,10 @@ export interface PublishTask {
    *  '无需添加自主声明', which is the user explicitly declaring nothing. */
   self_declaration: SelfDeclaration | null;
   collection_name: string | null;
+  /** Douyin 选择音乐 — the track name that was searched for at publish time.
+   *  null = the music control was left untouched, i.e. the platform default
+   *  (原声), which is what every post published before this field existed got. */
+  music_name: string | null;
   accounts: PublishTaskAccount[];
 }
 
@@ -2606,6 +2610,16 @@ export interface PublishRequest {
   /** Douyin 合集 name. Matched against the account's EXISTING collections; never
    *  creates one. Omit = no collection. */
   collection_name?: string;
+  /**
+   * Douyin 选择音乐 — a track name. At publish time the browser opens the
+   * editor's music dialog, searches for this, and selects a result: an exact
+   * title if the platform returned one, otherwise the first result (reported
+   * back either way). A search that returns NOTHING fails that account's row
+   * rather than publishing without music — a post the user meant to have music
+   * going out silently on 原声 is the outcome this field exists to prevent.
+   * Omit = leave the control untouched.
+   */
+  music_name?: string;
   /**
    * The two covers produced by `POST /distribution/covers/select`. Sent at
    * create time because the usual order is cover-first: the compose form

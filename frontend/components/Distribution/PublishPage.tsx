@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, ChevronLeft,
-  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send,
-  Sparkles, TrendingUp, X,
+  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Plus, Radio, Search,
+  Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
@@ -233,6 +233,11 @@ export const PublishPage: React.FC = () => {
   // The picker's anchor; non-null = open.
   const [scheduleAnchor, setScheduleAnchor] = useState<HTMLElement | null>(null);
   const [collectionName, setCollectionName] = useState('');
+  // Douyin 「选择音乐」. Empty = leave the control alone, i.e. the platform
+  // default (原声) — what every post published before this field existed got.
+  // A name that the platform's own search cannot find fails that account's row
+  // rather than publishing without music; see the backend's `music_name`.
+  const [musicName, setMusicName] = useState('');
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
   // Not user-selectable: the backend routes per account (see the Channel type).
@@ -403,6 +408,20 @@ export const PublishPage: React.FC = () => {
   }, [targetAccounts, capabilities]);
 
   const imagesSupported = imagesGate === null;
+
+  /**
+   * Whether every account this post reaches has a music picker we can drive.
+   *
+   * Read from the capabilities response, never decided here — same rule as the
+   * image limits above. A null map (still loading, or the request failed) reads
+   * as "not supported", so the field stays hidden rather than collecting a name
+   * that would be refused at submit with `music_not_supported`.
+   */
+  const musicSupported = useMemo(
+    () => targetAccounts.length > 0
+      && targetAccounts.every((a) => capabilities?.[a.platform]?.supports_music ?? false),
+    [targetAccounts, capabilities],
+  );
 
   // Used as both placeholder and aria-label, so it has to be one value.
   const pickerSearchLabel = isImages
@@ -808,7 +827,13 @@ export const PublishPage: React.FC = () => {
   // the backend fails the row rather than dropping the field, so warn before
   // the user finds out from a failed record.
   const usesCreatorPageOnlyFields =
-    scheduleMode === 'schedule' || selfDeclaration !== '' || collectionName.trim().length > 0;
+    scheduleMode === 'schedule'
+    || selfDeclaration !== ''
+    || collectionName.trim().length > 0
+    // Music is set by clicking through the creator page, so it is in the same
+    // group: an OAuth/H5 account cannot honour it, and the backend fails that
+    // row rather than dropping the field.
+    || musicName.trim().length > 0;
   const nonSessionSelected = useMemo(
     () => selectedAccounts.filter(
       (id) => accounts.find((a) => a.id === id)?.auth_type !== 'session',
@@ -899,6 +924,16 @@ export const PublishPage: React.FC = () => {
           return t(
             'distribution.publish.gateCollectionRejected',
             'The collection name was refused — clear it, or use one this account already has.',
+          );
+        case 'music_not_supported':
+          return t(
+            'distribution.publish.gateMusicNotSupported',
+            'This account cannot have its music picked for it — clear the music field, or remove the account.',
+          );
+        case 'invalid_music_name':
+          return t(
+            'distribution.publish.gateMusicInvalid',
+            'That music name was refused — shorten it, or clear the field to publish with the platform default.',
           );
         case 'self_declaration_not_supported':
         case 'unknown_self_declaration':
@@ -1007,6 +1042,9 @@ export const PublishPage: React.FC = () => {
         // "declare nothing" are different instructions on the platform.
         self_declaration: selfDeclaration || undefined,
         collection_name: collectionName.trim() || undefined,
+        // Omitted when blank — "leave the music control alone" (publish on the
+        // platform default) is a real instruction, not a missing value.
+        music_name: musicName.trim() || undefined,
         // Cover-first order: the pair was already derived by
         // POST /covers/select, so it rides along at create time rather than
         // needing a second call against the new task.
@@ -1578,6 +1616,28 @@ export const PublishPage: React.FC = () => {
                 onChange={(e) => setCollectionName(e.target.value)}
               />
             </div>
+            {/* Music is picked BY NAME in the platform's own dialog: at publish
+                time the browser searches for this and selects a result. We
+                cannot enumerate the platform's library from here, so this is
+                free text — and a name its search cannot find fails that account
+                (loudly) rather than publishing on the default 原声, which is
+                the whole reason the field exists. Hidden entirely when the
+                accounts in play have no music picker. */}
+            {musicSupported && (
+              <div className="opt-row">
+                <Music />
+                <span className="ol">{t('distribution.publish.music', 'Music')}</span>
+                <input
+                  className="input"
+                  style={{ width: 200 }}
+                  value={musicName}
+                  maxLength={100}
+                  aria-label={t('distribution.publish.music', 'Music')}
+                  placeholder={t('distribution.publish.musicPlaceholder', 'Track name to search')}
+                  onChange={(e) => setMusicName(e.target.value)}
+                />
+              </div>
+            )}
             <div className="opt-row">
               <MapPin />
               <span className="ol">{t('distribution.publish.location', 'Location')}</span>

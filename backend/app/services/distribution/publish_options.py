@@ -184,9 +184,38 @@ def normalize_collection(name: Optional[str]) -> Optional[str]:
     return trimmed
 
 
+# ── 配乐（抖音「选择音乐」） ─────────────────────────────────────
+
+#: 曲名的长度上界。同 ``MAX_COLLECTION_NAME_LEN`` 的口径：不是平台实测上限，
+#: 只是一个"明显不合理"的兜底。
+MAX_MUSIC_NAME_LEN = 100
+
+
+def normalize_music(name: Optional[str]) -> Optional[str]:
+    """去空白；空串 → ``None``（= 不碰音乐控件 = 平台默认原声）。超长 raise。
+
+    与 ``normalize_collection`` 同形，但语义上更严重一格：合集没挂上是归档
+    问题（浏览器侧降级放行，事后能在平台补挂），配乐没选上是分发问题，而且
+    作品发出去之后**换不了配乐**。所以浏览器侧那一步任何一种失配都直接失败，
+    不降级 —— 详见 ``douyin_publish._set_music``。
+
+    存在性 backend 无从校验（曲名不是封闭词表），由浏览器侧在平台自己的搜索
+    结果里判定。
+    """
+    if name is None:
+        return None
+    trimmed = name.strip()
+    if not trimmed:
+        return None
+    if len(trimmed) > MAX_MUSIC_NAME_LEN:
+        raise ValueError(f"music name exceeds {MAX_MUSIC_NAME_LEN} characters")
+    return trimmed
+
+
 __all__ = [
     "DOUYIN_SELF_DECLARATIONS",
     "MAX_COLLECTION_NAME_LEN",
+    "MAX_MUSIC_NAME_LEN",
     "SCHEDULE_LEAD_SLACK",
     "SCHEDULE_MAX_AHEAD",
     "SCHEDULE_MIN_LEAD",
@@ -202,6 +231,7 @@ __all__ = [
     "SELF_DECLARATION_OPINION",
     "SELF_DECLARATION_REPOST",
     "normalize_collection",
+    "normalize_music",
     "resolve_self_declaration",
     "self_declaration_conflicts",
     "validate_scheduled_at",

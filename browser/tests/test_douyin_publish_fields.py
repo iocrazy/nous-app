@@ -679,6 +679,11 @@ async def test_a_missing_time_field_fails_rather_than_leaving_the_default():
 # =============================================================================
 
 
+MUSIC_ENTRY = f"text={dp.MUSIC_ENTRY_TEXT}"
+MUSIC_SEARCH = dp.MUSIC_SEARCH_INPUT_SELECTORS[0]
+MUSIC_ROW_0 = f'[{dp.MUSIC_ROW_ATTRIBUTE}="0"]'
+
+
 def happy_page(**overrides) -> FakePage:
     """A page on which a full publish succeeds, so a single knocked-out control
     is the only difference between a test that publishes and one that does
@@ -701,12 +706,30 @@ def happy_page(**overrides) -> FakePage:
         state = set(base)
         if DECLARATION_CONFIRM not in page.clicks:
             state.add(dp.SELF_DECLARATION_MODAL_SELECTOR)
+        # The music dialog: open once 「选择音乐」 has been clicked, closed again
+        # once a result row has. Modelled rather than left permanently on
+        # screen, because "the dialog never closed" is a real failure this
+        # module refuses to publish through.
+        if MUSIC_ENTRY in page.clicks and MUSIC_ROW_0 not in page.clicks:
+            state.add(MUSIC_SEARCH)
         return state - missing
 
     def url(page: FakePage) -> str:
         return MANAGE_URL if f"text={dp.PUBLISH_BUTTON_TEXT}" in page.clicks else EDITOR_URL
 
-    return FakePage(url=url, visible=visible, **overrides)
+    page = FakePage(url=url, visible=visible, **overrides)
+    # [实测 2026-08-12, T0] 「选择音乐」 matches twice — the block heading and
+    # the button. Encoded here so every drive-level test runs against the real
+    # ambiguity rather than a convenient single match.
+    # `missing` has to reach this one through `counts`: the entry is found by
+    # counting text matches, not by a visibility check.
+    page.counts.setdefault(MUSIC_ENTRY, 0 if MUSIC_ENTRY in missing else 2)
+    page.music_rows = ("Dream It Possible", "Dream It Possible (Live)")
+    # The preview only starts naming the track once its row was clicked.
+    page.music_mentions = lambda pg, needle: (
+        1 if MUSIC_ROW_0 in pg.clicks and needle == "Dream It Possible" else 0
+    )
+    return page
 
 
 async def test_a_publish_carrying_every_new_field_reports_all_three():
@@ -766,6 +789,60 @@ async def test_a_collection_that_cannot_be_set_still_publishes():
     assert outcome.status is SessionStatus.PUBLISHED
     assert outcome.detail["collection"] == "control_missing"
     assert outcome.detail["collection_requested"] == "Weekly Recap"
+
+
+async def test_music_that_cannot_be_selected_fails_the_whole_publish():
+    """**The guard for the music field**, and the counterpart of the
+    declaration test above.
+
+    A user who typed a track name did it because a post published on 原声
+    reaches fewer people - that is the only reason the field exists. Publishing
+    anyway would produce a post that looks completely fine and quietly
+    under-performs, with nothing anywhere saying the music was dropped, and the
+    platform does not let a published post swap its track afterwards.
+
+    Removing this refusal (returning a `music: control_missing` note the way
+    the collection step does) turns this test red - which is the point.
+    """
+    page = happy_page(missing={MUSIC_ENTRY})
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._drive(
+            page, job(platform_options={"music": "Dream It Possible"}), Deadline(20)
+        )
+
+    assert excinfo.value.detail["stage"] == "music"
+    assert excinfo.value.detail["reason"] == "music_entry_missing"
+    # Nothing went out: the publish button was never clicked.
+    assert f"text={dp.PUBLISH_BUTTON_TEXT}" not in page.clicks
+    outcome = dp._outcome_from_exception(excinfo.value)
+    assert outcome.success is False
+
+
+async def test_a_publish_that_asked_for_music_reports_which_track_it_got():
+    """The positive control: on a page with the dialog, the drive publishes and
+    `detail` names the track and how it was matched."""
+    outcome = await dp._drive(
+        happy_page(),
+        job(platform_options={"music": "dream it possible"}),
+        Deadline(20),
+    )
+
+    assert outcome.status is SessionStatus.PUBLISHED
+    assert outcome.detail["music"] == "applied"
+    assert outcome.detail["music_selected"] == "Dream It Possible"
+    # Case and whitespace are not a disagreement about which song this is.
+    assert outcome.detail["music_match"] == "exact"
+
+
+async def test_a_publish_without_music_never_touches_the_dialog():
+    """Why refusing above is affordable: the ordinary publish does not depend
+    on a single music selector."""
+    page = happy_page()
+    outcome = await dp._drive(page, job(), Deadline(20))
+
+    assert outcome.status is SessionStatus.PUBLISHED
+    assert outcome.detail["music"] == "not_requested"
+    assert MUSIC_ENTRY not in page.clicks
 
 
 async def test_a_schedule_that_cannot_be_set_fails_the_whole_publish():
