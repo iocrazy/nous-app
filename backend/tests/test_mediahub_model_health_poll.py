@@ -24,8 +24,20 @@ async def test_poll_probes_only_enabled_and_persists():
 
     async def _fake_probe(row):
         if row["actual_model"] == "good":
-            return {"ok": True, "detail": "chat ok", "error": None, "dims": None}
-        return {"ok": False, "detail": "", "error": "HTTP 401: bad key", "dims": None}
+            return {
+                "ok": True,
+                "detail": "chat ok",
+                "error": None,
+                "dims": None,
+                "code": None,
+            }
+        return {
+            "ok": False,
+            "detail": "",
+            "error": "HTTP 401: bad key",
+            "dims": None,
+            "code": "auth",
+        }
 
     with patch(
         "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
@@ -41,8 +53,11 @@ async def test_poll_probes_only_enabled_and_persists():
     # Disabled row (id=3) never probed/persisted.
     persisted = {c.args[0] for c in repo.record_test_result.await_args_list}
     assert persisted == {"1", "2"}
-    repo.record_test_result.assert_any_await("1", "ok", "chat ok")
-    repo.record_test_result.assert_any_await("2", "fail", "HTTP 401: bad key")
+    # The hourly poll is the ONLY writer for most rows (nobody clicks Test), so
+    # if the reason code did not travel this call it would be NULL in production
+    # forever — the acceptance query would come back all-empty.
+    repo.record_test_result.assert_any_await("1", "ok", "chat ok", None)
+    repo.record_test_result.assert_any_await("2", "fail", "HTTP 401: bad key", "auth")
 
 
 @pytest.mark.asyncio
