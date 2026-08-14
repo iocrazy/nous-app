@@ -54,10 +54,19 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
   const [nameValue, setNameValue] = useState(folder.name);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  // ⚠️ Seeded DURING RENDER, never in a `useEffect`. A passive effect is a
+  // DEFERRED write: React commits the DOM first and flushes passive effects in
+  // a later scheduler task, so under CPU contention the seed can flush in the
+  // SAME batch as a keystroke and, landing after it, silently overwrite what
+  // the user just typed. `commitName` below then compares equal and calls no
+  // `onRename` at all — the rename is lost with zero user-visible feedback.
+  // Same defect class and fix as `editor/beats/BeatCard.tsx`.
+  const [seededName, setSeededName] = useState({ id: folder.id, name: folder.name });
+  if (seededName.id !== folder.id || seededName.name !== folder.name) {
+    setSeededName({ id: folder.id, name: folder.name });
     setNameValue(folder.name);
     setEditingName(false);
-  }, [folder.id, folder.name]);
+  }
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();

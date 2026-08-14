@@ -29,12 +29,24 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  useEffect(() => {
+  // ⚠️ Seeded DURING RENDER, never in a `useEffect`. A passive effect is a
+  // DEFERRED write: React commits the DOM first and flushes passive effects in
+  // a later scheduler task, so under CPU contention the seed can flush in the
+  // SAME batch as a keystroke and, landing after it, silently overwrite what
+  // the user just typed. Here that also re-arms `hasChanges` to false, so the
+  // Save button goes back to disabled and the edit is unrecoverable.
+  //
+  // Key stays the whole `project` object, exactly as the old effect deps were —
+  // callers (ProjectsListView / ProjectWorkspace) hold it in state, so its
+  // identity is stable across renders and this cannot loop.
+  const [seededProject, setSeededProject] = useState(project);
+  if (seededProject !== project) {
+    setSeededProject(project);
     setName(project.name);
     setAnnouncement(project.announcement || '');
     setProjectType(project.project_type);
     setProjectGroup(project.project_group || '');
-  }, [project]);
+  }
 
   // Island wiring (global idiom, cf. HotspotInfoPanel / ResourcesInfoPanelWrapper):
   // on sm+ the panel renders INSIDE the shell's info island — a sibling card in

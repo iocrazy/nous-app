@@ -410,15 +410,44 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     return () => window.removeEventListener('keydown', onKey);
   }, [navigateToSibling, resource]);
 
-  // Sync editable fields when resource loads/changes
-  useEffect(() => {
-    if (resource) {
-      setNameValue(resource.filename);
-      setNotesValue(resource.notes || '');
-      setUrlValue(resource.url || '');
-      setEditingName(false);
-    }
-  }, [resource?.id, resource?.filename, resource?.notes, resource?.url]);
+  // Sync editable fields when resource loads/changes.
+  //
+  // ⚠️ Seeded DURING RENDER, never in a `useEffect`. A passive effect is a
+  // DEFERRED write: React commits the DOM first and flushes passive effects in
+  // a later scheduler task, so under CPU contention the seed can flush in the
+  // SAME batch as a keystroke and, landing after it, silently overwrite what
+  // the user just typed. `commitName` / `commitNotes` / `commitUrl` below then
+  // compare equal and send NO update — the edit is lost with zero feedback.
+  // Same defect class and fix as `editor/beats/BeatCard.tsx`.
+  type ResourceSeed = {
+    id: string;
+    filename: string;
+    notes: string | null;
+    url: string | null;
+  };
+  const seed: ResourceSeed | null = resource
+    ? {
+        id: resource.id,
+        filename: resource.filename,
+        notes: resource.notes ?? null,
+        url: resource.url ?? null,
+      }
+    : null;
+  const [seededFrom, setSeededFrom] = useState<ResourceSeed | null>(seed);
+  const seedChanged =
+    seed != null &&
+    (seededFrom == null ||
+      seededFrom.id !== seed.id ||
+      seededFrom.filename !== seed.filename ||
+      seededFrom.notes !== seed.notes ||
+      seededFrom.url !== seed.url);
+  if (seed != null && resource && seedChanged) {
+    setSeededFrom(seed);
+    setNameValue(resource.filename);
+    setNotesValue(resource.notes || '');
+    setUrlValue(resource.url || '');
+    setEditingName(false);
+  }
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ChevronLeft,
   Copy,
@@ -82,10 +82,22 @@ export function MobileAudioUpload({
   const [currentTime, setCurrentTime] = useState(0);
 
   // ── Notes (local typing → commit on blur) ────────────────────────────────
+  // ⚠️ Seeded DURING RENDER, never in a `useEffect`. A passive effect is a
+  // DEFERRED write: React commits the DOM first and flushes passive effects in
+  // a later scheduler task, so under CPU contention the seed can flush in the
+  // SAME batch as a keystroke and, landing after it, silently overwrite what
+  // the user just typed. `commitNotes` below then compares equal and sends NO
+  // update — the note is lost with zero user-visible feedback. Same defect
+  // class and fix as `editor/beats/BeatCard.tsx`.
   const [notesValue, setNotesValue] = useState(resource.notes || '');
-  useEffect(() => {
+  const [seededNotes, setSeededNotes] = useState({
+    id: resource.id,
+    notes: resource.notes,
+  });
+  if (seededNotes.id !== resource.id || seededNotes.notes !== resource.notes) {
+    setSeededNotes({ id: resource.id, notes: resource.notes });
     setNotesValue(resource.notes || '');
-  }, [resource.id, resource.notes]);
+  }
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const reloadLyrics = useCallback(async () => {
