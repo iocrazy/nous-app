@@ -60,6 +60,7 @@ from app.services.canvas.derive_persistence import (
     persist_derived_image,
 )
 from app.services.canvas.image_crop import CropError, CropRegion, crop_normalized
+from app.services.library.resource_file_path import resolve_resource_file_path
 from app.services.media.render.video_frame_extractor import extract_frames
 
 # ── 抖音封面的两个比例 ────────────────────────────────────────────
@@ -277,7 +278,12 @@ async def load_source_video(
         raise CoverFrameError(
             status_code=400, detail="cover extraction is only valid for video resources"
         )
-    file_path = source.get("file_path")
+    # ⚠️ 不是 ``source.get("file_path")``。那一列对 ``source_type='web'`` 的行
+    # （平台解析下载的素材）**按设计**为空 —— 共享下载字段只存 parsed_media
+    # （PR-B）。生产里超过一半的视频是这种形状，直接读该列会把它们全判成"没有
+    # 文件"，用户看到 400 "no file on disk yet"：跟修 scope 前的假 404 是同一
+    # 类错误答案，只是换了个说法。阶梯与来源见 resource_file_path 的模块 docstring。
+    file_path = await resolve_resource_file_path(source)
     if not file_path:
         raise CoverFrameError(
             status_code=400, detail="source resource has no file on disk yet"

@@ -43,6 +43,7 @@ from app.schemas.resources import (
     ResourceTagRequest,
     ResourceUpdate,
 )
+from app.services.library.resource_file_path import resolve_resource_file_path
 from app.services.library.resources_service import ResourcesService
 
 router = APIRouter(prefix="/resources")
@@ -518,33 +519,12 @@ async def serve_resource_file(
             if not resource:
                 raise HTTPException(status_code=404, detail="Resource not found")
 
-            file_path = resource.get("file_path")
-            # PR-B: parsed-media-backed resources don't carry the shared
-            # file path on the resources row. Fall through to parsed_media.
-            if not file_path:
-                media_id = resource.get("media_id")
-                if media_id:
-                    from sqlalchemy import select
-
-                    from app.db.session import read_scope
-                    from app.models import ParsedMedia
-
-                    try:
-                        async with read_scope() as session:
-                            pm_path = (
-                                await session.execute(
-                                    select(ParsedMedia.download_path)
-                                    .where(ParsedMedia.id == int(media_id))
-                                    .limit(1)
-                                )
-                            ).scalar()
-                        if pm_path:
-                            file_path = pm_path
-                    except Exception as e:
-                        logger.warning(
-                            f"parsed_media file lookup failed for "
-                            f"media_id={media_id}: {e}"
-                        )
+            # PR-B 两级阶梯：resources.file_path → parsed_media.download_path。
+            # 这段逻辑原本内联在这里，现已提取到 resource_file_path（行为不变，
+            # 含 parsed_media 查询失败时降级为 None 的语义）—— 提取的原因是每个
+            # 不经过本端点却需要真文件的调用方都只实现了第一级，于是对
+            # source_type='web' 的行（生产里过半视频）静默判成"没有文件"。
+            file_path = await resolve_resource_file_path(resource)
         if not file_path:
             raise HTTPException(status_code=404, detail="No file available")
 
