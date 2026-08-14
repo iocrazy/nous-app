@@ -234,19 +234,37 @@ class ResourceImportError(Exception):
         super().__init__(detail)
 
 
-def resolve_resource_import(resource: dict) -> dict:
-    """Validate a resources row for import; return its RAW (unresolved) file_path.
+def resolve_resource_import(resource: dict, file_path: Optional[str]) -> dict:
+    """Validate a resources row + its ALREADY-RESOLVED path; return import args.
 
-    Pure/sync (no I/O), so it stays testable without mocking. The returned
-    file_path is NOT an absolute host path — storage unification means it's
-    either a legacy filesystem-relative-to-DOWNLOAD_PATH path or an
+    Pure/sync (no I/O), so it stays testable without mocking — which is why
+    ``file_path`` is a PARAMETER rather than something read off ``resource``
+    here. Locating the file needs a DB read for platform-downloaded rows (see
+    below), and doing that inside this function would have cost it exactly the
+    property its docstring promises.
+
+    ``file_path`` comes from ``resolve_resource_file_path`` (the PR-B ladder:
+    ``resources.file_path`` → ``parsed_media.download_path``). Reading
+    ``resource["file_path"]`` directly — as this did — is wrong for
+    ``source_type='web'`` rows, whose path lives only on ``parsed_media``:
+    every downloaded video/image 404'd with "Resource has no local file" when
+    the user tried to load it as an i2i/i2v reference.
+
+    The ladder also (correctly) resolves image ALBUMS to ``None``: an album is
+    a directory of slides, not a single reference image, so 404 is the right
+    answer for it here — the guard that protects this call site is the same one
+    that would be WRONG for an "is it downloaded?" question (see
+    ``ResourcesRepository.get_owned_platform_ids``).
+
+    The returned path is NOT an absolute host path — storage unification means
+    it's either a legacy filesystem-relative-to-DOWNLOAD_PATH path or an
     `sb://bucket/key` object-store URI (see resources_service.py /
     resources_crud_router.py "Storage unification" comments and
     media_storage.resolve_media_source). The endpoint resolves it to real
     bytes via `materialize()` — the same shared reader ffprobe/HLS/promote
     already use for either shape.
     """
-    file_path = (resource.get("file_path") or "").strip()
+    file_path = (file_path or "").strip()
     if not file_path:
         raise ResourceImportError(404, "Resource has no local file")
     mime = (resource.get("mime_type") or "").lower()
@@ -282,8 +300,13 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
         raise HTTPException(status_code=404, detail="Resource not found")
     if not await check_media_access(payload.resource_id, auth.user_id, None):
         raise HTTPException(status_code=403, detail="Access denied")
+    # PR-B 阶梯：平台下载来的素材路径在 parsed_media,不在 resources 行上。
+    # 在这里解析(需要 DB),让 resolve_resource_import 保持纯函数。
+    from app.services.library.resource_file_path import resolve_resource_file_path
+
+    resolved_path = await resolve_resource_file_path(resource)
     try:
-        args = resolve_resource_import(resource)
+        args = resolve_resource_import(resource, resolved_path)
     except ResourceImportError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 

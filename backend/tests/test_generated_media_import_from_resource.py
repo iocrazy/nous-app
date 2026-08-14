@@ -26,7 +26,7 @@ def test_resolves_image_resource():
         "file_path": "teams/42/uploads/1/v1/a.png",
         "mime_type": "image/png",
     }
-    args = resolve_resource_import(row)
+    args = resolve_resource_import(row, row["file_path"])
     assert args == {"file_path": "teams/42/uploads/1/v1/a.png", "mime": "image/png"}
 
 
@@ -38,7 +38,7 @@ def test_resolves_object_store_resource():
         "file_path": "sb://library/t42/ab/cd/deadbeef.png",
         "mime_type": "image/png",
     }
-    args = resolve_resource_import(row)
+    args = resolve_resource_import(row, row["file_path"])
     assert args == {
         "file_path": "sb://library/t42/ab/cd/deadbeef.png",
         "mime": "image/png",
@@ -47,21 +47,19 @@ def test_resolves_object_store_resource():
 
 def test_missing_file_path_raises_404():
     with pytest.raises(ResourceImportError) as e:
-        resolve_resource_import({"id": 1, "file_path": None, "mime_type": "image/png"})
+        resolve_resource_import({"id": 1, "mime_type": "image/png"}, None)
     assert e.value.status_code == 404
 
 
 def test_non_media_mime_raises_400():
     with pytest.raises(ResourceImportError) as e:
-        resolve_resource_import(
-            {"id": 1, "file_path": "/d/a.pdf", "mime_type": "application/pdf"}
-        )
+        resolve_resource_import({"id": 1, "mime_type": "application/pdf"}, "/d/a.pdf")
     assert e.value.status_code == 400
 
 
 def test_video_mime_allowed():
     row = {"id": 1, "file_path": "d/v.mp4", "mime_type": "video/mp4"}
-    assert resolve_resource_import(row)["mime"] == "video/mp4"
+    assert resolve_resource_import(row, row["file_path"])["mime"] == "video/mp4"
 
 
 class _Auth:

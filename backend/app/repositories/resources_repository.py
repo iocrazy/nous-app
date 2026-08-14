@@ -609,9 +609,33 @@ class ResourcesRepository(AsyncpgRepository):
         self, platform_ids: List[str], creator_id: str
     ) -> set:
         """Of the given vids (parsed_media.platform_id), return the subset this
-        user has already downloaded (a resources row with file_path set). ONE
-        batched query for the whole list — no N+1. Empty input short-circuits
-        to ``set()`` without a query.
+        user has already downloaded. ONE batched query for the whole list —
+        no N+1. Empty input short-circuits to ``set()`` without a query.
+
+        "已下载" 的判据是两列**任一**有值
+        =================================
+        ``resources.file_path IS NOT NULL`` 单独用是错的：那一列对
+        ``source_type='web'``（平台解析下载的素材）**按设计为空** —— 共享下载
+        字段只存 ``parsed_media``（PR-B）。而这个方法查的**全是** web 素材（它
+        按 ``media_id`` JOIN ``parsed_media``），所以旧谓词恰好在它唯一服务的那
+        类数据上系统性地答错。
+
+        生产实测：旧谓词判定"已下载" 998 行，正确谓词 1196 行 —— **198 条用户
+        其实已经下载过的素材被报成"没下载"**。后果不是报错：``media_soda_router``
+        把它当 ``downloaded`` 标志送给前端，前端"默认只勾选新的"，于是这 198 条
+        被默认勾上，用户**重复下载自己已经有的东西**。
+
+        ⚠️ 为什么**不**复用 ``resolve_resource_file_path``
+        ================================================
+        那个函数回答的是"给我一个能读的**文件**路径"，因此它（正确地）把图文
+        相册的目录前缀挡成 ``None``。但这里问的是**存在性**："这东西下载过没
+        有"。相册是**下载过的** —— 拿取路径函数当谓词，8 条相册会被判成"没下
+        载"，用户照样重复下载。
+
+        同一个目录守卫，在取路径场景是保护，在存在性场景是错误答案。这是"目录
+        形状"陷阱的第二种表现，所以这里刻意**不为了复用而复用**：存在性用自己
+        的 SQL 谓词，且必须留在 SQL 里（一次批量查询，逐行调 Python 解析会退化
+        成 N+1）。
 
         Phase C task 2: migrated off the ``scoped_sql`` raw-``text()`` backstop
         to a real ORM JOIN, same rationale as ``get_completed_resource_by_url_
@@ -631,7 +655,15 @@ class ResourcesRepository(AsyncpgRepository):
                     .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
                     .where(Resources.creator_id == creator_id)
                     .where(ParsedMedia.platform_id.in_(list(platform_ids)))
-                    .where(Resources.file_path.isnot(None))
+                    # 两列任一有值即"已下载"（理由见 docstring）。相册在这里
+                    # 靠 download_path 被正确算作已下载 —— 它没有单个文件，但
+                    # 它确实下载过。
+                    .where(
+                        or_(
+                            Resources.file_path.isnot(None),
+                            ParsedMedia.download_path.isnot(None),
+                        )
+                    )
                 )
                 return {r[0] for r in result.all()}
         except Exception as e:
