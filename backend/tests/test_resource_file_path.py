@@ -207,3 +207,57 @@ async def test_load_source_video_still_400s_when_truly_fileless(pm):
     with pytest.raises(CoverFrameError) as exc:
         await load_source_video(_WebRepo(), "500")
     assert exc.value.status_code == 400
+
+
+# ── 相册边界：目录前缀不是文件，必须解析成 None ──────────────────
+#
+# 这一组钉住的是一个**很容易被"顺手修好"的更糟结局**。
+#
+# 图文相册的 download_path 是目录前缀（``t{scope}/album/{rid}/``，见
+# ``media_storage.album_key_prefix``）。裸阶梯会把它当文件返回，于是下游
+# ``materialize()`` / ffmpeg / 签名 URL 拿到一个目录 —— 那不是修好了，那是把
+# "报错说没文件"换成"拿目录当文件炸掉"。
+#
+# 这不是假设：``serve_resource_file`` 接进阶梯之后，相册行确实从"干净 404"
+# 退化成了"把目录喂给 serve_stored_file"，下面这组同时是那次退化的回归测试。
+
+ALBUM_PREFIX = "sb://library/t1/album/12345/"
+
+
+def test_is_directory_prefix_uses_trailing_slash():
+    """判据是结尾的 ``/``，不是"有没有扩展名"。
+
+    用扩展名猜，会对没有扩展名的合法单文件产生假阳性，而这里假阳性的代价是
+    "本来取得到的文件被判成取不到"。
+    """
+    assert rfp.is_directory_prefix(ALBUM_PREFIX)
+    assert not rfp.is_directory_prefix(DOWNLOAD_PATH)
+    # 无扩展名但确实是单个文件 —— 不能被误判。
+    assert not rfp.is_directory_prefix("sb://library/t1/ab/cd/abcdef")
+
+
+@pytest.mark.asyncio
+async def test_album_download_path_resolves_to_none(pm):
+    """相册（第二级拿到目录前缀）必须是 None。
+
+    把守卫回退成直接 ``return str(pm_path)``，本例立刻红。
+    """
+    pm(ALBUM_PREFIX)
+    row = {"file_path": None, "media_id": 456, "source_type": "web"}
+
+    assert await resolve_resource_file_path(row) is None
+
+
+@pytest.mark.asyncio
+async def test_album_directory_on_the_resources_row_also_blocked(pm):
+    """第一级同样过守卫 —— 目录形状不是 parsed_media 独有的。
+
+    迁移期的相册行曾把目录前缀写进 ``resources.file_path``（``storage_migration``
+    的 web 模块处理的就是这批），所以只在第二级挡是挡不干净的。
+    """
+    session = pm(DOWNLOAD_PATH)
+    row = {"file_path": ALBUM_PREFIX, "media_id": 456}
+
+    assert await resolve_resource_file_path(row) is None
+    # 而且不该"第一级是目录就去查第二级" —— 那会把相册解析成一个无关的文件。
+    assert session.queries == 0

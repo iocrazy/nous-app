@@ -23,6 +23,7 @@ from sqlalchemy import update as sa_update
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
 from app.models import PublishTaskAccounts, PublishTasks, Resources, SocialAccounts
+from app.services.library.resource_file_path import resolve_resource_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -521,22 +522,40 @@ class PublishTasksRepository(AsyncpgRepository):
         from app.core.config import settings
         from app.services.library.media_storage import ObjectStore, resolve_media_source
 
+        # ⚠️ 不能只读 ``resources.file_path``。那一列对 ``source_type='web'``
+        # （平台解析下载的素材）**按设计为空** —— 共享下载字段只存
+        # ``parsed_media``（PR-B）。而"下载来的视频"恰恰是用户最常发布的东西：
+        # 生产实测该用户库里 107 个 web 视频取不到 URL、94 个能取到，也就是
+        # 一半以上的可发布视频**根本发不出去**，报 400 "No media URL for share"。
+        #
+        # 老的 web 行有 file_path、新的没有，所以这个缺陷是**随时间长出来的**：
+        # 发布功能上线时能用，越往后坏得越多，而且没有任何报错指向真正的原因。
+        #
+        # 走共享阶梯（``resolve_resource_file_path``）而不是在这里展开第二份
+        # ——那个函数同时负责挡掉图文相册的目录前缀（见下）。
         async with read_scope() as session:
             row = (
                 (
                     await session.execute(
-                        select(Resources.file_path, Resources.creator_id).where(
-                            Resources.id == self._bigint(resource_id)
-                        )
+                        select(
+                            Resources.file_path,
+                            Resources.media_id,
+                            Resources.creator_id,
+                        ).where(Resources.id == self._bigint(resource_id))
                     )
                 )
                 .mappings()
                 .first()
             )
-        if not row or not row.get("file_path"):
+        if not row:
             return None
 
-        file_path = row["file_path"]
+        # 相册（图文）在这里解析成 None 而不是目录前缀：签名一个目录会产出一个
+        # 必然取不到内容的 URL，把"发不出去"变成"发出去了但对端拿到 404"——
+        # 后者更难归因。相册要发布是独立能力，不是这个入口顺手能给的。
+        file_path = await resolve_resource_file_path(dict(row))
+        if not file_path:
+            return None
         loc = resolve_media_source(file_path)
         if loc.is_object_store:
             return await ObjectStore(loc.bucket).signed_url(loc.key, ttl_seconds=3600)

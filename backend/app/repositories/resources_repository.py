@@ -1567,6 +1567,13 @@ class ResourcesRepository(AsyncpgRepository):
         ran the shared-object GC branch, and thumbnail_path was dead code
         here specifically.
         """
+        # ⛔ 这个投影喂给 ``resources_service._delete_physical_files``，所以
+        # **永远不要**在消费端给它接 PR-B 阶梯（``resolve_resource_file_path``）。
+        # ``file_path`` 为空在删除语义下表示"这一行没有自己的文件"，不是"去
+        # parsed_media 找一个来删" —— 那份是多用户共享的，顺着阶梯删会造成跨租户
+        # 数据丢失。``media_id`` 在这个投影里，是给共享对象的**引用检查**用的
+        # （``exclude`` 名单），不是给"回落取路径"用的。完整理由见
+        # ``resources_service._delete_physical_files`` 里的同款标注。
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             async with read_scope() as session:

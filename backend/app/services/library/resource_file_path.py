@@ -55,7 +55,22 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-__all__ = ["resolve_resource_file_path"]
+__all__ = ["is_directory_prefix", "resolve_resource_file_path"]
+
+
+def is_directory_prefix(path: str) -> bool:
+    """``path`` 指的是一个目录/前缀而不是单个文件吗？
+
+    判据就是结尾的 ``/``，因为那正是本仓库写目录路径时的形状：图文相册的
+    ``download_path`` 由 ``media_storage.album_key_prefix`` 产出
+    （``t{scope}/album/{rid}/``），生产实测 8/8 相册以 ``/`` 结尾、0 个单文件
+    资源以 ``/`` 结尾 —— 是个完全可分的信号。
+
+    刻意**不**用"有没有扩展名"来猜：没有扩展名的单文件是完全合法的，靠扩展名
+    判断会在真实数据上产生假阳性，而假阳性在这里的代价是"能取到的文件被判成
+    取不到"。
+    """
+    return path.endswith("/")
 
 
 async def resolve_resource_file_path(resource: Dict[str, Any]) -> Optional[str]:
@@ -71,11 +86,31 @@ async def resolve_resource_file_path(resource: Dict[str, Any]) -> Optional[str]:
     ``resolve_media_source``），本函数不做判断，也不碰磁盘 —— 它只回答"路径写
     在哪一列"。
 
+    ⚠️ 边界：**只解析单文件资源，图文相册家族解析不出来（返回 None）**
+    ================================================================
+    图文相册（抖音图集等）的 ``download_path`` 是一个**目录前缀**
+    （``t{scope}/album/{rid}/``，见 ``media_storage.album_key_prefix``），不是
+    一个文件。把它当文件返回，下游 ``materialize()`` / ffmpeg / 签名 URL 拿到
+    的是目录 —— 那不是"修好了"，那是**把"报错说没文件"换成了"拿目录当文件炸
+    掉"，比原状更糟**。所以这里显式挡掉，让相册维持既有行为（``None`` → 干净
+    的 404/400），而不是产生一个坏路径。
+
+    这不是假设：``serve_resource_file`` 接进本函数之后，相册行一度就是这样从
+    "干净 404"退化成"把目录喂给 serve_stored_file"的 —— 这个守卫同时是那次退化
+    的修复。``tests/test_resource_file_path.py`` 有一条专门钉死它。
+
+    要**支持**相册（列 slides、逐张取图）是另一件事，需要一个 album-aware 的
+    解析（现成的读点是 ``media_slides_router._resolve_album_location``，按
+    ``media_id`` + ``sb://`` 前缀）。**不要**把那个语义塞进本函数：调用方拿到
+    的"一个路径"必须始终是一个文件，否则每个调用方都得自己判断，而这正是本
+    模块存在的理由。
+
     Args:
         resource: ``ResourcesRepository.get_resource_by_id`` 返回的行。
 
     Returns:
-        路径字符串；两级都落空时 ``None``。
+        指向**单个文件**的路径字符串；两级都落空、或解析结果是目录前缀
+        （相册家族）时 ``None``。
 
     Note:
         只有在第一级为空**且**该行有 ``media_id`` 时才会查库；纯上传素材走不到
@@ -85,7 +120,10 @@ async def resolve_resource_file_path(resource: Dict[str, Any]) -> Optional[str]:
     """
     file_path = resource.get("file_path")
     if file_path:
-        return str(file_path)
+        # 第一级也要过目录守卫：迁移期的相册行曾把目录前缀写进 resources
+        # .file_path（storage_migration 的 web 模块处理的就是这批），所以"目录"
+        # 不是 parsed_media 独有的形状。
+        return None if is_directory_prefix(str(file_path)) else str(file_path)
 
     media_id = resource.get("media_id")
     if not media_id:
@@ -109,4 +147,7 @@ async def resolve_resource_file_path(resource: Dict[str, Any]) -> Optional[str]:
         logger.warning(f"parsed_media file lookup failed for media_id={media_id}: {e}")
         return None
 
-    return str(pm_path) if pm_path else None
+    if not pm_path:
+        return None
+    # 相册在这里被挡掉 —— 它是本函数唯一会遇到目录形状的常规来源。
+    return None if is_directory_prefix(str(pm_path)) else str(pm_path)
