@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink } from 'lucide-react';
 import { useToast } from '../Toast';
+import PublishSmsPrompt from './PublishSmsPrompt';
 import { useTaskManager } from '../../contexts/TaskManagerContext';
 import {
   getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
@@ -416,6 +417,16 @@ export const RecordsPage: React.FC = () => {
                     </button>
                   )}
                 </div>
+
+                {/* Outside the accordion on purpose. A verification code has a
+                    180s window, so a prompt only visible after the user thinks
+                    to expand the right row is a prompt most people never see —
+                    which is the same outcome as not having built the channel.
+                    Renders nothing unless a publish is genuinely parked. */}
+                <PublishSmsPrompt
+                  taskId={task.id}
+                  active={task.status === 'publishing' || task.status === 'pending'}
+                />
 
                 {open && task.accounts.length > 0 && (
                   <div className="rec-sub">

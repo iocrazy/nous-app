@@ -594,3 +594,58 @@ export const promoteGeneratedVideo = async (genId: string): Promise<string> => {
   );
   return String(res.data.promoted_resource_id);
 };
+
+// ── 发布中途的短信验证码通道 ──────────────────────────────────
+//
+// 与登录侧的 `submitSmsCode` 是两条独立的路径,不要合并:登录时浏览器会话由
+// `/start` 交回一个 id,发布则在结束前什么都不返回,id 由后端自己生成并写进
+// task_tracking。前端因此按 **publish task id** 寻址,而不是按会话 id。
+
+/**
+ * "这次发布此刻在不在等验证码"。
+ *
+ * `waiting` 语义很窄:它表示**有一个发布协程此刻正停在 await 上**,不是"页面上
+ * 看见了验证码输入框"。放宽它就会给一个没人在等的用户弹输入框。
+ */
+export interface PublishSmsState {
+  waiting: boolean;
+  account_id?: number | null;
+  platform?: string | null;
+  attempts_left: number;
+  max_attempts: number;
+  seconds_remaining: number;
+  outcome?: string | null;
+  message: string;
+}
+
+/**
+ * 平台对提交的码做了什么。**闭集**(浏览器侧 `publish_sms.py` 定义):
+ * `accepted` / `rejected` / `exhausted` / `expired` / `abandoned` /
+ * `not_pending` / `unreachable`。
+ *
+ * 用类型化 outcome 而不是布尔成功位,是因为 `rejected`(码不对,重输)和
+ * `unreachable`(没送到,等一下再试)要用户做的事正相反。
+ *
+ * `retryable` 由浏览器算好透传,前端**不重新推导** —— 重推一次就是多一次和浏览器
+ * 分歧的机会,而分歧的形态会是"界面说还能再试、发布其实已经放弃了"。
+ */
+export interface PublishSmsVerdict {
+  outcome: string;
+  message: string;
+  attempts_left: number;
+  retryable: boolean;
+}
+
+/** 轮询某个发布批次是否卡在验证码上。 */
+export const getPublishSmsState = (taskId: number | string): Promise<PublishSmsState> =>
+  request<PublishSmsState>(`/tasks/${encodeURIComponent(String(taskId))}/sms`);
+
+/** 把验证码交给那个正在等它的发布,并当场拿回平台的裁决。 */
+export const submitPublishSmsCode = (
+  taskId: number | string,
+  code: string,
+): Promise<PublishSmsVerdict> =>
+  request<PublishSmsVerdict>(`/tasks/${encodeURIComponent(String(taskId))}/sms`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });

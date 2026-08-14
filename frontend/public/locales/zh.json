@@ -634,7 +634,20 @@
     "browserDownDesc": "扫码登录跑在一个浏览器服务里，它现在没有响应 —— 通常是发布期间的一次重启。官方授权不受影响。",
     "browserUnavailable": "扫码服务暂时不可用，现在无法开始扫码登录。",
     "browserRecheck": "重新检查",
-    "browserChecking": "检查中…"
+    "browserChecking": "检查中…",
+    "publishSms": {
+      "title": "需要验证码",
+      "body": "平台要求先输入验证码才能发布。请填写它发送到该账号的验证码。",
+      "inputLabel": "验证码",
+      "placeholder": "4-8 位验证码",
+      "submit": "提交",
+      "attemptsLeft": "还可尝试 {{count}} 次",
+      "rejected": "验证码未通过，平台仍在要求输入。请核对后重新提交。",
+      "unreachable": "验证码没能送达——这是我们这边的问题，不是你输错了。请再试一次。",
+      "endedExpired": "未在时限内输入验证码，本次发布已停止。可重试该批次。",
+      "endedExhausted": "平台拒绝了所有已输入的验证码。可重试该批次。",
+      "endedAbandoned": "本次发布已不再等待验证码。"
+    }
   },
   "parser": {
     "title": "媒体解析",

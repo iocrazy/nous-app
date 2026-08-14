@@ -299,13 +299,13 @@
       "qrcodeExpiredHint": "Codes are short-lived. A fresh one is being fetched — or request it now.",
       "qrcodeExpiredDetail": "The platform marked this code as expired, so a fresh one was requested.",
       "identityChallengeLabel": "Identity verification",
-      "identityChallengeHint": "The platform wants to confirm it is really you. Choosing \"Receive SMS code\" for you \u2014 nothing has been sent to your phone yet.",
-      "identityChallengeDetail": "The platform is showing its identity-verification step \u2014 no code has been sent yet.",
+      "identityChallengeHint": "The platform wants to confirm it is really you. Choosing \"Receive SMS code\" for you — nothing has been sent to your phone yet.",
+      "identityChallengeDetail": "The platform is showing its identity-verification step — no code has been sent yet.",
       "identityChallengeFailedLabel": "Identity verification could not be completed",
       "identityChallengeUnclickableHint": "The platform asked to verify your identity and did not offer an option we can complete automatically, so no code was sent. Get a new code and scan again, or sign in to this account on your phone first.",
       "identityChallengeStalledHint": "We selected \"Receive SMS code\" but the platform stayed on its verification screen, so no code was sent. Get a new code and scan again.",
       "identityChallengeBlockedHint": "The platform asked for a slider or picture check, which this sign-in cannot complete. Open the app on your phone and sign in to this account there first, then try linking again.",
-      "smsIdentityChallenge": "The platform went back to its identity check \u2014 wait for the code step to come back before entering a code.",
+      "smsIdentityChallenge": "The platform went back to its identity check — wait for the code step to come back before entering a code.",
       "smsRequiredLabel": "SMS verification required",
       "smsRequiredHint": "The platform is asking for a verification code for this account. Enter the code it is showing you how to get.",
       "smsRequestedHint": "We asked the platform to text a code to the phone number on this account. Enter it to continue.",
@@ -634,7 +634,20 @@
     "browserDownDesc": "QR sign-in runs in a browser service that is not responding — usually a restart during a deploy. Official Authorization is unaffected.",
     "browserUnavailable": "Connection service is temporarily unavailable — QR sign-in cannot start right now.",
     "browserRecheck": "Check again",
-    "browserChecking": "Checking..."
+    "browserChecking": "Checking...",
+    "publishSms": {
+      "title": "Verification code required",
+      "body": "The platform asked for a verification code before it will publish. Enter the code it sent to this account.",
+      "inputLabel": "Verification code",
+      "placeholder": "4-8 digit code",
+      "submit": "Submit",
+      "attemptsLeft": "{{count}} attempt(s) left",
+      "rejected": "That code was not accepted and the platform is still asking. Check it and send it again.",
+      "unreachable": "That code could not be delivered — this is our side, not yours. Try sending it again.",
+      "endedExpired": "No code was entered in time, so this publish was stopped. Retry the batch to try again.",
+      "endedExhausted": "The platform refused every code that was entered. Retry the batch to try again.",
+      "endedAbandoned": "This publish stopped waiting for a code."
+    }
   },
   "parser": {
     "title": "Media Parser",
