@@ -359,7 +359,7 @@ async def test_the_redirect_to_the_content_manager_is_what_confirms_a_publish():
         url=lambda p: MANAGE_URL if f"text={dp.PUBLISH_BUTTON_TEXT}" in p.clicks else EDITOR_URL,
         visible={f"text={dp.PUBLISH_BUTTON_TEXT}"},
     )
-    result = await dp._confirm_publish(page, Deadline(5))
+    result = await dp._confirm_publish(page, job(), Deadline(5))
 
     assert result["confirm_attempts"] == 1
     assert MANAGE_URL in result["final_url"]
@@ -368,15 +368,21 @@ async def test_the_redirect_to_the_content_manager_is_what_confirms_a_publish():
 async def test_a_publish_that_never_lands_times_out_saying_where_it_got_stuck():
     page = FakePage(url=EDITOR_URL, visible={f"text={dp.PUBLISH_BUTTON_TEXT}"})
     with pytest.raises(dp.StepFailure) as excinfo:
-        await dp._confirm_publish(page, Deadline(0.6))
+        await dp._confirm_publish(page, job(), Deadline(0.6))
 
     assert excinfo.value.status is SessionStatus.TIMEOUT
     assert excinfo.value.detail["page_state"] == "editing"
 
 
-async def test_a_verification_challenge_is_reported_rather_than_retried_blindly():
-    """This endpoint has no channel to supply an SMS code, so retrying until the
-    deadline would report `timeout` for a publish that was one code away.
+async def test_a_verification_challenge_with_no_supply_channel_still_fails_fast():
+    """A publish started **without a correlation id** has no way to be handed a
+    code, so parking on one would report `timeout` for a publish nobody could
+    ever rescue. `job()` builds exactly that: no `correlation_id`.
+
+    This is the pre-existing behaviour, deliberately kept reachable rather than
+    deleted — it is the honest answer for a caller with no channel to the user.
+    The channel case is covered in `test_douyin_publish_sms.py`.
+
     Checked only after a click failed to land - the same field is present but
     inert on a healthy page, which is how an early login judge ended up
     reporting `sms_required` on every poll."""
@@ -387,7 +393,7 @@ async def test_a_verification_challenge_is_reported_rather_than_retried_blindly(
         visible={dp.douyin.SMS_INPUT_SELECTORS[0], f"text={dp.PUBLISH_BUTTON_TEXT}"},
     )
     with pytest.raises(dp.StepFailure) as excinfo:
-        await dp._confirm_publish(page, Deadline(5))
+        await dp._confirm_publish(page, job(), Deadline(5))
 
     assert excinfo.value.detail["reason"] == "sms_verification_required"
     assert excinfo.value.status is SessionStatus.FAILED
@@ -408,7 +414,7 @@ async def test_a_missing_cover_complaint_is_self_healed_with_the_recommended_fra
             landed,
         },
     )
-    result = await dp._confirm_publish(page, Deadline(10))
+    result = await dp._confirm_publish(page, job(), Deadline(10))
 
     assert result["recovered_cover"] is True
     assert result["confirm_attempts"] == 2

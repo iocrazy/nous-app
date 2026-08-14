@@ -85,6 +85,14 @@ from ..publish import (
     PublishOutcome,
     ordered_image_assets,
 )
+from ..publish_sms import (
+    ACCEPTED,
+    EXHAUSTED,
+    EXPIRED,
+    REJECTED,
+    SmsVerdict,
+    get_sms_registry,
+)
 from ..redaction import scrub
 from ..schemas import PublishIntent, SessionStatus
 from ..validation import ProbeKind, classify_playwright_error
@@ -2277,10 +2285,225 @@ async def _await_manage_page(page: Any, budget_s: float) -> str | None:
     return None
 
 
-async def _confirm_publish(page: Any, deadline: Deadline) -> dict[str, Any]:
+# Captions on the control that submits a verification code on the *publish*
+# page. Deliberately **not** `douyin.SMS_SUBMIT_SELECTORS`, which is the login
+# tuple: that one carries `button:has-text("登录")`, a caption that means
+# nothing here, and reaching for a "log in" button in the middle of a publish is
+# the kind of cross-flow reuse that produces a click nobody can explain.
+#
+# Matched exactly and scoped to `role=button`, per the same rule the publish
+# button follows: `has-text` is a substring match, and substrings of Chinese
+# captions collide readily.
+#
+# [TO-VERIFY] Unconfirmed against a real challenge — the screen has never been
+# captured. `_submit_sms_code` therefore falls back to Enter, which is what a
+# human does and what the login path already relies on.
+SMS_CONFIRM_BUTTON_TEXTS = ("确认", "提交", "验证")
+
+
+async def _visible_sms_input(page: Any) -> str | None:
+    """Which code field is on screen, if any. Returns the selector that hit."""
+    for selector in douyin.SMS_INPUT_SELECTORS:
+        if await _visible(page, selector):
+            return selector
+    return None
+
+
+async def _submit_sms_code(page: Any, selector: str, code: str, click_ms: int) -> None:
+    """Type a code into the live field and press whatever submits it."""
+    await page.locator(selector).first.fill(code, timeout=click_ms)
+    for name in SMS_CONFIRM_BUTTON_TEXTS:
+        button = page.get_by_role("button", name=name, exact=True).first
+        if await button.count() and await button.is_visible():
+            await click_element(button, click_ms)
+            return
+    # Platforms commonly auto-submit on the last digit; Enter is the fallback a
+    # human would use, and the login path has relied on it since it shipped.
+    await page.keyboard.press("Enter")
+
+
+async def _resolve_sms_challenge(
+    page: Any, job: PublishJob, deadline: Deadline, click_ms: int
+) -> dict[str, Any]:
+    """Park the publish until someone supplies a code the platform accepts.
+
+    Replaces the dead end this step used to be. The old behaviour raised
+    `sms_verification_required` with an honest message — "this endpoint has no
+    channel to supply one" — and lost the post. There is a channel now
+    (`publish_sms`), and the only thing that changes here is that the publish
+    waits on it instead of giving up.
+
+    Three ways out, all typed, none of them silent:
+
+    * the code is accepted → return, and `_confirm_publish` clicks publish again
+    * nobody supplies one inside the window → `sms_code_timeout`
+    * every attempt is refused → `sms_code_rejected`
+
+    A wrong code costs one attempt, **not the publish**. That is the whole
+    reason `max_attempts` exists: a mistyped digit that lost a finished upload
+    would be a worse bug than the one being fixed, and "the user acted and
+    nothing happened" is the specific shape this repo keeps re-learning.
+
+    The honest limit on the evidence, stated because the copy is written to it:
+    a platform that *accepted* a code and immediately raised a **second**
+    challenge leaves a code field on screen too, and this page cannot tell that
+    apart from a rejection. Both readings share one remedy — enter the code on
+    screen now — so the user is told the code was not accepted and the page is
+    still asking, which is true either way. Same reasoning, and the same
+    wording, as `LoginSession.submit_sms`.
+    """
+    settings = get_settings()
+
+    if not job.correlation_id:
+        # No channel to the user. The pre-existing failure is still the right
+        # answer here — but it is now reachable only by a caller that never
+        # offered to supply codes, instead of being everyone's outcome.
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "the platform is asking for an SMS verification code to publish; "
+            "this publish was started without a channel to supply one",
+            reason="sms_verification_required",
+            stage="confirm",
+        )
+
+    registry = get_sms_registry()
+    started_at = time.monotonic()
+    attempts_used = 0
+    try:
+        async with registry.open(
+            job.correlation_id,
+            PLATFORM,
+            window_s=settings.publish_sms_wait_s,
+            max_attempts=settings.publish_sms_max_attempts,
+        ) as challenge:
+            # Bounded by the attempt budget, never `while True` (spec 7.2).
+            # Every pass consumes exactly one attempt, so the range *is* the
+            # real ceiling rather than a second one bolted on beside it.
+            for _ in range(settings.publish_sms_max_attempts):
+                submission = await challenge.await_code()
+                if submission is None:
+                    # Bounded, and it really does fail. A channel that waits
+                    # forever when nobody is listening is the same outage as no
+                    # channel at all, minus the error message.
+                    challenge.close(
+                        EXPIRED,
+                        "no verification code was supplied before the window closed",
+                    )
+                    raise StepFailure(
+                        SessionStatus.TIMEOUT,
+                        "the platform asked for an SMS verification code and none "
+                        f"was supplied within {settings.publish_sms_wait_s}s",
+                        reason="sms_code_timeout",
+                        stage="confirm",
+                        sms_attempts_used=attempts_used,
+                    )
+
+                challenge.consume_attempt()
+                attempts_used += 1
+
+                selector = await _visible_sms_input(page)
+                if selector is None:
+                    # The page moved on by itself while we waited. Not an
+                    # error: the challenge is over and the publish can carry
+                    # on. Reported as accepted because that is what the user
+                    # needs to know — the thing they were blocked on is gone.
+                    verdict = SmsVerdict(
+                        outcome=ACCEPTED,
+                        message="the page is no longer asking for a verification code",
+                    )
+                    challenge.resolve(submission, verdict)
+                    challenge.close(ACCEPTED, verdict.message)
+                    return {
+                        "sms_challenge": ACCEPTED,
+                        "sms_attempts_used": attempts_used,
+                        "sms_code_typed": False,
+                    }
+
+                await _submit_sms_code(page, selector, submission.code, click_ms)
+                # Sample only after the platform has had a moment to accept or
+                # refuse, otherwise the answer is just the pre-submit state.
+                await page.wait_for_timeout(settings.publish_sms_settle_ms)
+
+                if await _visible_sms_input(page) is None:
+                    verdict = SmsVerdict(
+                        outcome=ACCEPTED, message="the verification code was accepted"
+                    )
+                    challenge.resolve(submission, verdict)
+                    challenge.close(ACCEPTED, verdict.message)
+                    return {
+                        "sms_challenge": ACCEPTED,
+                        "sms_attempts_used": attempts_used,
+                        "sms_code_typed": True,
+                    }
+
+                if challenge.attempts_left <= 0:
+                    verdict = SmsVerdict(
+                        outcome=EXHAUSTED,
+                        message="the verification code was not accepted and no "
+                        "attempts remain",
+                    )
+                    challenge.resolve(submission, verdict)
+                    challenge.close(EXHAUSTED, verdict.message)
+                    raise StepFailure(
+                        SessionStatus.FAILED,
+                        "the platform did not accept the verification code after "
+                        f"{attempts_used} attempt(s)",
+                        reason="sms_code_rejected",
+                        stage="confirm",
+                        sms_attempts_used=attempts_used,
+                    )
+
+                # Refused, with attempts to spare: tell the submitter so, and
+                # keep the publish parked so the next code lands on the same
+                # page. Looping — not returning — is what makes a typo cost a
+                # retype instead of the post.
+                challenge.resolve(
+                    submission,
+                    SmsVerdict(
+                        outcome=REJECTED,
+                        message="the verification code was not accepted; the page "
+                        "is still asking for one",
+                        attempts_left=challenge.attempts_left,
+                    ),
+                )
+
+            # Unreachable while every pass consumes an attempt — the last one
+            # raises `sms_code_rejected` above. Kept because "the loop ended
+            # and nobody said why" is precisely the silence this module exists
+            # to remove, and a future edit to the accounting would land here.
+            raise StepFailure(
+                SessionStatus.FAILED,
+                "the platform did not accept the verification code after "
+                f"{attempts_used} attempt(s)",
+                reason="sms_code_rejected",
+                stage="confirm",
+                sms_attempts_used=attempts_used,
+            )
+    finally:
+        # Hand the human's time back on every path out, including the raises
+        # above. Bounded by the window, so this cannot push the publish past
+        # the ceiling the endpoint promised its caller.
+        deadline.extend(
+            min(time.monotonic() - started_at, float(settings.publish_sms_wait_s))
+        )
+
+
+async def _confirm_publish(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
     settings = get_settings()
     click_ms = deadline.slice_ms(settings.publish_click_timeout_ms)
     recovered_cover = False
+    sms_detail: dict[str, Any] = {}
+    # A staging/test switch, never a production path. Gated to the first pass
+    # only so a controlled run does not have to fail a click to reach the
+    # branch. See `Settings.publish_sms_force_challenge` for what this proves
+    # (the supply channel is wired) and what it does not (that the selectors
+    # match a real challenge screen).
+    force_sms = settings.publish_sms_force_challenge
+    if force_sms:
+        logger.warning(
+            "BROWSER_PUBLISH_FORCE_SMS_CHALLENGE is on: this publish will park on "
+            "an SMS challenge regardless of what the platform asked for"
+        )
 
     # Bounded attempts, each one self-healing rather than a blind repeat.
     for attempt in range(1, settings.publish_confirm_attempts + 1):
@@ -2291,20 +2514,22 @@ async def _confirm_publish(page: Any, deadline: Deadline) -> dict[str, Any]:
         # re-render, and the publish button is exactly what it covers.
         await remove_nodes(page, OVERLAY_SELECTORS)
 
-        if attempt > 1:
+        if attempt > 1 or force_sms:
             # Only checked after a click failed to land. On this page a visible
             # code field is a genuine verification challenge, but checking it up
             # front invites the same false positive that made an early login
             # judge report `sms_required` on every poll.
-            for selector in douyin.SMS_INPUT_SELECTORS:
-                if await _visible(page, selector):
-                    raise StepFailure(
-                        SessionStatus.FAILED,
-                        "the platform is asking for an SMS verification code to publish; "
-                        "this endpoint has no channel to supply one",
-                        reason="sms_verification_required",
-                        stage="confirm",
-                    )
+            if force_sms or await _visible_sms_input(page) is not None:
+                # Park rather than fail. The publish resumes on the next pass of
+                # this loop, which re-strips the overlay and clicks publish
+                # again — the code cleared a gate, it did not publish anything.
+                force_sms = False
+                sms_detail = await _resolve_sms_challenge(page, job, deadline, click_ms)
+                # The wait consumed wall-clock that `click_ms` was sliced from
+                # before it started; re-slice or every later click inherits a
+                # ceiling computed against a deadline that has since moved.
+                click_ms = deadline.slice_ms(settings.publish_click_timeout_ms)
+                continue
             if await _accept_recommended_cover(page, click_ms):
                 recovered_cover = True
 
@@ -2329,6 +2554,12 @@ async def _confirm_publish(page: Any, deadline: Deadline) -> dict[str, Any]:
                 "final_url": scrub(landed),
                 "confirm_attempts": attempt,
                 "recovered_cover": recovered_cover,
+                # Carried into the successful outcome too, not only the failed
+                # one: "this post needed a verification code" is the signal that
+                # tells an operator an account has started getting challenged,
+                # and a field that only ever appears on failures cannot show a
+                # trend.
+                **sms_detail,
             }
 
     judgement = judge_publish_outcome(page.url)
@@ -2338,6 +2569,7 @@ async def _confirm_publish(page: Any, deadline: Deadline) -> dict[str, Any]:
         stage="confirm",
         final_url=scrub(page.url),
         page_state=judgement.state.value,
+        **sms_detail,
     )
 
 
@@ -2365,7 +2597,7 @@ async def _drive(page: Any, job: PublishJob, deadline: Deadline) -> PublishOutco
     # publish button sits in, so anything done after it would be done against a
     # stale layout.
     detail.update(await _set_schedule(page, job, deadline))
-    detail.update(await _confirm_publish(page, deadline))
+    detail.update(await _confirm_publish(page, job, deadline))
 
     return PublishOutcome(
         status=SessionStatus.PUBLISHED,
@@ -2435,7 +2667,7 @@ async def _drive_images(page: Any, job: PublishJob, deadline: Deadline) -> Publi
     detail.update(await _set_collection(page, job, deadline))
     detail.update(await _apply_options(page, job, deadline))
     detail.update(await _set_schedule(page, job, deadline))
-    detail.update(await _confirm_publish(page, deadline))
+    detail.update(await _confirm_publish(page, job, deadline))
 
     return PublishOutcome(
         status=SessionStatus.PUBLISHED,

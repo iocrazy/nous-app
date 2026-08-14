@@ -67,6 +67,8 @@ from .schemas import (
     ProbeResponse,
     PublishRequest,
     PublishResponse,
+    PublishSmsStatusResponse,
+    PublishSmsSubmitResponse,
     SessionResult,
     SessionStatus,
     SessionValidateRequest,
@@ -75,6 +77,8 @@ from .schemas import (
     VerifyPublishRequest,
     VerifyPublishResponse,
 )
+from . import publish_budget
+from .publish_sms import NOT_PENDING, get_sms_registry
 from .security import require_internal_token
 from .verify import run_verify
 
@@ -213,7 +217,14 @@ async def post_session_validate(
 # call wedges below that granularity, and firing it *does* forfeit the
 # storage_state write-back, which is why it sits well above the real budget
 # rather than near it.
-PUBLISH_HARD_TIMEOUT_SLACK_S = 120
+#
+# **No longer a local sum.** The whole ceiling now comes from `publish_budget`,
+# which `nous-backend` derives its HTTP read timeout from as well. The two used
+# to be independent literals and had drifted into an inversion - the backend
+# gave up at 900s while this endpoint kept driving until 1320s, so a publish
+# that was still running was recorded as failed and whether the post went out
+# was decided by a race nobody could see.
+PUBLISH_HARD_TIMEOUT_SLACK_S = publish_budget.HARD_SLACK_S
 
 
 @app.post(
@@ -246,14 +257,32 @@ async def post_session_publish(request: PublishRequest) -> Any:
     except asyncio.TimeoutError:
         # Back-pressure, not a publish failure. A publish holds its slot for
         # minutes, so saturation here is ordinary and the caller should requeue.
+        #
+        # `parked_on_sms` is the reason this body grew a field. A publish
+        # waiting for a person to type a verification code holds its slot the
+        # whole time, so a batch can now be queued behind *humans* rather than
+        # behind work — and those are the same spinner but completely different
+        # situations, only one of which is fixed by waiting. Saying which one it
+        # is costs a dictionary lookup; leaving it out is the "looks like it is
+        # running, actually queued forever" shape this repo keeps re-learning.
+        parked = get_sms_registry().waiting_count()
         return PublishResponse(
             success=False,
             status=SessionStatus.FAILED,
-            message="browser pool saturated; no slot became available",
+            message=(
+                "browser pool saturated; no slot became available"
+                + (
+                    f" ({parked} publish(es) are holding a slot while waiting for "
+                    "a verification code)"
+                    if parked
+                    else ""
+                )
+            ),
             detail={
                 "error_kind": "pool_saturated",
                 "stage": "admission",
                 "platform": request.platform,
+                "parked_on_sms": parked,
             },
         )
 
@@ -265,8 +294,9 @@ async def post_session_publish(request: PublishRequest) -> Any:
                 request.storage_state,
                 request.environment,
                 request.intent,
+                request.correlation_id,
             ),
-            timeout=settings.publish_total_timeout_s + PUBLISH_HARD_TIMEOUT_SLACK_S,
+            timeout=publish_budget.browser_hard_ceiling_s(),
         )
     except asyncio.TimeoutError:
         logger.error("publish exceeded its hard ceiling for platform=%s", request.platform)
@@ -292,6 +322,81 @@ async def post_session_publish(request: PublishRequest) -> Any:
         )
     finally:
         slots.release()
+
+
+# --- mid-publish SMS challenge ----------------------------------------------
+#
+# The two endpoints that make a parked publish reachable. Both are addressed by
+# a `correlation_id` **the caller minted and sent in the publish request** —
+# there is no other way to name a publish that has not answered yet, which is
+# the whole reason this pair looks different from the login equivalents (see
+# `publish_sms`).
+
+
+@app.get(
+    "/session/publish/{correlation_id}/sms",
+    response_model=PublishSmsStatusResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def get_publish_sms(correlation_id: str) -> Any:
+    """Is that publish parked on a verification code right now?
+
+    The only thing the caller can ask while its own publish request is still
+    outstanding, so this is how "we need a code from you" ever reaches a user.
+    Pure registry state — it never touches the page, so polling it costs
+    nothing and cannot disturb a publish in progress.
+
+    A 200 with `waiting: false` for an unknown id is deliberate, not sloppy:
+    "no such publish" and "that publish is not asking for anything" are the same
+    instruction to the caller, and a 404 here would make every poll of a healthy
+    publish look like an error in the logs.
+    """
+    challenge = get_sms_registry().get(correlation_id)
+    if challenge is None:
+        return PublishSmsStatusResponse(waiting=False)
+    return PublishSmsStatusResponse(**challenge.snapshot())
+
+
+@app.post(
+    "/session/publish/{correlation_id}/sms",
+    response_model=PublishSmsSubmitResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_publish_sms(correlation_id: str, request: SmsCodeRequest) -> Any:
+    """Hand a code to the parked publish and answer with what the page did.
+
+    Blocks until the publish coroutine has judged the code, for exactly the
+    reason the login endpoint does: the code is only meaningful to that one
+    live context, so that context's verdict is the only useful thing to return.
+    Accepting the code and answering 202 would leave the user watching a field
+    somewhere else to find out whether they typed it correctly.
+
+    Never 4xx for a refused code. `rejected` is a *verdict*, not a protocol
+    error, and it carries `retryable` so a mistyped digit costs a retype rather
+    than the post.
+    """
+    challenge = get_sms_registry().get(correlation_id)
+    if challenge is None:
+        # Typed, not a bare 404. The caller gets the same envelope it parses on
+        # every other path and can tell the user something true — most likely
+        # that the publish moved on or gave up while they were typing.
+        return PublishSmsSubmitResponse(
+            outcome=NOT_PENDING,
+            message="this publish is not waiting for a verification code",
+        )
+    verdict = await challenge.submit(request.code)
+    # The code itself never reaches a log line, here or anywhere below.
+    logger.info(
+        "publish SMS code judged outcome=%s attempts_left=%d",
+        verdict.outcome,
+        verdict.attempts_left,
+    )
+    return PublishSmsSubmitResponse(
+        outcome=verdict.outcome,
+        message=verdict.message,
+        attempts_left=verdict.attempts_left,
+        retryable=verdict.retryable,
+    )
 
 
 # --- publish read-back (P1-3) -----------------------------------------------
