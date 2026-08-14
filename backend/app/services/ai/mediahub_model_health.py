@@ -50,7 +50,10 @@ from app.services.ai.providers.embedding_config import _is_multimodal
 PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 
 # Values ``mediahub_models.last_test_status`` may hold. Twin of the DB CHECK in
-# migration 428 / ``models/ai.py`` — both sides must change together.
+# migration 428 / ``models/ai.py`` — both sides must change together, and
+# test_mediahub_probe_not_probed.py::test_probe_statuses_matches_the_orm_check_constraint
+# reads the ORM constraint back and compares, so the pairing is enforced rather
+# than merely asserted here.
 PROBE_STATUSES = ("ok", "fail", "not_probed")
 
 # Closed enum of failure reasons. Closed is the whole point: a user-facing

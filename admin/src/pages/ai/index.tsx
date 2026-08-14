@@ -372,7 +372,14 @@ export function AIModelsPage() {
       const skipped = results.filter((r) => r === 'not_probed').length
       const checked = total - skipped
       const suffix = skipped ? ` (${skipped} not probed)` : ''
-      if (ok === checked) {
+      if (checked === 0) {
+        // Every model on the card was unprobeable, so this run verified
+        // NOTHING. `ok === checked` would be 0 === 0 here and paint a green
+        // "all 0 models reachable" — an affirmative reachability claim on top
+        // of zero evidence, which is the same dishonest-signal bug as the red
+        // lights this change removes, just inverted. Neutral, not success.
+        Message.info(`${g.provider}: nothing to probe (${skipped} not probed)`)
+      } else if (ok === checked) {
         Message.success(`${g.provider}: all ${checked} models reachable${suffix}`)
       } else {
         Message.warning(`${g.provider}: ${ok}/${checked} models reachable${suffix}`)

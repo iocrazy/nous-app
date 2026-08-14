@@ -28,11 +28,13 @@ something to get wrong:
 
 from __future__ import annotations
 
+import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.services.ai.mediahub_model_health import (
+    PROBE_STATUSES,
     PROBEABLE_TYPES,
     probe_mediahub_model,
     probe_result_status,
@@ -151,8 +153,32 @@ def test_probe_result_status_maps_all_three_outcomes() -> None:
     assert probe_result_status({"ok": False}) == "fail"
 
 
-def test_probeable_types_matches_the_branches_the_probe_actually_has() -> None:
-    """``PROBEABLE_TYPES`` is a claim about the code below it. If someone adds
-    an ``image`` branch to the probe and forgets this set, the type stays
-    permanently unverified while looking deliberate."""
+def test_probeable_types_is_exactly_the_three_documented_types() -> None:
+    """Change-detector, and only that: it pins the literal membership so
+    widening the set is a deliberate two-line edit rather than a slip.
+
+    It does NOT verify that the probe has a branch per type — the behavioural
+    guard for that is ``test_probeable_types_still_reach_the_transport``
+    above, which makes each member actually hit the transport.
+    """
     assert PROBEABLE_TYPES == frozenset({"llm", "embedding", "asr"})
+
+
+def test_probe_statuses_matches_the_orm_check_constraint() -> None:
+    """``PROBE_STATUSES`` claims to be the twin of the DB CHECK — so read the
+    other twin and compare, instead of asserting a second copy of the literal.
+
+    Without this the constant is a comment shaped like code: nothing would stop
+    the CHECK from gaining a fourth value (or losing ``not_probed``) while the
+    tuple stayed put. The ORM constraint is the checkable stand-in for the DB —
+    migration 428 wrote both, and ``schema-drift`` keeps ORM and DB aligned.
+    """
+    from app.models.ai import MediahubModels
+
+    constraint = next(
+        c
+        for c in MediahubModels.__table__.constraints
+        if c.name == "mediahub_models_last_test_status_check"
+    )
+    literals = set(re.findall(r"'([^']*)'", str(constraint.sqltext)))
+    assert literals == set(PROBE_STATUSES)
