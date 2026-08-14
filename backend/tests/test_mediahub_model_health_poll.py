@@ -46,6 +46,117 @@ async def test_poll_probes_only_enabled_and_persists():
 
 
 @pytest.mark.asyncio
+async def test_poll_logs_one_warning_per_failed_model():
+    """F1 hole two: the poll used to log only the ``5/11 unreachable`` summary,
+    so when ``last_test_detail`` came back empty there was no second place to
+    recover the reason from. Each failure now names the model and its reason;
+    healthy models stay quiet."""
+    from app.workflows.scheduled_health import probe_mediahub_models_step
+
+    rows = [
+        {
+            "id": "1",
+            "name": "mediahub-deepseek-v4-pro",
+            "is_enabled": True,
+            "type": "llm",
+            "actual_model": "good",
+        },
+        {
+            "id": "2",
+            "name": "mediahub-deepseek-v4-flash",
+            "is_enabled": True,
+            "type": "llm",
+            "actual_model": "bad",
+        },
+    ]
+    repo = MagicMock()
+    repo.list_all = AsyncMock(return_value=rows)
+    repo.record_test_result = AsyncMock(return_value={})
+
+    async def _fake_probe(row):
+        if row["actual_model"] == "good":
+            return {"ok": True, "detail": "chat ok", "error": None, "dims": None}
+        return {
+            "ok": False,
+            "detail": "",
+            "error": "ReadTimeout: <no message>",
+            "dims": None,
+        }
+
+    logger = MagicMock()
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            new=AsyncMock(side_effect=_fake_probe),
+        ):
+            with patch("app.workflows.scheduled_health.logger", logger):
+                await probe_mediahub_models_step()
+
+    assert logger.warning.call_count == 1
+    message = logger.warning.call_args[0][0]
+    assert "mediahub-deepseek-v4-flash" in message
+    assert "ReadTimeout" in message
+    assert "mediahub-deepseek-v4-pro" not in message
+
+
+@pytest.mark.asyncio
+async def test_poll_warning_never_blank_when_reason_missing():
+    """Defence in depth: even if a probe somehow reports no reason at all, the
+    log line must not trail off into nothing — a blank reason is exactly the
+    signal that misled the 2026-08-14 diagnosis."""
+    from app.workflows.scheduled_health import probe_mediahub_models_step
+
+    repo = MagicMock()
+    repo.list_all = AsyncMock(
+        return_value=[{"id": "9", "name": "mediahub-mystery", "is_enabled": True}]
+    )
+    repo.record_test_result = AsyncMock(return_value={})
+
+    logger = MagicMock()
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        with patch(
+            "app.services.ai.mediahub_model_health.probe_mediahub_model",
+            new=AsyncMock(
+                return_value={"ok": False, "detail": "", "error": "", "dims": None}
+            ),
+        ):
+            with patch("app.workflows.scheduled_health.logger", logger):
+                await probe_mediahub_models_step()
+
+    message = logger.warning.call_args[0][0]
+    assert "mediahub-mystery" in message
+    assert "<no detail>" in message
+
+
+def test_poll_runs_hourly():
+    """F3: 6h between probes meant a red light could be five hours stale before
+    anyone saw it. The probe is one ``max_tokens=8`` ping per model.
+
+    The cron is matched against THIS workflow specifically — a bare
+    ``"0 * * * *" in source`` would already pass on ``health_check_workflow``'s
+    schedule and never fail if this one stayed at 6h."""
+    import inspect
+    import re
+
+    from app.workflows import scheduled_health
+
+    source = inspect.getsource(scheduled_health)
+    match = re.search(
+        r'@DBOS\.scheduled\("([^"]+)"\)[^@]*@DBOS\.workflow\(\)\s*'
+        r"async def mediahub_model_health_workflow",
+        source,
+    )
+    assert match, "could not locate the platform-model health schedule"
+    assert match.group(1) == "0 * * * *"
+
+
+@pytest.mark.asyncio
 async def test_poll_no_models_is_noop():
     """No enabled models → zero probes, empty summary, no crash."""
     from app.workflows.scheduled_health import probe_mediahub_models_step

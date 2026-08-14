@@ -183,11 +183,23 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
         await repo.record_test_result(str(row.get("id")), status, detail[:200])
         if result.get("ok"):
             ok += 1
+        else:
+            # Per-model, not just the run summary: when ``last_test_detail``
+            # came back blank (the 2026-08-14 incident) the summary line was the
+            # only trace left, and it named no model and no reason. The log is
+            # now the second, independent place the reason survives.
+            logger.warning(
+                f"[mediahub_model_health] {row.get('name') or row.get('id')} "
+                f"status={status} reason={detail or '<no detail>'}"
+            )
 
     return {"total": len(enabled), "ok": ok, "failed": len(enabled) - ok}
 
 
-@DBOS.scheduled("0 */6 * * *")  # every 6 hours
+# hourly: the status is now user-visible (the model picker warns on a red
+# light), so a stale reading is a wrong reading. Cost is one max_tokens=8 ping
+# per enabled model per hour.
+@DBOS.scheduled("0 * * * *")
 @DBOS.workflow()
 async def mediahub_model_health_workflow(
     scheduled_time: datetime, actual_time: datetime
