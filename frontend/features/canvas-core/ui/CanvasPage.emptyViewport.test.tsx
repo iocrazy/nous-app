@@ -312,6 +312,7 @@ describe('CanvasView — read-only badge', () => {
         readOnly: false,
         saveStatus: 'error',
         saveError: 'HTTP 500',
+        saveErrorStatus: 500,
       });
     });
 
@@ -319,5 +320,122 @@ describe('CanvasView — read-only badge', () => {
 
     expect(await screen.findByText('Save failed')).toBeInTheDocument();
     expect(screen.queryByText('Read-only')).toBeNull();
+  });
+
+  it('read-only still wins over a save error that was already on screen', async () => {
+    // The latch's whole point: a viewer must see the standing fact, never a
+    // failure from the channel that has since been closed.
+    stubSurfaceSize(1280, 720);
+    seedReady({ viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] });
+    act(() => {
+      useCanvasCoreStore.setState({
+        readOnly: true,
+        saveStatus: 'error',
+        saveError: 'Failed to fetch',
+        saveErrorStatus: null,
+      });
+    });
+
+    render(<CanvasView canvasId="c1" />);
+
+    expect(await screen.findByText('Read-only')).toBeInTheDocument();
+    expect(screen.queryByText('Save failed')).toBeNull();
+  });
+});
+
+/**
+ * The 2026-08-13 half of this file: the badge must say WHICH kind of failure
+ * it is. A red "Save failed" that turned out to be a request the server never
+ * received cost a production-log investigation to identify.
+ */
+describe('CanvasView — save failure is typed on screen', () => {
+  const seedFailure = (saveError: string | null, saveErrorStatus: number | null) => {
+    stubSurfaceSize(1280, 720);
+    seedReady({ viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] });
+    act(() => {
+      useCanvasCoreStore.setState({
+        readOnly: false,
+        saveStatus: 'error',
+        saveError,
+        saveErrorStatus,
+      });
+    });
+  };
+
+  /** The badge element, found via the label it always carries. */
+  const badge = () => screen.getByText('Save failed').closest('[role="status"]')!;
+
+  it('a request that never reached the server says so, in text and in the tooltip', async () => {
+    seedFailure('Failed to fetch', null);
+    render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+
+    const el = badge();
+    // Visible, not tooltip-only: the category is real text on screen.
+    expect(el.textContent).toContain('no response');
+    const title = el.getAttribute('title') ?? '';
+    expect(title).toContain('never reached the server');
+    // …and the underlying message is preserved verbatim for a bug report.
+    expect(title).toContain('Failed to fetch');
+    // No status was invented for a request that got no response.
+    expect(el.textContent).not.toContain('HTTP');
+  });
+
+  it('a server refusal carries the status code — the thing a bug report needs', async () => {
+    seedFailure('Internal Server Error', 500);
+    render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+
+    const el = badge();
+    expect(el.textContent).toContain('HTTP 500');
+    const title = el.getAttribute('title') ?? '';
+    expect(title).toContain('HTTP 500');
+    expect(title).toContain('Internal Server Error');
+    expect(title).toContain('refused');
+  });
+
+  it('the two categories are actually distinguishable from each other', async () => {
+    seedFailure('Failed to fetch', null);
+    const { unmount } = render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+    const unreachable = badge().textContent;
+    unmount();
+
+    seedFailure('Internal Server Error', 500);
+    render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+    expect(badge().textContent).not.toBe(unreachable);
+  });
+
+  it('degrades to the plain label when the store kept no message at all', async () => {
+    seedFailure(null, null);
+    render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+
+    const el = badge();
+    expect(el.textContent).not.toContain('HTTP');
+    expect(el.textContent).not.toContain('no response');
+    expect(el.getAttribute('title') ?? '').toContain('unknown reason');
+  });
+
+  it('a conflict stays its own amber-toned "Conflict" — not a red failure', async () => {
+    seedFailure('conflict', 409);
+    render(<CanvasView canvasId="c1" />);
+
+    const el = await screen.findByText('Conflict');
+    expect(screen.queryByText('Save failed')).toBeNull();
+    // Warn semantics, never danger — a conflict is resolvable, not broken.
+    expect(el.className).toContain('warn');
+    expect(el.className).not.toContain('danger');
+  });
+
+  it('uses semantic colour tokens, not the retired hue literals', async () => {
+    seedFailure('Failed to fetch', null);
+    render(<CanvasView canvasId="c1" />);
+    await screen.findByText('Save failed');
+
+    const cls = badge().className;
+    expect(cls).toContain('danger');
+    expect(cls).not.toMatch(/rose-|amber-|slate-/);
   });
 });

@@ -2351,6 +2351,16 @@
       "hint": "It doesn't have any content yet."
     },
     "readOnly": "Read-only",
+    "saveBadge": {
+      "saving": "Saving…",
+      "failed": "Save failed",
+      "conflict": "Conflict",
+      "conflictTitle": "Someone else saved this canvas first. Resolve the conflict to continue saving.",
+      "reasonUnreachable": "no response",
+      "titleServer": "The server refused this save.",
+      "titleUnreachable": "The save request never reached the server — check your connection. Your edits are still here and will be retried on the next change.",
+      "titleUnknown": "The save failed for an unknown reason."
+    },
     "backToList": "Back to canvases",
     "classicRetired": "Classic canvases have been retired",
     "dragCreate": {

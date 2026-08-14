@@ -39,6 +39,7 @@ import { PromoteShotDialog } from '../smart/PromoteShotDialog';
 import type { ShotNodeData, SmartNode } from '../smart/types';
 import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { classifySaveFailure } from '../utils/saveFailure';
 import { viewportFramesAnyNode } from '../utils/viewport';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
 import { fetchScriptProjects } from '../../../services/scriptService';
@@ -155,6 +156,7 @@ export function CanvasView({
   const loadError = useCanvasCoreStore((s) => s.loadError);
   const saveStatus = useCanvasCoreStore((s) => s.saveStatus);
   const saveError = useCanvasCoreStore((s) => s.saveError);
+  const saveErrorStatus = useCanvasCoreStore((s) => s.saveErrorStatus);
   const readOnly = useCanvasCoreStore((s) => s.readOnly);
   const kind = useCanvasCoreStore((s) => s.kind);
   const name = useCanvasCoreStore((s) => s.name);
@@ -630,7 +632,13 @@ export function CanvasView({
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />
       )}
       <CanvasConflictDialog />
-      <SaveBadge status={saveStatus} error={saveError} readOnly={readOnly} t={t} />
+      <SaveBadge
+        status={saveStatus}
+        error={saveError}
+        errorStatus={saveErrorStatus}
+        readOnly={readOnly}
+        t={t}
+      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -703,14 +711,24 @@ function CanvasStatus({
   );
 }
 
+const BADGE_BASE = 'absolute right-4 top-4 rounded-md px-3 py-1 text-xs font-medium shadow';
+/** Neutral chrome (saving / read-only) — the canvas's own panel treatment. */
+const BADGE_NEUTRAL = 'canvas-island text-canvas-text';
+const BADGE_WARN = 'border border-warn-line bg-warn-soft text-warn';
+const BADGE_DANGER = 'border border-danger-line bg-danger-soft text-danger';
+
 function SaveBadge({
   status,
   error,
+  errorStatus,
   readOnly,
   t,
 }: {
   status: 'idle' | 'saving' | 'error';
   error: string | null;
+  /** HTTP status behind `error`, or null when nothing answered — see the
+   *  store's `saveErrorStatus`. */
+  errorStatus: number | null;
   /** The server refused this session's writes — see the store's `readOnly`. */
   readOnly: boolean;
   t: (key: string, fallback: string) => string;
@@ -721,7 +739,7 @@ function SaveBadge({
   if (readOnly) {
     return (
       <div
-        className="pointer-events-none absolute right-4 top-4 rounded-md bg-slate-900/80 px-3 py-1 text-xs font-medium text-white shadow"
+        className={`pointer-events-none ${BADGE_BASE} ${BADGE_NEUTRAL}`}
         role="status"
         aria-live="polite"
       >
@@ -730,25 +748,80 @@ function SaveBadge({
     );
   }
   if (status === 'idle') return null;
-  const label =
-    status === 'saving'
-      ? 'Saving…'
-      : error === 'conflict'
-        ? 'Conflict'
-        : 'Save failed';
-  const className =
-    status === 'saving'
-      ? 'bg-slate-900/80 text-white'
-      : error === 'conflict'
-        ? 'bg-amber-500 text-white'
-        : 'bg-rose-600 text-white';
+  if (status === 'saving') {
+    return (
+      <div
+        className={`pointer-events-none ${BADGE_BASE} ${BADGE_NEUTRAL}`}
+        role="status"
+        aria-live="polite"
+      >
+        {t('canvas.saveBadge.saving', 'Saving…')}
+      </div>
+    );
+  }
+
+  // A failure the user can act on (2026-08-13). The badge used to render a
+  // flat "Save failed" while `saveError` — which already held the message —
+  // was never read: the reported red badge turned out to be a request that
+  // never reached the server at all (48h of production logs carry no failing
+  // canvas PUT), and nothing on screen could have told the user or the person
+  // debugging it that. Category comes from `classifySaveFailure`, which is a
+  // pure function unit-tested on its own — no classification lives in here.
+  const failure = classifySaveFailure(error, errorStatus);
+
+  if (failure.kind === 'conflict') {
+    return (
+      <div
+        className={`pointer-events-none ${BADGE_BASE} ${BADGE_WARN}`}
+        role="status"
+        aria-live="polite"
+        title={t(
+          'canvas.saveBadge.conflictTitle',
+          'Someone else saved this canvas first. Resolve the conflict to continue saving.',
+        )}
+      >
+        {t('canvas.saveBadge.conflict', 'Conflict')}
+      </div>
+    );
+  }
+
+  // Short category next to the label; the full message rides in `title`. Not
+  // tooltip-ONLY: a reason nobody can see without hovering is barely better
+  // than no reason, so the category is real text either way.
+  // `HTTP <status>` is deliberately not translated — a status code is the
+  // same token in every language and is what a bug report needs verbatim.
+  const reason =
+    failure.kind === 'server'
+      ? `HTTP ${failure.status}`
+      : failure.kind === 'unreachable'
+        ? t('canvas.saveBadge.reasonUnreachable', 'no response')
+        : null;
+  const explanation =
+    failure.kind === 'server'
+      ? t('canvas.saveBadge.titleServer', 'The server refused this save.')
+      : failure.kind === 'unreachable'
+        ? t(
+            'canvas.saveBadge.titleUnreachable',
+            'The save request never reached the server — check your connection. Your edits are still here and will be retried on the next change.',
+          )
+        : t('canvas.saveBadge.titleUnknown', 'The save failed for an unknown reason.');
+  const title = [explanation, failure.status !== null ? `HTTP ${failure.status}` : null, failure.message]
+    .filter(Boolean)
+    .join(' — ');
+
   return (
+    // `pointer-events-auto` only on this branch: the native `title` tooltip
+    // needs hover, and one small hoverable corner is a fair price for a
+    // failure being readable. Every other badge state stays click-through so
+    // it can never eat a pan gesture.
     <div
-      className={`pointer-events-none absolute right-4 top-4 rounded-md px-3 py-1 text-xs font-medium shadow ${className}`}
+      className={`pointer-events-auto cursor-help ${BADGE_BASE} ${BADGE_DANGER}`}
       role="status"
       aria-live="polite"
+      title={title}
     >
-      {label}
+      <span>{t('canvas.saveBadge.failed', 'Save failed')}</span>
+      {reason && <span className="opacity-80"> · {reason}</span>}
     </div>
   );
 }
