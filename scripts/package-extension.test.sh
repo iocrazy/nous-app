@@ -46,24 +46,47 @@ case "$vn" in *"$sha"*) r=0;; *) r=1;; esac
 check "version_name 含当前 sha ($sha)" "$r"
 
 echo "== 源码零污染 =="
-[ -z "$(git status --porcelain -- "$SRC")" ]; check "源码目录 git status 干净" "$?"
+# 只测"打包脚本有没有往源码目录写东西",不测"源码目录本身干不干净"——
+# 开发者在 chrome-extension/ 下有自己的未提交改动是完全合法的日常状态,
+# 不该被这个测试判失败。做法:在跑打包脚本前后各拍一次 git status 快照,
+# 断言"delta 为空",这样才是隔离出脚本自己的效果。
+pre_src_status="$(git status --porcelain -- "$SRC")"
+bash scripts/package-extension.sh >/dev/null
+post_src_status="$(git status --porcelain -- "$SRC")"
+[ "$pre_src_status" = "$post_src_status" ]; check "打包脚本未改动源码目录的 git status" "$?"
 src_vn=$(python3 -c "import json;print(json.load(open('$SRC/manifest.json')).get('version_name',''))")
 [ -z "$src_vn" ]; check "源码 manifest 没有 version_name" "$?"
 
 echo "== 工作区脏时标 -dirty =="
 # 在源码目录造一个未跟踪文件 → git status 非空 → 脚本该标 -dirty。
-# 用 __ 前缀 + 立即删除,避免留下垃圾。
-touch "$SRC/__dirty_probe.tmp"
+# 用 __ 前缀 + trap 兜底删除,避免中途 Ctrl-C 留下垃圾探针文件
+# (未跟踪、不在 .gitignore 里,会让之后每次打包都误标 -dirty)。
+dirty_probe="$SRC/__dirty_probe.tmp"
+sibling_probe="release/__sibling_probe.txt"
+cleanup_probes() { rm -f "$dirty_probe" "$sibling_probe"; }
+trap cleanup_probes EXIT
+
+# 打探针之前的快照决定后面"-dirty 消失"这条断言是否可信:如果开发者本来就
+# 在 chrome-extension/ 下有未提交改动,探针删掉后工作区仍然是脏的,-dirty
+# 理应继续出现,断言"应消失"就会产生假失败——这种情况下跳过该断言并打印
+# SKIP,而不是算通过或失败。
+pre_dirty_snapshot="$(git status --porcelain -- "$SRC")"
+touch "$dirty_probe"
 bash scripts/package-extension.sh >/dev/null
 dirty_vn=$(python3 -c "import json;print(json.load(open('$OUT/manifest.json')).get('version_name',''))")
-rm -f "$SRC/__dirty_probe.tmp"
+rm -f "$dirty_probe"
 case "$dirty_vn" in *-dirty*) r=0;; *) r=1;; esac
-check "有未提交改动时 version_name 带 -dirty" "$r"
-# 探针删掉后重打包,标记该消失(否则 -dirty 会粘住,变成永远的假警报)
+check "有未跟踪文件时 version_name 带 -dirty" "$r"
+# 探针删掉后重打包,标记该消失(否则 -dirty 会粘住,变成永远的假警报)——
+# 仅当打探针之前工作区本就干净时才有意义。
 bash scripts/package-extension.sh >/dev/null
-clean_vn=$(python3 -c "import json;print(json.load(open('$OUT/manifest.json')).get('version_name',''))")
-case "$clean_vn" in *-dirty*) r=1;; *) r=0;; esac
-check "工作区恢复干净后 -dirty 消失" "$r"
+if [ -z "$pre_dirty_snapshot" ]; then
+  clean_vn=$(python3 -c "import json;print(json.load(open('$OUT/manifest.json')).get('version_name',''))")
+  case "$clean_vn" in *-dirty*) r=1;; *) r=0;; esac
+  check "工作区恢复干净后 -dirty 消失" "$r"
+else
+  printf '  SKIP  工作区恢复干净后 -dirty 消失 (打探针前 %s 下已有未提交改动,无法判定)\n' "$SRC"
+fi
 
 echo "== 先清空:源码没有的文件不该留在产物里 =="
 touch "$OUT/__stale_probe.js"
@@ -71,10 +94,10 @@ bash scripts/package-extension.sh >/dev/null
 [ ! -f "$OUT/__stale_probe.js" ]; check "重跑后陈旧文件被清掉" "$?"
 
 echo "== 清理范围:不碰 release/ 其它内容 =="
-mkdir -p release && touch release/__sibling_probe.txt
+mkdir -p release && touch "$sibling_probe"
 bash scripts/package-extension.sh >/dev/null
-[ -f release/__sibling_probe.txt ]; check "release/ 下的兄弟文件未被误删" "$?"
-rm -f release/__sibling_probe.txt
+[ -f "$sibling_probe" ]; check "release/ 下的兄弟文件未被误删" "$?"
+rm -f "$sibling_probe"
 
 printf '\n通过 %s / 失败 %s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

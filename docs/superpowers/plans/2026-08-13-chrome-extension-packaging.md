@@ -328,7 +328,11 @@ Expected: 产物打印 `1.3.1 (<sha>)`；源码打印 `None`（证明源码未�
 - [ ] **Step 6: 跑打包测试确认没回退**
 
 Run: `bash scripts/package-extension.test.sh`
-Expected: 全部 PASS，`失败 0`。
+Expected: `失败 0`，退出码 0。此时 Step 1/4 改的 `popup.js`/`README.md` 还没提交
+（Step 7 才 commit），`chrome-extension/` 处于人为的未提交状态，这是预期的
+——"工作区恢复干净后 -dirty 消失"那条断言会自动打印 SKIP（打探针前工作区本
+就不干净，无法判定该断言），不计入通过也不计入失败,其余各条应全部 PASS。
+不要因为看到 SKIP 或"通过"计数比总检查数少 1 就以为回退了。
 
 - [ ] **Step 7: 提交**
 

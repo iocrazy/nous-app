@@ -8,6 +8,8 @@ Build a release copy first — Chrome remembers whichever folder you pick, and
 pointing it at this source folder means branch switches, `git clean`, and
 uncommitted work all land straight in the extension you use every day.
 
+From the repo root:
+
 ```bash
 bash scripts/package-extension.sh   # → release/chrome-extension/
 ```
@@ -15,6 +17,12 @@ bash scripts/package-extension.sh   # → release/chrome-extension/
 1. Open `chrome://extensions/`
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked** → select `release/chrome-extension/`
+
+Note: `release/` is gitignored, so `git clean -ffdx` deletes the built copy
+along with everything else it's meant to protect you from — that tradeoff is
+intentional (see
+[`docs/superpowers/specs/2026-08-13-chrome-extension-packaging-design.md`](../docs/superpowers/specs/2026-08-13-chrome-extension-packaging-design.md)).
+If that happens, just re-run the script.
 
 After pulling new code, re-run the script, then hit the reload icon on the
 extension card. The popup header shows `v1.3.1 (<commit>)` so you can tell at a
