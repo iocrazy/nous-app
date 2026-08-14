@@ -105,6 +105,12 @@ class MediahubModelTestResponse(BaseModel):
     """Result of a real per-model connectivity probe (chat / embedding / asr)."""
 
     ok: bool
+    # True when the probe has no protocol for this model's type and therefore
+    # checked nothing (image / video / tts). ``ok`` stays False — nothing
+    # succeeded — so this is the only signal that separates "didn't check" from
+    # "checked and failed", and the admin page needs it to render a neutral
+    # badge instead of a red one.
+    not_probed: bool = False
     detail: str = ""
     error: Optional[str] = None
     dims: Optional[int] = None

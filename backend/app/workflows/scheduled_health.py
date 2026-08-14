@@ -167,36 +167,52 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
     runs, and the same persistence (``repo.record_test_result``) — no duplicated
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
+
+    Three buckets, not two: a type the probe has no protocol for is ``not_probed``
+    and belongs in neither. Counting it as failed is what kept three healthy
+    image/video models red on the admin page and produced a WARNING per model
+    per hour about nothing (2026-08-14).
     """
     from app.repositories.mediahub_model_repository import get_mediahub_model_repository
-    from app.services.ai.mediahub_model_health import probe_mediahub_model
+    from app.services.ai.mediahub_model_health import (
+        probe_mediahub_model,
+        probe_result_status,
+    )
 
     repo = get_mediahub_model_repository()
     rows = await repo.list_all()
     enabled = [r for r in rows if r.get("is_enabled")]
 
-    ok = 0
+    counts = {"ok": 0, "fail": 0, "not_probed": 0}
     for row in enabled:
         result = await probe_mediahub_model(row)
-        status = "ok" if result.get("ok") else "fail"
+        status = probe_result_status(result)
         detail = result.get("detail") or (result.get("error") or "")
         await repo.record_test_result(
             str(row.get("id")), status, detail[:200], result.get("code")
         )
-        if result.get("ok"):
-            ok += 1
-        else:
+        counts[status] += 1
+        if status == "fail":
             # Per-model, not just the run summary: when ``last_test_detail``
             # came back blank (the 2026-08-14 incident) the summary line was the
             # only trace left, and it named no model and no reason. The log is
             # now the second, independent place the reason survives.
+            #
+            # ``not_probed`` deliberately logs NOTHING. It is a standing fact
+            # about the probe, not an event, and repeating it hourly is the
+            # noise this change exists to remove.
             logger.warning(
                 f"[mediahub_model_health] {row.get('name') or row.get('id')} "
                 f"status={status} code={result.get('code') or '<none>'} "
                 f"reason={detail or '<no detail>'}"
             )
 
-    return {"total": len(enabled), "ok": ok, "failed": len(enabled) - ok}
+    return {
+        "total": len(enabled),
+        "ok": counts["ok"],
+        "failed": counts["fail"],
+        "not_probed": counts["not_probed"],
+    }
 
 
 # hourly: the status is now user-visible (the model picker warns on a red
@@ -208,12 +224,18 @@ async def mediahub_model_health_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
     summary = await probe_mediahub_models_step()
+    # ``not_probed`` is reported in both branches rather than folded into
+    # either: "3/4 unreachable" was a wrong sentence about a run in which
+    # nothing was wrong, and silently dropping the count would hide the fact
+    # that some enabled models are going unchecked.
+    skipped = summary.get("not_probed", 0)
     if summary["failed"]:
         logger.warning(
             f"[mediahub_model_health] {summary['failed']}/{summary['total']} "
-            f"platform models unreachable"
+            f"platform models unreachable (not_probed={skipped})"
         )
     else:
         logger.info(
-            f"[mediahub_model_health] all {summary['total']} platform models reachable"
+            f"[mediahub_model_health] all {summary['ok']} probeable platform "
+            f"models reachable (not_probed={skipped})"
         )

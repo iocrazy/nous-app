@@ -287,6 +287,11 @@ class MediahubModelRepository:
         server-side ``last_tested_at``, leaving ``updated_at`` untouched (a
         connectivity probe is not an edit).
 
+        ``status`` is one of ``PROBE_STATUSES`` — ``ok`` / ``fail`` /
+        ``not_probed`` (migration 428). No check here: the DB CHECK is the one
+        enforcement point, and callers derive the value from
+        ``probe_result_status`` rather than spelling it out.
+
         ``code`` is the closed-enum failure classification (migration 427) and
         is written UNCONDITIONALLY, including as NULL: a passing probe must
         erase the previous failure's code, or a recovered model would keep
