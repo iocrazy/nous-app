@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, Inbox, Trash2, Calendar, FileType } from 'lucide-react';
 import { createProjectCollection, fetchProjectCollections, deleteProjectCollection } from '../services/projectsService';
 import { useToast } from './Toast';
+import { DateTimePopover } from './common/DateTimePopover';
 
 interface ProjectCollectModalProps {
   projectId: string;
@@ -20,6 +21,8 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [deadline, setDeadline] = useState('');
+  // Anchor for the shared date picker that replaced the native date input.
+  const [deadlineAnchor, setDeadlineAnchor] = useState<HTMLElement | null>(null);
   const [maxSize, setMaxSize] = useState(500);
   const [isCreating, setIsCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -157,11 +160,23 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
                     <Calendar size={10} />
                     {t('projects.collect.deadline', 'Deadline')}
                   </label>
-                  <input
-                    type="date"
-                    value={deadline}
-                    onChange={(e) => setDeadline(e.target.value)}
-                    className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
+                  <button
+                    type="button"
+                    data-testid="collect-deadline-trigger"
+                    aria-label={t('projects.collect.deadline', 'Deadline')}
+                    onClick={(e) => setDeadlineAnchor(e.currentTarget)}
+                    className="w-full truncate rounded-lg border border-line bg-island px-3 py-2 text-left text-sm text-ink-200 transition-colors hover:border-line-strong focus:border-line-strong focus:outline-none"
+                  >
+                    <span className={deadline ? '' : 'text-ink-500'}>
+                      {deadline || t('projects.collect.deadline', 'Deadline')}
+                    </span>
+                  </button>
+                  <DateTimePopover
+                    mode="single"
+                    anchorEl={deadlineAnchor}
+                    value={deadline || null}
+                    onChange={(next) => setDeadline(next ?? '')}
+                    onClose={() => setDeadlineAnchor(null)}
                   />
                 </div>
                 <div>
