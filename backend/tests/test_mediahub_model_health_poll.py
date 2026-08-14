@@ -1,5 +1,5 @@
 # backend/tests/test_mediahub_model_health_poll.py
-"""Scheduled 6-hour platform-model health poll: probe every enabled Nous model
+"""Scheduled hourly platform-model health poll: probe every enabled Nous model
 and persist the result (reusing the manual-Test probe + persistence)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch

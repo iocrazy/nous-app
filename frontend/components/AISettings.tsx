@@ -40,6 +40,7 @@ import {
   getAIGovernance,
   GOVERNANCE_ALL_ALLOWED,
 } from '../services/aiService';
+import { useTranslation } from 'react-i18next';
 import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth } from '../utils/modelHealth';
 import { aiLibraryService } from '../services/aiLibraryService';
@@ -395,6 +396,11 @@ const ManagedNote: React.FC = () => (
 );
 
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
+  // Only the model-health warning below goes through i18n so far — the rest of
+  // this page is still hardcoded English. A health warning is the one string
+  // here a user has to ACT on, so it is worth reading in their own language
+  // even while the labels around it lag behind.
+  const { t } = useTranslation();
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
   const [governance, setGovernance] = useState<AIGovernanceFlags>(GOVERNANCE_ALL_ALLOWED);
   const [localSettings, setLocalSettings] = useState<AISettingsType>(() => ({
@@ -638,7 +644,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const health = nousHealth[modelName];
     if (health?.status !== 'fail') return null;
     const checked = relativeTime(health.testedAt ?? undefined);
-    return checked ? `health check failed, checked ${checked}` : 'health check failed';
+    return checked
+      ? t('aiSettings.modelHealthFailedAgo', { ago: checked })
+      : t('aiSettings.modelHealthFailed');
   };
 
   const nousConfig = localSettings.providers.nous;

@@ -2828,6 +2828,10 @@
     "archivedToast": "Memory 已归档",
     "archiveFailed": "归档失败：{{message}}"
   },
+  "aiSettings": {
+    "modelHealthFailed": "自检失败",
+    "modelHealthFailedAgo": "自检失败，检查于 {{ago}}"
+  },
   "aiLibrary": {
     "title": "AI 库",
     "menuItem": "AI 库",

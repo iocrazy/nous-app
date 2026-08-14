@@ -2828,6 +2828,10 @@
     "archivedToast": "Memory archived",
     "archiveFailed": "Archive failed: {{message}}"
   },
+  "aiSettings": {
+    "modelHealthFailed": "health check failed",
+    "modelHealthFailedAgo": "health check failed, checked {{ago}}"
+  },
   "aiLibrary": {
     "title": "AI Library",
     "menuItem": "AI Library",

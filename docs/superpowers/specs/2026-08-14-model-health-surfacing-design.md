@@ -81,3 +81,31 @@
 - 既有测试保持绿；全量 collect 无 import 错。
 - 生产验收：部署后查 `mediahub_models.last_test_detail`——下一轮探针后，
   **任何 fail 行的 detail 都不得为空**（这是本次修复唯一可证伪的信号）。
+  ⚠️ 这条信号的边界：image / video / tts 行的 detail 虽然非空，但那个非空内容本身是
+  探针打错端点的产物（见 §4 第 1 条），不构成"模型坏了"的证据，查的时候要排除掉。
+
+## 4. Backlog
+
+1. **探针按 type 分派——image / video / tts 的判定当前完全无效。**
+   `mediahub_model_health.py` 把除 `asr` / `embedding` 之外的一切都 POST 到
+   `{base_url}/chat/completions`，所以这三类**永远**是 fail，与模型能不能用无关：
+   文生图模型打 chat 端点必然 404，CLI 类模型 `base_url` 为空会拼出非法 URL。
+   2026-08-14 生产库 4 个 fail 行里 3 个是这种构造性假红（`jimeng-cli-image`、
+   `jimeng-cli-seedance`、`mediahub-doubao-seedream-t2i`），三个模型都是好的。
+   **当前的缓解不是修复**：`frontend/utils/modelHealth.ts` 的 `PROBED_TYPES` 只让
+   `llm` / `embedding` / `asr` 的结果透出前端——因为常亮的假红会直接教会用户无视这个徽标，
+   正是本 spec 要消灭的东西。真修法是探针按 type 分派到各自的协议，或者对判不了的类型
+   干脆不写 `last_test_status`（那样 UI 侧的类型过滤就能撤掉）。在探针真会说那门协议之前，
+   **不要放宽 `PROBED_TYPES`**。
+2. **脱敏的 reason code**。§F2.1 只透出 status/tested_at，不透出 `last_test_detail`——
+   探针错误文本常带上游 host、私有 base_url、上游内部模型 ID。要让用户看到"为什么"，
+   正确做法是服务端算一个封闭枚举（timeout / unreachable / auth / rate_limit /
+   model_not_found / upstream_error / bad_response / other），它天生不含自由文本。
+   判据在探针里全部现成（异常类型 + status_code）。⚠️ asr 分支例外：它只有
+   `AIProviderFactory.test_connection` 的自由文本，没有 status_code 也没有异常对象——
+   要么先让 `ai_provider.py` 返回结构化 code，要么把 asr 一并归到 `other`，
+   **不要靠子串匹配猜**。
+3. **失败后加速重探**（§2 已明确排除，用户选了纯提频）。
+4. **串行探测的耗时会随模型数线性涨**。`probe_mediahub_models_step` 是串行 for 循环，
+   单次预算 60s，11 个 enabled 模型最坏一轮 11 分钟。当前 1 小时 cadence 下安全，
+   但"再加几个模型"不再是免费的——要加到 20+ 就该改并发。

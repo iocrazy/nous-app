@@ -16,7 +16,7 @@ the failure reason is never empty, and it names the exception type.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -65,6 +65,24 @@ _EMBEDDING_ROW = {
     "api_key": "k",
 }
 
+_ASR_ROW = {
+    "type": "asr",
+    "actual_provider": "volcengine",
+    "actual_model": "bigmodel",
+    "base_url": "https://openspeech.bytedance.com",
+    "api_key": "k",
+    "app_id": "a",
+}
+
+
+def _patch_test_connection(result: dict):
+    """Stub ``AIProviderFactory.test_connection`` — the asr branch's only source
+    of a failure reason."""
+    return patch(
+        "app.services.ai.mediahub_model_health.AIProviderFactory.test_connection",
+        AsyncMock(return_value=result),
+    )
+
 
 @pytest.mark.parametrize(
     "exc",
@@ -110,6 +128,46 @@ async def test_reason_is_truncated() -> None:
         out = await probe_mediahub_model(_LLM_ROW)
 
     assert len(out["error"]) <= 200
+
+
+@pytest.mark.parametrize("returned_error", ["", None])
+@pytest.mark.asyncio
+async def test_asr_failure_also_yields_a_reason(returned_error) -> None:
+    """The asr branch returns before the except-branch fallback, so it needs the
+    same guarantee of its own.
+
+    Its reason comes from ``AIProviderFactory.test_connection``, whose fallback
+    is a bare ``str(e)`` — the very shape that made the 2026-08-14 red light
+    undiagnosable — and it probes on a 10s budget, so an empty-stringifying
+    timeout is MORE likely here than on the chat path. Without this, the spec's
+    "no fail row has an empty detail" acceptance signal simply does not hold for
+    asr models.
+    """
+    with _patch_test_connection({"success": False, "error": returned_error}):
+        out = await probe_mediahub_model(_ASR_ROW)
+
+    assert out["ok"] is False
+    assert out["error"], "a failed asr probe must never record an empty reason"
+
+
+@pytest.mark.asyncio
+async def test_asr_failure_keeps_the_real_message() -> None:
+    """The placeholder only fills a void — it never displaces a real reason."""
+    with _patch_test_connection({"success": False, "error": "invalid app_id"}):
+        out = await probe_mediahub_model(_ASR_ROW)
+
+    assert out["error"] == "invalid app_id"
+
+
+@pytest.mark.asyncio
+async def test_asr_success_records_no_error() -> None:
+    """Counterpart guard: the fallback must not invent a reason on success."""
+    with _patch_test_connection({"success": True}):
+        out = await probe_mediahub_model(_ASR_ROW)
+
+    assert out["ok"] is True
+    assert out["error"] is None
+    assert out["detail"] == "reachable"
 
 
 @pytest.mark.parametrize("row", [_LLM_ROW, _EMBEDDING_ROW])

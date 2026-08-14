@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { NousModelPublic } from '../types';
-import { buildModelHealth, unhealthyModelNames } from './modelHealth';
+import { buildModelHealth } from './modelHealth';
 
 const model = (over: Partial<NousModelPublic>): NousModelPublic =>
   ({
@@ -48,18 +48,29 @@ describe('buildModelHealth', () => {
     ]);
     expect(map).toEqual({});
   });
-});
 
-describe('unhealthyModelNames', () => {
-  it('collects only the failing models', () => {
-    const names = unhealthyModelNames([
-      model({ name: 'bad', last_test_status: 'fail' }),
-      model({ name: 'good', last_test_status: 'ok' }),
-      model({ name: 'unknown' }),
+  it.each(['image', 'video', 'tts'] as const)(
+    'stays silent about a %s model the probe cannot judge',
+    (type) => {
+      // The backend probe POSTs everything but asr/embedding to
+      // /chat/completions, so these types are recorded as failing no matter
+      // what. Production 2026-08-14: 3 of 4 `fail` rows were exactly this, and
+      // all three models worked. Surfacing them would teach users to ignore
+      // the badge — the failure mode this whole feature is meant to prevent.
+      const map = buildModelHealth([model({ name: 'a', type, last_test_status: 'fail' })]);
+      expect(map).toEqual({});
+    },
+  );
+
+  it('still reports the types the probe really speaks', () => {
+    // Counterpart to the above: the type filter must not swallow the signal
+    // it was built to protect.
+    const map = buildModelHealth([
+      model({ name: 'chat', type: 'llm', last_test_status: 'fail' }),
+      model({ name: 'vec', type: 'embedding', last_test_status: 'fail' }),
+      model({ name: 'speech', type: 'asr', last_test_status: 'fail' }),
     ]);
-    expect(names.has('bad')).toBe(true);
-    expect(names.has('good')).toBe(false);
-    expect(names.has('unknown')).toBe(false);
+    expect(Object.keys(map).sort()).toEqual(['chat', 'speech', 'vec']);
   });
 });
 

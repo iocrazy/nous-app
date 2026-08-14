@@ -15,6 +15,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { AISettings } from './AISettings';
 import type { AISettings as AISettingsType, NousModelPublic } from '../types';
+import en from '../public/locales/en.json';
+
+// Resolve against the REAL shipped English copy rather than a hand-written
+// table, so a missing/renamed key surfaces here as a failing assertion instead
+// of a raw `aiSettings.modelHealthFailedAgo` shown to users. The component's
+// own i18n instance is never initialized in tests (nothing loads i18n.ts), so
+// react-i18next would otherwise hand back bare keys.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, vars?: Record<string, unknown>): string => {
+      const template = key
+        .split('.')
+        .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], en);
+      if (typeof template !== 'string') return key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars?.[name] ?? ''));
+    },
+  }),
+}));
 
 const twentyMinutesAgo = new Date(Date.now() - 20 * 60_000).toISOString();
 
@@ -34,6 +52,16 @@ const WELL_LLM: NousModelPublic = {
   pricing_type: 'per_token',
   pricing_value: 4,
   last_test_status: 'ok',
+  last_tested_at: twentyMinutesAgo,
+};
+/** Recorded as failing by construction — see the no-badge test below. */
+const SICK_IMAGE: NousModelPublic = {
+  name: 'mediahub-doubao-seedream-t2i',
+  display_name: 'Seedream T2I',
+  type: 'image',
+  pricing_type: 'per_request',
+  pricing_value: 5,
+  last_test_status: 'fail',
   last_tested_at: twentyMinutesAgo,
 };
 const UNPROBED_ASR: NousModelPublic = {
@@ -122,6 +150,22 @@ describe('AISettings — platform model health', () => {
     expect(
       within(cardRow('DeepSeek V4 Pro')).queryByTestId('model-health-badge'),
     ).toBeNull();
+  });
+
+  it('says nothing about an image model, whose red light is a probe artifact', async () => {
+    // The backend probe POSTs every non-asr/embedding type to
+    // /chat/completions, so image / video / tts models are recorded as failing
+    // no matter what. On 2026-08-14, 3 of the 4 production `fail` rows were
+    // exactly this — and all three models worked. Three permanently-lit
+    // warnings would teach users to ignore the badge, which is the failure
+    // this feature exists to prevent.
+    await renderWith([SICK_IMAGE, SICK_LLM]);
+    expect(within(cardRow('Seedream T2I')).queryByTestId('model-health-badge')).toBeNull();
+    // Same render, real signal still shown — proves the filter is by type and
+    // not a blanket mute.
+    expect(
+      within(cardRow('DeepSeek V4 Flash')).getByTestId('model-health-badge'),
+    ).toBeInTheDocument();
   });
 
   it('says nothing about a model that has never been probed', async () => {

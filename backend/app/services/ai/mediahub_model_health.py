@@ -53,10 +53,18 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                     "model": model,
                 },
             )
+            # Same "never an empty reason" guarantee as the except-branch below,
+            # applied here too: this branch returns before reaching it, and the
+            # message comes from AIProviderFactory.test_connection, whose own
+            # fallback is a bare ``str(e)`` — the exact shape that made the
+            # 2026-08-14 red light undiagnosable. Its 10s budget makes an
+            # empty-stringifying timeout MORE likely here than on the chat path.
+            ok = bool(res.get("success"))
+            err = res.get("error") or ""
             return {
-                "ok": bool(res.get("success")),
-                "detail": "reachable" if res.get("success") else "",
-                "error": res.get("error"),
+                "ok": ok,
+                "detail": "reachable" if ok else "",
+                "error": None if ok else (err or "asr probe failed with no message"),
                 "dims": None,
             }
 

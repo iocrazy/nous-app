@@ -23,7 +23,7 @@
 // keeps it free of the i18n instance — importing it must stay cheap enough
 // that any component can, which is not true of utils/relativeTime.
 
-import type { NousModelPublic } from '../types';
+import type { NousModelPublic, NousModelType } from '../types';
 
 export type ModelHealthStatus = 'ok' | 'fail';
 
@@ -34,22 +34,46 @@ export interface ModelHealth {
 }
 
 /**
+ * Model types the backend probe can actually judge.
+ *
+ * The probe branches on type and sends everything that is not `asr` or
+ * `embedding` to `POST {base_url}/chat/completions`
+ * (backend/app/services/ai/mediahub_model_health.py). So `image` / `video` /
+ * `tts` are ALWAYS recorded as failing, whatever their real state: a
+ * text-to-image model 404s on a chat endpoint, and CLI-backed models have no
+ * base_url at all so the probe builds an invalid URL. Production confirms it —
+ * 3 of the 4 `fail` rows on 2026-08-14 were exactly this, all three models fine.
+ *
+ * Surfacing those would put three permanently-lit warnings in front of every
+ * user, and the first thing they'd learn is to ignore the badge — which is the
+ * problem this feature exists to fix, not a smaller version of it. So the
+ * unjudgeable types stay silent, on the same rule as never-probed models: no
+ * signal is better than a false one.
+ *
+ * The real fix belongs in the probe (dispatch per type, or write no status for
+ * types it cannot reach); tracked in the spec's backlog. Widen this set only
+ * once the probe actually speaks that type's protocol.
+ */
+const PROBED_TYPES: ReadonlySet<NousModelType> = new Set<NousModelType>([
+  'llm',
+  'embedding',
+  'asr',
+]);
+
+/**
  * Health by model NAME (the id the pickers key on), for every model that has
- * actually been probed. A model with no status is left OUT rather than
- * defaulted: "never checked" is not a health claim in either direction.
+ * actually been probed AND whose type the probe can judge. A model with no
+ * status is left OUT rather than defaulted: "never checked" is not a health
+ * claim in either direction.
  */
 export function buildModelHealth(
   models: NousModelPublic[],
 ): Record<string, ModelHealth> {
   const out: Record<string, ModelHealth> = {};
   for (const m of models) {
+    if (!PROBED_TYPES.has(m.type)) continue;
     if (m.last_test_status !== 'ok' && m.last_test_status !== 'fail') continue;
     out[m.name] = { status: m.last_test_status, testedAt: m.last_tested_at ?? null };
   }
   return out;
-}
-
-/** Names of models whose last probe failed. */
-export function unhealthyModelNames(models: NousModelPublic[]): Set<string> {
-  return new Set(models.filter((m) => m.last_test_status === 'fail').map((m) => m.name));
 }
