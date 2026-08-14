@@ -11,6 +11,11 @@ The probe performs a real minimal inference per model TYPE (chat / embedding /
 asr) so account-level limits surface (e.g. a Volcengine ``SetLimitExceeded`` on
 a specific model), not just key reachability. It never raises.
 
+It also declares its own boundary: a type it has no protocol for comes back
+``not_probed`` rather than ``fail`` (see ``PROBEABLE_TYPES``). A probe that
+cannot speak a protocol should answer "I can't check this", not hand back a
+verdict that was never going to be anything but red.
+
 Every failure also carries a CODE from a closed enum (``classify_probe_failure``)
 alongside the free-text reason: the reason is admin-only (it embeds upstream
 hosts, private base_urls and upstream model ids), the code is what users see.
@@ -18,12 +23,35 @@ hosts, private base_urls and upstream model ids), the code is what users see.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import httpx
 
 from app.services.ai.providers.ai_provider import AIProviderFactory
 from app.services.ai.providers.embedding_config import _is_multimodal
+
+# The model types this probe can actually speak a protocol for. Everything else
+# is reported as ``not_probed`` — not as a failure — and never leaves the
+# process.
+#
+# Why there is no image/video/tts probe rather than a TODO: a real text-to-image
+# or text-to-video call COSTS MONEY AND PRODUCES AN ASSET on every run, and this
+# runs hourly per enabled model; and the CLI-backed models (``jimeng-cli-*``)
+# have an empty ``base_url`` because they have no HTTP endpoint at all, so there
+# is nothing an HTTP probe could reach even in principle.
+#
+# What the old code did instead was send them all to ``/chat/completions``,
+# which is why 3 of the 4 red lights on 2026-08-14 were structurally impossible
+# to clear: a text-to-image endpoint 404s on a chat path and an empty base_url
+# builds an invalid URL. All three models were healthy.
+#
+# Widen this set only together with a branch below that genuinely speaks that
+# type's protocol (test_mediahub_probe_not_probed.py pins the two together).
+PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
+
+# Values ``mediahub_models.last_test_status`` may hold. Twin of the DB CHECK in
+# migration 428 / ``models/ai.py`` — both sides must change together.
+PROBE_STATUSES = ("ok", "fail", "not_probed")
 
 # Closed enum of failure reasons. Closed is the whole point: a user-facing
 # value derived ONLY from the exception type and the HTTP status can never
@@ -97,15 +125,55 @@ def classify_probe_failure(
 _PROBE_TIMEOUT = 60.0
 
 
+def probe_result_status(result: Mapping[str, Any]) -> str:
+    """Map a probe result onto the ``last_test_status`` value to persist.
+
+    Both writers (the hourly poll and the admin Test endpoint) go through here
+    for the same reason they share the probe itself: two hand-written copies of
+    this three-way choice would drift, and the failure mode of drifting is a
+    false red light — the exact thing being fixed.
+
+    A result without ``not_probed`` is a plain failure, never "didn't check".
+    """
+    if result.get("ok"):
+        return "ok"
+    if result.get("not_probed"):
+        return "not_probed"
+    return "fail"
+
+
 async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
 
-    Returns ``{ok, detail, error, dims, code}``. Never raises — a transport/HTTP
-    failure is reported as ``ok=False`` with the error text plus a
-    ``PROBE_FAILURE_CODES`` value. ``code`` is ``None`` on success, so writing
+    Returns ``{ok, detail, error, dims, code, not_probed}``. Never raises — a
+    transport/HTTP failure is reported as ``ok=False`` with the error text plus
+    a ``PROBE_FAILURE_CODES`` value. ``code`` is ``None`` on success, so writing
     it on every probe clears a previous failure's code.
+
+    A type outside ``PROBEABLE_TYPES`` returns ``not_probed=True`` without
+    sending anything. ``ok`` stays False there — it did not succeed — so the
+    only way to read it as healthy is to look at ``not_probed`` deliberately.
     """
     typ = (row.get("type") or "").strip()
+
+    if typ not in PROBEABLE_TYPES:
+        # Before the try block, and before any client is built: the point is not
+        # to fail gracefully, it is to not make the call. Hourly × per model,
+        # every one of these was a guaranteed-failing request plus a WARNING.
+        return {
+            "ok": False,
+            "not_probed": True,
+            # Admin-visible reason. Names the boundary that was hit and nothing
+            # else — no host, no base_url, no credential — so unlike a probe
+            # failure's free text this is safe wherever it ends up.
+            "detail": f"no protocol probe for type={typ}",
+            "error": None,
+            # NULL, not a code: PROBE_FAILURE_CODES enumerates why a probe
+            # FAILED, and nothing failed here.
+            "code": None,
+            "dims": None,
+        }
+
     model = (row.get("actual_model") or "").strip()
     base = (row.get("base_url") or "").rstrip("/")
     key = row.get("api_key") or ""
