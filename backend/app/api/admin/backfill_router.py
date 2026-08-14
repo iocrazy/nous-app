@@ -28,6 +28,9 @@ from app.workflows.backfill_normalize_personal_project_team_ids import (
 from app.workflows.backfill_project_stage_issue_team_ids import (
     backfill_project_stage_issue_team_ids_workflow,
 )
+from app.workflows.backfill_publish_task_team_ids import (
+    backfill_publish_task_team_ids_workflow,
+)
 
 router = APIRouter()
 
@@ -39,6 +42,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     "normalize_personal_project_team_ids": (
         backfill_normalize_personal_project_team_ids_workflow
     ),
+    "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
 }
 
 
