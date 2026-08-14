@@ -11,9 +11,15 @@
  *
  * Empty state = "Extract from script": materializes the script-derived
  * entity names into rows (idempotent server-side upsert).
+ *
+ * Non-empty state used to hide that same path behind one quiet header button,
+ * so a project whose scripts already name six characters could sit next to an
+ * empty-looking library with nothing connecting the two (user report: "why
+ * didn't the script's characters create cards here?"). The library now diffs
+ * the script cast against its own rows and says so — see the import hint bar.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, Plus, Sparkles, UserRound, Wand2 } from 'lucide-react';
@@ -26,6 +32,8 @@ import {
   updateCharacter,
   type ProjectCharacter,
 } from '../../services/charactersService';
+import { fetchProjectEntities } from '../../services/projectsService';
+import { missingCharacterNames } from './characterNameMatch';
 import {
   createCanvas,
   listCanvases,
@@ -53,6 +61,10 @@ export function CharacterLibrary({ projectId }: CharacterLibraryProps) {
   const { addToast } = useToast();
   const [characters, setCharacters] = useState<ProjectCharacter[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // character id or 'extract'/'new'
+  /** Script-derived cast names (same source the server's extract reads), so
+   *  the hint's count is exactly what a click would materialize. Best-effort:
+   *  a failed fetch leaves it empty and simply shows no hint. */
+  const [scriptCast, setScriptCast] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,11 +81,51 @@ export function CharacterLibrary({ projectId }: CharacterLibraryProps) {
     };
   }, [projectId]);
 
+  const loadScriptCast = useCallback(async () => {
+    try {
+      const entities = await fetchProjectEntities(projectId);
+      setScriptCast((entities.characters ?? []).map((c) => c.name));
+    } catch (err) {
+      console.error('[CharacterLibrary] script cast load failed:', err);
+      setScriptCast([]);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadScriptCast();
+  }, [loadScriptCast]);
+
+  /** Script names with no card yet — drives the import hint bar. */
+  const missingNames = useMemo(
+    () => missingCharacterNames(scriptCast, (characters ?? []).map((c) => c.name)),
+    [scriptCast, characters],
+  );
+
   const handleExtract = async () => {
     if (busy) return;
     setBusy('extract');
+    const before = characters?.length ?? 0;
     try {
-      setCharacters(await extractCharactersFromScript(projectId));
+      const rows = await extractCharactersFromScript(projectId);
+      setCharacters(rows);
+      // Typed echo — never a silent no-op (CLAUDE.md). The server upserts with
+      // ON CONFLICT DO NOTHING, so the row delta *is* the number imported and
+      // nothing the user curated (including a blank "New Character") is touched.
+      const imported = Math.max(0, rows.length - before);
+      addToast(
+        imported > 0
+          ? t('characters.importedCount', {
+              count: imported,
+              defaultValue_one: 'Imported {{count}} character from your scripts',
+              defaultValue_other: 'Imported {{count}} characters from your scripts',
+            })
+          : t(
+              'characters.importedNone',
+              'Every script character is already in the library',
+            ),
+        imported > 0 ? 'success' : 'info',
+      );
+      await loadScriptCast();
     } catch (err) {
       console.error('[CharacterLibrary] extract failed:', err);
       addToast(t('characters.extractFailed', 'Failed to extract characters'), 'error');
@@ -193,6 +245,44 @@ export function CharacterLibrary({ projectId }: CharacterLibraryProps) {
 
   return (
     <div data-testid="character-library">
+      {/* Import hint — only while the script names someone the library lacks.
+          Empty diff renders nothing, so this never becomes standing noise. */}
+      {missingNames.length > 0 && (
+        <div
+          data-testid="character-import-hint"
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-info-line bg-info-soft px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-info">
+              {t('characters.missingFromLibrary', {
+                count: missingNames.length,
+                defaultValue_one:
+                  '{{count}} character in your scripts is not in this library yet',
+                defaultValue_other:
+                  '{{count}} characters in your scripts are not in this library yet',
+              })}
+            </p>
+            <p className="mt-0.5 truncate text-[11px] text-ink-400">
+              {missingNames.slice(0, 6).join(' · ')}
+              {missingNames.length > 6 ? ' …' : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleExtract}
+            disabled={busy !== null}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-info-line bg-info-soft px-2.5 py-1 text-xs font-medium text-info hover:bg-info-soft/70 disabled:opacity-60"
+          >
+            {busy === 'extract' ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Wand2 size={12} />
+            )}
+            {t('characters.importMissing', 'Import them')}
+          </button>
+        </div>
+      )}
+
       <div className="mb-3 flex items-center justify-end gap-2">
         <button
           type="button"
