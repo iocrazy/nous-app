@@ -457,6 +457,7 @@ async def _find_running_audit() -> str | None:
 
     from app.db.session import read_scope
     from app.models import TaskTracking
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES_SQL
 
     async with read_scope() as session:
         row = (
@@ -464,7 +465,12 @@ async def _find_running_audit() -> str | None:
                 await session.execute(
                     select(TaskTracking.dbos_workflow_id)
                     .where(TaskTracking.task_type == "storage_audit")
-                    .where(TaskTracking.phase.in_(["queued", "in_progress"]))
+                    # ACTIVE_PHASES_SQL, not a hand-written list: the old
+                    # ("queued", "in_progress") never matched a running audit
+                    # (live workflow tasks sit at 'processing'), so this dedup
+                    # was a no-op and a double-click really did start two
+                    # full-library scans.
+                    .where(TaskTracking.phase.in_(ACTIVE_PHASES_SQL))
                     # INTERVAL literal via a text() fragment (structural
                     # exception, non-full-statement) — no ORM interval type.
                     .where(

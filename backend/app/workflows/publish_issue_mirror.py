@@ -156,10 +156,20 @@ def issue_status_for_phase(
     closes it through ``transition_status`` in the same sweep, which is what
     stamps ``completed_at`` and fires the sub-issue / pipeline hooks
     (``issue_create_atomic`` cannot write ``completed_at``).
+
+    ⚠️ **两套词汇在这个函数里交汇，别把它们看成同一个词表**：入参 ``phase``
+    是 ``task_tracking.phase``（batch 任务的执行阶段），返回值是 ``issues``
+    的 status。两边**都**有一个叫 ``in_progress`` 的词，但含义无关 —— issue
+    侧 ``in_progress`` 是合法状态；task 侧一个跑着的 workflow 实际停在
+    ``processing``（见 ``unified_task_manager`` 的两写入方说明）。原先这里写
+    ``if phase == "in_progress"``，比的是 task phase 却用了 issue 的词，那个
+    分支从来没进去过。现在入参一侧一律走 ``ACTIVE_PHASES``。
     """
-    if phase == "queued":
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES, TaskPhase
+
+    if phase == TaskPhase.QUEUED.value:
         return "todo"
-    if phase == "in_progress":
+    if phase in ACTIVE_PHASES:  # dedup_check / processing / in_progress
         return "in_progress"
     if phase in ("failed", "lost"):
         return "blocked"

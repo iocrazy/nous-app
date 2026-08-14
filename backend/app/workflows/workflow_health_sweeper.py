@@ -77,14 +77,19 @@ async def classify_and_act_step() -> Dict[str, int]:
 
     from app.db.session import read_scope
     from app.models import TaskTracking
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES_SQL
 
     # Fetch active rows with the columns the classifier needs.
     #
-    # Active phase is 'processing', NOT 'in_progress': the DBOS lifecycle
-    # trigger maps RUNNING -> 'processing' (migration 209/219), confirmed
-    # against prod task_tracking. The old 'in_progress' literal never matched,
-    # so the sweeper silently skipped every running workflow (no LOST /
-    # USER_TIMEOUT detection for in-flight work). Mirrors get_queue_status.
+    # The active set comes from ACTIVE_PHASES_SQL — never a hand-written list.
+    # This filter was ("queued", "in_progress") once, which matched no running
+    # workflow at all (the sweeper silently skipped every in-flight task: no
+    # LOST / USER_TIMEOUT detection). It was then hand-corrected to
+    # ("queued", "processing"), which is right for the phases the application
+    # writes but still misses the two the DB trigger can leave behind
+    # ('in_progress' in the race window before manager.start() lands) and the
+    # manager's own 'dedup_check'. Both writers are reconciled in one place —
+    # see the two-writers note in unified_task_manager.
     async with read_scope() as session:
         rows = (
             (
@@ -102,7 +107,7 @@ async def classify_and_act_step() -> Dict[str, int]:
                         TaskTracking.health_status,
                         TaskTracking.user_id,
                         TaskTracking.title,
-                    ).where(TaskTracking.phase.in_(["queued", "processing"]))
+                    ).where(TaskTracking.phase.in_(ACTIVE_PHASES_SQL))
                 )
             )
             .mappings()

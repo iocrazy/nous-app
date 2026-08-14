@@ -35,6 +35,7 @@ from sqlalchemy import update as sa_update
 from app.core.deps import AuthDep
 from app.db.session import read_scope, write_scope
 from app.models import TaskFlows, TaskTracking
+from app.services.infra.unified_task_manager import ACTIVE_PHASES_SQL
 
 router = APIRouter(prefix="/flows", tags=["Task Flows"])
 
@@ -227,14 +228,18 @@ async def cancel_flow(flow_id: str, auth: AuthDep) -> Dict[str, Any]:
     if not flow.get("cascade_cancel", True):
         return {"ok": True, "cascaded": 0, "reason": "cascade_cancel=false"}
 
-    # Find non-terminal children.
+    # Find non-terminal children. ACTIVE_PHASES_SQL, never a hand-written list:
+    # this filter used to be ("queued", "in_progress") and therefore matched no
+    # running child at all (a live workflow task sits at 'processing' — see the
+    # two-writers note in unified_task_manager), so cascade_cancel silently
+    # cancelled the flow row while every child kept running.
     async with read_scope() as session:
         children = (
             (
                 await session.execute(
                     select(TaskTracking.dbos_workflow_id, TaskTracking.phase)
                     .where(TaskTracking.flow_id == flow_id)
-                    .where(TaskTracking.phase.in_(["queued", "in_progress"]))
+                    .where(TaskTracking.phase.in_(ACTIVE_PHASES_SQL))
                 )
             )
             .mappings()

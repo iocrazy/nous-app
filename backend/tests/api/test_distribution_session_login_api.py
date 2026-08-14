@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import app.api.distribution_router as dr
+from app.services.infra.unified_task_manager import ACTIVE_PHASES
 
 _USER = "11111111-1111-1111-1111-111111111111"
 SID = "ls_abc123"
@@ -188,7 +189,18 @@ def test_start_login_validates_the_request_body(client, configured_browser, body
 # ── POST /accounts/session/login/{task_id}/sms ──────────────
 
 
-def _patch_task(monkeypatch, *, phase="in_progress", login_session_id=SID, owner=_USER):
+def _patch_task(monkeypatch, *, phase="processing", login_session_id=SID, owner=_USER):
+    """⚠️ 默认 phase 必须是 **生产上真的能观测到的那个值**。
+
+    这里原本默认 ``"in_progress"``，而一个跑着的 session_login 任务在
+    ``task_tracking`` 上实际停在 ``"processing"``（``manager.start()`` 写的；
+    见 ``unified_task_manager`` 的两写入方说明）。于是端点的守卫和喂给它的
+    fixture 用了**同一个错词**，整套用例全绿，而真实用户提交手机号必吃 409
+    "Login task is no longer active" —— 小红书绑号在这里断了第二次。
+
+    fixture 的取值就是断言的一部分：它写错，测试就只是在自证。
+    """
+
     async def fake_load(task_id, user):
         if str(user["id"]) != owner:
             raise HTTPException(status_code=404, detail="Login task not found")
@@ -284,6 +296,91 @@ def test_sms_on_a_terminal_task_is_409(client, configured_browser, monkeypatch):
     )
     assert resp.status_code == 409
     configured_browser.submit_login_sms.assert_not_awaited()
+
+
+@pytest.mark.parametrize("phase", sorted(ACTIVE_PHASES))
+def test_sms_is_forwarded_at_every_phase_a_live_task_can_be_at(
+    client, configured_browser, monkeypatch, phase
+):
+    """守卫本体：**活着的任务必须放行**，不管是哪个写入方最后写的 phase。
+
+    ``processing`` 是这条用例的重点 —— 它是生产上跑着的 session_login 任务
+    的实际取值，而守卫曾经写死 ``("queued", "in_progress")``，于是用户一提交
+    手机号/验证码就被 409 判成"本次登录已结束"，后端会话其实还活着。把守卫
+    改回任何**残缺**的字面量集合，这条就红。
+    """
+    _patch_task(monkeypatch, phase=phase)
+    snapshot = MagicMock()
+    snapshot.result.to_dict.return_value = {
+        "success": True,
+        "status": "scanned",
+        "message": "accepted",
+        "detail": {},
+    }
+    configured_browser.submit_login_sms.return_value = snapshot
+
+    resp = client.post(
+        "/api/v1/distribution/accounts/session/login/wf-1/sms", json={"code": "123456"}
+    )
+
+    assert resp.status_code == 200, (
+        f"phase={phase!r} 是个活任务，验证码必须转发进去。"
+        f"守卫应当引用 ACTIVE_PHASES，而不是手写元组。"
+    )
+    configured_browser.submit_login_sms.assert_awaited_once_with(SID, "123456")
+
+
+@pytest.mark.parametrize("phase", sorted(ACTIVE_PHASES))
+def test_phone_is_forwarded_at_every_phase_a_live_task_can_be_at(
+    client, configured_browser, monkeypatch, phase
+):
+    """同一条守卫的手机号那一侧 —— SMS 平台（小红书）**先**走这个端点。
+
+    只钉住 ``/sms`` 是不够的：用户在 ``/phone`` 就已经被挡住了，根本走不到
+    验证码那一步。两个端点各有一份守卫，所以各要一条用例。
+    """
+    _patch_task(monkeypatch, phase=phase)
+    snapshot = MagicMock()
+    snapshot.result.to_dict.return_value = {
+        "success": True,
+        "status": "sms_required",
+        "message": "code sent",
+        "detail": {},
+    }
+    configured_browser.submit_login_phone = AsyncMock(return_value=snapshot)
+
+    resp = client.post(
+        "/api/v1/distribution/accounts/session/login/wf-1/phone",
+        json={"phone": "13800000000"},
+    )
+
+    assert resp.status_code == 200, (
+        f"phase={phase!r} 是个活任务，手机号必须转发进去。"
+        f"守卫应当引用 ACTIVE_PHASES，而不是手写元组。"
+    )
+    configured_browser.submit_login_phone.assert_awaited_once_with(SID, "13800000000")
+
+
+@pytest.mark.parametrize("phase", ["completed", "failed", "cancelled", "lost"])
+def test_terminal_phases_still_get_409_on_both_endpoints(
+    client, configured_browser, monkeypatch, phase
+):
+    """反向：放行不能放成"全放行"。终态任务的浏览器 context 已经释放。"""
+    _patch_task(monkeypatch, phase=phase)
+    configured_browser.submit_login_phone = AsyncMock()
+
+    sms = client.post(
+        "/api/v1/distribution/accounts/session/login/wf-1/sms", json={"code": "123456"}
+    )
+    phone = client.post(
+        "/api/v1/distribution/accounts/session/login/wf-1/phone",
+        json={"phone": "13800000000"},
+    )
+
+    assert sms.status_code == 409
+    assert phone.status_code == 409
+    configured_browser.submit_login_sms.assert_not_awaited()
+    configured_browser.submit_login_phone.assert_not_awaited()
 
 
 def test_sms_before_the_context_exists_is_409(client, configured_browser, monkeypatch):

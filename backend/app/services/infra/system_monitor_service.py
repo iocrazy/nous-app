@@ -93,11 +93,14 @@ async def get_queue_status() -> dict:
       "offline" — DB unreachable (defensive; should not happen)
       "online"  — counts available
 
-    Active = phase 'processing'; Pending = phase 'queued'. The string
-    'processing' must match `TaskPhase.PROCESSING.value` in
-    unified_task_manager — there used to be a typo here ('in_progress')
-    that made the active count always zero, which manifested as
-    "WORKER Idle" in TaskMonitor while a task was actively parsing.
+    Pending = phase 'queued'; Active = every other live phase (ACTIVE_PHASES
+    minus 'queued'). This counter has been wrong twice in the same shape:
+    first it read phase 'in_progress' (a word the application never writes),
+    making the active count always zero — "WORKER Idle" in TaskMonitor while
+    a task was actively parsing; then the hand-fix pinned the single word
+    'processing', which still drops rows the DB trigger left at 'in_progress'
+    and rows the manager parks at 'dedup_check'. Both writers are reconciled
+    once, in unified_task_manager — read the set from there, never re-type it.
     """
     current_time = time.time()
 
@@ -125,6 +128,12 @@ async def get_queue_status() -> dict:
 
         from app.db.session import read_scope
         from app.models import TaskTracking
+        from app.services.infra.unified_task_manager import (
+            ACTIVE_PHASES,
+            TaskPhase,
+        )
+
+        running_phases = tuple(sorted(ACTIVE_PHASES - {TaskPhase.QUEUED.value}))
 
         async with read_scope() as session:
             active_count = int(
@@ -132,7 +141,7 @@ async def get_queue_status() -> dict:
                     await session.execute(
                         select(func.count())
                         .select_from(TaskTracking)
-                        .where(TaskTracking.phase == "processing")
+                        .where(TaskTracking.phase.in_(running_phases))
                     )
                 ).scalar()
                 or 0
@@ -185,7 +194,14 @@ def _aggregate_breakdown(rows: list[dict], now) -> list[dict]:
     per task_type: running / pending counts + oldest queued age (seconds).
 
     Pure (no DB / no clock) so it's unit testable. `now` is passed in.
+
+    "running" 是 **活着但已不在排队** 的补集，不是 ``phase == 'processing'``
+    这一个词：调用方按 ``ACTIVE_PHASES`` 取行，里面还有 trigger 写的
+    ``in_progress`` 与 manager 的 ``dedup_check``。写死单个词会让那些行既不
+    计入 running 也不计入 pending —— 取回来又悄悄丢掉，比不取更糟。
     """
+    from app.services.infra.unified_task_manager import ACTIVE_PHASES, TaskPhase
+
     acc: dict[str, dict] = {}
     for r in rows:
         tt = r.get("task_type") or "unknown"
@@ -194,7 +210,7 @@ def _aggregate_breakdown(rows: list[dict], now) -> list[dict]:
             tt,
             {"task_type": tt, "running": 0, "pending": 0, "oldest_queued_age_sec": 0},
         )
-        if phase == "processing":
+        if phase in ACTIVE_PHASES and phase != TaskPhase.QUEUED.value:
             entry["running"] += 1
         elif phase == "queued":
             entry["pending"] += 1
@@ -231,6 +247,7 @@ async def get_queue_breakdown() -> list[dict]:
 
         from app.db.session import read_scope
         from app.models import TaskTracking
+        from app.services.infra.unified_task_manager import ACTIVE_PHASES_SQL
 
         async with read_scope() as session:
             rows = [
@@ -241,7 +258,10 @@ async def get_queue_breakdown() -> list[dict]:
                             TaskTracking.task_type,
                             TaskTracking.phase,
                             TaskTracking.created_at,
-                        ).where(TaskTracking.phase.in_(["processing", "queued"]))
+                            # ACTIVE_PHASES_SQL, not a hand-written list — the
+                            # breakdown must count the same rows every other
+                            # "is it alive?" reader counts.
+                        ).where(TaskTracking.phase.in_(ACTIVE_PHASES_SQL))
                     )
                 )
                 .mappings()

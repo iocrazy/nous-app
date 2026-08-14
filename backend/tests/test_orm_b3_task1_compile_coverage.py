@@ -42,6 +42,7 @@ import app.db.session as db_session
 import app.workflows.scheduled_cleanup as scheduled_cleanup
 import app.workflows.scheduled_recovery as scheduled_recovery
 import app.workflows.workflow_health_sweeper as sweeper
+from app.services.infra.unified_task_manager import ACTIVE_PHASES
 
 storage_router = importlib.import_module("app.api.admin.storage_router")
 
@@ -115,7 +116,12 @@ async def test_classify_and_act_step_filters_queued_and_processing(monkeypatch):
     assert result == sweeper._zero_counters()
     sql, binds = session.calls[0]
     assert "task_tracking" in sql
-    assert binds["phase_1"] == ["queued", "processing"]
+    # The sweeper must sweep every live phase, not a hand-picked pair — it used
+    # to filter ("queued", "in_progress") and therefore classified no running
+    # workflow at all. Compare against the one shared definition rather than
+    # re-typing the words here (tests/test_task_phase_vocabulary.py owns the
+    # reconciliation with the DB trigger).
+    assert sorted(binds["phase_1"]) == sorted(ACTIVE_PHASES)
 
 
 @pytest.mark.asyncio
@@ -366,8 +372,10 @@ async def test_find_running_audit_interval_is_raw_text_fragment(monkeypatch):
     assert "interval '2 hours'" in sql
     assert "created_at >" in sql
     # phase IN (...) is a POSTCOMPILE expanding param — its values live in
-    # binds, not the compiled SQL text.
-    assert binds["phase_1"] == ["queued", "in_progress"]
+    # binds, not the compiled SQL text. The set is ACTIVE_PHASES: the old
+    # ("queued", "in_progress") pair matched no running audit at all, so this
+    # dedup was a no-op and an admin double-click really started two scans.
+    assert sorted(binds["phase_1"]) == sorted(ACTIVE_PHASES)
 
 
 # ── scheduled_cleanup.py ─────────────────────────────────────────────────

@@ -826,6 +826,13 @@ class AgentWorkforceRepository:
                     sa_update(TaskTracking)
                     .where(TaskTracking.task_kind == TASK_KIND_AGENT)
                     .where(TaskTracking.dbos_workflow_id == task_id_str)
+                    # ⚠️ 这两个词属于 **agent_task 的 8 状态 lifecycle**
+                    # (``LIFECYCLE_TO_STATUS`` 的键)，不是 DBOS workflow 那套
+                    # phase 词汇 —— 上面 ``task_kind == TASK_KIND_AGENT`` 已经
+                    # 把行限定死了，这类行的 phase 全由本文件写，trigger 不参与
+                    # (mig 200 注释)。所以这里的 ``in_progress`` 是真值，**不能**
+                    # 换成 ACTIVE_PHASES；换了会把 agent 的 ``waiting_for_other``
+                    # / ``blocked`` 一并 requeue，而漏掉 ``assigned``。
                     .where(TaskTracking.phase.in_(["assigned", "in_progress"]))
                     .values(
                         phase="queued",

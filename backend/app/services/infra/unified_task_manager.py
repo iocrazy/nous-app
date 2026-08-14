@@ -138,6 +138,56 @@ _TERMINAL_PHASES = {
 }
 
 
+# ─── "Is this task still alive?" — the ONE definition ─────────────────
+#
+# 立约 2026-08-13。在此之前，「活着的 phase 集合」在五个调用点各手写了一份
+# 字面量，而 ``task_tracking.phase`` 有**两个写入方、两套词汇**：
+#
+#   * ``mirror_dbos_lifecycle_to_tracking`` trigger（DB 侧）
+#         PENDING/ENQUEUED → 'queued'      RUNNING → 'in_progress'
+#   * ``UnifiedTaskManager``（应用侧，本文件）
+#         create() → 'queued'   start() → 'processing'（TaskPhase 枚举）
+#
+# 两者会打架：DBOS 把 workflow 翻成 RUNNING、trigger 写下 'in_progress'，
+# 紧接着 workflow 体调 ``manager.start()`` 又覆写成 'processing'。所以**一个
+# 跑着的 workflow 任务，实际观测到的 phase 几乎总是 'processing'**，
+# 'in_progress' 只在那条极短的竞态窗口里（以及 start() 那一步被吞掉异常时）
+# 看得见 —— ``_get_phase`` 把不认识的值静默降级成 QUEUED，连一条日志都没有，
+# 所以这个分歧从来没炸过，只是让手写 ``("queued", "in_progress")`` 的守卫
+# 永远匹配不到活任务。
+#
+# 代价（真实发生）：小红书 SMS 绑号提交手机号必 409「Login task is no longer
+# active」，而后端会话活得好好的；``/flows`` 的级联取消找不到任何子任务；
+# storage audit 的去重永不命中，管理员双击就是两次全库扫描。
+#
+# 所以：**别再手写这个集合**。要判断「这任务还活着吗」，一律引用
+# ``ACTIVE_PHASES``（Python 侧）或 ``ACTIVE_PHASES_SQL``（``.in_()`` 侧）。
+# ``backend/tests/test_task_phase_vocabulary.py`` 把这条从注释变成红 CI：它
+# 从 ``supabase/schema_baseline.sql`` 里真的解析 trigger 的 ``mapped_phase``
+# CASE 块来对账，并 AST 扫描 ``backend/app/`` 拒绝任何"残缺的活集合"字面量。
+
+# trigger 写得出、而 TaskPhase 枚举里没有的 phase 值。写在这里不是为了"再抄
+# 一份字面量"—— 上面那个测试会拿真正的 SQL 跟它对账，trigger 多出一个新词
+# 而这里没跟上就直接红。
+MIRROR_ONLY_PHASES: frozenset[str] = frozenset({"in_progress"})
+
+# 应用侧词汇 ∪ trigger 侧词汇 —— 一行 task_tracking.phase 的全部合法取值。
+KNOWN_PHASES: frozenset[str] = (
+    frozenset(p.value for p in TaskPhase) | MIRROR_ONLY_PHASES
+)
+
+# 「还没走到终态」的全部取值。两个写入方的非终态词汇都要在里面，因为读的人
+# 无法知道自己撞上的是哪一方最后写的那一次。
+ACTIVE_PHASES: frozenset[str] = (
+    frozenset(p.value for p in TaskPhase if p not in _TERMINAL_PHASES)
+    | MIRROR_ONLY_PHASES
+)
+
+# 同一个集合的 SQL 形态。排序是刻意的：frozenset 的迭代顺序逐进程随机，直接
+# 喂给 ``.in_()`` 会让不同 worker 生成文本不同、计划缓存互不命中的等价查询。
+ACTIVE_PHASES_SQL: tuple[str, ...] = tuple(sorted(ACTIVE_PHASES))
+
+
 # ─── Dedup Key Fields ────────────────────────────────────────────────
 
 DEDUP_KEY_FIELDS: Dict[str, str] = {
@@ -1365,11 +1415,12 @@ class UnifiedTaskManager:
                             TaskTracking.subscribers,
                         )
                         .where(TaskTracking.dedup_key == dedup_key)
-                        .where(
-                            TaskTracking.phase.in_(
-                                ["queued", "dedup_check", "processing"]
-                            )
-                        )
+                        # ACTIVE_PHASES_SQL rather than this module's own three
+                        # non-terminal enum values spelled out: a row the DB
+                        # trigger left at 'in_progress' is just as alive, and
+                        # missing it means dedup hands out a second task for
+                        # work already in flight.
+                        .where(TaskTracking.phase.in_(ACTIVE_PHASES_SQL))
                         .order_by(TaskTracking.created_at.desc())
                         .limit(1)
                     )
