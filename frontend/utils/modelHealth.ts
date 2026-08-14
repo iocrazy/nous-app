@@ -31,6 +31,13 @@ export interface ModelHealth {
   status: ModelHealthStatus;
   /** ISO-8601 timestamp of the probe, or null when the backend didn't send one. */
   testedAt: string | null;
+  /**
+   * Why the last probe failed, as a closed enum (backend migration 427), or
+   * null when the row predates the column. Never free text: the backend
+   * derives it from the exception type and HTTP status alone, which is what
+   * makes it safe to show on a list every user can read.
+   */
+  code: string | null;
 }
 
 /**
@@ -73,7 +80,45 @@ export function buildModelHealth(
   for (const m of models) {
     if (!PROBED_TYPES.has(m.type)) continue;
     if (m.last_test_status !== 'ok' && m.last_test_status !== 'fail') continue;
-    out[m.name] = { status: m.last_test_status, testedAt: m.last_tested_at ?? null };
+    out[m.name] = {
+      status: m.last_test_status,
+      testedAt: m.last_tested_at ?? null,
+      code: m.last_test_code ?? null,
+    };
   }
   return out;
+}
+
+/**
+ * The failure codes this build can put words to. A fixed table, not a template:
+ * a key is only ever returned for a value that is IN this list, so no string
+ * arriving from the backend can be turned into rendered text by accident.
+ */
+const REASON_CODES: ReadonlySet<string> = new Set([
+  'timeout',
+  'unreachable',
+  'auth',
+  'rate_limit',
+  'model_not_found',
+  'upstream_error',
+  'bad_response',
+  'other',
+]);
+
+/**
+ * i18n key for a failure code, or `null` when there is nothing specific to say.
+ *
+ * `null` covers two different situations that want the same treatment: the row
+ * was probed before the column existed (no code at all), and the backend enum
+ * grew ahead of this deploy (a code we have no translation for). Both fall back
+ * to the caller's plain "health check failed" wording — rendering an untranslated
+ * key would be worse than saying less.
+ *
+ * The wording itself deliberately lives in the locale files rather than here,
+ * for the same reason this module holds no other copy: it must stay importable
+ * without pulling in the i18n instance (see the module-boundaries test).
+ */
+export function healthReasonKey(code: string | null | undefined): string | null {
+  if (!code || !REASON_CODES.has(code)) return null;
+  return `aiSettings.healthReason.${code}`;
 }

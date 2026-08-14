@@ -24,7 +24,7 @@ import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
 import { overrideFieldCount, personaHintKind } from './agentOverride';
-import { type ModelHealth } from '../../utils/modelHealth';
+import { healthReasonKey, type ModelHealth } from '../../utils/modelHealth';
 import { formatRelativeTime } from '../../utils/relativeTime';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
@@ -91,6 +91,11 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
         ago: formatRelativeTime(selectedHealth.testedAt, t),
       })
     : '';
+  // Why it failed, from the backend's closed enum (mig 427) — "timed out" and
+  // "rate limited" want opposite things from the reader, and this line used to
+  // say the same sentence for both. Null (pre-427 row, or a code newer than
+  // this build) keeps the original wording rather than showing a raw key.
+  const selectedReasonKey = healthReasonKey(selectedHealth?.code);
 
   return (
     <div className="space-y-6">
@@ -250,10 +255,16 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
             >
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>
-                {t(
-                  'aiLibrary.agents.modelHealthFailed',
-                  'Last health check failed — chats using this model may fail.',
-                )}
+                {selectedReasonKey
+                  ? t(
+                      'aiLibrary.agents.modelHealthFailedReason',
+                      'Last health check failed ({{reason}}) — chats using this model may fail.',
+                      { reason: t(selectedReasonKey) },
+                    )
+                  : t(
+                      'aiLibrary.agents.modelHealthFailed',
+                      'Last health check failed — chats using this model may fail.',
+                    )}
                 {selectedCheckedLabel && ` (${selectedCheckedLabel})`}
               </span>
             </div>

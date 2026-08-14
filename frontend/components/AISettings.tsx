@@ -42,7 +42,7 @@ import {
 } from '../services/aiService';
 import { useTranslation } from 'react-i18next';
 import { relativeTime } from '../utils/taskDisplay';
-import { buildModelHealth } from '../utils/modelHealth';
+import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MCPServersPanel } from './MCPServersPanel';
 import { HotwordChipInput } from './settings/HotwordChipInput';
@@ -639,14 +639,29 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   // than vetoes. `relativeTime` (already imported for this file's English UI)
   // carries the check age — hourly cadence means a 50-minute-old verdict is
   // not a statement about right now.
+  //
+  // The verdict now carries WHY (spec 2026-08-14 reason-code, backend mig 427).
+  // "Timed out" and "rate limited" ask the user for opposite things — wait vs
+  // go deal with a quota — and under #1838 both read as the same bare red dot.
+  // The reason is a closed enum, never the probe's raw text: that text embeds
+  // the upstream host and private base_url and never leaves admin.
   const nousHealth = useMemo(() => buildModelHealth(nousModels), [nousModels]);
   const nousHealthWarning = (modelName: string): string | null => {
     const health = nousHealth[modelName];
     if (health?.status !== 'fail') return null;
     const checked = relativeTime(health.testedAt ?? undefined);
+    const reasonKey = healthReasonKey(health.code);
+    // No key = a row probed before the column existed, or a code newer than
+    // this build. Both fall back to the original reason-less wording.
+    if (!reasonKey) {
+      return checked
+        ? t('aiSettings.modelHealthFailedAgo', { ago: checked })
+        : t('aiSettings.modelHealthFailed');
+    }
+    const reason = t(reasonKey);
     return checked
-      ? t('aiSettings.modelHealthFailedAgo', { ago: checked })
-      : t('aiSettings.modelHealthFailed');
+      ? t('aiSettings.modelHealthFailedReasonAgo', { reason, ago: checked })
+      : t('aiSettings.modelHealthFailedReason', { reason });
   };
 
   const nousConfig = localSettings.providers.nous;
