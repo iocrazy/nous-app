@@ -99,6 +99,46 @@ export interface CanvasViewProps {
 }
 
 /**
+ * Zoom floor for the empty-viewport self-heal below (2026-08-13 user report:
+ * "画布是缩小的，不是整域的" — six shot cards squeezed into a thin, unreadable
+ * column with empty gutters either side).
+ *
+ * A bare `fitView` optimises for "every node on screen", which for the
+ * COMMON storyboard shape is the wrong objective: `shotSync.ts` lays scenes
+ * out as columns and shots as rows within a column, so a single-scene
+ * episode is one tall-thin stack (6 shots ≈ 280 × 2360 world px). Fitting
+ * that into a 1280×720 surface is height-driven and lands around zoom 0.2–0.3
+ * (0.29 on the reported canvas). Everything is visible and nothing is
+ * legible — the bound shot card's description textarea is `text-xs` (12px)
+ * → 3.5 CSS px, its four vocabulary chips `text-[11px]` → 3.2, the
+ * `shot_label` chip `text-[10px]` → 2.9. That is a thumbnail, not a
+ * workspace.
+ *
+ * 0.7 is the smallest zoom at which a `SMART_NODE_DEFAULT_WIDTH.shot` (280) ×
+ * `SHOT_SYNC_NODE_HEIGHT_ESTIMATE` (360) card still READS — every text run it
+ * carries stays at or above 7 CSS px:
+ *   description  12px × 0.7 = 8.4 CSS px  (the smallest type this design
+ *                                          system ships anywhere is 9px;
+ *                                          ~8px is the practical legibility
+ *                                          floor for short on-screen runs)
+ *   chips        11px × 0.7 = 7.7 CSS px
+ *   shot label   10px × 0.7 = 7.0 CSS px
+ * 0.5 was the first candidate and does not survive the same arithmetic: the
+ * description lands at 6px and the label at 5px — shapes, not words.
+ *
+ * The trade-off is deliberate and one-directional: content that does not fit
+ * at 0.7 OVERFLOWS the viewport (React Flow centres on the content's
+ * midpoint) and the user pans to the rest. "Too big to fit, pan to see it"
+ * is a canvas working normally; "all of it on screen, none of it readable"
+ * is the bug being fixed here.
+ *
+ * Only the AUTOMATIC heal is floored. `CanvasSurface`'s own `minZoom={0.1}`
+ * is untouched, so a user who deliberately wants the bird's-eye overview
+ * still zooms out to it by hand.
+ */
+export const VIEWPORT_HEAL_MIN_ZOOM = 0.7;
+
+/**
  * The actual canvas work surface — see the file doc comment above for why
  * this is split from the default-exported route component.
  */
@@ -482,7 +522,11 @@ export function CanvasView({
       '[CanvasView] saved viewport frames no node — fitting view instead',
       { canvasId, viewport, nodeCount },
     );
-    instance.fitView({ padding: 0.2 });
+    // `minZoom` floors the fit — see `VIEWPORT_HEAL_MIN_ZOOM` for the
+    // arithmetic. React Flow clamps its computed fit zoom into
+    // [minZoom, maxZoom] and centres on the content, so a stack too tall for
+    // 0.7 simply overflows top and bottom instead of shrinking to a smear.
+    instance.fitView({ padding: 0.2, minZoom: VIEWPORT_HEAL_MIN_ZOOM });
   }, [loadStatus, canvasId, nodeCount, rfReady]);
 
   // Viewport focus (Task 5 — the three entry points: a shot card click, the

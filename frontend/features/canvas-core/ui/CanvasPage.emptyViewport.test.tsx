@@ -59,8 +59,33 @@ vi.mock('../../../editor/sceneService', () => ({
   createShot: vi.fn(),
 }));
 
-import { CanvasView } from './CanvasPage';
+import { CanvasView, VIEWPORT_HEAL_MIN_ZOOM } from './CanvasPage';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+
+/**
+ * React Flow's own fit-zoom arithmetic, reproduced from
+ * `@xyflow/system`'s `getViewportForBounds` (numeric padding resolves to
+ * `padding * width` per side, so `2 * padding * width` total on each axis):
+ *
+ *   zoom = clamp(min((w - 2pw) / bounds.w, (h - 2ph) / bounds.h), min, max)
+ *
+ * The `fitView` spy can't tell us what zoom React Flow WOULD land on, so the
+ * tall-thin assertion below evaluates the same formula against the options
+ * the component actually passed. That is what makes "the floor is not merely
+ * present, it BINDS for the shape that caused the report" checkable.
+ */
+function fitZoom(
+  bounds: { width: number; height: number },
+  surface: { width: number; height: number },
+  opts: { padding: number; minZoom?: number; maxZoom?: number },
+): number {
+  const xZoom = (surface.width - 2 * opts.padding * surface.width) / bounds.width;
+  const yZoom = (surface.height - 2 * opts.padding * surface.height) / bounds.height;
+  return Math.min(
+    Math.max(Math.min(xZoom, yZoom), opts.minZoom ?? 0.1),
+    opts.maxZoom ?? 4,
+  );
+}
 
 /** The real row's viewport, verbatim. */
 const PROD_VIEWPORT = { x: 181.47, y: 106.68, zoom: 0.514 };
@@ -126,7 +151,42 @@ describe('CanvasView — empty-viewport self-heal', () => {
     render(<CanvasView canvasId="c1" />);
 
     await waitFor(() => expect(fitView).toHaveBeenCalledTimes(1));
-    expect(fitView.mock.calls[0][0]).toMatchObject({ padding: 0.2 });
+    expect(fitView.mock.calls[0][0]).toMatchObject({
+      padding: 0.2,
+      minZoom: VIEWPORT_HEAL_MIN_ZOOM,
+    });
+  });
+
+  it('floors the fit zoom — tall-thin content overflows rather than shrinking to a smear', async () => {
+    // The reported shape: one scene column of shot cards, ~200 world px wide
+    // and ~2400 tall, in a 1280×720 surface. Unfloored this fits at ~0.18 —
+    // every card on screen, none of them readable (12px description → 2px).
+    stubSurfaceSize(1280, 720);
+    seedReady({ viewport: PROD_VIEWPORT, nodes: OFFSCREEN_NODES });
+
+    render(<CanvasView canvasId="c1" />);
+    await waitFor(() => expect(fitView).toHaveBeenCalledTimes(1));
+
+    const opts = fitView.mock.calls[0][0] as { padding: number; minZoom: number };
+    const bounds = { width: 200, height: 2400 };
+    const surface = { width: 1280, height: 720 };
+
+    // Precondition: without a floor this content really does collapse — the
+    // assertion below would be vacuous if it didn't.
+    expect(fitZoom(bounds, surface, { padding: opts.padding })).toBeLessThan(
+      VIEWPORT_HEAL_MIN_ZOOM,
+    );
+    // With the options actually passed, the heal cannot go below the floor.
+    expect(fitZoom(bounds, surface, opts)).toBe(VIEWPORT_HEAL_MIN_ZOOM);
+  });
+
+  it('does not zoom IN past the natural fit — the floor is a floor, not a target', async () => {
+    // Content that comfortably fits keeps its own (larger) fit zoom; the
+    // floor must never pull a well-framed board back down to 0.7.
+    const opts = { padding: 0.2, minZoom: VIEWPORT_HEAL_MIN_ZOOM };
+    expect(fitZoom({ width: 400, height: 300 }, { width: 1280, height: 720 }, opts)).toBeGreaterThan(
+      VIEWPORT_HEAL_MIN_ZOOM,
+    );
   });
 
   it('heals at most once, even as the node list churns afterwards', async () => {
