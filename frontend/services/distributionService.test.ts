@@ -81,10 +81,73 @@ describe('listLibraryVideos — real nested row shape', () => {
       }),
     );
     const videos = await listLibraryVideos('scope-1');
+    // Exhaustive on purpose: an empty nested resource must yield explicit
+    // nulls for every identifying field, never a guessed 0 / '' / today's
+    // date. The picker renders each of these as an em dash, and a stray
+    // zero would read to the user as a real measurement.
     expect(videos[0]).toEqual({
       id: 'b', filename: 'Untitled', thumbnail_url: null,
       mime_type: null, gallery_count: undefined,
+      duration_seconds: null, resolution: null,
+      file_size_bytes: null, created_at: null,
     });
+  });
+
+  it('maps the identifying metadata off the nested resource row', async () => {
+    // These four ride along in `row_to_json(r.*)` and were on the wire long
+    // before the picker read them — this pins the mapping so a projection
+    // change surfaces here rather than as blank tiles in the UI.
+    vi.stubGlobal(
+      'fetch',
+      mockFetchJson({
+        success: true,
+        data: [{
+          id: 'a',
+          resource_id: 'b',
+          // The join row carries its own created_at (when the resource was
+          // filed into this folder). The picker must NOT use it.
+          created_at: '2020-01-01T00:00:00Z',
+          resource: {
+            filename: 'clip.mp4',
+            duration_seconds: 154,
+            resolution: '1080x1920',
+            file_size_bytes: 19364154,
+            created_at: '2026-08-11T05:23:28Z',
+          },
+        }],
+      }),
+    );
+    const v = (await listLibraryVideos('scope-1'))[0];
+    expect(v.duration_seconds).toBe(154);
+    expect(v.resolution).toBe('1080x1920');
+    expect(v.file_size_bytes).toBe(19364154);
+    expect(v.created_at).toBe('2026-08-11T05:23:28Z');
+  });
+
+  it('rejects wrong-typed metadata instead of passing it through', async () => {
+    // A string where a number belongs would render as "NaN MB". Narrowing at
+    // the boundary turns a bad payload into an em dash — visibly absent, which
+    // is honest, rather than visibly wrong.
+    vi.stubGlobal(
+      'fetch',
+      mockFetchJson({
+        success: true,
+        data: [{
+          id: 'a',
+          resource_id: 'b',
+          resource: {
+            filename: 'clip.mp4',
+            duration_seconds: 'not-a-number',
+            file_size_bytes: null,
+            resolution: '',
+          },
+        }],
+      }),
+    );
+    const v = (await listLibraryVideos('scope-1'))[0];
+    expect(v.duration_seconds).toBeNull();
+    expect(v.file_size_bytes).toBeNull();
+    expect(v.resolution).toBeNull();
   });
 
   it('falls back to the join-row id when resource_id is absent (defensive)', async () => {

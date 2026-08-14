@@ -2744,4 +2744,23 @@ export interface LibraryVideo {
   /** Child-image count when this row is a gallery entity; 0 / absent
    *  otherwise (projected by the backend `get_resource_items` query). */
   gallery_count?: number;
+  // ── Identifying metadata ────────────────────────────────────────────
+  //
+  // Filename alone cannot tell two versions of the same content apart — the
+  // publish picker's whole job is choosing between them. These four come free
+  // off the wire: the backend already returns the entire `resources` row via
+  // `row_to_json(r.*)`, so this is a mapper widening, not a new query.
+  //
+  // Every one is nullable ON PURPOSE. Coverage on real data (204 videos):
+  // duration 203, resolution 201, size 204, created_at 204 — high but not
+  // total, and the generated-media tab supplies none of them. A missing value
+  // renders as an em dash; it is never guessed or back-computed.
+  /** Playback length in whole seconds. */
+  duration_seconds?: number | null;
+  /** Pixel dimensions as stored, e.g. `"1080x1920"`. */
+  resolution?: string | null;
+  /** File size in bytes. */
+  file_size_bytes?: number | null;
+  /** When the resource itself was created (NOT the library-item join row). */
+  created_at?: string | null;
 }

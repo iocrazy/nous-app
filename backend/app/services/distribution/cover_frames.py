@@ -60,6 +60,7 @@ from app.services.canvas.derive_persistence import (
     persist_derived_image,
 )
 from app.services.canvas.image_crop import CropError, CropRegion, crop_normalized
+from app.services.library.resource_file_path import resolve_resource_file_path
 from app.services.media.render.video_frame_extractor import extract_frames
 
 # ── 抖音封面的两个比例 ────────────────────────────────────────────
@@ -260,8 +261,15 @@ async def load_source_video(
     视频"，并且**不读文件内容** —— 视频动辄几个 GB，不能像图片那样整个读进
     内存，抽帧走的是 ``materialize`` 给出的本地路径。
 
+    ⚠️ 调用方必须已经建立 ambient tenant scope（HTTP 侧 request_scope /
+    ScopedRequestDep，workflow 侧 request_scope）。没有 scope 时
+    ``get_resource_by_id`` 抛 ``UnscopedQueryError``，本函数**故意不接**它 ——
+    那是调用方的缺陷，不是"源不存在"，让它冒到 router 变成 500。曾经它被 repo
+    吞成 None，于是下面这个 404 把服务端 bug 说成了"该视频已不可用"。
+
     Raises:
         CoverFrameError: 404 资源/文件不存在，400 不是视频或没有 scope 归属。
+        UnscopedQueryError: 调用方没开 tenant scope（穿透，不翻译成 404）。
     """
     source = await repo.get_resource_by_id(source_resource_id)
     if not source:
@@ -270,7 +278,12 @@ async def load_source_video(
         raise CoverFrameError(
             status_code=400, detail="cover extraction is only valid for video resources"
         )
-    file_path = source.get("file_path")
+    # ⚠️ 不是 ``source.get("file_path")``。那一列对 ``source_type='web'`` 的行
+    # （平台解析下载的素材）**按设计**为空 —— 共享下载字段只存 parsed_media
+    # （PR-B）。生产里超过一半的视频是这种形状，直接读该列会把它们全判成"没有
+    # 文件"，用户看到 400 "no file on disk yet"：跟修 scope 前的假 404 是同一
+    # 类错误答案，只是换了个说法。阶梯与来源见 resource_file_path 的模块 docstring。
+    file_path = await resolve_resource_file_path(source)
     if not file_path:
         raise CoverFrameError(
             status_code=400, detail="source resource has no file on disk yet"

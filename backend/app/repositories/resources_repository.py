@@ -98,7 +98,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
-from app.db.scope import is_enforced, system_request_scope
+from app.db.scope import UnscopedQueryError, is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     Folders,
@@ -331,6 +331,31 @@ class ResourcesRepository(AsyncpgRepository):
             raise
 
     async def get_resource_by_id(self, resource_id: str) -> Optional[Dict[str, Any]]:
+        """Read one resource. ``None`` means **the row is not visible**; a
+        missing ambient scope RAISES.
+
+        ⚠️ ``UnscopedQueryError`` is re-raised, NOT swallowed into ``None``.
+        The distinction is the whole point: ``None`` is a DATA answer ("no such
+        row, or not yours"), while ``UnscopedQueryError`` is a CALLER BUG ("you
+        forgot to open a ``request_scope`` / ``user_session`` at the entry
+        boundary"). Collapsing the second into the first makes a programming
+        error indistinguishable from a legitimate 404 — every caller then
+        translates "I am broken" into "your file is gone", and the fault is
+        invisible in the error funnel because nothing 5xx's.
+
+        That is not hypothetical: it is exactly how the cover-frame extraction
+        outage stayed hidden. ``distribution_router.extract_cover_frames`` and
+        ``select_cover_frame`` never opened a scope, this method logged an ERROR
+        and returned ``None``, ``cover_frames.load_source_video`` read that as
+        "source resource not found" and raised 404, and the user was told "That
+        video is no longer available — pick a different one" about a video that
+        was perfectly fine. Five consecutive attempts, all 404, zero 5xx.
+
+        Every other exception keeps the legacy log-and-return-``None`` behaviour
+        — narrowing only the fail-closed guard, whose entire contract is to be
+        loud (``app.db.scope``: "forgetting to open a session surfaces
+        immediately instead of silently returning every user's rows").
+        """
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -340,6 +365,14 @@ class ResourcesRepository(AsyncpgRepository):
                 )
                 row = result.scalars().first()
                 return _resources_row_to_dict(row) if row else None
+        except UnscopedQueryError:
+            logger.error(
+                f"Failed to get resource {resource_id}: no ambient scope. This is a "
+                f"caller bug (missing request_scope/user_session at the entry "
+                f"boundary), NOT a missing row — re-raising so it cannot be "
+                f"mistranslated into a 404."
+            )
+            raise
         except Exception as e:
             logger.error(f"Failed to get resource {resource_id}: {e}")
             return None
@@ -412,6 +445,16 @@ class ResourcesRepository(AsyncpgRepository):
                     )
                     row = result.scalars().first()
                     return _resources_row_to_dict(row) if row else None
+        except UnscopedQueryError:
+            # Same rule as get_resource_by_id: "no scope" is a caller bug, not
+            # an invisible row. Unreachable while ``is_enforced`` holds (the
+            # system_request_scope wrap above supplies a scope), which is
+            # precisely why it must not be swallowed if that ever changes.
+            logger.error(
+                f"Failed to get resource {resource_id} for caller {user_id}: no "
+                f"ambient scope — caller bug, re-raising."
+            )
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to get resource {resource_id} for caller {user_id}: {e}"
