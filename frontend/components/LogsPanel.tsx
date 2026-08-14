@@ -20,7 +20,9 @@ import {
   Filter,
   Calendar,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Loading } from './common/Loading';
+import { DateTimePopover } from './common/DateTimePopover';
 
 // Types
 interface LogEntry {
@@ -101,6 +103,7 @@ const formatDate = (isoString: string): string => {
 };
 
 export const LogsPanel: React.FC = () => {
+  const { t } = useTranslation();
   // State
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -117,6 +120,10 @@ export const LogsPanel: React.FC = () => {
   const [dateRange, setDateRange] = useState('7days');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  // Anchor for the shared DateTimePopover that replaced the two native
+  // `<input type="date">` fields. State shape below is unchanged — the
+  // popover commits both ends at once, so one onChange writes both.
+  const [customRangeAnchor, setCustomRangeAnchor] = useState<HTMLElement | null>(null);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
@@ -306,18 +313,29 @@ export const LogsPanel: React.FC = () => {
         {/* Custom Date Range */}
         {dateRange === 'custom' && (
           <>
-            <input
-              type="date"
-              value={customStartDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
-              className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
-            />
-            <span className="text-ink-500">to</span>
-            <input
-              type="date"
-              value={customEndDate}
-              onChange={(e) => setCustomEndDate(e.target.value)}
-              className="bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-300 outline-none focus:border-indigo-500 transition-colors"
+            <button
+              type="button"
+              data-testid="logs-custom-range-trigger"
+              aria-label={t('common.dateRangePopover.title', 'Select date range')}
+              onClick={(e) => setCustomRangeAnchor(e.currentTarget)}
+              className="rounded-lg border border-line bg-island px-3 py-2 text-sm text-ink-300 outline-none transition-colors hover:border-line-strong focus:border-line-strong"
+            >
+              <span className={customStartDate || customEndDate ? '' : 'text-ink-500'}>
+                {customStartDate || customEndDate
+                  ? `${customStartDate || t('common.dateRangePopover.empty', '–')} → ${
+                    customEndDate || t('common.dateRangePopover.empty', '–')}`
+                  : t('common.dateRangePopover.title', 'Select date range')}
+              </span>
+            </button>
+            <DateTimePopover
+              anchorEl={customRangeAnchor}
+              start={customStartDate || null}
+              end={customEndDate || null}
+              onChange={(start, end) => {
+                setCustomStartDate(start ?? '');
+                setCustomEndDate(end ?? '');
+              }}
+              onClose={() => setCustomRangeAnchor(null)}
             />
           </>
         )}

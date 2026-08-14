@@ -2,7 +2,8 @@
  * StageNodeForm — the Stage Board's deliverable-form fill-in surface (M3
  * PR-I §2, task I4). Renders whatever `form_schema` a node's template
  * defined at instantiation (I2/I3's Form tab) as controlled inputs seeded
- * from `form_data`. A field only pushes to the server on BLUR, and only the
+ * from `form_data`. A field only pushes to the server on BLUR (the `date`
+ * field on pick — a popover has no blur), and only the
  * single changed key rides the wire — `project_stage_nodes_repository`'s
  * write path merges it into the node's existing `form_data` with a
  * per-node key whitelist, so concurrent edits to two different fields (or a
@@ -23,6 +24,7 @@ import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FormFieldDef, FormFieldType } from '../../types';
 import { isFieldFilled } from '../workflow/formFieldFill';
+import { DateTimePopover } from '../common/DateTimePopover';
 
 interface StageNodeFormProps {
   schema: FormFieldDef[];
@@ -86,6 +88,9 @@ const StageNodeFormField: React.FC<{
   // and fire a phantom save (caught by code review — reproduced for every
   // type except number, which happened to be masked by its own `''` guard).
   const lastSaved = useRef<unknown>(defaultLocal(field.type, value));
+
+  // Anchor for the `date` branch's shared picker (null = closed).
+  const [dateAnchor, setDateAnchor] = useState<HTMLElement | null>(null);
 
   // Reseed during render, NOT in a `useEffect` — see the long note in
   // `components/workflow/BriefField.tsx`. A passive effect is a deferred
@@ -214,18 +219,37 @@ const StageNodeFormField: React.FC<{
       );
 
     case 'date':
+      // The app-wide picker, not `<input type="date">` (which renders as
+      // `mm/dd/yyyy` in a zh-CN browser). A popover has no blur to commit on,
+      // so its onChange IS the commit — `commit()` still guards against a
+      // no-op write, so re-picking the held day saves nothing, exactly like
+      // the old blur-without-an-edit. `disabled` now gates the trigger: a
+      // disabled button cannot be clicked, so the popover cannot open.
       return (
         <div className="flex flex-col gap-1">
           {label}
-          <input
+          <button
             id={testId}
             data-testid={testId}
-            type="date"
-            value={(local as string) ?? ''}
+            type="button"
             disabled={disabled}
-            onChange={(e) => setLocal(e.target.value)}
-            onBlur={() => commit(local)}
-            className={inputClass}
+            onClick={(e) => setDateAnchor(e.currentTarget)}
+            className={`${inputClass} truncate text-left`}
+          >
+            <span className={local ? '' : 'text-ink-600'}>
+              {(local as string) || t('common.dateRangePopover.empty', '–')}
+            </span>
+          </button>
+          <DateTimePopover
+            mode="single"
+            anchorEl={dateAnchor}
+            value={(local as string) || null}
+            onChange={(next) => {
+              const value = next ?? '';
+              setLocal(value);
+              commit(value);
+            }}
+            onClose={() => setDateAnchor(null)}
           />
         </div>
       );

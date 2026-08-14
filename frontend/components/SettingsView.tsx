@@ -21,6 +21,14 @@ import { useConfirm } from './ConfirmDialog';
 import { ChatTempTtlPanel } from './ChatTempTtlPanel';
 import { WorkflowTemplateEditor } from './workflow/WorkflowTemplateEditor';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
+import { DateTimePopover } from './common/DateTimePopover';
+
+/** Local midnight today — the floor an API key's expiration may not go under. */
+const startOfToday = (): Date => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -95,6 +103,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Anchor for the shared date picker that replaced the native `<input
+  // type="date">` on the expiration field.
+  const [expirationAnchor, setExpirationAnchor] = useState<HTMLElement | null>(null);
 
   // Load API keys from backend
   const loadApiKeys = useCallback(async () => {
@@ -938,12 +949,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                      {keyForm.expirationType === 'date' && (
                        <div className="relative animate-in fade-in slide-in-from-top-2">
                           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500 w-4 h-4" />
-                          <input
-                             type="date"
-                             value={keyForm.expirationDate}
-                             min={new Date().toISOString().split('T')[0]}
-                             onChange={(e) => setKeyForm({...keyForm, expirationDate: e.target.value})}
-                             className="w-full bg-ink-950 border border-ink-800 rounded-lg pl-10 pr-4 py-3 text-ink-200 outline-none focus:border-indigo-500 transition-colors"
+                          {/* The native input's `min` (today) becomes the popover's
+                              `minAt` window — same rule, now enforced by greying the
+                              illegal days out instead of trusting the browser. */}
+                          <button
+                             type="button"
+                             data-testid="api-key-expiration-trigger"
+                             aria-label={t('settings.api.expirationDate', 'Expiration date')}
+                             onClick={(e) => setExpirationAnchor(e.currentTarget)}
+                             className="w-full rounded-lg border border-line bg-island py-3 pl-10 pr-4 text-left text-ink-200 outline-none transition-colors hover:border-line-strong focus:border-line-strong"
+                          >
+                             <span className={keyForm.expirationDate ? '' : 'text-ink-500'}>
+                                {keyForm.expirationDate
+                                  || t('settings.api.expirationDate', 'Expiration date')}
+                             </span>
+                          </button>
+                          <DateTimePopover
+                             mode="single"
+                             anchorEl={expirationAnchor}
+                             value={keyForm.expirationDate || null}
+                             minAt={startOfToday()}
+                             onChange={(next) => setKeyForm({ ...keyForm, expirationDate: next ?? '' })}
+                             onClose={() => setExpirationAnchor(null)}
                           />
                           {keyForm.expirationDate && (
                              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--accent-text)] font-medium">

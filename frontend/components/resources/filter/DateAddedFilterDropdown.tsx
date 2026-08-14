@@ -1,14 +1,19 @@
 // frontend/components/resources/filter/DateAddedFilterDropdown.tsx
 //
 // Single-select radio list of preset date ranges for the Date-added
-// chip, plus an inline Custom-range editor with two native <input
-// type="date"> fields. Selecting a preset other than "custom" auto-
-// clears the custom inputs so the chip state stays consistent.
+// chip, plus an inline Custom-range editor that opens the app-wide
+// DateTimePopover in range mode. Selecting a preset other than "custom"
+// auto-clears the custom bounds so the chip state stays consistent.
+//
+// The popover portals to document.body — see FilterChip's `inFloatingLayer`
+// guard, which is what keeps a click on a calendar day from reading as an
+// outside click and closing this dropdown out from under the picker.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Calendar, CalendarRange, Check, Clock, type LucideIcon } from 'lucide-react';
 
+import { DateTimePopover } from '../../common/DateTimePopover';
 import type { DateAddedChipValue, DatePresetId } from './types';
 
 export interface DateAddedFilterDropdownProps {
@@ -32,10 +37,11 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
   onClearAll,
 }) => {
   const { t } = useTranslation();
+  const [rangeAnchor, setRangeAnchor] = useState<HTMLElement | null>(null);
   const inactiveRow = 'text-content-2 hover:bg-island-2';
   const inactiveIcon = 'text-content-3';
   const labelMuted = 'text-content-3';
-  const dateInputCls = 'flex-1 bg-island-2 border border-line rounded px-1.5 py-1 text-[11px] text-content-2 focus:outline-none focus:border-indigo-500';
+  const dateTriggerCls = 'flex-1 truncate bg-island-2 border border-line rounded px-1.5 py-1 text-left text-[11px] text-content-2 transition-colors hover:border-line-strong focus:outline-none focus:border-line-strong';
 
   const labels: Record<DatePresetId, string> = {
     today: t('resources.filter.date.today', 'Today'),
@@ -69,17 +75,15 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
     }
   };
 
-  const setCustom = (
-    field: 'customAfter' | 'customBefore',
-    raw: string,
-  ) => {
-    const next: DateAddedChipValue = {
+  // The popover is commit-on-complete: one onChange carries BOTH ends, where
+  // the two native inputs each committed their own field. The emitted shape is
+  // unchanged — same three keys, same `null` for "unset".
+  const setCustomRange = (after: string | null, before: string | null) => {
+    onChange({
       preset: 'custom',
-      customAfter: value.customAfter,
-      customBefore: value.customBefore,
-      [field]: raw || null,
-    };
-    onChange(next);
+      customAfter: after || null,
+      customBefore: before || null,
+    });
   };
 
   const isActive = (preset: DatePresetId) => value.preset === preset;
@@ -121,13 +125,16 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
             >
               {t('resources.filter.date.from', 'From')}
             </label>
-            <input
+            <button
               id="filter-date-after"
-              type="date"
-              value={value.customAfter ?? ''}
-              onChange={(e) => setCustom('customAfter', e.target.value)}
-              className={dateInputCls}
-            />
+              type="button"
+              data-testid="filter-date-after"
+              aria-label={t('common.dateRangePopover.title', 'Select date range')}
+              onClick={(e) => setRangeAnchor(e.currentTarget)}
+              className={dateTriggerCls}
+            >
+              {value.customAfter ?? t('common.dateRangePopover.empty', '–')}
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <label
@@ -136,14 +143,26 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
             >
               {t('resources.filter.date.to', 'To')}
             </label>
-            <input
+            <button
               id="filter-date-before"
-              type="date"
-              value={value.customBefore ?? ''}
-              onChange={(e) => setCustom('customBefore', e.target.value)}
-              className={dateInputCls}
-            />
+              type="button"
+              data-testid="filter-date-before"
+              aria-label={t('common.dateRangePopover.title', 'Select date range')}
+              onClick={(e) => setRangeAnchor(e.currentTarget)}
+              className={dateTriggerCls}
+            >
+              {value.customBefore ?? t('common.dateRangePopover.empty', '–')}
+            </button>
           </div>
+          {/* Both triggers open the same range picker — whichever was clicked
+              is the anchor. */}
+          <DateTimePopover
+            anchorEl={rangeAnchor}
+            start={value.customAfter}
+            end={value.customBefore}
+            onChange={setCustomRange}
+            onClose={() => setRangeAnchor(null)}
+          />
         </div>
       )}
       {value.preset !== null && (

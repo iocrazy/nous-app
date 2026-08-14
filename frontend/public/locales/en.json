@@ -189,6 +189,8 @@
       "editEnd": "Edit end date only",
       "empty": "–",
       "clear": "Clear",
+      "clearStart": "Clear start",
+      "clearEnd": "Clear end",
       "weekdaySun": "Su",
       "weekdayMon": "Mo",
       "weekdayTue": "Tu",
@@ -685,6 +687,9 @@
     "successRate": "Success Rate"
   },
   "settings": {
+    "api": {
+      "expirationDate": "Expiration date"
+    },
     "progressStyle": "Download Progress Style",
     "neonBorder": "Neon Border",
     "neonBorderDesc": "Glowing border animation",

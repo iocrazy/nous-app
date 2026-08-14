@@ -189,6 +189,8 @@
       "editEnd": "仅修改结束日期",
       "empty": "–",
       "clear": "清除",
+      "clearStart": "清除开始",
+      "clearEnd": "清除结束",
       "weekdaySun": "日",
       "weekdayMon": "一",
       "weekdayTue": "二",
@@ -685,6 +687,9 @@
     "successRate": "成功率"
   },
   "settings": {
+    "api": {
+      "expirationDate": "过期日期"
+    },
     "progressStyle": "下载进度样式",
     "neonBorder": "霓虹边框",
     "neonBorderDesc": "发光边框动画",

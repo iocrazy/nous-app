@@ -52,6 +52,12 @@
  * again cancels. `editing === null` — the default on every open — is the
  * original two-click behaviour, unchanged.
  *
+ * Clear obeys the same arming: with a segment armed it empties ONLY that end
+ * (and says so — the label becomes "Clear start"/"Clear end"), leaving the
+ * other end alone. Half-bounded ranges are a real user need ("added after
+ * Aug 1, no upper bound") and the two native inputs this control replaced
+ * could each be emptied on their own; unarmed, Clear still wipes both.
+ *
  * While a segment is armed, days that would invert the range (a start after the
  * held end, or an end before the held start) render `disabled`, exactly like the
  * `minAt`/`maxAt` window does. The tempting alternative — accept the click and
@@ -482,10 +488,30 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
     if (selDate) emitSingle(selDate, selHour, minute);
   };
 
+  /**
+   * Clear follows whatever the footer is currently armed for.
+   *
+   * With a segment armed, it clears ONLY that end and leaves the other exactly
+   * as it is — the same "the end you are not editing is not ours to touch"
+   * rule the day clicks follow. This is the only way to reach a half-bounded
+   * filter ("added after Aug 1, no upper bound"); the two native date inputs
+   * this control replaced could each be emptied on their own, and losing that
+   * would have been a real regression, not a simplification. Unarmed, Clear
+   * still wipes both ends, which is what an unqualified "Clear" should do.
+   */
   const handleClear = () => {
     if (props.mode === 'single') {
       setSelDate(null);
       emitSingle(null, selHour, selMinute);
+      return;
+    }
+    if (editing) {
+      const s = editing === 'start' ? null : pendingStart;
+      const e = editing === 'end' ? null : pendingEnd;
+      setPendingStart(s);
+      setPendingEnd(e);
+      setEditing(null);
+      props.onChange(s, e);
       return;
     }
     setPendingStart(null);
@@ -576,6 +602,13 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
       hint: t('common.dateRangePopover.editEnd', 'Edit end date only'),
     },
   ];
+
+  const clearLabel =
+    editing === 'start'
+      ? t('common.dateRangePopover.clearStart', 'Clear start')
+      : editing === 'end'
+        ? t('common.dateRangePopover.clearEnd', 'Clear end')
+        : t('common.dateRangePopover.clear', 'Clear');
 
   const selectedLabel = selDate
     ? (withTime ? `${selDate} ${pad2(selHour)}:${pad2(selMinute)}` : selDate)
@@ -759,13 +792,16 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
       )}
 
       <div className="mt-2 flex items-center justify-end gap-2">
+        {/* The label has to move with the armed segment: a button that says
+            plain "Clear" while it would only empty one end is a button that
+            lies about what it is about to do. */}
         <button
           type="button"
           data-testid="date-time-clear"
           onClick={handleClear}
           className="rounded px-2 py-1 text-[12px] text-ink-500 transition-colors hover:text-ink-200 motion-reduce:transition-none"
         >
-          {t('common.dateRangePopover.clear', 'Clear')}
+          {clearLabel}
         </button>
         {withTime && (
           <button
