@@ -21,6 +21,13 @@ import httpx
 from app.services.ai.providers.ai_provider import AIProviderFactory
 from app.services.ai.providers.embedding_config import _is_multimodal
 
+# Per-request budget for a probe. Was 20s, which is a plausible cause of the
+# 2026-08-14 false red on ``mediahub-deepseek-v4-flash``: cold starts (upstream
+# scale-from-zero, a self-hosted engine paging a model in) routinely exceed it,
+# and the probe cannot tell a slow start from a dead endpoint. A model wrongly
+# marked unreachable costs far more than 40 extra seconds on an hourly ping.
+_PROBE_TIMEOUT = 60.0
+
 
 async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
@@ -46,10 +53,18 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
                     "model": model,
                 },
             )
+            # Same "never an empty reason" guarantee as the except-branch below,
+            # applied here too: this branch returns before reaching it, and the
+            # message comes from AIProviderFactory.test_connection, whose own
+            # fallback is a bare ``str(e)`` — the exact shape that made the
+            # 2026-08-14 red light undiagnosable. Its 10s budget makes an
+            # empty-stringifying timeout MORE likely here than on the chat path.
+            ok = bool(res.get("success"))
+            err = res.get("error") or ""
             return {
-                "ok": bool(res.get("success")),
-                "detail": "reachable" if res.get("success") else "",
-                "error": res.get("error"),
+                "ok": ok,
+                "detail": "reachable" if ok else "",
+                "error": None if ok else (err or "asr probe failed with no message"),
                 "dims": None,
             }
 
@@ -64,7 +79,7 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 url = base + "/embeddings"
                 payload = {"model": model, "input": "ping"}
-            async with httpx.AsyncClient(timeout=20.0) as c:
+            async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as c:
                 r = await c.post(url, headers=headers, json=payload)
             if r.status_code != 200:
                 return {
@@ -94,7 +109,7 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
             "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 8,
         }
-        async with httpx.AsyncClient(timeout=20.0) as c:
+        async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as c:
             r = await c.post(url, headers=headers, json=payload)
         if r.status_code != 200:
             return {
@@ -111,4 +126,10 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
             "dims": None,
         }
     except Exception as e:  # noqa: BLE001 — probe is best-effort
-        return {"ok": False, "detail": "", "error": str(e)[:200], "dims": None}
+        # Qualify the reason with the exception TYPE, never bare str(e):
+        # httpx's ReadTimeout / ConnectTimeout / ReadError all stringify to ""
+        # (verified inside nous-backend), which landed in the DB as a red light
+        # with a blank reason — indistinguishable from a genuinely broken model.
+        # See test_mediahub_model_health_diagnosable.py.
+        reason = f"{type(e).__name__}: {str(e) or '<no message>'}"
+        return {"ok": False, "detail": "", "error": reason[:200], "dims": None}

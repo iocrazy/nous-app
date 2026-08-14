@@ -35,6 +35,41 @@ def test_public_projection_excludes_admin_description():
     assert "base_url" not in col_names
 
 
+def test_public_projection_never_exposes_credentials():
+    """Guard rail for the F2 additions (2026-08-14): the projection now carries
+    health columns, and the temptation next time will be to 'just add' whatever
+    the UI wants. This list is the tripwire — every credential-bearing column
+    stays out, including ``last_test_detail`` (a probe failure text routinely
+    embeds the private base_url / upstream host, the same leak class that got
+    ``description`` excluded)."""
+    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+
+    col_names = {c.key for c in _PUBLIC_COLS}
+    forbidden = {
+        "api_key",
+        "app_id",
+        "base_url",
+        "description",
+        "last_test_detail",
+        "actual_provider",
+        "actual_model",
+    }
+    assert col_names & forbidden == set()
+
+
+def test_public_projection_exposes_health_status_and_time():
+    """F2: the user-facing list must carry the model's health, otherwise the
+    frontend cannot warn anyone — before this the columns simply weren't in the
+    payload, so 'the UI doesn't show it' was really 'the UI can't know'.
+    ``last_tested_at`` rides along because a stale green light must not read as
+    'currently fine'."""
+    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+
+    col_names = {c.key for c in _PUBLIC_COLS}
+    assert "last_test_status" in col_names
+    assert "last_tested_at" in col_names
+
+
 @pytest.mark.asyncio
 async def test_governance_includes_nous_enabled_and_modules():
     from app.api.ai_settings_router import get_ai_governance

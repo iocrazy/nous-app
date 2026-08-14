@@ -18,12 +18,14 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, AlertTriangle } from 'lucide-react';
 import type { AILibraryAgent, AILibrarySkill } from '../../types';
 import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
 import { overrideFieldCount, personaHintKind } from './agentOverride';
+import { type ModelHealth } from '../../utils/modelHealth';
+import { formatRelativeTime } from '../../utils/relativeTime';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
 
@@ -45,6 +47,13 @@ interface AgentPersonaTabProps {
   readOnly: boolean;
   catalogLocked: boolean;
   modelGroups: ProviderModelGroup[];
+  /**
+   * Last self-check per platform model, keyed by model name. Models absent
+   * from the map have never been probed — the picker stays silent about them.
+   */
+  modelHealth?: Record<string, ModelHealth>;
+  /** Localized warning suffixes for failing models, passed to the picker. */
+  unhealthyModelLabels?: Record<string, string>;
   localSkillIds: number[];
   allSkills: AILibrarySkill[] | null;
   skillsLoading: boolean;
@@ -60,6 +69,8 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   readOnly,
   catalogLocked,
   modelGroups,
+  modelHealth,
+  unhealthyModelLabels,
   localSkillIds,
   allSkills,
   skillsLoading,
@@ -70,6 +81,16 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [doc, setDoc] = useState<PersonaDoc>('identity_md');
+
+  // Health of the model this agent will actually run on. The probe is hourly,
+  // so the check time travels with the verdict in both directions — a green
+  // light nobody dates is indistinguishable from a stale one.
+  const selectedHealth = modelHealth?.[draft.model ?? ''];
+  const selectedCheckedLabel = selectedHealth?.testedAt
+    ? t('aiLibrary.agents.modelHealthCheckedAgo', 'checked {{ago}}', {
+        ago: formatRelativeTime(selectedHealth.testedAt, t),
+      })
+    : '';
 
   return (
     <div className="space-y-6">
@@ -220,7 +241,29 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
               'provider not enabled',
             ),
             noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
+            unhealthyLabels: unhealthyModelLabels,
           })}
+          {selectedHealth?.status === 'fail' && (
+            <div
+              data-testid="model-health-warning"
+              className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn-line bg-warn-soft px-2 py-1.5 text-xs text-warn"
+            >
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>
+                {t(
+                  'aiLibrary.agents.modelHealthFailed',
+                  'Last health check failed — chats using this model may fail.',
+                )}
+                {selectedCheckedLabel && ` (${selectedCheckedLabel})`}
+              </span>
+            </div>
+          )}
+          {selectedHealth?.status === 'ok' && selectedCheckedLabel && (
+            <p data-testid="model-health-ok" className="mt-1.5 text-xs text-ink-500">
+              {t('aiLibrary.agents.modelHealthPassed', 'Health check passed')} ·{' '}
+              {selectedCheckedLabel}
+            </p>
+          )}
           {modelGroups.every((g) => g.models.length === 0) && (
             <button
               type="button"

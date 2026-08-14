@@ -70,6 +70,14 @@ _NOUS_ATTRS = {p.key for p in MediahubModels.__mapper__.column_attrs}
 # (e.g. private ZeroTier IPs, BYOK source references) that must never surface in
 # the user-facing platform-models card. No public consumer of list_enabled reads
 # it — see test_list_enabled_hides_secret_columns.
+#
+# ``last_test_status`` / ``last_tested_at`` were added 2026-08-14 so the picker
+# can warn before someone selects an unreachable model (previously the health
+# signal existed but never left the admin surface, so a chat just failed
+# silently). ``last_test_detail`` stays OUT on the same grounds as
+# ``description``: a probe failure text routinely embeds the upstream host and
+# private base_url. The status alone is what a user can act on; the reason
+# belongs to admin. Guarded by test_public_projection_never_exposes_credentials.
 _PUBLIC_COLS = (
     MediahubModels.id,
     MediahubModels.name,
@@ -78,6 +86,8 @@ _PUBLIC_COLS = (
     MediahubModels.pricing_type,
     MediahubModels.pricing_value,
     MediahubModels.sort_order,
+    MediahubModels.last_test_status,
+    MediahubModels.last_tested_at,
 )
 
 

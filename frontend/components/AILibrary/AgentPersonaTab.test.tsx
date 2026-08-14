@@ -16,11 +16,30 @@ vi.mock('./MarkdownEditor', () => ({ MarkdownEditor: () => <div /> }));
 vi.mock('./AgentIconPicker', () => ({ AgentIconPicker: () => <div /> }));
 vi.mock('./agentEditorModel', () => ({ renderModelSelect: () => <div /> }));
 
+// Interpolating stand-in for i18next: the health line reads its relative time
+// through t('common.time.minutesAgo', { count }), so a mock that drops
+// variables would make "shows when the check ran" pass on an empty string.
+const TRANSLATIONS: Record<string, string> = {
+  'common.time.justNow': 'just now',
+  'common.time.minutesAgo': '{{count}}m ago',
+  'common.time.hoursAgo': '{{count}}h ago',
+  'common.time.daysAgo': '{{count}}d ago',
+};
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_k: string, d?: string | Record<string, unknown>) =>
-      typeof d === 'string' ? d : '',
+    t: (key: string, second?: unknown, third?: unknown): string => {
+      const template = typeof second === 'string' ? second : (TRANSLATIONS[key] ?? '');
+      const vars = ((typeof second === 'object' ? second : third) ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return template.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? ''));
+    },
   }),
+  // The health line reaches utils/relativeTime -> utils/formatDate -> i18n.ts,
+  // which calls i18n.use(initReactI18next) at module-eval time: the named
+  // export must exist on the mock or vitest throws before any test runs.
+  initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
 import { AgentPersonaTab } from './AgentPersonaTab';
@@ -168,5 +187,64 @@ describe('AgentPersonaTab — persona hint banner', () => {
     renderTab({ agent: { ...agent, override_fields: ['soul_md'] } as AILibraryAgent });
     expect(screen.queryByTestId('agent-override-banner')).toBeNull();
     expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
+  });
+});
+
+/**
+ * Health of the SELECTED model, inline under the picker.
+ *
+ * Before this, a failing model was invisible here: the user picked it, saved,
+ * and learned about it when the chat failed with nothing to go on. The line
+ * carries the check time because the probe runs hourly — a green light from 50
+ * minutes ago is not a statement about right now.
+ */
+describe('AgentPersonaTab — selected model health', () => {
+  const health = { 'mediahub-deepseek-v4-flash': { status: 'fail' as const, testedAt: null } };
+
+  it('warns when the selected model failed its last health check', () => {
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-flash' },
+      modelHealth: health,
+    });
+    const el = screen.getByTestId('model-health-warning');
+    expect(el.textContent).toContain('may fail');
+  });
+
+  it('stays quiet when the selected model is healthy', () => {
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-pro' },
+      modelHealth: {
+        ...health,
+        'mediahub-deepseek-v4-pro': { status: 'ok' as const, testedAt: null },
+      },
+    });
+    expect(screen.queryByTestId('model-health-warning')).toBeNull();
+  });
+
+  it('says nothing about a model that has never been probed', () => {
+    // Silence, not a green light: an unprobed model has no health to report.
+    renderTab({ draft: { model: 'byok-gpt-4o' }, modelHealth: health });
+    expect(screen.queryByTestId('model-health-warning')).toBeNull();
+    expect(screen.queryByTestId('model-health-ok')).toBeNull();
+  });
+
+  it('shows when the check ran, so a stale reading reads as stale', () => {
+    const fortyMinutesAgo = new Date(Date.now() - 40 * 60_000).toISOString();
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-flash' },
+      modelHealth: {
+        'mediahub-deepseek-v4-flash': { status: 'fail', testedAt: fortyMinutesAgo },
+      },
+    });
+    expect(screen.getByTestId('model-health-warning').textContent).toContain('40m ago');
+  });
+
+  it('reports a healthy model check time too — quietly', () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    renderTab({
+      draft: { model: 'mediahub-deepseek-v4-pro' },
+      modelHealth: { 'mediahub-deepseek-v4-pro': { status: 'ok', testedAt: tenMinutesAgo } },
+    });
+    expect(screen.getByTestId('model-health-ok').textContent).toContain('10m ago');
   });
 });
