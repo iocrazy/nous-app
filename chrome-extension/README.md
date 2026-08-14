@@ -4,9 +4,26 @@ Push video URLs to Nous for parsing and download, and scan pages for images to i
 
 ## Install
 
+Build a release copy first — Chrome remembers whichever folder you pick, and
+pointing it at this source folder means branch switches, `git clean`, and
+uncommitted work all land straight in the extension you use every day.
+
+```bash
+bash scripts/package-extension.sh   # → release/chrome-extension/
+```
+
 1. Open `chrome://extensions/`
 2. Enable **Developer mode** (top right)
-3. Click **Load unpacked** → select this `chrome-extension/` folder
+3. Click **Load unpacked** → select `release/chrome-extension/`
+
+After pulling new code, re-run the script, then hit the reload icon on the
+extension card. The popup header shows `v1.3.1 (<commit>)` so you can tell at a
+glance which build is loaded — if that commit does not match `git log -1`, the
+release copy is stale and needs a re-run. A `-dirty` suffix means it was built
+with uncommitted changes.
+
+Loading this `chrome-extension/` folder directly still works for debugging; the
+popup then shows the bare version with no commit.
 
 ## Setup
 

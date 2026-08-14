@@ -51,9 +51,15 @@ let tagsLoaded = false;
 
 // Show the extension version beside the header — read at runtime from the
 // manifest so it never drifts from manifest.json.
+//
+// Prefer version_name: scripts/package-extension.sh stamps it onto the COPY in
+// release/ as "1.3.1 (aefb817e)" so the popup says exactly which commit is
+// installed. The fallback matters — loading this folder directly (the debug
+// path) has no version_name, and must show "v1.3.1", never "vundefined".
 const versionEl = document.getElementById('appVersion');
 if (versionEl && chrome.runtime && chrome.runtime.getManifest) {
-  versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
+  const manifest = chrome.runtime.getManifest();
+  versionEl.textContent = 'v' + (manifest.version_name || manifest.version);
 }
 
 // Init: check if configured, show appropriate view
