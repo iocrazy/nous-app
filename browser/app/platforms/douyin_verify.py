@@ -92,6 +92,7 @@ import re
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Sequence
+from urllib.parse import urlsplit
 
 from ..dom import visible_marker_texts
 from ..verify import ReadbackJudgement, ReadbackVerdict, VerifySpec
@@ -455,6 +456,115 @@ def _num(value: int | None) -> str:
     return "?" if value is None else str(value)
 
 
+# Path of `WORKS_URL`, so "are we still on the works page" is derived from the
+# one constant that says where the works page is, not from a second copy of it.
+_WORKS_PATH = urlsplit(WORKS_URL).path.rstrip("/")
+
+
+def page_label(url: str) -> str:
+    """Coarse name for the page we actually landed on. Pure.
+
+    A LABEL, never the URL. `verify_detail` lands in a database row and in
+    logs, and this repository is public — a creator-console URL can carry
+    query parameters, so the raw string does not leave this function. The
+    labels are derived from constants this module already owns.
+
+    Answers the question no count could: `not_found` on a works page and
+    `not_found` on some other page that merely rendered are the same output
+    today, and they are completely different bugs.
+    """
+    parts = urlsplit(url or "")
+    host = (parts.hostname or "").lower()
+    if not host:
+        return "unknown"
+    if host not in CREATOR_HOSTS:
+        return "off-host"
+    path = (parts.path or "/").rstrip("/")
+    if path == _WORKS_PATH:
+        return "manage"
+    if "login" in path:
+        return "login"
+    if path.startswith("/creator-micro"):
+        return "creator-other"
+    return "other"
+
+
+# Login vocabulary DELIBERATELY WIDER than `LOGIN_TEXT_MARKERS`. That tuple is
+# the one `verify.py` gates on before the list is ever read, so by the time
+# this module runs it has already measured 0 — re-counting it would only
+# restate a decision that was already taken. These are the words a login screen
+# would carry that our gate does NOT recognise, which is exactly the blind spot
+# that turns "logged out" into "this account has no works".
+#
+# ⚠️ CANDIDATES, not measurements. Nobody has counted these against a live
+# logged-out console; a zero here means "not seen", never "not there".
+# `exact=True` throughout, which is also what keeps 「退出登录」 (a logged-IN
+# control) from being read as a login prompt.
+LOGIN_MARKER_CANDIDATES: tuple[str, ...] = (
+    "登录",
+    "验证码登录",
+    "抖音号登录",
+    "登录后可查看",
+    "请先登录",
+)
+
+# Page chrome the works page itself should carry, as opposed to its cards.
+# ⚠️ Also CANDIDATES — the 2026-08-11 read recorded card vocabulary only, so
+# nothing here has ever been counted.
+WORKS_PAGE_MARKER_CANDIDATES: tuple[str, ...] = (
+    "作品管理",
+    "内容管理",
+    "全部作品",
+    "发布视频",
+)
+
+# Nodes that mean "still rendering". If these are non-zero at the moment we
+# read, the settle was too short and every count above is a measurement of a
+# half-built page.
+#
+# ⚠️ Summed across selectors that OVERLAP — a `loading-spinner` class matches
+# both `loading` and `spin`, so one node can count twice. This is a
+# boolean-shaped signal ("was the page still working"), not a node census, and
+# reading it as the latter would overstate.
+BUSY_SELECTORS: tuple[str, ...] = (
+    '[class*="loading"]',
+    '[class*="skeleton"]',
+    '[class*="spin"]',
+)
+
+
+@dataclass(frozen=True)
+class PageProbe:
+    """WHICH PAGE the read-back actually reached. Counts and labels only.
+
+    `ListProbe` answers "why did the list read that way". This answers the
+    question that turned out to come first: **was there a list at all**. The
+    first live probe returned zero works, zero card roots under three of four
+    selectors, and zero operation words — a shape that says the page had no
+    works list on it, and nothing in the output could say why.
+    """
+
+    where: str | None = None
+    text_len: int | None = None
+    divs: int | None = None
+    login_gate: int | None = None
+    login_wide: int | None = None
+    works_words: int | None = None
+    empty_words: int | None = None
+    busy: int | None = None
+
+    def render(self) -> str:
+        return (
+            f"[page where={self.where or '?'}"
+            f" textlen={_num(self.text_len)}"
+            f" divs={_num(self.divs)}"
+            f" login={_num(self.login_gate)}+{_num(self.login_wide)}"
+            f" works={_num(self.works_words)}"
+            f" empty={_num(self.empty_words)}"
+            f" busy={_num(self.busy)}]"
+        )
+
+
 @dataclass(frozen=True)
 class ListProbe:
     """Why the works list read the way it did. **Counts and selector literals
@@ -494,6 +604,14 @@ class ListProbe:
     # ⚠️ Nodes, not cards: a wrapper whose only text is that word matches too,
     # so read these as a multiple of the works on screen, not as the works.
     op_words: tuple[int | None, int | None] = (None, None)
+    # Size and line count of the first card the reader ACCEPTED — never its
+    # text. `card-:3/1` told us a chrome node won the loop but not what it was;
+    # a 12-character single-line "card" and a 400-character six-line one are
+    # different findings, and both are readable from two integers.
+    won_len: int | None = None
+    won_lines: int | None = None
+    # Which page this was read off, when it could be determined.
+    page: PageProbe | None = None
 
     def render(self) -> str:
         roots = ",".join(
@@ -501,11 +619,14 @@ class ListProbe:
             for sel, raw, scoped in self.roots
         )
         won = probe_label(self.won) if self.won else "none"
+        page = f" {self.page.render()}" if self.page is not None else ""
         return (
             f"[probe cards={_num(self.cards)} won={won}"
+            f" wonlen={_num(self.won_len)}/{_num(self.won_lines)}"
             f" roots={roots or 'none'}"
             f" title_exact={_num(self.title_exact)}"
             f" ops={_num(self.op_words[0])}/{_num(self.op_words[1])}]"
+            f"{page}"
         )
 
 
@@ -559,14 +680,29 @@ def match_cards(cards: Sequence[WorkCard], title: str) -> list[WorkCard]:
     direction, closing the work item as published on the strength of a
     different post being live.
 
-    ⚠️ What the line route rests on, stated because it is an INFERENCE and not
-    a measurement: that the caption occupies a rendered line of its own, i.e.
-    that it sits in its own block element inside the card. The 2026-08-11 live
-    read counted six same-prefixed nodes per card but recorded no class names,
-    and the page-text excerpt it captured had already been whitespace-collapsed
-    (`inspect.py` joins `body.innerText` on single spaces), so no line
-    structure was ever observed. If the inference is wrong the short title
-    simply does not match — the same miss as today, never a new false verdict.
+    ⚠️ What the line route rests on, stated because it is an INFERENCE and
+    STILL not a measurement: that the caption occupies a rendered line of its
+    own, i.e. that it sits in its own block element inside the card. The
+    2026-08-11 live read counted six same-prefixed nodes per card but recorded
+    no class names, and the page-text excerpt it captured had already been
+    whitespace-collapsed (`inspect.py` joins `body.innerText` on single
+    spaces), so no line structure was ever observed.
+
+    [2026-08-15] One live attempt to measure it has now been made and it came
+    back **uninformative, not negative**. `ListProbe.title_exact` — nodes whose
+    whole text is the caption — read 0, but on that same read `ops` (the
+    operation words the console prints on every card) read 0 as well and every
+    card selector read 0: the page carried no works list at all, so a caption
+    could not have been found whatever the markup does. **A zero measured on a
+    page that has nothing to measure is not evidence against the inference**,
+    and writing it up as "disproved" would be the same mistake as reading an
+    empty probe as a negative answer. The question is still open, and
+    `title_exact` will answer it on the first read that actually reaches a
+    works list.
+
+    Either way the failure direction is unchanged: if the inference is wrong
+    the short title simply does not match — the same miss as before, never a
+    new false verdict.
     """
     needle = normalize_title(title)
     if not needle:
@@ -760,6 +896,61 @@ async def _exact_text_count(page: Any, text: str) -> int | None:
         return None
 
 
+async def _group_count(page: Any, markers: Sequence[str]) -> int | None:
+    """Total nodes matching any of `markers` exactly, or None.
+
+    **None if ANY single probe failed**, not a partial sum. An understated
+    total is worse than an honest `?`: it reads like a real observation and
+    would be quoted as one, which is the whole failure mode `_num` exists to
+    prevent.
+    """
+    total = 0
+    for marker in markers:
+        count = await _exact_text_count(page, marker)
+        if count is None:
+            return None
+        total += count
+    return total
+
+
+async def measure_page(page: Any) -> PageProbe:
+    """Which page did we land on, and had it finished rendering.
+
+    Every field fails soft to None. Nothing here reads as content: a label
+    derived from our own constants, a character count, and node counts.
+    """
+    try:
+        url = str(getattr(page, "url", "") or "")
+    except Exception:  # noqa: BLE001
+        url = ""
+
+    text_len: int | None = None
+    try:
+        body = await page.locator("body").inner_text()
+        text_len = len(body or "")
+    except Exception:  # noqa: BLE001
+        text_len = None
+
+    busy: int | None = 0
+    for selector in BUSY_SELECTORS:
+        count = await _count_or_none(page, selector)
+        if count is None:
+            busy = None
+            break
+        busy += count
+
+    return PageProbe(
+        where=page_label(url) if url else "unknown",
+        text_len=text_len,
+        divs=await _count_or_none(page, "div"),
+        login_gate=await _group_count(page, LOGIN_TEXT_MARKERS),
+        login_wide=await _group_count(page, LOGIN_MARKER_CANDIDATES),
+        works_words=await _group_count(page, WORKS_PAGE_MARKER_CANDIDATES),
+        empty_words=await _group_count(page, LIST_EMPTY_MARKERS),
+        busy=busy,
+    )
+
+
 async def read_works_list(
     page: Any, limit: int = MAX_CARDS
 ) -> tuple[list[WorkCard], ListProbe]:
@@ -794,7 +985,11 @@ async def read_works_list(
         cards = await _read_cards_from(locator, min(scoped, limit))
         if cards:
             return cards, ListProbe(
-                roots=tuple(roots), won=selector, cards=len(cards)
+                roots=tuple(roots),
+                won=selector,
+                cards=len(cards),
+                won_len=len(cards[0].text),
+                won_lines=len(card_lines(cards[0].text)),
             )
     return [], ListProbe(roots=tuple(roots), won=None, cards=0)
 
@@ -823,6 +1018,7 @@ async def measure_page_probes(page: Any, title: str, probe: ListProbe) -> ListPr
             await _exact_text_count(page, "编辑作品"),
             await _exact_text_count(page, "删除作品"),
         ),
+        page=await measure_page(page),
     )
 
 
@@ -927,8 +1123,12 @@ __all__ = [
     "CARD_SELECTORS",
     "LIST_EMPTY_MARKERS",
     "LIVE_MARKERS",
+    "BUSY_SELECTORS",
     "ListProbe",
+    "LOGIN_MARKER_CANDIDATES",
     "MAX_CARDS",
+    "PageProbe",
+    "WORKS_PAGE_MARKER_CANDIDATES",
     "REJECTED_MARKERS",
     "SCHEDULED_MARKERS",
     "SPEC",
@@ -945,9 +1145,11 @@ __all__ = [
     "judge_readback",
     "list_is_empty",
     "match_cards",
+    "measure_page",
     "measure_page_probes",
     "normalize_title",
     "outermost_only",
+    "page_label",
     "probe_label",
     "read_work_cards",
     "read_works_list",

@@ -32,6 +32,7 @@ from app.platforms.douyin_verify import (
     CARD_SELECTORS,
     LIVE_MARKERS,
     ListProbe,
+    PageProbe,
     WorkCard,
     WorkState,
     build_published_url,
@@ -42,9 +43,11 @@ from app.platforms.douyin_verify import (
     judge_readback,
     list_is_empty,
     match_cards,
+    measure_page,
     measure_page_probes,
     normalize_title,
     outermost_only,
+    page_label,
     probe_label,
     read_work_cards,
     read_works_list,
@@ -505,10 +508,24 @@ class TestListProbeRendering:
             cards=0,
             title_exact=0,
             op_words=(0, 0),
+            won_len=0,
+            won_lines=0,
+            page=PageProbe(
+                where="manage",
+                text_len=0,
+                divs=0,
+                login_gate=0,
+                login_wide=0,
+                works_words=0,
+                empty_words=0,
+                busy=0,
+            ),
         ).render()
         assert "cards=0" in rendered
         assert "work-card:0/0" in rendered
         assert "title_exact=0" in rendered
+        # Every field set to a real zero — so a `?` anywhere would mean the
+        # renderer invented an unmeasured field, which is the bug this pins.
         assert "?" not in rendered
 
     def test_it_carries_the_numbers_that_tell_the_hypotheses_apart(self):
@@ -555,6 +572,246 @@ class TestListProbeRendering:
         printed whole rather than abbreviated into something untrue."""
         assert probe_label('[class*="video-card"]') == "video-card"
         assert probe_label("tbody tr") == "tbody tr"
+
+
+class TestPageLabel:
+    """`page_label` — a LABEL, never the URL. The one question no count could
+    answer: `not_found` read off the works page and `not_found` read off some
+    other page that merely rendered are the same output today, and they are
+    completely different bugs."""
+
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("https://creator.douyin.com/creator-micro/content/manage", "manage"),
+            ("https://creator.douyin.com/creator-micro/content/manage/", "manage"),
+            ("https://creator.douyin.com/creator-micro/content/manage?tab=1", "manage"),
+            ("https://creator.douyin.com/creator-micro/home", "creator-other"),
+            (
+                "https://creator.douyin.com/creator-micro/content/upload",
+                "creator-other",
+            ),
+            ("https://creator.douyin.com/login", "login"),
+            # The logged-out redirect keeps the original path in a query
+            # parameter — the same trap `judge_douyin_session` documents. The
+            # PATH is what decides, so this must not read as "manage".
+            (
+                "https://creator.douyin.com/login?redirect_url="
+                "%2Fcreator-micro%2Fcontent%2Fmanage",
+                "login",
+            ),
+            ("https://www.douyin.com/user/self", "off-host"),
+            ("https://creator.douyin.com/", "other"),
+            ("", "unknown"),
+            ("not a url at all", "unknown"),
+        ],
+    )
+    def test_labels(self, url, expected):
+        assert page_label(url) == expected
+
+    def test_it_never_emits_the_url_itself(self):
+        """`verify_detail` is a database row and a log line, and this repo is
+        public. A console URL can carry query parameters; the label may not
+        contain any part of one."""
+        url = (
+            "https://creator.douyin.com/creator-micro/content/manage"
+            "?sec_uid=SECRET&tab=2"
+        )
+        label = page_label(url)
+        assert label == "manage"
+        assert "SECRET" not in label
+        assert "douyin" not in label
+
+
+LOGIN_URL = "https://creator.douyin.com/login"
+
+
+def _document(fragment: str) -> str:
+    """A fragment as a real page. Real consoles always have a `<body>`, and
+    `text_len` is read off it — testing against a bare fragment would exercise
+    a path production never takes and leave the field unproven."""
+    return f"<body>{fragment}</body>"
+
+
+class TestPageProbe:
+    """Which page did we reach, and had it finished rendering."""
+
+    async def test_the_works_fixture_reads_as_the_works_page(self):
+        probe = await measure_page(FakePage(_document(FIXTURE)))
+        assert probe.where == "manage"
+        assert probe.busy == 0
+        assert probe.empty_words == 0
+        assert probe.login_gate == 0
+        assert probe.text_len and probe.text_len > 100
+        assert probe.divs and probe.divs > 10
+
+    async def test_the_empty_state_page_is_told_apart_from_a_missing_list(self):
+        """**The distinction the first live probe could not make.**
+
+        A works page that renders 「暂无作品」 is the platform answering; a page
+        with no works list at all is us being somewhere else. Both produce zero
+        cards.
+        """
+        empty = await measure_page(FakePage(_document(EMPTY_PAGE)))
+        missing = await measure_page(FakePage(_document(REDESIGNED_PAGE)))
+        assert empty.empty_words == 1
+        assert missing.empty_words == 0
+
+    async def test_a_login_screen_our_gate_does_not_recognise_is_still_visible(self):
+        """`verify.py` gates on `LOGIN_TEXT_MARKERS` before the list is read,
+        so by here that count is always 0 — which means a login page whose
+        wording changed sails straight through and reads as "no works". The
+        wider candidate set is the only thing that would show it."""
+        page = FakePage(
+            _document(
+                '<div class="page"><div class="box">请先登录</div>'
+                '<div class="btn">验证码登录</div></div>'
+            ),
+            url=LOGIN_URL,
+        )
+        probe = await measure_page(page)
+        assert probe.login_gate == 0, "the gate's own vocabulary must still miss"
+        assert probe.login_wide == 2, "…while the wider set sees it"
+        assert probe.where == "login"
+
+    async def test_a_still_rendering_page_says_so(self):
+        page = FakePage(
+            _document(
+                '<div class="wrap"><div class="loading-spinner-x1"></div>'
+                '<div class="skeleton-row-a2"></div></div>'
+            )
+        )
+        probe = await measure_page(page)
+        # 3, not 2: `loading-spinner` matches both `loading` and `spin`. The
+        # selectors overlap by design and the field is documented as a
+        # boolean-shaped signal — pinned here so nobody later reads it as a
+        # node census and "fixes" the number.
+        assert probe.busy == 3
+
+    async def test_a_page_with_no_body_is_unmeasurable_not_empty(self):
+        """A console that rendered no document at all must not report a text
+        length of 0 — that reads like "the page was blank" when the truth is
+        "we could not look"."""
+        probe = await measure_page(FakePage(FIXTURE))  # fragment, no <body>
+        assert probe.text_len is None
+        assert "textlen=?" in probe.render()
+
+    async def test_every_field_degrades_to_unmeasurable_not_to_zero(self):
+        class ExplodingPage:
+            url = "https://creator.douyin.com/creator-micro/content/manage"
+
+            def locator(self, selector):
+                raise RuntimeError("detached")
+
+            def get_by_text(self, text, exact=False):
+                raise RuntimeError("detached")
+
+        probe = await measure_page(ExplodingPage())
+        # The URL is read off an attribute, so the label survives — and that is
+        # the point: it is the one signal that does not need the DOM.
+        assert probe.where == "manage"
+        assert probe.text_len is None
+        assert probe.divs is None
+        assert probe.busy is None
+        assert probe.login_wide is None
+        rendered = probe.render()
+        assert "textlen=?" in rendered
+        assert "busy=?" in rendered
+        assert "0" not in rendered.replace("where=manage", "")
+
+    async def test_a_partly_failed_group_is_unmeasurable_rather_than_understated(self):
+        """A sum that silently dropped a failed probe would read like a real
+        observation. Better `?` than a number nobody can trust."""
+
+        class HalfBrokenPage(FakePage):
+            def get_by_text(self, text, exact=False):
+                if text == "扫码登录":
+                    raise RuntimeError("detached")
+                return super().get_by_text(text, exact=exact)
+
+        probe = await measure_page(HalfBrokenPage(FIXTURE))
+        assert probe.login_gate is None
+        # …and a group that fully succeeded is still a number.
+        assert probe.empty_words == 0
+
+
+# The shape the first live probe actually returned: three `card-` nodes, one
+# of them outermost, and NOTHING else — no works, no operation words, no card
+# roots under the other three selectors. Reconstructed from the counts alone
+# ([实测 2026-08-15]); the real page's markup was never captured, and this is
+# a page that REPRODUCES THE NUMBERS, not a copy of it.
+LIVE_SHAPE_NO_WORKS = """
+<div class="card-shell-a1">
+  <div class="card-head-b2">Console chrome</div>
+  <div class="card-body-c3">Nothing that is a work</div>
+</div>
+"""
+
+
+class TestTheLiveShapeIsNowDiagnosable:
+    """**The read this round has to explain.**
+
+    [实测 2026-08-15] the live read-back returned
+    `cards=1 won=card- roots=content-card:0/0,work-card:0/0,video-card:0/0,
+    card-:3/1 title_exact=0 ops=0/0` — a page with no works list on it. The
+    list-shape probe proved the shadowing hypothesis was only half the story
+    (`card-` did win, but `video-card` was 0 too, so the real selector had
+    nothing to find either). What it could NOT say is why the page had no
+    works. These pin that the next read will.
+    """
+
+    async def test_the_reconstruction_reproduces_the_reported_counts(self):
+        """If this drifts from the numbers above, the rest of the class is
+        reasoning about a page that never existed."""
+        cards, probe = await read_works_list(FakePage(LIVE_SHAPE_NO_WORKS))
+        measured = {sel: (raw, scoped) for sel, raw, scoped in probe.roots}
+        assert measured['[class^="card-"]'] == (3, 1)
+        assert measured['[class*="video-card"]'] == (0, 0)
+        assert measured['[class*="content-card"]'] == (0, 0)
+        assert measured['[class*="work-card"]'] == (0, 0)
+        assert probe.cards == 1 and probe.won == '[class^="card-"]'
+        assert len(cards) == 1
+
+    async def test_the_accepted_card_is_now_described_without_quoting_it(self):
+        """`card-:3/1` said a chrome node won but not what it was. Two integers
+        settle it — a short single-line node is a chip, a long multi-line one
+        is something that at least looks like a work."""
+        _cards, probe = await read_works_list(FakePage(LIVE_SHAPE_NO_WORKS))
+        assert probe.won_lines == 2
+        assert probe.won_len and probe.won_len < 120
+        rendered = probe.render()
+        assert f"wonlen={probe.won_len}/2" in rendered
+        assert "Console chrome" not in rendered
+        assert "Nothing that is a work" not in rendered
+
+    @pytest.mark.parametrize(
+        "url,expected_where",
+        [
+            ("https://creator.douyin.com/creator-micro/content/manage", "manage"),
+            ("https://creator.douyin.com/login", "login"),
+            ("https://creator.douyin.com/creator-micro/home", "creator-other"),
+        ],
+    )
+    async def test_where_separates_the_remaining_hypotheses(self, url, expected_where):
+        """The same zero-works page, reached at three different addresses —
+        three different bugs, and until now one indistinguishable output."""
+        page = FakePage(_document(LIVE_SHAPE_NO_WORKS), url=url)
+        probe = await measure_page(page)
+        assert probe.where == expected_where
+
+    async def test_the_whole_line_lands_in_a_not_found_message(self):
+        """End to end: this is what the next occurrence will actually write
+        into `verify_detail`."""
+        page = FakePage(_document(LIVE_SHAPE_NO_WORKS))
+        judgement = await verify_publish(page, "Some Published Caption")
+        assert judgement.reason == "not_found"
+        assert "[probe cards=1 won=card-" in judgement.message
+        assert "video-card:0/0" in judgement.message
+        assert "[page where=manage" in judgement.message
+        assert "empty=0" in judgement.message
+        assert "busy=0" in judgement.message
+        # and still not one word of the page in it
+        assert "Console chrome" not in judgement.message
 
 
 class TestProbeAgainstFixtureHtml:
