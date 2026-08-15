@@ -29,7 +29,9 @@ from pathlib import Path
 import pytest
 
 from app.platforms.douyin_verify import (
+    CARD_SELECTORS,
     LIVE_MARKERS,
+    ListProbe,
     WorkCard,
     WorkState,
     build_published_url,
@@ -40,9 +42,12 @@ from app.platforms.douyin_verify import (
     judge_readback,
     list_is_empty,
     match_cards,
+    measure_page_probes,
     normalize_title,
     outermost_only,
+    probe_label,
     read_work_cards,
+    read_works_list,
     verify_publish,
 )
 from app.verify import ReadbackVerdict, response_for_judgement
@@ -464,6 +469,220 @@ class TestShortTitles:
         )
 
 
+class TestListProbeRendering:
+    """**The diagnostic must be falsifiable.**
+
+    The read-back's only observable output is `verify_detail`, which
+    `publish_readback.verdict_for` builds from `[reason] message` alone — every
+    other key of the detail dict is dropped. So these pin two things: that the
+    counts reach the message at all, and that a probe which could not measure
+    something says so instead of reporting a zero.
+    """
+
+    def test_a_failed_measurement_is_not_a_zero(self):
+        """`None` renders `?`. A broken probe whose output is shaped like "the
+        answer is none" is not evidence — it is the `xvfb_ready` mistake, and
+        it is the whole reason these fields are `int | None`."""
+        rendered = ListProbe(
+            roots=(('[class*="video-card"]', None, None),),
+            won=None,
+            cards=None,
+            title_exact=None,
+            op_words=(None, None),
+        ).render()
+        assert "cards=?" in rendered
+        assert "video-card:?/?" in rendered
+        assert "title_exact=?" in rendered
+        assert "ops=?/?" in rendered
+        assert "0" not in rendered
+
+    def test_zero_still_renders_as_zero(self):
+        """The other half of the same property: a real zero must not be
+        indistinguishable from a failure either."""
+        rendered = ListProbe(
+            roots=(('[class*="work-card"]', 0, 0),),
+            won=None,
+            cards=0,
+            title_exact=0,
+            op_words=(0, 0),
+        ).render()
+        assert "cards=0" in rendered
+        assert "work-card:0/0" in rendered
+        assert "title_exact=0" in rendered
+        assert "?" not in rendered
+
+    def test_it_carries_the_numbers_that_tell_the_hypotheses_apart(self):
+        probe = ListProbe(
+            roots=(
+                ('[class*="content-card"]', 3, 1),
+                ('[class*="work-card"]', 0, 0),
+                ('[class*="video-card"]', 72, 12),
+                ('[class^="card-"]', 2, 2),
+            ),
+            won='[class*="content-card"]',
+            cards=1,
+            title_exact=1,
+            op_words=(12, 12),
+        )
+        rendered = probe.render()
+        # "an earlier candidate won while the real one had 12 works waiting"
+        # has to be readable straight off this line — that is the finding the
+        # live account could not be asked about.
+        assert "won=content-card" in rendered
+        assert "video-card:72/12" in rendered
+        assert "cards=1" in rendered
+        assert "title_exact=1" in rendered
+        assert "ops=12/12" in rendered
+
+    def test_it_never_carries_page_content(self):
+        """`verify_detail` lands in the database and in logs, and this repo is
+        public. The probe may carry counts and selector literals — never a
+        caption, never card text."""
+        probe = ListProbe(
+            roots=(('[class*="video-card"]', 1, 1),),
+            won='[class*="video-card"]',
+            cards=1,
+            title_exact=1,
+            op_words=(1, 1),
+        )
+        rendered = probe.render()
+        assert all(ch not in rendered for ch in "编删作品")
+        for token in rendered.replace("[probe ", "").rstrip("]").split():
+            assert "=" in token
+
+    def test_an_unlabelled_selector_falls_back_to_its_literal(self):
+        """Never a guess: a selector the label regex does not understand is
+        printed whole rather than abbreviated into something untrue."""
+        assert probe_label('[class*="video-card"]') == "video-card"
+        assert probe_label("tbody tr") == "tbody tr"
+
+
+class TestProbeAgainstFixtureHtml:
+    """The probe measured through the real reader, over real markup."""
+
+    async def test_it_reports_every_candidate_not_only_the_winner(self):
+        cards, probe = await read_works_list(FakePage(FIXTURE))
+        assert len(cards) == 12
+        assert probe.cards == 12
+        assert probe.won == '[class*="video-card"]'
+        measured = {sel: (raw, scoped) for sel, raw, scoped in probe.roots}
+        # All four counted, including the three that did not win — the number
+        # that was missing when a chrome node could shadow the real selector.
+        assert set(measured) == set(CARD_SELECTORS)
+        assert measured['[class*="video-card"]'] == (72, 12)
+        assert measured['[class*="content-card"]'] == (0, 0)
+        assert measured['[class*="work-card"]'] == (0, 0)
+
+    async def test_the_shadowing_hypothesis_is_visible_in_the_numbers(self):
+        """**The scenario the live read-back could not distinguish.**
+
+        An earlier candidate matches one piece of page chrome, so the reader
+        returns that single node and never tries the selector under which
+        twelve works are sitting. The old output for this was `read 1 work(s)`
+        — identical to a one-work account. The probe has to make it obvious.
+        """
+        shadowed = (
+            '<div class="content-card-header-x1">Filter bar chrome</div>'
+            + FIXTURE
+        )
+        cards, probe = await read_works_list(FakePage(shadowed))
+        assert len(cards) == 1  # the reproduction
+        assert probe.won == '[class*="content-card"]'
+        measured = {sel: (raw, scoped) for sel, raw, scoped in probe.roots}
+        assert measured['[class*="content-card"]'] == (1, 1)
+        # …while the real one was never read from, and says so out loud.
+        assert measured['[class*="video-card"]'] == (72, 12)
+        assert "won=content-card" in probe.render()
+        assert "video-card:72/12" in probe.render()
+
+    async def test_the_probe_reaches_the_message_of_a_not_found_verdict(self):
+        """If it does not land in the message it does not land in
+        `verify_detail`, and a diagnostic nobody can read is not a
+        diagnostic."""
+        judgement = await verify_publish(FakePage(FIXTURE), "A Post That Was Deleted")
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "not_found"
+        assert "[probe cards=12 won=video-card" in judgement.message
+        assert "title_exact=0" in judgement.message
+
+    async def test_title_exact_proves_the_caption_has_an_element_of_its_own(self):
+        """**The measurement `match_cards`' line route was waiting on.**
+
+        `title_exact` counts nodes whose ENTIRE text is the caption. ≥1 means
+        the caption is not glued to the badge or the status word — it occupies
+        an element of its own, and therefore a line of its own in `inner_text`.
+        On the fixture that is true by construction; on the live console it is
+        the number that will confirm or kill the inference.
+        """
+        cards, probe = await read_works_list(FakePage(FIXTURE))
+        probe = await measure_page_probes(
+            FakePage(FIXTURE), "Autumn Harvest Field Notes", probe
+        )
+        assert probe.title_exact == 1
+        # And the same page's caption really does read back as its own line.
+        card = next(c for c in cards if "Autumn Harvest" in c.text)
+        assert "autumn harvest field notes" in card_lines(card.text)
+
+    async def test_a_caption_that_is_absent_measures_zero_not_unmeasurable(self):
+        probe = await measure_page_probes(
+            FakePage(FIXTURE), "No Such Caption Anywhere", ListProbe()
+        )
+        assert probe.title_exact == 0
+
+    async def test_a_blank_title_is_unmeasurable_rather_than_zero(self):
+        probe = await measure_page_probes(FakePage(FIXTURE), "   ", ListProbe())
+        assert probe.title_exact is None
+
+    async def test_operation_word_counts_are_a_card_count_without_class_names(self):
+        """The number that settles "does this account even have more than one
+        work" independently of every selector in this module."""
+        probe = await measure_page_probes(FakePage(FIXTURE), "x", ListProbe())
+        assert probe.op_words == (12, 12)
+
+    async def test_an_unreadable_page_still_produces_a_probe(self):
+        """The case that matters most — nothing matched — must still explain
+        itself, and must not fabricate a winner."""
+        page = FakePage(REDESIGNED_PAGE)
+        cards, probe = await read_works_list(page)
+        assert cards == []
+        assert probe.won is None
+        assert probe.cards == 0
+        assert all(scoped == 0 for _sel, _raw, scoped in probe.roots)
+        judgement = await verify_publish(page, "Autumn Harvest Field Notes")
+        assert judgement.reason == "list_unreadable"
+        assert "won=none" in judgement.message
+
+    async def test_a_live_verdict_stays_clean(self):
+        """The probe explains the answers that need explaining. A post that
+        verified needs none, and `verify_detail` is user-visible."""
+        judgement = await verify_publish(
+            FakePage(FIXTURE), "Linkless Live Card From The Real Console"
+        )
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert "[probe" not in judgement.message
+
+    async def test_reading_survives_a_page_whose_locators_raise(self):
+        """Fails soft, and the failure is reported as `?` rather than as 0 —
+        otherwise a broken page would look like an empty one."""
+
+        class ExplodingPage:
+            def locator(self, selector):
+                raise RuntimeError("detached")
+
+            def get_by_text(self, text, exact=False):
+                raise RuntimeError("detached")
+
+        page = ExplodingPage()
+        cards, probe = await read_works_list(page)
+        assert cards == []
+        assert probe.won is None
+        assert all(raw is None and scoped is None for _s, raw, scoped in probe.roots)
+        probe = await measure_page_probes(page, "anything", probe)
+        assert probe.title_exact is None
+        assert "title_exact=?" in probe.render()
+        assert "video-card:?/?" in probe.render()
+
+
 class TestWorkStateMarkers:
     @pytest.mark.parametrize(
         "text,expected",
@@ -591,6 +810,23 @@ class TestStatusMapping:
         assert response.success is False
         assert response.status is SessionStatus.NOT_PUBLISHED
         assert response.detail["reason"] == "rejected"
+
+    async def test_the_probe_survives_into_the_wire_response(self):
+        """**The last hop this module owns.**
+
+        `verify_detail` is built by `publish_readback.verdict_for` as
+        `[reason] message`, and `browser_client.verify_publish` copies the wire
+        `message` through verbatim — so a probe that reaches this response
+        reaches the database row. Everything after this is someone else's file;
+        everything before it is pinned above. If this breaks, the diagnostic
+        goes silent while still looking like it works, which is the exact
+        failure it was built to prevent.
+        """
+        judgement = await verify_publish(FakePage(FIXTURE), "A Post That Was Deleted")
+        response = response_for_judgement(judgement, "douyin", {})
+        assert response.status is SessionStatus.NOT_PUBLISHED
+        assert "[probe cards=12" in response.message
+        assert "won=video-card" in response.message
 
     def test_inconclusive_must_not_wear_not_published(self):
         """The distinction the whole module is built on. `not_published`
