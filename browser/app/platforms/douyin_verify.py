@@ -313,9 +313,16 @@ _STATE_MARKERS: tuple[tuple[WorkState, tuple[str, ...]], ...] = (
 # the rest behind lazy loading), so 24 leaves real headroom.
 MAX_CARDS = 24
 
-# Below this many characters a title is too weak to match on as a substring —
-# 「测试」 would match half the account. Short titles fall back to whole-string
-# equality, which is stricter, not looser.
+# Below this many characters a title is too weak to match on as a substring of
+# the WHOLE card — 「测试」 would match half the account. Short titles match a
+# single rendered LINE of the card instead (see `match_cards` / `caption_lines`).
+#
+# ⚠️ This number has no derivation. It was picked when the module was written
+# and no measurement, spec or plan justifies 6 rather than 4 or 8 — said out
+# loud because the previous short-title rule looked equally deliberate and was
+# structurally unsatisfiable. What the number now controls is only "when may a
+# title be matched loosely against the whole card", and BOTH sides of the cliff
+# are now reachable, which is the property that was missing.
 _MIN_SUBSTRING_TITLE_LEN = 6
 
 _WHITESPACE = re.compile(r"\s+")
@@ -334,6 +341,64 @@ def normalize_title(value: str) -> str:
         return ""
     cleaned = _WHITESPACE.sub(" ", value.replace("　", " "))
     return cleaned.strip(_TRIM_CHARS).casefold()
+
+
+def card_lines(text: str) -> tuple[str, ...]:
+    """One card's rendered text, split into normalised non-empty lines. Pure.
+
+    Split BEFORE normalising, because `normalize_title` collapses every run of
+    whitespace — newlines included — into single spaces. Normalising first and
+    splitting after would always yield exactly one line, which is the same
+    class of structurally-impossible code this function exists to remove.
+    """
+    lines = (normalize_title(part) for part in text.splitlines())
+    return tuple(line for line in lines if line)
+
+
+# Text a card renders that is the console's, not the user's. Excluded from the
+# short-title match below so that a caption which happens to BE one of these
+# words cannot borrow another post's card.
+#
+# Two sources, both from the same live read ([实测 2026-08-11], recorded in the
+# fixture header): the status vocabulary already tabulated above, and the four
+# operation words every card carries verbatim (编辑作品 设置权限 作品置顶
+# 删除作品). The regexes cover the badge, which is a duration on a video card
+# and 「{N}张」 on an image card — the only other short, per-card, repeating
+# text observed.
+_CARD_CHROME_LINES: frozenset[str] = frozenset(
+    normalize_title(word)
+    for word in (
+        *REJECTED_MARKERS,
+        *UNDER_REVIEW_MARKERS,
+        *SCHEDULED_MARKERS,
+        *LIVE_MARKERS,
+        "编辑作品",
+        "设置权限",
+        "作品置顶",
+        "删除作品",
+    )
+)
+_CARD_CHROME_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\d{1,4}张$"),  # image-post badge
+    re.compile(r"^\d{1,3}:\d{2}$"),  # video duration badge
+)
+
+
+def caption_lines(text: str) -> tuple[str, ...]:
+    """`card_lines(text)` minus the console's own chrome. Pure.
+
+    What is left is everything the user could plausibly have typed as the
+    caption. It is deliberately a filter over the whole card rather than an
+    attempt to pick THE caption line: which line that is depends on markup
+    nobody has measured, whereas "not one of the words the console puts on
+    every card" needs only the vocabulary already tabulated here.
+    """
+    return tuple(
+        line
+        for line in card_lines(text)
+        if line not in _CARD_CHROME_LINES
+        and not any(pattern.match(line) for pattern in _CARD_CHROME_PATTERNS)
+    )
 
 
 def extract_item_id(hrefs: Sequence[str]) -> str | None:
@@ -386,15 +451,45 @@ def classify_work_state(text: str) -> WorkState:
 def match_cards(cards: Sequence[WorkCard], title: str) -> list[WorkCard]:
     """Cards whose text carries `title`. Pure.
 
-    Substring rather than equality, because the card's text is the WHOLE card —
-    caption plus status word plus view counter — and because the platform
-    truncates long captions with an ellipsis.
+    Two ways in, and a card matches on either:
 
-    Short titles are matched by normalised equality against the card text
-    instead. A two-character title would otherwise match nearly every card on
-    the account, and a false match is far worse than a miss: a miss retries,
-    whereas a false match reports some OTHER post's state as this batch's
-    outcome.
+      * **any long-enough title, as a substring of the whole card.** The card's
+        text is the WHOLE card — caption plus status word plus counters — so
+        equality against it could never hold; a substring is the only form that
+        can. `_MIN_SUBSTRING_TITLE_LEN` is the floor, because 「测试」 as a
+        substring would match half the account.
+      * **any title, as one whole rendered LINE of the card** (`caption_lines`).
+        This is the stricter form: 「测试」 matches a card captioned exactly
+        「测试」 and NOT one captioned 「测试版本」.
+
+    ⚠️ The second route replaces a rule that was **structurally unsatisfiable**,
+    and the failure was live rather than theoretical. Short titles used to be
+    compared for equality against the whole card's text — the same string whose
+    own docstring says it also carries the status word and the view counter. No
+    caption can ever equal that, so EVERY title under
+    `_MIN_SUBSTRING_TITLE_LEN` characters resolved to `not_found` → NOT_LIVE →
+    a blocked work item, no matter what the platform actually showed. A post
+    published with a four-character title went live, was confirmed live on the
+    platform by eye, and the read-back reported it missing anyway. The floor
+    counts CHARACTERS, so on Chinese captions it swallows every four-Han-
+    character title — an entirely ordinary length, not just 「测试」-style
+    noise.
+
+    A miss is still preferred over a wrong match, and that ordering is why the
+    replacement is line equality rather than "substring for short titles too":
+    a miss retries and then asks a human, whereas a false match reports some
+    OTHER post's state as this batch's outcome — including, in the worst
+    direction, closing the work item as published on the strength of a
+    different post being live.
+
+    ⚠️ What the line route rests on, stated because it is an INFERENCE and not
+    a measurement: that the caption occupies a rendered line of its own, i.e.
+    that it sits in its own block element inside the card. The 2026-08-11 live
+    read counted six same-prefixed nodes per card but recorded no class names,
+    and the page-text excerpt it captured had already been whitespace-collapsed
+    (`inspect.py` joins `body.innerText` on single spaces), so no line
+    structure was ever observed. If the inference is wrong the short title
+    simply does not match — the same miss as today, never a new false verdict.
     """
     needle = normalize_title(title)
     if not needle:
@@ -404,10 +499,8 @@ def match_cards(cards: Sequence[WorkCard], title: str) -> list[WorkCard]:
         haystack = normalize_title(card.text)
         if not haystack:
             continue
-        if len(needle) >= _MIN_SUBSTRING_TITLE_LEN:
-            if needle in haystack:
-                out.append(card)
-        elif needle == haystack:
+        long_enough = len(needle) >= _MIN_SUBSTRING_TITLE_LEN
+        if (long_enough and needle in haystack) or needle in caption_lines(card.text):
             out.append(card)
     return out
 
@@ -654,6 +747,8 @@ __all__ = [
     "WorkCard",
     "WorkState",
     "build_published_url",
+    "caption_lines",
+    "card_lines",
     "classify_work_state",
     "extract_item_id",
     "judge_readback",
