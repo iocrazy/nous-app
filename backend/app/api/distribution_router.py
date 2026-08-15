@@ -48,9 +48,9 @@ from app.schemas.distribution_cover import (
     CoverSelectResponse,
 )
 from app.schemas.distribution_publish import (
-    PublishTaskCreate,
     PublishSmsStateResponse,
     PublishSmsVerdictResponse,
+    PublishTaskCreate,
     PublishTaskListResponse,
     PublishTaskOut,
     ShareSchemaResponse,
@@ -66,6 +66,7 @@ from app.services.distribution.credentials import (
     get_douyin_credentials,
 )
 from app.services.distribution.publish_gate import publish_request_problems
+from app.services.distribution.publish_sms_watch import PUBLISH_SMS_KEY
 from app.services.distribution.registry import get_adapter
 from app.services.distribution.topic_suggest import (
     MAX_KEYWORD_LEN,
@@ -78,7 +79,6 @@ from app.workflows.publish_distribution import (
     publish_distribution_workflow,
     visibility_to_private_status,
 )
-from app.services.distribution.publish_sms_watch import PUBLISH_SMS_KEY
 from app.workflows.session_login import TASK_TYPE as SESSION_LOGIN_TASK_TYPE
 from app.workflows.session_login import session_login_workflow
 

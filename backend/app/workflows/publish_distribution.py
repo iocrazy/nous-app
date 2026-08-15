@@ -559,13 +559,13 @@ async def _publish_one_account_session(
     from app.repositories.social_accounts_repository import (
         SESSION_STATE_DECRYPT_FAILED,
     )
+    from app.services.distribution.publish_sms_watch import publish_with_sms_channel
     from app.services.distribution.registry import get_session_adapter
     from app.services.distribution.session_adapter import (
         PublishOutcome,
         SessionOpResult,
         decrypt_failure_result,
     )
-    from app.services.distribution.publish_sms_watch import publish_with_sms_channel
     from app.services.distribution.session_lock import account_session_lock
 
     account_row_id = int(account["id"])
