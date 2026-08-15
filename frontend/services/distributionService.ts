@@ -403,6 +403,112 @@ export const suggestTopics = (
     { signal },
   ).then((r) => r.suggestions ?? []);
 
+/**
+ * One track from the platform's own catalogue.
+ *
+ * `music_id` is the platform's `id_str` — a STRING, deliberately. The same
+ * upstream row also carries an `id` as a JSON number past 2^53 (measured:
+ * 6953836671917951012), which is already a different number by the time it
+ * reaches this file. Publishing with the wrong id publishes the wrong song,
+ * and a published post cannot swap its music.
+ *
+ * `duration` is seconds and `user_count` is the raw integer: formatting
+ * (`5:25`, `3万人使用`) is the UI's job, never the API's.
+ */
+export interface MusicTrack {
+  music_id: string;
+  title: string;
+  author: string;
+  duration: number;
+  user_count: number;
+  cover_url: string;
+  play_url: string;
+}
+
+/**
+ * Whose session the catalogue was read with.
+ *
+ * The panel MUST show this. The catalogue itself is not account-specific, but
+ * the search credential is minted with one account's cookies, and the
+ * favourites tab is account-scoped on the platform (measured: three accounts,
+ * 0 / 18 / 9 saved tracks). Without it, changing the target account silently
+ * changes the list — the system knowing something the user cannot see.
+ */
+export interface MusicBrowseIdentity {
+  account_id: string;
+  username: string;
+  avatar_url: string | null;
+}
+
+export interface MusicSearchPage {
+  tracks: MusicTrack[];
+  cursor: number;
+  has_more: boolean;
+  cached: boolean;
+  browsing_as: MusicBrowseIdentity;
+}
+
+/**
+ * Typed reasons a catalogue lookup can fail. The panel branches on these
+ * codes; it never parses the English `message`.
+ *
+ * There is deliberately NO "empty list" failure mode. An empty `tracks` array
+ * means the platform answered with nothing — which is rare enough to be
+ * suspicious (a nonsense keyword still returns ~8 fuzzy matches), so the copy
+ * for it says "the platform returned nothing for that", not "no results".
+ */
+export const MUSIC_SEARCH_REASONS = [
+  'platform_unsupported',
+  'keyword_empty',
+  'account_not_session_bound',
+  'session_unusable',
+  'signature_unavailable',
+  'upstream_unreachable',
+  'upstream_status',
+  'upstream_shape',
+] as const;
+export type MusicSearchReason = (typeof MUSIC_SEARCH_REASONS)[number];
+
+/** Pull the typed reason (and any back-off hint) out of a rejected search. */
+export const musicSearchFailure = (
+  err: unknown,
+): { reason: MusicSearchReason | null; retryAfterS: number | null } => {
+  if (!(err instanceof DistributionApiError)) return { reason: null, retryAfterS: null };
+  const detail = err.detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+    return { reason: null, retryAfterS: null };
+  }
+  const raw = (detail as { reason?: unknown }).reason;
+  const after = (detail as { retry_after_s?: unknown }).retry_after_s;
+  return {
+    reason: MUSIC_SEARCH_REASONS.includes(raw as MusicSearchReason)
+      ? (raw as MusicSearchReason)
+      : null,
+    retryAfterS: typeof after === 'number' ? after : null,
+  };
+};
+
+/**
+ * Search the platform's music catalogue.
+ *
+ * `accountId` is whose session pays for the lookup (the first target account).
+ * Rejects — never resolves to an empty page — when the lookup itself failed.
+ */
+export const searchMusic = (
+  keyword: string,
+  accountId: string,
+  cursor = 0,
+  platform = 'douyin',
+  signal?: AbortSignal,
+): Promise<MusicSearchPage> =>
+  request<MusicSearchPage>(
+    `/music/search?platform=${encodeURIComponent(platform)}`
+    + `&account_id=${encodeURIComponent(accountId)}`
+    + `&keyword=${encodeURIComponent(keyword)}`
+    + `&cursor=${cursor}`,
+    { signal },
+  );
+
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
 
