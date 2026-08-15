@@ -564,6 +564,135 @@ BUSY_SELECTORS: tuple[str, ...] = (
 )
 
 
+# Read-only, constant, and it AGGREGATES INSIDE THE PAGE on purpose.
+#
+# The interesting field on a `PerformanceResourceTiming` is `name` — the full
+# request URL — and this repository is public while `verify_detail` lands in a
+# database row and in logs. So the counting happens in the browser and only
+# integers cross back. There is no code path here that can return a URL,
+# because no URL is ever put into the returned object.
+#
+# `responseStatus` needs Chromium 109+. When it is missing the entry counts as
+# `unknown` and `status_supported` stays false, so the caller can render `?`
+# instead of a zero that would read like "no failures". A capability we do not
+# have must not look like an observation we made.
+_NETWORK_TIMING_JS = """
+() => {
+  let entries = [];
+  try { entries = performance.getEntriesByType('resource') || []; }
+  catch (err) { return null; }
+  const out = {
+    resources: entries.length, xhr: 0, ok: 0, c4: 0, c5: 0,
+    unknown: 0, empty: 0, status_supported: false,
+    ready: (document && document.readyState) || ''
+  };
+  for (const entry of entries) {
+    const kind = entry.initiatorType;
+    if (kind !== 'xmlhttprequest' && kind !== 'fetch') continue;
+    out.xhr += 1;
+    const status = entry.responseStatus;
+    if (typeof status === 'number' && status > 0) {
+      out.status_supported = true;
+      if (status >= 500) out.c5 += 1;
+      else if (status >= 400) out.c4 += 1;
+      else out.ok += 1;
+    } else {
+      out.unknown += 1;
+    }
+    if (!entry.transferSize && !entry.encodedBodySize) out.empty += 1;
+  }
+  return out;
+}
+"""
+
+
+@dataclass(frozen=True)
+class NetProbe:
+    """Did the page ever ASK for its works list. Counts and status buckets only.
+
+    [实测 2026-08-15] Why this exists. After the read-back learnt to wait, it
+    waited the full 20 s and the page was byte-for-byte as empty as it had been
+    at 2.5 s (`textlen=105`, `busy=1`, `divs=73` — against 105/1/72 before).
+    That rules out "slow": nothing was arriving at all. The remaining question
+    is one level down — whether the list was requested and failed, or never
+    requested.
+
+    ⚠️ `xhr_before` / `xhr` bracket the wait. Growth means the page IS talking
+    and not rendering; a flat zero means it never asked. Those are different
+    bugs with different fixes, and one number apiece separates them.
+    """
+
+    resources: int | None = None
+    xhr_before: int | None = None
+    xhr: int | None = None
+    ok: int | None = None
+    c4: int | None = None
+    c5: int | None = None
+    unknown: int | None = None
+    empty: int | None = None
+    ready_state: str | None = None
+
+    def render(self) -> str:
+        return (
+            f"[net res={_num(self.resources)}"
+            f" xhr={_num(self.xhr_before)}->{_num(self.xhr)}"
+            f" ok={_num(self.ok)} 4xx={_num(self.c4)} 5xx={_num(self.c5)}"
+            f" unk={_num(self.unknown)} empty={_num(self.empty)}"
+            f" doc={self.ready_state or '?'}]"
+        )
+
+
+async def measure_network(page: Any, xhr_before: int | None = None) -> NetProbe:
+    """One retroactive read of the page's own resource timings. Never raises.
+
+    **Retroactive is the whole reason this shape was chosen.** The recorder
+    `probe.py` uses attaches to the browser CONTEXT (`context.on("response")`)
+    and has to be attached before navigation; this module is handed a `page`
+    that has already navigated and settled (`verify.py` creates the context,
+    navigates, waits, and only then calls `spec.read(page, title)`). The
+    Resource Timing buffer is already populated by then, so it answers the same
+    question without a listener, without touching the neutral runner, and
+    without one extra request to the platform.
+
+    ⚠️ What it cannot see: a request still in flight. Entries are only added
+    when a response completes, so "asked and never got an answer" shows up as
+    absence, not as a pending row. That is precisely what `xhr_before -> xhr`
+    is for — a page retrying in the background moves the number even when
+    nothing ever completes... and if it does not, `empty` and the status
+    buckets have to carry the finding instead.
+    """
+    try:
+        raw = await page.evaluate(_NETWORK_TIMING_JS)
+    except Exception:  # noqa: BLE001
+        return NetProbe(xhr_before=xhr_before)
+    if not isinstance(raw, dict):
+        return NetProbe(xhr_before=xhr_before)
+
+    def _int(key: str) -> int | None:
+        value = raw.get(key)
+        return int(value) if isinstance(value, (int, float)) else None
+
+    supported = bool(raw.get("status_supported"))
+    return NetProbe(
+        resources=_int("resources"),
+        xhr_before=xhr_before,
+        xhr=_int("xhr"),
+        # Without `responseStatus` these are not zeroes, they are unknowns.
+        ok=_int("ok") if supported else None,
+        c4=_int("c4") if supported else None,
+        c5=_int("c5") if supported else None,
+        unknown=_int("unknown"),
+        empty=_int("empty"),
+        ready_state=str(raw.get("ready") or "") or None,
+    )
+
+
+async def count_xhr(page: Any) -> int | None:
+    """Completed XHR/fetch entries right now, or None. Never raises."""
+    probe = await measure_network(page)
+    return probe.xhr
+
+
 @dataclass(frozen=True)
 class PageProbe:
     """WHICH PAGE the read-back actually reached. Counts and labels only.
@@ -647,6 +776,8 @@ class ListProbe:
     won_lines: int | None = None
     # Which page this was read off, when it could be determined.
     page: PageProbe | None = None
+    # Whether the page ever asked for its list.
+    net: NetProbe | None = None
 
     def render(self) -> str:
         roots = ",".join(
@@ -655,13 +786,14 @@ class ListProbe:
         )
         won = probe_label(self.won) if self.won else "none"
         page = f" {self.page.render()}" if self.page is not None else ""
+        net = f" {self.net.render()}" if self.net is not None else ""
         return (
             f"[probe cards={_num(self.cards)} won={won}"
             f" wonlen={_num(self.won_len)}/{_num(self.won_lines)}"
             f" roots={roots or 'none'}"
             f" title_exact={_num(self.title_exact)}"
             f" ops={_num(self.op_words[0])}/{_num(self.op_words[1])}]"
-            f"{page}"
+            f"{page}{net}"
         )
 
 
@@ -1191,7 +1323,11 @@ async def read_works_list(
 
 
 async def measure_page_probes(
-    page: Any, title: str, probe: ListProbe, readiness: Readiness | None = None
+    page: Any,
+    title: str,
+    probe: ListProbe,
+    readiness: Readiness | None = None,
+    xhr_before: int | None = None,
 ) -> ListProbe:
     """`probe` with the page-level counts filled in.
 
@@ -1217,6 +1353,7 @@ async def measure_page_probes(
             await _exact_text_count(page, "删除作品"),
         ),
         page=await measure_page(page, readiness),
+        net=await measure_network(page, xhr_before),
     )
 
 
@@ -1315,10 +1452,14 @@ async def verify_publish(page: Any, title: str) -> ReadbackJudgement:
        It costs one locator call and it closes the gap that turned "we arrived
        early" into "we read the list".
     """
+    # Sampled BEFORE the wait so the pair brackets it: a page that is talking
+    # to the platform and still not rendering moves this number, one that never
+    # asked does not. Same read, two moments — see `NetProbe`.
+    xhr_before = await count_xhr(page)
     readiness = await wait_for_works_list(page)
     cards, probe = await read_works_list(page)
     empty = await _empty_state_or_false(page)
-    probe = await measure_page_probes(page, title, probe, readiness)
+    probe = await measure_page_probes(page, title, probe, readiness, xhr_before)
     return judge_readback(
         cards, title, list_empty=empty, probe=probe, ready=readiness.ready
     )
@@ -1345,6 +1486,7 @@ __all__ = [
     "ListProbe",
     "LOGIN_MARKER_CANDIDATES",
     "MAX_CARDS",
+    "NetProbe",
     "PageProbe",
     "WORKS_PAGE_MARKER_CANDIDATES",
     "REJECTED_MARKERS",
@@ -1359,7 +1501,10 @@ __all__ = [
     "caption_lines",
     "card_lines",
     "classify_work_state",
+    "count_xhr",
     "extract_item_id",
+    "has_work_evidence",
+    "measure_network",
     "judge_readback",
     "list_is_empty",
     "match_cards",
