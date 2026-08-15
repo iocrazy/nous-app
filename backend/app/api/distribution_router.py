@@ -34,6 +34,7 @@ from app.schemas.distribution import (
     CapabilitiesResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
+    ReadbackTiming,
     SessionLoginCancelResponse,
     SessionLoginRequest,
     SessionLoginResponse,
@@ -53,6 +54,7 @@ from app.schemas.distribution_publish import (
     PublishTaskCreate,
     PublishTaskListResponse,
     PublishTaskOut,
+    PublishTaskRetryRequest,
     ShareSchemaResponse,
     TaskAccountOut,
     TopicRef,
@@ -66,6 +68,10 @@ from app.services.distribution.credentials import (
     get_douyin_credentials,
 )
 from app.services.distribution.publish_gate import publish_request_problems
+from app.services.distribution.publish_options import (
+    SCHEDULE_STATE_UNREACHABLE,
+    schedule_state,
+)
 from app.services.distribution.publish_sms_watch import PUBLISH_SMS_KEY
 from app.services.distribution.registry import get_adapter
 from app.services.distribution.topic_suggest import (
@@ -513,8 +519,26 @@ async def get_capabilities(user: CurrentUserDep) -> CapabilitiesResponse:
     平台、各自的上限，属于内部能力信息，不是公开的 status page。
     """
     from app.services.distribution.session_adapter import platform_capabilities
+    from app.workflows.publish_readback import (
+        GO_LIVE_GRACE_S,
+        MAX_ATTEMPTS,
+        MIN_RETRY_INTERVAL_S,
+    )
 
-    return CapabilitiesResponse(platforms=platform_capabilities())
+    return CapabilitiesResponse(
+        platforms=platform_capabilities(),
+        # 记录页要能回答"还要等多久才知道发出去了没有"。唯一诚实的答案是这三
+        # 个常量算出来的，所以在这里投影一次，而不是让前端写一个自己的数 ——
+        # 那种数会漂，而且下一步就会被当成平台的承诺讲给用户听（正是
+        # ``SCHEDULE_TOO_SOON`` 那句话已经犯过的错）。
+        publish_readback=ReadbackTiming(
+            first_check_after_seconds=GO_LIVE_GRACE_S,
+            # 最后一次尝试之后才放弃，所以是 (N-1) 个间隔，不是 N 个。
+            give_up_after_seconds=(
+                GO_LIVE_GRACE_S + max(0, MAX_ATTEMPTS - 1) * MIN_RETRY_INTERVAL_S
+            ),
+        ),
+    )
 
 
 @router.get(
@@ -870,6 +894,7 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
         status=rollup,
         created_at=task["created_at"],
         scheduled_at=task.get("scheduled_at"),
+        schedule_state=schedule_state(task.get("scheduled_at")),
         self_declaration=task.get("self_declaration"),
         collection_name=task.get("collection_name"),
         music_name=task.get("music_name"),
@@ -885,6 +910,8 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
                 published_url=a.get("published_url"),
                 platform_item_id=a.get("platform_item_id"),
                 published_at=a.get("published_at"),
+                verify_state=a.get("verify_state"),
+                verify_detail=a.get("verify_detail"),
             )
             for a in accounts
         ],
@@ -1174,8 +1201,52 @@ async def cancel_task(task_id: int, user: CurrentUserDep):
     response_model=PublishTaskOut,
     dependencies=[Depends(require_distribution)],
 )
-async def retry_task(task_id: int, user: CurrentUserDep):
+async def retry_task(
+    task_id: int,
+    user: CurrentUserDep,
+    body: Optional[PublishTaskRetryRequest] = None,
+):
+    """Re-dispatch a failed batch.
+
+    ⚠️ **A retry whose schedule has expired can never succeed.** The batch keeps
+    the ``scheduled_at`` it was created with, and the publish intent is validated
+    again before the browser opens — so re-dispatching a batch whose time has
+    passed just burns a workflow and writes a second, identical failure. In
+    production a user pressed the button three times and got three 200s and
+    three rejections; from the UI it looked like nothing happened at all.
+
+    So the default mode refuses it with a typed 409 instead of pretending. The
+    way out is ``mode='now'``, which drops the schedule and publishes
+    immediately — a *different* intent, which is why the caller has to say it
+    out loud rather than get it silently. Nothing here rewrites a schedule on
+    the user's behalf: a post going live at a moment they did not choose cannot
+    be taken back.
+    """
     task = await _authorize_task(task_id, user)
+    mode = (body or PublishTaskRetryRequest()).mode
+    state = schedule_state(task.get("scheduled_at"))
+    if state == SCHEDULE_STATE_UNREACHABLE:
+        if mode != "now":
+            # Typed reason, not prose: the frontend keys its copy off ``reason``
+            # (the contract), the message is for logs — same split the submit
+            # gate uses. Deliberately does NOT restate the platform's minimum
+            # lead here; that number is ours-dressed-as-theirs and is being
+            # dealt with separately.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "schedule_unreachable",
+                    "message": (
+                        "this batch's scheduled publish time has passed, so "
+                        "re-running it as scheduled would be rejected again; "
+                        "retry with mode='now' to publish immediately instead"
+                    ),
+                },
+            )
+        # The user explicitly chose "publish now" in front of a message saying
+        # the schedule is gone. Clear it BEFORE dispatching: the workflow reads
+        # the row, so leaving it set would reproduce the exact rejection.
+        await publish_repo.clear_task_schedule(task_id)
     # Re-key task_tracking to a fresh workflow id and re-dispatch (retry_task
     # with new_workflow_id — otherwise the row keeps pointing at the terminal
     # workflow and the sweeper re-marks it lost; see bug_retry_failed_downloads).

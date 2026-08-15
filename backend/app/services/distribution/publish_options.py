@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 # ── 自主声明（抖音「自主声明」下拉） ────────────────────────────────
 
@@ -119,6 +119,19 @@ SCHEDULE_TOO_SOON = (
 SCHEDULE_TOO_FAR = "scheduled_at must be within 14 days from now"
 SCHEDULE_NAIVE = "scheduled_at must include a timezone offset"
 
+#: 一批定时发布**现在**还能不能按原样兑现。
+#:
+#: * ``none``        —— 没有定时（立即发布）
+#: * ``pending``     —— 还在窗口内，按原样重投是能成的
+#: * ``unreachable`` —— 时间已经过去（或近到不够传完），按原样重投**必然**被拒
+#:
+#: 存在的理由：``validate_scheduled_at`` 回的是一句给日志/422 用的英文，调用方
+#: 想知道的却是"这批还能不能重投"这个**是非题**。让每个调用方各自去 parse 那
+#: 句话，或者各自重算一遍 ``now + min_lead``，就是把同一条规则抄成 N 份。
+SCHEDULE_STATE_NONE = "none"
+SCHEDULE_STATE_PENDING = "pending"
+SCHEDULE_STATE_UNREACHABLE = "unreachable"
+
 
 def validate_scheduled_at(
     scheduled_at: Optional[datetime],
@@ -156,6 +169,50 @@ def validate_scheduled_at(
     if delta > max_ahead:
         return SCHEDULE_TOO_FAR
     return None
+
+
+def schedule_state(
+    scheduled_at: Any,
+    *,
+    now: Optional[datetime] = None,
+    min_lead: timedelta = SCHEDULE_MIN_LEAD,
+) -> str:
+    """这批定时**现在**处于哪一档（``SCHEDULE_STATE_*``）。纯函数。
+
+    只看下限那一侧，**不看上限**：``TOO_FAR``（超过 14 天）是等一等就会自己
+    好的，而下限只会越过越远 —— 时间不倒流。把两者都算成 ``unreachable`` 会
+    让一批"太远了"的任务被当成"没救了"。
+
+    入参刻意收 ``Any``：调用方是序列化层，拿到的是 ``publish_tasks.scheduled_at``
+    这一列**经过某条读路径之后**的样子 —— ORM 给 ``datetime``，而 PostgREST /
+    JSON 那条给 ISO 字符串。在这里认两种，好过让每个调用方各自 parse 一遍
+    （漏一处就是那条路径上的门静默失效）。
+
+    认不出来的值（None / 空串 / 垃圾）一律 ``none``：这个函数只负责回答"定时
+    还能不能兑现"，而没有可信的定时时间时，那个问题本身就不成立。真正的格式
+    校验在写入侧（``validate_scheduled_at``），不在这里重做一遍。
+
+    naive datetime 当 UTC，不像 ``validate_scheduled_at`` 那样拒绝：那一个守的
+    是用户输入（猜错时区会让稿子早八小时发出去，宁可 422），这一个读的是已经
+    落库的 ``timestamptz``，抛异常只会把整个列表接口打成 500。
+    """
+    if scheduled_at is None:
+        return SCHEDULE_STATE_NONE
+    if isinstance(scheduled_at, datetime):
+        when = scheduled_at
+    else:
+        try:
+            when = datetime.fromisoformat(str(scheduled_at).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return SCHEDULE_STATE_NONE
+    if when.tzinfo is None or when.tzinfo.utcoffset(when) is None:
+        when = when.replace(tzinfo=timezone.utc)
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    if (when - ref) < min_lead:
+        return SCHEDULE_STATE_UNREACHABLE
+    return SCHEDULE_STATE_PENDING
 
 
 # ── 合集 ────────────────────────────────────────────────────────
@@ -221,6 +278,9 @@ __all__ = [
     "SCHEDULE_MIN_LEAD",
     "SCHEDULE_PLATFORM_MIN_LEAD",
     "SCHEDULE_NAIVE",
+    "SCHEDULE_STATE_NONE",
+    "SCHEDULE_STATE_PENDING",
+    "SCHEDULE_STATE_UNREACHABLE",
     "SCHEDULE_TOO_FAR",
     "SCHEDULE_TOO_SOON",
     "SELF_DECLARATIONS",
@@ -233,6 +293,7 @@ __all__ = [
     "normalize_collection",
     "normalize_music",
     "resolve_self_declaration",
+    "schedule_state",
     "self_declaration_conflicts",
     "validate_scheduled_at",
 ]

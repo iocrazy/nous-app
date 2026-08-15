@@ -5,7 +5,8 @@ import { useToast } from '../Toast';
 import PublishSmsPrompt from './PublishSmsPrompt';
 import { useTaskManager } from '../../contexts/TaskManagerContext';
 import {
-  getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
+  getReadbackTiming, getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
+  type ReadbackTiming,
 } from '../../services/distributionService';
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
 import { humanizeTaskError } from '../../utils/humanizeTaskError';
@@ -142,6 +143,71 @@ const PUBLISH_NOTE_KEYS: ReadonlyArray<{
   },
 ];
 
+/**
+ * Where a session-channel post stands with the PLATFORM, which is a different
+ * question from whether our upload finished.
+ *
+ * `status: 'success'` answers "did we finish typing it in and pressing
+ * publish". Whether the platform then put it live is answered minutes later by
+ * `publish_readback`, and until that verdict arrives there is genuinely
+ * nothing to claim. Both used to render as a flat "Published", which is how a
+ * work item correctly held for confirmation became indistinguishable from a
+ * stuck one.
+ */
+type VerifyDisplay = 'settled' | 'awaiting' | 'verified' | 'notLive' | 'unconfirmed';
+
+/**
+ * `verify_state` → what to draw. Pure.
+ *
+ * ⚠️ `notLive` and `awaiting` are separate on purpose and must never be merged.
+ * `not_live` means we looked and the platform is not showing it; `pending`
+ * (and `null`, its starting point) means this round could not tell us — a
+ * crashed browser container looks exactly like that. Collapsing the two would
+ * render our own outage as "the platform rejected your post", which is the
+ * asymmetry `publish_readback.py`'s docstring is written about.
+ *
+ * Anything that is not a session-channel success returns `settled`: official
+ * and H5 rows get their URL from the API that created them and are never read
+ * back, so showing them as "awaiting confirmation" would invent a wait that is
+ * not happening. This mirrors the backend's `_readback_columns`, which scopes
+ * the same way.
+ */
+const verifyDisplayFor = (a: PublishTaskAccount): VerifyDisplay => {
+  if (a.status !== 'success' || a.channel !== 'session') return 'settled';
+  switch (a.verify_state) {
+    case 'verified': return 'verified';
+    case 'not_live': return 'notLive';
+    case 'abandoned': return 'unconfirmed';
+    // A platform with no read-back implementation is OUR coverage gap. Holding
+    // the row in "awaiting" forever would punish the user for it, so it reads
+    // as plainly published — same call the backend's `readback_verdict` makes.
+    case 'not_supported': return 'settled';
+    case 'pending':
+    default: return 'awaiting'; // includes null/undefined = never checked yet
+  }
+};
+
+/** `[reason] prose` from a read-back → the i18n key that explains it. Same
+ *  split as PUBLISH_NOTE_KEYS: the bracketed reason is the contract, the
+ *  English after it is written for logs and must never reach a user. */
+const VERIFY_REASON_KEYS: ReadonlyArray<{ test: RegExp; key: string; fallback: string }> = [
+  {
+    test: /\[rejected\]/i,
+    key: 'distribution.records.verifyRejected',
+    fallback: 'The platform refused this post. Check the account notifications for the reason, then edit and publish again.',
+  },
+  {
+    test: /\[under_review\]/i,
+    key: 'distribution.records.verifyUnderReview',
+    fallback: 'The platform is still reviewing this post, so it is not public yet.',
+  },
+  {
+    test: /\[not_found\]/i,
+    key: 'distribution.records.verifyNotFound',
+    fallback: 'This post is not in the account any more — it may have been removed.',
+  },
+];
+
 export const RecordsPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -149,6 +215,11 @@ export const RecordsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // How long OUR read-back takes. Fetched rather than written down here: the
+  // numbers are backend constants, and a copy in the frontend is a second
+  // declaration that will drift — and, worse, drift into being told to the user
+  // as though the platform had promised it.
+  const [readbackTiming, setReadbackTiming] = useState<ReadbackTiming | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -171,6 +242,17 @@ export const RecordsPage: React.FC = () => {
   }, [t]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Separate from `reload` (not folded into its Promise.all) so a failure here
+  // can never take the records list down with it. Losing the timing costs one
+  // clause of one sentence; losing the list costs the page.
+  useEffect(() => {
+    let alive = true;
+    getReadbackTiming()
+      .then((timing) => { if (alive) setReadbackTiming(timing); })
+      .catch((err) => { console.error('distribution: read-back timing failed', err); });
+    return () => { alive = false; };
+  }, []);
 
   // ── DBOS-driven live sync (route C) ──
   // task_tracking is the execution engine's single UI source of truth, and
@@ -253,10 +335,80 @@ export const RecordsPage: React.FC = () => {
     [t],
   );
 
-  const onRetry = async (id: string) => {
+  /** Chip copy + colour for a row whose platform standing we do know something
+   *  about. `settled` returns null — the plain per-status chip already says it. */
+  const verifyChip = useCallback(
+    (display: VerifyDisplay): { label: string; cls: string; pulse?: boolean } | null => {
+      switch (display) {
+        case 'awaiting':
+          return {
+            label: t('distribution.records.verifyAwaiting', 'Awaiting platform confirmation'),
+            cls: 'chip-amber',
+            pulse: true,
+          };
+        case 'verified':
+          return { label: t('distribution.records.verifyLive', 'Live on platform'), cls: 'chip-green' };
+        case 'notLive':
+          return { label: t('distribution.records.verifyNotLive', 'Not live on platform'), cls: 'chip-red' };
+        case 'unconfirmed':
+          // NOT "failed" and NOT "rejected": we ran out of attempts without
+          // ever getting an answer. Saying more than that would be inventing a
+          // verdict we never obtained.
+          return { label: t('distribution.records.verifyUnconfirmed', 'Could not confirm'), cls: 'chip-amber' };
+        default:
+          return null;
+      }
+    },
+    [t],
+  );
+
+  /** "we start looking after X, we give up after Y" — in minutes, from the
+   *  backend's own constants. Null while they have not arrived (or could not
+   *  be fetched), in which case the copy simply omits the numbers rather than
+   *  substituting a guess. */
+  const awaitingHint = useCallback((): string => {
+    if (!readbackTiming) {
+      return t(
+        'distribution.records.verifyAwaitingHint',
+        'The upload finished. We check the platform afterwards and update this once the post is confirmed live.',
+      );
+    }
+    const first = Math.max(1, Math.round(readbackTiming.first_check_after_seconds / 60));
+    const limit = Math.max(first, Math.round(readbackTiming.give_up_after_seconds / 60));
+    return t(
+      'distribution.records.verifyAwaitingHintTimed',
+      'The upload finished. We start checking the platform about {{first}} minutes later and keep trying for up to {{limit}} minutes.',
+      { first, limit },
+    );
+  }, [readbackTiming, t]);
+
+  /** A read-back `verify_detail` → translated copy, keyed on the bracketed
+   *  reason. Falls back to a neutral sentence rather than echoing the backend's
+   *  English, which is written for logs. */
+  const verifyReasonText = useCallback(
+    (raw: string | null | undefined, display: VerifyDisplay): string => {
+      for (const row of VERIFY_REASON_KEYS) {
+        if (raw && row.test.test(raw)) return t(row.key, row.fallback);
+      }
+      return display === 'notLive'
+        ? t('distribution.records.verifyNotLiveGeneric', 'The platform is not showing this post.')
+        : t(
+          'distribution.records.verifyUnconfirmedGeneric',
+          'We could not reach the platform to confirm it. The post may well be live — check the account.',
+        );
+    },
+    [t],
+  );
+
+  const onRetry = async (id: string, mode: 'as_scheduled' | 'now' = 'as_scheduled') => {
     try {
-      await retryPublishTask(id);
-      addToast(t('distribution.records.retried', 'Retrying'), 'success');
+      await retryPublishTask(id, mode);
+      addToast(
+        mode === 'now'
+          ? t('distribution.records.publishingNow', 'Publishing now')
+          : t('distribution.records.retried', 'Retrying'),
+        'success',
+      );
       void reload();
     } catch (err) {
       console.error('distribution: retry failed', err);
@@ -434,6 +586,11 @@ export const RecordsPage: React.FC = () => {
                       const aChipMeta = ACCOUNT_STATUS_META[a.status];
                       const aChipLabel = accountStatusLabel(a.status);
                       const platform = platformFor(a.account_id);
+                      // What the PLATFORM says, which is a different question
+                      // from whether our upload finished (`a.status`). Only a
+                      // session-channel success has one at all.
+                      const vDisplay = verifyDisplayFor(a);
+                      const vChip = verifyChip(vDisplay);
                       return (
                         <div key={a.id} className="sub-row">
                           {/* `avatar_url` here is joined live off social_accounts
@@ -450,6 +607,34 @@ export const RecordsPage: React.FC = () => {
                           <span className={`chip ${aChipMeta.cls} ${aChipMeta.pulse ? 'pulse' : ''}`}>
                             <span className="d" />{aChipLabel}
                           </span>
+                          {/* Second chip, next to (not instead of) the upload
+                              status. Both facts are true and neither implies
+                              the other: we finished sending it, AND the
+                              platform has/has not confirmed it. Replacing the
+                              first would lose "the upload is done", which is
+                              what tells the user there is nothing to re-send. */}
+                          {vChip && (
+                            <span className={`chip ${vChip.cls} ${vChip.pulse ? 'pulse' : ''}`}>
+                              <span className="d" />{vChip.label}
+                            </span>
+                          )}
+                          {vDisplay === 'awaiting' && (
+                            <span className="note">{awaitingHint()}</span>
+                          )}
+                          {/* The typed reason, carried through to the pixel.
+                              "Not live" on its own cannot be acted on — whether
+                              to appeal, wait, or re-publish depends entirely on
+                              WHY, and `unconfirmed` deliberately says something
+                              different from `notLive` here (we never got an
+                              answer vs. we got a negative one). */}
+                          {(vDisplay === 'notLive' || vDisplay === 'unconfirmed') && (
+                            <span
+                              className={vDisplay === 'notLive' ? 'err' : 'note'}
+                              title={a.verify_detail || undefined}
+                            >
+                              {verifyReasonText(a.verify_detail, vDisplay)}
+                            </span>
+                          )}
                           {a.status === 'success' && a.published_url && (
                             <a href={a.published_url} target="_blank" rel="noreferrer">
                               {t('distribution.records.view', 'View post')}
@@ -488,9 +673,47 @@ export const RecordsPage: React.FC = () => {
                               <span className="err" title={a.error_message || undefined}>
                                 {noteText(a.error_message)}
                               </span>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onRetry(task.id)}>
-                                {t('distribution.records.retry', 'Retry')}
-                              </button>
+                              {/* A batch keeps the `scheduled_at` it was created
+                                  with, and the publish intent is re-validated
+                                  before the browser opens. Once that time has
+                                  passed, "Retry" is a button that CANNOT
+                                  succeed — pressing it dispatches a workflow
+                                  that is rejected on the same rule, writes the
+                                  same failure back, and leaves the row looking
+                                  untouched. (A user pressed it three times.)
+
+                                  So we do not offer it. What we offer instead
+                                  says exactly what it will do: publish now,
+                                  without the schedule. That IS a change to what
+                                  the user originally asked for and it cannot be
+                                  undone once the post is up — which is why it
+                                  is a differently-labelled button next to a
+                                  sentence explaining the situation, and never
+                                  something "Retry" quietly turns into. Wanting
+                                  a different time is a new publish; the Publish
+                                  page is where the picker (and the platform's
+                                  own window) lives. */}
+                              {task.schedule_state === 'unreachable' ? (
+                                <>
+                                  <span className="note">
+                                    {t(
+                                      'distribution.records.scheduleExpired',
+                                      'The scheduled time for this batch has passed, so it cannot be published as scheduled any more.',
+                                    )}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => void onRetry(task.id, 'now')}
+                                  >
+                                    {t('distribution.records.publishNow', 'Publish now')}
+                                  </button>
+                                </>
+                              ) : (
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onRetry(task.id)}>
+                                  {t('distribution.records.retry', 'Retry')}
+                                </button>
+                              )}
                             </>
                           )}
                         </div>

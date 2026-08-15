@@ -2551,6 +2551,27 @@ export interface PublishTaskAccount {
   published_url: string | null;
   platform_item_id: string | null;
   published_at: string | null;
+  /**
+   * Did the platform confirm this post is actually live? (`publish_readback`)
+   *
+   * `status: 'success'` only means OUR upload finished — for the session
+   * channel the platform still has to accept it, which a scheduled read-back
+   * checks minutes later. Until this field existed the two were indistinguishable
+   * on screen, so a post awaiting confirmation and one confirmed live both read
+   * "Published".
+   *
+   * `null` = not checked yet (the starting point of `pending`), NOT "no check
+   * needed" — only `not_supported` means that.
+   *
+   * ⚠️ `not_live` ("we looked, it is not up") and `pending` ("this round could
+   * not tell us") must stay distinguishable all the way to the pixels. Folding
+   * them together renders a crashed container as "the platform rejected your
+   * post" — see the module docstring of `publish_readback.py`.
+   */
+  verify_state?: 'pending' | 'verified' | 'not_live' | 'not_supported' | 'abandoned' | null;
+  /** Typed reason (`[rejected] …`, `[under_review] …`, `[verification_abandoned] …`).
+   *  The bracketed code is the contract; the prose after it is written for logs. */
+  verify_detail?: string | null;
 }
 
 /**
@@ -2600,6 +2621,19 @@ export interface PublishTask {
   created_at: string;
   /** Platform-side scheduled publish time (ISO). null = published immediately. */
   scheduled_at: string | null;
+  /**
+   * Can that schedule still be honoured RIGHT NOW? Derived server-side.
+   *
+   * - `none` — not a scheduled batch
+   * - `pending` — still inside the window; re-running it as scheduled can work
+   * - `unreachable` — the time has passed (or is too close to finish the
+   *   upload), so re-running it as scheduled is guaranteed to be rejected
+   *
+   * Computed by the backend because the threshold (`SCHEDULE_MIN_LEAD`) is the
+   * backend's constant. Subtracting a lead the frontend guessed at would be a
+   * second copy of the rule with nothing keeping it in step.
+   */
+  schedule_state: 'none' | 'pending' | 'unreachable';
   /** null = the declaration control was left untouched. Distinct from
    *  '无需添加自主声明', which is the user explicitly declaring nothing. */
   self_declaration: SelfDeclaration | null;

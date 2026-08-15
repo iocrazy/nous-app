@@ -238,6 +238,22 @@ class TaskAccountOut(BaseModel):
     published_url: Optional[str] = None
     platform_item_id: Optional[str] = None
     published_at: Optional[datetime] = None
+    # ── 回读（``publish_readback``）────────────────────────────────
+    # ``status='success'`` 只说明**我们这边**传完了。这一条真的在平台上线了
+    # 没有，是回读那一轮才知道的事，而在这两列被下发之前，前端根本无从区分
+    # "发完了" 与 "发完了但平台还没确认" —— 用户看到的都是一个 Published。
+    #
+    # ⚠️ ``not_live``（我们查过了，它没上线）与 ``pending``（这一轮没问出来）
+    # 必须一路保持可分辨，直到画到屏幕上为止。合并它们是很自然的手滑，代价
+    # 却极不对称：一次容器宕机会被显示成"平台拒了你的稿"。原话见
+    # ``publish_readback`` 的模块 docstring。
+    #
+    # NULL = 还没查过（等于 pending 的起点），不是"不需要查"。
+    verify_state: Optional[str] = None
+    # 类型化原因（``[rejected] ...`` / ``[under_review] ...`` /
+    # ``[verification_abandoned] ...``）。前端按方括号里的 reason 键控翻译，
+    # 后面那段 prose 是写给日志的 —— 同 ``PUBLISH_NOTE_KEYS`` 的口径。
+    verify_detail: Optional[str] = None
 
 
 class PublishTaskOut(BaseModel):
@@ -257,6 +273,12 @@ class PublishTaskOut(BaseModel):
     # 哪一项"。写进去却读不回来，是 CLAUDE.md「触发路径必须类型化回显」在
     # 表单字段上的同族问题 —— ai_content 正是这么静默了两个版本。
     scheduled_at: Optional[datetime] = None
+    # 这一批的定时**现在**还能不能兑现（``SCHEDULE_STATE_*``）。
+    #
+    # 派生字段，服务端算：判据是 ``SCHEDULE_MIN_LEAD``，而那个常量属于后端。
+    # 让前端拿 ``scheduled_at`` 自己减一个它猜的下限，就是把同一条规则抄成
+    # 第二份 —— 而且抄的那一份没有任何东西能钉住它别漂。
+    schedule_state: str = "none"
     self_declaration: Optional[str] = None
     collection_name: Optional[str] = None
     music_name: Optional[str] = None
@@ -265,6 +287,23 @@ class PublishTaskOut(BaseModel):
 
 class PublishTaskListResponse(BaseModel):
     tasks: list[PublishTaskOut]
+
+
+#: 重投一批的三种意图。默认 ``as_scheduled`` —— **不许**默认改写用户当初选的
+#: 时间：把一条本该 15:20 上线的稿子改成"现在就发"，是一个不可撤销的动作，
+#: 而"再试一次"这个词从来不包含它。
+RetryMode = Literal["as_scheduled", "now"]
+
+
+class PublishTaskRetryRequest(BaseModel):
+    """``POST /tasks/{id}/retry`` 的可选请求体（不传 = ``as_scheduled``）。
+
+    ``now`` 是用户在界面上**另外**点的那个按钮（"Publish now"）：它显式清掉
+    ``scheduled_at``，也就显式承认"我知道这不再是定时发布了"。所以它不是
+    retry 的一个参数细节，而是一个不同的意图，必须由调用方写出来。
+    """
+
+    mode: RetryMode = "as_scheduled"
 
 
 class ShareSchemaResponse(BaseModel):

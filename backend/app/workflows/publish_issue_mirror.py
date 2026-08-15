@@ -464,6 +464,43 @@ def build_readback_note(verdict: str, details: Any) -> Optional[str]:
     return headline + " " + " | ".join(seen)
 
 
+def build_awaiting_readback_note() -> str:
+    """The line that tells a held work item WHAT it is waiting for. Pure.
+
+    Without it the item reads exactly like a stuck one: status ``in_progress``,
+    description empty, nothing anywhere saying a read-back is pending. A user
+    whose post was demonstrably live on the platform concluded the publish
+    system was broken — while the system was doing the right thing and simply
+    not saying so. Same family as every other "the system knows, the user
+    cannot see it" bug in this repo.
+
+    ⚠️ Every number in this sentence is **ours** (``publish_readback``'s
+    constants, read here rather than retyped), not the platform's. Writing "the
+    platform takes about ten minutes" would invent a promise on the platform's
+    behalf — the mistake ``SCHEDULE_TOO_SOON`` already made once.
+
+    Constant text on purpose: ``_append_issue_note`` de-duplicates by substring,
+    so a note carrying a timestamp would append a fresh copy every 2-minute
+    sweep until the description hit its 4000-char cap.
+    """
+    from app.workflows.publish_readback import (
+        GO_LIVE_GRACE_S,
+        MAX_ATTEMPTS,
+        MIN_RETRY_INTERVAL_S,
+    )
+
+    first = max(1, GO_LIVE_GRACE_S // 60)
+    give_up = max(
+        first, (GO_LIVE_GRACE_S + max(0, MAX_ATTEMPTS - 1) * MIN_RETRY_INTERVAL_S) // 60
+    )
+    return (
+        "Uploaded — waiting for the platform to confirm it is live. "
+        f"We start checking about {first} minutes after publishing and keep "
+        f"checking for up to {give_up} minutes; this item closes as soon as the "
+        "post is confirmed, and moves to blocked (with the reason) if it is not."
+    )
+
+
 async def _append_issue_note(issues, issue_id: int, note: str) -> None:
     """Append ``note`` to the issue description. Best-effort by contract.
 
@@ -522,6 +559,15 @@ async def _sync_terminal_batches() -> dict[str, int]:
                     counts["awaiting_schedule"] += 1
                 elif row.get("phase") == "completed" and verdict == "pending":
                     counts["awaiting_readback"] += 1
+                    # Say so ON the item. This counter used to be the ONLY
+                    # trace that a batch was held for the read-back, and it
+                    # lives in a workflow return value nobody reads — so from
+                    # the to-do list a correct hold and a stuck item were
+                    # indistinguishable. ``_append_issue_note`` is idempotent,
+                    # so re-running every 2 minutes writes it exactly once.
+                    await _append_issue_note(
+                        issues, int(row["issue_id"]), build_awaiting_readback_note()
+                    )
                 else:
                     counts["skipped"] += 1
                 continue

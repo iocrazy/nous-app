@@ -300,6 +300,25 @@ export const getPlatformCapabilities = (): Promise<Record<string, PlatformCapabi
     .then((r) => r.platforms);
 
 /**
+ * How long WE take to confirm a publish went live (`publish_readback`).
+ *
+ * ⚠️ These are our numbers, not the platform's — deliberately a separate shape
+ * from `PlatformCapability` so nobody reads them as a platform promise. They
+ * ride the capabilities endpoint only because that is already the channel for
+ * "the backend owns this constant, the frontend just displays it".
+ */
+export interface ReadbackTiming {
+  /** Earliest we look at all, measured from the moment the post went out. */
+  first_check_after_seconds: number;
+  /** After this we stop asking and the work item is blocked as unconfirmed. */
+  give_up_after_seconds: number;
+}
+
+export const getReadbackTiming = (): Promise<ReadbackTiming | null> =>
+  request<{ publish_readback?: ReadbackTiming | null }>('/capabilities')
+    .then((r) => r.publish_readback ?? null);
+
+/**
  * One live topic suggestion from the platform's own topic library.
  *
  * `topic_id` is the platform's topic ENTITY id (Douyin's challenge `cid`).
@@ -398,8 +417,28 @@ export const getPublishTask = (id: string): Promise<PublishTask> =>
 export const cancelPublishTask = (id: string): Promise<PublishTask> =>
   request<PublishTask>(`/tasks/${id}/cancel`, { method: 'POST' });
 
-export const retryPublishTask = (id: string): Promise<PublishTask> =>
-  request<PublishTask>(`/tasks/${id}/retry`, { method: 'POST' });
+/**
+ * Re-dispatch a failed batch.
+ *
+ * `mode` is the whole point of this signature. A batch keeps the
+ * `scheduled_at` it was created with, so retrying one whose time has passed is
+ * rejected again the moment the browser opens — the backend now answers that
+ * with a typed 409 (`reason: 'schedule_unreachable'`) instead of a cheerful
+ * 200 that changes nothing.
+ *
+ * `'now'` is the escape hatch: it drops the schedule and publishes
+ * immediately. That is a DIFFERENT intent from "try again", and irreversible
+ * once the post is up, so it is never the default and never inferred — the
+ * caller says it because the user pressed a button that says it.
+ */
+export const retryPublishTask = (
+  id: string,
+  mode: 'as_scheduled' | 'now' = 'as_scheduled',
+): Promise<PublishTask> =>
+  request<PublishTask>(`/tasks/${id}/retry`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
 
 /**
  * Sample candidate cover frames from a video (asynchronous).
