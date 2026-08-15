@@ -88,7 +88,9 @@ again.
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Sequence
@@ -326,6 +328,35 @@ MAX_CARDS = 24
 # are now reachable, which is the property that was missing.
 _MIN_SUBSTRING_TITLE_LEN = 6
 
+# The operation words the console prints on every card ([实测 2026-08-11]:
+# 编辑作品 / 设置权限 / 作品置顶 / 删除作品 on all 12 works). Two of them are
+# enough, and they carry two jobs:
+#
+#   * they are the READINESS signal — a rendered card is the only thing that
+#     puts them on the page, so a skeleton cannot fake them (unlike a class
+#     name, which page chrome shares).
+#   * they are the WORK EVIDENCE a node must carry to be accepted as a card.
+#
+# ⚠️ If the console renames them, both jobs fail SAFE: readiness never fires,
+# the read is INCONCLUSIVE, and the probe line shows `ops=0` — which is the
+# diagnosis, immediately.
+OPERATION_MARKERS: tuple[str, ...] = ("编辑作品", "删除作品")
+
+# How long to wait for the works list, and how often to look.
+#
+# [实测 2026-08-15] The read-back had NEVER waited for anything: it read a
+# fixed 2 500 ms after `domcontentloaded` and judged whatever was there. On the
+# live console that landed on a skeleton — `textlen=105`, `busy=1`, zero cards
+# under every selector, zero operation words — and a stray chrome node made it
+# look like a list had been read. Every read-back this mechanism has ever done
+# was that read; it has produced no successful verdict in its lifetime.
+#
+# 20 s sits well inside the per-attempt budget (`validate_attempt_timeout_s`
+# = 120 s) and is only ever spent in full when the page never becomes
+# readable — the wait returns the moment the list is there.
+READY_TIMEOUT_MS = 20_000
+READY_POLL_MS = 500
+
 _WHITESPACE = re.compile(r"\s+")
 _TRIM_CHARS = "　 \t\r\n​﻿"
 
@@ -545,6 +576,9 @@ class PageProbe:
     """
 
     where: str | None = None
+    # Why the wait ended: cards / empty / timeout — see `Readiness`.
+    ready: str | None = None
+    waited_ms: int | None = None
     text_len: int | None = None
     divs: int | None = None
     login_gate: int | None = None
@@ -556,6 +590,7 @@ class PageProbe:
     def render(self) -> str:
         return (
             f"[page where={self.where or '?'}"
+            f" ready={self.ready or '?'}/{_num(self.waited_ms)}ms"
             f" textlen={_num(self.text_len)}"
             f" divs={_num(self.divs)}"
             f" login={_num(self.login_gate)}+{_num(self.login_wide)}"
@@ -646,6 +681,52 @@ def classify_work_state(text: str) -> WorkState:
     return WorkState.UNKNOWN
 
 
+def has_work_evidence(text: str) -> bool:
+    """Is this node plausibly a WORK, rather than page furniture? Pure.
+
+    [实测 2026-08-15] the reason this exists. `[class^="card-"]` — the
+    class-name-free structural fallback — matched a piece of console chrome on
+    a page that had not rendered its works list yet. The reader accepted that
+    node, `verify_publish` therefore never asked whether the list was empty
+    (`empty = False if cards else …`), and a page we had simply arrived at too
+    early was reported as "we read the list and your post is not on it".
+
+    A node has to carry something only a work carries: one of the operation
+    words every card prints, or a status word we recognise. Chrome has
+    neither. Both routes are kept because they fail in different directions —
+    a console that renames the operation words still has statuses, and a work
+    in a status we do not know still has its operation words.
+
+    Failing this check does not lose a real card silently: it lowers the card
+    count, and a card count of zero routes to INCONCLUSIVE, which retries and
+    then asks a human.
+    """
+    if not text:
+        return False
+    if any(marker in text for marker in OPERATION_MARKERS):
+        return True
+    return classify_work_state(text) is not WorkState.UNKNOWN
+
+
+@dataclass(frozen=True)
+class Readiness:
+    """Did the works list actually render before we judged it.
+
+    `reason` is `cards` (works on screen), `empty` (the platform's own "no
+    works" state — also a rendered answer), or `timeout`.
+
+    ⚠️ `ready is False` must never produce NOT_LIVE for a post we did not
+    find. That is the whole bug this type exists to prevent, and the rule is
+    enforced in `judge_readback`, not here, so that it is a pure and tested
+    property rather than a habit of the driver.
+    """
+
+    ready: bool
+    reason: str
+    waited_ms: int | None = None
+    op_words: int | None = None
+
+
 def match_cards(cards: Sequence[WorkCard], title: str) -> list[WorkCard]:
     """Cards whose text carries `title`. Pure.
 
@@ -724,8 +805,29 @@ def judge_readback(
     *,
     list_empty: bool = False,
     probe: ListProbe | None = None,
+    ready: bool = True,
 ) -> ReadbackJudgement:
     """Cards + the caption we published → the verdict. Pure. Total.
+
+    `ready` says the works list was observed to have rendered. When it is
+    False, **"we did not find your post" may not be reported as NOT_LIVE** —
+    it becomes INCONCLUSIVE (`list_not_ready`), i.e. "ask again next tick".
+
+    That asymmetry is the point, and it is deliberately narrow:
+
+      * not ready + nothing matched  → INCONCLUSIVE. We were early; absence of
+        evidence is not evidence of absence.
+      * not ready + matched, and live → LIVE. Arriving early cannot make a post
+        we can SEE fake.
+      * not ready + matched, refused  → NOT_LIVE. We read that card's status
+        off the page; the verdict rests on what we saw, not on what we missed.
+
+    [实测 2026-08-15] Why it is spelled out rather than left to the caller: the
+    read-back read a fixed 2 500 ms after `domcontentloaded`, landed on a
+    skeleton, and reported a live post as missing. `publish_readback`'s module
+    docstring had already written down that merging "not live" with "no
+    answer" is the asymmetric mistake — this is that rule holding on the path
+    nobody had thought of.
 
     `probe` is appended to the message of the three "we did not find it"
     outcomes only — `not_found` (both forms) and `list_unreadable`. Those are
@@ -751,6 +853,16 @@ def judge_readback(
     suffix = f" {probe.render()}" if probe is not None else ""
 
     if not matches:
+        if not ready:
+            # We looked before the list had rendered. Nothing here is evidence
+            # about the post — least of all its absence.
+            return ReadbackJudgement(
+                ReadbackVerdict.INCONCLUSIVE,
+                "list_not_ready",
+                "the works list had not finished rendering when the read-back "
+                f"gave up waiting — no conclusion about this post{suffix}",
+                detail={"cards_seen": len(cards), "ready": False},
+            )
         if cards:
             # We read a real list and this post is not on it. For a scheduled
             # batch past its go-live time that means it never landed, or it was
@@ -913,7 +1025,89 @@ async def _group_count(page: Any, markers: Sequence[str]) -> int | None:
     return total
 
 
-async def measure_page(page: Any) -> PageProbe:
+async def _empty_state_or_false(page: Any) -> bool:
+    """`list_is_empty`, made total.
+
+    `dom.visible_marker_texts` builds its locator OUTSIDE its own try block, so
+    a page that raises on `get_by_text` propagates. That was survivable while
+    this was asked only when no card had been read; it is called on every read
+    now — in the poll loop as well — so it is guarded here rather than by
+    changing a helper four other platforms share.
+
+    False on failure is the safe default: it withholds the "this account has
+    no works" conclusion instead of inventing it.
+    """
+    try:
+        return await list_is_empty(page)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def wait_for_works_list(
+    page: Any,
+    *,
+    timeout_ms: int | None = None,
+    poll_ms: int | None = None,
+) -> Readiness:
+    """Wait until the works list has actually rendered. Never raises.
+
+    **A falsifiable signal, not a sleep.** Two things count as rendered, and
+    both are content the platform only emits once it has answered:
+
+      * operation words on screen — a work card is the only thing that prints
+        them, and the count must be non-zero AND unchanged between two
+        consecutive polls, so a list rendering progressively is not read
+        half-built;
+      * the platform's own empty state — "this account has no works" is an
+        answer too, and waiting for cards that will never come would turn an
+        empty account into a permanent timeout.
+
+    ⚠️ Card SELECTORS are deliberately not a readiness signal. Chrome shares
+    their class names — that is exactly how a skeleton page came to look like
+    a list that had been read ([实测 2026-08-15]: `card-:2/1` on a page whose
+    whole text was 105 characters). Readiness has to rest on something chrome
+    cannot produce.
+
+    Returning `ready=False` is a real outcome, not an error: the caller must
+    turn it into INCONCLUSIVE, never into "the post is gone".
+
+    The bounds resolve from the module constants at CALL time rather than as
+    default arguments, so a test can shrink them without a 20-second wait and
+    without the shrink silently becoming the production value.
+    """
+    timeout_ms = max(0, READY_TIMEOUT_MS if timeout_ms is None else timeout_ms)
+    poll_ms = max(0, READY_POLL_MS if poll_ms is None else poll_ms)
+    started = time.monotonic()
+    deadline = started + timeout_ms / 1000
+
+    # Bounded TWICE on purpose — wall clock and iteration count. `while True`
+    # is banned service-wide (spec 7.2, enforced by
+    # `test_no_unbounded_loop_survives_anywhere_in_the_service`) and the reason
+    # applies here exactly: a loop whose only ceiling is a `break` is one edit
+    # away from hanging the caller against a page that stopped responding.
+    max_polls = 1 + (timeout_ms // poll_ms if poll_ms else 0)
+
+    previous: int | None = None
+    ops: int | None = None
+
+    def elapsed() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    for _ in range(max_polls):
+        ops = await _group_count(page, OPERATION_MARKERS)
+        if ops and previous == ops:
+            return Readiness(True, "cards", elapsed(), ops)
+        if await _empty_state_or_false(page):
+            return Readiness(True, "empty", elapsed(), ops)
+        previous = ops
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(poll_ms / 1000)
+
+    return Readiness(False, "timeout", elapsed(), ops)
+
+
+async def measure_page(page: Any, readiness: Readiness | None = None) -> PageProbe:
     """Which page did we land on, and had it finished rendering.
 
     Every field fails soft to None. Nothing here reads as content: a label
@@ -941,6 +1135,8 @@ async def measure_page(page: Any) -> PageProbe:
 
     return PageProbe(
         where=page_label(url) if url else "unknown",
+        ready=readiness.reason if readiness else None,
+        waited_ms=readiness.waited_ms if readiness else None,
         text_len=text_len,
         divs=await _count_or_none(page, "div"),
         login_gate=await _group_count(page, LOGIN_TEXT_MARKERS),
@@ -994,7 +1190,9 @@ async def read_works_list(
     return [], ListProbe(roots=tuple(roots), won=None, cards=0)
 
 
-async def measure_page_probes(page: Any, title: str, probe: ListProbe) -> ListProbe:
+async def measure_page_probes(
+    page: Any, title: str, probe: ListProbe, readiness: Readiness | None = None
+) -> ListProbe:
     """`probe` with the page-level counts filled in.
 
     Separate from `read_works_list` because these two need the caption and the
@@ -1018,7 +1216,7 @@ async def measure_page_probes(page: Any, title: str, probe: ListProbe) -> ListPr
             await _exact_text_count(page, "编辑作品"),
             await _exact_text_count(page, "删除作品"),
         ),
-        page=await measure_page(page),
+        page=await measure_page(page, readiness),
     )
 
 
@@ -1063,6 +1261,11 @@ async def _read_cards_from(locator: Any, limit: int) -> list[WorkCard]:
             continue
         if not text or not text.strip():
             continue
+        if not has_work_evidence(text):
+            # Page furniture that happened to match a card selector. Dropping
+            # it is what keeps `verify_publish` asking whether the list was
+            # empty — see `has_work_evidence`.
+            continue
         card = WorkCard(text=text, hrefs=tuple(await _card_hrefs(node)))
         item_id = card.item_id
         if item_id is not None:
@@ -1099,11 +1302,26 @@ async def verify_publish(page: Any, title: str) -> ReadbackJudgement:
     conditionally would mean deciding the verdict before deciding what to
     measure, and the page is already loaded — three more counts against it are
     not worth a second code path.
+
+    Two changes here are load-bearing, both from [实测 2026-08-15]:
+
+    1. **It waits for the list before reading it.** The caller's fixed settle
+       is now only a floor; `wait_for_works_list` is what decides the page is
+       readable. Reading on a timer is how a live post got reported missing.
+    2. **`list_is_empty` is asked unconditionally.** It used to be skipped
+       whenever any card had been read (`empty = False if cards else …`), so
+       one chrome node matching a card selector silently removed the "does the
+       platform say this account is empty" question from the whole judgement.
+       It costs one locator call and it closes the gap that turned "we arrived
+       early" into "we read the list".
     """
+    readiness = await wait_for_works_list(page)
     cards, probe = await read_works_list(page)
-    empty = False if cards else await list_is_empty(page)
-    probe = await measure_page_probes(page, title, probe)
-    return judge_readback(cards, title, list_empty=empty, probe=probe)
+    empty = await _empty_state_or_false(page)
+    probe = await measure_page_probes(page, title, probe, readiness)
+    return judge_readback(
+        cards, title, list_empty=empty, probe=probe, ready=readiness.ready
+    )
 
 
 SPEC = VerifySpec(

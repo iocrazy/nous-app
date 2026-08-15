@@ -28,8 +28,13 @@ from pathlib import Path
 
 import pytest
 
+from app.platforms import douyin_verify
 from app.platforms.douyin_verify import (
     CARD_SELECTORS,
+    OPERATION_MARKERS,
+    Readiness,
+    has_work_evidence,
+    wait_for_works_list,
     LIVE_MARKERS,
     ListProbe,
     PageProbe,
@@ -59,6 +64,28 @@ from app.schemas import SessionStatus
 from tests.dom_fixture import FakePage, UnsupportedSelector
 
 pytestmark = pytest.mark.unit
+
+# Captured at import, BEFORE the autouse fixture below shrinks them, so the
+# "what actually ships" test can still see the real values.
+SHIPPED_READY_TIMEOUT_MS = douyin_verify.READY_TIMEOUT_MS
+SHIPPED_READY_POLL_MS = douyin_verify.READY_POLL_MS
+
+
+@pytest.fixture(autouse=True)
+def _fast_readiness_wait(monkeypatch):
+    """Shrink the readiness bounds for every test in this file.
+
+    `FakePage` is a static document, so a page that is not ready never becomes
+    ready and the real 20-second timeout would be spent in full, on every
+    negative test. Shrunk here rather than passed at each call site so that
+    `verify_publish` — which takes only `(page, title)`, because that is the
+    shape `VerifySpec` calls — is still exercised through its real signature.
+
+    `test_the_shipped_bounds_are_sane` pins the production values, so this
+    fixture cannot quietly become the thing that ships.
+    """
+    monkeypatch.setattr(douyin_verify, "READY_TIMEOUT_MS", 60)
+    monkeypatch.setattr(douyin_verify, "READY_POLL_MS", 5)
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "douyin_works_manage.html").read_text(
     encoding="utf-8"
@@ -197,13 +224,20 @@ class TestAgainstFixtureHtml:
         """**The safety property.** A console redesign must cost a "please
         check this", never a false "it was deleted" — the read-back learned
         nothing, and saying nothing-shaped-as-something is the whole failure
-        this module exists to avoid."""
+        this module exists to avoid.
+
+        The reason is now `list_not_ready` rather than `list_unreadable`: a
+        page whose cards never appear also never satisfies the readiness
+        signal, so the wait times out first. Both are INCONCLUSIVE, which is
+        the property that matters, and the new code says the more specific of
+        the two true things.
+        """
         page = FakePage(REDESIGNED_PAGE)
         assert await read_work_cards(page) == []
         assert await list_is_empty(page) is False
         judgement = await verify_publish(page, "Autumn Harvest Field Notes")
         assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
-        assert judgement.reason == "list_unreadable"
+        assert judgement.reason == "list_not_ready"
 
 
 # A console that nests its card roots inside a container matching the SAME
@@ -512,6 +546,8 @@ class TestListProbeRendering:
             won_lines=0,
             page=PageProbe(
                 where="manage",
+                ready="cards",
+                waited_ms=0,
                 text_len=0,
                 divs=0,
                 login_gate=0,
@@ -760,29 +796,55 @@ class TestTheLiveShapeIsNowDiagnosable:
     works. These pin that the next read will.
     """
 
-    async def test_the_reconstruction_reproduces_the_reported_counts(self):
-        """If this drifts from the numbers above, the rest of the class is
-        reasoning about a page that never existed."""
+    async def test_the_chrome_node_is_no_longer_accepted_as_a_work(self):
+        """**The fix.** The selector still matches the chrome — that is a fact
+        about the page, and the probe still reports it — but the node carries
+        no operation word and no status word, so it is not a work and is not
+        counted as one."""
         cards, probe = await read_works_list(FakePage(LIVE_SHAPE_NO_WORKS))
         measured = {sel: (raw, scoped) for sel, raw, scoped in probe.roots}
+        # The raw counts are unchanged: this is still the same page.
         assert measured['[class^="card-"]'] == (3, 1)
         assert measured['[class*="video-card"]'] == (0, 0)
-        assert measured['[class*="content-card"]'] == (0, 0)
-        assert measured['[class*="work-card"]'] == (0, 0)
-        assert probe.cards == 1 and probe.won == '[class^="card-"]'
-        assert len(cards) == 1
+        # …but nothing on it is a work any more.
+        assert cards == []
+        assert probe.cards == 0
+        assert probe.won is None
 
-    async def test_the_accepted_card_is_now_described_without_quoting_it(self):
-        """`card-:3/1` said a chrome node won but not what it was. Two integers
-        settle it — a short single-line node is a chip, a long multi-line one
-        is something that at least looks like a work."""
-        _cards, probe = await read_works_list(FakePage(LIVE_SHAPE_NO_WORKS))
-        assert probe.won_lines == 2
-        assert probe.won_len and probe.won_len < 120
+    async def test_arriving_early_is_now_inconclusive_rather_than_not_live(self):
+        """**The verdict that caused the incident.**
+
+        Same page, same moment, and the old code called it
+        `NOT_LIVE / not_found` — "we read the list and your post is gone" —
+        about a post that was live on the platform. It must now be a
+        no-conclusion that retries.
+        """
+        page = FakePage(_document(LIVE_SHAPE_NO_WORKS))
+        judgement = await verify_publish(page, "Some Published Caption")
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.verdict is not ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "list_not_ready"
+
+    async def test_the_empty_state_question_is_asked_again(self):
+        """`empty = False if cards else …` meant one chrome node removed the
+        "does the platform say this account is empty" question from the whole
+        judgement. With the chrome no longer counted as a card, and the check
+        no longer short-circuited, it is asked."""
+        page = FakePage(_document(LIVE_SHAPE_NO_WORKS + EMPTY_PAGE))
+        judgement = await verify_publish(page, "Some Published Caption")
+        # The platform positively said "no works", which IS an answer.
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "not_found"
+        assert judgement.detail["list_empty"] is True
+
+    async def test_the_accepted_card_is_described_without_quoting_it(self):
+        """Two integers, when there IS an accepted card. A short single-line
+        node is a chip, a long multi-line one at least looks like a work."""
+        _cards, probe = await read_works_list(FakePage(FIXTURE))
+        assert probe.won_lines and probe.won_lines > 1
         rendered = probe.render()
-        assert f"wonlen={probe.won_len}/2" in rendered
-        assert "Console chrome" not in rendered
-        assert "Nothing that is a work" not in rendered
+        assert f"wonlen={probe.won_len}/{probe.won_lines}" in rendered
+        assert "Autumn Harvest" not in rendered
 
     @pytest.mark.parametrize(
         "url,expected_where",
@@ -799,17 +861,17 @@ class TestTheLiveShapeIsNowDiagnosable:
         probe = await measure_page(page)
         assert probe.where == expected_where
 
-    async def test_the_whole_line_lands_in_a_not_found_message(self):
-        """End to end: this is what the next occurrence will actually write
-        into `verify_detail`."""
+    async def test_the_whole_line_still_lands_in_the_message(self):
+        """End to end: the diagnosis survives the fix. A read that gives up
+        waiting must still say where it was, what it saw and how long it
+        waited — otherwise the next regression is invisible again."""
         page = FakePage(_document(LIVE_SHAPE_NO_WORKS))
         judgement = await verify_publish(page, "Some Published Caption")
-        assert judgement.reason == "not_found"
-        assert "[probe cards=1 won=card-" in judgement.message
-        assert "video-card:0/0" in judgement.message
-        assert "[page where=manage" in judgement.message
+        assert judgement.reason == "list_not_ready"
+        assert "[probe cards=0 won=none" in judgement.message
+        assert "card-:3/1" in judgement.message
+        assert "[page where=manage ready=timeout/" in judgement.message
         assert "empty=0" in judgement.message
-        assert "busy=0" in judgement.message
         # and still not one word of the page in it
         assert "Console chrome" not in judgement.message
 
@@ -830,27 +892,28 @@ class TestProbeAgainstFixtureHtml:
         assert measured['[class*="content-card"]'] == (0, 0)
         assert measured['[class*="work-card"]'] == (0, 0)
 
-    async def test_the_shadowing_hypothesis_is_visible_in_the_numbers(self):
-        """**The scenario the live read-back could not distinguish.**
+    async def test_shadowing_chrome_no_longer_costs_the_real_list(self):
+        """**Regression for the shadowing half of the incident.**
 
-        An earlier candidate matches one piece of page chrome, so the reader
-        returns that single node and never tries the selector under which
-        twelve works are sitting. The old output for this was `read 1 work(s)`
-        — identical to a one-work account. The probe has to make it obvious.
+        An earlier candidate matches a piece of page chrome. It used to win the
+        loop outright, so the selector under which twelve works were sitting
+        was never tried and the output read `1 work` — indistinguishable from a
+        one-work account. Now the chrome carries no work evidence, is not
+        counted, and the loop moves on to the candidate that does have works.
         """
         shadowed = (
             '<div class="content-card-header-x1">Filter bar chrome</div>'
             + FIXTURE
         )
         cards, probe = await read_works_list(FakePage(shadowed))
-        assert len(cards) == 1  # the reproduction
-        assert probe.won == '[class*="content-card"]'
+        assert len(cards) == 12
+        assert probe.won == '[class*="video-card"]'
         measured = {sel: (raw, scoped) for sel, raw, scoped in probe.roots}
+        # The chrome is still THERE and still reported — we did not stop
+        # seeing it, we stopped believing it was a work.
         assert measured['[class*="content-card"]'] == (1, 1)
-        # …while the real one was never read from, and says so out loud.
         assert measured['[class*="video-card"]'] == (72, 12)
-        assert "won=content-card" in probe.render()
-        assert "video-card:72/12" in probe.render()
+        assert "won=video-card" in probe.render()
 
     async def test_the_probe_reaches_the_message_of_a_not_found_verdict(self):
         """If it does not land in the message it does not land in
@@ -906,7 +969,7 @@ class TestProbeAgainstFixtureHtml:
         assert probe.cards == 0
         assert all(scoped == 0 for _sel, _raw, scoped in probe.roots)
         judgement = await verify_publish(page, "Autumn Harvest Field Notes")
-        assert judgement.reason == "list_unreadable"
+        assert judgement.reason == "list_not_ready"
         assert "won=none" in judgement.message
 
     async def test_a_live_verdict_stays_clean(self):
@@ -1033,6 +1096,249 @@ class TestJudgementEdges:
         judgement = judge_readback(cards, "Known Title Here")
         assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
         assert judgement.reason == "unknown_work_state"
+
+
+SKELETON = """
+<div class="card-shell-a1"><div class="loading-spinner-b2"></div></div>
+"""
+
+
+def _card_markup(caption: str, status: str = "已发布") -> str:
+    """One image card as MARKUP, in the fixture's measured shape.
+
+    `_image_card` above produces the card's rendered TEXT, which is what the
+    pure judgement takes. Anything that goes through a page needs real
+    elements — the operation words have to be leaf nodes for an exact text
+    match to find them, and the caption has to be its own block.
+    """
+    return f"""
+<div class="video-card-a1b2">
+  <div class="video-card-cover-c3"><i class="video-card-badge-d4">2张</i></div>
+  <div class="video-card-info-e5">
+    <div class="video-card-desc-f6">{caption}</div>
+    <div class="op-g7"><span>编辑作品</span><span>设置权限</span>
+      <span>作品置顶</span><span>删除作品</span></div>
+  </div>
+  <div class="video-card-stats-h8">2025年11月20日 22:30 {status} 播放 12</div>
+</div>"""
+
+
+class _LazyPage:
+    """A page whose works list appears only after a few readiness polls.
+
+    `FakePage` is deliberately immutable, which is right for everything else in
+    this file — but a wait is a behaviour over TIME, and a document that never
+    changes can only ever prove the timeout branch. This advances on counted
+    readiness polls rather than on wall-clock, so the tests are deterministic.
+    """
+
+    def __init__(self, skeleton: str, loaded: str, after_polls: int = 2):
+        self._skeleton = FakePage(_document(skeleton))
+        self._loaded = FakePage(_document(loaded))
+        self._after = after_polls * len(OPERATION_MARKERS)
+        self._op_calls = 0
+        self.url = self._loaded.url
+
+    @property
+    def _now(self) -> FakePage:
+        return self._loaded if self._op_calls > self._after else self._skeleton
+
+    def locator(self, selector: str):
+        return self._now.locator(selector)
+
+    def get_by_text(self, text: str, exact: bool = False):
+        if text in OPERATION_MARKERS:
+            self._op_calls += 1
+        return self._now.get_by_text(text, exact=exact)
+
+
+class TestWorkEvidence:
+    """What may be counted as a work at all."""
+
+    def test_console_chrome_is_not_a_work(self):
+        assert has_work_evidence("Filter bar chrome") is False
+        assert has_work_evidence("") is False
+
+    def test_an_operation_word_is_evidence(self):
+        assert has_work_evidence("Some Caption\n编辑作品\n删除作品") is True
+
+    def test_a_status_word_alone_is_evidence(self):
+        """Kept as a second route so a console that renames the operation
+        words still reads — the two fail in different directions."""
+        assert has_work_evidence("Some Caption\n已发布") is True
+        assert has_work_evidence("Some Caption\n未通过") is True
+
+    def test_an_unknown_status_with_operation_words_is_still_a_work(self):
+        """Otherwise a work in a status we have not seen would be dropped from
+        the count, and a dropped card reads as a missing post."""
+        assert has_work_evidence("Some Caption\n平台新造的状态词\n编辑作品") is True
+
+
+class TestReadiness:
+    """**The fix.** Wait for a signal the page can only produce once it has
+    answered — never for a fixed number of milliseconds."""
+
+    def test_the_shipped_bounds_are_sane(self):
+        """The autouse fixture shrinks these to keep the suite fast. Pinned so
+        the shrink cannot quietly become what ships, and so the wait stays
+        inside the read-back's 120 s per-attempt budget."""
+        assert SHIPPED_READY_TIMEOUT_MS == 20_000
+        assert SHIPPED_READY_POLL_MS == 500
+        # …and comfortably inside `validate_attempt_timeout_s` (120 s), which
+        # is the budget one read-back attempt has to finish in.
+        assert SHIPPED_READY_TIMEOUT_MS < 120_000
+
+    async def test_a_rendered_list_is_ready(self):
+        readiness = await wait_for_works_list(FakePage(_document(FIXTURE)))
+        assert readiness.ready is True
+        assert readiness.reason == "cards"
+        assert readiness.op_words and readiness.op_words > 0
+
+    async def test_the_platforms_own_empty_state_is_also_an_answer(self):
+        """An account with no works would otherwise never satisfy a
+        cards-based signal, and would time out forever — trading one永-pending
+        bug for another."""
+        readiness = await wait_for_works_list(FakePage(_document(EMPTY_PAGE)))
+        assert readiness.ready is True
+        assert readiness.reason == "empty"
+
+    async def test_a_skeleton_times_out_rather_than_reading_it(self):
+        readiness = await wait_for_works_list(FakePage(_document(SKELETON)))
+        assert readiness.ready is False
+        assert readiness.reason == "timeout"
+        assert readiness.waited_ms is not None
+
+    async def test_chrome_cannot_satisfy_readiness(self):
+        """**Why the signal is operation words and not card selectors.**
+
+        This page matches `[class^="card-"]` — it is the shape that made a
+        skeleton look like a list that had been read. It must not count as
+        rendered.
+        """
+        readiness = await wait_for_works_list(
+            FakePage(_document(LIVE_SHAPE_NO_WORKS))
+        )
+        assert readiness.ready is False
+
+    async def test_a_list_that_arrives_late_is_waited_for(self):
+        """The incident, in one test: the page is a skeleton when we first
+        look and a works list a moment later."""
+        page = _LazyPage(SKELETON, FIXTURE)
+        readiness = await wait_for_works_list(page, timeout_ms=5_000, poll_ms=1)
+        assert readiness.ready is True
+        assert readiness.reason == "cards"
+
+    async def test_a_half_rendered_list_is_not_read_as_complete(self):
+        """The count must be non-zero AND stable. A list rendering
+        progressively would otherwise be judged from whatever had arrived, and
+        a post missing from a partial list reads as a deleted post."""
+        page = _LazyPage(SKELETON, FIXTURE, after_polls=1)
+        first = await _group_count_via(page)
+        assert first == 0, "first look must land on the skeleton"
+        readiness = await wait_for_works_list(page, timeout_ms=5_000, poll_ms=1)
+        assert readiness.ready is True
+
+
+async def _group_count_via(page) -> int:
+    """One readiness sample, for tests that need to observe the first look."""
+    total = 0
+    for marker in OPERATION_MARKERS:
+        total += await page.get_by_text(marker, exact=True).count()
+    return total
+
+
+class TestReadinessGovernsTheVerdict:
+    """**Requirement 2, as a pure property.** Arriving early may cost us an
+    answer; it may never produce a wrong one."""
+
+    CARDS = (WorkCard(text="Some Other Post\n已发布\n编辑作品"),)
+
+    def test_not_ready_and_not_found_is_inconclusive_not_not_live(self):
+        judgement = judge_readback(
+            self.CARDS, "The Post We Published", ready=False
+        )
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.verdict is not ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "list_not_ready"
+        assert judgement.detail["ready"] is False
+
+    def test_the_same_input_when_ready_is_still_not_live(self):
+        """The safety rule must not have swallowed the real verdict: a post
+        genuinely absent from a list we DID read is still not live."""
+        judgement = judge_readback(self.CARDS, "The Post We Published", ready=True)
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "not_found"
+
+    def test_not_ready_does_not_suppress_a_post_we_can_see(self):
+        """Arriving early cannot make a post we found fake. LIVE stands."""
+        cards = [WorkCard(text="The Post We Published\n已发布\n编辑作品")]
+        judgement = judge_readback(cards, "The Post We Published", ready=False)
+        assert judgement.verdict is ReadbackVerdict.LIVE
+
+    def test_not_ready_does_not_suppress_a_refusal_we_read(self):
+        """A status read off a card we matched rests on what we SAW, not on
+        what we missed — so it is still a conclusion."""
+        cards = [WorkCard(text="The Post We Published\n未通过\n编辑作品")]
+        judgement = judge_readback(cards, "The Post We Published", ready=False)
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "rejected"
+
+    def test_not_ready_with_an_empty_account_is_still_inconclusive(self):
+        """An empty state we never waited to see is not an empty account."""
+        judgement = judge_readback([], "Anything", list_empty=True, ready=False)
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.reason == "list_not_ready"
+
+
+class TestTheIncidentEndToEnd:
+    """**The acceptance shape.** Not "the tests pass" — a live post, on a page
+    that renders late, must come back VERIFIED."""
+
+    async def test_a_late_rendering_page_verifies_the_post(self):
+        page = _LazyPage(SKELETON, FIXTURE)
+        judgement = await verify_publish(page, "Autumn Harvest Field Notes")
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert judgement.reason == "live"
+
+    async def test_the_old_code_path_would_have_called_it_missing(self):
+        """The counterfactual, pinned: judging the skeleton — which is what
+        reading on a 2 500 ms timer did — is what produced the wrong verdict.
+        If this ever stops being INCONCLUSIVE, the regression is back.
+        """
+        judgement = await verify_publish(
+            FakePage(_document(SKELETON)), "Autumn Harvest Field Notes"
+        )
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.verdict is not ReadbackVerdict.NOT_LIVE
+
+    async def test_the_whole_path_is_total_against_a_page_that_raises(self):
+        """`list_is_empty` is now asked on EVERY read, including inside the
+        poll loop — and `dom.visible_marker_texts` builds its locator outside
+        its own try block, so a page that raises on `get_by_text` propagates
+        through it. A read-back that raises is a read-back that cannot report
+        a verdict at all, so the guard is pinned here rather than trusted.
+        """
+
+        class ExplodingPage:
+            url = "https://creator.douyin.com/creator-micro/content/manage"
+
+            def locator(self, selector):
+                raise RuntimeError("detached")
+
+            def get_by_text(self, text, exact=False):
+                raise RuntimeError("detached")
+
+        judgement = await verify_publish(ExplodingPage(), "Anything At All")
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.verdict is not ReadbackVerdict.NOT_LIVE
+
+    async def test_a_short_title_on_a_late_page_also_verifies(self):
+        """The two fixes compose: the caption that started all of this is four
+        characters long, and it has to survive both the wait and the matcher."""
+        page = _LazyPage(SKELETON, _card_markup("test"))
+        judgement = await verify_publish(page, "test")
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert judgement.reason == "live"
 
 
 class TestStatusMapping:
