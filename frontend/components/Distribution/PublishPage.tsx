@@ -562,25 +562,6 @@ export const PublishPage: React.FC = () => {
 
   const isImages = contentType === 'images';
 
-  /**
-   * Why the Images tab is dead, or null when it is alive.
-   *
-   * Two distinct reasons, and they used to share one sentence. The old gate was
-   * `targets.length > 0 && targets.every(...)`, so "you have not connected any
-   * account" and "the platform you connected cannot do this" both printed
-   * *Image posts are not supported yet* — telling a user with no accounts to go
-   * wait for a feature, when what they actually need is the Accounts page.
-   *
-   * Gated on the accounts the post actually reaches (all connected ones until
-   * the user narrows it down) rather than a global flag: "nothing can do this"
-   * and "the ones YOU picked can't" are the same failure for the user, and both
-   * have to be visible before the form is filled in.
-   *
-   * Capabilities come from the backend (`GET /distribution/capabilities`), so
-   * nothing here has to be edited when the browser service learns galleries —
-   * the tab un-greys itself. A null map (still loading, or the request failed)
-   * reads as "supports nothing".
-   */
   /** The accounts this post actually reaches — all connected ones until the
    *  user narrows it down. Every capability question below is asked about
    *  exactly this set. */
@@ -591,28 +572,6 @@ export const PublishPage: React.FC = () => {
     [accounts, selectedAccounts],
   );
 
-  /**
-   * Why the Images tab is dead, or null when it is alive. FOUR reasons, and the
-   * last three used to be one.
-   *
-   * `unsupported` is the only one that says anything about the platform, and it
-   * is now the only one that can be reached with an actual answer in hand:
-   * `capState === 'ready'` and a capability record for every target platform.
-   * Everything else — request in flight, request failed, a response that simply
-   * has no entry for this platform — is *no evidence*, and no evidence is not a
-   * "no". It used to be reported as one ("the connected platforms can only
-   * publish video"), which is how a user with a gallery-capable account got
-   * told their platform could not do galleries.
-   *
-   * The gate value still closes the tab in every non-null case: the safe
-   * default is untouched and must stay untouched (see `getPlatformCapabilities`
-   * — a rejection means OUR call failed, never that the platform said no). This
-   * split changes what we tell the user, not what we let them arm.
-   *
-   * `noAccounts` is tested first because it is answerable without capabilities
-   * at all: with nothing connected, no capability response changes what the
-   * user has to do next.
-   */
   /**
    * Whether we actually hold an answer about every account this post reaches.
    *
@@ -626,6 +585,37 @@ export const PublishPage: React.FC = () => {
     [capState, targetAccounts, capabilities],
   );
 
+  /**
+   * Why the Images tab is dead, or null when it is alive. FOUR reasons, and the
+   * last three used to be one.
+   *
+   * `unsupported` is the only one that says anything about the platform, and it
+   * is now the only one reachable with an actual answer in hand: `capState ===
+   * 'ready'` plus a capability record for every target platform. Everything
+   * else — request in flight, request failed, a response that simply has no
+   * entry for this platform — is *no evidence*, and no evidence is not a "no".
+   * It used to be reported as one ("the connected platforms can only publish
+   * video"), which is how a user with a gallery-capable account got told their
+   * platform could not do galleries.
+   *
+   * The gate value still closes the tab in every non-null case: the safe
+   * default is untouched and must stay untouched (see `getPlatformCapabilities`
+   * — a rejection means OUR call failed, never that the platform said no). This
+   * split changes what we tell the user, not what we let them arm.
+   *
+   * `noAccounts` is tested first because it is answerable without capabilities
+   * at all: with nothing connected, no capability response changes what the
+   * user has to do next. It kept its own sentence from the previous round of
+   * this same bug — "you have not connected an account" and "the platform you
+   * connected cannot do this" used to share one, which told a user with no
+   * accounts to go wait for a feature.
+   *
+   * Everything is asked about the accounts the post actually REACHES rather
+   * than a global flag: "nothing can do this" and "the ones YOU picked can't"
+   * are the same failure for the user. And nothing here needs editing when the
+   * browser service learns galleries — the tab un-greys itself off the
+   * response.
+   */
   const imagesGate = useMemo<'noAccounts' | 'loading' | 'unknown' | 'unsupported' | null>(() => {
     if (targetAccounts.length === 0) return 'noAccounts';
     if (capState === 'loading') return 'loading';
