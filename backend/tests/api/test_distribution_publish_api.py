@@ -310,7 +310,7 @@ def test_a_platform_without_a_publisher_creates_no_row(monkeypatch):
     assert spy == {}
 
 
-def _fake_task_with_wf():
+def _fake_task_with_wf(scheduled_at=None):
     async def fake_get_task(task_id):
         return {
             "id": "700",
@@ -322,6 +322,7 @@ def _fake_task_with_wf():
             "distribution_mode": "broadcast",
             "created_at": "2026-07-08T00:00:00Z",
             "dbos_workflow_id": "wf-old",
+            "scheduled_at": scheduled_at,
         }
 
     return fake_get_task
@@ -411,6 +412,157 @@ def test_retry_terminal_task_redispatches(monkeypatch):
     assert spy["set_wf"] == spy["start_wf"]
     # same new wf_id flowed through retry_task -> set_task_workflow_id -> dispatch
     assert spy["retry_task_called_with"][2] == spy["set_wf"]
+
+
+# ── 定时批次的重投（生产实证 2026-08-15） ──────────────────────────────
+#
+# 用户点了三次 Retry。三次都 200，三次都真的派发了 workflow，三次都在
+# ``validate_publish_intent`` 被同一条规则拒掉 —— 因为重投沿用批次里存着的
+# ``scheduled_at``，而那个时间早就过去了。界面上看起来是"点了没反应"。
+#
+# 这三条守的是同一件事：**结构上不可能成功的重投不许被接受**，而唯一合法的
+# 出路（清掉定时、立即发布）必须由调用方显式说出来。
+
+
+def _retry_spies(monkeypatch, *, scheduled_at):
+    """把 retry 路径上的每一个副作用都插上探针，返回 (spy, app)。
+
+    每个都要探，因为这道门失守的表现是"多做了一件事"而不是"少做了一件事"：
+    派发出去的 workflow 会真的开浏览器、真的重置账号行，代价在门外面。
+    """
+    app = _make_app(monkeypatch, module_on=True)
+    spy = {}
+
+    async def fake_get_task_accounts(task_id):
+        return []
+
+    async def fake_reset_failed_accounts(task_id):
+        spy["reset_failed_accounts"] = task_id
+
+    async def fake_set_wf(task_id, wf_id):
+        spy["set_wf"] = wf_id
+
+    async def fake_clear_schedule(task_id):
+        spy["clear_schedule"] = task_id
+
+    class _Mgr:
+        async def retry_task(self, old_wf, user_id, *, new_workflow_id=None):
+            spy["retry_task_called_with"] = (old_wf, user_id, new_workflow_id)
+            return {"dbos_workflow_id": new_workflow_id}
+
+    async def fake_start_wf(*a, **kw):
+        spy["start_wf"] = kw.get("workflow_id")
+        return {"mode": "dbos"}
+
+    monkeypatch.setattr(
+        dr.publish_repo, "get_task", _fake_task_with_wf(scheduled_at=scheduled_at)
+    )
+    monkeypatch.setattr(dr.publish_repo, "get_task_accounts", fake_get_task_accounts)
+    monkeypatch.setattr(
+        dr.publish_repo, "reset_failed_accounts", fake_reset_failed_accounts
+    )
+    monkeypatch.setattr(dr.publish_repo, "set_task_workflow_id", fake_set_wf)
+    monkeypatch.setattr(dr.publish_repo, "clear_task_schedule", fake_clear_schedule)
+    monkeypatch.setattr(dr, "get_task_manager", lambda: _Mgr())
+    monkeypatch.setattr(dr, "start_workflow_routed", fake_start_wf)
+    return spy, app
+
+
+def _past_iso(**kw):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(**kw)).isoformat()
+
+
+def _future_iso(**kw):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(**kw)).isoformat()
+
+
+def test_retry_of_an_expired_scheduled_batch_is_refused_not_dispatched(monkeypatch):
+    """定时时间已过 → 409 + 类型化 reason，**一个副作用都不许发生**。
+
+    这是那个 bug 的直接回归：修复回退后本条变红（旧代码 200 并真的派发）。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=_past_iso(hours=20))
+
+    resp = TestClient(app).post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 409, resp.text
+    # reason 是契约（前端按它键控文案），message 只是给日志的。
+    assert resp.json()["detail"]["reason"] == "schedule_unreachable"
+    # 门在最前面：连 task_manager 都不该被打扰，更不该派发 workflow。
+    assert spy == {}
+
+
+def test_retry_is_also_refused_while_the_schedule_is_too_close_to_finish(monkeypatch):
+    """还没到、但已经近到传不完 —— 失败形态一模一样，所以同样拒。
+
+    只判"时间是否已过去"会漏掉这一段，而漏掉的后果与原 bug 完全相同。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=_future_iso(minutes=30))
+
+    resp = TestClient(app).post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["reason"] == "schedule_unreachable"
+    assert spy == {}
+
+
+def test_retry_mode_now_clears_the_schedule_before_dispatching(monkeypatch):
+    """用户显式点了 Publish now → 清掉定时再派发。
+
+    顺序是重点：不先清 ``scheduled_at``，workflow 读到的还是那个过期时间，
+    于是"立即发布"会以完全相同的方式再失败一次。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=_past_iso(hours=20))
+
+    resp = TestClient(app).post(
+        "/api/v1/distribution/tasks/700/retry", json={"mode": "now"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert spy["clear_schedule"] == 700
+    assert spy["set_wf"] == spy["start_wf"]
+
+
+def test_retry_never_clears_a_schedule_on_its_own(monkeypatch):
+    """定时还在窗口内 → 照常重投，且**不许**碰 ``scheduled_at``。
+
+    把一条本该 15:20 上线的稿子改成"现在就发"是不可撤销的，绝不能是
+    "再试一次"的副作用。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=_future_iso(days=3))
+
+    resp = TestClient(app).post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 200, resp.text
+    assert "clear_schedule" not in spy
+    assert spy["set_wf"] == spy["start_wf"]
+
+
+def test_retry_response_tells_the_client_whether_the_schedule_is_reachable(monkeypatch):
+    """``schedule_state`` 必须在响应里 —— 前端据此决定画哪个按钮。
+
+    判据是 ``SCHEDULE_MIN_LEAD``（后端常量），所以由服务端算。让前端拿
+    ``scheduled_at`` 自己减一个它猜的下限，就是把同一条规则抄成第二份。
+    """
+    _, app = _retry_spies(monkeypatch, scheduled_at=_future_iso(days=3))
+    body = TestClient(app).post("/api/v1/distribution/tasks/700/retry").json()
+    assert body["schedule_state"] == "pending"
+
+
+def test_immediate_batches_are_untouched_by_the_schedule_gate(monkeypatch):
+    """没有定时的批次重投照旧（绝大多数发布都是这一档）。"""
+    spy, app = _retry_spies(monkeypatch, scheduled_at=None)
+
+    resp = TestClient(app).post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["schedule_state"] == "none"
+    assert "clear_schedule" not in spy
+    assert spy["set_wf"] == spy["start_wf"]
 
 
 def test_authorize_task_cross_user_404(monkeypatch):

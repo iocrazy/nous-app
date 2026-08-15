@@ -231,6 +231,25 @@ class PlatformCapability(BaseModel):
     supports_music: bool = False
 
 
+class ReadbackTiming(BaseModel):
+    """发布之后我们**自己**多久去平台确认一次、确认到什么时候放弃。
+
+    ⚠️ 这里每一个数都是 **我们的**（``publish_readback`` 的常量），不是平台
+    给的。之所以要下发而不是让前端写死：记录页要回答"还要等多久"，而唯一
+    诚实的答案来自这三个常量 —— 前端自己写一个"大概十分钟"，就是又造了一份
+    会漂的声明，而且下一步必然演化成把它说成平台的承诺。
+    ``PlatformCapability.schedule_*`` 是平台的数，这两个字段是我们的数，刻意
+    分成两个模型，免得读的人以为它们同源。
+    """
+
+    #: 发布回报成功后，最早**这么久**才会去查第一次（``GO_LIVE_GRACE_S``）。
+    #: 平台在刚发出去那一刻自己还在处理，立刻查必然看到"审核中"。
+    first_check_after_seconds: int
+    #: 一直问不出结论时，**这么久**之后就放弃并把待办转 blocked。
+    #: = grace + (MAX_ATTEMPTS - 1) × MIN_RETRY_INTERVAL_S。
+    give_up_after_seconds: int
+
+
 class CapabilitiesResponse(BaseModel):
     """``GET /distribution/capabilities`` 的响应。
 
@@ -239,3 +258,5 @@ class CapabilitiesResponse(BaseModel):
     """
 
     platforms: dict[str, PlatformCapability]
+    #: 见 ``ReadbackTiming`` —— 模块级（不分平台），且是我们的数不是平台的数。
+    publish_readback: Optional[ReadbackTiming] = None

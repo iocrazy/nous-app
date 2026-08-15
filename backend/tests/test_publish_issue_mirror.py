@@ -590,6 +590,76 @@ async def test_a_batch_awaiting_its_readback_is_counted_separately(harness):
 
 
 @pytest.mark.asyncio
+async def test_a_held_batch_says_on_the_item_what_it_is_waiting_for(harness):
+    """户外可见的那一半：待办本身要说出它在等什么。
+
+    生产实证（2026-08-15）：一条图文成功发出、平台上确实在线，待办却一直是
+    ``in_progress``、description **完全空白**。系统在做对的事（等回读确认），
+    但没有任何地方说出来 —— 用户的结论是"发布系统坏了"。
+
+    ``awaiting_readback`` 这个计数器此前是唯一的痕迹，而它活在一个没人读的
+    workflow 返回值里。所以从待办列表看，一次正确的等待和一个卡死的任务长得
+    一模一样。
+    """
+    issues, _ = harness(mirrored_open=[_readback_row(readback_states=[None])])
+    await wf._sync_terminal_batches()
+
+    note = issues.descriptions.get(5, "")
+    assert note, "a held work item must say why it is held"
+    # 说清楚三件事：传完了 / 在等平台确认 / 大概等多久。
+    assert "waiting for the platform" in note.lower()
+    assert "minutes" in note
+    # 还在等 ≠ 出事了。措辞不许把"等确认"写成失败或拒绝。
+    assert "reject" not in note.lower()
+    assert "fail" not in note.lower()
+    # 状态本身没动 —— 这条注解是**补上说明**，不是替代那道门。
+    assert issues.transitions == []
+
+
+@pytest.mark.asyncio
+async def test_the_holding_note_is_written_once_not_once_per_sweep(harness):
+    """sweep 每 2 分钟一轮，而一批可能等两个小时。
+
+    注解如果每轮都追加一次，description 会在 4000 字上限之前被同一句话刷满，
+    真正有用的信息（定时时刻、失败原因）反而被挤掉。
+    """
+    issues, _ = harness(mirrored_open=[_readback_row(readback_states=[None])])
+    await wf._sync_terminal_batches()
+    await wf._sync_terminal_batches()
+    await wf._sync_terminal_batches()
+
+    note = issues.descriptions[5]
+    assert note.count("waiting for the platform") == 1
+
+
+class TestAwaitingReadbackNote:
+    def test_every_number_in_it_comes_from_our_own_constants(self):
+        """这句话里的分钟数是**我们的**（回读节奏），不是平台的。
+
+        把它写成"平台大约需要十分钟"就是替平台许了一个它没许的承诺 ——
+        ``SCHEDULE_TOO_SOON`` 已经犯过一次的错，不许在这里再犯一次。
+        """
+        from app.workflows.publish_readback import (
+            GO_LIVE_GRACE_S,
+            MAX_ATTEMPTS,
+            MIN_RETRY_INTERVAL_S,
+        )
+
+        note = wf.build_awaiting_readback_note()
+        assert str(GO_LIVE_GRACE_S // 60) in note
+        expected_limit = (
+            GO_LIVE_GRACE_S + (MAX_ATTEMPTS - 1) * MIN_RETRY_INTERVAL_S
+        ) // 60
+        assert str(expected_limit) in note
+        # 主语是 "we"：这些数描述的是我们的行为，不是平台的时限。
+        assert "we start checking" in note.lower()
+
+    def test_it_is_constant_text_so_dedup_can_work(self):
+        """带时间戳的注解每轮都会是一句"新"话，于是每轮都追加一次。"""
+        assert wf.build_awaiting_readback_note() == wf.build_awaiting_readback_note()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_batch_blocks_without_waiting_for_any_readback(harness):
     """An incident needs a human now. The read-back gate only ever guards the
     path to done."""

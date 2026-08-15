@@ -301,6 +301,23 @@ class PublishTasksRepository(AsyncpgRepository):
                 .values(dbos_workflow_id=wf_id, updated_at=func.now())
             )
 
+    async def clear_task_schedule(self, task_id: int) -> None:
+        """把这一批变成"立即发布"（``scheduled_at = NULL``）。
+
+        只有 ``retry?mode=now`` 会调它 —— 用户看着一句"这个定时时间已经过去了"
+        之后，自己点了 Publish now。**没有任何自动路径**该走这里：定时时间是
+        用户的意图，系统替他改掉，作品就会在他没预期的时刻上线，而且撤不回来。
+
+        顺带让 ``publish_readback.go_live_at`` 回落到 ``published_at``（真正发
+        出去的那一刻），否则那一批的回读会一直拿一个陈旧的过去时间当基准。
+        """
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTasks)
+                .where(PublishTasks.id == self._bigint(task_id))
+                .values(scheduled_at=None, updated_at=func.now())
+            )
+
     async def set_task_covers(
         self,
         task_id: int,

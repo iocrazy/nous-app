@@ -196,6 +196,32 @@ def test_music_support_is_projected_from_the_profile(client):
         SESSION_PLATFORM_PROFILES.pop("testonly")
 
 
+def test_readback_timing_ships_our_own_numbers(client):
+    """记录页要能回答"还要等多久才知道发出去了没有"。
+
+    唯一诚实的答案来自 ``publish_readback`` 的三个常量，所以在这里投影一次。
+    前端自己写一个"大概十分钟"会漂，而且下一步就会被讲成平台的承诺 ——
+    ``SCHEDULE_TOO_SOON`` 那句话已经犯过一次。
+
+    ⚠️ 刻意与 ``platforms`` 平级、用另一个模型：这些是**我们的**数，不是平台
+    的能力，混进 ``PlatformCapability`` 就会被读成后者。
+    """
+    from app.workflows.publish_readback import (
+        GO_LIVE_GRACE_S,
+        MAX_ATTEMPTS,
+        MIN_RETRY_INTERVAL_S,
+    )
+
+    timing = client.get(_PATH).json()["publish_readback"]
+
+    assert timing["first_check_after_seconds"] == GO_LIVE_GRACE_S
+    # 最后一次尝试之后才放弃 → (N-1) 个间隔。写成 N 个会对用户多许一段时间。
+    assert timing["give_up_after_seconds"] == (
+        GO_LIVE_GRACE_S + (MAX_ATTEMPTS - 1) * MIN_RETRY_INTERVAL_S
+    )
+    assert timing["give_up_after_seconds"] > timing["first_check_after_seconds"]
+
+
 def test_projection_is_pure_and_needs_no_request():
     """投影函数本身可单测 —— 端点里没有它之外的逻辑。
 

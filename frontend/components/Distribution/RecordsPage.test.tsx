@@ -13,13 +13,13 @@ vi.mock('../../services/distributionService', () => ({
   listPublishTasks: vi.fn().mockResolvedValue([
     { id: '700', content_type: 'video', title: 'Awaiting', description: null, topics: [],
       visibility: 'public', distribution_mode: 'broadcast', status: 'pending_share',
-      created_at: '2026-07-08T00:00:00Z',
+      created_at: '2026-07-08T00:00:00Z', schedule_state: 'none',
       accounts: [{ id: '1', account_id: '10', username: 'HEYGO', avatar_url: null,
         channel: 'h5', status: 'pending_share', error_message: null, published_url: null,
         platform_item_id: null, published_at: null }] },
     { id: '701', content_type: 'video', title: 'Mixed', description: null, topics: [],
       visibility: 'public', distribution_mode: 'broadcast', status: 'partial',
-      created_at: '2026-07-08T00:00:00Z',
+      created_at: '2026-07-08T00:00:00Z', schedule_state: 'none',
       accounts: [
         // Only this row carries an avatar (it is joined live off
         // social_accounts) — 'Bad One' next to it keeps exercising the
@@ -33,7 +33,7 @@ vi.mock('../../services/distributionService', () => ({
           platform_item_id: null, published_at: null }] },
     { id: '703', content_type: 'video', title: 'Session No Link', description: null, topics: [],
       visibility: 'private', distribution_mode: 'broadcast', status: 'success',
-      created_at: '2026-07-08T00:00:00Z',
+      created_at: '2026-07-08T00:00:00Z', schedule_state: 'none',
       // 会话通道的常态:发布成功,但拿不到作品直链(抖音发布后重定向不带
       // item id,作品卡无 href/id,列表接口也不返回)。
       // …and this row also carries a caveat: the post went out, but with the
@@ -43,10 +43,14 @@ vi.mock('../../services/distributionService', () => ({
         channel: 'session', status: 'success',
         error_message: "[music_approximate] published with '起风了 (Cover)' — the closest match the platform's search returned for '起风了'",
         published_url: null,
-        platform_item_id: null, published_at: '2026-07-08T03:00:00Z' }] },
+        platform_item_id: null, published_at: '2026-07-08T03:00:00Z',
+        // Real wire shape for a session row nobody has read back yet: the
+        // columns exist and are NULL. NULL is the START of pending, not
+        // "nothing to check".
+        verify_state: null, verify_detail: null }] },
     { id: '702', content_type: 'video', title: 'Done One', description: null, topics: [],
       visibility: 'public', distribution_mode: 'broadcast', status: 'success',
-      created_at: '2026-07-08T00:00:00Z',
+      created_at: '2026-07-08T00:00:00Z', schedule_state: 'none',
       accounts: [{ id: '4', account_id: '13', username: 'Winner', avatar_url: null,
         channel: 'official', status: 'success', error_message: null,
         published_url: 'https://douyin/v/12', platform_item_id: '12',
@@ -55,6 +59,10 @@ vi.mock('../../services/distributionService', () => ({
   cancelPublishTask: vi.fn(),
   retryPublishTask,
   getShareSchema,
+  // Our own read-back cadence, fetched so the page never writes those numbers
+  // down itself. Resolving null here is the "could not load" branch, which must
+  // still render the page — see RecordsPage.readback.test.tsx.
+  getReadbackTiming: vi.fn().mockResolvedValue(null),
   listAccounts: vi.fn().mockResolvedValue([
     { id: '10', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op1',
       username: 'HEYGO', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
@@ -90,7 +98,10 @@ describe('RecordsPage', () => {
     fireEvent.click(screen.getByText('Mixed'));
     await waitFor(() => expect(screen.getByText('upload rejected')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
-    await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('701'));
+    // 'as_scheduled' is explicit on the wire: the endpoint now distinguishes
+    // "try the same thing again" from "drop the schedule and go now", and only
+    // the second one is allowed to change what the user asked for.
+    await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('701', 'as_scheduled'));
   });
 
   it('draws the real avatar on expanded account rows, gradient tile for the rest', async () => {
