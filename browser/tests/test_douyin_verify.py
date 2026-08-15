@@ -33,6 +33,8 @@ from app.platforms.douyin_verify import (
     WorkCard,
     WorkState,
     build_published_url,
+    caption_lines,
+    card_lines,
     classify_work_state,
     extract_item_id,
     judge_readback,
@@ -338,7 +340,7 @@ class TestTitleNormalisation:
     def test_full_width_space_is_normalised(self):
         assert normalize_title("Autumn　Harvest") == "autumn harvest"
 
-    def test_short_titles_need_whole_string_equality(self):
+    def test_short_titles_do_not_match_a_longer_caption(self):
         """A two-character title as a substring would match half the account,
         and a false match reports the WRONG post's state as this batch's."""
         cards = [WorkCard(text="测试版本 已发布")]
@@ -346,6 +348,120 @@ class TestTitleNormalisation:
 
     def test_empty_title_matches_nothing(self):
         assert match_cards([WorkCard(text="anything 已发布")], "   ") == []
+
+
+# One card as the reader hands it over: `inner_text` of the whole card root,
+# so caption AND status word AND counters, in the order the live console
+# renders them ([实测 2026-08-11], recorded in the fixture header — image card
+# = 「{N}张」 / caption / operation words / date / status / 播放… / 图文 metrics).
+# Captions are English test data (repo rule); the chrome is that read's
+# vocabulary.
+def _image_card(caption: str, status: str = "已发布") -> str:
+    return (
+        "2张\n"
+        f"{caption}\n"
+        "编辑作品\n设置权限\n作品置顶\n删除作品\n"
+        f"2025年11月20日 22:30\n{status}\n"
+        "播放 12 点赞 0 评论 0 分享 0 收藏 0\n"
+        "划走率 44.58% 文案展开率 2.56% 平均浏览图片数 2.2 吸粉量 0"
+    )
+
+
+class TestShortTitles:
+    """**Regression: the short-title rule was structurally unsatisfiable.**
+
+    Titles under `_MIN_SUBSTRING_TITLE_LEN` used to be compared for EQUALITY
+    against `card.text` — the card's whole rendered text, which the reader's
+    own docstring says carries the status word and the counters alongside the
+    caption. No caption can equal that string, so every short title resolved to
+    `not_found` → NOT_LIVE → a blocked work item, whatever the platform
+    actually showed.
+
+    It was not theoretical. A post published with the title `test` went live,
+    the user saw it on the platform, and the read-back reported it missing on
+    the first attempt. Four-Han-character captions are the same class of title
+    and are entirely ordinary.
+    """
+
+    def test_the_old_rule_could_never_have_held(self):
+        """The root cause, pinned so it cannot be reintroduced as an
+        'optimisation': the caption is a strict part of the card's text, so
+        equality against the whole card is unsatisfiable by construction."""
+        text = _image_card("test")
+        assert normalize_title("test") != normalize_title(text)
+        assert normalize_title("test") in normalize_title(text)
+
+    def test_a_four_character_title_verifies_on_a_real_shaped_card(self):
+        """**The reported case.** Revert `match_cards` and this goes red."""
+        judgement = judge_readback([WorkCard(text=_image_card("test"))], "test")
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert judgement.reason == "live"
+
+    @pytest.mark.parametrize("caption", ["Fog", "test", "Dusk1"])
+    def test_every_length_below_the_substring_floor_verifies(self, caption):
+        """Not just the one reported length. Everything under
+        `_MIN_SUBSTRING_TITLE_LEN` took the broken branch, and the floor counts
+        CHARACTERS — so on the Chinese captions this product is mostly used for
+        it swallows four-character titles, an entirely ordinary length, not
+        just 「测试」-style noise."""
+        cards = [WorkCard(text=_image_card(caption))]
+        assert judge_readback(cards, caption).verdict is ReadbackVerdict.LIVE
+
+    def test_a_short_title_still_will_not_borrow_a_neighbours_status(self):
+        """The property the old rule was reaching for, kept. Our post is NOT on
+        the list; a longer caption containing it is. That must read as missing,
+        not as the neighbour's 已发布."""
+        cards = [
+            WorkCard(text=_image_card("test drive of the new lens")),
+            WorkCard(text=_image_card("something else entirely")),
+        ]
+        judgement = judge_readback(cards, "test")
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "not_found"
+
+    def test_a_short_title_reads_its_own_cards_status_not_a_live_neighbours(self):
+        """Multiple cards, only one of them ours, and ours was refused. The
+        verdict must come off OUR card — matching loosely here is how a refused
+        post gets closed as published."""
+        cards = [
+            WorkCard(text=_image_card("holiday lantern walk")),
+            WorkCard(text=_image_card("test", status="未通过")),
+        ]
+        judgement = judge_readback(cards, "test")
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "rejected"
+
+    @pytest.mark.parametrize("chrome", ["已发布", "审核中", "编辑作品", "2张"])
+    def test_console_chrome_as_a_caption_matches_nothing(self, chrome):
+        """A caption that happens to BE a word the console prints on every card
+        must not match every card. `已发布` would otherwise pick up whichever
+        card is live and close the work item as published — the one direction
+        this module promises never to invent."""
+        cards = [WorkCard(text=_image_card("holiday lantern walk"))]
+        assert match_cards(cards, chrome) == []
+
+    def test_long_titles_are_unaffected_and_still_match_as_substrings(self):
+        cards = [WorkCard(text=_image_card("Autumn Harvest Field Notes"))]
+        assert len(match_cards(cards, "Autumn Harvest Field Notes")) == 1
+
+    def test_card_lines_splits_before_it_normalises(self):
+        """`normalize_title` collapses newlines into spaces, so splitting after
+        normalising would always yield exactly one 'line' — the same shape of
+        can-never-hold bug this fix removes."""
+        assert card_lines("Autumn Harvest\n已发布\n播放 12") == (
+            "autumn harvest",
+            "已发布",
+            "播放 12",
+        )
+        assert card_lines("  \n\n Sole Line \n") == ("sole line",)
+
+    def test_caption_lines_drops_chrome_but_keeps_the_users_words(self):
+        assert caption_lines(_image_card("Autumn Harvest")) == (
+            "autumn harvest",
+            "2025年11月20日 22:30",
+            "播放 12 点赞 0 评论 0 分享 0 收藏 0",
+            "划走率 44.58% 文案展开率 2.56% 平均浏览图片数 2.2 吸粉量 0",
+        )
 
 
 class TestWorkStateMarkers:
