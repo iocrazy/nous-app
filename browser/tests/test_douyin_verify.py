@@ -24,6 +24,7 @@ survivable: when the shape is wrong, the answer is `list_unreadable`
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,7 @@ from app.platforms.douyin_verify import (
     judge_readback,
     list_is_empty,
     match_cards,
+    measure_network,
     measure_page,
     measure_page_probes,
     normalize_title,
@@ -1339,6 +1341,139 @@ class TestTheIncidentEndToEnd:
         judgement = await verify_publish(page, "test")
         assert judgement.verdict is ReadbackVerdict.LIVE
         assert judgement.reason == "live"
+
+
+class _NetPage(FakePage):
+    """A page whose resource-timing buffer we control."""
+
+    def __init__(self, html: str, timings, url: str | None = None):
+        super().__init__(_document(html), url=url or FakePage("").url)
+        self._timings = timings
+
+    async def evaluate(self, script, *args):
+        if callable(self._timings):
+            return self._timings()
+        return self._timings
+
+
+def _timing(**over):
+    base = {
+        "resources": 40,
+        "xhr": 0,
+        "ok": 0,
+        "c4": 0,
+        "c5": 0,
+        "unknown": 0,
+        "empty": 0,
+        "status_supported": False,
+        "ready": "complete",
+    }
+    base.update(over)
+    return base
+
+
+class TestNetworkProbe:
+    """**Did the page ever ask for its list.**
+
+    [实测 2026-08-15] After the read-back learnt to wait, it waited the full
+    20 s and the page was as empty as it had been at 2.5 s — `textlen=105`,
+    `busy=1`, `divs=73` against 105/1/72 before. Not slow: nothing was
+    arriving. The next question is one level down, and it is a network
+    question.
+    """
+
+    def test_the_page_script_cannot_return_a_url(self):
+        """**The containment property, asserted structurally.**
+
+        The interesting field on a `PerformanceResourceTiming` is `name` — the
+        full request URL. `verify_detail` is a database row and a log line, and
+        this repo is public. The aggregation therefore happens inside the page
+        and only integers come back; if this script ever learns to read
+        `.name`, this test is the thing that says so.
+        """
+        source = douyin_verify._NETWORK_TIMING_JS
+        assert ".name" not in source
+        assert "entry.name" not in source
+        assert "JSON.stringify" not in source
+        # Only these keys may cross the boundary.
+        assert set(re.findall(r"(\w+):", source)) <= {
+            "resources", "xhr", "ok", "c4", "c5", "unknown", "empty",
+            "status_supported", "ready",
+        }
+
+    async def test_a_page_that_never_asked_reads_as_zero_xhr(self):
+        """Candidate: the request was never sent."""
+        page = _NetPage(SKELETON, _timing(resources=40, xhr=0))
+        probe = await measure_network(page, xhr_before=0)
+        assert probe.xhr == 0
+        assert probe.resources == 40
+        assert "xhr=0->0" in probe.render()
+
+    async def test_failed_requests_show_up_as_status_buckets(self):
+        """Candidate: the request went out and the platform refused it."""
+        page = _NetPage(
+            SKELETON,
+            _timing(xhr=6, c4=5, ok=1, status_supported=True, empty=5),
+        )
+        probe = await measure_network(page, xhr_before=2)
+        assert (probe.ok, probe.c4, probe.c5) == (1, 5, 0)
+        assert "xhr=2->6" in probe.render()
+        assert "4xx=5" in probe.render()
+
+    async def test_missing_response_status_support_is_unknown_not_zero(self):
+        """**The `?`-vs-`0` rule, at the capability level.**
+
+        `responseStatus` needs Chromium 109+. If the browser does not expose
+        it, "no 4xx seen" is not an observation we made — it is a measurement
+        we could not take, and rendering it as `0` would read like proof that
+        nothing failed.
+        """
+        page = _NetPage(SKELETON, _timing(xhr=6, unknown=6, status_supported=False))
+        probe = await measure_network(page)
+        assert probe.xhr == 6
+        assert probe.ok is None and probe.c4 is None and probe.c5 is None
+        assert probe.unknown == 6
+        rendered = probe.render()
+        assert "ok=? 4xx=? 5xx=?" in rendered
+        assert "unk=6" in rendered
+
+    async def test_a_page_without_evaluate_degrades_to_unmeasurable(self):
+        """`FakePage` has no `evaluate`, and neither will a page that detached.
+        Every field must be `?` — never a zero that reads like "it asked for
+        nothing"."""
+        probe = await measure_network(FakePage(_document(SKELETON)))
+        assert probe.xhr is None and probe.resources is None
+        rendered = probe.render()
+        assert "res=? xhr=?->?" in rendered
+        assert "0" not in rendered
+
+    async def test_a_script_that_returns_null_is_unmeasurable(self):
+        """The page script returns `null` when the Performance API itself
+        throws — that is a failed measurement, not an empty one."""
+        page = _NetPage(SKELETON, None)
+        probe = await measure_network(page, xhr_before=3)
+        assert probe.resources is None
+        assert probe.xhr is None
+        assert probe.xhr_before == 3
+
+    async def test_growth_across_the_wait_is_visible(self):
+        """A page that is talking and still not rendering moves this number; a
+        page that never asked does not. Different bugs, different fixes."""
+        page = _NetPage(SKELETON, _timing(xhr=9))
+        probe = await measure_network(page, xhr_before=3)
+        assert "xhr=3->9" in probe.render()
+
+    async def test_the_net_section_joins_the_others_in_the_message(self):
+        """All three sections have to survive together — the page section is
+        what located this bug, and losing it to make room would cost the next
+        one."""
+        page = _NetPage(SKELETON, _timing(xhr=0), url=LOGIN_URL)
+        judgement = await verify_publish(page, "Some Caption")
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert "[probe cards=" in judgement.message
+        assert "[page where=login" in judgement.message
+        assert "[net res=40 xhr=0->0" in judgement.message
+        assert "doc=complete" in judgement.message
 
 
 class TestStatusMapping:
