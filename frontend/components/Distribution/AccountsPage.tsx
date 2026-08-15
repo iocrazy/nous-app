@@ -9,22 +9,13 @@ import {
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
 import { AccountAvatar, PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
+import { needsReconnect } from './accountStatus';
 import { PageHeader } from '../layout/PageHeader';
 import { useConfirm } from '../ConfirmDialog';
 import SessionLoginModal from './SessionLoginModal';
 import './distribution-v4.css';
 
 const WEEK_MS = 7 * 86_400_000;
-
-/**
- * Two statuses mean "this account cannot publish right now": `expired` is an
- * OAuth token that lapsed, `needs_relogin` is a dead browser session. Any
- * count or filter that means "needs attention" must cover both — treating
- * only `expired` as actionable makes the stat read 0 while session accounts
- * are offline, which is exactly the silent no-op CLAUDE.md forbids.
- */
-const isActionable = (a: SocialAccount) =>
-  a.status === 'expired' || a.status === 'needs_relogin';
 
 /**
  * What we know about the browser service every QR binding runs inside (D1).
@@ -282,7 +273,7 @@ export const AccountsPage: React.FC = () => {
 
   // ── stats derived from real publish tasks ──
   const expiredCount = useMemo(
-    () => accounts.filter(isActionable).length,
+    () => accounts.filter(needsReconnect).length,
     [accounts],
   );
   // Split so the stat can say *which* kind of attention is needed — "3
@@ -391,7 +382,7 @@ export const AccountsPage: React.FC = () => {
         <div className="acct-grid">
           {accounts.map((a) => {
             const needsRelogin = a.status === 'needs_relogin';
-            const expired = isActionable(a);
+            const expired = needsReconnect(a);
             const isSession = a.auth_type === 'session';
             const badge = PLATFORM_BADGE[a.platform];
             const posts = postsByAccount.get(a.id) ?? 0;
