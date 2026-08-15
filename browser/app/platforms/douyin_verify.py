@@ -89,7 +89,7 @@ again.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Sequence
 
@@ -432,6 +432,83 @@ class WorkCard:
         return extract_item_id(self.hrefs)
 
 
+# The distinctive part of a card selector, for the compact probe line. Falls
+# back to the whole literal rather than to a guess: an unlabelled selector in a
+# diagnostic is still readable, a mislabelled one is a lie.
+_SELECTOR_LABEL = re.compile(r'\[class[*^$]?="([^"]+)"\]')
+
+
+def probe_label(selector: str) -> str:
+    """Short name for `selector` in the probe line. Pure."""
+    match = _SELECTOR_LABEL.search(selector)
+    return match.group(1) if match else selector
+
+
+def _num(value: int | None) -> str:
+    """A count, or `?` when it could not be measured. Pure.
+
+    **`None` must never render as `0`.** A probe that failed and a page that
+    genuinely has none of something are opposite findings, and a diagnostic
+    whose broken output is shaped like a negative answer is not evidence —
+    the same rule as `readyz`'s three-state `dbos` field.
+    """
+    return "?" if value is None else str(value)
+
+
+@dataclass(frozen=True)
+class ListProbe:
+    """Why the works list read the way it did. **Counts and selector literals
+    only — never page content.**
+
+    This exists because the read-back's one observable output is
+    `verify_detail`, and `verify_detail` is built from `[reason] message`
+    alone (`publish_readback.verdict_for` drops every other key of the detail
+    dict). A read that reported `read 1 work(s)` therefore said nothing about
+    WHICH of the four candidate selectors produced that 1, or whether the
+    other three were even tried — and answering that took a live-account
+    reconnaissance run that nobody could schedule. The numbers below ride the
+    message instead, so the next occurrence answers itself.
+
+    ⚠️ Nothing here may become content. `verify_detail` lands in a database
+    row and in logs, and this repository is public: card text, captions,
+    account identifiers and URLs are all forbidden. `title_exact` is a COUNT
+    of nodes whose whole text equals the caption — the caption itself never
+    appears.
+
+    Every field is `int | None`, and `None` means "could not measure", which
+    renders as `?`. See `_num`.
+    """
+
+    # (selector, raw matches, matches after `outermost_only`) per candidate.
+    roots: tuple[tuple[str, int | None, int | None], ...] = ()
+    # The candidate `read_work_cards` actually read from, if any.
+    won: str | None = None
+    # Cards handed to the judgement.
+    cards: int | None = None
+    # Nodes whose ENTIRE text is the published caption. ≥1 proves the caption
+    # occupies an element of its own — which is what `match_cards`' line route
+    # assumes and what no measurement had ever confirmed.
+    title_exact: int | None = None
+    # Nodes whose entire text is 编辑作品 / 删除作品 — the operation words the
+    # console prints on every card. A card count that needs no class name.
+    # ⚠️ Nodes, not cards: a wrapper whose only text is that word matches too,
+    # so read these as a multiple of the works on screen, not as the works.
+    op_words: tuple[int | None, int | None] = (None, None)
+
+    def render(self) -> str:
+        roots = ",".join(
+            f"{probe_label(sel)}:{_num(raw)}/{_num(scoped)}"
+            for sel, raw, scoped in self.roots
+        )
+        won = probe_label(self.won) if self.won else "none"
+        return (
+            f"[probe cards={_num(self.cards)} won={won}"
+            f" roots={roots or 'none'}"
+            f" title_exact={_num(self.title_exact)}"
+            f" ops={_num(self.op_words[0])}/{_num(self.op_words[1])}]"
+        )
+
+
 def classify_work_state(text: str) -> WorkState:
     """What the platform says about this card. Pure.
 
@@ -510,8 +587,18 @@ def judge_readback(
     title: str,
     *,
     list_empty: bool = False,
+    probe: ListProbe | None = None,
 ) -> ReadbackJudgement:
     """Cards + the caption we published → the verdict. Pure. Total.
+
+    `probe` is appended to the message of the three "we did not find it"
+    outcomes only — `not_found` (both forms) and `list_unreadable`. Those are
+    exactly the verdicts where the counts explain the answer; a LIVE post needs
+    no explanation, and a refused one is about the platform, not about our
+    reading. It rides the MESSAGE rather than `detail` because the message is
+    the only part that survives into `verify_detail`
+    (`publish_readback.verdict_for`). Passing `None` changes nothing, which is
+    what keeps this function pure and every existing caller correct.
 
     `list_empty` is the platform's own empty state, and it is what separates
     "this account has no works" (a real answer) from "we read nothing" (no
@@ -525,6 +612,7 @@ def judge_readback(
     direction that does not block a user over a duplicate name.
     """
     matches = match_cards(cards, title)
+    suffix = f" {probe.render()}" if probe is not None else ""
 
     if not matches:
         if cards:
@@ -535,14 +623,15 @@ def judge_readback(
                 ReadbackVerdict.NOT_LIVE,
                 "not_found",
                 f"read {len(cards)} work(s) from the creator centre and none "
-                "matches the published title",
+                f"matches the published title{suffix}",
                 detail={"cards_seen": len(cards)},
             )
         if list_empty:
             return ReadbackJudgement(
                 ReadbackVerdict.NOT_LIVE,
                 "not_found",
-                "the creator centre reports this account has no works at all",
+                "the creator centre reports this account has no works at all"
+                f"{suffix}",
                 detail={"cards_seen": 0, "list_empty": True},
             )
         # Zero cards AND no empty state: the page did not render, or our card
@@ -551,7 +640,7 @@ def judge_readback(
             ReadbackVerdict.INCONCLUSIVE,
             "list_unreadable",
             "could not read the works list (no cards found and no empty-state "
-            "marker) — the read-back reached the page but learned nothing",
+            f"marker) — the read-back reached the page but learned nothing{suffix}",
             detail={"cards_seen": 0, "list_empty": False},
         )
 
@@ -643,6 +732,100 @@ async def _card_hrefs(node: Any, limit: int = 8) -> list[str]:
     return out
 
 
+async def _count_or_none(page: Any, selector: str) -> int | None:
+    """Matches for `selector`, or None if it could not be counted.
+
+    None rather than 0, always — see `_num`. A locator that raises and a page
+    with no such node are opposite findings.
+    """
+    try:
+        return int(await page.locator(selector).count())
+    except Exception:  # noqa: BLE001 - an unusable probe is not a crash
+        return None
+
+
+async def _exact_text_count(page: Any, text: str) -> int | None:
+    """Nodes whose ENTIRE text is `text`, or None if it could not be counted.
+
+    `exact=True` for the repo's usual reason (「允许」 is a substring of
+    「不允许」), and because the question being asked is precisely "is there a
+    node that contains this and nothing else" — a substring count cannot
+    answer it.
+    """
+    if not text:
+        return None
+    try:
+        return int(await page.get_by_text(text, exact=True).count())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def read_works_list(
+    page: Any, limit: int = MAX_CARDS
+) -> tuple[list[WorkCard], ListProbe]:
+    """`read_work_cards`, plus the counts that explain what it did.
+
+    **Every candidate is counted, not just the winner.** The loop below still
+    takes the first candidate that yields cards — behaviour is unchanged — but
+    the counting pass runs over all four first, because "which selector won"
+    is only meaningful next to "what did the others see". Four extra `count()`
+    calls, which is what `CARD_SELECTORS` already budgets for ("they cost one
+    `count()` each").
+
+    That distinction is the whole point: the reader returns on the FIRST
+    candidate that produces any card, so a console change that makes an
+    EARLIER candidate match one piece of page chrome silently prevents the
+    real one from ever being tried — and the outcome looks identical to "the
+    account has one work". Nothing in the old output could tell those apart.
+    """
+    roots: list[tuple[str, int | None, int | None]] = []
+    for selector in CARD_SELECTORS:
+        raw = await _count_or_none(page, selector)
+        scoped = await _count_or_none(page, outermost_only(selector))
+        roots.append((selector, raw, scoped))
+
+    for selector, _raw, scoped in roots:
+        if not scoped:
+            continue
+        try:
+            locator = page.locator(outermost_only(selector))
+        except Exception:  # noqa: BLE001
+            continue
+        cards = await _read_cards_from(locator, min(scoped, limit))
+        if cards:
+            return cards, ListProbe(
+                roots=tuple(roots), won=selector, cards=len(cards)
+            )
+    return [], ListProbe(roots=tuple(roots), won=None, cards=0)
+
+
+async def measure_page_probes(page: Any, title: str, probe: ListProbe) -> ListProbe:
+    """`probe` with the page-level counts filled in.
+
+    Separate from `read_works_list` because these two need the caption and the
+    list read does not, and because they answer a different question: not "did
+    we find the card" but "is the page even shaped the way we think".
+
+    Neither count ever leaves as text. `title_exact` is a number of nodes; the
+    caption is used as a needle and discarded.
+
+    The RAW title goes to the matcher, not the normalised one: Playwright
+    collapses whitespace on both sides of a text match itself, whereas
+    `normalize_title` also case-folds — and case-folding the needle would make
+    a case-only mismatch invisible in a number that is supposed to prove the
+    caption is rendered as we sent it. A blank title measures as `?`, not 0.
+    """
+    needle = title if normalize_title(title) else ""
+    return replace(
+        probe,
+        title_exact=await _exact_text_count(page, needle),
+        op_words=(
+            await _exact_text_count(page, "编辑作品"),
+            await _exact_text_count(page, "删除作品"),
+        ),
+    )
+
+
 async def read_work_cards(page: Any, limit: int = MAX_CARDS) -> list[WorkCard]:
     """Read up to `limit` work cards off the manage page.
 
@@ -661,42 +844,42 @@ async def read_work_cards(page: Any, limit: int = MAX_CARDS) -> list[WorkCard]:
     can nest cards in a way the CSS scoping does not catch, and one post
     counted several times inflates `cards_seen` — the very number the "we
     really did read the list" judgement rests on.
-    """
-    for selector in CARD_SELECTORS:
-        try:
-            locator = page.locator(outermost_only(selector))
-            count = await locator.count()
-        except Exception:
-            continue
-        if not count:
-            continue
 
-        cards: list[WorkCard] = []
-        seen_ids: set[str] = set()
-        seen_text: set[str] = set()
-        for index in range(min(count, limit)):
-            try:
-                node = locator.nth(index)
-                text = await node.inner_text()
-            except Exception:
+    Kept as the cards-only door onto `read_works_list` so that callers which
+    do not want the diagnostic do not have to unpack it. The selection logic
+    lives there and only there — a second copy of "which selector wins" would
+    be a second thing to keep true.
+    """
+    cards, _ = await read_works_list(page, limit)
+    return cards
+
+
+async def _read_cards_from(locator: Any, limit: int) -> list[WorkCard]:
+    """Up to `limit` cards off an already-chosen locator. Fails soft."""
+    cards: list[WorkCard] = []
+    seen_ids: set[str] = set()
+    seen_text: set[str] = set()
+    for index in range(limit):
+        try:
+            node = locator.nth(index)
+            text = await node.inner_text()
+        except Exception:  # noqa: BLE001
+            continue
+        if not text or not text.strip():
+            continue
+        card = WorkCard(text=text, hrefs=tuple(await _card_hrefs(node)))
+        item_id = card.item_id
+        if item_id is not None:
+            if item_id in seen_ids:
                 continue
-            if not text or not text.strip():
+            seen_ids.add(item_id)
+        else:
+            key = normalize_title(text)
+            if key in seen_text:
                 continue
-            card = WorkCard(text=text, hrefs=tuple(await _card_hrefs(node)))
-            item_id = card.item_id
-            if item_id is not None:
-                if item_id in seen_ids:
-                    continue
-                seen_ids.add(item_id)
-            else:
-                key = normalize_title(text)
-                if key in seen_text:
-                    continue
-                seen_text.add(key)
-            cards.append(card)
-        if cards:
-            return cards
-    return []
+            seen_text.add(key)
+        cards.append(card)
+    return cards
 
 
 async def list_is_empty(page: Any) -> bool:
@@ -714,10 +897,17 @@ async def verify_publish(page: Any, title: str) -> ReadbackJudgement:
     Navigation deliberately lives in `verify.py`, so this whole judgement path
     is exercisable against a page whose content was set directly — no network,
     no creator account.
+
+    The probe is measured on EVERY read, including the ones that end LIVE, and
+    only rendered where it explains something (see `judge_readback`). Measuring
+    conditionally would mean deciding the verdict before deciding what to
+    measure, and the page is already loaded — three more counts against it are
+    not worth a second code path.
     """
-    cards = await read_work_cards(page)
+    cards, probe = await read_works_list(page)
     empty = False if cards else await list_is_empty(page)
-    return judge_readback(cards, title, list_empty=empty)
+    probe = await measure_page_probes(page, title, probe)
+    return judge_readback(cards, title, list_empty=empty, probe=probe)
 
 
 SPEC = VerifySpec(
@@ -737,6 +927,7 @@ __all__ = [
     "CARD_SELECTORS",
     "LIST_EMPTY_MARKERS",
     "LIVE_MARKERS",
+    "ListProbe",
     "MAX_CARDS",
     "REJECTED_MARKERS",
     "SCHEDULED_MARKERS",
@@ -754,8 +945,11 @@ __all__ = [
     "judge_readback",
     "list_is_empty",
     "match_cards",
+    "measure_page_probes",
     "normalize_title",
     "outermost_only",
+    "probe_label",
     "read_work_cards",
+    "read_works_list",
     "verify_publish",
 ]
