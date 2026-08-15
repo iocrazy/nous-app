@@ -2642,7 +2642,28 @@ export interface PublishTask {
    *  null = the music control was left untouched, i.e. the platform default
    *  (原声), which is what every post published before this field existed got. */
   music_name: string | null;
+  /** The picked track's identity, when the user chose one from the platform's
+   *  catalogue rather than typing a name. null = the typed-name path (or no
+   *  music at all). */
+  music_ref: MusicRef | null;
   accounts: PublishTaskAccount[];
+}
+
+/**
+ * A track's identity as the platform states it (mig 429).
+ *
+ * `duration` is SECONDS and `user_count` is the raw integer — formatting is
+ * the UI's job. Both ride along because they are the fingerprint the browser
+ * aligns dialog rows against: same title, different author or length, is a
+ * different upload.
+ */
+export interface MusicRef {
+  music_id: string;
+  music_name: string;
+  music_author: string;
+  duration: number;
+  user_count: number;
+  cover_url: string;
 }
 
 export interface PublishRequest {
@@ -2717,6 +2738,22 @@ export interface PublishRequest {
    * Omit = leave the control untouched.
    */
   music_name?: string;
+  /**
+   * The identity of a track picked out of the platform's own catalogue.
+   *
+   * A title is not an identity — one search for 「起风了」 returns five rows
+   * whose titles are character-identical under different ids (measured
+   * 2026-08-15). With this present the browser aligns rows on
+   * (title, author, length) and refuses anything short of a unique match
+   * (`music_ambiguous`); with only `music_name` it stays on the older
+   * deliberately-fuzzy path, which is the right behaviour for a name someone
+   * typed from memory.
+   *
+   * `music_id` is the platform's `id_str` and is a STRING: the sibling `id`
+   * is a JSON number past 2^53 and is already a different number by the time
+   * it reaches this file.
+   */
+  music_ref?: MusicRef;
   /**
    * The two covers produced by `POST /distribution/covers/select`. Sent at
    * create time because the usual order is cover-first: the compose form
