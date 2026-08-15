@@ -37,7 +37,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence
 
-from app.services.distribution.publish_options import resolve_self_declaration
+from app.services.distribution.publish_options import (
+    music_platform_options,
+    resolve_self_declaration,
+)
 from app.services.distribution.session_adapter import (
     AUTH_TYPE_SESSION,
     REASON_PUBLISHING_NOT_IMPLEMENTED,
@@ -134,9 +137,12 @@ def _platform_options(body: "PublishTaskCreate") -> dict[str, Any]:
     collection = (body.collection_name or "").strip()
     if collection:
         opts["collection"] = collection
-    music = (body.music_name or "").strip()
-    if music:
-        opts["music"] = music
+    opts.update(
+        music_platform_options(
+            body.music_name,
+            body.music_ref.model_dump() if body.music_ref else None,
+        )
+    )
     return opts
 
 

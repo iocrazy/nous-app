@@ -626,6 +626,7 @@
       "accountsCount": "{{n}} accounts",
       "noteMusicApproximate": "Published, but with the closest matching track rather than the one you named.",
       "noteMusicNotFound": "The platform's music search found nothing for that name — nothing was published. Try another spelling.",
+      "noteMusicAmbiguous": "Several tracks on the platform look identical to the one you picked, so nothing was published rather than risk the wrong song. Pick a different version.",
       "noteMusicFailed": "The music could not be selected on the platform, so nothing was published.",
       "noteCollectionSkipped": "Published, but the collection was not applied.",
       "publishingNow": "Publishing now",

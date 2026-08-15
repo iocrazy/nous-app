@@ -626,6 +626,7 @@
       "accountsCount": "{{n}} 个账号",
       "noteMusicApproximate": "已发布，但用的是最接近的一首，不是你填的那首。",
       "noteMusicNotFound": "平台的音乐搜索没有找到这个名字 — 本次未发布。换个写法再试。",
+      "noteMusicAmbiguous": "平台上有好几首和你选的那首长得一样，为避免发错歌，本次没有发布。换一个版本再试。",
       "noteMusicFailed": "配乐没能在平台页面上选中，本次未发布。",
       "noteCollectionSkipped": "已发布，但合集没有挂上。",
       "publishingNow": "正在立即发布",

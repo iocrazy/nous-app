@@ -49,6 +49,7 @@ from app.schemas.distribution_cover import (
     CoverSelectResponse,
 )
 from app.schemas.distribution_publish import (
+    MusicRef,
     PublishSmsStateResponse,
     PublishSmsVerdictResponse,
     PublishTaskCreate,
@@ -898,6 +899,11 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
         self_declaration=task.get("self_declaration"),
         collection_name=task.get("collection_name"),
         music_name=task.get("music_name"),
+        music_ref=(
+            MusicRef.model_validate(task["music_ref"])
+            if isinstance(task.get("music_ref"), dict)
+            else None
+        ),
         accounts=[
             TaskAccountOut(
                 id=a["id"],
@@ -990,6 +996,8 @@ async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
         self_declaration=body.self_declaration,
         collection_name=body.collection_name,
         music_name=body.music_name,
+        # mig 429 — 选中曲库卡片时的结构化身份。`None` = 手打曲名的老路径。
+        music_ref=body.music_ref.model_dump() if body.music_ref else None,
     )
     task_id = int(task["id"])
 

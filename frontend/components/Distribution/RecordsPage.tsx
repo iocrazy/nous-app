@@ -109,7 +109,7 @@ const formatTime = (iso: string): string => {
  * chains). This table is the structured path, the same split
  * `utils/errorCatalog.ts` describes.
  */
-const PUBLISH_NOTE_KEYS: ReadonlyArray<{
+export const PUBLISH_NOTE_KEYS: ReadonlyArray<{
   test: RegExp;
   key: string;
   fallback: string;
@@ -126,6 +126,17 @@ const PUBLISH_NOTE_KEYS: ReadonlyArray<{
     test: /\[music_not_found\]/i,
     key: 'distribution.records.noteMusicNotFound',
     fallback: "The platform's music search found nothing for that name — nothing was published. Try another spelling.",
+  },
+  {
+    // Several results were indistinguishable from the track that was picked
+    // (the platform lists same-titled uploads by different creators), so the
+    // publish refused rather than guess. This sits ABOVE the catch-all below
+    // because the user's move is different and specific: the generic sentence
+    // ("the control could not be driven") would send him looking for a broken
+    // picker that is working exactly as intended.
+    test: /\[music_ambiguous\]/i,
+    key: 'distribution.records.noteMusicAmbiguous',
+    fallback: 'Several tracks on the platform look identical to the one you picked, so nothing was published rather than risk the wrong song. Pick a different version.',
   },
   {
     // Every other music reason is a control that could not be driven:
