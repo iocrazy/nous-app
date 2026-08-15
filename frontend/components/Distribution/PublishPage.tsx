@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, ChevronLeft,
   ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Play, Plus, Radio,
-  Search, Send, Sparkles, TrendingUp, X,
+  RefreshCw, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
@@ -21,6 +21,7 @@ import {
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { AccountAvatar } from './platform';
+import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
 import { DateTimePopover } from '../common/DateTimePopover';
@@ -291,8 +292,8 @@ export const PublishPage: React.FC = () => {
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   /**
-   * Per-platform capabilities, straight from the backend. `null` = not answered
-   * yet (or the request failed).
+   * Per-platform capabilities, straight from the backend. `null` = we have no
+   * answer (still asking, or the request failed).
    *
    * Null must read as "supports nothing", never as "assume yes": an empty map
    * during the first paint would otherwise let the Images tab flash open and
@@ -301,6 +302,22 @@ export const PublishPage: React.FC = () => {
    * whole endpoint exists to prevent.
    */
   const [capabilities, setCapabilities] = useState<Record<string, PlatformCapability> | null>(null);
+  /**
+   * How we came to be holding (or not holding) that map.
+   *
+   * The map alone cannot tell the three cases apart, and they are three
+   * different sentences to a user: we have not asked yet, our own request
+   * failed, or the platform genuinely answered "no". Collapsing them is how the
+   * page ended up telling a user with a perfectly capable account that "the
+   * connected platforms can only publish video" — an assertion about the
+   * platform, made from no evidence at all, while the request was still in
+   * flight.
+   *
+   * The safe default does NOT change with this state: every non-`ready` case
+   * still leaves image posts disabled (see `imagesGate`). What changes is only
+   * what we SAY, which is the part that was lying.
+   */
+  const [capState, setCapState] = useState<'loading' | 'ready' | 'error'>('loading');
   // selectedVideos holds media resource ids in PICK ORDER — for images that
   // order IS the gallery order sent to the note.
   const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
@@ -445,23 +462,36 @@ export const PublishPage: React.FC = () => {
   useEffect(() => { void load(); }, [load]);
 
   /**
-   * Capabilities are fetched once on mount, not inside `load()`: they do not
-   * depend on scope or content type, and re-fetching a table of constants every
-   * time the user flips a tab is noise.
+   * Capabilities are fetched on mount, not inside `load()`: they do not depend
+   * on scope or content type, and re-fetching a table of constants every time
+   * the user flips a tab is noise.
    *
    * A failure leaves `capabilities` at null — i.e. image posts stay disabled.
    * That is the safe direction and it is deliberate: a failed request is no
-   * evidence that the platform supports galleries.
+   * evidence that the platform supports galleries. It is also, on its own, no
+   * evidence that the platform DOESN'T — hence `capState`, and hence this being
+   * a callable rather than an inline effect: the user can ask again.
+   *
+   * Guarded by a sequence number (same pattern as `suggestSeq`) so a slow first
+   * attempt landing after a retry cannot repaint the page with the older answer.
    */
-  useEffect(() => {
-    let cancelled = false;
-    getPlatformCapabilities()
-      .then((caps) => { if (!cancelled) setCapabilities(caps); })
-      .catch((err) => {
-        console.error('distribution: load platform capabilities failed', err);
-      });
-    return () => { cancelled = true; };
+  const capSeq = useRef(0);
+  const loadCapabilities = useCallback(async () => {
+    const seq = ++capSeq.current;
+    setCapState('loading');
+    try {
+      const caps = await getPlatformCapabilities();
+      if (seq !== capSeq.current) return;
+      setCapabilities(caps);
+      setCapState('ready');
+    } catch (err) {
+      if (seq !== capSeq.current) return;
+      console.error('distribution: load platform capabilities failed', err);
+      setCapState('error');
+    }
   }, []);
+
+  useEffect(() => { void loadCapabilities(); }, [loadCapabilities]);
 
   /**
    * A refusal describes the exact request that was refused. As soon as any
@@ -532,25 +562,6 @@ export const PublishPage: React.FC = () => {
 
   const isImages = contentType === 'images';
 
-  /**
-   * Why the Images tab is dead, or null when it is alive.
-   *
-   * Two distinct reasons, and they used to share one sentence. The old gate was
-   * `targets.length > 0 && targets.every(...)`, so "you have not connected any
-   * account" and "the platform you connected cannot do this" both printed
-   * *Image posts are not supported yet* — telling a user with no accounts to go
-   * wait for a feature, when what they actually need is the Accounts page.
-   *
-   * Gated on the accounts the post actually reaches (all connected ones until
-   * the user narrows it down) rather than a global flag: "nothing can do this"
-   * and "the ones YOU picked can't" are the same failure for the user, and both
-   * have to be visible before the form is filled in.
-   *
-   * Capabilities come from the backend (`GET /distribution/capabilities`), so
-   * nothing here has to be edited when the browser service learns galleries —
-   * the tab un-greys itself. A null map (still loading, or the request failed)
-   * reads as "supports nothing".
-   */
   /** The accounts this post actually reaches — all connected ones until the
    *  user narrows it down. Every capability question below is asked about
    *  exactly this set. */
@@ -561,13 +572,59 @@ export const PublishPage: React.FC = () => {
     [accounts, selectedAccounts],
   );
 
-  const imagesGate = useMemo<'noAccounts' | 'unsupported' | null>(() => {
+  /**
+   * Whether we actually hold an answer about every account this post reaches.
+   *
+   * A response that carries no record for a platform is not a response that
+   * said "no" — the old `?? false` flattened those two into a refusal, exactly
+   * like a pending or failed request did.
+   */
+  const capsResolved = useMemo(
+    () => capState === 'ready'
+      && targetAccounts.every((a) => Boolean(capabilities?.[a.platform])),
+    [capState, targetAccounts, capabilities],
+  );
+
+  /**
+   * Why the Images tab is dead, or null when it is alive. FOUR reasons, and the
+   * last three used to be one.
+   *
+   * `unsupported` is the only one that says anything about the platform, and it
+   * is now the only one reachable with an actual answer in hand: `capState ===
+   * 'ready'` plus a capability record for every target platform. Everything
+   * else — request in flight, request failed, a response that simply has no
+   * entry for this platform — is *no evidence*, and no evidence is not a "no".
+   * It used to be reported as one ("the connected platforms can only publish
+   * video"), which is how a user with a gallery-capable account got told their
+   * platform could not do galleries.
+   *
+   * The gate value still closes the tab in every non-null case: the safe
+   * default is untouched and must stay untouched (see `getPlatformCapabilities`
+   * — a rejection means OUR call failed, never that the platform said no). This
+   * split changes what we tell the user, not what we let them arm.
+   *
+   * `noAccounts` is tested first because it is answerable without capabilities
+   * at all: with nothing connected, no capability response changes what the
+   * user has to do next. It kept its own sentence from the previous round of
+   * this same bug — "you have not connected an account" and "the platform you
+   * connected cannot do this" used to share one, which told a user with no
+   * accounts to go wait for a feature.
+   *
+   * Everything is asked about the accounts the post actually REACHES rather
+   * than a global flag: "nothing can do this" and "the ones YOU picked can't"
+   * are the same failure for the user. And nothing here needs editing when the
+   * browser service learns galleries — the tab un-greys itself off the
+   * response.
+   */
+  const imagesGate = useMemo<'noAccounts' | 'loading' | 'unknown' | 'unsupported' | null>(() => {
     if (targetAccounts.length === 0) return 'noAccounts';
+    if (capState === 'loading') return 'loading';
+    if (!capsResolved) return 'unknown';
     const ok = targetAccounts.every(
       (a) => capabilities?.[a.platform]?.content_types.includes('images') ?? false,
     );
     return ok ? null : 'unsupported';
-  }, [targetAccounts, capabilities]);
+  }, [targetAccounts, capabilities, capState, capsResolved]);
 
   const imagesSupported = imagesGate === null;
 
@@ -575,9 +632,12 @@ export const PublishPage: React.FC = () => {
    * Whether every account this post reaches has a music picker we can drive.
    *
    * Read from the capabilities response, never decided here — same rule as the
-   * image limits above. A null map (still loading, or the request failed) reads
-   * as "not supported", so the field stays hidden rather than collecting a name
-   * that would be refused at submit with `music_not_supported`.
+   * image limits above. Without an answer (still loading, or the request
+   * failed) the field stays hidden rather than collecting a name that would be
+   * refused at submit with `music_not_supported` — but see
+   * `capabilitiesUnavailable` below the row: a field that vanishes for want of
+   * an answer has to say so, otherwise "we could not ask" is indistinguishable
+   * from "your platform has no music picker".
    */
   const musicSupported = useMemo(
     () => targetAccounts.length > 0
@@ -590,16 +650,46 @@ export const PublishPage: React.FC = () => {
     ? t('distribution.publish.pickerSearchImages', 'Search images')
     : t('distribution.publish.pickerSearch', 'Search videos');
 
-  // Says why the tab is dead, in the same words on the tooltip and in the card.
-  const imagesUnsupportedHint = imagesGate === 'noAccounts'
-    ? t(
-      'distribution.publish.noAccountsForImages',
-      'Connect an account before publishing an image post.',
-    )
-    : t(
-      'distribution.publish.imagesUnsupported',
-      'Image posts are not supported yet — the connected platforms can only publish video.',
-    );
+  /**
+   * Says why the tab is dead, in the same words on the tooltip and in the card.
+   *
+   * One sentence per gate value, deliberately: the whole point of splitting the
+   * gate is that these read differently. Only the `unsupported` line is allowed
+   * to make a claim about the platform.
+   */
+  const imagesGateHint = ((): string | undefined => {
+    switch (imagesGate) {
+      case 'noAccounts':
+        return t(
+          'distribution.publish.noAccountsForImages',
+          'Connect an account before publishing an image post.',
+        );
+      case 'loading':
+        return t(
+          'distribution.publish.capabilitiesLoading',
+          'Checking what the connected platforms can publish…',
+        );
+      case 'unknown':
+        return t(
+          'distribution.publish.capabilitiesUnknown',
+          'We could not read what the connected platforms can publish, so image posts stay off for now. This is our lookup failing, not the platform saying no.',
+        );
+      case 'unsupported':
+        return t(
+          'distribution.publish.imagesUnsupported',
+          'Image posts are not supported yet — the connected platforms can only publish video.',
+        );
+      default:
+        return undefined;
+    }
+  })();
+
+  /**
+   * We have accounts but no capability answer about them. Drives the places
+   * that hide a control outright — hiding it is the right safe default, hiding
+   * it *without saying so* is the silent no-op.
+   */
+  const capabilitiesUnavailable = targetAccounts.length > 0 && !capsResolved;
 
   /**
    * How many images one post may carry, for the accounts it reaches.
@@ -1252,8 +1342,11 @@ export const PublishPage: React.FC = () => {
     return t('distribution.publish.visFriends', 'Friends');
   };
 
-  const onToggleAccount = (accountId: string, expired: boolean) => {
-    if (expired) return;
+  // `blocked` covers both dead statuses (see `needsReconnect`) — the row is the
+  // second lock, this is the first: whichever way the click arrives, an account
+  // that cannot publish must not end up in the selection.
+  const onToggleAccount = (accountId: string, blocked: boolean) => {
+    if (blocked) return;
     setSelectedAccounts((s) => toggle(s, accountId));
   };
 
@@ -1409,7 +1502,12 @@ export const PublishPage: React.FC = () => {
                 role="tab"
                 aria-selected={isImages}
                 disabled={!imagesSupported}
-                title={imagesSupported ? undefined : imagesUnsupportedHint}
+                // While the lookup is in flight the tab is busy, not judged.
+                // Same `disabled` either way — arming a post we have no evidence
+                // for is what we are avoiding — but a screen reader should hear
+                // "we're checking", not silence.
+                aria-busy={imagesGate === 'loading'}
+                title={imagesGateHint}
                 className={isImages ? 'on' : ''}
                 onClick={() => onContentTypeChange('images')}
               >
@@ -1417,7 +1515,25 @@ export const PublishPage: React.FC = () => {
               </button>
             </div>
             {!imagesSupported && (
-              <p className="hint" style={{ marginBottom: 10 }}>{imagesUnsupportedHint}</p>
+              <p className="hint" style={{ marginBottom: 10 }}>
+                {imagesGate === 'loading' && (
+                  <Loader2 size={12} className="animate-spin" style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                )}
+                {imagesGateHint}
+                {/* A dead end the user can act on. The copy says our lookup
+                    failed; without a way to ask again that is just a nicer
+                    dead end. */}
+                {imagesGate === 'unknown' && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => void loadCapabilities()}
+                  >
+                    <RefreshCw size={12} /> {t('distribution.publish.capabilitiesRetry', 'Check again')}
+                  </button>
+                )}
+              </p>
             )}
             <div className="seg">
               <button type="button" className="on">{t('distribution.publish.fromLibrary', 'From Library')}</button>
@@ -1960,6 +2076,17 @@ export const PublishPage: React.FC = () => {
                 />
               </div>
             )}
+            {/* The row above is hidden by two very different facts. Say which:
+                "this platform has no music picker" is the platform's answer and
+                needs no note, "we never got an answer" is ours. */}
+            {!musicSupported && capabilitiesUnavailable && (
+              <p className="hint" style={{ margin: '4px 0 0' }}>
+                {t(
+                  'distribution.publish.musicCapabilityUnknown',
+                  'Music is hidden because we could not read what the connected platforms support.',
+                )}
+              </p>
+            )}
             <div className="opt-row">
               <MapPin />
               <span className="ol">{t('distribution.publish.location', 'Location')}</span>
@@ -2061,7 +2188,19 @@ export const PublishPage: React.FC = () => {
             </p>
 
             {accounts.map((a) => {
-              const expired = a.status === 'expired';
+              /* Both dead statuses, not just the OAuth one. `expired` is a
+                 lapsed OAuth token; a QR-bound session never reaches it — it
+                 dies as `needs_relogin`. Checking only `expired` here let a
+                 session-bound user (i.e. everyone publishing unattended) tick
+                 an offline account and find out at publish time. The predicate
+                 is shared with AccountsPage so the two cannot drift again. */
+              const blocked = needsReconnect(a);
+              /* Two statuses, two recoveries, two sentences — the same words
+                 AccountsPage uses on the card the user is being sent to.
+                 Merging them would send half of them to the wrong button. */
+              const blockedLabel = a.status === 'needs_relogin'
+                ? t('distribution.publish.reloginRescan', 'Signed out — scan again')
+                : t('distribution.publish.expiredReauthorize', 'Expired — reauthorize');
               const on = selectedAccounts.includes(a.id);
               const badge = PLATFORM_BADGE[a.platform];
               const open = customizeOpen[a.id];
@@ -2070,14 +2209,14 @@ export const PublishPage: React.FC = () => {
                   <div
                     role="checkbox"
                     aria-checked={on}
-                    aria-disabled={expired}
-                    tabIndex={expired ? -1 : 0}
-                    className={`acct-row ${on ? 'sel' : ''} ${expired ? 'dis' : ''}`}
-                    onClick={() => onToggleAccount(a.id, expired)}
+                    aria-disabled={blocked}
+                    tabIndex={blocked ? -1 : 0}
+                    className={`acct-row ${on ? 'sel' : ''} ${blocked ? 'dis' : ''}`}
+                    onClick={() => onToggleAccount(a.id, blocked)}
                     onKeyDown={(e) => {
-                      if (!expired && (e.key === 'Enter' || e.key === ' ')) {
+                      if (!blocked && (e.key === 'Enter' || e.key === ' ')) {
                         e.preventDefault();
-                        onToggleAccount(a.id, expired);
+                        onToggleAccount(a.id, blocked);
                       }
                     }}
                   >
@@ -2096,8 +2235,8 @@ export const PublishPage: React.FC = () => {
                       <small>
                         {PLATFORM_LABEL[a.platform] ?? a.platform}
                         {' · '}
-                        {expired
-                          ? t('distribution.publish.expiredReauthorize', 'Expired — reauthorize')
+                        {blocked
+                          ? blockedLabel
                           : (a.scope_type === 'team' ? t('distribution.teamScope', 'Team') : t('distribution.personalScope', 'Personal'))}
                         {' · '}
                         {/* How this row will actually publish. Worth stating: the
@@ -2109,7 +2248,7 @@ export const PublishPage: React.FC = () => {
                           : t('distribution.publish.routeNeedsPhone', 'Needs confirming on your phone')}
                       </small>
                     </span>
-                    {!expired && (
+                    {!blocked && (
                       <button
                         type="button"
                         className="cust"
@@ -2122,7 +2261,7 @@ export const PublishPage: React.FC = () => {
                       </button>
                     )}
                   </div>
-                  {!expired && open && (
+                  {!blocked && open && (
                     <div className="override">
                       <label htmlFor={`override-title-${a.id}`}>{t('distribution.publish.titleForAccount', 'Title for this account')}</label>
                       <input
