@@ -22,8 +22,12 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-const { retryPublishTask } = vi.hoisted(() => ({
+const { retryPublishTask, isScheduleUnreachable } = vi.hoisted(() => ({
   retryPublishTask: vi.fn().mockResolvedValue({}),
+  // The real classifier is unit-tested in services/distributionService.test.ts;
+  // here it is a seam so a test can put the page in the "list went stale"
+  // situation without constructing a DistributionApiError.
+  isScheduleUnreachable: vi.fn().mockReturnValue(false),
 }));
 
 // Real wire shape: `schedule_state` is computed server-side (the threshold is
@@ -76,6 +80,7 @@ vi.mock('../../services/distributionService', () => ({
   ]),
   cancelPublishTask: vi.fn(),
   retryPublishTask,
+  isScheduleUnreachable,
   getShareSchema: vi.fn(),
   getReadbackTiming: vi.fn().mockResolvedValue(null),
   listAccounts: vi.fn().mockResolvedValue([
@@ -88,7 +93,8 @@ vi.mock('../../services/distributionService', () => ({
   ]),
 }));
 
-vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+const { addToast } = vi.hoisted(() => ({ addToast: vi.fn() }));
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
 vi.mock('../../contexts/TaskManagerContext', () => ({ useTaskManager: () => ({ tasks: [] }) }));
 
 import RecordsPage from './RecordsPage';
@@ -101,7 +107,11 @@ const openBatch = async (title: string) => {
 };
 
 describe('RecordsPage — a schedule that can no longer be honoured', () => {
-  beforeEach(() => { retryPublishTask.mockClear(); });
+  beforeEach(() => {
+    retryPublishTask.mockClear();
+    addToast.mockClear();
+    isScheduleUnreachable.mockReturnValue(false);
+  });
 
   it('offers no Retry button on an expired scheduled batch', async () => {
     await openBatch('Expired Schedule');
@@ -145,5 +155,23 @@ describe('RecordsPage — a schedule that can no longer be honoured', () => {
     await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('802', 'as_scheduled'));
     expect(screen.queryByRole('button', { name: /Publish now/i })).toBeNull();
     expect(screen.queryByText(/scheduled time for this batch has passed/i)).toBeNull();
+  });
+
+  it('says why when the deadline passed while the page sat open', async () => {
+    // `schedule_state` is a snapshot from fetch time, so a page left open
+    // across the deadline still shows Retry and the click lands on the
+    // backend's typed 409. Answering that with the generic "Retry failed"
+    // would discard a reason the backend deliberately named — the same
+    // silence this whole change is about.
+    retryPublishTask.mockRejectedValueOnce(new Error('409'));
+    isScheduleUnreachable.mockReturnValue(true);
+
+    await openBatch('Still Schedulable');
+    fireEvent.click(await screen.findByRole('button', { name: /^Retry$/i }));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    const [message] = addToast.mock.calls.at(-1) as [string, string];
+    expect(message).toMatch(/scheduled time for this batch has passed/i);
+    expect(message).not.toMatch(/^Retry failed$/i);
   });
 });

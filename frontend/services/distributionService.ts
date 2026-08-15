@@ -44,6 +44,27 @@ export interface PublishGateProblem {
 /** The `detail.reason` the submit-time gate stamps on its 422 envelope. */
 export const PUBLISH_INTENT_REJECTED = 'publish_intent_rejected';
 
+/** The `detail.reason` a retry gets when the batch's schedule can no longer be
+ *  honoured. See `isScheduleUnreachable`. */
+export const SCHEDULE_UNREACHABLE = 'schedule_unreachable';
+
+/**
+ * Was this retry refused because the batch's scheduled time is gone?
+ *
+ * The page normally never asks — it reads `schedule_state` off the task and
+ * shows "Publish now" instead of "Retry" in the first place. But that field is
+ * a snapshot: a records page left open across the deadline still renders
+ * Retry, and pressing it lands on this 409. Falling back to a generic "Retry
+ * failed" there would take a reason the backend deliberately typed and hand
+ * the user nothing — the same silence this whole change is about.
+ */
+export const isScheduleUnreachable = (err: unknown): boolean => {
+  if (!(err instanceof DistributionApiError) || err.status !== 409) return false;
+  const detail = err.detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return false;
+  return (detail as { reason?: unknown }).reason === SCHEDULE_UNREACHABLE;
+};
+
 /**
  * Pull the typed problems out of a rejected `createPublishTask`, or null when
  * the failure was anything else.

@@ -5,8 +5,8 @@ import { useToast } from '../Toast';
 import PublishSmsPrompt from './PublishSmsPrompt';
 import { useTaskManager } from '../../contexts/TaskManagerContext';
 import {
-  getReadbackTiming, getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
-  type ReadbackTiming,
+  getReadbackTiming, getShareSchema, isScheduleUnreachable, listAccounts, listPublishTasks,
+  retryPublishTask, type ReadbackTiming,
 } from '../../services/distributionService';
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
 import { humanizeTaskError } from '../../utils/humanizeTaskError';
@@ -412,6 +412,23 @@ export const RecordsPage: React.FC = () => {
       void reload();
     } catch (err) {
       console.error('distribution: retry failed', err);
+      // `schedule_state` is a snapshot taken when the list was fetched, so a
+      // page left open across the deadline still shows Retry. Pressing it now
+      // lands on the backend's typed 409 — and answering that with a generic
+      // "Retry failed" would throw away a reason the backend went to the
+      // trouble of naming, leaving the user exactly where they started.
+      // Reloading swaps the row over to "Publish now" so the next click works.
+      if (isScheduleUnreachable(err)) {
+        addToast(
+          t(
+            'distribution.records.scheduleExpired',
+            'The scheduled time for this batch has passed, so it cannot be published as scheduled any more.',
+          ),
+          'error',
+        );
+        void reload();
+        return;
+      }
       addToast(t('distribution.records.retryFailed', 'Retry failed'), 'error');
     }
   };
