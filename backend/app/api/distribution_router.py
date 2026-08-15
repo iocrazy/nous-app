@@ -48,6 +48,11 @@ from app.schemas.distribution_cover import (
     CoverSelectRequest,
     CoverSelectResponse,
 )
+from app.schemas.distribution_music import (
+    BrowseIdentityOut,
+    MusicSearchResponse,
+    MusicTrackOut,
+)
 from app.schemas.distribution_publish import (
     MusicRef,
     PublishSmsStateResponse,
@@ -67,6 +72,13 @@ from app.schemas.distribution_topics import (
 from app.services.distribution.credentials import (
     CredentialsNotConfigured,
     get_douyin_credentials,
+)
+from app.services.distribution.music_catalog import (
+    MAX_KEYWORD_LEN as MAX_MUSIC_KEYWORD_LEN,
+)
+from app.services.distribution.music_catalog import (
+    MusicCatalogError,
+    search_music,
 )
 from app.services.distribution.publish_gate import publish_request_problems
 from app.services.distribution.publish_options import (
@@ -873,6 +885,83 @@ async def suggest_topics_endpoint(
             for s in result.suggestions
         ],
         cached=result.cached,
+    )
+
+
+@router.get(
+    "/music/search",
+    response_model=MusicSearchResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def search_music_endpoint(
+    user: CurrentUserDep,
+    account_id: int = Query(
+        ...,
+        description=(
+            "Whose session pays for the lookup. The catalogue itself is not "
+            "account-specific, but the search credential is minted with this "
+            "account's cookies — so the caller must be told which one it was."
+        ),
+    ),
+    keyword: str = Query(..., min_length=1, max_length=MAX_MUSIC_KEYWORD_LEN),
+    cursor: int = Query(0, ge=0),
+    platform: str = Query("douyin", description="Only douyin has a catalogue today."),
+) -> MusicSearchResponse:
+    """搜平台自己的曲库（配乐选择器的数据源）。
+
+    **失败一律是带类型化 ``detail.reason`` 的 HTTP 错误，绝不是 200 + 空列表。**
+    实测拿一个乱码关键词去搜仍回 8 条（模糊召回），所以空列表几乎只可能是我们
+    自己参数错了 —— 用它表达失败，等于把一次故障说成一个结论。
+
+    - 400 ``platform_unsupported`` / ``keyword_empty`` /
+      ``account_not_session_bound`` —— 请求本身不成立
+    - 409 ``session_unusable`` —— 账号要重新扫码（**不是**上游挂了）
+    - 502 ``signature_unavailable`` / ``upstream_*`` —— 上游那边的问题；
+      ``signature_unavailable`` 可能带 ``retry_after_s``（退避中，稍后会好）
+
+    ⚠️ 这条链上唯一带账号 cookie 的请求是换搜索凭证那一步，而它有 10 分钟的
+    进程内缓存 —— 用户连着搜二十次，带身份的请求仍然只有一次。面板不打开就一个
+    请求都不发（发布页初次渲染只读已有的 ``supports_music`` 能力声明）。
+    """
+    account = await _authorize_account(account_id, user)
+    try:
+        result = await search_music(
+            platform=platform,
+            keyword=keyword,
+            account_id=account_id,
+            cursor=cursor,
+        )
+    except MusicCatalogError as exc:
+        detail: dict[str, object] = {"reason": exc.reason, "message": exc.message}
+        if exc.retry_after_s is not None:
+            detail["retry_after_s"] = exc.retry_after_s
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+
+    return MusicSearchResponse(
+        platform=platform.strip().lower(),
+        keyword=keyword,
+        tracks=[
+            MusicTrackOut(
+                music_id=t.music_id,
+                title=t.title,
+                author=t.author,
+                duration=t.duration,
+                user_count=t.user_count,
+                cover_url=t.cover_url,
+                play_url=t.play_url,
+            )
+            for t in result.tracks
+        ],
+        cursor=result.cursor,
+        has_more=result.has_more,
+        cached=result.cached,
+        # 谁的会话付的账。面板必须显示它 —— Phase 2 的「收藏」tab 是按账号隔离
+        # 的，不显示身份就会出现"换了目标账号、列表静默变了"。
+        browsing_as=BrowseIdentityOut(
+            account_id=str(account["id"]),
+            username=account.get("username") or "Unknown",
+            avatar_url=account.get("avatar_url"),
+        ),
     )
 
 
