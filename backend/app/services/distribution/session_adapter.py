@@ -983,6 +983,7 @@ class SessionAdapter:
         intent: PublishIntent,
         *,
         environment: Optional[SessionEnvironment] = None,
+        correlation_id: Optional[str] = None,
     ) -> PublishOutcome:
         """发布一次内容。**S3 实现**，签名在此定死。
 
@@ -1072,8 +1073,15 @@ class SessionAdapter:
             )
 
         env = environment or build_environment(account.get("environment"))
+        # ``correlation_id`` 只是原样透传：它是**调用方**给这次发布起的名字，
+        # 让"发布中途要验证码"这件事在这个调用还没返回时仍能被寻址（见
+        # browser/app/publish_sms.py）。adapter 不解释它，也不该解释。
         published = await self._client.publish(
-            self.platform_name, storage_state, intent.to_payload(), env
+            self.platform_name,
+            storage_state,
+            intent.to_payload(),
+            env,
+            correlation_id=correlation_id,
         )
         logger.info(
             f"[session.publish] platform={self.platform_name} "

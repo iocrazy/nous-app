@@ -270,3 +270,44 @@ class PublishTaskListResponse(BaseModel):
 class ShareSchemaResponse(BaseModel):
     schema_url: str
     share_id: str
+
+
+class PublishSmsStateResponse(BaseModel):
+    """ "这次发布此刻在不在等验证码"—— 前端渲染输入框的唯一依据。
+
+    ``waiting`` 语义很窄：它表示**有一个发布协程此刻正停在 await 上**，不是
+    "页面上看见了验证码输入框"。放宽它就会给一个没人在等的用户弹输入框，那是
+    登录侧曾经犯过的错的镜像版本（当时是在没人发码时告诉用户"码已发出"）。
+
+    ``outcome`` 只在挑战结束后才有值，用来说明它是怎么结束的（收了码 / 超时 /
+    次数用尽）。挑战结束却不说一声，输入框就会挂在屏幕上，用户往里输的每一个
+    码都会石沉大海。
+    """
+
+    waiting: bool
+    account_id: Optional[int] = None
+    platform: Optional[str] = None
+    attempts_left: int = 0
+    max_attempts: int = 0
+    seconds_remaining: float = 0.0
+    outcome: Optional[str] = None
+    message: str = ""
+
+
+class PublishSmsVerdictResponse(BaseModel):
+    """平台对这个码做了什么。**提交动作的当场回执**。
+
+    ``outcome`` 是闭集（见 browser/app/publish_sms.py）：``accepted`` /
+    ``rejected`` / ``exhausted`` / ``expired`` / ``abandoned`` / ``not_pending``
+    / ``unreachable``。用类型化 outcome 而不是布尔成功位，是因为 ``rejected``
+    （码不对，重输）和 ``unreachable``（没送到，等一下再试）要用户做的事正好
+    相反，塌缩成一个布尔就会让一次容器抖动去污蔑一个正确的验证码。
+
+    ``retryable`` 由浏览器算好透传，不在任何一层重新推导 —— 重推一次就是多一次
+    和浏览器分歧的机会，而分歧的形态会是"界面说还能再试、发布其实已经放弃了"。
+    """
+
+    outcome: str
+    message: str
+    attempts_left: int = 0
+    retryable: bool = False

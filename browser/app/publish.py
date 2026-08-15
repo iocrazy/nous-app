@@ -149,6 +149,11 @@ class PublishJob:
     environment: EnvironmentConfig | None
     intent: PublishIntent
     assets: Mapping[str, StagedAsset]
+    # The caller's handle on this publish, used to address a mid-flight SMS
+    # challenge (`publish_sms`). `None` means the caller has no channel to the
+    # user, and a challenge must then fail rather than park on a code nobody
+    # can supply.
+    correlation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +191,26 @@ class Deadline:
 
     def expired(self) -> bool:
         return self.remaining() <= 0
+
+    def extend(self, seconds: float) -> None:
+        """Give back wall-clock that was spent waiting for a *person*.
+
+        The one sanctioned exception to "a slow stage eats the rest", and it is
+        not an exception to the principle behind it: that rule exists so slow
+        *machine* work cannot make the whole unbounded. Time parked on a human
+        supplying a verification code is not work — the browser is idle — and
+        charging it to the budget would mean a correctly supplied code could
+        still lose the post to a deadline the waiting itself consumed.
+
+        Bounded by construction, not by trust: the only caller draws from a
+        separate, fixed SMS window (`publish_sms.SmsWindow`), so the total
+        extension a publish can win is that window and nothing more. The
+        endpoint's hard ceiling is computed from exactly that sum
+        (`publish_budget.browser_hard_ceiling_s`), so this can never push a
+        publish past what the caller was promised.
+        """
+        if seconds > 0:
+            self._expires_at += seconds
 
     def slice_ms(self, ceiling_ms: int) -> int:
         """`ceiling_ms`, or whatever is left if that is less. Never below zero.
@@ -488,6 +513,7 @@ async def run_publish(
     storage_state: dict[str, Any],
     environment: EnvironmentConfig | None,
     intent: PublishIntent,
+    correlation_id: str | None = None,
 ) -> PublishResponse:
     # Imported here, not at module scope: `platforms/__init__` imports every
     # platform module, and `douyin_publish` imports this one for `PublishJob` /
@@ -560,6 +586,7 @@ async def run_publish(
                 environment=environment,
                 intent=intent,
                 assets=assets,
+                correlation_id=correlation_id,
             )
             outcome = await publisher(job, deadline)
     except AssetError as exc:

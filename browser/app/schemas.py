@@ -296,6 +296,59 @@ class PublishRequest(BaseModel):
     storage_state: dict[str, Any]
     environment: EnvironmentConfig | None = None
     intent: PublishIntent
+    # **Minted by the caller, not by us**, and that inversion is the whole
+    # mechanism (see `publish_sms`). A publish is one blocking call, so there is
+    # no response in which to hand an id back — the only way the caller can
+    # address a challenge belonging to a publish still in flight is to have
+    # named it first.
+    #
+    # Optional so a caller that never supplies codes is unaffected: without it
+    # a mid-publish SMS challenge fails exactly as it did before, which is the
+    # honest answer for a caller that has no channel to the user.
+    correlation_id: str | None = Field(default=None, max_length=128)
+
+
+class PublishSmsStatusResponse(BaseModel):
+    """Is this publish parked on a verification code right now?
+
+    Polled by the backend *while its own publish call is still outstanding* —
+    the one thing it can do from outside a blocking request. Cheap and pure: it
+    reads registry state and never touches the page.
+    """
+
+    # False for both "no such publish" and "that publish is not asking", which
+    # are the same instruction to the caller: nothing to show the user.
+    waiting: bool
+    correlation_id: str | None = None
+    platform: str | None = None
+    # Set once the challenge is over, so a poll that arrives late reports how
+    # it ended rather than looking like it never happened.
+    outcome: str | None = None
+    message: str = ""
+    attempts_left: int = 0
+    max_attempts: int = 0
+    seconds_remaining: float = 0.0
+
+
+class PublishSmsSubmitResponse(BaseModel):
+    """What the page did with the code. The reverse channel.
+
+    `outcome` is the field that matters and it is a closed vocabulary
+    (`publish_sms`): `accepted`, `rejected`, `exhausted`, `expired`,
+    `abandoned`, `not_pending`. A submitted code that merely returns 200 tells
+    the user nothing — and "the user did a thing and nothing visibly happened"
+    is the failure this whole change exists to remove, so it must not be
+    reintroduced at the last hop.
+    """
+
+    outcome: str
+    message: str
+    attempts_left: int = 0
+    # Whether the user can usefully type another code. Derived here rather than
+    # left to each client to infer from `outcome` + `attempts_left`, because two
+    # clients inferring it separately is two chances to disagree with the
+    # browser about whether the publish is still listening.
+    retryable: bool = False
 
 
 class PublishResponse(BaseModel):

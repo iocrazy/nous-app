@@ -10,6 +10,19 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+from . import publish_budget
+
+
+def _bool_env(name: str) -> bool:
+    """Strictly opt-in: only an explicit affirmative turns a switch on.
+
+    Anything else — unset, empty, "0", a typo — is off. A debug switch that a
+    stray value could enable is a production incident waiting for a bad
+    deployment, and every switch read through here is one that changes what the
+    service does to a user's real account.
+    """
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _int_env(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -131,6 +144,30 @@ class Settings:
     # Per-attempt wait for the platform's post-publish redirect.
     publish_confirm_wait_s: int
 
+    # --- mid-publish SMS challenge -----------------------------------------
+    # How long a publish may stand still waiting for a person to supply a
+    # verification code. **Not drawn from `publish_total_timeout_s`** — it is
+    # human time, granted on top and handed back via `Deadline.extend`, so a
+    # code that arrives does not leave the rest of the publish short. Derived
+    # in `publish_budget` because `nous-backend` has to agree with it.
+    publish_sms_wait_s: int
+    # Wrong codes a user may burn before the publish gives up. A typo must not
+    # cost the post; an unbounded retry must not cost a browser slot.
+    publish_sms_max_attempts: int
+    # Settle after typing a code, before re-reading the page to see whether the
+    # platform took it. Below this the answer is just the pre-submit state.
+    publish_sms_settle_ms: int
+    # **Test/staging switch: treat the first confirm attempt as if the platform
+    # had demanded a code.** Off by default and loudly logged when on.
+    #
+    # It exists because the real challenge is not reproducible on demand — the
+    # platform decides — and a supply channel nobody has ever driven end to end
+    # is indistinguishable from one that does not work. This proves the wiring
+    # (backend → browser → parked publish → verdict → resume); it does **not**
+    # prove the selectors match a real challenge screen. That distinction is
+    # the point and is why this is a separate switch rather than a mock.
+    publish_sms_force_challenge: bool
+
     # --- read-only page recon (T0) -----------------------------------------
     # Deliberately its own pair rather than reusing the posting flow's: those
     # names carry a vocabulary `app/inspect.py` is guarded against containing
@@ -179,7 +216,14 @@ def get_settings() -> Settings:
         login_reaper_interval_s=max(1, _int_env("BROWSER_LOGIN_REAPER_INTERVAL_S", 15)),
         login_terminal_grace_s=max(0, _int_env("BROWSER_LOGIN_TERMINAL_GRACE_S", 120)),
         login_state_grace_s=max(0, _int_env("BROWSER_LOGIN_STATE_GRACE_S", 60)),
-        publish_total_timeout_s=max(60, _int_env("BROWSER_PUBLISH_TOTAL_TIMEOUT_S", 1_200)),
+        # Both from `publish_budget`, not from a local literal: the backend
+        # derives its HTTP read timeout from the same module, and the two being
+        # computed from one place is what keeps them from inverting again.
+        publish_total_timeout_s=publish_budget.work_budget_s(),
+        publish_sms_wait_s=publish_budget.sms_wait_s(),
+        publish_sms_max_attempts=max(1, _int_env("BROWSER_PUBLISH_SMS_MAX_ATTEMPTS", 3)),
+        publish_sms_settle_ms=max(0, _int_env("BROWSER_PUBLISH_SMS_SETTLE_MS", 2_500)),
+        publish_sms_force_challenge=_bool_env("BROWSER_PUBLISH_FORCE_SMS_CHALLENGE"),
         publish_editor_wait_s=max(5, _int_env("BROWSER_PUBLISH_EDITOR_WAIT_S", 180)),
         publish_upload_wait_s=max(10, _int_env("BROWSER_PUBLISH_UPLOAD_WAIT_S", 900)),
         publish_upload_retries=max(0, _int_env("BROWSER_PUBLISH_UPLOAD_RETRIES", 2)),
