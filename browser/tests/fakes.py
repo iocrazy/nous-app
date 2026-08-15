@@ -349,6 +349,12 @@ class FakePage:
         # them. A list of titles, or a callable taking the page — the same
         # value-or-callable convention as `visible`, so "the rows only exist
         # once something was typed into the search box" is expressible.
+        #
+        # An entry may also be a `(title, meta)` pair, where `meta` is the row's
+        # second line as the live dialog renders it (「作者·时长」). That second
+        # line is what separates five rows sharing one title, so a fake that
+        # could only express titles could not exercise the matching that keeps a
+        # same-titled different upload from being published.
         self.music_rows: Any = ()
         # needle -> how many places on the page show it. Callable form takes
         # (page, needle), which is how a test says "the preview starts showing
@@ -416,7 +422,17 @@ class FakePage:
             # Shaped like the real probe's return value, indices included: the
             # driver clicks `[data-nous-music-row="<index>"]`, so a fake that
             # only handed back names would not exercise the addressing at all.
-            return [{"index": i, "name": name} for i, name in enumerate(rows)]
+            # `meta` mirrors the probe's second line; a bare string row means
+            # "this row's second line could not be read", which is a state the
+            # live dialog can genuinely be in.
+            out = []
+            for i, row in enumerate(rows):
+                if isinstance(row, (tuple, list)):
+                    name, meta = (list(row) + [""])[:2]
+                else:
+                    name, meta = row, ""
+                out.append({"index": i, "name": name, "meta": meta})
+            return out
         if "__nous_music_readback_probe__" in (_script or ""):
             mentions = self.music_mentions
             if callable(mentions):

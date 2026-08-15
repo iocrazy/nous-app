@@ -14,6 +14,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services.distribution.publish_options import (
+    MAX_MUSIC_NAME_LEN,
     SELF_DECLARATIONS,
     normalize_collection,
     normalize_music,
@@ -127,6 +128,55 @@ def normalize_topic_refs(refs: Optional[list["TopicRef"]]) -> list["TopicRef"]:
     return out[:MAX_TOPICS]
 
 
+class MusicRef(BaseModel):
+    """从平台曲库里选中的那一首的**结构化身份**（mig 429）。
+
+    为什么曲名不能当身份（实测 2026-08-15）
+    ======================================
+    搜「起风了」一页里 **5 条标题完全相同**、id 各异、使用量 0～30023 不等；
+    而分类榜里的曲子按曲名去搜 3/3 都搜不到那一首，其中一条还返回了一个
+    **标题一模一样但 id 不同**的歌。按名匹配在那一条上会判「精确命中」、点击
+    成功、读回校验也过 —— 每一道关卡都亮绿灯，发出去的是另一首歌，而配乐发出
+    去之后平台不让换。
+
+    所以选择器这条路径存的是指纹，不是名字：``music_name`` 仍是浏览器侧填进
+    平台搜索框的关键词，而 (名, 作者, 时长) 三元组是"哪一行才是用户点的那张
+    卡片"的判据，``music_id`` 是唯一真正的身份。
+
+    ⚠️ ``music_id`` 必须是抖音搜索结果的 **``id_str``**，不是同一条里的 ``id``。
+    上游同时给两个字段：``id`` 是 JSON number 且超过 2^53（实测
+    ``6953836671917951012``），经 JSON 进前端就精度丢失。两者并存是真实形状，
+    不是可以"统一"的漂移（CLAUDE.md「边界 mock 必须用真实 JSON 形状」）。
+    这里声明为 ``str``，pydantic v2 不做 int→str 隐式转换，所以误传 ``id``
+    会 422 —— 这正是我们想要的响：一个静默降精度的 id 比拒收坏得多。
+    """
+
+    music_id: str = Field(min_length=1, max_length=64)
+    music_name: str = Field(min_length=1, max_length=MAX_MUSIC_NAME_LEN)
+    # 作者与时长是三元组的另外两维。作者可能为空串（平台偶有无作者的曲目），
+    # 那不是缺数据 —— 浏览器侧对齐时会自动跳过它拿不到的那一维，宁可判
+    # ambiguous 也不猜。
+    music_author: str = Field(default="", max_length=200)
+    #: 秒。0 = 上游没给（同上，缺一维而不是错一维）。
+    duration: int = Field(default=0, ge=0, le=24 * 3600)
+    #: 选中当刻的使用人数。事后补不回来 —— 它一直在涨，而"用户挑的是 3 万人
+    #: 用的那一首"正是他挑它的理由。纯记录，不参与匹配。
+    user_count: int = Field(default=0, ge=0)
+    cover_url: str = Field(default="", max_length=2000)
+
+    @field_validator("music_id", "music_name", "music_author", "cover_url")
+    @classmethod
+    def _trim(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("music_name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("music ref name is empty")
+        return v.strip()
+
+
 class AccountConfigOverride(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -180,6 +230,12 @@ class PublishTaskCreate(BaseModel):
     # 平台自己的搜索结果里判定，搜不到那一行失败（**不**静默发一条没配乐的
     # 作品）。
     music_name: Optional[str] = None
+    # ── 配乐的结构化身份（mig 429） ──
+    # 从曲库选择器里点中一张卡片时带上。``None`` = 手打曲名的老路径（行为不变）。
+    # 两者共存时 ``music_ref`` 为准：``music_name`` 仍是浏览器侧填进平台搜索框
+    # 的关键词，而三元组决定"结果里哪一行才是他点的那一首"，不唯一命中就失败
+    # （``music_ambiguous``），绝不"挑使用量最高的继续发"。
+    music_ref: Optional[MusicRef] = None
     # 定时发布。必须带时区（naive 会被拒），窗口 2h~14d —— 见 _validate_content。
     scheduled_at: Optional[datetime] = None
 
@@ -202,6 +258,19 @@ class PublishTaskCreate(BaseModel):
     @classmethod
     def _clean_music(cls, v: Optional[str]) -> Optional[str]:
         return normalize_music(v)
+
+    @model_validator(mode="after")
+    def _music_name_follows_the_reference(self) -> "PublishTaskCreate":
+        """选了具体一首歌时，``music_name`` 由 ``music_ref`` 派生，不由客户端说了算。
+
+        两个字段各写各的会漂：浏览器侧用 ``music_name`` 当搜索关键词、用
+        ``music_ref`` 当对齐指纹，一旦名字不是那首歌的名字，搜索结果里根本不会
+        有它 —— 表现为"选了歌却发布失败"，而根因是两份真相。
+        派生而不是校验，是因为这里没有"用户真的想让它们不同"的合法情形。
+        """
+        if self.music_ref is not None:
+            object.__setattr__(self, "music_name", self.music_ref.music_name)
+        return self
 
     @model_validator(mode="after")
     def _validate_content(self) -> "PublishTaskCreate":
@@ -282,6 +351,9 @@ class PublishTaskOut(BaseModel):
     self_declaration: Optional[str] = None
     collection_name: Optional[str] = None
     music_name: Optional[str] = None
+    # 回显（同 topic_refs 的理由）：写进去却读不回来，就没人能证明它真的存下来
+    # 了。这一条尤其要读得回来 —— 它是"发出去的到底是哪一首"的唯一凭据。
+    music_ref: Optional[MusicRef] = None
     accounts: list[TaskAccountOut] = Field(default_factory=list)
 
 

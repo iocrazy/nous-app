@@ -264,6 +264,10 @@ class PublishTasksRepository(AsyncpgRepository):
                 collection_name=f.get("collection_name"),
                 # mig 425 — music_name NULL = 不碰音乐控件（平台默认原声）。
                 music_name=f.get("music_name"),
+                # mig 429 — 从曲库选中那一首的结构化身份。NULL = 手打曲名的老
+                # 路径。曲名不是身份（同名不同 id 实测 5 条），所以这一列在时
+                # 浏览器侧走的是三元组对齐、不唯一命中就失败的严格分支。
+                music_ref=f.get("music_ref"),
             )
             .returning(*_TASK_COLS)
         )

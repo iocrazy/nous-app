@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -269,10 +270,56 @@ def normalize_music(name: Optional[str]) -> Optional[str]:
     return trimmed
 
 
+#: ``platform_options.music_ref`` 里浏览器侧真正会读的键。多余的键在这里被丢
+#: 掉，不是洁癖：``platform_options`` 是原样透传到浏览器服务的逃生舱，往里塞
+#: 一份完整的上游响应，等于把一个我们不控制形状的对象送过跨服务边界。
+MUSIC_REF_KEYS = (
+    "music_id",
+    "music_name",
+    "music_author",
+    "duration",
+    "user_count",
+)
+
+
+def music_platform_options(
+    name: Optional[str], ref: Optional[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """配乐那部分的 ``platform_options``。纯函数，**提交门与 workflow 共用一份**。
+
+    两条路径的差别只有一个键：
+
+    * 只有 ``music`` —— 用户手打的曲名。浏览器侧按名匹配，允许近似（那是这个
+      字段本来的语义：用户只知道一个名字，取哪个同名版本都算满足意图）。
+    * 再加 ``music_ref`` —— 用户从曲库里点了一张具体的卡片。这时"同名的另一
+      首"不再是近似满足而是**发错了**，所以浏览器侧改走三元组对齐、不唯一命中
+      就失败。
+
+    ``music`` 在两条路径上都在，且在第二条上等于 ``ref["music_name"]``：它是
+    填进平台搜索框的关键词，不是判据。少了它浏览器侧连搜都搜不了。
+
+    ⚠️ 返回 ``{}`` = 不碰音乐控件 = 平台默认原声。这与"要配乐但没选上"是两件
+    完全不同的事，不能合并（见 ``douyin_publish._set_music``）。
+    """
+    ref_name = str((ref or {}).get("music_name") or "").strip() if ref else ""
+    keyword = ref_name or (name or "").strip()
+    if not keyword:
+        return {}
+    opts: dict[str, Any] = {"music": keyword}
+    if ref and ref_name:
+        opts["music_ref"] = {
+            key: ref[key] for key in MUSIC_REF_KEYS if ref.get(key) not in (None, "")
+        }
+        opts["music_ref"]["music_name"] = ref_name
+    return opts
+
+
 __all__ = [
     "DOUYIN_SELF_DECLARATIONS",
     "MAX_COLLECTION_NAME_LEN",
     "MAX_MUSIC_NAME_LEN",
+    "MUSIC_REF_KEYS",
+    "music_platform_options",
     "SCHEDULE_LEAD_SLACK",
     "SCHEDULE_MAX_AHEAD",
     "SCHEDULE_MIN_LEAD",

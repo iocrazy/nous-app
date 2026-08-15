@@ -381,6 +381,24 @@ COLLECTION_OPTION_SELECTOR = ".semi-select-option"
 # but that assumption has not been run. If it is wrong, a video publish that
 # asked for music fails with `music_entry_missing` — visible, attributable, and
 # not a silently music-less post.
+#
+# [实测 2026-08-15] Two facts about the platform's catalogue decide how a row is
+# CHOSEN once the dialog is up, and they are why this module has two matching
+# policies instead of one:
+#
+#   * a title is not unique — one search for 「起风了」 returned five rows whose
+#     titles were character-identical, with different ids and usage counts from
+#     0 to 30023;
+#   * a track taken off a category chart may not come back from a search at all
+#     (3/3 missed), and one of those searches returned a **same-titled
+#     different upload**. Title-only matching calls that `exact`, clicks it,
+#     and passes the read-back — every gate green, the wrong song published.
+#
+# So when the caller says WHICH track (`platform_options.music_ref`, mig 429),
+# the row is aligned on (title, author, running time) and anything short of a
+# unique survivor raises `music_ambiguous`. Typing a bare name keeps the old,
+# deliberately looser policy — see `judge_music_choice` vs
+# `judge_music_reference`.
 
 MUSIC_ENTRY_TEXT = "选择音乐"
 # The dialog's search box. The one node in there whose *copy* was measured and
@@ -736,11 +754,77 @@ class PlatformOptions:
     # default (原声) is what every post published before this field existed got,
     # so "absent" has to keep meaning exactly that.
     music: str | None = None
+    # The identity of a track picked out of the platform's own catalogue, when
+    # the user picked one rather than typing a name (mig 429). `None` = the
+    # typed-name path, whose matching stays exactly as it was.
+    music_ref: "MusicReference | None" = None
     # Keys present but holding something that is not a string. Kept rather than
     # discarded: a caller sending `{"self_declaration": true}` has a bug, and
     # answering it with "no declaration requested" hides that bug behind a post
     # that went out undeclared.
     bad_types: tuple[str, ...] = ()
+    # `music_ref` was present but unusable (no id, or no name). Its own flag
+    # rather than a `bad_types` entry, because the user's move differs: a
+    # non-string declaration is a caller bug, while this one means "pick the
+    # track again". Silently falling back to the loose name match is the one
+    # response ruled out — that path is what publishes a same-titled different
+    # song while every gate reports success.
+    music_ref_broken: bool = False
+
+
+@dataclass(frozen=True)
+class MusicReference:
+    """Which track the user actually pointed at, as a fingerprint. Pure data.
+
+    A title is **not** an identity, and that is measured rather than feared
+    [实测 2026-08-15]: one search for 「起风了」 comes back with five rows whose
+    titles are character-identical and whose ids all differ, and a track taken
+    off a category chart can come back from a *search* as a same-titled
+    different upload. The old name-only match calls that second one `exact`,
+    clicks it, and passes the read-back — every gate green, a different song
+    published, and a published post cannot swap its music afterwards.
+
+    So the row is chosen by (title, author, duration) instead, and `music_id`
+    rides along because it is the only real identity: it cannot address a
+    dialog row today (whether rows carry an id attribute has never been
+    measured), but it is what a later "click by id" would be built on, and it
+    is already proven resolvable on the publishing side.
+    """
+
+    music_id: str
+    music_name: str
+    music_author: str = ""
+    #: Seconds. `0` = upstream gave none, which costs a dimension of the
+    #: fingerprint rather than corrupting it — see `judge_music_reference`.
+    duration_s: int = 0
+
+
+def read_music_reference(raw: Any) -> MusicReference | None:
+    """`platform_options["music_ref"]` → a fingerprint, or `None`. Pure, total.
+
+    A ref missing its id or its name is dropped rather than half-used: half a
+    fingerprint aligns rows no more credibly than a title does, and silently
+    degrading to the loose path is exactly the "looks like it worked" failure
+    this whole change exists to remove. The caller reports the drop
+    (`music_ref_unusable`) instead of letting it pass unremarked.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    music_id = str(raw.get("music_id") or "").strip()
+    name = str(raw.get("music_name") or "").strip()
+    if not music_id or not name:
+        return None
+    duration = raw.get("duration")
+    try:
+        duration_s = max(0, int(duration))
+    except (TypeError, ValueError):
+        duration_s = 0
+    return MusicReference(
+        music_id=music_id,
+        music_name=name,
+        music_author=str(raw.get("music_author") or "").strip(),
+        duration_s=duration_s,
+    )
 
 
 def read_platform_options(raw: Mapping[str, Any] | None) -> PlatformOptions:
@@ -761,11 +845,19 @@ def read_platform_options(raw: Mapping[str, Any] | None) -> PlatformOptions:
         cleaned = value.strip()
         values[key] = cleaned or None
 
+    # `music_ref` is an object, so it is read separately rather than being
+    # swept up by the string loop above (which would file it under `bad_types`
+    # and refuse the publish over a field that is doing its job).
+    ref_raw = source.get("music_ref")
+    music_ref = read_music_reference(ref_raw)
+
     return PlatformOptions(
         self_declaration=values.get("self_declaration"),
         collection=values.get("collection"),
         music=values.get("music"),
+        music_ref=music_ref,
         bad_types=tuple(bad),
+        music_ref_broken=ref_raw is not None and music_ref is None,
     )
 
 
@@ -899,6 +991,159 @@ def judge_music_choice(requested: str, candidates: Sequence[str]) -> MusicChoice
     )
 
 
+# The separator between a row's author and its running time, as the T0 survey
+# read it off the live dialog (`作者·时长`). Both the interpunct and the
+# ASCII/full-width middle dots are accepted because which one the platform
+# emits is copy, not contract.
+MUSIC_META_SEPARATORS = ("·", "・", "•")
+#: How far a row's running time may sit from the catalogue's before the two are
+#: different tracks. One second: the dialog renders `mm:ss` while the catalogue
+#: reports seconds, so a rounding step is expected and anything beyond it is a
+#: real difference.
+MUSIC_DURATION_TOLERANCE_S = 1
+
+
+def parse_music_duration(text: str | None) -> int | None:
+    """`mm:ss` (or `h:mm:ss`) → seconds. `None` when it is not a running time.
+
+    `None` is a first-class answer, not a zero: it means "this row did not tell
+    us its length", and `judge_music_reference` then drops that dimension
+    instead of comparing against a number nobody measured.
+    """
+    parts = (text or "").strip().split(":")
+    if len(parts) < 2 or len(parts) > 3:
+        return None
+    total = 0
+    for part in parts:
+        part = part.strip()
+        if not part.isdigit():
+            return None
+        total = total * 60 + int(part)
+    return total
+
+
+@dataclass(frozen=True)
+class MusicRow:
+    """One row of the dialog's result list, as read off the page. Pure data.
+
+    `author` and `duration_s` are `None` when the row's second line could not
+    be split into the shape T0 measured — a genuine "we could not read it",
+    which is different from an empty author, and the matcher treats them so.
+    """
+
+    index: int
+    name: str
+    author: str | None = None
+    duration_s: int | None = None
+
+
+def parse_music_row(index: int, name: str, meta: str | None) -> MusicRow:
+    """A probe row → a `MusicRow`. Pure.
+
+    The author is taken as everything before the LAST separator, so a track
+    whose uploader name itself contains one still parses. If the tail is not a
+    running time, nothing is claimed about either field: a half-parsed line is
+    the kind of evidence that reads as a match without being one.
+    """
+    text = (meta or "").strip()
+    if not text:
+        return MusicRow(index=index, name=name)
+    for separator in MUSIC_META_SEPARATORS:
+        if separator not in text:
+            continue
+        head, _, tail = text.rpartition(separator)
+        duration = parse_music_duration(tail)
+        if duration is None:
+            continue
+        return MusicRow(
+            index=index, name=name, author=head.strip(), duration_s=duration
+        )
+    # No separator produced a running time. The whole line may still be one
+    # (some rows show only a duration), and that is worth keeping.
+    duration = parse_music_duration(text)
+    if duration is not None:
+        return MusicRow(index=index, name=name, duration_s=duration)
+    return MusicRow(index=index, name=name)
+
+
+def judge_music_reference(
+    ref: MusicReference, rows: Sequence[MusicRow]
+) -> MusicChoice:
+    """Which row IS the track the user picked. Pure. **Never guesses.**
+
+    The opposite policy from `judge_music_choice`, and the asymmetry is the
+    whole point of this path:
+
+    * a typed name says "some song called this"; taking the first result is a
+      benign completion of an under-specified request;
+    * a picked card says "**this** song" — it had a cover, an author, a running
+      time and a usage count on it, and those are why it got picked. Handing
+      back a same-titled different upload is not an approximation of that
+      request, it is the wrong answer, and it is invisible: the post looks
+      fine, the read-back passes (the page really does show that title), and
+      nobody re-checks a published post's audio.
+
+    So the result is only `exact` when exactly one row survives every dimension
+    both sides could supply. More than one survivor is `ambiguous` (the caller
+    raises); none is `none`.
+
+    ⚠️ A dimension is used only when the reference has it AND **every**
+    surviving row has it. Filtering on a field half the rows do not expose
+    would drop the real row for lacking data rather than for being wrong.
+    """
+    key = canonical_music(ref.music_name)
+    pool = [row for row in rows if row.name.strip() and canonical_music(row.name) == key]
+    if not pool:
+        return MusicChoice(None, None, "none", "no result carried that title")
+
+    if ref.music_author and all(row.author is not None for row in pool):
+        wanted = canonical_music(ref.music_author)
+        narrowed = [row for row in pool if canonical_music(row.author or "") == wanted]
+        if not narrowed:
+            # Same title, different uploader — the 「电子布洛芬（Live）」 case:
+            # the search really does not have the track that was picked, and
+            # saying so is the difference between a refused publish and a
+            # published wrong song.
+            return MusicChoice(
+                None,
+                None,
+                "none",
+                f"rows titled '{ref.music_name}' came back, but none by "
+                f"'{ref.music_author}'",
+            )
+        pool = narrowed
+
+    if ref.duration_s > 0 and all(row.duration_s is not None for row in pool):
+        narrowed = [
+            row
+            for row in pool
+            if abs((row.duration_s or 0) - ref.duration_s) <= MUSIC_DURATION_TOLERANCE_S
+        ]
+        if not narrowed:
+            return MusicChoice(
+                None,
+                None,
+                "none",
+                "the matching titles all run a different length from the track "
+                "that was picked",
+            )
+        pool = narrowed
+
+    if len(pool) == 1:
+        row = pool[0]
+        return MusicChoice(
+            row.name, row.index, "exact", "one row matched title, author and length"
+        )
+
+    return MusicChoice(
+        None,
+        None,
+        "ambiguous",
+        f"{len(pool)} results are indistinguishable from the track that was "
+        "picked; refusing to guess which one to publish",
+    )
+
+
 # --- scheduling -------------------------------------------------------------
 
 
@@ -1013,6 +1258,14 @@ def check_intent(intent: PublishIntent, now: datetime) -> IntentProblem | None:
             "platform_options "
             + ", ".join(sorted(options.bad_types))
             + " must be strings or absent",
+        )
+
+    if options.music_ref_broken:
+        return IntentProblem(
+            "unusable_music_reference",
+            "platform_options music_ref is missing its music_id or its name; "
+            "refusing to fall back to a title-only match, which is what "
+            "publishes a same-titled different track",
         )
 
     if options.self_declaration is not None:
@@ -1954,11 +2207,17 @@ _MUSIC_ROWS_JS = """
       .split('\\n')
       .map((s) => s.trim())
       .filter(Boolean);
-    rows.push({ name: lines[0] || '', row });
+    // Line 1 is the title and line 2 is 「作者·时长」 — both measured at T0.
+    // The second line is what makes a title an identity: five rows can carry
+    // the same title, and the author + running time are what separate them.
+    // Read positionally rather than by class because the row's markup has
+    // never been measured; a made-up class selector would fire on the wrong
+    // node instead of on nothing.
+    rows.push({ name: lines[0] || '', meta: lines[1] || '', row });
   }
   return rows.map((entry, index) => {
     entry.row.setAttribute(attribute, String(index));
-    return { index, name: entry.name };
+    return { index, name: entry.name, meta: entry.meta };
   });
 }
 """
@@ -2037,18 +2296,44 @@ async def _open_music_dialog(page: Any, click_ms: int, settle_ms: int) -> int | 
     return None
 
 
-async def _music_rows(page: Any) -> list[str]:
-    """The titles the dialog is listing, in order. Never raises."""
+def _rows_by_index(rows: Sequence[MusicRow]) -> list[str]:
+    """Row titles laid out so that list position == the probe's DOM index. Pure.
+
+    Gaps are empty strings, which `judge_music_choice` already skips without
+    renumbering.
+    """
+    if not rows:
+        return []
+    names = [""] * (max(row.index for row in rows) + 1)
+    for row in rows:
+        if 0 <= row.index < len(names):
+            names[row.index] = row.name
+    return names
+
+
+async def _music_rows(page: Any) -> list[MusicRow]:
+    """The rows the dialog is listing, in order. Never raises.
+
+    Returns the structured rows; the typed-name path takes `.name` off them and
+    is unchanged by the extra fields. The index is the probe's own, which is
+    what `[data-nous-music-row="<i>"]` addresses — renumbering here would click
+    the row next to the chosen one.
+    """
     try:
         rows = await page.evaluate(_MUSIC_ROWS_JS, MUSIC_ROW_ATTRIBUTE)
     except Exception:
         return []
-    out: list[str] = []
-    for row in rows or []:
+    out: list[MusicRow] = []
+    for position, row in enumerate(rows or []):
         try:
-            out.append(str(row.get("name") or ""))
-        except AttributeError:
+            index = int(row.get("index", position))
+            name = str(row.get("name") or "")
+            meta = row.get("meta")
+        except (AttributeError, TypeError, ValueError):
             continue
+        out.append(
+            parse_music_row(index, name, None if meta is None else str(meta))
+        )
     return out
 
 
@@ -2076,7 +2361,9 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     affordance that lets `_apply_options` refuse a missing visibility control.
     """
     settings = get_settings()
-    requested = read_platform_options(job.intent.platform_options).music
+    options = read_platform_options(job.intent.platform_options)
+    requested = options.music
+    reference = options.music_ref
     if requested is None:
         return {"music": "not_requested"}
 
@@ -2115,15 +2402,45 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     await page.keyboard.press("Enter")
     await page.wait_for_timeout(settle_ms)
 
-    candidates = await _music_rows(page)
-    choice = judge_music_choice(requested, candidates)
+    rows = await _music_rows(page)
+    if reference is None:
+        # The typed-name path, unchanged: the user knows a name, and any upload
+        # carrying it satisfies what he asked for.
+        #
+        # The list is addressed BY the probe's own index rather than by list
+        # position: `judge_music_choice` enumerates what it is given, and a row
+        # that failed to parse would shift every index after it — clicking the
+        # row next to the chosen one, which is precisely the failure mode this
+        # module refuses everywhere else.
+        choice = judge_music_choice(requested, _rows_by_index(rows))
+    else:
+        # The picked-card path. Aligned on (title, author, length) and refusing
+        # to guess — see `judge_music_reference`.
+        choice = judge_music_reference(reference, rows)
+
+    if choice.match == "ambiguous":
+        raise StepFailure(
+            SessionStatus.FAILED,
+            f"{choice.reason}. Nothing was published: a post's music cannot be "
+            "changed afterwards, and a same-titled different track is the one "
+            "failure that leaves no signal",
+            reason="music_ambiguous",
+            stage="music",
+            requested_music=requested,
+            # The id is the identity the ambiguity is about. It is the
+            # platform's own catalogue id, not anything of ours.
+            music_id=reference.music_id if reference else None,
+        )
+
     if choice.name is None or choice.index is None:
         raise StepFailure(
             SessionStatus.FAILED,
-            f"no music named '{requested}' came back from the platform's search",
+            f"no music named '{requested}' came back from the platform's search"
+            + (f" ({choice.reason})" if reference is not None else ""),
             reason="music_not_found",
             stage="music",
             requested_music=requested,
+            music_id=reference.music_id if reference else None,
         )
 
     row = page.locator(f'[{MUSIC_ROW_ATTRIBUTE}="{choice.index}"]').first
@@ -2184,7 +2501,7 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             music_selected=choice.name,
         )
 
-    return {
+    detail: dict[str, Any] = {
         "music": "applied",
         "music_requested": requested,
         "music_selected": choice.name,
@@ -2192,9 +2509,20 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # user-visible note on an otherwise successful publish: a post that came
         # back with a different track than the one that was typed is a fact the
         # user has to be told, not a detail to bury.
+        #
+        # The picked-card path never produces `approximate`: it is `exact` or it
+        # raised.
         "music_match": choice.match,
         "music_entry_index": entry_index,
     }
+    if reference is not None:
+        # Which of the two matching policies actually ran. Without it, an
+        # `exact` on this row is indistinguishable from an `exact` the old
+        # title-only match produced — and those are the two claims this whole
+        # change exists to separate.
+        detail["music_match_by"] = "reference"
+        detail["music_id"] = reference.music_id
+    return detail
 
 
 async def _set_schedule(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:

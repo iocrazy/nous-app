@@ -429,6 +429,10 @@ SHAPE_COLLECTION_UNSUPPORTED = "collections_not_supported"
 SHAPE_COLLECTION_INVALID = "invalid_collection_name"
 SHAPE_MUSIC_UNSUPPORTED = "music_not_supported"
 SHAPE_MUSIC_INVALID = "invalid_music_name"
+#: 结构化配乐引用（mig 429）本身残缺。与 ``invalid_music_name`` 分开是因为用户
+#: 的下一步不同：曲名太长是他能改的，一个缺 id 的 ref 是我们这边的 bug，让他
+#: 重新从曲库里选一次是唯一能给的建议。
+SHAPE_MUSIC_REF_INVALID = "invalid_music_reference"
 # D4：图集不接受独立封面。抖音图文页确实有「封面设置」，但 [实测 2026-08-11]
 # （§3.4 V8）它是**从已上传的图片里挑一张**，不是视频那种在弹窗里独立上传的
 # 第五个文件。所以带 cover 素材的图集请求是语义错误，不是可以忽略的多余字段。
@@ -616,6 +620,31 @@ def _option_shape_problems(
                     SHAPE_MUSIC_INVALID,
                     f"music name exceeds {MAX_MUSIC_NAME_LEN} characters",
                 )
+            )
+
+    # 配乐的结构化身份（mig 429）。同样只校验形状 —— 这首歌在平台上还在不在
+    # 是浏览器侧那一次搜索说了算。但**这一个键在时浏览器侧走的是严格分支**
+    # （三元组对齐，不唯一命中就失败），所以它自己必须是完整的：一个缺 id
+    # 或缺名字的 ref 会让那条分支拿着半个指纹去对齐，判出来的"唯一命中"不比
+    # 按名匹配可信。
+    music_ref = opts.get("music_ref")
+    if music_ref is not None:
+        if not isinstance(music_ref, Mapping):
+            problems.append(
+                ShapeProblem(
+                    SHAPE_MUSIC_REF_INVALID, "music reference is not an object"
+                )
+            )
+        elif not str(music_ref.get("music_id") or "").strip():
+            problems.append(
+                ShapeProblem(
+                    SHAPE_MUSIC_REF_INVALID,
+                    "music reference has no music_id (the track's only real identity)",
+                )
+            )
+        elif not str(music_ref.get("music_name") or "").strip():
+            problems.append(
+                ShapeProblem(SHAPE_MUSIC_REF_INVALID, "music reference has no name")
             )
     return problems
 

@@ -329,7 +329,10 @@ async def _build_publish_intent(account: dict, task: dict, repo):
     ``resolve_self_declaration``); leaving that mapping to the browser would
     put a product decision in the DOM layer where nobody would find it.
     """
-    from app.services.distribution.publish_options import resolve_self_declaration
+    from app.services.distribution.publish_options import (
+        music_platform_options,
+        resolve_self_declaration,
+    )
     from app.services.distribution.session_adapter import PublishIntent, PublishMedia
 
     opts = _account_publish_opts(account, task)
@@ -370,9 +373,15 @@ async def _build_publish_intent(account: dict, task: dict, repo):
     collection = (task.get("collection_name") or "").strip()
     if collection:
         platform_options["collection"] = collection
-    music = (task.get("music_name") or "").strip()
-    if music:
-        platform_options["music"] = music
+    # 配乐。组装逻辑与提交门（``publish_gate._platform_options``）共用一份 ——
+    # 两道门看到的不是同一个请求，是这条链上最难查的一类不一致。
+    music_ref = task.get("music_ref")
+    platform_options.update(
+        music_platform_options(
+            task.get("music_name"),
+            music_ref if isinstance(music_ref, dict) else None,
+        )
+    )
 
     return PublishIntent(
         content_type=content_type,

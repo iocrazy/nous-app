@@ -223,6 +223,10 @@ class PublishTasks(Base):
     # mig 425 — 「选择音乐」。存曲名原文，浏览器侧拿它去发布页的音乐弹窗里搜。
     # NULL = 不碰那个控件 = 平台默认（原声），也就是这一列存在之前的行为。
     music_name: Mapped[str | None] = mapped_column(Text)
+    # mig 429 — 从平台曲库里选中的那一首的**结构化身份**（名+作者+时长+id）。
+    # NULL = 手打曲名的老路径。曲名不是身份：实测一次搜索里 5 条标题完全相同、
+    # id 各异，按名匹配会满怀信心地发出另一首歌。详见迁移文件的说明。
+    music_ref: Mapped[dict | None] = mapped_column(JSONB)
     dbos_workflow_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
