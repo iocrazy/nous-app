@@ -7,7 +7,7 @@ import type { CoverFramesMeta } from '../../types';
 // hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
 const {
   createPublishTask, promoteGeneratedVideo, uploadResource, getGalleryItems,
-  extractCoverFrames, selectCoverFrame, suggestTopics,
+  extractCoverFrames, selectCoverFrame, suggestTopics, searchMusic,
 } = vi.hoisted(() => ({
   createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
   promoteGeneratedVideo: vi.fn().mockResolvedValue('900'),
@@ -22,6 +22,29 @@ const {
     { name: 'goldenhour', topic_id: '1583761434171470', view_count: 30909355369, is_new: false },
     { name: 'goldenhourphotography', topic_id: '', view_count: 0, is_new: true },
   ]),
+  // Real wire shape of GET /distribution/music/search (measured 2026-08-15).
+  // Two rows with CHARACTER-IDENTICAL titles under different ids, because that
+  // is what the platform actually returns — and it is the entire reason the
+  // picker exists: a title cannot address either of them.
+  //
+  // `music_id` is the upstream `id_str`, a STRING. The same upstream row also
+  // carries an `id` as a JSON number past 2^53, which is already a different
+  // number by the time it reaches a browser; a fixture that "tidied" the two
+  // into one numeric id would prove something the real payload never does
+  // (CLAUDE.md: boundary mocks copy the wire shape).
+  // `duration` is SECONDS — measured 49 / 221 / 323 / 267 in one response.
+  searchMusic: vi.fn().mockResolvedValue({
+    tracks: [
+      { music_id: '6953836671917951012', title: 'Dream It Possible', author: 'Delacey',
+        duration: 221, user_count: 30025, cover_url: '', play_url: '' },
+      { music_id: '7673728791198320674', title: 'Dream It Possible', author: 'Someone Else',
+        duration: 195, user_count: 9, cover_url: '', play_url: '' },
+    ],
+    cursor: 20,
+    has_more: true,
+    cached: false,
+    browsing_as: { account_id: '10', username: 'HEYGO', avatar_url: null },
+  }),
 }));
 
 // Stable toast spy so the upload-failure test can assert on it.
@@ -75,6 +98,11 @@ vi.mock('../../services/distributionService', () => ({
   extractCoverFrames,
   selectCoverFrame,
   suggestTopics,
+  searchMusic,
+  musicSearchFailure: (err: unknown) => ({
+    reason: (err as { reason?: string })?.reason ?? null,
+    retryAfterS: null,
+  }),
   // The page branches on this code to pick its wording; the real one digs the
   // reason out of a DistributionApiError.
   topicSuggestReason: (err: unknown) => (err as { reason?: string })?.reason ?? null,
@@ -816,23 +844,138 @@ describe('PublishPage form fields', () => {
     expect(createPublishTask.mock.calls.at(-1)?.[0].collection_name).toBe('Summer Trip');
   });
 
-  it('sends a trimmed music name and warns about accounts that cannot honour it', async () => {
+  /**
+   * Open the music panel, search, and wait for the (debounced) results.
+   *
+   * Returns the rows scoped to the panel. ⚠️ The topic type-ahead also renders
+   * `role="option"` and sits ABOVE this in the DOM, so a page-wide
+   * `getAllByRole('option')` silently returns topic suggestions — a click
+   * would add a hashtag and the music assertion would fail for a reason that
+   * has nothing to do with music.
+   */
+  const openMusicAndSearch = async (term = 'dream') => {
+    fireEvent.click(screen.getByTestId('music-panel-toggle'));
+    fireEvent.change(screen.getByLabelText(/^Search music$/i), { target: { value: term } });
+    await waitFor(
+      () => expect(
+        within(screen.getByTestId('music-panel')).getAllByRole('option').length,
+      ).toBeGreaterThan(0),
+      { timeout: 3000 },
+    );
+    return within(screen.getByTestId('music-panel')).getAllByRole('option');
+  };
+
+  it('publishes the id of the row that was clicked, not its title', async () => {
+    // **The guard.** The catalogue returns two rows whose titles are
+    // character-identical under different ids — the measured shape. Sending
+    // the title would be indistinguishable between them, and the publish step
+    // would refuse (`music_ambiguous`) or, before this change, quietly pick
+    // the wrong upload. The SECOND row is taken so that "we sent the id of
+    // the row that was clicked" cannot pass by accident.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+    const rows = await openMusicAndSearch();
+    // Both rows are titled 'Dream It Possible'; the second one is taken so
+    // that "the id of the row that was clicked" cannot pass by accident.
+    fireEvent.click(rows[1]);
+
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const payload = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(payload.music_ref.music_id).toBe('7673728791198320674');
+    // The fingerprint the browser aligns dialog rows against travels with it —
+    // the author and the length are what separate two same-titled uploads.
+    expect(payload.music_ref.music_author).toBe('Someone Else');
+    expect(payload.music_ref.duration).toBe(195);
+    // …and the keyword the browser will type is derived from the pick, never
+    // typed separately: two sources of truth here means the platform's own
+    // search cannot find what the user chose.
+    expect(payload.music_name).toBe('Dream It Possible');
+  });
+
+  it('says whose library it is showing', async () => {
+    // **The guard.** The browse identity is the first target account, without
+    // a control to change it — which the user accepted. What he did not accept
+    // is not knowing whose list this is: the platform's saved-tracks tab is
+    // account-scoped, so switching target accounts changes the panel silently.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    fireEvent.click(screen.getByTestId('music-panel-toggle'));
+    expect(screen.getByTestId('music-identity')).toHaveTextContent(/HEYGO/);
+  });
+
+  it('asks the platform only while the panel is open', async () => {
+    // Every lookup mints a search credential with a REAL account's cookies, so
+    // a request the user did not ask for is a risk-control signal spent for
+    // nothing — and the publish page is opened far more often than music is
+    // chosen (the field has been empty on every publish so far).
+    //
+    // ⚠️ Asserting "no call before the panel opens" ALONE proves nothing: with
+    // no keyword typed there is nothing to search for either way, so it passes
+    // whether or not the guard exists. The falsifiable half is the second one:
+    // a keyword survives the panel closing, and without the guard the next
+    // re-render searches again with it.
+    //
+    // Cleared before the render — the calls in question include the render's own.
+    searchMusic.mockClear();
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    expect(searchMusic).not.toHaveBeenCalled();
+
+    const rows = await openMusicAndSearch();
+    expect(searchMusic).toHaveBeenCalledTimes(1);
+
+    // Picking closes the panel; the typed keyword is still in state.
+    fireEvent.click(rows[0]);
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Another title, another render' },
+    });
+    // Long enough that a debounced lookup would have fired by now.
+    await new Promise((resolve) => { setTimeout(resolve, 700); });
+
+    expect(searchMusic).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a typed reason instead of an empty list when the lookup fails', async () => {
+    // "The platform has no such track" and "we could not ask" are different
+    // sentences. An empty panel for the second is the failure this repo keeps
+    // paying for — and here it would be a lie twice over, since a nonsense
+    // keyword still returns fuzzy matches upstream.
+    searchMusic.mockRejectedValueOnce({ reason: 'session_unusable' });
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    fireEvent.click(screen.getByTestId('music-panel-toggle'));
+    fireEvent.change(screen.getByLabelText(/^Search music$/i), { target: { value: 'dream' } });
+
+    await waitFor(
+      () => expect(screen.getByTestId('music-error')).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(screen.getByTestId('music-error')).toHaveTextContent(/needs reconnecting/i);
+    expect(
+      within(screen.getByTestId('music-panel')).queryAllByRole('option'),
+    ).toHaveLength(0);
+  });
+
+  it('warns about accounts that cannot honour a chosen track', async () => {
     // Music is set by clicking through the creator page, so an OAuth account
     // cannot honour it — the same group as the collection and the schedule.
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
     await pickContentAndAccount();
+    const rows = await openMusicAndSearch();
+    fireEvent.click(rows[0]);
 
-    fireEvent.change(screen.getByLabelText(/^Music$/i), {
-      target: { value: '  Dream It Possible  ' },
-    });
     expect(screen.queryByText(/connected by QR code/i)).toBeNull();
     fireEvent.click(screen.getByText('OAuth One'));
     expect(screen.getByText(/connected by QR code/i)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
-    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
-    expect(createPublishTask.mock.calls.at(-1)?.[0].music_name).toBe('Dream It Possible');
   });
 });
 

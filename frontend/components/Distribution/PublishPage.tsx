@@ -8,8 +8,9 @@ import {
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
-  listLibraryMedia, promoteGeneratedVideo, publishGateProblems, suggestTopics,
-  topicSuggestReason, GeneratedVideo, PlatformCapability, PublishGateProblem,
+  listLibraryMedia, musicSearchFailure, promoteGeneratedVideo, publishGateProblems,
+  searchMusic, suggestTopics, topicSuggestReason, GeneratedVideo, MusicBrowseIdentity,
+  MusicSearchReason, MusicTrack, PlatformCapability, PublishGateProblem,
   TopicSuggestion, TopicSuggestReason,
 } from '../../services/distributionService';
 import {
@@ -62,6 +63,12 @@ const MAX_TOPIC_LEN = 50;
 // request instead of one per keystroke, short enough that the list feels like
 // it belongs to the keyboard rather than to a spinner.
 const TOPIC_SUGGEST_DEBOUNCE_MS = 250;
+// Longer than the topic one, deliberately. A topic lookup is anonymous; a
+// catalogue lookup mints a search credential with a REAL account's cookies,
+// so every keystroke that turns into a request is charged to that account's
+// risk profile. 450ms is roughly "the user stopped typing" rather than "the
+// user paused mid-word".
+const MUSIC_SEARCH_DEBOUNCE_MS = 450;
 
 /**
  * Cumulative play count, written the way the reader's own locale writes large
@@ -373,6 +380,26 @@ export const PublishPage: React.FC = () => {
   // A name that the platform's own search cannot find fails that account's row
   // rather than publishing without music; see the backend's `music_name`.
   const [musicName, setMusicName] = useState('');
+  /**
+   * The track picked out of the platform's own catalogue, or null.
+   *
+   * `musicName` above stays as the search keyword the browser types into the
+   * platform's dialog; THIS is the identity. A title is not one — one search
+   * for 「起风了」 comes back with five character-identical titles under
+   * different ids, and the publish step refuses (`music_ambiguous`) rather
+   * than guess. Picking a card is what makes that refusal avoidable.
+   */
+  const [musicTrack, setMusicTrack] = useState<MusicTrack | null>(null);
+  const [musicPanelOpen, setMusicPanelOpen] = useState(false);
+  const [musicQuery, setMusicQuery] = useState('');
+  const [musicResults, setMusicResults] = useState<MusicTrack[]>([]);
+  const [musicState, setMusicState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [musicError, setMusicError] = useState<
+    { reason: MusicSearchReason | 'unknown'; retryAfterS: number | null } | null
+  >(null);
+  /** Whose session the catalogue was read with — shown, never inferred. */
+  const [musicIdentity, setMusicIdentity] = useState<MusicBrowseIdentity | null>(null);
+  const musicSeq = useRef(0);
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
   // Not user-selectable: the backend routes per account (see the Channel type).
@@ -874,6 +901,88 @@ export const PublishPage: React.FC = () => {
     );
   };
 
+  /**
+   * Search the platform's music catalogue, debounced.
+   *
+   * Three things this deliberately does NOT do, each one a failure this repo
+   * has already paid for:
+   *  - it never runs unless the panel is open. Every lookup mints a search
+   *    credential with a real account's cookies, and a request the user did
+   *    not ask for is a risk-control signal we spent for nothing;
+   *  - it never turns a failed lookup into an empty list. A nonsense keyword
+   *    still returns fuzzy matches upstream, so an empty panel is far more
+   *    likely to mean "we failed" than "no such track";
+   *  - it never lets a slow response overwrite a newer one.
+   */
+  useEffect(() => {
+    const term = musicQuery.trim();
+    const browseAccount = targetAccounts[0];
+    if (!musicPanelOpen || !term || !browseAccount) {
+      setMusicResults([]);
+      setMusicState('idle');
+      setMusicError(null);
+      return;
+    }
+    const seq = ++musicSeq.current;
+    setMusicState('loading');
+    setMusicError(null);
+    const timer = window.setTimeout(() => {
+      searchMusic(term, browseAccount.id)
+        .then((page) => {
+          if (seq !== musicSeq.current) return;
+          setMusicResults(page.tracks);
+          setMusicIdentity(page.browsing_as);
+          setMusicState('ready');
+        })
+        .catch((err) => {
+          if (seq !== musicSeq.current) return;
+          console.error('distribution: music search failed', err);
+          const failure = musicSearchFailure(err);
+          setMusicResults([]);
+          setMusicError({
+            reason: failure.reason ?? 'unknown',
+            retryAfterS: failure.retryAfterS,
+          });
+          setMusicState('error');
+        });
+    }, MUSIC_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [musicQuery, musicPanelOpen, targetAccounts]);
+
+  /** Human sentence for a typed catalogue failure. Branches on the code,
+   *  never on the backend's English prose. */
+  const musicErrorText = (): string => {
+    switch (musicError?.reason) {
+      case 'session_unusable':
+        return t(
+          'distribution.publish.musicSessionUnusable',
+          'This account needs reconnecting before its music library can be read.',
+        );
+      case 'account_not_session_bound':
+        return t(
+          'distribution.publish.musicAccountNotSession',
+          'Only accounts connected by QR code can browse the music library.',
+        );
+      case 'signature_unavailable':
+        // Distinguished from a dead upstream: this one recovers on its own,
+        // and saying "broken" would send the user off to fix nothing.
+        return t(
+          'distribution.publish.musicBackingOff',
+          'Music search is briefly unavailable after a failed handshake — try again in a moment.',
+        );
+      case 'platform_unsupported':
+        return t(
+          'distribution.publish.musicUnsupported',
+          'This platform has no music library we can search.',
+        );
+      default:
+        return t(
+          'distribution.publish.musicSearchFailed',
+          'Could not reach the music library — nothing was searched.',
+        );
+    }
+  };
+
   // Only the videos the user actually picked are shown as content thumbs —
   // never the whole Library. Resolve ids → video rows, dropping any that no
   // longer exist in the loaded Library list.
@@ -1276,6 +1385,15 @@ export const PublishPage: React.FC = () => {
             'distribution.publish.gateMusicInvalid',
             'That music name was refused — shorten it, or clear the field to publish with the platform default.',
           );
+        // A picked track arrived without its id. Separate copy from the one
+        // above because the user's move differs: a long name is his to fix,
+        // an unidentifiable track is ours — the only useful advice is "pick
+        // it again", and telling him to shorten something would be nonsense.
+        case 'invalid_music_reference':
+          return t(
+            'distribution.publish.gateMusicRefInvalid',
+            'That track could not be identified — pick it again from the music panel.',
+          );
         case 'self_declaration_not_supported':
         case 'unknown_self_declaration':
           return t(
@@ -1404,6 +1522,21 @@ export const PublishPage: React.FC = () => {
         // Omitted when blank — "leave the music control alone" (publish on the
         // platform default) is a real instruction, not a missing value.
         music_name: musicName.trim() || undefined,
+        // The identity of the picked track. Present = the browser aligns rows
+        // on (title, author, length) and refuses anything short of a unique
+        // match; absent = the older title-only path, which is fuzzy on
+        // purpose. `music_name` above is the search keyword either way, and
+        // the backend re-derives it from this object so the two cannot drift.
+        music_ref: musicTrack
+          ? {
+            music_id: musicTrack.music_id,
+            music_name: musicTrack.title,
+            music_author: musicTrack.author,
+            duration: musicTrack.duration,
+            user_count: musicTrack.user_count,
+            cover_url: musicTrack.cover_url,
+          }
+          : undefined,
         // Cover-first order: the pair was already derived by
         // POST /covers/select, so it rides along at create time rather than
         // needing a second call against the new task.
@@ -2054,26 +2187,194 @@ export const PublishPage: React.FC = () => {
                 onChange={(e) => setCollectionName(e.target.value)}
               />
             </div>
-            {/* Music is picked BY NAME in the platform's own dialog: at publish
-                time the browser searches for this and selects a result. We
-                cannot enumerate the platform's library from here, so this is
-                free text — and a name its search cannot find fails that account
-                (loudly) rather than publishing on the default 原声, which is
-                the whole reason the field exists. Hidden entirely when the
-                accounts in play have no music picker. */}
+            {/* Music is picked from the PLATFORM'S OWN catalogue, and what
+                travels is the track's id — not its title. A title is not an
+                identity: one search for 「起风了」 returns five rows whose
+                titles are character-identical under different ids, and the
+                publish step refuses (`music_ambiguous`) rather than guess.
+                This panel is what makes that refusal avoidable.
+
+                Hidden entirely when the accounts in play have no music picker
+                — the same capability read as before. */}
             {musicSupported && (
-              <div className="opt-row">
-                <Music />
-                <span className="ol">{t('distribution.publish.music', 'Music')}</span>
-                <input
-                  className="input"
-                  style={{ width: 200 }}
-                  value={musicName}
-                  maxLength={100}
-                  aria-label={t('distribution.publish.music', 'Music')}
-                  placeholder={t('distribution.publish.musicPlaceholder', 'Track name to search')}
-                  onChange={(e) => setMusicName(e.target.value)}
-                />
+              <div className="opt-row opt-row-stack">
+                <div className="opt-row-head">
+                  <Music />
+                  <span className="ol">{t('distribution.publish.music', 'Music')}</span>
+                  {musicTrack ? (
+                    <span className="music-chosen" data-testid="music-chosen">
+                      <span className="mc-title">{musicTrack.title}</span>
+                      <span className="mc-meta">
+                        {musicTrack.author || NO_VALUE}
+                        {' · '}
+                        {formatDuration(musicTrack.duration)}
+                      </span>
+                      <button
+                        type="button"
+                        className="mc-clear"
+                        aria-label={t('distribution.publish.musicClear', 'Remove music')}
+                        onClick={() => {
+                          setMusicTrack(null);
+                          setMusicName('');
+                        }}
+                      >
+                        <X />
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="ov">
+                      {t('distribution.publish.musicDefault', 'Original sound')}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="oa oa-btn"
+                    aria-expanded={musicPanelOpen}
+                    data-testid="music-panel-toggle"
+                    onClick={() => setMusicPanelOpen((v) => !v)}
+                  >
+                    {musicPanelOpen
+                      ? t('distribution.publish.musicClose', 'Close')
+                      : t('distribution.publish.musicChoose', 'Choose')}
+                  </button>
+                </div>
+
+                {/* Nothing is fetched until this is open: every lookup is paid
+                    for with a real account's cookies. */}
+                {musicPanelOpen && (
+                  <div className="music-panel" data-testid="music-panel">
+                    {/* WHOSE library this is. The catalogue is global, but the
+                        credential is minted with the first target account's
+                        session and the platform's saved-tracks tab is
+                        account-scoped — so switching target accounts changes
+                        what this panel can show. Stating it is not decoration:
+                        a list that changes for reasons the user cannot see is
+                        the failure this repo keeps finding. */}
+                    <div className="music-identity" data-testid="music-identity">
+                      {targetAccounts[0] ? (
+                        <>
+                          <AccountAvatar
+                            gradient={gradientFor(targetAccounts[0].id)}
+                            username={musicIdentity?.username ?? targetAccounts[0].username}
+                            avatarUrl={
+                              musicIdentity?.avatar_url ?? targetAccounts[0].avatar_url
+                            }
+                          />
+                          {/* The account name is rendered as its own node
+                              rather than interpolated into the sentence: it is
+                              the one part of this line that has to survive
+                              however the translation layer is wired. Same rule
+                              the topic row's play count follows. */}
+                          <span>
+                            {t(
+                              'distribution.publish.musicBrowsingAs',
+                              'Music library of',
+                            )}
+                            {' '}
+                            <b>{musicIdentity?.username ?? targetAccounts[0].username}</b>
+                          </span>
+                        </>
+                      ) : (
+                        <span>
+                          {t(
+                            'distribution.publish.musicNoAccount',
+                            'Select an account first — the music library is read with its session.',
+                          )}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="music-search">
+                      <Search />
+                      <input
+                        className="input"
+                        value={musicQuery}
+                        maxLength={50}
+                        aria-label={t('distribution.publish.musicSearch', 'Search music')}
+                        placeholder={t('distribution.publish.musicSearch', 'Search music')}
+                        onChange={(e) => setMusicQuery(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Four states, and an empty list is only ever shown for
+                        "the platform answered with nothing" — never for a
+                        failure. */}
+                    {musicState === 'loading' && (
+                      <div className="music-note">
+                        <Loader2 className="spin" />
+                        {t('distribution.publish.musicSearching', 'Searching the platform…')}
+                      </div>
+                    )}
+                    {musicState === 'error' && (
+                      <div className="music-note music-error" role="alert" data-testid="music-error">
+                        <AlertCircle />
+                        {musicErrorText()}
+                      </div>
+                    )}
+                    {musicState === 'ready' && musicResults.length === 0 && (
+                      <div className="music-note">
+                        {t(
+                          'distribution.publish.musicEmpty',
+                          'The platform returned nothing for that — try a different wording.',
+                        )}
+                      </div>
+                    )}
+                    {musicState === 'idle' && (
+                      <div className="music-note">
+                        {t(
+                          'distribution.publish.musicPrompt',
+                          'Type a track or artist to search the platform.',
+                        )}
+                      </div>
+                    )}
+                    {musicState === 'ready' && musicResults.length > 0 && (
+                      <div className="music-results" role="listbox">
+                        {musicResults.map((track) => (
+                          <button
+                            key={track.music_id}
+                            type="button"
+                            role="option"
+                            aria-selected={musicTrack?.music_id === track.music_id}
+                            className={`music-row ${musicTrack?.music_id === track.music_id ? 'sel' : ''}`}
+                            /* The id is the identity — carried on the node so a
+                               test (and a human in devtools) can see WHICH row
+                               was taken, not merely that a row with that title
+                               was. */
+                            data-music-id={track.music_id}
+                            onClick={() => {
+                              setMusicTrack(track);
+                              // The keyword the browser will type into the
+                              // platform's own dialog. Derived from the track,
+                              // never typed independently: two sources of truth
+                              // here means the search cannot find the pick.
+                              setMusicName(track.title);
+                              setMusicPanelOpen(false);
+                            }}
+                          >
+                            {track.cover_url ? (
+                              <img className="mr-cover" src={track.cover_url} alt="" loading="lazy" />
+                            ) : (
+                              <span className="mr-cover mr-cover-empty" aria-hidden="true" />
+                            )}
+                            <span className="mr-main">
+                              <span className="mr-title">{track.title}</span>
+                              <span className="mr-meta">
+                                {track.author || NO_VALUE}
+                                {' · '}
+                                {formatDuration(track.duration)}
+                              </span>
+                            </span>
+                            <span className="mr-uses">
+                              <b>{formatViewCount(track.user_count, i18n.language)}</b>
+                              {' '}
+                              {t('distribution.publish.musicUses', 'uses')}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {/* The row above is hidden by two very different facts. Say which:
