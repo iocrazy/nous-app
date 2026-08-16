@@ -377,6 +377,126 @@ async def test_a_same_titled_stranger_fails_instead_of_publishing_the_wrong_song
     )
 
 
+# --- the diagnostic: which of three things happened -------------------------
+#
+# A real publish failed with `music_not_found (no result carried that title)`
+# and the message could not say WHICH of these it was:
+#
+#   * the dialog listed rows, none titled that      → the two search faces differ
+#   * the dialog listed nothing                     → the search itself found none
+#   * the probe blew up and was swallowed into []   → we never saw the page
+#
+# All three produced identical text, and `detail` cannot carry the answer:
+# `publish_distribution._finish_account` keeps only `reason` + `message` and
+# writes `[reason] message` into the row. So the clause goes in the message,
+# and these tests pin that it is there AND that the three stay distinguishable.
+
+
+def test_rows_that_were_read_are_quoted_with_their_count():
+    read = dp.MusicRowsRead(rows(("起风了", "吴青峰·05:25"), ("起风了", "翻唱君·04:58")))
+    described = dp.describe_music_rows(read)
+    assert "rows=2" in described
+    assert "起风了" in described
+
+
+def test_an_empty_dialog_and_a_broken_probe_do_not_look_alike():
+    """**The guard**, and the rule this repo wrote down today: `?` is not `0`.
+
+    Reporting a crashed probe as "0 rows" asserts something about the page that
+    nobody observed — the same shape as a health check that reports `false` for
+    "could not determine".
+    """
+    empty = dp.describe_music_rows(dp.MusicRowsRead([]))
+    broken = dp.describe_music_rows(dp.MusicRowsRead([], error="TypeError"))
+
+    assert empty != broken
+    assert "rows=0" in empty
+    assert "rows=?" in broken and "TypeError" in broken
+    # And the crashed one must not claim a count at all.
+    assert "rows=0" not in broken
+
+
+def test_the_quoted_titles_are_bounded_in_number_and_length():
+    """This string lands in `publish_task_accounts.error_message` (capped at
+    500 chars, rendered in the UI, kept in logs). A diagnostic that crowds out
+    the sentence it explains has made things worse."""
+    long_title = "A" * 200
+    read = dp.MusicRowsRead(rows(*[(long_title, "x·01:00")] * 10))
+    described = dp.describe_music_rows(read)
+
+    assert "rows=10" in described
+    assert described.count("|") == dp.MUSIC_SAMPLE_ROWS - 1
+    assert len(described) < 200
+
+
+async def test_a_failed_publish_says_how_many_rows_it_saw():
+    """**The guard.** Delete the clause from the message and this goes red —
+    and with it goes the only way to tell, from a user's ordinary failed
+    publish, whether the dialog disagrees with the search API or our own probe
+    is broken. `detail` cannot do this job: the caller drops it.
+    """
+    page = music_page((("某首别的歌", "别人·03:20"), ("另一首", "别人·02:10")))
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_not_found"
+    assert "rows=2" in excinfo.value.message
+    assert excinfo.value.detail["music_rows_seen"] == 2
+
+
+async def test_a_probe_that_blew_up_is_reported_as_unobserved_not_as_zero():
+    """The state that made the real failure unattributable. `_music_rows` used
+    to swallow this into `[]`."""
+
+    def explode(_page):
+        raise TypeError("probe blew up")
+
+    page = music_page((("起风了", "吴青峰·05:25"),))
+    page.music_rows = explode
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "rows=?" in excinfo.value.message
+    assert "TypeError" in excinfo.value.message
+    # `None`, never 0 — nobody saw the page.
+    assert excinfo.value.detail["music_rows_seen"] is None
+    assert excinfo.value.detail["music_rows_error"] == "TypeError"
+
+
+async def test_an_empty_dialog_reports_zero_rows():
+    page = music_page(())
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "rows=0" in excinfo.value.message
+    assert excinfo.value.detail["music_rows_seen"] == 0
+    assert excinfo.value.detail["music_rows_error"] is None
+
+
+async def test_an_ambiguous_failure_also_says_what_it_saw():
+    page = music_page((("起风了", ""), ("起风了", ""), ("起风了", "")))
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert "rows=3" in excinfo.value.message
+
+
+async def test_the_diagnostic_changes_no_verdict():
+    """A successful pick stays successful, and nothing about the decision moved
+    — this batch only made the failures explain themselves."""
+    page = music_page(
+        (("起风了", "买辣椒也用券·05:11"), ("起风了", "吴青峰·05:25"))
+    )
+    result = await dp._set_music(
+        page, job(music="起风了", ref_payload=REF), Deadline(10)
+    )
+    assert result["music"] == "applied"
+    assert result["music_match"] == "exact"
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
+
+
 async def test_the_typed_name_path_is_untouched_by_any_of_this():
     """No reference = the old, deliberately looser policy. A user who typed a
     name still gets the closest row and is told it was approximate — changing
