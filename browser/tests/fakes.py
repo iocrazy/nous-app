@@ -419,6 +419,12 @@ class FakePage:
             return self.dom_probe.get(_arg, [])
         if "__nous_music_rows_probe__" in (_script or ""):
             rows = self.music_rows(self) if callable(self.music_rows) else self.music_rows
+            # A callable may raise to simulate the probe blowing up on the live
+            # page — the state the production code must report as "we could not
+            # look", never as "there was nothing there". Assigning an exception
+            # INSTANCE expresses the same thing without a callable.
+            if isinstance(rows, BaseException):
+                raise rows
             # Shaped like the real probe's return value, indices included: the
             # driver clicks `[data-nous-music-row="<index>"]`, so a fake that
             # only handed back names would not exercise the addressing at all.

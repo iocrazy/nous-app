@@ -761,6 +761,58 @@ async def test_session_invalid_marks_account_needs_relogin():
 
 
 @pytest.mark.asyncio
+async def test_the_browser_message_survives_into_the_row_but_detail_does_not():
+    """**这条钉的是浏览器侧诊断赖以成立的前提。**
+
+    `douyin_publish._set_music` 把"弹窗到底列了几行、前几行叫什么"写进失败
+    **message**，而不是只写进 `detail` —— 因为这一层只保留 `reason` 与
+    `message`，其余 `detail` 键既不入库也不进日志。
+
+    如果哪天有人把 message 换成一句固定文案、或改成从 detail 里挑字段拼，
+    那条诊断就会变成"看起来在工作、实际永远静默"的字段（本仓库刚栽过的那一
+    类）。所以这里正反各钉一次：message 必须活下来，detail 的额外键必须**没有**
+    悄悄成为唯一载体。
+    """
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "failed",
+            message=(
+                "no music named 'X' came back from the platform's search "
+                "(no result carried that title) [rows=12, saw: A | B | C]"
+            ),
+            detail={
+                "reason": "music_not_found",
+                "stage": "music",
+                # 只在 detail 里的诊断字段 —— 下面断言它并没有被落库，
+                # 这正是"诊断必须写进 message"的理由本身。
+                "music_rows_seen": 12,
+            },
+        )
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    written = repo.updates[-1][1]["error_message"]
+    assert "[music_not_found]" in written
+    # 诊断随 message 落库了
+    assert "rows=12" in written
+    assert "saw: A | B | C" in written
+    # …而 detail 里那一份**没有**任何独立通路进到行上
+    assert "music_rows_seen" not in written
+
+
+@pytest.mark.asyncio
 async def test_infra_failure_never_touches_account_status():
     """容器不可达时一整批账号会同时失败。若据此标 needs_relogin，一次宕机
     就要求用户重扫一百次码（§7.8）。"""

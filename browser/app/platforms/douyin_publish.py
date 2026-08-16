@@ -2296,6 +2296,65 @@ async def _open_music_dialog(page: Any, click_ms: int, settle_ms: int) -> int | 
     return None
 
 
+@dataclass(frozen=True)
+class MusicRowsRead:
+    """What the row probe came back with — **including whether it ran at all**.
+
+    Three states, and collapsing any two of them is how a diagnosis gets lost:
+
+    * ``rows=[…], error=None`` — the dialog listed these;
+    * ``rows=[], error=None`` — the dialog listed **nothing**;
+    * ``rows=[], error="TypeError"`` — **the probe itself failed**, so the page
+      is unobserved. This is not "the dialog listed nothing", and reporting it
+      as `0` would be the same lie this repo has now found in three places:
+      `?` is not `0`.
+
+    The distinction is load-bearing here specifically because the probe's own
+    JavaScript has **never been proven** (`tests/test_douyin_music.py` says so
+    in its header: the fixture has no JS engine). When a publish fails with
+    "no result carried that title", the first question is which of these three
+    happened — and until this type existed, the answer was unrecoverable.
+    """
+
+    rows: list[MusicRow]
+    error: str | None = None
+
+
+#: How many titles a failure message quotes, and how long each may be. Bounded
+#: because this string lands in `publish_task_accounts.error_message` (capped
+#: at 500 chars, rendered in the UI, kept in logs) — a diagnostic that crowds
+#: out the sentence it is explaining has made things worse, not better.
+MUSIC_SAMPLE_ROWS = 3
+MUSIC_SAMPLE_TITLE_CHARS = 24
+
+
+def describe_music_rows(read: MusicRowsRead) -> str:
+    """One compact clause saying what the dialog showed. Pure.
+
+    Goes into the failure **message**, not only into `detail`: on this chain
+    `detail` is dropped by the caller — `publish_distribution` keeps just the
+    reason and the message, and writes `[reason] message` into the row. A
+    diagnostic parked in `detail` would look like it was working and be
+    silently discarded every time, which is the trap this project keeps
+    re-finding rather than a hypothetical.
+
+    Titles are the platform's own catalogue text (public), never anything the
+    user wrote.
+    """
+    if read.error is not None:
+        # `?`, not `0` — we did not see the page, so we cannot say what was on it.
+        return f"rows=? (the result probe failed: {read.error})"
+    if not read.rows:
+        return "rows=0 (the dialog listed nothing)"
+    sample = " | ".join(
+        (row.name[:MUSIC_SAMPLE_TITLE_CHARS] + "…")
+        if len(row.name) > MUSIC_SAMPLE_TITLE_CHARS
+        else row.name
+        for row in read.rows[:MUSIC_SAMPLE_ROWS]
+    )
+    return f"rows={len(read.rows)}, saw: {sample}"
+
+
 def _rows_by_index(rows: Sequence[MusicRow]) -> list[str]:
     """Row titles laid out so that list position == the probe's DOM index. Pure.
 
@@ -2311,18 +2370,24 @@ def _rows_by_index(rows: Sequence[MusicRow]) -> list[str]:
     return names
 
 
-async def _music_rows(page: Any) -> list[MusicRow]:
+async def _music_rows(page: Any) -> MusicRowsRead:
     """The rows the dialog is listing, in order. Never raises.
 
     Returns the structured rows; the typed-name path takes `.name` off them and
     is unchanged by the extra fields. The index is the probe's own, which is
     what `[data-nous-music-row="<i>"]` addresses — renumbering here would click
     the row next to the chosen one.
+
+    A probe that blew up is reported **as a probe failure**, not as an empty
+    list. It used to be swallowed into `[]`, which made "the dialog showed
+    nothing" and "we could not look" the same observation — and since the
+    caller turns both into `music_not_found`, a real user's failure could not
+    be attributed to either afterwards.
     """
     try:
         rows = await page.evaluate(_MUSIC_ROWS_JS, MUSIC_ROW_ATTRIBUTE)
-    except Exception:
-        return []
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        return MusicRowsRead([], error=type(exc).__name__)
     out: list[MusicRow] = []
     for position, row in enumerate(rows or []):
         try:
@@ -2334,7 +2399,7 @@ async def _music_rows(page: Any) -> list[MusicRow]:
         out.append(
             parse_music_row(index, name, None if meta is None else str(meta))
         )
-    return out
+    return MusicRowsRead(out)
 
 
 async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
@@ -2402,7 +2467,15 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     await page.keyboard.press("Enter")
     await page.wait_for_timeout(settle_ms)
 
-    rows = await _music_rows(page)
+    read = await _music_rows(page)
+    rows = read.rows
+    # What the dialog showed, in one clause. Carried in the MESSAGE because on
+    # this chain the message is the only thing that survives: the caller
+    # (`publish_distribution._finish_account`) keeps `reason` and `message` and
+    # writes `[reason] message` into the row — every other key of `detail` is
+    # dropped, never logged, never stored. A diagnostic put only in `detail`
+    # would look like it was working and be discarded every single time.
+    seen = describe_music_rows(read)
     if reference is None:
         # The typed-name path, unchanged: the user knows a name, and any upload
         # carrying it satisfies what he asked for.
@@ -2421,26 +2494,33 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     if choice.match == "ambiguous":
         raise StepFailure(
             SessionStatus.FAILED,
-            f"{choice.reason}. Nothing was published: a post's music cannot be "
-            "changed afterwards, and a same-titled different track is the one "
-            "failure that leaves no signal",
+            f"{choice.reason} [{seen}]. Nothing was published: a post's music "
+            "cannot be changed afterwards, and a same-titled different track "
+            "is the one failure that leaves no signal",
             reason="music_ambiguous",
             stage="music",
             requested_music=requested,
             # The id is the identity the ambiguity is about. It is the
             # platform's own catalogue id, not anything of ours.
             music_id=reference.music_id if reference else None,
+            music_rows_seen=None if read.error else len(rows),
+            music_rows_error=read.error,
         )
 
     if choice.name is None or choice.index is None:
         raise StepFailure(
             SessionStatus.FAILED,
             f"no music named '{requested}' came back from the platform's search"
-            + (f" ({choice.reason})" if reference is not None else ""),
+            + (f" ({choice.reason})" if reference is not None else "")
+            + f" [{seen}]",
             reason="music_not_found",
             stage="music",
             requested_music=requested,
             music_id=reference.music_id if reference else None,
+            # `None` (not 0) when the probe itself failed: we did not see the
+            # page, so we cannot report what was on it.
+            music_rows_seen=None if read.error else len(rows),
+            music_rows_error=read.error,
         )
 
     row = page.locator(f'[{MUSIC_ROW_ATTRIBUTE}="{choice.index}"]').first
