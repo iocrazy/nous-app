@@ -141,8 +141,11 @@ describe('RecordsPage — a schedule that can no longer be honoured', () => {
 
     // 'now' is what drops the schedule server-side. Sending 'as_scheduled'
     // here would reproduce the original bug exactly — a 409 this time, but
-    // still a button that cannot succeed.
-    await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('801', 'now'));
+    // still a button that cannot succeed. `dropMusic: false` because this
+    // batch's music was never the problem: the second escape hatch must not
+    // ride along with the first.
+    await waitFor(() => expect(retryPublishTask)
+      .toHaveBeenCalledWith('801', 'now', { dropMusic: false }));
   });
 
   it('leaves Retry alone while the schedule is still reachable', async () => {
@@ -152,7 +155,8 @@ describe('RecordsPage — a schedule that can no longer be honoured', () => {
     // Never 'now': re-timing a post the user deliberately scheduled is
     // irreversible once it is live, so it can only ever happen because they
     // pressed a button that says so.
-    await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('802', 'as_scheduled'));
+    await waitFor(() => expect(retryPublishTask)
+      .toHaveBeenCalledWith('802', 'as_scheduled', { dropMusic: false }));
     expect(screen.queryByRole('button', { name: /Publish now/i })).toBeNull();
     expect(screen.queryByText(/scheduled time for this batch has passed/i)).toBeNull();
   });

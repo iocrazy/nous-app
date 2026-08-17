@@ -322,6 +322,25 @@ class PublishTasksRepository(AsyncpgRepository):
                 .values(scheduled_at=None, updated_at=func.now())
             )
 
+    async def clear_task_music(self, task_id: int) -> None:
+        """把这一批变成"不带配乐发布"（``music_name`` / ``music_ref`` 都清空）。
+
+        只有 ``retry?drop_music=true`` 会调它 —— 用户看着一句"重试会用同一首曲子
+        跑同一次搜索"之后，自己点了那颗写着"去掉配乐"的按钮。跟
+        ``clear_task_schedule`` 同一条纪律：**没有任何自动路径**该走这里。配乐
+        是用户的意图，作品发出去之后换不了歌；系统替他删掉配乐，等于替他做了一
+        个撤不回来的决定。
+
+        两列一起清：只清 ``music_ref`` 会退回"按名字模糊搜"那条路径，也就是仍然
+        会开配乐弹窗、仍然可能失败 —— 那正是这颗按钮要绕开的墙。
+        """
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(PublishTasks)
+                .where(PublishTasks.id == self._bigint(task_id))
+                .values(music_name=None, music_ref=None, updated_at=func.now())
+            )
+
     async def set_task_covers(
         self,
         task_id: int,

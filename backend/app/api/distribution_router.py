@@ -1318,9 +1318,19 @@ async def retry_task(
     out loud rather than get it silently. Nothing here rewrites a schedule on
     the user's behalf: a post going live at a moment they did not choose cannot
     be taken back.
+
+    ``drop_music`` is the same shape of escape hatch on a different axis. A
+    batch whose music could not be selected keeps the ``music_name`` /
+    ``music_ref`` it was created with, so retrying it runs the identical search
+    against the platform's publish dialog — and the records page offers no way
+    to edit the track. Setting this clears both columns, which is the one route
+    that is known to work. It is never inferred: a post cannot have its music
+    changed after it is up, so dropping it is the user's call, made in front of
+    a button that says so.
     """
     task = await _authorize_task(task_id, user)
-    mode = (body or PublishTaskRetryRequest()).mode
+    req = body or PublishTaskRetryRequest()
+    mode = req.mode
     state = schedule_state(task.get("scheduled_at"))
     if state == SCHEDULE_STATE_UNREACHABLE:
         if mode != "now":
@@ -1362,6 +1372,13 @@ async def retry_task(
     )
     if retried is None:
         raise HTTPException(status_code=409, detail="Task is not in a retryable state")
+    if req.drop_music:
+        # AFTER the retryability gate, unlike the schedule clear above: this one
+        # throws the user's track away, and a request that ends in a 409 must
+        # not have quietly edited the batch on its way out. Still BEFORE the
+        # dispatch, because the workflow reads these columns off the row — clear
+        # them any later and the retry runs the very search it was told to skip.
+        await publish_repo.clear_task_music(task_id)
     await publish_repo.reset_failed_accounts(task_id)
     await publish_repo.set_task_workflow_id(task_id, new_wf)
     await start_workflow_routed(

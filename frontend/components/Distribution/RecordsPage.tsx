@@ -95,6 +95,16 @@ const formatTime = (iso: string): string => {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+/** The reason the browser stamps when the publish dialog's music search came
+ *  back with nothing usable (`douyin_publish.py`). */
+const MUSIC_NOT_FOUND = /\[music_not_found\]/i;
+
+/** Did THIS row fail because the track could not be found in the platform's
+ *  publish dialog? Exported because it decides which buttons the row gets, not
+ *  merely which sentence it reads. */
+export const isMusicNotFound = (raw?: string | null): boolean =>
+  Boolean(raw) && MUSIC_NOT_FOUND.test(raw as string);
+
 /**
  * `[reason] prose` → the i18n key that explains it.
  *
@@ -123,9 +133,14 @@ export const PUBLISH_NOTE_KEYS: ReadonlyArray<{
     fallback: 'Published, but with the closest matching track rather than the one you named.',
   },
   {
-    test: /\[music_not_found\]/i,
+    // States what happened and stops there. It used to end with "Try another
+    // spelling", which is advice this page cannot act on and — for a track
+    // picked out of the platform's own catalogue — advice we have measured to
+    // be beside the point. What to do instead is on the buttons below, where
+    // each label states its own consequence.
+    test: MUSIC_NOT_FOUND,
     key: 'distribution.records.noteMusicNotFound',
-    fallback: "The platform's music search found nothing for that name — nothing was published. Try another spelling.",
+    fallback: "The platform's music search returned nothing for this track, so nothing was published.",
   },
   {
     // Several results were indistinguishable from the track that was picked
@@ -218,6 +233,122 @@ const VERIFY_REASON_KEYS: ReadonlyArray<{ test: RegExp; key: string; fallback: s
     fallback: 'This post is not in the account any more — it may have been removed.',
   },
 ];
+
+/** A sentence to print, or a button to draw, on a failed account row. */
+interface FailedRowCopy { key: string; fallback: string }
+export interface FailedRowAction extends FailedRowCopy {
+  mode: 'as_scheduled' | 'now';
+  /** Clear the batch's track server-side before re-dispatching. */
+  dropMusic: boolean;
+}
+export interface FailedRowPlan {
+  notes: FailedRowCopy[];
+  actions: FailedRowAction[];
+}
+
+/**
+ * What a failed row offers the user. Pure, and deliberately the only place the
+ * combinations are decided.
+ *
+ * The rule this encodes: **never draw a button that we can see cannot work.**
+ * Two independent walls put a retry in that position, and they compose.
+ *
+ * - *Expired schedule.* A batch keeps the `scheduled_at` it was created with,
+ *   so re-running it as scheduled is rejected on the same rule that failed it
+ *   (PR #1857 — a user pressed Retry three times). Only "publish now" gets out.
+ * - *A track that would not select.* The batch keeps its `music_name` /
+ *   `music_ref`, and this page offers no way to edit them, so a retry runs the
+ *   byte-identical search against the same dialog. Only "publish without
+ *   music" gets out — and that route is known to work: posts from the same
+ *   account go out fine when no track is attached.
+ *
+ * ⚠️ The music sentence claims exactly one thing beyond that, and only when
+ * `musicFromCatalogue`: that the NAME is not the problem. That much is
+ * established — the track was chosen out of the platform's own catalogue
+ * panel, and a read-only probe of the catalogue API returns it for the typed
+ * form, the de-punctuated form and the author's name alike. WHY the publish
+ * dialog's search then showed nothing is NOT established; `music_rows_seen`
+ * (added alongside `[music_not_found]`) is what will answer it, and until a
+ * failure carries that number the copy must not name a cause. Writing "we
+ * don't know yet" as though it were a diagnosis is the failure mode this page
+ * has been cleaned of twice.
+ *
+ * Both walls at once leaves exactly one working combination, which is why the
+ * two axes are separate parameters rather than one enum: collapsing them would
+ * put the user back in front of a button that fails.
+ */
+export const planFailedRow = (input: {
+  scheduleUnreachable: boolean;
+  musicNotFound: boolean;
+  musicFromCatalogue: boolean;
+}): FailedRowPlan => {
+  const notes: FailedRowCopy[] = [];
+  const actions: FailedRowAction[] = [];
+
+  if (input.scheduleUnreachable) {
+    notes.push({
+      key: 'distribution.records.scheduleExpired',
+      fallback: 'The scheduled time for this batch has passed, so it cannot be published as scheduled any more.',
+    });
+  }
+  if (input.musicNotFound) {
+    if (input.musicFromCatalogue) {
+      notes.push({
+        key: 'distribution.records.musicPickedFromCatalogue',
+        fallback: "You picked this track from the platform's own catalogue, so the name is not the problem. Why its publish dialog then found nothing is still being worked out.",
+      });
+    }
+    notes.push({
+      key: 'distribution.records.musicSameSearchAgain',
+      fallback: 'Publishing this batch again keeps the same track, so it repeats the same search.',
+    });
+  }
+
+  if (input.musicNotFound && input.scheduleUnreachable) {
+    // The only combination left. Offering the two separately would mean one
+    // button that hits the schedule wall and one that hits the music wall.
+    actions.push({
+      key: 'distribution.records.publishNowWithoutMusic',
+      fallback: 'Publish now without music',
+      mode: 'now',
+      dropMusic: true,
+    });
+  } else if (input.musicNotFound) {
+    actions.push({
+      key: 'distribution.records.publishWithoutMusic',
+      fallback: 'Publish without music',
+      mode: 'as_scheduled',
+      dropMusic: true,
+    });
+    // Kept, but named. We know this re-runs the identical search; we do NOT
+    // know it always loses — the dialog is a live surface and we have not
+    // established why it came back empty. Deleting the option would be
+    // asserting a certainty we do not have, and "Retry" on its own would hide
+    // the one that we do: nothing about the attempt changes.
+    actions.push({
+      key: 'distribution.records.retrySameTrack',
+      fallback: 'Try the same track again',
+      mode: 'as_scheduled',
+      dropMusic: false,
+    });
+  } else if (input.scheduleUnreachable) {
+    actions.push({
+      key: 'distribution.records.publishNow',
+      fallback: 'Publish now',
+      mode: 'now',
+      dropMusic: false,
+    });
+  } else {
+    actions.push({
+      key: 'distribution.records.retry',
+      fallback: 'Retry',
+      mode: 'as_scheduled',
+      dropMusic: false,
+    });
+  }
+
+  return { notes, actions };
+};
 
 export const RecordsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -411,9 +542,13 @@ export const RecordsPage: React.FC = () => {
     [t],
   );
 
-  const onRetry = async (id: string, mode: 'as_scheduled' | 'now' = 'as_scheduled') => {
+  const onRetry = async (
+    id: string,
+    mode: 'as_scheduled' | 'now' = 'as_scheduled',
+    dropMusic = false,
+  ) => {
     try {
-      await retryPublishTask(id, mode);
+      await retryPublishTask(id, mode, { dropMusic });
       addToast(
         mode === 'now'
           ? t('distribution.records.publishingNow', 'Publishing now')
@@ -619,6 +754,18 @@ export const RecordsPage: React.FC = () => {
                       // session-channel success has one at all.
                       const vDisplay = verifyDisplayFor(a);
                       const vChip = verifyChip(vDisplay);
+                      // What this row can actually offer. `music_ref` lives on
+                      // the BATCH (the track was chosen once for the whole
+                      // publish), while the reason that names the wall is on
+                      // the account row — so the two inputs come from two
+                      // different objects on purpose.
+                      const failPlan = a.status === 'failed'
+                        ? planFailedRow({
+                          scheduleUnreachable: task.schedule_state === 'unreachable',
+                          musicNotFound: isMusicNotFound(a.error_message),
+                          musicFromCatalogue: Boolean(task.music_ref),
+                        })
+                        : null;
                       return (
                         <div key={a.id} className="sub-row">
                           {/* `avatar_url` here is joined live off social_accounts
@@ -696,52 +843,41 @@ export const RecordsPage: React.FC = () => {
                               {noteText(a.error_message)}
                             </span>
                           )}
-                          {a.status === 'failed' && (
+                          {failPlan && (
                             <>
                               <span className="err" title={a.error_message || undefined}>
                                 {noteText(a.error_message)}
                               </span>
-                              {/* A batch keeps the `scheduled_at` it was created
-                                  with, and the publish intent is re-validated
-                                  before the browser opens. Once that time has
-                                  passed, "Retry" is a button that CANNOT
-                                  succeed — pressing it dispatches a workflow
-                                  that is rejected on the same rule, writes the
-                                  same failure back, and leaves the row looking
-                                  untouched. (A user pressed it three times.)
+                              {/* Why this row does not simply say "Retry".
+                                  A batch keeps both the `scheduled_at` and the
+                                  track it was created with, and neither can be
+                                  edited from here — so where one of those is
+                                  the thing that failed, "try again" is a button
+                                  that repeats an attempt we can see will be
+                                  turned away at the same place. (A user pressed
+                                  the schedule one three times and read it as
+                                  the button doing nothing at all.)
 
-                                  So we do not offer it. What we offer instead
-                                  says exactly what it will do: publish now,
-                                  without the schedule. That IS a change to what
-                                  the user originally asked for and it cannot be
-                                  undone once the post is up — which is why it
-                                  is a differently-labelled button next to a
-                                  sentence explaining the situation, and never
-                                  something "Retry" quietly turns into. Wanting
-                                  a different time is a new publish; the Publish
-                                  page is where the picker (and the platform's
-                                  own window) lives. */}
-                              {task.schedule_state === 'unreachable' ? (
-                                <>
-                                  <span className="note">
-                                    {t(
-                                      'distribution.records.scheduleExpired',
-                                      'The scheduled time for this batch has passed, so it cannot be published as scheduled any more.',
-                                    )}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => void onRetry(task.id, 'now')}
-                                  >
-                                    {t('distribution.records.publishNow', 'Publish now')}
-                                  </button>
-                                </>
-                              ) : (
-                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onRetry(task.id)}>
-                                  {t('distribution.records.retry', 'Retry')}
+                                  Every label below therefore states its own
+                                  consequence — publishing now, or publishing
+                                  with no track — because each of those IS a
+                                  change to what the user asked for and cannot
+                                  be undone once the post is up. None of it is
+                                  something "Retry" quietly turns into. The
+                                  combinations live in `planFailedRow`. */}
+                              {failPlan.notes.map((n) => (
+                                <span className="note" key={n.key}>{t(n.key, n.fallback)}</span>
+                              ))}
+                              {failPlan.actions.map((act) => (
+                                <button
+                                  key={act.key}
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => void onRetry(task.id, act.mode, act.dropMusic)}
+                                >
+                                  {t(act.key, act.fallback)}
                                 </button>
-                              )}
+                              ))}
                             </>
                           )}
                         </div>
