@@ -776,7 +776,22 @@ class RenderProbe:
         measurements, in `frontend/e2e-prod/playwright.config.ts` — there it
         needed `--disable-gpu` AND `--disable-software-rasterizer` together,
         and neither alone. ⚠️ `browser_runtime.LAUNCH_ARGS` carries NEITHER
-        flag, so the question is live rather than rhetorical.
+        flag.
+
+        [实测 2026-08-16] Measured in the production `nous-browser` container
+        with the real `build_launch_kwargs(None)`: `raf` fired,
+        `document.timeline.currentTime` advanced 599.976 ms across a 600 ms
+        wait, and `page.screenshot()` returned normally. **So frames ARE being
+        produced here and this candidate is currently NEGATIVE.** The
+        difference from the e2e-prod case is `headless=False` under Xvfb
+        versus headless — the same host, a different compositor path.
+
+        The field ships anyway, for a reason worth stating: that measurement
+        was taken on a page built with `set_content`, not on the live console
+        under load, so it rules out "the browser cannot paint at all" and NOT
+        "this page starved the compositor". A candidate demoted by one
+        measurement is not the same as a candidate closed, and one integer per
+        read is what keeps the demotion honest on the next occurrence.
       * `iframes` / `frames` — is the works list somewhere this reader cannot
         look. Every selector in this module runs against the TOP document only,
         so a console that moved its list into an iframe would read as an empty

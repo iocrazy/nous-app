@@ -156,6 +156,11 @@ def readback_due_stmt(limit: int = READBACK_BATCH):
             PublishTaskAccounts.verify_state,
             PublishTaskAccounts.verify_attempts,
             PublishTaskAccounts.verify_checked_at,
+            # Carried so the abandon sweeper can say WHY it gave up. Without
+            # it that path overwrote the last attempt's diagnosis with a
+            # generic sentence, destroying the only record of what the final
+            # read actually measured.
+            PublishTaskAccounts.verify_detail,
             PublishTaskAccounts.published_at,
             func.coalesce(PublishTaskAccounts.title, PublishTasks.title).label("title"),
             PublishTasks.scheduled_at,
@@ -173,6 +178,52 @@ def readback_due_stmt(limit: int = READBACK_BATCH):
         .order_by(PublishTaskAccounts.verify_checked_at.asc().nullsfirst())
         .limit(limit)
     )
+
+
+# Ceiling for ``publish_task_accounts.verify_detail``.
+#
+# The column is ``Text`` — there is no database limit, so this number exists
+# only to stop a future caller storing something page-sized. It is NOT a
+# guess: measured 2026-08-16 against the real diagnostic the Douyin read-back
+# emits (``douyin_verify.ListProbe.render``), on the longest path that can
+# reach this column —
+#
+#   four probe sections .................. 341 chars
+#   + "list_unreadable" message ..........  ~126
+#   + the "[verification_abandoned] gave up after N attempt(s); last
+#     failure: [cause] " prefix ..........   ~83
+#   ------------------------------------------------
+#   worst case observed .................. ~552 chars
+#
+# 2000 is ~3.6× that, so another section or two can be added without anyone
+# having to rediscover this limit the hard way.
+#
+# ⚠️ It used to be 500, applied as a bare ``detail[:500]``. That is the bug
+# this constant replaces, and it was NOT "the diagnostics got a bit clipped":
+# a silent slice with no marker and no log means the evidence is destroyed AND
+# the destruction is invisible, so the next reader trusts a truncated line as
+# a complete one. Same family as writing a diagnostic into a field that never
+# reaches the database. Whatever this number becomes, truncation must stay
+# VISIBLE — see ``_fit_verify_detail``.
+VERIFY_DETAIL_MAX = 2000
+
+# Appended to anything that had to be cut, so a truncated line can never be
+# read as a complete one. Counted INSIDE the budget, never added on top.
+VERIFY_DETAIL_TRUNCATION_MARKER = "…[truncated]"
+
+
+def fit_verify_detail(detail: str, *, limit: int = VERIFY_DETAIL_MAX) -> str:
+    """``detail`` shortened to ``limit``, and SAYING SO when it had to be. Pure.
+
+    Truncation leaves two traces, because the two readers are different
+    people: the marker is for whoever reads the row later, the warning is for
+    whoever is watching when it happens. A cut that leaves neither is how a
+    diagnostic quietly becomes a lie.
+    """
+    if len(detail) <= limit:
+        return detail
+    keep = max(0, limit - len(VERIFY_DETAIL_TRUNCATION_MARKER))
+    return detail[:keep] + VERIFY_DETAIL_TRUNCATION_MARKER
 
 
 def verification_update_stmt(
@@ -208,7 +259,21 @@ def verification_update_stmt(
         "updated_at": func.now(),
     }
     if detail is not None:
-        values["verify_detail"] = detail[:500]
+        fitted = fit_verify_detail(detail)
+        if fitted != detail:
+            # The row keeps the marker; this is the other half of the trace.
+            # Logged at WARNING because it means evidence was destroyed —
+            # whoever reads the row next is now looking at a partial line.
+            logger.warning(
+                "verify_detail truncated for publish row %s: %d chars -> %d "
+                "(limit %d). The stored line ends with %r.",
+                account_row_id,
+                len(detail),
+                len(fitted),
+                VERIFY_DETAIL_MAX,
+                VERIFY_DETAIL_TRUNCATION_MARKER,
+            )
+        values["verify_detail"] = fitted
     if bump_attempts:
         values["verify_attempts"] = PublishTaskAccounts.verify_attempts + 1
     if published_url:

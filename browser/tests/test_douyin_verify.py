@@ -1702,32 +1702,32 @@ class TestRenderProbe:
         rendered = _worst_case_probe().render()
         assert rendered.index("[render ") < rendered.index("[net ")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BLOCKED on a one-line change outside this module: "
-            "publish_tasks_repository.verification_update_stmt truncates to "
-            "detail[:500]. Measured — three sections + the abandoned prefix "
-            "already reach 499/500 on the list_unreadable path, so a fourth "
-            "section cannot fit and the tail of [net ...] is silently cut. "
-            "Raise that limit (the column is TEXT, no DB limit) and this test "
-            "starts passing, which strict-xfail reports as a failure so the "
-            "marker gets removed."
-        ),
-    )
+    # The store this has to fit into. Duplicated as a literal ON PURPOSE:
+    # `browser/` is a separate service and must not import from `backend/`,
+    # so this is a CONTRACT restated, not a shared constant. If the two ever
+    # disagree, this test is the thing that notices — which is the whole
+    # reason it names the number instead of importing it.
+    # Source of truth: publish_tasks_repository.VERIFY_DETAIL_MAX.
+    STORE_LIMIT = 2000
+
     @pytest.mark.parametrize("reason, ready", [
         ("list_not_ready", False),
         ("list_unreadable", True),
     ])
-    def test_the_whole_diagnostic_survives_the_500_char_store(self, reason, ready):
+    def test_the_whole_diagnostic_survives_the_store(self, reason, ready):
         """**A diagnostic that gets truncated is a diagnostic that lied.**
 
-        The three existing sections each decided a previous round, so none may
-        be sacrificed for the new one — which means the line has to FIT, not
-        merely be ordered well. This encodes that requirement against the real
-        worst case: an `abandoned` row, whose prefix alone is 83 characters
-        before the message starts, and which is exactly the row that blocks a
-        work item for a human to read.
+        The four sections each decided a different round, so none may be
+        sacrificed for the next one — which means the line has to FIT, not
+        merely be ordered well. Checked against the real worst case: an
+        `abandoned` row, whose prefix alone is ~83 characters before the
+        message starts, and which is exactly the row that blocks a work item
+        for a human to read.
+
+        This used to be `xfail(strict=True)` — the store was 500 and the line
+        was 552. The limit is now 2000 and the marker is gone; if a future
+        section pushes past it, this goes red instead of the evidence going
+        silently missing.
         """
         judgement = judge_readback(
             [], "Some Caption", probe=_worst_case_probe(), ready=ready
@@ -1736,9 +1736,9 @@ class TestRenderProbe:
             "[verification_abandoned] gave up after 5 attempt(s); "
             f"last failure: [{reason}] {judgement.message}"
         )
-        assert len(line) <= 500, (
-            f"{len(line)} chars — the store would cut {len(line) - 500}, "
-            f"losing {line[500:]!r}"
+        assert len(line) <= self.STORE_LIMIT, (
+            f"{len(line)} chars — the store would cut "
+            f"{len(line) - self.STORE_LIMIT}, losing {line[self.STORE_LIMIT:]!r}"
         )
 
 
