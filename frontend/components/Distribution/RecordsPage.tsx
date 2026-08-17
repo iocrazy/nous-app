@@ -154,6 +154,18 @@ export const PUBLISH_NOTE_KEYS: ReadonlyArray<{
     fallback: 'Several tracks on the platform look identical to the one you picked, so nothing was published rather than risk the wrong song. Pick a different version.',
   },
   {
+    // The publish dialog never showed the results of THIS search before the
+    // browser gave up waiting for them. Above the catch-all for the same reason
+    // the ambiguous one is: the generic sentence ("the music could not be
+    // selected") describes a broken control, and this is not one — it is a
+    // dialog that was still thinking. The user's move differs too: this is the
+    // one music failure where publishing the same batch again can genuinely
+    // land, which is what the plain Retry button below already offers it.
+    test: /\[music_results_not_seen\]/i,
+    key: 'distribution.records.noteMusicResultsNotSeen',
+    fallback: "The platform's music dialog did not answer in time, so we could not tell whether it has this track — nothing was published. Publishing again may work.",
+  },
+  {
     // Every other music reason is a control that could not be driven:
     // music_entry_missing / music_dialog_stuck / music_click_failed /
     // music_not_confirmed. One sentence, because the user's move is the same
