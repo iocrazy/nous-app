@@ -557,14 +557,26 @@ export const cancelPublishTask = (id: string): Promise<PublishTask> =>
  * immediately. That is a DIFFERENT intent from "try again", and irreversible
  * once the post is up, so it is never the default and never inferred — the
  * caller says it because the user pressed a button that says it.
+ *
+ * `dropMusic` is the same kind of escape hatch on a second axis: it clears the
+ * batch's track so the retry never opens the platform's music dialog. A batch
+ * that failed on music keeps the track it was created with and the records
+ * page cannot edit it, so a plain retry runs the identical search. Orthogonal
+ * to `mode` on purpose — a batch can have BOTH an expired schedule and a track
+ * that will not select, and "publish now, without music" is then the only
+ * combination that can succeed.
  */
 export const retryPublishTask = (
   id: string,
   mode: 'as_scheduled' | 'now' = 'as_scheduled',
+  options: { dropMusic?: boolean } = {},
 ): Promise<PublishTask> =>
   request<PublishTask>(`/tasks/${id}/retry`, {
     method: 'POST',
-    body: JSON.stringify({ mode }),
+    // Both flags always on the wire rather than leaning on the server default:
+    // `drop_music: false` is the value that means "keep my track", and an
+    // omitted key cannot be told apart from a client that predates the field.
+    body: JSON.stringify({ mode, drop_music: Boolean(options.dropMusic) }),
   });
 
 /**

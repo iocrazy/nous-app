@@ -36,16 +36,16 @@ const conflictFetch = (reason: string) =>
   });
 
 describe('retryPublishTask', () => {
-  it('defaults to the mode that cannot change the user\'s intent', async () => {
+  it('defaults to the values that cannot change the user\'s intent', async () => {
     const spy = okFetch();
     vi.stubGlobal('fetch', spy);
 
     await retryPublishTask('801');
 
     const init = spy.mock.calls[0][1] as RequestInit;
-    // Explicit on the wire rather than relying on the server default: this is
-    // the value that means "do NOT touch my schedule".
-    expect(JSON.parse(String(init.body))).toEqual({ mode: 'as_scheduled' });
+    // Explicit on the wire rather than relying on the server default: these are
+    // the values that mean "do NOT touch my schedule, do NOT touch my track".
+    expect(JSON.parse(String(init.body))).toEqual({ mode: 'as_scheduled', drop_music: false });
   });
 
   it('sends mode=now only when asked', async () => {
@@ -55,7 +55,31 @@ describe('retryPublishTask', () => {
     await retryPublishTask('801', 'now');
 
     const init = spy.mock.calls[0][1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ mode: 'now' });
+    expect(JSON.parse(String(init.body))).toEqual({ mode: 'now', drop_music: false });
+  });
+
+  it('sends drop_music only when asked, and leaves the schedule alone', async () => {
+    const spy = okFetch();
+    vi.stubGlobal('fetch', spy);
+
+    await retryPublishTask('801', 'as_scheduled', { dropMusic: true });
+
+    const init = spy.mock.calls[0][1] as RequestInit;
+    // The two axes are independent: dropping a track the platform would not
+    // select must never also turn a scheduled post into an immediate one.
+    expect(JSON.parse(String(init.body))).toEqual({ mode: 'as_scheduled', drop_music: true });
+  });
+
+  it('can carry both escape hatches at once', async () => {
+    const spy = okFetch();
+    vi.stubGlobal('fetch', spy);
+
+    await retryPublishTask('801', 'now', { dropMusic: true });
+
+    // A batch can have BOTH an expired schedule and a track that will not
+    // select, and this is then the only request that can succeed.
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ mode: 'now', drop_music: true });
   });
 });
 

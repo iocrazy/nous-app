@@ -373,9 +373,19 @@ class PublishTaskRetryRequest(BaseModel):
     ``now`` 是用户在界面上**另外**点的那个按钮（"Publish now"）：它显式清掉
     ``scheduled_at``，也就显式承认"我知道这不再是定时发布了"。所以它不是
     retry 的一个参数细节，而是一个不同的意图，必须由调用方写出来。
+
+    ``drop_music`` 同理，只是换了一根轴：它清掉 ``music_name`` / ``music_ref``，
+    也就是显式承认"我知道这条发出去不会带配乐了"。一条配乐没选上的批次原样重投
+    会跑**完全相同的一次搜索**，而用户在记录页上改不了曲名 —— 这颗按钮是他当下
+    真正能走通的那条路。作品发出去之后换不了歌，所以同样绝不能是重试的副作用。
+
+    两根轴刻意正交：定时过期 **且** 配乐没选上的批次，唯一能成功的重投是"立即
+    发布 + 去掉配乐"。把 ``drop_music`` 塞成 ``mode`` 的第三个取值就表达不了这
+    个组合，界面上就又会出现一颗必然失败的按钮。
     """
 
     mode: RetryMode = "as_scheduled"
+    drop_music: bool = False
 
 
 class ShareSchemaResponse(BaseModel):

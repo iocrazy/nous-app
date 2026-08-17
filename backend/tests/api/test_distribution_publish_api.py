@@ -445,6 +445,9 @@ def _retry_spies(monkeypatch, *, scheduled_at):
     async def fake_clear_schedule(task_id):
         spy["clear_schedule"] = task_id
 
+    async def fake_clear_music(task_id):
+        spy["clear_music"] = task_id
+
     class _Mgr:
         async def retry_task(self, old_wf, user_id, *, new_workflow_id=None):
             spy["retry_task_called_with"] = (old_wf, user_id, new_workflow_id)
@@ -463,6 +466,7 @@ def _retry_spies(monkeypatch, *, scheduled_at):
     )
     monkeypatch.setattr(dr.publish_repo, "set_task_workflow_id", fake_set_wf)
     monkeypatch.setattr(dr.publish_repo, "clear_task_schedule", fake_clear_schedule)
+    monkeypatch.setattr(dr.publish_repo, "clear_task_music", fake_clear_music)
     monkeypatch.setattr(dr, "get_task_manager", lambda: _Mgr())
     monkeypatch.setattr(dr, "start_workflow_routed", fake_start_wf)
     return spy, app
@@ -562,6 +566,91 @@ def test_immediate_batches_are_untouched_by_the_schedule_gate(monkeypatch):
     assert resp.status_code == 200, resp.text
     assert resp.json()["schedule_state"] == "none"
     assert "clear_schedule" not in spy
+    assert spy["set_wf"] == spy["start_wf"]
+
+
+# ── 配乐没选上的批次的重投（生产实证 2026-08-16） ───────────────────────
+#
+# 一条图集发布挂在 ``[music_not_found]``，记录页给的是"换个写法再试"+ Retry。
+# 两半都不成立：那首曲子是从平台自己的曲库面板里挑的，而重投沿用批次里存着的
+# ``music_name`` / ``music_ref``（记录页改不了），所以它跑的是**同一次搜索**。
+#
+# 出路和定时那条同构：清掉配乐再重投 —— 但配乐是用户的意图，作品发出去之后换
+# 不了歌，所以只能由调用方显式说出来。
+
+
+def test_retry_with_drop_music_clears_the_track_before_dispatching(monkeypatch):
+    """用户显式点了"去掉配乐发布" → 清掉曲子再派发。
+
+    顺序是重点：workflow 是从行上读 ``music_name`` / ``music_ref`` 的，清晚了
+    这一次重投照样会去开配乐弹窗、照样撞同一堵墙。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=None)
+
+    resp = TestClient(app).post(
+        "/api/v1/distribution/tasks/700/retry", json={"drop_music": True}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert spy["clear_music"] == 700
+    assert spy["set_wf"] == spy["start_wf"]
+    # 只动配乐这一根轴：没让用户改的定时不许被顺手改掉。
+    assert "clear_schedule" not in spy
+
+
+def test_retry_never_drops_music_on_its_own(monkeypatch):
+    """普通重投**不许**碰配乐。
+
+    把一条用户选好了配乐的稿子改成"没有配乐"是不可撤销的（作品发出去之后换不
+    了歌），绝不能是"再试一次"的副作用 —— 与定时那条同一条纪律。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=None)
+
+    resp = TestClient(app).post("/api/v1/distribution/tasks/700/retry")
+
+    assert resp.status_code == 200, resp.text
+    assert "clear_music" not in spy
+
+
+def test_a_retry_that_is_refused_does_not_quietly_edit_the_batch(monkeypatch):
+    """重投被拒（任务不在可重投状态）→ 一个字段都不许被改。
+
+    ``drop_music`` 是破坏性的：它扔掉用户选的曲子。一次以 409 收场的请求顺手
+    改了批次，用户在界面上看不到任何变化，下一次重投却已经不带配乐了。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=None)
+
+    class _RefusingMgr:
+        async def retry_task(self, old_wf, user_id, *, new_workflow_id=None):
+            return None
+
+    monkeypatch.setattr(dr, "get_task_manager", lambda: _RefusingMgr())
+
+    resp = TestClient(app).post(
+        "/api/v1/distribution/tasks/700/retry", json={"drop_music": True}
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert "clear_music" not in spy
+    assert "start_wf" not in spy
+
+
+def test_both_walls_at_once_needs_both_escape_hatches(monkeypatch):
+    """定时过期 **且** 配乐选不上 → 只有"立即发布 + 去掉配乐"能成。
+
+    两根轴刻意正交。合成一个枚举就表达不了这个组合，界面上就只能画一颗必然撞
+    到另一堵墙的按钮 —— 正是这两次改动要消灭的东西。
+    """
+    spy, app = _retry_spies(monkeypatch, scheduled_at=_past_iso(hours=20))
+
+    resp = TestClient(app).post(
+        "/api/v1/distribution/tasks/700/retry",
+        json={"mode": "now", "drop_music": True},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert spy["clear_schedule"] == 700
+    assert spy["clear_music"] == 700
     assert spy["set_wf"] == spy["start_wf"]
 
 

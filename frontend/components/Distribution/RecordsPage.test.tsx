@@ -98,10 +98,12 @@ describe('RecordsPage', () => {
     fireEvent.click(screen.getByText('Mixed'));
     await waitFor(() => expect(screen.getByText('upload rejected')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
-    // 'as_scheduled' is explicit on the wire: the endpoint now distinguishes
-    // "try the same thing again" from "drop the schedule and go now", and only
-    // the second one is allowed to change what the user asked for.
-    await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('701', 'as_scheduled'));
+    // Both are explicit on the wire: the endpoint distinguishes "try the same
+    // thing again" from "drop the schedule and go now" and from "drop the
+    // track and go without music", and only the last two are allowed to change
+    // what the user asked for.
+    await waitFor(() => expect(retryPublishTask)
+      .toHaveBeenCalledWith('701', 'as_scheduled', { dropMusic: false }));
   });
 
   it('draws the real avatar on expanded account rows, gradient tile for the rest', async () => {
