@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient } from '../../supabaseClient';
-import { AlertTriangle, KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle, KeyRound, Plus, QrCode, RefreshCw, ShieldCheck, ShieldQuestion, Trash2, X,
+} from 'lucide-react';
 import { useToast } from '../Toast';
 import {
   connectAccount, deleteAccount, getAccountUsage, getBrowserHealth, listAccounts,
@@ -9,7 +11,7 @@ import {
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
 import { AccountAvatar, PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
-import { needsReconnect } from './accountStatus';
+import { describeSessionFreshness, needsReconnect, type SessionFreshness } from './accountStatus';
 import { PageHeader } from '../layout/PageHeader';
 import { useConfirm } from '../ConfirmDialog';
 import SessionLoginModal from './SessionLoginModal';
@@ -36,6 +38,56 @@ type SessionLoginTarget = {
   scopeType: 'user' | 'team';
   scopeId: string;
   relinkUsername?: string;
+};
+
+/**
+ * "When did we last confirm this account works" — stated on the card.
+ *
+ * The status chip above answers a different question. `Active` is the absence
+ * of a *failure*, and until this line existed it looked identical on an account
+ * verified an hour ago and on one the sweep had never reached: no evidence
+ * rendered as a positive verdict. So the two cases are separated on three axes
+ * at once — icon, tone class and wording — rather than by a single adjective a
+ * user would have to notice.
+ *
+ * What it deliberately does NOT do is judge. There is no "stale" threshold and
+ * no colour that means "too old": the sweep's recheck interval lives in the
+ * backend and is env-overridable, so any cutoff written here would be a guess
+ * wearing the clothes of a fact. Age is reported; the reader decides.
+ *
+ * OAuth accounts render nothing — see `describeSessionFreshness`.
+ */
+const SessionCheckLine: React.FC<{ freshness: SessionFreshness }> = ({ freshness }) => {
+  const { t } = useTranslation();
+  if (freshness.kind === 'notApplicable') return null;
+
+  const unverified = freshness.kind !== 'checked';
+  const label = (() => {
+    switch (freshness.kind) {
+      case 'never':
+        return t('distribution.checkNever', 'Not checked yet — sign-in state unconfirmed');
+      case 'unknown':
+        return t('distribution.checkUnknown', 'Last check time unavailable');
+      default:
+        switch (freshness.unit) {
+          case 'now':
+            return t('distribution.checkJustNow', 'Checked just now');
+          case 'minutes':
+            return t('distribution.checkMinutes', 'Checked {{n}}m ago', { n: freshness.value });
+          case 'hours':
+            return t('distribution.checkHours', 'Checked {{n}}h ago', { n: freshness.value });
+          default:
+            return t('distribution.checkDays', 'Checked {{n}}d ago', { n: freshness.value });
+        }
+    }
+  })();
+
+  return (
+    <div className={`acct-check${unverified ? ' unverified' : ''}`} data-testid="acct-check">
+      {unverified ? <ShieldQuestion size={12} /> : <ShieldCheck size={12} />}
+      <span>{label}</span>
+    </div>
+  );
 };
 
 export const AccountsPage: React.FC = () => {
@@ -435,6 +487,7 @@ export const AccountsPage: React.FC = () => {
                     <span className="chip chip-mute">{t('distribution.personalScope', 'Personal')}</span>
                   )}
                 </div>
+                <SessionCheckLine freshness={describeSessionFreshness(a)} />
                 <div className="acct-foot">
                   <span className="acct-meta">
                     {posts > 0
