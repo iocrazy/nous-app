@@ -228,3 +228,83 @@ async def test_count_account_publish_records_returns_zero_not_none(monkeypatch):
     scope, _ = _scalar_scope_returning(None)
     monkeypatch.setattr(mod, "read_scope", scope)
     assert await PublishTasksRepository().count_account_publish_records(1) == 0
+
+
+class TestVerifyDetailFits:
+    """截断必须留痕。
+
+    ``verify_detail`` 原来是一句裸 ``detail[:500]`` —— 不留标记、不记日志。
+    问题不是"诊断被剪短了一点"，是**证据被销毁、而销毁本身不可见**：下一个
+    读这一行的人会把半截当完整的看。跟"往一个进不了库的字段塞诊断"同族。
+    """
+
+    def test_a_short_detail_is_stored_verbatim(self):
+        from app.repositories.publish_tasks_repository import fit_verify_detail
+
+        detail = "[list_not_ready] nothing to see here"
+        assert fit_verify_detail(detail) == detail
+
+    def test_a_long_detail_says_it_was_cut(self):
+        from app.repositories.publish_tasks_repository import (
+            VERIFY_DETAIL_TRUNCATION_MARKER,
+            fit_verify_detail,
+        )
+
+        fitted = fit_verify_detail("x" * 5000, limit=100)
+        assert len(fitted) == 100
+        assert fitted.endswith(VERIFY_DETAIL_TRUNCATION_MARKER)
+
+    def test_the_marker_is_inside_the_budget_not_added_on_top(self):
+        """否则"限制"就不是限制了 —— 存进去的比声明的长。"""
+        from app.repositories.publish_tasks_repository import fit_verify_detail
+
+        for limit in (20, 100, 2000):
+            assert len(fit_verify_detail("y" * 9000, limit=limit)) == limit
+
+    def test_the_real_worst_case_diagnostic_fits_without_being_cut(self):
+        """浏览器那侧四段探针 + abandoned 前缀实测 ~552 字符。
+
+        这个数字就是 ``VERIFY_DETAIL_MAX`` 的由来；它要是放不下，诊断在**唯一
+        会挂起待办的那种行**上就是残缺的。
+        """
+        from app.repositories.publish_tasks_repository import (
+            VERIFY_DETAIL_MAX,
+            VERIFY_DETAIL_TRUNCATION_MARKER,
+            fit_verify_detail,
+        )
+
+        worst_case = (
+            "[verification_abandoned] gave up after 5 attempt(s); last failure: "
+            "[list_unreadable] could not read the works list (no cards found and "
+            "no empty-state marker) — the read-back reached the page but learned "
+            "nothing [probe cards=0 won=none wonlen=?/? roots=content-card:0/0,"
+            "work-card:0/0,video-card:0/0,card-:0/0 title_exact=0 ops=0/0] "
+            "[page where=manage ready=timeout/20565ms textlen=105 divs=73 "
+            "login=0+0 works=2 empty=0 busy=1] [render raf=1 vp=1280x720/1 "
+            "bodyh=704 ifr=0/1 sdw=0] [net res=250 xhr=138->180 ok=180 4xx=0 "
+            "5xx=0 unk=0 empty=49 doc=complete]"
+        )
+        assert len(worst_case) < VERIFY_DETAIL_MAX
+        fitted = fit_verify_detail(worst_case)
+        assert fitted == worst_case
+        assert VERIFY_DETAIL_TRUNCATION_MARKER not in fitted
+
+    def test_the_update_statement_logs_when_it_has_to_cut(self, caplog):
+        """行上的标记是给之后读的人看的，日志是给当时在看的人看的。
+        两个读者不是同一个人，所以两条痕迹都要有。"""
+        import logging
+
+        from app.repositories.publish_tasks_repository import verification_update_stmt
+
+        with caplog.at_level(logging.WARNING):
+            verification_update_stmt(1, state="abandoned", detail="z" * 9000)
+        assert any("truncated" in r.getMessage() for r in caplog.records)
+
+    def test_a_detail_that_fits_logs_nothing(self, caplog):
+        import logging
+
+        from app.repositories.publish_tasks_repository import verification_update_stmt
+
+        with caplog.at_level(logging.WARNING):
+            verification_update_stmt(1, state="not_live", detail="[rejected] nope")
+        assert not caplog.records

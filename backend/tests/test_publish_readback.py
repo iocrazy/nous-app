@@ -161,6 +161,50 @@ class TestVerdictFor:
         assert wf.VERIFY_VERIFIED not in wf.BLOCKING_VERIFY_STATES
 
 
+class TestAbandonDetail:
+    """收尾文案必须带上最后一次尝试量到的东西。
+
+    这条路径是 ``UPDATE``：它写什么，行上就只剩什么。原来写的是一句不含原因
+    的通用文案，等于把最后一次尝试刚写上去的诊断整句抹掉 —— 四轮诊断全为这
+    条路径服务，却在最后一步被自己删掉。
+    """
+
+    def test_the_last_attempts_diagnosis_is_carried_forward(self):
+        detail = wf.abandon_detail(
+            "[list_not_ready] the works list had not finished rendering "
+            "[probe cards=0 ...] [render raf=1 ...]"
+        )
+        assert "verification_abandoned" in detail
+        # 原因必须原样带过来 —— 这是这一行唯一的证据。
+        assert "[list_not_ready]" in detail
+        assert "[render raf=1 ...]" in detail
+
+    def test_it_says_so_when_there_was_no_diagnosis(self):
+        """空字符串糊过去就是另一种静默：说"没记录"，不要装作有记录。"""
+        for empty in (None, "", "   "):
+            detail = wf.abandon_detail(empty)
+            assert "recorded no diagnosis" in detail
+            assert "last attempt:" not in detail
+
+    def test_it_does_not_claim_the_post_is_missing(self):
+        """``abandoned`` 是"我们没看见"，不是"它不在"。
+
+        后者是 ``not_live``。把两者写成一句话，就是本轮一直在修的那个假结论
+        换个地方复活。
+        """
+        detail = wf.abandon_detail("[list_unreadable] could not read the list")
+        assert "could not SEE" in detail
+        assert "not the same as it not being there" in detail
+
+    def test_the_abandon_write_goes_through_the_composer(self):
+        """收尾那一步不许自己拼字符串 —— 否则纯函数上的保证在真正写库的路径
+        上不成立（本 bug 的原形就是这样）。"""
+        import inspect
+
+        source = inspect.getsource(wf._readback_abandon_step)
+        assert "abandon_detail(" in source
+
+
 # ── _verify_one 的接线 ──────────────────────────────────────────────
 
 

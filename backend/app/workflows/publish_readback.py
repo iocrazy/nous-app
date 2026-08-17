@@ -52,6 +52,18 @@ P1-3 的原始描述是"回填 ``published_url`` / ``platform_item_id``"。**这
 "我们没能确认它上线了"不允许渲染成 done。静默挂着更不行（CLAUDE.md
 「触发路径必须类型化失败回显」）。
 
+⚠️ **一样 blocked，但不是一回事**，这条差别必须一路撑到像素：
+
+* ``NOT_LIVE`` = 我们看过了，平台上没有它 —— 用户要去**处理**。
+* ``ABANDONED`` = 我们没看见 —— 用户要去**自己看一眼**。作品很可能好好地在
+  线上，只是我们的浏览器连着 5 次没能读到那个列表。
+
+两者共用 blocked 只是因为"都得有人看一眼"，不是因为它们是同一件事。措辞分岔
+在三处，各自都有测试钉住：``build_readback_note`` 的抬头、``RecordsPage`` 的
+chip/文案（``notLive`` vs ``unconfirmed``），以及本模块的 ``abandon_detail``。
+把 ``abandoned`` 写成"作品没了"，就是回读本身已经修掉的那个假结论
+（``list_not_ready`` → 无结论而非 ``not_live``）换一层复活。
+
 节奏（刻意的慢）
 ================
 每次回读 == 起一次真浏览器、带着该账号 cookie 登一次平台。三道闸叠起来，
@@ -323,7 +335,14 @@ async def _readback_scan_due() -> dict[str, list[dict[str, str]]]:
             }
             for r in due
         ],
-        "abandon": [{"id": str(r["id"])} for r in abandoned],
+        # ``last_detail`` rides along so the sweeper can name the cause. It is
+        # the diagnosis the FINAL attempt already wrote onto the row; without
+        # it the abandon write is a generic sentence that destroys the only
+        # evidence there was.
+        "abandon": [
+            {"id": str(r["id"]), "last_detail": str(r.get("verify_detail") or "")}
+            for r in abandoned
+        ],
     }
 
 
@@ -421,9 +440,15 @@ async def _verify_one(
                 f"(reason={verified.reason!r}) — the work item will be blocked"
             )
         elif state == VERIFY_ABANDONED:
+            # ``detail`` carries the last attempt's diagnosis, and it is the
+            # only reason this row is about to block someone's work item. The
+            # NOT_LIVE branch above has always logged its cause; this one used
+            # to log none, so the log said "gave up" and nothing else.
             logger.warning(
                 f"[publish.readback] row={row_id} giving up after "
-                f"{attempts_before + 1} attempts — the work item will be blocked"
+                f"{attempts_before + 1} attempts — could not confirm go-live "
+                f"(this is 'we did not see it', NOT 'it is not there'); "
+                f"the work item will be blocked. detail={detail!r}"
             )
         return state
     except Exception as exc:  # noqa: BLE001 —— 写回失败同样不该炸掉整批
@@ -450,8 +475,37 @@ async def _readback_verify_one_step(
         )
 
 
+def abandon_detail(
+    last_detail: Optional[str], *, max_attempts: int = MAX_ATTEMPTS
+) -> str:
+    """收尾文案。纯函数。
+
+    **必须带上最后一次尝试量到的东西。** 这条路径原来写的是一句不含任何原因
+    的通用文案，而它是 ``UPDATE``：最后一次尝试刚写上去的诊断被整句盖掉，于是
+    这一行**唯一的证据**没了 —— 待办上只剩"放弃了"，没有"为什么"。四轮诊断
+    全部为这条路径服务，却在最后一步被自己抹掉。
+
+    ``verdict_for`` 的 ABANDONED 分支一直是带原因的（``last failure: [cause]``）；
+    两条路径通向同一个 verdict，措辞却一条有据、一条没有。这里补齐的是那个不
+    对称。
+
+    措辞也刻意区分了两件事：``abandoned`` 是"我们没看见"，不是"它不在"。
+    ``not_live`` 才是后者。见 ``BLOCKING_VERIFY_STATES`` 上方的注释。
+    """
+    head = (
+        f"[verification_abandoned] no conclusive read-back after "
+        f"{max_attempts} attempts — we could not SEE this post, which is not "
+        f"the same as it not being there"
+    )
+    tail = (last_detail or "").strip()
+    if not tail:
+        # 说"没记录"而不是装作有记录。空字符串糊过去就是另一种静默。
+        return f"{head}; the final attempt recorded no diagnosis"
+    return f"{head}; last attempt: {tail}"
+
+
 @DBOS.step()
-async def _readback_abandon_step(row_id: str) -> None:
+async def _readback_abandon_step(row_id: str, last_detail: str = "") -> None:
     """把预算用尽却还停在 ``pending`` 的行收尾成 ``abandoned``。
 
     ``bump_attempts=False``：这不是一次尝试，是给一串失败尝试盖棺。
@@ -465,10 +519,7 @@ async def _readback_abandon_step(row_id: str) -> None:
         await PublishTasksRepository().record_verification(
             int(row_id),
             state=VERIFY_ABANDONED,
-            detail=(
-                f"[verification_abandoned] no conclusive read-back after "
-                f"{MAX_ATTEMPTS} attempts; go-live was never confirmed"
-            ),
+            detail=abandon_detail(last_detail),
             bump_attempts=False,
         )
 
@@ -495,7 +546,7 @@ async def publish_readback_workflow(
     # 正是容器长期不可用时最该发生的事：让"一直没能确认"变成用户看得见的
     # blocked，而不是无限期停在 pending。
     for row in scanned["abandon"]:
-        await _readback_abandon_step(row["id"])
+        await _readback_abandon_step(row["id"], row.get("last_detail") or "")
         counts["abandoned"] += 1
 
     if not due:
@@ -535,6 +586,7 @@ __all__ = [
     "VERIFY_NOT_SUPPORTED",
     "VERIFY_PENDING",
     "VERIFY_VERIFIED",
+    "abandon_detail",
     "go_live_at",
     "publish_readback_workflow",
     "select_abandoned",

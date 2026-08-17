@@ -216,23 +216,55 @@ const verifyDisplayFor = (a: PublishTaskAccount): VerifyDisplay => {
 /** `[reason] prose` from a read-back → the i18n key that explains it. Same
  *  split as PUBLISH_NOTE_KEYS: the bracketed reason is the contract, the
  *  English after it is written for logs and must never reach a user. */
-const VERIFY_REASON_KEYS: ReadonlyArray<{ test: RegExp; key: string; fallback: string }> = [
+const VERIFY_REASON_KEYS: ReadonlyArray<{ code: string; key: string; fallback: string }> = [
   {
-    test: /\[rejected\]/i,
+    code: 'rejected',
     key: 'distribution.records.verifyRejected',
     fallback: 'The platform refused this post. Check the account notifications for the reason, then edit and publish again.',
   },
   {
-    test: /\[under_review\]/i,
+    code: 'under_review',
     key: 'distribution.records.verifyUnderReview',
     fallback: 'The platform is still reviewing this post, so it is not public yet.',
   },
   {
-    test: /\[not_found\]/i,
+    code: 'not_found',
     key: 'distribution.records.verifyNotFound',
     fallback: 'This post is not in the account any more — it may have been removed.',
   },
 ];
+
+/** The reason code a `verify_detail` LEADS with — the contract half of the
+ *  string (`types.ts` says so on the field itself). */
+const LEADING_REASON = /^\s*\[([a-z0-9_]+)\]/i;
+
+/**
+ * Which sentence a read-back reason earns, or null for "no specific one". Pure
+ * and exported so the mapping is testable without rendering the page.
+ *
+ * ⚠️ It matches the LEADING code only, and that anchoring is the whole point.
+ * A `verify_detail` can legitimately CONTAIN a second bracketed code — the
+ * abandoned verdicts read `[verification_abandoned] ... last attempt: [x] ...`
+ * so that giving up still says why. While this scanned the whole string, an
+ * inner code decided the copy: an abandoned row whose final attempt mentioned
+ * `[not_found]` rendered "This post is not in the account any more — it may
+ * have been removed."
+ *
+ * That is the worst sentence this page can print. `abandoned` means WE COULD
+ * NOT SEE IT; telling the user their live post was deleted is the same false
+ * verdict the read-back itself was fixed to stop producing (`list_not_ready`
+ * → inconclusive, not `not_live`), leaking back in through the copy layer.
+ * Same shape as this repo's 「允许」/「不允许」 substring rule: match the token,
+ * not a fragment of it.
+ */
+export const verifyReasonEntry = (
+  raw: string | null | undefined,
+): { key: string; fallback: string } | null => {
+  const match = LEADING_REASON.exec(raw ?? '');
+  if (!match) return null;
+  const code = match[1].toLowerCase();
+  return VERIFY_REASON_KEYS.find((row) => row.code === code) ?? null;
+};
 
 /** A sentence to print, or a button to draw, on a failed account row. */
 interface FailedRowCopy { key: string; fallback: string }
@@ -529,9 +561,8 @@ export const RecordsPage: React.FC = () => {
    *  English, which is written for logs. */
   const verifyReasonText = useCallback(
     (raw: string | null | undefined, display: VerifyDisplay): string => {
-      for (const row of VERIFY_REASON_KEYS) {
-        if (raw && row.test.test(raw)) return t(row.key, row.fallback);
-      }
+      const entry = verifyReasonEntry(raw);
+      if (entry) return t(entry.key, entry.fallback);
       return display === 'notLive'
         ? t('distribution.records.verifyNotLiveGeneric', 'The platform is not showing this post.')
         : t(

@@ -487,6 +487,16 @@ def _num(value: int | None) -> str:
     return "?" if value is None else str(value)
 
 
+def _bool(value: bool | None) -> str:
+    """A yes/no, or `?` when it could not be measured. Pure.
+
+    Same rule as `_num`, and it matters more here: the questions this renders
+    ("did a frame ever arrive") have a FALSE that is a real finding, so an
+    unmeasurable probe collapsing to `0` would read as the diagnosis itself.
+    """
+    return "?" if value is None else ("1" if value else "0")
+
+
 # Path of `WORKS_URL`, so "are we still on the works page" is derived from the
 # one constant that says where the works page is, not from a second copy of it.
 _WORKS_PATH = urlsplit(WORKS_URL).path.rstrip("/")
@@ -693,6 +703,180 @@ async def count_xhr(page: Any) -> int | None:
     return probe.xhr
 
 
+# Read-only, constant, and it returns ONLY numbers and booleans — no node text,
+# no URL, no attribute value. Same rule as `_NETWORK_TIMING_JS`: `verify_detail`
+# lands in a database row and in logs, and this repository is public.
+#
+# Why a Promise with its own timer. `requestAnimationFrame` is the only one of
+# these questions that cannot be answered synchronously, and the answer that
+# matters is the NEGATIVE one — a browser that never paints never calls the
+# callback, so waiting for it forever is exactly the shape that would hang the
+# read-back. The in-page `setTimeout` resolves `false` instead, and the caller
+# additionally bounds the whole evaluate (see `measure_render`). Two bounds for
+# the same reason `wait_for_works_list` has two.
+#
+# ⚠️ `shadow` counts OPEN shadow roots on top-level elements only. A closed root
+# is invisible to any script, and a root nested inside another root is not
+# walked. So a zero here means "none found by this method", never "none exist" —
+# which is why a non-zero is evidence and a zero is only a weak absence.
+_RENDER_PROBE_JS = """
+() => new Promise((resolve) => {
+  const out = {
+    body_h: null, vw: null, vh: null, dpr: null,
+    iframes: null, shadow: null, raf: null
+  };
+  try { out.body_h = Math.round(document.body.getBoundingClientRect().height); }
+  catch (err) {}
+  try { out.vw = window.innerWidth; out.vh = window.innerHeight; } catch (err) {}
+  try { out.dpr = window.devicePixelRatio; } catch (err) {}
+  try { out.iframes = document.querySelectorAll('iframe,frame').length; }
+  catch (err) {}
+  try {
+    let hosts = 0;
+    for (const el of document.querySelectorAll('*')) { if (el.shadowRoot) hosts += 1; }
+    out.shadow = hosts;
+  } catch (err) {}
+  let done = false;
+  const finish = (value) => {
+    if (done) return;
+    done = true;
+    out.raf = value;
+    resolve(out);
+  };
+  const timer = setTimeout(() => finish(false), 1000);
+  try {
+    requestAnimationFrame(() => { clearTimeout(timer); finish(true); });
+  } catch (err) { clearTimeout(timer); finish(null); }
+})
+"""
+
+# Ceiling for the whole render probe, in seconds. The in-page timer is 1 s; this
+# covers the case where the page's event loop is so wedged that even `setTimeout`
+# does not run, which is precisely one of the states being tested for.
+_RENDER_PROBE_TIMEOUT_S = 5.0
+
+
+@dataclass(frozen=True)
+class RenderProbe:
+    """Is the BROWSER working, as opposed to the page being empty.
+
+    The first four rounds all measured the page. Every one of them came back
+    saying the same thing — the document is complete, the requests all
+    succeeded, and there is almost nothing on screen — which is a shape that
+    stops being a statement about Douyin and starts being a statement about us.
+    This is the first probe that asks whether our own browser rendered anything
+    at all, and whether the thing we are reading is even the whole document.
+
+    Three questions, one per candidate explanation, and they are independent:
+
+      * `raf` — did a frame ever arrive. A Chromium that falls back to
+        SwiftShader and then stalls produces NO frames: `requestAnimationFrame`
+        never fires and `document.timeline.currentTime` stays pinned at 0. The
+        repo has this exact failure recorded on this very host, with
+        measurements, in `frontend/e2e-prod/playwright.config.ts` — there it
+        needed `--disable-gpu` AND `--disable-software-rasterizer` together,
+        and neither alone. ⚠️ `browser_runtime.LAUNCH_ARGS` carries NEITHER
+        flag.
+
+        [实测 2026-08-16] Measured in the production `nous-browser` container
+        with the real `build_launch_kwargs(None)`: `raf` fired,
+        `document.timeline.currentTime` advanced 599.976 ms across a 600 ms
+        wait, and `page.screenshot()` returned normally. **So frames ARE being
+        produced here and this candidate is currently NEGATIVE.** The
+        difference from the e2e-prod case is `headless=False` under Xvfb
+        versus headless — the same host, a different compositor path.
+
+        The field ships anyway, for a reason worth stating: that measurement
+        was taken on a page built with `set_content`, not on the live console
+        under load, so it rules out "the browser cannot paint at all" and NOT
+        "this page starved the compositor". A candidate demoted by one
+        measurement is not the same as a candidate closed, and one integer per
+        read is what keeps the demotion honest on the next occurrence.
+      * `iframes` / `frames` — is the works list somewhere this reader cannot
+        look. Every selector in this module runs against the TOP document only,
+        so a console that moved its list into an iframe would read as an empty
+        page forever, and nothing measured so far could have said so. Two
+        counts because they fail differently: `iframes` is the top document's
+        own tags, `frames` is what the driver can actually see (nested ones
+        included).
+      * `vw` / `vh` / `dpr` / `body_h` — is the window a shape a virtualised
+        list would render into. A list that renders rows only for the visible
+        window renders none at all into a degenerate one, and `body_h` says
+        whether the document has any vertical extent to render into.
+
+    ⚠️ None of these is a verdict about the post, and none of them may ever
+    become one. Like every other probe here they ride the message of the
+    "we did not find it" outcomes; a failure to measure renders `?`.
+    """
+
+    raf: bool | None = None
+    body_h: int | None = None
+    vw: int | None = None
+    vh: int | None = None
+    dpr: float | None = None
+    iframes: int | None = None
+    # Browsing contexts the DRIVER can see, nested ones included. Measured off
+    # the Playwright page rather than the document, so a cross-origin iframe
+    # that the page script cannot enumerate still counts.
+    frames: int | None = None
+    shadow: int | None = None
+
+    def render(self) -> str:
+        dpr = "?" if self.dpr is None else f"{self.dpr:g}"
+        return (
+            f"[render raf={_bool(self.raf)}"
+            f" vp={_num(self.vw)}x{_num(self.vh)}/{dpr}"
+            f" bodyh={_num(self.body_h)}"
+            f" ifr={_num(self.iframes)}/{_num(self.frames)}"
+            f" sdw={_num(self.shadow)}]"
+        )
+
+
+async def measure_render(page: Any) -> RenderProbe:
+    """One bounded read of the browser's own rendering state. Never raises.
+
+    `frames` is taken from the driver, not from the page script, because the
+    two can legitimately disagree: a cross-origin iframe is opaque to
+    `querySelectorAll` in some configurations but is still a frame Playwright
+    lists. When they disagree, that disagreement is itself the finding.
+    """
+    frames: int | None = None
+    try:
+        found = getattr(page, "frames", None)
+        if found is not None:
+            frames = int(len(found))
+    except Exception:  # noqa: BLE001
+        frames = None
+
+    try:
+        raw = await asyncio.wait_for(
+            page.evaluate(_RENDER_PROBE_JS), timeout=_RENDER_PROBE_TIMEOUT_S
+        )
+    except Exception:  # noqa: BLE001 - includes the timeout; both mean "unmeasured"
+        return RenderProbe(frames=frames)
+    if not isinstance(raw, dict):
+        return RenderProbe(frames=frames)
+
+    def _int(key: str) -> int | None:
+        value = raw.get(key)
+        return int(value) if isinstance(value, (int, float)) else None
+
+    dpr = raw.get("dpr")
+    raf = raw.get("raf")
+    return RenderProbe(
+        # Only a real boolean counts. A page that returned something else did
+        # not answer the question, and `?` is what "did not answer" looks like.
+        raf=raf if isinstance(raf, bool) else None,
+        body_h=_int("body_h"),
+        vw=_int("vw"),
+        vh=_int("vh"),
+        dpr=float(dpr) if isinstance(dpr, (int, float)) else None,
+        iframes=_int("iframes"),
+        frames=frames,
+        shadow=_int("shadow"),
+    )
+
+
 @dataclass(frozen=True)
 class PageProbe:
     """WHICH PAGE the read-back actually reached. Counts and labels only.
@@ -778,6 +962,9 @@ class ListProbe:
     page: PageProbe | None = None
     # Whether the page ever asked for its list.
     net: NetProbe | None = None
+    # Whether our own browser rendered anything, and whether the document we
+    # read is the whole document.
+    render_probe: RenderProbe | None = None
 
     def render(self) -> str:
         roots = ",".join(
@@ -787,13 +974,25 @@ class ListProbe:
         won = probe_label(self.won) if self.won else "none"
         page = f" {self.page.render()}" if self.page is not None else ""
         net = f" {self.net.render()}" if self.net is not None else ""
+        # ⚠️ ORDER IS LOAD-BEARING, and the reason is downstream, not here.
+        # `publish_tasks_repository.verification_update_stmt` writes this string
+        # as `detail[:500]` — a silent slice with no marker and no log. On an
+        # `abandoned` row the prefix alone is ~83 characters, so the tail of
+        # this line is genuinely reachable. `[render ...]` therefore sits
+        # BEFORE `[net ...]` rather than at the end: it is the newest section
+        # and the one this round exists to read, and appending it would have
+        # made it the first thing cut on exactly the rows that block a work
+        # item. See `test_the_render_section_is_not_the_first_thing_truncated`.
+        rendering = (
+            f" {self.render_probe.render()}" if self.render_probe is not None else ""
+        )
         return (
             f"[probe cards={_num(self.cards)} won={won}"
             f" wonlen={_num(self.won_len)}/{_num(self.won_lines)}"
             f" roots={roots or 'none'}"
             f" title_exact={_num(self.title_exact)}"
             f" ops={_num(self.op_words[0])}/{_num(self.op_words[1])}]"
-            f"{page}{net}"
+            f"{page}{rendering}{net}"
         )
 
 
@@ -1353,6 +1552,7 @@ async def measure_page_probes(
             await _exact_text_count(page, "删除作品"),
         ),
         page=await measure_page(page, readiness),
+        render_probe=await measure_render(page),
         net=await measure_network(page, xhr_before),
     )
 
@@ -1488,6 +1688,7 @@ __all__ = [
     "MAX_CARDS",
     "NetProbe",
     "PageProbe",
+    "RenderProbe",
     "WORKS_PAGE_MARKER_CANDIDATES",
     "REJECTED_MARKERS",
     "SCHEDULED_MARKERS",
@@ -1505,6 +1706,7 @@ __all__ = [
     "extract_item_id",
     "has_work_evidence",
     "measure_network",
+    "measure_render",
     "judge_readback",
     "list_is_empty",
     "match_cards",
