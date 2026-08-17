@@ -46,9 +46,20 @@ def row_selector(index: int) -> str:
     return f'[{dp.MUSIC_ROW_ATTRIBUTE}="{index}"]'
 
 
+# Captured at import, BEFORE the shrinking fixture below can touch them, so the
+# production values stay assertable. A test suite that only ever runs the 60 ms
+# version cannot notice the day someone ships the 60 ms version.
+SHIPPED_MUSIC_READY_TIMEOUT_MS = dp.MUSIC_READY_TIMEOUT_MS
+SHIPPED_MUSIC_READY_POLL_MS = dp.MUSIC_READY_POLL_MS
+
+
 @pytest.fixture(autouse=True)
 def fast_polling(monkeypatch):
     monkeypatch.setenv("BROWSER_PUBLISH_POLL_INTERVAL_S", "0.2")
+    # Resolved at call time by `wait_for_music_results`, which is what lets a
+    # test shrink them without the shrunk value becoming production.
+    monkeypatch.setattr(dp, "MUSIC_READY_TIMEOUT_MS", 60)
+    monkeypatch.setattr(dp, "MUSIC_READY_POLL_MS", 1)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -223,6 +234,238 @@ async def test_the_requested_name_is_typed_into_the_dialogs_search_box():
     assert "Enter" in page.keyboard.pressed
 
 
+# --- waiting for the search to answer ---------------------------------------
+#
+# [实测 2026-08-17, 生产库] The step used to press Enter, sleep
+# `publish_settle_ms` (1 500 ms) and read once. The same day's logs put the
+# catalogue search at 1.2–2.5 s, so the read landed mid-search and the user was
+# told the platform does not have his song. `rows=?` did NOT fire — we really
+# looked, and the dialog really was empty *at that instant*.
+
+
+def slow_page(*, appears_after: int, rows=("Dream It Possible",)) -> FakePage:
+    """A dialog whose results render only after `appears_after` readings.
+
+    Latency expressed in probe calls rather than seconds: the fake has no
+    clock, and a test that slept for real would be pinning the machine it runs
+    on rather than the code.
+    """
+    calls = {"n": 0}
+
+    def scripted(_page):
+        calls["n"] += 1
+        return tuple(rows) if calls["n"] > appears_after else ()
+
+    page = music_page(rows=rows)
+    page.music_rows = scripted
+    return page
+
+
+async def test_the_dialog_gets_time_to_answer_before_its_silence_is_believed():
+    """**The incident, reproduced forwards.** Results that arrive after the old
+    fixed settle are found now instead of being reported as "the platform does
+    not have this track".
+
+    Against the 1 500 ms-and-read version this is red: that one reads once, at
+    a moment when the scripted dialog is still empty, and raises
+    `music_not_found`.
+    """
+    page = slow_page(appears_after=3)
+    result = await dp._set_music(page, job("Dream It Possible"), Deadline(10))
+
+    assert result["music"] == "applied"
+    assert result["music_selected"] == "Dream It Possible"
+
+
+async def test_never_seeing_the_results_is_not_the_platform_saying_no():
+    """A wait that ran out says "we did not read the list", never "the list did
+    not have it". The two need opposite responses — one is worth retrying and
+    the other is not — so they are different reasons, and this asserts the
+    counterfactual rather than only the new value."""
+    page = slow_page(appears_after=10_000)
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job("Dream It Possible"), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_results_not_seen"
+    assert excinfo.value.detail["reason"] != "music_not_found"
+    assert excinfo.value.status is SessionStatus.TIMEOUT
+
+
+async def test_a_list_that_never_changed_is_not_this_searchs_answer():
+    """The dialog may keep showing what it had while the search runs. "Some
+    rows are on screen" is therefore not "the search answered", and a step that
+    reads the leftovers is reading a list this query never produced.
+
+    The fake here holds one list from before Enter to well past it. Readiness
+    requires a list the pre-search stamp never touched (or a different text
+    hash), so this times out — and because only the *approximate* fallback
+    matched, the leftovers are refused rather than published. Against the
+    read-once version this is red in the worst possible way: it publishes
+    「Some Other Song」 as the closest match and reports success.
+    """
+    page = music_page(rows=("Some Other Song",))
+    page.music_probe = lambda _page, _stamp: {
+        "anchors": 1,
+        # Nothing new: this anchor was already stamped before the search.
+        "fresh": 0,
+        "leaves": 41,
+        "sig": 777,
+        "textlen": 902,
+    }
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job("Dream It Possible"), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_results_not_seen"
+
+
+async def test_a_relisted_search_is_accepted_even_when_the_nodes_are_reused():
+    """The second route to "this is a new list", and it exists because the
+    first one can fail honestly: a UI that re-renders text into the SAME DOM
+    nodes keeps our stamp, so `fresh` stays 0 forever. The anchors' text hash
+    moving says the list changed anyway. Without it, a node-reusing dialog
+    could never become ready and music would be unpublishable.
+
+    Asserted against `wait_for_music_results` rather than through `_set_music`:
+    driven end-to-end, an *exact* title match is accepted whether or not the
+    wait succeeded (by design — see `_set_music`), so the whole step would go
+    green with this route deleted. That is the shape of false green this
+    session has now hit repeatedly: the assertion held for a different reason
+    than the one under test.
+    """
+    before = dp.MusicProbe(anchors=1, fresh=0, leaves=41, sig=111, text_len=902)
+    page = music_page()
+    # Same node count, same (zero) freshness — only the content moved.
+    page.music_probe = lambda _page, _stamp: {
+        "anchors": 1,
+        "fresh": 0,
+        "leaves": 41,
+        "sig": 222,
+        "textlen": 902,
+    }
+
+    readiness = await dp.wait_for_music_results(
+        page, before, timeout_ms=50, poll_ms=1
+    )
+
+    assert readiness.ready is True
+    assert readiness.reason == "results"
+
+
+async def test_the_same_list_twice_is_never_ready():
+    """The counterfactual of the test above, and the reason the hash is not
+    simply "has the page changed": an identical reading is the dialog's
+    leftovers, and accepting it is reading a list this search never produced.
+    """
+    same = dp.MusicProbe(anchors=1, fresh=0, leaves=41, sig=111, text_len=902)
+    page = music_page()
+    page.music_probe = lambda _page, _stamp: {
+        "anchors": 1,
+        "fresh": 0,
+        "leaves": 41,
+        "sig": 111,
+        "textlen": 902,
+    }
+
+    readiness = await dp.wait_for_music_results(page, same, timeout_ms=50, poll_ms=1)
+
+    assert readiness.ready is False
+
+
+async def test_half_a_rendered_list_is_not_a_list():
+    """Stability across two consecutive readings. A list still growing is a
+    list a song can be missing from — the same false negative by a different
+    route, and the one #1862 hit on the read-back."""
+    seq = {"n": 0}
+
+    def never_settles(_page, _stamp):
+        # One more row every time we look: always new, never the same twice.
+        seq["n"] += 1
+        return {
+            "anchors": seq["n"],
+            "fresh": seq["n"],
+            "leaves": 30 + seq["n"],
+            "sig": seq["n"],
+            "textlen": 500 + seq["n"],
+        }
+
+    page = music_page()
+    page.music_probe = never_settles
+    readiness = await dp.wait_for_music_results(
+        page,
+        dp.MusicProbe(anchors=0, fresh=0, leaves=20, sig=0, text_len=400),
+        timeout_ms=5,
+        poll_ms=1,
+    )
+
+    assert readiness.ready is False
+    assert readiness.reason == "timeout"
+
+
+async def test_rows_zero_now_says_whether_the_dialog_painted_anything():
+    """The residual ambiguity #1865 left behind. `rows=0` meant two unrelated
+    things — an empty dialog, and a dialog whose 「N人使用」 copy no longer
+    matches our anchor — and a production failure could not be attributed to
+    either.
+
+    They are different strings now. Nothing but counts goes into them.
+    """
+    empty = dp.MusicReadiness(
+        False,
+        "timeout",
+        12_000,
+        dp.MusicProbe(anchors=0, fresh=0, leaves=18, sig=0, text_len=210),
+        dp.MusicProbe(anchors=0, fresh=0, leaves=18, sig=0, text_len=210),
+    )
+    copy_moved = dp.MusicReadiness(
+        False,
+        "timeout",
+        12_000,
+        dp.MusicProbe(anchors=0, fresh=0, leaves=18, sig=0, text_len=210),
+        dp.MusicProbe(anchors=0, fresh=0, leaves=96, sig=0, text_len=1840),
+    )
+    read = dp.MusicRowsRead([])
+
+    assert dp.describe_music_rows(read, empty) != dp.describe_music_rows(read, copy_moved)
+    assert "leaves=18/96" in dp.describe_music_rows(read, copy_moved)
+    assert "txt=210/1840" in dp.describe_music_rows(read, copy_moved)
+
+
+async def test_an_unobservable_dialog_renders_question_marks_not_zeroes():
+    """`?` is not `0`. A probe that failed did not see an empty dialog; it saw
+    nothing at all, and printing `anchors=0` would be the same lie this repo
+    has now removed in four places."""
+    blind = dp.MusicProbe(error="TypeError")
+    clause = dp.describe_music_rows(
+        dp.MusicRowsRead([]),
+        dp.MusicReadiness(False, "timeout", 900, blind, blind),
+    )
+    assert "anchors=?/?" in clause
+    assert "anchors=0" not in clause
+
+
+def test_the_two_music_probes_share_one_anchor():
+    """Both probes look for 「N人使用」, and they must look for the SAME thing.
+    Two literal copies is how the readiness probe goes on reporting "the list
+    is there" about a pattern the row reader no longer matches — the two would
+    then disagree about one page, which is the very ambiguity the readiness
+    counts exist to remove."""
+    assert dp._MUSIC_USAGE_JS in dp._MUSIC_ROWS_JS
+    assert dp._MUSIC_USAGE_JS in dp._MUSIC_READY_JS
+    # And neither carries a second, hand-written copy of it.
+    assert dp._MUSIC_ROWS_JS.count("人使用") == 1
+    assert dp._MUSIC_READY_JS.count("人使用") == 1
+
+
+def test_the_shipped_music_wait_is_not_the_shrunk_test_value():
+    """The fixture above shrinks these to 60 ms/1 ms. Pinned separately so the
+    shrink cannot be the thing that ships — and bounded well under the
+    per-publish budget so a music miss cannot eat the post's time."""
+    assert SHIPPED_MUSIC_READY_TIMEOUT_MS == 12_000
+    assert SHIPPED_MUSIC_READY_POLL_MS == 400
+    assert SHIPPED_MUSIC_READY_TIMEOUT_MS > 2_500  # the measured search latency
+    assert SHIPPED_MUSIC_READY_TIMEOUT_MS < 60_000
+
+
 async def test_a_search_that_comes_back_empty_is_a_typed_failure():
     """**The guard.** A track the platform does not have must not become a post
     published on 原声 while the batch reports success — the user asked for
@@ -230,13 +473,22 @@ async def test_a_search_that_comes_back_empty_is_a_typed_failure():
     re-reads `detail` looking for a note.
 
     Delete the raise this asserts on and this test goes red.
+
+    ⚠️ The *reason* changed on 2026-08-17 and the change is the point: a dialog
+    that lists nothing and one that has not answered yet are the same page to
+    us, and we hold no measured copy for the platform's own "no results" state.
+    Reporting the union as `music_not_found` is the assertion this whole fix
+    exists to stop making. What the guard actually guarantees — a typed
+    failure, never a silent 原声 publish — is asserted directly below, and
+    survives whichever of the two reasons is right.
     """
     page = music_page(rows=())
     with pytest.raises(dp.StepFailure) as excinfo:
         await dp._set_music(page, job("A Track Nobody Uploaded"), Deadline(10))
 
-    assert excinfo.value.detail["reason"] == "music_not_found"
+    assert excinfo.value.detail["stage"] == "music"
     assert excinfo.value.detail["requested_music"] == "A Track Nobody Uploaded"
+    assert excinfo.value.detail["reason"] == "music_results_not_seen"
 
 
 async def test_an_approximate_pick_reports_the_track_it_actually_selected():

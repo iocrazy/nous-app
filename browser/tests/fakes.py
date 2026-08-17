@@ -356,6 +356,19 @@ class FakePage:
         # could only express titles could not exercise the matching that keeps a
         # same-titled different upload from being published.
         self.music_rows: Any = ()
+        # What the readiness probe reports, or None for the default derived
+        # from `music_rows`. Callable form takes (page, stamp) and returns the
+        # probe's dict — that is how a test scripts a dialog that answers
+        # slowly, or one that paints plenty of text while producing no anchors
+        # (the 「N人使用」 copy having moved).
+        #
+        # The default models the one thing about this dialog that is not in
+        # doubt: **results exist only after the search ran.** Before Enter the
+        # dialog lists nothing, after it lists `music_rows`. A fake whose
+        # results were on screen before the search would let a step that reads
+        # the pre-search list pass.
+        self.music_probe: Any = None
+        self._music_stamped = 0
         # needle -> how many places on the page show it. Callable form takes
         # (page, needle), which is how a test says "the preview starts showing
         # the track only after its row was clicked".
@@ -407,6 +420,41 @@ class FakePage:
     async def goto(self, url: str, **_kwargs: Any) -> None:
         self.navigations.append(url)
 
+    def _music_row_values(self) -> Any:
+        rows = self.music_rows(self) if callable(self.music_rows) else self.music_rows
+        if isinstance(rows, BaseException):
+            raise rows
+        return rows
+
+    def _music_ready_probe(self, stamp: bool) -> dict[str, Any]:
+        """The readiness probe's counts, derived from `music_rows` by default.
+
+        Anchors exist only once Enter has been pressed — the dialog answers a
+        search, it does not pre-empt one. `fresh` is anchors minus the ones a
+        previous `stamp=True` reading marked, and `sig` is a stand-in for the
+        real probe's text hash: same contract (equal lists hash equal, different
+        lists do not), computed from the titles the fake was handed.
+        """
+        if self.music_probe is not None:
+            probe = self.music_probe
+            return dict(probe(self, stamp) if callable(probe) else probe)
+
+        rows = self._music_row_values() if self.keyboard.pressed else ()
+        names = tuple(
+            row[0] if isinstance(row, (tuple, list)) else row for row in rows
+        )
+        anchors = len(names)
+        fresh = max(0, anchors - self._music_stamped)
+        if stamp:
+            self._music_stamped = anchors
+        return {
+            "anchors": anchors,
+            "fresh": fresh,
+            "leaves": 20 + anchors * 3,
+            "sig": hash(names) & 0xFFFFFFFF,
+            "textlen": 400 + anchors * 30,
+        }
+
     async def evaluate(self, _script: str, _arg: Any = None) -> Any:
         # `_radio_is_checked` asks the page whether the radio captioned `_arg`
         # carries data-checked="true". Answer from `data_checked`, where a
@@ -417,14 +465,14 @@ class FakePage:
             return self.data_checked.get(_arg)
         if "__nous_click_target_probe__" in (_script or ""):
             return self.dom_probe.get(_arg, [])
+        if "__nous_music_ready_probe__" in (_script or ""):
+            return self._music_ready_probe(bool((_arg or {}).get("stamp")))
         if "__nous_music_rows_probe__" in (_script or ""):
-            rows = self.music_rows(self) if callable(self.music_rows) else self.music_rows
             # A callable may raise to simulate the probe blowing up on the live
             # page — the state the production code must report as "we could not
             # look", never as "there was nothing there". Assigning an exception
             # INSTANCE expresses the same thing without a callable.
-            if isinstance(rows, BaseException):
-                raise rows
+            rows = self._music_row_values()
             # Shaped like the real probe's return value, indices included: the
             # driver clicks `[data-nous-music-row="<index>"]`, so a fake that
             # only handed back names would not exercise the addressing at all.

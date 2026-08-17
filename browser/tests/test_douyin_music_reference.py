@@ -62,6 +62,10 @@ REF = {
 @pytest.fixture(autouse=True)
 def fast_polling(monkeypatch):
     monkeypatch.setenv("BROWSER_PUBLISH_POLL_INTERVAL_S", "0.2")
+    # `wait_for_music_results` reads these at call time. Production values are
+    # pinned in `test_douyin_music.py`, so shrinking here cannot ship.
+    monkeypatch.setattr(dp, "MUSIC_READY_TIMEOUT_MS", 60)
+    monkeypatch.setattr(dp, "MUSIC_READY_POLL_MS", 1)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -464,14 +468,20 @@ async def test_a_probe_that_blew_up_is_reported_as_unobserved_not_as_zero():
     assert excinfo.value.detail["music_rows_error"] == "TypeError"
 
 
-async def test_an_empty_dialog_reports_zero_rows():
+async def test_an_empty_dialog_reports_zero_rows_and_that_it_waited():
+    """`rows=0` still says what the reader read. What is new alongside it is
+    `ready=` — because on its own, `rows=0` never distinguished "the dialog
+    listed nothing" from "we asked before it had answered", and 2026-08-17's
+    production failure was the second one wearing the first one's label."""
     page = music_page(())
     with pytest.raises(dp.StepFailure) as excinfo:
         await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
 
     assert "rows=0" in excinfo.value.message
+    assert "ready=timeout" in excinfo.value.message
     assert excinfo.value.detail["music_rows_seen"] == 0
     assert excinfo.value.detail["music_rows_error"] is None
+    assert excinfo.value.detail["reason"] == "music_results_not_seen"
 
 
 async def test_an_ambiguous_failure_also_says_what_it_saw():

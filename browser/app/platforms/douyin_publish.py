@@ -422,6 +422,30 @@ MUSIC_CONFIRM_TEXTS: tuple[str, ...] = ("确定", "完成", "使用")
 # on can be clicked by an exact selector. Clicking by the song's text instead
 # would resolve against any node on the page carrying the same string.
 MUSIC_ROW_ATTRIBUTE = "data-nous-music-row"
+# Stamped on every result ANCHOR that was already on screen before the search
+# ran, so "these rows are new" is a fact about the page rather than a guess.
+# See `wait_for_music_results`.
+MUSIC_SEEN_ATTRIBUTE = "data-nous-music-seen"
+
+# How long to wait for the search's results, and how often to look.
+#
+# [实测 2026-08-17, 生产库] The step never waited for anything: it pressed Enter,
+# slept `publish_settle_ms` (**1 500 ms**), and read once. The same day's logs
+# show the catalogue API answering a search in **1.2–2.5 s**, so the read landed
+# on the dialog mid-search and the user got
+#
+#     [music_not_found] … [rows=0 (the dialog listed nothing)]
+#
+# — i.e. "the platform does not have this song", asserted from a page that had
+# not answered yet. `rows=?` (probe failure) did NOT fire, so we really did look
+# and really did see nothing: the timing is the whole story.
+#
+# This is the third time a fixed settle has been mistaken for a readiness
+# judgement on this chain (the read-back's 2 500 ms, #1862's, now this one), so
+# the bound below is a ceiling on a *wait for a signal*, never a sleep: it is
+# only ever spent in full when the results never render.
+MUSIC_READY_TIMEOUT_MS = 12_000
+MUSIC_READY_POLL_MS = 400
 
 # --- scheduled publishing (定时发布) ----------------------------------------
 
@@ -2179,10 +2203,19 @@ async def _set_collection(page: Any, job: PublishJob, deadline: Deadline) -> dic
 # Each row is stamped with an index attribute so the decision (pure, taken in
 # Python) can be executed with an exact selector. Clicking by the song's text
 # instead would resolve against any node carrying that string.
+#
+# ⚠️ The anchor pattern lives in ONE place and is substituted into both probes.
+# Two literal copies is how the readiness probe keeps answering "the list is
+# there" about a pattern the row reader no longer matches — the two would then
+# disagree about the same page, which is exactly the ambiguity the readiness
+# diagnostic exists to remove. `test_the_two_music_probes_share_one_anchor`
+# fails if they ever drift apart.
+_MUSIC_USAGE_JS = r"/\d+(?:\.\d+)?\s*[万亿]?\s*人使用/"
+
 _MUSIC_ROWS_JS = """
 (attribute) => {
   // __nous_music_rows_probe__
-  const USAGE = /\\d+(?:\\.\\d+)?\\s*[万亿]?\\s*人使用/;
+  const USAGE = __USAGE__;
   const anchors = [];
   for (const el of document.querySelectorAll('*')) {
     if (el.children.length) continue;
@@ -2220,7 +2253,62 @@ _MUSIC_ROWS_JS = """
     return { index, name: entry.name, meta: entry.meta };
   });
 }
-"""
+""".replace("__USAGE__", _MUSIC_USAGE_JS)
+
+
+# What the dialog looks like RIGHT NOW, in numbers only.
+#
+# Four counts, and each one is here because it separates a diagnosis the other
+# three cannot:
+#
+#   * `anchors` — leaf nodes carrying 「N人使用」. This is the readiness signal,
+#     and it is deliberately the same string the row reader anchors on: a
+#     skeleton dialog cannot emit it, and neither can page chrome. (Compare
+#     #1862: card *class names* looked ready because the console's own furniture
+#     shares them. Readiness has to rest on something the shell cannot produce.)
+#   * `fresh` — anchors NOT carrying the stamp we put on the pre-search list.
+#     "New rows arrived" rather than "some rows exist", so a dialog that keeps
+#     showing its previous list while the search runs cannot be read as an
+#     answer.
+#   * `sig` — a djb2 hash over the anchors' own text, in document order. The
+#     second, independent way to notice the list was replaced: a UI framework
+#     that re-uses its DOM nodes and only rewrites their text keeps our stamp, so
+#     `fresh` would stay 0 forever and the step could never succeed. A number,
+#     never stored, never rendered — it exists only to be compared with itself.
+#   * `leaves` / `textlen` — how much the dialog painted at all. These are what
+#     make `rows=0` answerable: a dialog that painted plenty and produced zero
+#     anchors says the 「N人使用」 copy moved, while one that painted nothing says
+#     the list simply is not there. Before this, those two were the same number.
+#
+# Nothing here reads as content: counts and one hash. `textlen` is a length.
+_MUSIC_READY_JS = """
+(options) => {
+  // __nous_music_ready_probe__
+  const USAGE = __USAGE__;
+  const attribute = options.attribute;
+  const stamp = !!options.stamp;
+  let anchors = 0;
+  let fresh = 0;
+  let leaves = 0;
+  let sig = 5381;
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const own = (el.innerText || el.textContent || '').trim();
+    if (!own) continue;
+    leaves += 1;
+    if (!USAGE.test(own)) continue;
+    anchors += 1;
+    for (let i = 0; i < own.length; i += 1) {
+      sig = ((sig * 33) ^ own.charCodeAt(i)) >>> 0;
+    }
+    if (!el.hasAttribute(attribute)) fresh += 1;
+    if (stamp) el.setAttribute(attribute, '1');
+  }
+  const body = document.body;
+  const textlen = ((body && body.innerText) || '').length;
+  return { anchors, fresh, leaves, sig, textlen };
+}
+""".replace("__USAGE__", _MUSIC_USAGE_JS)
 
 # How many places on the page say the chosen track's name.
 #
@@ -2262,6 +2350,157 @@ async def _music_mentions(page: Any, name: str) -> int:
         return int(await page.evaluate(_MUSIC_READBACK_JS, name))
     except Exception:
         return 0
+
+
+@dataclass(frozen=True)
+class MusicProbe:
+    """One reading of the dialog, in counts. `None` everywhere = we could not look.
+
+    `error` is kept for the same reason `MusicRowsRead.error` is: a probe that
+    blew up is **not** a dialog that showed nothing, and rendering it as `0`
+    would be the lie this repo has now found in four places. Every accessor
+    below returns `None` in that case so the diagnostic prints `?`.
+    """
+
+    anchors: int | None = None
+    fresh: int | None = None
+    leaves: int | None = None
+    sig: int | None = None
+    text_len: int | None = None
+    error: str | None = None
+
+
+async def _music_probe(page: Any, *, stamp: bool = False) -> MusicProbe:
+    """Count the dialog. Never raises.
+
+    `stamp=True` also marks every anchor now on screen as "was already here",
+    which is what makes the later readings able to say *new* rows arrived
+    rather than *some* rows exist.
+    """
+    try:
+        raw = await page.evaluate(
+            _MUSIC_READY_JS, {"attribute": MUSIC_SEEN_ATTRIBUTE, "stamp": stamp}
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        return MusicProbe(error=type(exc).__name__)
+    try:
+        return MusicProbe(
+            anchors=int(raw["anchors"]),
+            fresh=int(raw["fresh"]),
+            leaves=int(raw["leaves"]),
+            sig=int(raw["sig"]),
+            text_len=int(raw["textlen"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        # A probe whose shape we do not recognise is unobserved page, not an
+        # empty one — same rule as an exception.
+        return MusicProbe(error=type(exc).__name__)
+
+
+@dataclass(frozen=True)
+class MusicReadiness:
+    """Did the search's results actually render before we judged them.
+
+    `reason` is `results` (a new list is on screen and has stopped changing) or
+    `timeout` (it never was, within the budget).
+
+    ⚠️ `ready is False` must never be reported as "the platform does not have
+    this track". That collapse is the entire bug this type exists to prevent —
+    it is the music-shaped instance of the rule `judge_readback` already
+    enforces for the read-back, and `_set_music` raises a **different reason**
+    (`music_results_not_seen`) for it.
+    """
+
+    ready: bool
+    reason: str
+    waited_ms: int
+    before: MusicProbe
+    after: MusicProbe
+
+    def render(self) -> str:
+        """One bracketed clause of counts. Pure. No content, ever."""
+
+        def num(value: int | None) -> str:
+            return "?" if value is None else str(value)
+
+        return (
+            f"ready={self.reason}/{self.waited_ms}ms"
+            f" anchors={num(self.before.anchors)}/{num(self.after.anchors)}"
+            f" fresh={num(self.after.fresh)}"
+            f" leaves={num(self.before.leaves)}/{num(self.after.leaves)}"
+            f" txt={num(self.before.text_len)}/{num(self.after.text_len)}"
+        )
+
+
+async def wait_for_music_results(
+    page: Any,
+    before: MusicProbe,
+    *,
+    timeout_ms: int | None = None,
+    poll_ms: int | None = None,
+) -> MusicReadiness:
+    """Wait until the dialog has rendered a NEW result list. Never raises.
+
+    Ready means all three of:
+
+      * at least one anchor is on screen — 「N人使用」 is emitted by a result row
+        and by nothing else on the page, so a loading dialog cannot fake it;
+      * the list is not the one that was there before the search — either an
+        anchor arrived that our stamp had never touched (`fresh`), or the
+        anchors' text hash moved (`sig`). Two routes because they fail in
+        different directions: a UI that re-uses DOM nodes defeats the stamp, and
+        a search that returns a textually identical list defeats the hash;
+      * the reading is **stable across two consecutive polls**. Half a rendered
+        list is a list a song can be missing from, which is the same false
+        negative by a different route (#1862 hit exactly this).
+
+    Not ready is a real outcome, not an error: the caller must turn it into "we
+    did not see the results", never into "the platform has no such track".
+
+    Bounds resolve from the module constants at CALL time rather than as
+    default arguments, so a test can shrink them without the shrunk value
+    silently becoming the production one.
+    """
+    timeout_ms = max(0, MUSIC_READY_TIMEOUT_MS if timeout_ms is None else timeout_ms)
+    poll_ms = max(0, MUSIC_READY_POLL_MS if poll_ms is None else poll_ms)
+    started = time.monotonic()
+    deadline = started + timeout_ms / 1000
+
+    # Bounded twice — wall clock and iteration count. `while True` is banned
+    # service-wide (spec 7.2) and the reason applies exactly here: a loop whose
+    # only ceiling is a `break` is one edit away from hanging a publish against
+    # a dialog that stopped responding.
+    max_polls = 1 + (timeout_ms // poll_ms if poll_ms else 0)
+
+    def elapsed() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    previous: MusicProbe | None = None
+    now = before
+    for _ in range(max_polls):
+        now = await _music_probe(page)
+        if _music_list_is_new(before, now) and previous is not None:
+            if (now.anchors, now.sig) == (previous.anchors, previous.sig):
+                return MusicReadiness(True, "results", elapsed(), before, now)
+        previous = now
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(poll_ms / 1000)
+
+    return MusicReadiness(False, "timeout", elapsed(), before, now)
+
+
+def _music_list_is_new(before: MusicProbe, now: MusicProbe) -> bool:
+    """Is what is on screen a different list from the pre-search one? Pure.
+
+    `None` anywhere means the probe failed, and an unobserved page is never
+    evidence that a list arrived.
+    """
+    if not now.anchors:
+        return False
+    if now.fresh:
+        return True
+    return now.sig is not None and before.sig is not None and now.sig != before.sig
 
 
 async def _music_dialog_open(page: Any) -> bool:
@@ -2328,7 +2567,9 @@ MUSIC_SAMPLE_ROWS = 3
 MUSIC_SAMPLE_TITLE_CHARS = 24
 
 
-def describe_music_rows(read: MusicRowsRead) -> str:
+def describe_music_rows(
+    read: MusicRowsRead, readiness: MusicReadiness | None = None
+) -> str:
     """One compact clause saying what the dialog showed. Pure.
 
     Goes into the failure **message**, not only into `detail`: on this chain
@@ -2340,19 +2581,29 @@ def describe_music_rows(read: MusicRowsRead) -> str:
 
     Titles are the platform's own catalogue text (public), never anything the
     user wrote.
+
+    `readiness` appends the counts that make `rows=0` **answerable**. Until it
+    existed, that one number meant two unrelated things — "the dialog listed
+    nothing" and "our 「N人使用」 anchor stopped matching the dialog's copy" — and
+    a production failure could not be attributed to either. `anchors` separates
+    them (0 anchors on a dialog that painted plenty of `leaves`/`txt` is the
+    copy having moved), and `ready=` says whether we were even entitled to
+    conclude anything.
     """
     if read.error is not None:
         # `?`, not `0` — we did not see the page, so we cannot say what was on it.
-        return f"rows=? (the result probe failed: {read.error})"
-    if not read.rows:
-        return "rows=0 (the dialog listed nothing)"
-    sample = " | ".join(
-        (row.name[:MUSIC_SAMPLE_TITLE_CHARS] + "…")
-        if len(row.name) > MUSIC_SAMPLE_TITLE_CHARS
-        else row.name
-        for row in read.rows[:MUSIC_SAMPLE_ROWS]
-    )
-    return f"rows={len(read.rows)}, saw: {sample}"
+        base = f"rows=? (the result probe failed: {read.error})"
+    elif not read.rows:
+        base = "rows=0 (the dialog listed nothing)"
+    else:
+        sample = " | ".join(
+            (row.name[:MUSIC_SAMPLE_TITLE_CHARS] + "…")
+            if len(row.name) > MUSIC_SAMPLE_TITLE_CHARS
+            else row.name
+            for row in read.rows[:MUSIC_SAMPLE_ROWS]
+        )
+        base = f"rows={len(read.rows)}, saw: {sample}"
+    return base if readiness is None else f"{base} {readiness.render()}"
 
 
 def _rows_by_index(rows: Sequence[MusicRow]) -> list[str]:
@@ -2464,8 +2715,17 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             requested_music=requested,
         )
     await search.fill(requested, timeout=click_ms)
+
+    # Taken **before Enter**, and it stamps: whatever the dialog is showing
+    # right now (the platform's own suggestions, a previous search, or nothing)
+    # is the list this search has to REPLACE. Without this reading, "there are
+    # rows on screen" cannot be told apart from "the search has answered", and
+    # the step would happily read the pre-search list.
+    before = await _music_probe(page, stamp=True)
     await page.keyboard.press("Enter")
-    await page.wait_for_timeout(settle_ms)
+    readiness = await wait_for_music_results(
+        page, before, timeout_ms=deadline.slice_ms(MUSIC_READY_TIMEOUT_MS)
+    )
 
     read = await _music_rows(page)
     rows = read.rows
@@ -2475,7 +2735,7 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
     # writes `[reason] message` into the row — every other key of `detail` is
     # dropped, never logged, never stored. A diagnostic put only in `detail`
     # would look like it was working and be discarded every single time.
-    seen = describe_music_rows(read)
+    seen = describe_music_rows(read, readiness)
     if reference is None:
         # The typed-name path, unchanged: the user knows a name, and any upload
         # carrying it satisfies what he asked for.
@@ -2503,6 +2763,44 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             # The id is the identity the ambiguity is about. It is the
             # platform's own catalogue id, not anything of ours.
             music_id=reference.music_id if reference else None,
+            music_rows_seen=None if read.error else len(rows),
+            music_rows_error=read.error,
+        )
+
+    if (
+        # Nothing matched, **or** only the approximate fallback did. An exact
+        # title is the user's own answer wherever it came from, so it stands
+        # even on a list we are not sure is this search's (#1862's rule: a
+        # verdict may rest on what we saw, never on what we missed). The
+        # first-result fallback is the opposite — on a list that may still be
+        # the dialog's leftovers, "closest match" is a different song entirely,
+        # which is the one music failure that leaves no signal.
+        choice.match != "exact"
+        and not readiness.ready
+        # A row probe that blew up already has a more specific diagnosis of its
+        # own (`music_rows_error`, #1865) and keeps it: "we could not run the
+        # reader" and "the reader ran and the list was not there yet" are two
+        # different unobserved-page stories, and flattening them would undo
+        # that fix while making this one.
+        and read.error is None
+    ):
+        # We never saw the search answer. **Not** "the platform does not have
+        # this track" — that is the collapse #1862 removed from the read-back
+        # and the one a 1 500 ms settle made here every time the catalogue took
+        # its measured 1.2–2.5 s. A different reason, because the two need
+        # different responses: this one is worth retrying, `music_not_found` is
+        # not.
+        raise StepFailure(
+            SessionStatus.TIMEOUT,
+            "the music dialog never showed results this search produced, so "
+            f"whether the platform has '{requested}' is unknown; nothing was "
+            f"published [{seen}]",
+            reason="music_results_not_seen",
+            stage="music",
+            requested_music=requested,
+            music_id=reference.music_id if reference else None,
+            music_ready=False,
+            music_waited_ms=readiness.waited_ms,
             music_rows_seen=None if read.error else len(rows),
             music_rows_error=read.error,
         )
