@@ -115,6 +115,13 @@
 .dist-v4 .acct-name b { display: block; font-size: 13.5px; font-weight: 600; color: var(--content); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; }
 .dist-v4 .acct-name span { display: block; font-size: 11.5px; color: var(--content-4); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dist-v4 .acct-meta { font-size: 11.5px; color: var(--content-4); font-variant-numeric: tabular-nums; }
+/* Session freshness line. `.unverified` is a real tone shift, not a shade of
+   grey: "we have never confirmed this one" has to be legible at a glance next
+   to "checked 2h ago", or it reads as the same reassuring nothing. It is amber
+   (attention), never red — nothing has failed, we simply have no evidence yet,
+   and the user has nothing to fix. */
+.dist-v4 .acct-check { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--content-4); font-variant-numeric: tabular-nums; }
+.dist-v4 .acct-check.unverified { color: var(--t-amber); }
 .dist-v4 .acct-foot { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
 .dist-v4 .acct.ghost { border-style: dashed; border-color: var(--line-strong); background: transparent; align-items: center; justify-content: center; color: var(--content-3); font-size: 12.5px; gap: 9px; min-height: 158px; cursor: pointer; box-shadow: none; font: inherit; }
 .dist-v4 .acct.ghost:hover { color: var(--t-indigo); border-color: rgba(99, 102, 241, .45); }
