@@ -395,6 +395,162 @@ async def test_a_gallery_that_never_fills_up_reports_how_far_it_got():
     assert excinfo.value.detail["stage"] == "image_upload"
 
 
+# --- giving up now says what it was looking at ------------------------------
+#
+# [实测 2026-08-17] the same account, the same single JPEG, 106 seconds apart:
+# 23 seconds one time, 900 seconds the other with the count never appearing
+# once. Both signed URLs fetch fine (HTTP 206, real JPEG header), so the asset
+# and the storage are excluded — and the failure said only "an unknown number
+# of 1 images finished uploading within 900s", which is equally true of a stuck
+# transfer, an editor that never drew, and a counter whose copy moved.
+
+
+def stalled_composer(**overrides) -> FakePage:
+    """A composer that never announces a count. Nothing else is broken."""
+    return FakePage(
+        url=IMAGE_EDITOR_URL,
+        visible=set(overrides.pop("visible", {IMAGE_TITLE})),
+        counts={"div": 72, "img": 2, **overrides.pop("counts", {})},
+        texts={"body": "x" * 105, **overrides.pop("texts", {})},
+        **overrides,
+    )
+
+
+async def test_giving_up_reports_the_page_and_the_network_not_just_the_clock():
+    """The clause that used to be the whole of the evidence explained nothing.
+    Both probes ride the MESSAGE, because `publish_distribution` keeps `reason`
+    and `message` and drops every other key of `detail`."""
+    page = stalled_composer()
+    page.network_probe = {
+        "resources": 41, "xhr": 3, "ok": 2, "c4": 0, "c5": 0,
+        "unknown": 1, "empty": 0, "status_supported": True, "ready": "complete",
+    }
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1)
+
+    message = excinfo.value.message
+    assert "[page " in message
+    assert "[net " in message
+    # The page really was measured, not merely mentioned.
+    assert "divs=72" in message
+    assert "textlen=105" in message
+    assert "res=41" in message
+
+
+async def test_an_unread_counter_is_a_question_mark_not_a_sentence():
+    """`?` is the house notation for "could not measure", and it is one
+    character. "an unknown number of" was a clause spending the budget of a
+    column capped at 500 characters — the same budget the counts need."""
+    page = stalled_composer()
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1)
+
+    assert "only ? of 1 images" in excinfo.value.message
+    assert "an unknown number of" not in excinfo.value.message
+    assert "added=?" in excinfo.value.message
+    # Never invented: the detail keeps None, not 0.
+    assert excinfo.value.detail["images_added"] is None
+
+
+async def test_two_readings_show_whether_the_page_ever_stopped_asking():
+    """A single reading cannot tell "still uploading" from "gave up quietly".
+    The composer here answers the same tally both times, which is what a page
+    that stopped issuing requests looks like — and `xhr=3->3` says so."""
+    page = stalled_composer()
+    page.network_probe = {
+        "resources": 41, "xhr": 3, "ok": 3, "c4": 0, "c5": 0,
+        "unknown": 0, "empty": 0, "status_supported": True, "ready": "complete",
+    }
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1)
+
+    # The left-hand number can only exist if a baseline was taken before the
+    # wait started. Measure only at the end and it renders `?`.
+    assert "xhr=3->3" in excinfo.value.message
+
+
+async def test_a_page_without_resource_timing_renders_question_marks():
+    """The probe failing is not the page having made zero requests. `network_probe`
+    left at None makes the fake answer `null`, exactly as the real probe does
+    when `performance` is unusable."""
+    page = stalled_composer()
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1)
+
+    assert "res=?" in excinfo.value.message
+    assert "res=0" not in excinfo.value.message
+
+
+async def test_the_timeout_admits_a_real_failure_reaches_it_too():
+    """`IMAGE_UPLOAD_FAILED_SELECTOR` is the video flow's, reused unverified —
+    the gallery survey only ever saw a *successful* composer. If it does not
+    fire here, every genuine upload failure can only surface as this timeout,
+    wearing the label of a slow transfer. No selector is invented (we hold no
+    observation of a failed gallery page); the timeout says so instead."""
+    page = stalled_composer()
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1)
+
+    assert "FAILED upload also lands here" in excinfo.value.message
+    assert "unverified" in excinfo.value.message
+
+
+async def test_the_upload_timeout_names_what_the_editor_wait_actually_proved():
+    """"The upload is stuck" and "the editor never drew, so there was never a
+    counter to read" produce the same silence. The editor step now knows which
+    of the two it handed over, and the upload timeout carries it — because that
+    is the failure the user sees, and `detail` never reaches them."""
+    page = stalled_composer()
+    arrival = dp.EditorArrival(True, "images", "reached", rendered=False)
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._await_images_uploaded(page, Deadline(0.5), 1, arrival=arrival)
+
+    assert "[editor=url_only]" in excinfo.value.message
+
+
+def test_the_whole_diagnostic_still_fits_the_column_it_lands_in():
+    """**The does-it-reach-the-database check.** `_settle_session_outcome` writes
+    `f"[{cause}] {message}"[:500]` into `publish_task_accounts.error_message`.
+    A diagnostic that overflows is not a smaller diagnostic — it is a truncated
+    one, and truncation lands on the RIGHT, which is where the network counts
+    are. This session already lost a diagnostic to a silent 500-char cut once.
+
+    Numbers chosen pessimistically: five digits of body text, four of divs, and
+    every optional clause present at once.
+    """
+    probe = dp.EditorPageProbe(
+        added=None, title_field=1, imgs=12, divs=1284,
+        text_len=98765, busy=3, done_marker=1, fail_marker=0,
+    )
+    net = dp.NetProbe(
+        resources=412, xhr_before=37, xhr=37, ok=30, c4=2, c5=1,
+        unknown=4, empty=0, ready_state="complete",
+    )
+    message = (
+        "only ? of 9 images finished uploading within 900s; a FAILED upload "
+        "also lands here — the composer's failure marker is unverified for "
+        f"galleries [editor=url_only] {probe.render()} -> {probe.render()} "
+        f"{net.render()}"
+    )
+    # `[timeout] ` is the widest prefix this failure can take.
+    assert len(f"[timeout] {message}") < 500
+
+
+def test_the_failure_probe_carries_its_own_health_warning():
+    """`fail=0` from an unverified probe means "our probe saw nothing", not
+    "nothing failed". Rendering the two identically is the `?`-as-`0` mistake
+    with an extra step."""
+    assert dp.IMAGE_UPLOAD_FAILED_VERIFIED is False
+    rendered = dp.EditorPageProbe(fail_marker=0).render()
+    assert "fail=0?unver" in rendered
+
+
 async def test_a_composer_holding_more_than_we_sent_is_refused():
     page = FakePage(url=IMAGE_EDITOR_URL, texts={ADDED: "已添加5张图片"})
 
