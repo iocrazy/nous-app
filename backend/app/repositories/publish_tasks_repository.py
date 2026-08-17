@@ -204,7 +204,7 @@ def readback_due_stmt(limit: int = READBACK_BATCH):
 # the destruction is invisible, so the next reader trusts a truncated line as
 # a complete one. Same family as writing a diagnostic into a field that never
 # reaches the database. Whatever this number becomes, truncation must stay
-# VISIBLE — see ``_fit_verify_detail``.
+# VISIBLE — see ``fit_verify_detail``.
 VERIFY_DETAIL_MAX = 2000
 
 # Appended to anything that had to be cut, so a truncated line can never be
