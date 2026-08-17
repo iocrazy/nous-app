@@ -1446,7 +1446,9 @@ def _capture_warnings(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_publish_that_only_landed_via_forced_clicks_says_so_in_the_log(monkeypatch):
+async def test_a_publish_that_only_landed_via_forced_clicks_says_so_in_the_log(
+    monkeypatch,
+):
     """「发过就说明浏览器是好的」从来不成立。
 
     ``dom.click_element`` 是三级降级（普通点击 → force → JS ``el.click()``），
@@ -1466,7 +1468,10 @@ async def test_a_publish_that_only_landed_via_forced_clicks_says_so_in_the_log(m
         outcome=_outcome(
             "published",
             platform_item_id="item-1",
-            detail={"click_tiers": "direct=0 force=9 js=0 fail=0", "click_degraded": True},
+            detail={
+                "click_tiers": "direct=0 force=9 js=0 fail=0",
+                "click_degraded": True,
+            },
         )
     )
 
@@ -1498,7 +1503,10 @@ async def test_a_publish_whose_clicks_all_landed_normally_logs_nothing(monkeypat
         outcome=_outcome(
             "published",
             platform_item_id="item-1",
-            detail={"click_tiers": "direct=9 force=0 js=0 fail=0", "click_degraded": False},
+            detail={
+                "click_tiers": "direct=9 force=0 js=0 fail=0",
+                "click_degraded": False,
+            },
         )
     )
 
