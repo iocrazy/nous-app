@@ -99,6 +99,11 @@ def wire(monkeypatch):
         async def fake_drive(_page, _job, _deadline):
             if isinstance(drive_result, Exception):
                 raise drive_result
+            # A callable lets a test script what the driver *does* rather than
+            # only what it returns — needed for anything the driver accumulates
+            # on its way through, such as which click tier carried it.
+            if callable(drive_result):
+                return await drive_result()
             return drive_result
 
         monkeypatch.setattr(douyin_publish, "_drive", fake_drive)
@@ -131,6 +136,59 @@ def published() -> PublishOutcome:
 
 async def _publish(environment: EnvironmentConfig | None = None) -> PublishOutcome:
     return await douyin_publish.publish(job(environment), Deadline(60))
+
+
+# --- which click tier carried the publish -----------------------------------
+
+
+async def test_a_publish_reports_which_click_tier_carried_it(wire):
+    """`dom.click_element` degrades silently through three tiers, so a browser
+    whose ordinary clicks all fail publishes perfectly — every click paying a
+    full timeout first — and looks exactly like a healthy one. The counts ride
+    out on the outcome so that "it published" stops being the only thing we
+    know about the browser."""
+    from app import dom
+
+    class Stubborn:
+        """`pointer-events: none` — a plain click sits there until it times out."""
+
+        async def click(self, timeout=None, force: bool = False) -> None:
+            if not force:
+                raise TimeoutError("element intercepts pointer events")
+
+    async def drive_with_a_forced_click():
+        await dom.click_element(Stubborn(), 10)
+        return published()
+
+    wire(drive_with_a_forced_click)
+
+    outcome = await _publish()
+
+    assert outcome.detail["click_tiers"] == "direct=0 force=1 js=0 fail=0"
+    assert outcome.detail["click_degraded"] is True
+
+
+async def test_a_publish_whose_clicks_all_landed_normally_says_so(wire):
+    """The counterfactual. Without it, "the field exists" would be the whole
+    assertion and a version that hard-coded `degraded=True` would pass."""
+    wire(published())
+
+    outcome = await _publish()
+
+    assert outcome.detail["click_tiers"] == "direct=0 force=0 js=0 fail=0"
+    assert outcome.detail["click_degraded"] is False
+
+
+async def test_a_failed_publish_still_reports_its_click_tiers(wire):
+    """Not only on success. A first tier that never works shows up as a
+    publish that is slow and then times out, and the counts are what say which
+    of the two it was."""
+    wire(RuntimeError("the publish button was never found"))
+
+    outcome = await _publish()
+
+    assert outcome.status is SessionStatus.FAILED
+    assert "click_tiers" in outcome.detail
 
 
 # --- the renewal is collected on every path --------------------------------
