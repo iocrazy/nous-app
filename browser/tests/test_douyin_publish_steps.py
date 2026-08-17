@@ -38,6 +38,10 @@ def fast_polling(monkeypatch):
     alternative to shortening them is a test suite that takes minutes."""
     monkeypatch.setenv("BROWSER_PUBLISH_POLL_INTERVAL_S", "0.2")
     monkeypatch.setenv("BROWSER_PUBLISH_CONFIRM_WAIT_S", "1")
+    # Read at call time by `_await_editor`. The production value is pinned by
+    # `test_the_shipped_editor_render_grace_is_not_the_shrunk_test_value`, so
+    # shrinking it here cannot be the thing that ships.
+    monkeypatch.setattr(dp, "EDITOR_RENDER_GRACE_S", 0.05)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -84,11 +88,77 @@ def cover_asset():
 # --- reaching the editor ----------------------------------------------------
 
 
+SHIPPED_EDITOR_RENDER_GRACE_S = dp.EDITOR_RENDER_GRACE_S
+
+
 async def test_an_editor_already_on_screen_is_reported_with_its_variant():
-    page = FakePage(url=EDITOR_URL)
+    page = FakePage(url=EDITOR_URL, visible={dp.TITLE_INPUT_SELECTOR})
     arrival = await dp._await_editor(page, Deadline(5))
     assert arrival.arrived is True
     assert arrival.variant == "version_2"
+    # And it drew. Previously this page — a URL and literally nothing else —
+    # satisfied "the editor is open", which is what every step after it was
+    # then built on.
+    assert arrival.rendered is True
+    assert arrival.readiness == "rendered"
+
+
+async def test_a_url_with_no_editor_on_it_is_recorded_as_url_only():
+    """**What arrival used to prove, exactly**: `page.url` matched a path.
+
+    A page carrying the editor's URL and none of the editor's form is the
+    difference between "we navigated" and "the editor is on screen", and every
+    downstream step had been assuming the second from the first. Reported, not
+    raised — a marker list that goes stale must not turn a working publish into
+    a refused one — but no longer invisible.
+
+    ⚠️ Asserted as a CONTRAST, not as a single value. `rendered` defaults to
+    False, so "a bare URL gives url_only" is also true of a version that never
+    looks at the page at all — the assertion would hold for the wrong reason,
+    which is the false green this session kept producing. The two pages differ
+    in exactly one thing, and so must the verdict.
+    """
+    bare = FakePage(url=EDITOR_URL)
+    drawn = FakePage(url=EDITOR_URL, visible={dp.TITLE_INPUT_SELECTOR})
+
+    empty_arrival = await dp._await_editor(bare, Deadline(5))
+    drawn_arrival = await dp._await_editor(drawn, Deadline(5))
+
+    assert (empty_arrival.arrived, drawn_arrival.arrived) == (True, True)
+    assert empty_arrival.readiness == "url_only"
+    assert drawn_arrival.readiness == "rendered"
+
+
+async def test_the_gallery_editor_is_judged_by_its_own_form_field():
+    """V9: 添加作品标题 on the gallery page, 填写作品标题 on the video one, and
+    neither matches on the other. One hard-coded pair would make `url_only`
+    mean "did not render" on one editor and "wrong selector" on the other."""
+    page = FakePage(
+        url="https://creator.douyin.com/creator-micro/content/post/image",
+        visible={dp.IMAGE_TITLE_INPUT_SELECTORS[0]},
+    )
+    arrival = await dp._await_editor(
+        page,
+        Deadline(5),
+        paths=dp.IMAGE_EDITOR_PATHS,
+        stage="image_editor",
+        markers=dp.IMAGE_FORM.title_selectors,
+    )
+
+    assert arrival.rendered is True
+    # ...and the video flow's marker would NOT have found it.
+    plain = await dp._await_editor(
+        page, Deadline(1), paths=dp.IMAGE_EDITOR_PATHS, stage="image_editor"
+    )
+    assert plain.rendered is False
+
+
+def test_the_shipped_editor_render_grace_is_not_the_shrunk_test_value():
+    """The fixture above shrinks this to 50 ms. Pinned separately, and bounded
+    well under the stage ceiling so a stale marker list costs seconds, never a
+    publish."""
+    assert SHIPPED_EDITOR_RENDER_GRACE_S == 8.0
+    assert SHIPPED_EDITOR_RENDER_GRACE_S < get_settings().publish_editor_wait_s
 
 
 async def test_an_editor_that_never_opens_is_a_timeout_bounded_by_the_deadline():
@@ -105,6 +175,12 @@ async def test_an_editor_that_never_opens_is_a_timeout_bounded_by_the_deadline()
     assert excinfo.value.status is SessionStatus.TIMEOUT
     assert excinfo.value.detail["stage"] == "editor"
     assert elapsed < 5  # not the 180s stage ceiling
+    # And it says what was on the page. "The editor did not open" cannot tell a
+    # blank page from a rendered editor under a path we no longer recognise —
+    # and `detail` is dropped by the caller, so the counts must ride the
+    # message.
+    assert "[page " in excinfo.value.message
+    assert "title=" in excinfo.value.message
 
 
 async def test_a_login_prompt_instead_of_the_editor_is_a_lost_session_not_a_timeout():

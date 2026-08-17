@@ -369,6 +369,13 @@ class FakePage:
         # the pre-search list pass.
         self.music_probe: Any = None
         self._music_stamped = 0
+        # What the retroactive resource-timing probe reports, or None for "the
+        # page has no Resource Timing" (the real shape when `performance`
+        # throws — the production code must render `?`, never `0`). A callable
+        # taking the page expresses "the second reading differs from the
+        # first", which is the only way to say *a page that stopped asking*
+        # apart from one whose requests keep failing.
+        self.network_probe: Any = None
         # needle -> how many places on the page show it. Callable form takes
         # (page, needle), which is how a test says "the preview starts showing
         # the track only after its row was clicked".
@@ -467,6 +474,13 @@ class FakePage:
             return self.dom_probe.get(_arg, [])
         if "__nous_music_ready_probe__" in (_script or ""):
             return self._music_ready_probe(bool((_arg or {}).get("stamp")))
+        if "__nous_image_network_probe__" in (_script or ""):
+            probe = self.network_probe
+            if probe is None:
+                # `null` is what the real probe returns when `performance`
+                # is unusable — NOT an empty tally.
+                return None
+            return dict(probe(self) if callable(probe) else probe)
         if "__nous_music_rows_probe__" in (_script or ""):
             # A callable may raise to simulate the probe blowing up on the live
             # page — the state the production code must report as "we could not

@@ -221,13 +221,40 @@ IMAGE_TITLE_LIMIT = 20
 IMAGE_UPLOAD_DONE_TEXT = "清空并重新上传"
 IMAGE_ADDED_PATTERN = re.compile(r"已添加\s*(\d+)\s*张图片")
 
-# ⚠️ UNVERIFIED for galleries. 「上传失败」 was exact=0 during the survey, but the
-# survey only ever saw a *successful* composer, so that is not evidence the
-# string is absent - only that nothing had failed. Reused from the video flow
-# because a false negative here is safe (the count check below still refuses to
-# call an incomplete gallery complete) while having no failure probe at all
-# would spend the whole upload budget before saying anything.
+# ⚠️ **UNVERIFIED for galleries, and the consequence is now measured.**
+# 「上传失败」 was exact=0 during the survey, but the survey only ever saw a
+# *successful* composer, so that is not evidence the string is absent — only
+# that nothing had failed. Reused from the video flow because having no failure
+# probe at all would spend the whole upload budget before saying anything.
+#
+# What "a false negative here is safe" left out: it is safe for CORRECTNESS (the
+# count check still refuses to call an incomplete gallery complete) and
+# expensive for DIAGNOSIS. If this selector does not fire on the gallery
+# composer — and nothing says it does — then **every real upload failure can
+# only reach the user as a 900-second timeout**, wearing the label of a slow
+# transfer. [实测 2026-08-17] the same account, the same single JPEG, 106
+# seconds apart: 23 s once, 900 s the other time with the count never appearing.
+# Both signed URLs fetch fine (HTTP 206, real JPEG header), so the asset and the
+# storage are excluded and this branch is the one that should have spoken.
+#
+# We hold **no observation of a failed gallery upload page**, so no selector is
+# invented here. What changed instead: the timeout path now measures the page
+# and says so (`EditorPageProbe` + `NetProbe`), and its message states that a
+# failed upload lands there too. `fail=` in the probe is a count from an
+# unverified probe — `IMAGE_UPLOAD_FAILED_VERIFIED` says which, so nobody reads
+# a `0` from it as "nothing failed".
 IMAGE_UPLOAD_FAILED_SELECTOR = UPLOAD_FAILED_SELECTOR
+IMAGE_UPLOAD_FAILED_VERIFIED = False
+
+# Diagnostic-only. Nothing is driven by these — they answer "was the composer
+# doing anything at all" when the count never arrived. Same three the read-back
+# uses (`douyin_verify.BUSY_SELECTORS`), deliberately: a busy page looks the
+# same on both, and two divergent lists would be two answers to one question.
+IMAGE_BUSY_SELECTORS: tuple[str, ...] = (
+    '[class*="loading"]',
+    '[class*="skeleton"]',
+    '[class*="spin"]',
+)
 
 # [实测 2026-08-11] (V4) 「图片文件大小不超过50MB」. Three orders of magnitude
 # below `asset_max_bytes` (2GB), so the neutral staging ceiling cannot catch it:
@@ -511,9 +538,26 @@ class UploadJudgement:
 
 @dataclass(frozen=True)
 class EditorArrival:
+    """Did we reach the editor — and, separately, did it DRAW.
+
+    `arrived` is a URL fact and nothing more. `rendered` is the one that
+    licenses the next step's assumptions, and it starts False because that is
+    what a bare URL match proves: navigation happened. Keeping them apart is
+    the point — the pure judge can only ever answer the first, and every step
+    downstream had been treating its answer as though it were the second.
+    """
+
     arrived: bool
     variant: str | None
     reason: str
+    rendered: bool = False
+
+    @property
+    def readiness(self) -> str:
+        """`rendered` / `url_only` / `absent` — one label for `detail`."""
+        if not self.arrived:
+            return "absent"
+        return "rendered" if self.rendered else "url_only"
 
 
 @dataclass(frozen=True)
@@ -1335,6 +1379,25 @@ async def _visible(page: Any, selector: str) -> bool:
         return False
 
 
+async def _any_visible(page: Any, selectors: Sequence[str]) -> bool:
+    """Is any of `selectors` on screen right now. Never raises, never waits."""
+    for selector in selectors:
+        if await _visible(page, selector):
+            return True
+    return False
+
+
+# How long after the URL says "editor" we keep looking for the editor's own
+# form field before giving up on seeing it render.
+#
+# Small on purpose, and resolved at call time so a test can shrink it: this is
+# not a budget for the editor to load (`publish_editor_wait_s` is), it is the
+# grace inside that budget for the difference between "navigated" and "drew".
+# Spending it costs an already-slow publish a few seconds once; refusing to
+# spend it is what left every downstream step standing on an unchecked premise.
+EDITOR_RENDER_GRACE_S = 8.0
+
+
 async def _goto_editor(page: Any, job: PublishJob, deadline: Deadline) -> None:
     settings = get_settings()
     await page.goto(
@@ -1362,9 +1425,29 @@ async def _await_editor(
     *,
     paths: Sequence[tuple[str, str]] = EDITOR_PATHS,
     stage: str = "editor",
+    markers: Sequence[str] = (TITLE_INPUT_SELECTOR,),
 ) -> EditorArrival:
+    """Wait for the post editor. Says whether it RENDERED, not only that we navigated.
+
+    **What this used to prove, exactly**: that `page.url` matched an editor
+    path. Nothing else. Every step after it — the form, the upload counter, the
+    music dialog — was built on a premise ("the editor is on screen") that no
+    reading had ever checked, and the failures then landed on whichever step
+    first touched a control that was not there yet.
+
+    So arrival now carries `rendered`: a form field the editor emits is visible.
+    ⚠️ It is **reported, never enforced** — a marker list that goes stale would
+    otherwise turn a working publish into a refused one, which is a far worse
+    trade than a diagnostic that reads `url_only`. The URL is still what ends
+    the wait; `rendered` is what says whether that meant anything.
+
+    `markers` is per-editor for the reason `FormLayout` exists: 填写作品标题 is
+    absent from the gallery page and 添加作品标题 from the video page.
+    """
     settings = get_settings()
     end = time.monotonic() + _stage_budget(deadline, settings.publish_editor_wait_s)
+    arrival = EditorArrival(False, None, "the editor wait never ran")
+    arrived_at: float | None = None
 
     # Bounded by wall clock, never `while True` (spec 7.2). The reference
     # implementation's equivalent loop has no ceiling at all, so an editor that
@@ -1372,8 +1455,21 @@ async def _await_editor(
     while time.monotonic() < end:
         arrival = judge_editor_arrival(page.url, paths)
         if arrival.arrived:
-            return arrival
+            if await _any_visible(page, markers):
+                return replace(arrival, rendered=True)
+            if arrived_at is None:
+                arrived_at = time.monotonic()
+            elif time.monotonic() - arrived_at >= EDITOR_RENDER_GRACE_S:
+                # The URL is right and the form never came. Handed back rather
+                # than raised — see the docstring — and the next step's own
+                # probe is what turns it into a user-visible finding.
+                return arrival
         await asyncio.sleep(settings.publish_poll_interval_s)
+
+    if arrival.arrived:
+        # Ran out of budget on a page that HAD navigated. Not a timeout: the
+        # editor did open, we just never saw it finish drawing.
+        return arrival
 
     # Before calling this a timeout: being bounced back to a login screen looks
     # identical from a URL poll, and the two need opposite responses from the
@@ -1385,9 +1481,15 @@ async def _await_editor(
             reason="session_lost_during_publish",
             stage=stage,
         )
+    probe = await _measure_editor_page(page, markers)
     raise StepFailure(
         SessionStatus.TIMEOUT,
-        f"the post editor did not open within {settings.publish_editor_wait_s}s",
+        # The counts ride the MESSAGE because `detail` is dropped on this chain
+        # (see `_await_images_uploaded`). "Did not open" alone cannot say
+        # whether we were on a blank page, a redirect, or a rendered editor
+        # under a path we do not recognise.
+        f"the post editor did not open within {settings.publish_editor_wait_s}s "
+        f"{probe.render()}",
         stage=stage,
         final_url=scrub(page.url),
     )
@@ -1687,8 +1789,238 @@ async def _read_added_images(page: Any) -> int | None:
         return None
 
 
+def _num(value: int | None) -> str:
+    """`?` for "could not measure". Never `0` — they are opposite findings."""
+    return "?" if value is None else str(value)
+
+
+async def _count_or_none(page: Any, selector: str) -> int | None:
+    try:
+        return int(await page.locator(selector).count())
+    except Exception:  # noqa: BLE001 - an unusable probe is not a crash
+        return None
+
+
+async def _group_count(page: Any, selectors: Sequence[str]) -> int | None:
+    """Summed matches, or None if ANY of them could not be counted.
+
+    None wins over a partial sum on purpose: "two of the three probes worked"
+    is not a number anybody can act on, and reporting it as if it were the
+    total is the same `?`-as-`0` mistake in aggregate form.
+    """
+    total = 0
+    for selector in selectors:
+        count = await _count_or_none(page, selector)
+        if count is None:
+            return None
+        total += count
+    return total
+
+
+@dataclass(frozen=True)
+class EditorPageProbe:
+    """What the composer looked like, in counts. **Never page content.**
+
+    [实测 2026-08-17] why this exists at all: `_await_images_uploaded` collected
+    **nothing**. Its timeout message read "only an unknown number of 3 images
+    finished uploading within 900s" — and that clause was the whole of the
+    evidence. Three unrelated failures produce it identically:
+
+      * the transfer really is stuck;
+      * the editor never rendered, so there was no counter to read;
+      * the 「已添加N张图片」 copy moved and the counter is there, unread.
+
+    Nothing in the row, the logs or the detail could separate them, and a real
+    user hit two of these three within 106 seconds of each other.
+
+    Every field is `int | None`; `None` renders as `?`. The whole thing is
+    counts, booleans and our own selector labels — no text, no URLs, no
+    filenames. It lands in `publish_task_accounts.error_message`, which is a
+    public-repo database column.
+    """
+
+    added: int | None = None
+    title_field: int | None = None
+    imgs: int | None = None
+    divs: int | None = None
+    text_len: int | None = None
+    busy: int | None = None
+    done_marker: int | None = None
+    fail_marker: int | None = None
+
+    def render(self) -> str:
+        # `fail=` carries its own health warning: the selector behind it has
+        # never been observed to fire on this editor, so a `0` from it means
+        # "our unverified probe saw nothing", not "nothing failed".
+        fail = _num(self.fail_marker) + ("" if IMAGE_UPLOAD_FAILED_VERIFIED else "?unver")
+        return (
+            f"[page added={_num(self.added)}"
+            f" title={_num(self.title_field)}"
+            f" imgs={_num(self.imgs)}"
+            f" divs={_num(self.divs)}"
+            f" textlen={_num(self.text_len)}"
+            f" busy={_num(self.busy)}"
+            f" done={_num(self.done_marker)}"
+            f" fail={fail}]"
+        )
+
+
+@dataclass(frozen=True)
+class NetProbe:
+    """The page's own resource timings, read retroactively. Counts only.
+
+    Copied in shape from `douyin_verify.NetProbe` rather than imported: that
+    module is being changed concurrently (#1867), and a shared helper landed
+    mid-flight is a merge conflict in the one file a publish cannot afford to
+    have broken. Extracting the common piece is a follow-up, listed in the PR.
+
+    ⚠️ The interesting field on a `PerformanceResourceTiming` is `name` — the
+    full request URL — so the aggregation happens **inside the page** and only
+    integers come back. There is no path here that can return a URL.
+    """
+
+    resources: int | None = None
+    xhr_before: int | None = None
+    xhr: int | None = None
+    ok: int | None = None
+    c4: int | None = None
+    c5: int | None = None
+    unknown: int | None = None
+    empty: int | None = None
+    ready_state: str | None = None
+
+    def render(self) -> str:
+        return (
+            f"[net res={_num(self.resources)}"
+            f" xhr={_num(self.xhr_before)}->{_num(self.xhr)}"
+            f" ok={_num(self.ok)} 4xx={_num(self.c4)} 5xx={_num(self.c5)}"
+            f" unk={_num(self.unknown)} empty={_num(self.empty)}"
+            f" doc={self.ready_state or '?'}]"
+        )
+
+
+_IMAGE_NETWORK_TIMING_JS = """
+() => {
+  // __nous_image_network_probe__
+  let entries = [];
+  try { entries = performance.getEntriesByType('resource') || []; }
+  catch (err) { return null; }
+  const out = {
+    resources: entries.length, xhr: 0, ok: 0, c4: 0, c5: 0,
+    unknown: 0, empty: 0, status_supported: false,
+    ready: (document && document.readyState) || ''
+  };
+  for (const entry of entries) {
+    const kind = entry.initiatorType;
+    if (kind !== 'xmlhttprequest' && kind !== 'fetch') continue;
+    out.xhr += 1;
+    const status = entry.responseStatus;
+    if (typeof status === 'number' && status > 0) {
+      out.status_supported = true;
+      if (status >= 500) out.c5 += 1;
+      else if (status >= 400) out.c4 += 1;
+      else out.ok += 1;
+    } else {
+      out.unknown += 1;
+    }
+    if (!entry.transferSize && !entry.encodedBodySize) out.empty += 1;
+  }
+  return out;
+}
+"""
+
+
+async def _measure_network(page: Any, xhr_before: int | None = None) -> NetProbe:
+    """One retroactive read of the page's resource timings. Never raises.
+
+    ⚠️ It cannot see a request still in flight — entries are added when a
+    response *completes*. "Asked and never got an answer" therefore shows up as
+    absence, which is exactly what `xhr_before -> xhr` is for: a composer
+    retrying in the background moves that number even when nothing completes.
+    A 900-second wait whose two readings are identical is a page that stopped
+    asking, and that is a different bug from a page whose uploads are failing.
+    """
+    try:
+        raw = await page.evaluate(_IMAGE_NETWORK_TIMING_JS)
+    except Exception:  # noqa: BLE001
+        return NetProbe(xhr_before=xhr_before)
+    if not isinstance(raw, dict):
+        return NetProbe(xhr_before=xhr_before)
+
+    def _int(key: str) -> int | None:
+        value = raw.get(key)
+        return int(value) if isinstance(value, (int, float)) else None
+
+    supported = bool(raw.get("status_supported"))
+    return NetProbe(
+        resources=_int("resources"),
+        xhr_before=xhr_before,
+        xhr=_int("xhr"),
+        # Without `responseStatus` these are not zeroes, they are unknowns.
+        ok=_int("ok") if supported else None,
+        c4=_int("c4") if supported else None,
+        c5=_int("c5") if supported else None,
+        unknown=_int("unknown"),
+        empty=_int("empty"),
+        ready_state=str(raw.get("ready") or "") or None,
+    )
+
+
+async def _visible_marker_count(page: Any, marker: str) -> int | None:
+    """`visible_marker_texts` for one marker, made total.
+
+    That helper builds its locator OUTSIDE its own try block, so a page that
+    raises on `get_by_text` propagates — survivable where a publish step is
+    already allowed to fail, not survivable in a probe whose entire job is to
+    explain a failure that already happened.
+    """
+    try:
+        return len(await visible_marker_texts(page, (marker,), exact=True))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _measure_editor_page(
+    page: Any, markers: Sequence[str] = IMAGE_TITLE_INPUT_SELECTORS
+) -> EditorPageProbe:
+    """One reading of the editor. Never raises; every field soft-fails.
+
+    `added` uses the same reader the upload loop drives on, so the diagnostic
+    and the decision can never disagree about what the counter said. On the
+    video editor it simply reads `?`, which is correct — there is no gallery
+    counter there.
+
+    `markers` is the form field whose presence means "this editor rendered",
+    and it is a parameter for the same reason `FormLayout` is one: 填写作品标题
+    matches nothing on the gallery page and 添加作品标题 nothing on the video
+    page. A hard-coded pair would make `title=0` mean "did not render" on one
+    editor and "wrong selector" on the other.
+    """
+    text_len: int | None
+    try:
+        body = await page.locator("body").inner_text()
+        text_len = len(body or "")
+    except Exception:  # noqa: BLE001
+        text_len = None
+
+    return EditorPageProbe(
+        added=await _read_added_images(page),
+        title_field=await _group_count(page, markers),
+        imgs=await _count_or_none(page, "img"),
+        divs=await _count_or_none(page, "div"),
+        text_len=text_len,
+        busy=await _group_count(page, IMAGE_BUSY_SELECTORS),
+        done_marker=await _visible_marker_count(page, IMAGE_UPLOAD_DONE_TEXT),
+        fail_marker=await _count_or_none(page, IMAGE_UPLOAD_FAILED_SELECTOR),
+    )
+
+
 async def _await_images_uploaded(
-    page: Any, deadline: Deadline, expected: int
+    page: Any,
+    deadline: Deadline,
+    expected: int,
+    *,
+    arrival: EditorArrival | None = None,
 ) -> dict[str, Any]:
     """Wait until the composer holds exactly `expected` images.
 
@@ -1701,10 +2033,22 @@ async def _await_images_uploaded(
     refuses everywhere else. Recovery is 清空并重新上传 followed by a fresh
     upload, and that sequence has never been observed; until it has, the honest
     answer is a typed failure.
+
+    **It measures the page before it starts waiting, and again when it gives
+    up.** [实测 2026-08-17] until it did, giving up said only "an unknown number
+    of 3 images finished uploading within 900s" — one clause covering a stuck
+    transfer, an editor that never rendered, and a counter whose copy moved.
+    A real user hit two different ones 106 seconds apart on the same account and
+    the same file, and nothing distinguished them afterwards. The two readings
+    are a *comparison*: a composer that stopped asking the network shows the
+    same `xhr` twice, which is a different bug from one whose requests fail.
     """
     settings = get_settings()
     end = time.monotonic() + _stage_budget(deadline, settings.publish_upload_wait_s)
     observed: int | None = None
+
+    before = await _measure_editor_page(page)
+    net_before = await _measure_network(page)
 
     while time.monotonic() < end:
         observed = await _read_added_images(page)
@@ -1750,15 +2094,27 @@ async def _await_images_uploaded(
 
         await asyncio.sleep(settings.publish_poll_interval_s)
 
+    after = await _measure_editor_page(page)
+    net_after = await _measure_network(page, xhr_before=net_before.xhr)
     raise StepFailure(
         SessionStatus.TIMEOUT,
-        f"only {observed if observed is not None else 'an unknown number of'} of "
-        f"{expected} images finished uploading within "
-        f"{settings.publish_upload_wait_s}s",
+        # `?`, not a sentence. "an unknown number of" was a whole clause saying
+        # what a single character says, and it crowded out the counts that
+        # actually explain the failure — in a column capped at 500 characters.
+        f"only {_num(observed)} of {expected} images finished uploading within "
+        f"{settings.publish_upload_wait_s}s; a FAILED upload also lands here — "
+        "the composer's failure marker is unverified for galleries "
+        f"[editor={arrival.readiness if arrival else '?'}] "
+        f"{before.render()} -> {after.render()} {net_after.render()}",
         stage="image_upload",
         images_expected=expected,
         # Which ones are missing is not readable from a count, but *how many*
         # is - and "2 of 3" is a different bug report from "0 of 3".
+        #
+        # ⚠️ These keys are for a test to read, not for a user: on this chain
+        # `publish_distribution._settle_session_outcome` keeps `reason` and
+        # `message` and drops every other key of `detail`. That is why the
+        # probes above are rendered into the MESSAGE and not parked here.
         images_added=observed,
     )
 
@@ -3283,8 +3639,13 @@ async def _drive(page: Any, job: PublishJob, deadline: Deadline) -> PublishOutco
     detail: dict[str, Any] = {}
 
     await _goto_editor(page, job, deadline)
-    arrival = await _await_editor(page, deadline)
+    arrival = await _await_editor(page, deadline, markers=VIDEO_FORM.title_selectors)
     detail["editor_variant"] = arrival.variant
+    # `rendered` / `url_only`. Recorded even on the happy path: the day a
+    # publish starts failing two steps later, "the editor never actually drew"
+    # is the first thing worth knowing and the last thing anyone can go back
+    # and measure.
+    detail["editor_ready"] = arrival.readiness
 
     detail.update(await _fill_form(page, job, deadline))
     detail.update(await _await_upload_complete(page, job, deadline))
@@ -3350,11 +3711,18 @@ async def _drive_images(page: Any, job: PublishJob, deadline: Deadline) -> Publi
 
     detail.update(await _goto_image_composer(page, images, deadline))
     arrival = await _await_editor(
-        page, deadline, paths=IMAGE_EDITOR_PATHS, stage="image_editor"
+        page,
+        deadline,
+        paths=IMAGE_EDITOR_PATHS,
+        stage="image_editor",
+        markers=IMAGE_FORM.title_selectors,
     )
     detail["editor_variant"] = arrival.variant
+    detail["editor_ready"] = arrival.readiness
 
-    detail.update(await _await_images_uploaded(page, deadline, len(images)))
+    detail.update(
+        await _await_images_uploaded(page, deadline, len(images), arrival=arrival)
+    )
     detail.update(await _fill_form(page, job, deadline, layout=IMAGE_FORM))
     # No `_set_cover`. Spec D4: this channel has no separate cover asset - the
     # gallery's own first image is the cover - and `validate_intent` has already
