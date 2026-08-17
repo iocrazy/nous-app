@@ -24,7 +24,9 @@ survivable: when the shape is wrong, the answer is `list_unreadable`
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -52,6 +54,8 @@ from app.platforms.douyin_verify import (
     measure_network,
     measure_page,
     measure_page_probes,
+    measure_render,
+    RenderProbe,
     normalize_title,
     outermost_only,
     page_label,
@@ -1344,16 +1348,70 @@ class TestTheIncidentEndToEnd:
 
 
 class _NetPage(FakePage):
-    """A page whose resource-timing buffer we control."""
+    """A page whose resource-timing buffer we control.
 
-    def __init__(self, html: str, timings, url: str | None = None):
+    Dispatches on the SCRIPT, because there are now two probes that evaluate
+    JavaScript and handing the render probe a timing dict would quietly make
+    every render field unmeasurable in tests that are not about it.
+    """
+
+    def __init__(self, html: str, timings, url: str | None = None, rendering=None):
         super().__init__(_document(html), url=url or FakePage("").url)
         self._timings = timings
+        self._rendering = rendering
 
     async def evaluate(self, script, *args):
+        if "requestAnimationFrame" in str(script):
+            if callable(self._rendering):
+                return self._rendering()
+            return self._rendering
         if callable(self._timings):
             return self._timings()
         return self._timings
+
+
+def _worst_case_probe() -> ListProbe:
+    """A full probe carrying round five's real numbers.
+
+    The longest line this module can produce on a path that blocks a work
+    item: every selector counted, every page field measured, the caption
+    absent. Used to size the diagnostic against the downstream store.
+    """
+    return ListProbe(
+        roots=tuple((sel, 0, 0) for sel in CARD_SELECTORS),
+        won=None,
+        cards=0,
+        title_exact=0,
+        op_words=(0, 0),
+        page=PageProbe(
+            where="manage", ready="timeout", waited_ms=20565, text_len=105,
+            divs=73, login_gate=0, login_wide=0, works_words=2,
+            empty_words=0, busy=1,
+        ),
+        render_probe=RenderProbe(
+            raf=True, body_h=704, vw=1280, vh=720, dpr=1,
+            iframes=0, frames=1, shadow=0,
+        ),
+        net=douyin_verify.NetProbe(
+            resources=250, xhr_before=138, xhr=180, ok=180, c4=0, c5=0,
+            unknown=0, empty=49, ready_state="complete",
+        ),
+    )
+
+
+def _rendering(**over):
+    """A healthy browser's answer to the render probe."""
+    base = {
+        "body_h": 704,
+        "vw": 1280,
+        "vh": 720,
+        "dpr": 1,
+        "iframes": 0,
+        "shadow": 0,
+        "raf": True,
+    }
+    base.update(over)
+    return base
 
 
 def _timing(**over):
@@ -1464,16 +1522,224 @@ class TestNetworkProbe:
         assert "xhr=3->9" in probe.render()
 
     async def test_the_net_section_joins_the_others_in_the_message(self):
-        """All three sections have to survive together — the page section is
-        what located this bug, and losing it to make room would cost the next
-        one."""
-        page = _NetPage(SKELETON, _timing(xhr=0), url=LOGIN_URL)
+        """All FOUR sections have to survive together — each one located a
+        different round's finding, and losing any to make room would cost the
+        next one."""
+        page = _NetPage(SKELETON, _timing(xhr=0), url=LOGIN_URL, rendering=_rendering())
         judgement = await verify_publish(page, "Some Caption")
         assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
         assert "[probe cards=" in judgement.message
         assert "[page where=login" in judgement.message
+        assert "[render raf=1" in judgement.message
         assert "[net res=40 xhr=0->0" in judgement.message
         assert "doc=complete" in judgement.message
+
+
+class TestRenderProbe:
+    """**Is our own browser working, and are we reading the whole document.**
+
+    Round five ruled out the platform: `where=manage`, `login=0+0`, 180 XHRs
+    with `4xx=0 5xx=0`, `doc=complete` — and then 105 characters and 73 divs on
+    screen. Nothing was refused and nothing failed to arrive, so the remaining
+    candidates are all on our side of the wire, and none of them had a number.
+    """
+
+    def test_the_page_script_cannot_return_content(self):
+        """**The containment property, asserted structurally.**
+
+        Same rule as the network probe: `verify_detail` is a database row and a
+        log line, and this repo is public. This script walks every element on
+        the page, so it is one `.textContent` away from exfiltrating the whole
+        console. If it ever learns to read text, this test says so.
+        """
+        source = douyin_verify._RENDER_PROBE_JS
+        for forbidden in (
+            "textContent", "innerText", "innerHTML", "outerHTML",
+            ".src", ".href", "location", "JSON.stringify", "getAttribute",
+        ):
+            assert forbidden not in source, forbidden
+        # Only these keys may cross the boundary.
+        assert set(re.findall(r"(\w+):", source)) <= {
+            "body_h", "vw", "vh", "dpr", "iframes", "shadow", "raf",
+        }
+
+    async def test_a_healthy_browser_reports_frames_and_one_document(self):
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering())
+        probe = await measure_render(page)
+        assert probe.raf is True
+        assert probe.iframes == 0
+        assert probe.shadow == 0
+        assert "[render raf=1 vp=1280x720/1 bodyh=704 ifr=0/" in probe.render()
+
+    async def test_a_browser_that_never_painted_says_so(self):
+        """Candidate 1: no frames.
+
+        The repo has this exact failure recorded on this host — SwiftShader
+        stalls, `requestAnimationFrame` never fires, and every Playwright
+        `click()` fails its stability gate. `raf=0` is a REAL finding and must
+        be distinguishable from `raf=?`.
+        """
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering(raf=False))
+        probe = await measure_render(page)
+        assert probe.raf is False
+        assert "raf=0" in probe.render()
+
+    async def test_a_list_hidden_in_an_iframe_would_be_visible_as_a_count(self):
+        """Candidate 2: the works list is somewhere this reader cannot look.
+
+        Every selector in the module runs against the top document, so a
+        console that moved its list into an iframe reads as an empty page
+        forever. 73 divs and 105 characters is what that looks like.
+        """
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering(iframes=3, shadow=12))
+        probe = await measure_render(page)
+        assert probe.iframes == 3
+        assert probe.shadow == 12
+        assert "ifr=3/" in probe.render()
+        assert "sdw=12" in probe.render()
+
+    async def test_the_window_shape_is_reported(self):
+        """Candidate 3: a virtualised list renders no rows into a degenerate
+        window."""
+        page = _NetPage(
+            SKELETON, _timing(), rendering=_rendering(vw=800, vh=16, dpr=2.5, body_h=0)
+        )
+        probe = await measure_render(page)
+        assert "vp=800x16/2.5" in probe.render()
+        assert "bodyh=0" in probe.render()
+
+    async def test_frames_come_from_the_driver_not_the_page(self):
+        """`iframes` and `frames` measure the same thing two ways on purpose.
+
+        A cross-origin iframe can be opaque to `querySelectorAll` while still
+        being a frame Playwright lists, so a DISAGREEMENT between the two is
+        itself the finding — which only works if they have independent sources.
+        """
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering(iframes=0))
+        page.frames = [object(), object(), object()]
+        probe = await measure_render(page)
+        assert probe.iframes == 0
+        assert probe.frames == 3
+        assert "ifr=0/3" in probe.render()
+
+    async def test_an_unmeasurable_browser_renders_question_marks_not_zeroes(self):
+        """**The rule this whole file is built on.**
+
+        "We could not look" and "we looked and there was none" are opposite
+        findings. A probe whose broken output is shaped like a negative answer
+        is not evidence — and here the negative answer (`raf=0`) is precisely
+        the diagnosis being hunted, so a collapse to zero would manufacture it.
+        """
+        probe = await measure_render(FakePage(_document(SKELETON)))
+        rendered = probe.render()
+        assert "raf=?" in rendered
+        assert "vp=?x?/?" in rendered
+        assert "bodyh=?" in rendered
+        assert "ifr=?/?" in rendered
+        assert "sdw=?" in rendered
+        assert "=0" not in rendered
+
+    async def test_a_script_that_returns_the_wrong_shape_is_unmeasurable(self):
+        page = _NetPage(SKELETON, _timing(), rendering=None)
+        probe = await measure_render(page)
+        assert probe.raf is None
+        assert "raf=?" in probe.render()
+
+    async def test_a_non_boolean_raf_is_unmeasurable_not_true(self):
+        """`raf` is the one field where a truthy non-answer would be worst:
+        it would report frames on a browser nobody measured."""
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering(raf="yes"))
+        probe = await measure_render(page)
+        assert probe.raf is None
+        assert "raf=?" in probe.render()
+
+    async def test_a_page_that_hangs_is_bounded_rather_than_hanging_the_readback(self):
+        """The negative answer is the one that cannot be waited for.
+
+        A browser producing no frames also never runs the in-page timer if its
+        event loop is wedged, so the evaluate itself has a ceiling. Without it
+        the read-back would burn its whole 120 s attempt budget on the probe
+        that was supposed to explain the failure.
+        """
+
+        class _Hangs(FakePage):
+            async def evaluate(self, script, *args):
+                await asyncio.sleep(30)
+
+        monkey = _Hangs(_document(SKELETON))
+        original = douyin_verify._RENDER_PROBE_TIMEOUT_S
+        douyin_verify._RENDER_PROBE_TIMEOUT_S = 0.05
+        try:
+            started = time.monotonic()
+            probe = await measure_render(monkey)
+        finally:
+            douyin_verify._RENDER_PROBE_TIMEOUT_S = original
+        assert time.monotonic() - started < 5
+        assert probe.raf is None
+        assert "raf=?" in probe.render()
+
+    async def test_the_render_probe_never_changes_the_verdict(self):
+        """A dead browser is still not evidence about the post.
+
+        `raf=0` explains why we saw nothing; it may never become "your post is
+        gone". This is the same asymmetry `Readiness` enforces, checked on the
+        new field so a future edit cannot quietly wire it into the judgement.
+        """
+        page = _NetPage(SKELETON, _timing(), rendering=_rendering(raf=False))
+        judgement = await verify_publish(page, "Some Caption")
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert "raf=0" in judgement.message
+
+    def test_the_render_section_is_ordered_before_the_net_section(self):
+        """Order is load-bearing because of a truncation downstream.
+
+        `publish_tasks_repository.verification_update_stmt` stores this string
+        as `detail[:500]` — a silent slice, no marker, no log — so whatever
+        sits last is what gets eaten first. `[render ...]` goes before
+        `[net ...]` rather than at the end; any edit that appends it instead
+        fails here.
+        """
+        rendered = _worst_case_probe().render()
+        assert rendered.index("[render ") < rendered.index("[net ")
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "BLOCKED on a one-line change outside this module: "
+            "publish_tasks_repository.verification_update_stmt truncates to "
+            "detail[:500]. Measured — three sections + the abandoned prefix "
+            "already reach 499/500 on the list_unreadable path, so a fourth "
+            "section cannot fit and the tail of [net ...] is silently cut. "
+            "Raise that limit (the column is TEXT, no DB limit) and this test "
+            "starts passing, which strict-xfail reports as a failure so the "
+            "marker gets removed."
+        ),
+    )
+    @pytest.mark.parametrize("reason, ready", [
+        ("list_not_ready", False),
+        ("list_unreadable", True),
+    ])
+    def test_the_whole_diagnostic_survives_the_500_char_store(self, reason, ready):
+        """**A diagnostic that gets truncated is a diagnostic that lied.**
+
+        The three existing sections each decided a previous round, so none may
+        be sacrificed for the new one — which means the line has to FIT, not
+        merely be ordered well. This encodes that requirement against the real
+        worst case: an `abandoned` row, whose prefix alone is 83 characters
+        before the message starts, and which is exactly the row that blocks a
+        work item for a human to read.
+        """
+        judgement = judge_readback(
+            [], "Some Caption", probe=_worst_case_probe(), ready=ready
+        )
+        line = (
+            "[verification_abandoned] gave up after 5 attempt(s); "
+            f"last failure: [{reason}] {judgement.message}"
+        )
+        assert len(line) <= 500, (
+            f"{len(line)} chars — the store would cut {len(line) - 500}, "
+            f"losing {line[500:]!r}"
+        )
 
 
 class TestStatusMapping:
