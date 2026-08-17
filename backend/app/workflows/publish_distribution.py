@@ -499,6 +499,18 @@ async def _settle_session_outcome(
 
     detail = result.get("detail") or {}
 
+    # 「发过就说明浏览器是好的」从来不成立。`dom.click_element` 是三级降级
+    # （普通点击 → force → JS `el.click()`），每一级失败都吞掉；**第一级永远
+    # 挂掉的浏览器照样能把每一篇都发出去**，只是每次多付一个完整的点击超时。
+    # 降级本身是对的，无声才是错的 —— 所以这里只在真降级时落一条日志（进
+    # `application_logs`，运维能用错误漏斗查），成功行的 `error_message`
+    # 不写：那一列是给用户看的，浏览器健康度不是用户要读的东西。
+    if detail.get("click_degraded"):
+        logger.warning(
+            f"[publish.clicks] account {account_id} degraded: "
+            f"{detail.get('click_tiers')}"
+        )
+
     if status == SessionStatus.PUBLISHED.value:
         from datetime import datetime, timezone
 

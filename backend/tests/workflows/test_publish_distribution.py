@@ -1424,6 +1424,104 @@ async def test_a_clean_publish_leaves_no_caveat_behind():
     assert repo.updates[-1][1]["error_message"] is None
 
 
+def _capture_warnings(monkeypatch):
+    """收集 ``publish_distribution`` 打出的 WARNING。
+
+    ⚠️ **不能用 pytest 的 ``caplog``** —— 本项目用 loguru，它不走 stdlib
+    logging 的 handler，``caplog.records`` 永远是空的。第一版就是这么写的，
+    于是"降级要打日志"和"不降级不打日志"两条测试**同时通过**，而后者在一个
+    无条件打日志的版本上照样通过。断言因为"什么都没捕获到"而成立，不是因为
+    行为对 —— 正是本轮反复撞到的那种假绿。
+    """
+    from app.workflows import publish_distribution as pd_module
+
+    seen: list[str] = []
+    real = pd_module.logger.warning
+    monkeypatch.setattr(
+        pd_module.logger,
+        "warning",
+        lambda message, *a, **k: (seen.append(str(message)), real(message, *a, **k))[0],
+    )
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_a_publish_that_only_landed_via_forced_clicks_says_so_in_the_log(
+    monkeypatch,
+):
+    """「发过就说明浏览器是好的」从来不成立。
+
+    ``dom.click_element`` 是三级降级（普通点击 → force → JS ``el.click()``），
+    每一级失败都吞掉 —— **第一级永远挂掉的浏览器照样能把每一篇都发出去**，
+    只是每次多付一个完整的点击超时。这条日志是唯一能看见它的地方：成功行的
+    ``error_message`` 是给用户看的，浏览器健康度不属于那里；而
+    ``application_logs`` 有运维的错误漏斗。
+
+    ⚠️ 触发条件是浏览器给的 ``click_degraded`` 布尔，不是去 substring 匹配
+    ``click_tiers`` 那个字符串 —— 后者改一次渲染就永远不再触发。
+    """
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    warnings = _capture_warnings(monkeypatch)
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "published",
+            platform_item_id="item-1",
+            detail={
+                "click_tiers": "direct=0 force=9 js=0 fail=0",
+                "click_degraded": True,
+            },
+        )
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "success"
+    assert any("[publish.clicks]" in line for line in warnings)
+    assert any("force=9" in line for line in warnings)
+    # 行本身仍是干净的成功：这不是给用户的提示。
+    assert repo.updates[-1][1]["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_publish_whose_clicks_all_landed_normally_logs_nothing(monkeypatch):
+    """反事实。少了它，上一条对一个**无条件打日志**的版本同样成立 —— 而那样
+    每一次健康发布都会刷一条警告，运维学会忽略它，等于没有。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    warnings = _capture_warnings(monkeypatch)
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "published",
+            platform_item_id="item-1",
+            detail={
+                "click_tiers": "direct=9 force=0 js=0 fail=0",
+                "click_degraded": False,
+            },
+        )
+    )
+
+    await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert not any("[publish.clicks]" in line for line in warnings)
+
+
 @pytest.mark.asyncio
 async def test_session_only_batch_never_fetches_oauth_credentials(monkeypatch):
     """全 session 批次绝不能去取 OAuth 应用凭证。

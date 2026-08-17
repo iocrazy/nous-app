@@ -13,7 +13,10 @@ where raising would turn a transient repaint into a typed failure.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from typing import Any, Iterator, Sequence
 
 
 async def visible_marker_texts(
@@ -194,6 +197,76 @@ async def remove_nodes(page: Any, selectors: Sequence[str]) -> int:
         return 0
 
 
+@dataclass
+class ClickTally:
+    """How many clicks each escalation tier won, over one operation.
+
+    **Why counting is worth code at all.** `click_element` degrades silently,
+    so a browser whose *first* tier never works goes on publishing perfectly —
+    tier 2 or 3 picks every click up, each one costing a full click timeout
+    first. Nothing anywhere records that this happened. The consequence is a
+    sentence worth stating plainly: **"it published, so the browser is fine" has
+    never been a valid inference**, and a stack that had degraded to JS clicks
+    months ago would look exactly like a healthy one, only slower.
+
+    Counts, never selectors and never page text: this rides into logs.
+    """
+
+    direct: int = 0
+    force: int = 0
+    js: int = 0
+    failed: int = 0
+
+    def record(self, tier: str) -> None:
+        setattr(self, tier, getattr(self, tier) + 1)
+
+    @property
+    def total(self) -> int:
+        return self.direct + self.force + self.js + self.failed
+
+    @property
+    def degraded(self) -> bool:
+        """Did anything win below tier 1. The one bit worth alerting on."""
+        return bool(self.force or self.js)
+
+    def render(self) -> str:
+        return (
+            f"direct={self.direct} force={self.force} "
+            f"js={self.js} fail={self.failed}"
+        )
+
+
+# Ambient rather than threaded through ~20 call sites, and a ContextVar rather
+# than a module global **because concurrency is real here**: the service
+# publishes several accounts at once, each in its own asyncio task, and a
+# module-level counter would blend them into one meaningless number. A task
+# copies the context when it is created, so each publish gets its own tally and
+# no publish can see another's.
+_click_tally: ContextVar[ClickTally | None] = ContextVar("nous_click_tally", default=None)
+
+
+@contextmanager
+def collecting_clicks() -> Iterator[ClickTally]:
+    """Count click tiers for the duration of this block. Never affects clicking.
+
+    Outside such a block the counter is `None` and `click_element` does not
+    record — login and probing keep behaving exactly as before, with no
+    accumulator quietly growing for the life of the process.
+    """
+    tally = ClickTally()
+    token = _click_tally.set(tally)
+    try:
+        yield tally
+    finally:
+        _click_tally.reset(token)
+
+
+def _record_click(tier: str) -> None:
+    tally = _click_tally.get()
+    if tally is not None:
+        tally.record(tier)
+
+
 async def click_element(locator: Any, timeout_ms: int) -> bool:
     """Click through three escalating strategies. False = none of them worked.
 
@@ -210,23 +283,33 @@ async def click_element(locator: Any, timeout_ms: int) -> bool:
 
     Strategy 3 skips every actionability guarantee, which is why it is last:
     it will happily click something that is covered, disabled or off-screen.
+
+    **Which tier won is recorded** (`ClickTally`). The escalation itself is
+    unchanged and deliberately so — degrading is the right behaviour, doing it
+    without a trace is not. A caller inside `collecting_clicks()` ends up able
+    to say "every click on this publish needed `force`", which is a browser
+    fault that a successful publish had been hiding.
     """
     try:
         await locator.click(timeout=timeout_ms)
+        _record_click("direct")
         return True
     except Exception:
         pass
 
     try:
         await locator.click(timeout=timeout_ms, force=True)
+        _record_click("force")
         return True
     except Exception:
         pass
 
     try:
         await locator.evaluate("el => el.click()")
+        _record_click("js")
         return True
     except Exception:
+        _record_click("failed")
         return False
 
 

@@ -73,7 +73,13 @@ from ..browser_runtime import (
     build_launch_kwargs,
 )
 from ..config import get_settings
-from ..dom import click_element, click_first, remove_nodes, visible_marker_texts
+from ..dom import (
+    click_element,
+    click_first,
+    collecting_clicks,
+    remove_nodes,
+    visible_marker_texts,
+)
 from ..publish import (
     COVER_ROLE,
     IMAGES_CONTENT_TYPE,
@@ -3481,27 +3487,52 @@ async def publish(job: PublishJob, deadline: Deadline) -> PublishOutcome:
             detail={"stage": "launch"},
         )
         state: dict[str, Any] | None = None
-        try:
-            context = await browser.new_context(**context_kwargs)
-            await apply_stealth(context)
+        # Counts which of `click_element`'s three tiers won, for this publish
+        # only. Scoped here rather than around the driver call so that a
+        # publish which dies inside `new_context` still reports `0/0/0/0`
+        # instead of nothing — "no clicks happened" is an answer.
+        with collecting_clicks() as clicks:
             try:
-                page = await context.new_page()
-                outcome = await _driver_for(job.intent.content_type)(page, job, deadline)
-            except Exception as exc:  # noqa: BLE001
+                context = await browser.new_context(**context_kwargs)
+                await apply_stealth(context)
+                try:
+                    page = await context.new_page()
+                    outcome = await _driver_for(job.intent.content_type)(
+                        page, job, deadline
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    outcome = _outcome_from_exception(exc)
+                finally:
+                    # Before the context is torn down, and regardless of how the
+                    # publish went.
+                    state = await _safe_storage_state(context)
+            except Exception as exc:  # noqa: BLE001 - context creation itself failed
                 outcome = _outcome_from_exception(exc)
             finally:
-                # Before the context is torn down, and regardless of how the
-                # publish went.
-                state = await _safe_storage_state(context)
-        except Exception as exc:  # noqa: BLE001 - context creation itself failed
-            outcome = _outcome_from_exception(exc)
-        finally:
-            try:
-                await browser.close()
-            except Exception:  # noqa: BLE001
-                logger.warning("browser did not close cleanly after publish")
+                try:
+                    await browser.close()
+                except Exception:  # noqa: BLE001
+                    logger.warning("browser did not close cleanly after publish")
 
-    return replace(outcome, updated_storage_state=state)
+    # On every path, success and failure alike. A publish that only ever
+    # succeeds via `force` is a browser fault, and a field that appeared only on
+    # failures could not show it — the whole point is that the failing case here
+    # looks like success.
+    if clicks.degraded:
+        logger.warning("publish clicks degraded: %s", clicks.render())
+    return replace(
+        outcome,
+        detail={
+            **outcome.detail,
+            "click_tiers": clicks.render(),
+            # A separate boolean, not something the caller parses out of the
+            # string above. The backend decides whether to log on this, and a
+            # consumer that had to substring-match `force=0 js=0` would be one
+            # rendering change away from silently never firing.
+            "click_degraded": clicks.degraded,
+        },
+        updated_storage_state=state,
+    )
 
 
 register_publisher(PLATFORM, publish)
