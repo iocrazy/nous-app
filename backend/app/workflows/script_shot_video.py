@@ -85,6 +85,7 @@ async def generate_shot_video_step(
     shot_id: str,
     model: Optional[str],
     provider: Optional[str],
+    user_id: Optional[str] = None,
 ) -> str:
     """Read the shot + scene, compose the prompt, and run the video provider.
 
@@ -103,7 +104,9 @@ async def generate_shot_video_step(
     scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
     prompt = _compose_prompt(shot, scene)
 
-    provider_obj, actual_model = await resolve_video_provider(provider or model or None)
+    provider_obj, actual_model = await resolve_video_provider(
+        provider or model or None, user_id=user_id
+    )
 
     async with _resolve_local_image_for_i2v(shot) as image_path:
         result = await provider_obj.generate_video(
@@ -218,7 +221,7 @@ async def script_shot_video_workflow(
     task_tracking mirrors it); the shot row is left untouched so a video failure
     never corrupts the image lane. ``user_id`` is optional (frozen DBOS input
     compat) but a real value is required to persist."""
-    local_path = await generate_shot_video_step(shot_id, model, provider)
+    local_path = await generate_shot_video_step(shot_id, model, provider, user_id)
     video_url = await persist_video_generation(
         shot_id, local_path, model, provider, user_id
     )

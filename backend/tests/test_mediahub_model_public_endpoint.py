@@ -18,8 +18,12 @@ async def test_list_mediahub_models_passes_type_filter():
         "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
         return_value=repo,
     ):
-        result = await list_mediahub_models(type="llm")
-    repo.list_enabled.assert_awaited_once_with("llm")
+        from types import SimpleNamespace
+
+        result = await list_mediahub_models(
+            auth=SimpleNamespace(user_id="viewer-1"), type="llm"
+        )
+    repo.list_enabled.assert_awaited_once_with("llm", viewer_user_id="viewer-1")
     assert result == {"models": [{"name": "nous-llm", "type": "llm"}]}
 
 
@@ -109,3 +113,23 @@ async def test_governance_includes_nous_enabled_and_modules():
     assert result["nous_enabled"] is True
     assert isinstance(result["nous_modules"], dict)
     assert result["nous_modules"]["transcription"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_mediahub_models_passes_viewer_from_auth():
+    """The catalog endpoint must scope the list to the calling user so
+    owner-private rows (codex/jimeng, migration 431) never leak to others."""
+    from types import SimpleNamespace
+
+    from app.api.ai_settings_router import list_mediahub_models
+
+    repo = MagicMock()
+    repo.list_enabled = AsyncMock(return_value=[])
+    with patch(
+        "app.repositories.mediahub_model_repository.get_mediahub_model_repository",
+        return_value=repo,
+    ):
+        await list_mediahub_models(
+            auth=SimpleNamespace(user_id="viewer-1"), type="image"
+        )
+    repo.list_enabled.assert_awaited_once_with("image", viewer_user_id="viewer-1")

@@ -292,7 +292,7 @@ async def _generate_image_with(model: str):
             model=model,
             provider_name=None,  # workflow now threads None → DB resolution
         )
-    resolver.assert_awaited_once_with(None)
+    resolver.assert_awaited_once_with(None, user_id=None)
     gen_model = fake_provider.generate.call_args.args[1]
     return result, gen_model
 

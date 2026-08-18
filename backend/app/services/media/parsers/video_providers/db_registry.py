@@ -81,20 +81,59 @@ async def _enabled_rows(media_type: str) -> list[dict]:
     return [r for r in rows if r.get("type") == media_type and r.get("is_enabled")]
 
 
+def _visible_to(row: dict, user_id: Optional[str]) -> bool:
+    """Owner scoping (migration 431): a NULL owner is platform-wide; a set
+    owner admits only that user. No user in scope → fail-closed."""
+    owner = row.get("owner_user_id")
+    if not owner:
+        return True
+    return user_id is not None and str(owner) == str(user_id)
+
+
+def _explicit_match(rows: list[dict], name: str) -> Optional[dict]:
+    return next(
+        (r for r in rows if r.get("name") == name or r.get("actual_model") == name),
+        None,
+    )
+
+
+def _visible_rows(
+    rows: list[dict], name: Optional[str], user_id: Optional[str], kind: str
+) -> list[dict]:
+    """Apply owner scoping; an explicitly-requested private row must RAISE for
+    a non-owner, never silently fall back to some other public row."""
+    visible = [r for r in rows if _visible_to(r, user_id)]
+    if (
+        name
+        and _explicit_match(visible, name) is None
+        and _explicit_match(rows, name) is not None
+    ):
+        raise RuntimeError(
+            f"{kind} model {name!r} is private to another user "
+            "(mediahub_models.owner_user_id)"
+        )
+    return visible
+
+
 async def resolve_image_provider(
     name: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> Tuple[BaseImageProvider, str]:
     """Resolve an image provider from the ``mediahub_models`` catalog.
 
     Returns ``(provider, actual_model)``. Dispatches on ``actual_provider``;
     when several image rows are enabled and no explicit ``name`` matches, the
-    jimeng-cli row is preferred (CLI is the primary generator).
+    jimeng-cli row is preferred (CLI is the primary generator). Owner-scoped
+    rows resolve only for their owner (``user_id``); call paths that don't
+    thread a user fail closed.
 
     Raises:
-        RuntimeError: no enabled image model, or the resolved row's
-            ``actual_provider`` has no wired implementation.
+        RuntimeError: no enabled image model, the requested row is private to
+            another user, or the resolved row's ``actual_provider`` has no
+            wired implementation.
     """
-    image_rows = await _enabled_rows("image")
+    image_rows = _visible_rows(await _enabled_rows("image"), name, user_id, "image")
     if not image_rows:
         raise RuntimeError("no image model configured in mediahub_models catalog")
 
@@ -120,17 +159,22 @@ async def resolve_image_provider(
 
 async def resolve_video_provider(
     name: Optional[str] = None,
+    *,
+    user_id: Optional[str] = None,
 ) -> Tuple[JimengCliProvider, str]:
     """Resolve a video provider from the ``mediahub_models`` catalog.
 
     Returns ``(provider, actual_model)``. Only the jimeng-cli CLI has a wired
     video path today; callers use ``provider.generate_video(...)`` directly.
+    Owner-scoped rows resolve only for their owner (see
+    ``resolve_image_provider``).
 
     Raises:
-        RuntimeError: no enabled video model, or the resolved row's
-            ``actual_provider`` has no wired video implementation.
+        RuntimeError: no enabled video model, the requested row is private to
+            another user, or the resolved row's ``actual_provider`` has no
+            wired video implementation.
     """
-    video_rows = await _enabled_rows("video")
+    video_rows = _visible_rows(await _enabled_rows("video"), name, user_id, "video")
     if not video_rows:
         raise RuntimeError("no video model configured in mediahub_models catalog")
 

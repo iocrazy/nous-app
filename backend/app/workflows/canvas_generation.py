@@ -47,6 +47,7 @@ async def generate_canvas_media_step(
     model: str,
     params: Dict[str, Any],
     source_url: Optional[str],
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the DB-catalog provider; returns the raw product location.
 
@@ -61,7 +62,9 @@ async def generate_canvas_media_step(
             generated_media_local_path,
         )
 
-        provider, actual_model = await db_registry.resolve_video_provider(model or None)
+        provider, actual_model = await db_registry.resolve_video_provider(
+            model or None, user_id=user_id
+        )
         gen_model = model or actual_model
         async with generated_media_local_path(
             source_url, media_kind="image"
@@ -83,7 +86,9 @@ async def generate_canvas_media_step(
             "model": gen_model or "",
         }
 
-    provider, actual_model = await db_registry.resolve_image_provider(model or None)
+    provider, actual_model = await db_registry.resolve_image_provider(
+        model or None, user_id=user_id
+    )
     gen_model = model or actual_model
     result = await provider.generate(
         prompt,
@@ -291,7 +296,9 @@ async def canvas_generation_workflow(
     user_id: Optional[str],
     source_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    media = await generate_canvas_media_step(kind, prompt, model, params, source_url)
+    media = await generate_canvas_media_step(
+        kind, prompt, model, params, source_url, user_id
+    )
     result = await persist_canvas_generation_step(
         media=media,
         user_id=user_id,

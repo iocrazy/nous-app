@@ -60,6 +60,7 @@ class GenerateMediaTools:
                 model=model,
                 provider_name=provider,
                 aspect_ratio=(args.get("aspect_ratio") or "16:9"),
+                user_id=str(run_context.get("user_id") or "") or None,
             )
             url = (raw or {}).get("url") or (raw or {}).get("image_url")
             if not url:
@@ -108,6 +109,7 @@ class GenerateMediaTools:
                 prompt=prompt,
                 provider_name=provider,
                 model=model,
+                user_id=str(run_context.get("user_id") or "") or None,
             )
             url = (raw or {}).get("url") or (raw or {}).get("video_url")
             if not url:

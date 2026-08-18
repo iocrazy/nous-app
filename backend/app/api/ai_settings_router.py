@@ -397,15 +397,16 @@ async def get_ai_governance(auth: AuthDep):
 
 
 @router.get("/mediahub-models")
-async def list_mediahub_models(type: str | None = None):
+async def list_mediahub_models(auth: AuthDep, type: str | None = None):
     """List enabled Nous models (public, no API keys), optionally filtered by
     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
 
     Returns models available for users to select. If none are configured,
-    returns an empty list.
+    returns an empty list. Requires auth (added with owner scoping, migration
+    431): the list is scoped to the caller so owner-private rows never leak.
     """
     from app.repositories.mediahub_model_repository import get_mediahub_model_repository
 
     repo = get_mediahub_model_repository()
-    models = await repo.list_enabled(type)
+    models = await repo.list_enabled(type, viewer_user_id=auth.user_id)
     return {"models": models}

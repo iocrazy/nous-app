@@ -30,11 +30,16 @@ codex login                                            # 浏览器 OAuth,写 ~/.
 ```
 
 容器 uid=1031 ≠ heygo(1000)，用 ACL 授权，**不要 chown/chgrp**（宿主机 codex CLI
-还在用这个目录）：
+还在用这个目录）。⚠️ `~/.codex` 是 symlink → `~/.config/codex`，`setfacl -R` 不跟
+符号链接递归，必须打在真实目录上（2026-08-17 实测：打在 symlink 上只有目录本身
+拿到 ACL，auth.json 仍 Permission denied）：
 
 ```bash
-setfacl -R -m u:1031:rwX -m d:u:1031:rwX /home/heygo/.codex
+setfacl -R -m u:1031:rwX -m d:u:1031:rwX /home/heygo/.config/codex
 ```
+
+（docker bind mount 会解析 symlink，compose 里写 `/home/heygo/.codex` 不受影响。）
+已于 2026-08-17 在 gpupc 执行并用 `docker run -u 1031:100` 写入探针验证 PROBE-OK。
 
 ## 部署验收（读正常 ≠ 服务正常）
 

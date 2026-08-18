@@ -419,6 +419,12 @@ class MediahubModels(Base):
     # therefore stays admin-only — this is derived from the exception type and
     # HTTP status alone, so it is safe on the public model list.
     last_test_code: Mapped[Optional[str]] = mapped_column(Text)
+    # Owner scoping (migration 431): NULL = platform-wide row; non-NULL makes
+    # the row visible/usable ONLY to that auth.users id — for providers that
+    # spend a personal credential (codex / jimeng CLI subscription sessions)
+    # rather than a platform api_key. Enforced in list_enabled (catalog
+    # queries) AND db_registry resolvers (dispatch, fail-closed).
+    owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True))
 
 
 class AgentOverrides(Base):

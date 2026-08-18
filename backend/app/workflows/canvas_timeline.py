@@ -61,6 +61,7 @@ async def generate_segment_step(
     model: str,
     aspect: str,
     guide_url: Optional[str],
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Generate ONE timeline segment through the DB-catalog video provider.
 
@@ -69,7 +70,9 @@ async def generate_segment_step(
     """
     from app.services.media.parsers.video_providers import db_registry
 
-    provider, actual_model = await db_registry.resolve_video_provider(model or None)
+    provider, actual_model = await db_registry.resolve_video_provider(
+        model or None, user_id=user_id
+    )
     gen_model = model or actual_model
 
     from app.services.library.generated_media_service import (
@@ -300,6 +303,7 @@ async def canvas_timeline_workflow(
             model=model,
             aspect=aspect,
             guide_url=guide_url,
+            user_id=str(user_id),
         )
         segment_paths.append(media["local_path"])
         # Tail frame guides the NEXT segment; the last segment skips it.

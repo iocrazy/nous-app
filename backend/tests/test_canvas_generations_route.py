@@ -204,7 +204,8 @@ class TestTextModels:
         assert data[0]["type"] == "llm"
         # Public columns only — credentials must never reach the browser.
         assert all("api_key" not in m and "base_url" not in m for m in data)
-        list_enabled.assert_awaited_once_with("llm")
+        assert list_enabled.await_args.args == ("llm",)
+        assert list_enabled.await_args.kwargs["viewer_user_id"]
 
 
 def _read_scope_returning(row, *, forbid_writes: bool = False):

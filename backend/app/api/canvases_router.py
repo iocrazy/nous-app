@@ -224,7 +224,9 @@ async def list_generation_models(auth: AuthDep) -> dict:
     only — no api_key/base_url) for the composer's model picker."""
     from app.repositories import mediahub_model_repository as _repo_mod
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled()
+    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
+        viewer_user_id=auth.user_id
+    )
     data = [
         {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
         for r in rows
@@ -244,7 +246,9 @@ async def list_text_models(auth: AuthDep) -> dict:
     consistent source of truth instead of a hardcoded frontend list."""
     from app.repositories import mediahub_model_repository as _repo_mod
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled("llm")
+    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
+        "llm", viewer_user_id=auth.user_id
+    )
     data = [{k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS} for r in rows]
     return {"success": True, "data": data}
 
