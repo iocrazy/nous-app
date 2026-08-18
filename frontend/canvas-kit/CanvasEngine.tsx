@@ -193,6 +193,11 @@ export interface CanvasEngineProps {
    */
   onInit?: (instance: ReactFlowInstance) => void;
 
+  /** Files dropped on the empty pane (Infinite parity: drop anywhere to
+   *  create an upload node). Position is the drop point in flow coords.
+   *  Node-level drop handlers (media/group) win via stopPropagation. */
+  onFileDrop?: (files: File[], flowPosition: { x: number; y: number }) => void;
+
   /** Raw React Flow node changes (caller applies + routes to its persist channel). */
   onNodesChange: (changes: NodeChange[]) => void;
   /** Raw React Flow edge changes. */
@@ -319,6 +324,7 @@ export function CanvasEngine({
   getPorts,
   renderCreateMenu,
   paneCreateMenu = false,
+  onFileDrop,
   minimap,
   controls,
   onInit,
@@ -589,6 +595,34 @@ export function CanvasEngine({
     },
     [paneCreateMenu, openPaneCreateMenu],
   );
+  // File drop on blank canvas (Infinite parity): nodes that take files
+  // themselves (media/group) stopPropagation in their own onDrop, and the
+  // `.react-flow__node` guard covers node surfaces without a handler, so
+  // this only fires for the empty pane/backdrop.
+  const onContainerDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (!onFileDrop) return;
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+    },
+    [onFileDrop],
+  );
+  const onContainerDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!onFileDrop) return;
+      const files = Array.from(e.dataTransfer.files ?? []);
+      if (files.length === 0) return;
+      if ((e.target as Element).closest?.('.react-flow__node')) return;
+      e.preventDefault();
+      const flowPosition =
+        instanceRef.current?.screenToFlowPosition({
+          x: e.clientX,
+          y: e.clientY,
+        }) ?? { x: e.clientX, y: e.clientY };
+      onFileDrop(files, flowPosition);
+    },
+    [onFileDrop],
+  );
   // Container-level right-click so the native browser menu never leaks while
   // the create menu is interacting (bug: right-clicking the open menu's
   // backdrop is NOT on `.react-flow__pane`, so React Flow's onPaneContextMenu
@@ -672,6 +706,8 @@ export function CanvasEngine({
       tabIndex={0}
       className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
       onDoubleClick={onContainerDoubleClick}
+      onDragOver={onFileDrop ? onContainerDragOver : undefined}
+      onDrop={onFileDrop ? onContainerDrop : undefined}
       onContextMenu={paneCreateMenu ? onContainerContextMenu : undefined}
     >
       <ReactFlow
