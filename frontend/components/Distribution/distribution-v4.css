@@ -240,7 +240,15 @@
    tokens, not hue names — see the K1 palette remap. */
 .dist-v4 .field-err { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--danger); }
 .dist-v4 .field-warn { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--warn); }
-.dist-v4 select.input { appearance: none; cursor: pointer; }
+/* `button.input` is the UiSelect trigger wearing this page's field styling
+   (passed as `triggerClassName`). The dropdowns here used to be bare
+   <select>s, which paint with the OS widget — its own highlight colour and
+   font — and were the only controls on the page that did. */
+.dist-v4 select.input, .dist-v4 button.input { appearance: none; cursor: pointer; }
+/* The trigger lays out as `inline-flex` (label | chevron) from the shared
+   component; `.input`'s own `width: 100%` still applies. `text-align: left`
+   keeps the label against the leading edge the way a <select> renders it. */
+.dist-v4 button.input { text-align: left; }
 .dist-v4 .opt-row .input { flex-shrink: 0; font-size: 12.5px; padding: 6px 10px; }
 
 /* ═══ distribution mode cards ═══ */
@@ -284,13 +292,21 @@
 
 /* ═══ covers ═══ */
 .dist-v4 .cover-wrap { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; }
-.dist-v4 .cover-slots { display: flex; gap: 10px; }
+/* The two crops are different heights (3:4 is 120px, 4:3 is 96px). Anything
+   other than a top-aligning cross-axis value therefore renders them offset
+   from each other — which is what `align-self: center` on the horizontal slot
+   used to do, staggering the pair by (120-96)/2 = 12px. Keep them on one row,
+   tops flush, each captioned underneath. */
+.dist-v4 .cover-slots { display: flex; flex-wrap: nowrap; gap: 10px; align-items: flex-start; }
+.dist-v4 .cover-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dist-v4 .cover-cap { font-size: 11px; line-height: 1.3; color: var(--content-4); white-space: nowrap; }
 .dist-v4 .cover-slot { border: 1.5px dashed var(--line-strong); border-radius: 11px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--content-4); font-size: 11px; cursor: not-allowed; transition: border-color .12s, color .12s; text-align: center; position: relative; overflow: hidden; background: none; padding: 0; font: inherit; }
 .dist-v4 .cover-slot svg { width: 17px; height: 17px; }
 .dist-v4 .cover-slot.v { width: 90px; height: 120px; }
-.dist-v4 .cover-slot.h { width: 128px; height: 96px; align-self: center; }
+.dist-v4 .cover-slot.h { width: 128px; height: 96px; }
 .dist-v4 .cover-slot.filled { border-style: solid; border-color: rgba(99, 102, 241, .5); color: #fff; }
-.dist-v4 .cover-slot.filled .tag { position: absolute; left: 6px; top: 6px; font-size: 9.5px; font-weight: 600; padding: 2px 6px; border-radius: 5px; background: rgba(0, 0, 0, .5); color: #fff; letter-spacing: .03em; }
+/* (The ratio label used to be an overlay pinned inside the filled box; it now
+   sits under the box as `.cover-cap`, so there is no `.tag` here any more.) */
 /* D4 not-yet-built cover slots: dimmed + a "Soon" pill (mirrors the D3/D4
    disabled affordances used elsewhere on this page). */
 .dist-v4 .cover-slot.is-soon { opacity: .5; }
@@ -308,7 +324,12 @@
 .dist-v4 .cover-frames-err .field-err svg { flex-shrink: 0; margin-top: 2px; }
 .dist-v4 .cover-source { display: flex; align-items: center; gap: 8px; width: 100%; }
 .dist-v4 .cover-source label { font-size: 11px; color: var(--content-4); white-space: nowrap; }
-.dist-v4 .cover-source .input { flex: 1; min-width: 0; }
+/* UiSelect wraps its trigger in a positioning div, so the flex item in this
+   row is that wrapper, not the `.input` trigger itself — the trigger's own
+   `width: 100%` then fills it. Targeting only `.input` would leave the wrapper
+   content-sized and the field would no longer stretch to the row. */
+.dist-v4 .cover-source > :not(label) { flex: 1; min-width: 0; }
+.dist-v4 .cover-source .input { width: 100%; min-width: 0; }
 .dist-v4 .cover-cand-strip { display: flex; gap: 9px; flex-wrap: wrap; }
 .dist-v4 .cover-cand { position: relative; width: 62px; height: 82px; padding: 0; border-radius: 9px; border: 1.5px solid var(--line-strong); background: none; overflow: hidden; cursor: pointer; transition: border-color .12s; }
 .dist-v4 .cover-cand:hover:not(:disabled) { border-color: var(--content-4); }

@@ -297,10 +297,9 @@ describe('PublishPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /# Topic/i }));
     fireEvent.change(screen.getByLabelText(/Add a topic/i), { target: { value: 'golden' } });
 
-    // Scoped to the suggestion list on purpose: the page also renders a native
-    // <select> for the self declaration, and its <option> elements carry the
-    // same ARIA role — an unscoped query would "find" rows that resolve before
-    // the lookup has even run.
+    // Scoped to the suggestion list on purpose: the self-declaration dropdown
+    // also renders rows with the `option` role once it is open — an unscoped
+    // query would "find" rows that resolve before the lookup has even run.
     const list = await screen.findByTestId('topic-suggest');
     // Debounced: one request for the burst, not one per keystroke.
     const options = await within(list).findAllByRole('option');
@@ -710,10 +709,12 @@ describe('PublishPage form fields', () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
-    const select = screen.getByLabelText(/Self declaration/i) as HTMLSelectElement;
-    expect(select.value).toBe('');
+    // The declaration is a UiSelect, so the readback is the trigger's own
+    // label. The wire value it maps to is asserted on the request below.
+    const declaration = screen.getByRole('button', { name: 'Self declaration' });
+    expect(declaration.textContent).toContain('Not set');
     fireEvent.click(screen.getByRole('switch', { name: /AI-generated content/i }));
-    expect(select.value).toBe('内容由AI生成');
+    expect(declaration.textContent).toContain('AI-generated content');
 
     await pickContentAndAccount();
     fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
@@ -730,9 +731,8 @@ describe('PublishPage form fields', () => {
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('switch', { name: /AI-generated content/i }));
-    fireEvent.change(screen.getByLabelText(/Self declaration/i), {
-      target: { value: '内容为转载信息' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Self declaration' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Reposted information' }));
     // Disagreeing controls are surfaced, not silently resolved.
     expect(screen.getByText(/declares something else/i)).toBeInTheDocument();
 

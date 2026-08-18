@@ -241,10 +241,16 @@ export function UiSelect({
   const [onlyLoaded, setOnlyLoaded] = useState(false);
   const [query, setQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [menuStyle, setMenuStyle] = useState<{ left: number; top: number; width: number }>({
+  const [menuStyle, setMenuStyle] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxWidth: number;
+  }>({
     left: 0,
     top: 0,
     width: 0,
+    maxWidth: 0,
   });
   const { shouldRender: shouldRenderMenu, isVisible: isMenuVisible } = useDialogTransition(
     isOpen,
@@ -392,6 +398,12 @@ export function UiSelect({
         left: rect.left,
         top: openAbove ? Math.max(8, rect.top - estimatedMenuHeight - 8) : rect.bottom + 8,
         width: rect.width,
+        // Room from the trigger's left edge to the right edge of the viewport.
+        // The menu is shrink-to-fit (see the style block below), so this is
+        // what keeps a long option from running off screen. Floored at the
+        // trigger width so the menu is never made NARROWER than the trigger,
+        // whatever the trigger's position.
+        maxWidth: Math.max(rect.width, window.innerWidth - rect.left - 8),
       });
     };
 
@@ -539,7 +551,25 @@ export function UiSelect({
               style={{
                 left: menuStyle.left,
                 top: menuStyle.top,
-                width: Math.max(menuStyle.width, richMode || showSearch ? 240 : 0),
+                // `min-width`, NOT `width`. Pinning the panel to the trigger's
+                // measured width meant any option label longer than the
+                // CURRENTLY SELECTED one got ellipsised — a short trigger made
+                // its own menu unreadable ("Recently updated" → "Recently up…"
+                // under a trigger showing "Newest first"). That cost is already
+                // recorded elsewhere in the codebase: `editor/components/
+                // HeadingSelect.tsx` exists as a separate dropdown partly
+                // because "the app-wide UiSelect is a menu whose panel width
+                // tracks its trigger; the short heading triggers make it clip
+                // labels".
+                //
+                // Leaving `width` off makes this fixed-position panel
+                // shrink-to-fit: it sizes to its content, clamped between the
+                // trigger width (so it never looks detached from a wide
+                // trigger) and the room left on screen. Callers cannot be
+                // affected — the panel is portaled to <body> and positioned
+                // `fixed`, so it takes part in no caller's layout.
+                minWidth: Math.max(menuStyle.width, richMode || showSearch ? 240 : 0),
+                maxWidth: menuStyle.maxWidth,
                 maxHeight: 320,
                 transitionDuration: `${UI_POPOVER_TRANSITION_MS}ms`,
               }}

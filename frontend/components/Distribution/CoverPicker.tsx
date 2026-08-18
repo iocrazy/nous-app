@@ -5,6 +5,7 @@ import { getSupabaseClient } from '../../supabaseClient';
 import { extractCoverFrames, selectCoverFrame } from '../../services/distributionService';
 import { getResourceFileUrl } from '../../services/resourceService';
 import { CoverCandidate, CoverFramesMeta } from '../../types';
+import { UiSelect } from '../ui/primitives';
 
 /**
  * Cover picking, frame-first: sample N evenly-spaced frames out of a video the
@@ -288,21 +289,23 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
 
   const frameUrl = (id: string) => getResourceFileUrl(id, token);
 
+  /**
+   * One cover cell: the crop box, with its ratio caption UNDER it.
+   *
+   * The caption used to be an overlay pinned inside the filled box (and plain
+   * text inside the empty one), which meant the two boxes were the only thing
+   * carrying the layout — and since they are different heights (120 vs 96) the
+   * shorter one was centred against the taller one, so the pair rendered
+   * staggered rather than side by side. Wrapping each box in a cell and
+   * captioning underneath is what the platform's own uploader does, and it
+   * makes the two cells align on their top edge for free.
+   */
   const slot = (kind: 'v' | 'h', resourceId: string | undefined, label: string) => (
-    <div className={`cover-slot ${kind} ${resourceId ? 'filled' : ''}`}>
-      {resourceId
-        ? (
-          <>
-            <img src={frameUrl(resourceId)} alt={label} />
-            <span className="tag">{label}</span>
-          </>
-        )
-        : (
-          <>
-            <Film />
-            {label}
-          </>
-        )}
+    <div className="cover-cell">
+      <div className={`cover-slot ${kind} ${resourceId ? 'filled' : ''}`}>
+        {resourceId ? <img src={frameUrl(resourceId)} alt={label} /> : <Film />}
+      </div>
+      <span className="cover-cap">{label}</span>
     </div>
   );
 
@@ -342,19 +345,27 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
           <>
             {sources.length > 1 && (
               <div className="cover-source">
-                <label htmlFor="cover-source-select">
+                {/* No `htmlFor`: the control below is a button-based menu, not
+                    a native <select>, so the accessible name rides on its own
+                    `aria-label`. Pointing a label at the aria-hidden mirror
+                    <select> would name a control screen readers cannot reach. */}
+                <label>
                   {t('distribution.publish.coverSourceLabel', 'Sample from')}
                 </label>
-                <select
-                  id="cover-source-select"
-                  className="input"
+                {/* Same reason as the self-declaration field on the publish
+                    page: a bare <select> paints with the OS widget instead of
+                    the app's own menu. `triggerClassName` keeps this page's
+                    `.input` field look. */}
+                <UiSelect
+                  triggerClassName="input"
+                  aria-label={t('distribution.publish.coverSourceLabel', 'Sample from')}
                   value={activeSource ?? ''}
                   onChange={(e) => setSourceId(e.target.value)}
                 >
                   {sources.map((s) => (
                     <option key={s.id} value={s.id}>{s.filename}</option>
                   ))}
-                </select>
+                </UiSelect>
               </div>
             )}
 

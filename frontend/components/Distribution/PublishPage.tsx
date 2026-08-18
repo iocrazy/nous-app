@@ -25,6 +25,7 @@ import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
+import { UiSelect } from '../ui/primitives';
 import { DateTimePopover } from '../common/DateTimePopover';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
@@ -2325,8 +2326,15 @@ export const PublishPage: React.FC = () => {
                   )}
                 </span>
               </div>
-              <select
-                className="input"
+              {/* UiSelect, not a bare <select>: a native dropdown paints with
+                  the OS widget (its own highlight colour, its own font) and was
+                  the only control on this page that did. `triggerClassName`
+                  swaps the shared component's default surface for this page's
+                  own `.input` field styling, so the trigger still looks like
+                  every other field in the form while the menu is the same
+                  portal menu the rest of the app uses. */}
+              <UiSelect
+                triggerClassName="input"
                 value={selfDeclaration}
                 aria-label={t('distribution.publish.selfDeclaration', 'Self declaration')}
                 onChange={(e) => onSelfDeclarationChange(e.target.value)}
@@ -2339,7 +2347,7 @@ export const PublishPage: React.FC = () => {
                     {t(`distribution.publish.${d.key}`, d.label)}
                   </option>
                 ))}
-              </select>
+              </UiSelect>
               {declarationConflict && (
                 <p className="field-warn">
                   {t(
