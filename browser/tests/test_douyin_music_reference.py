@@ -659,6 +659,11 @@ def test_the_usage_clause_is_bounded_in_number_and_length():
     assert "|12345|" not in clause
     # A count that fits is printed whole, no decoration.
     assert "31" == dp.describe_music_usage(rows(("未来", "", "31人使用")), None).split("uses=")[1].split(" ")[0]
+    # `want` is clipped and marked on the same rule — it is read as one side of
+    # a comparison against the counts beside it, so a silent prefix is the same
+    # lie there.
+    huge = dp.describe_music_usage(rows(("未来", "", "31人使用")), ref(user_count=12345678901234))
+    assert huge.endswith("want=123456789…")
 
 
 def test_the_row_probe_hands_the_usage_line_back_out_of_the_page():

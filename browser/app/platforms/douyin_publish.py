@@ -3087,11 +3087,15 @@ def describe_music_usage(
         # Said explicitly: a truncated list that looked complete would let
         # "all four agree" be read off a sample of a wider set.
         body += f"|+{len(candidates) - MUSIC_SAMPLE_USAGE}"
-    want = (
-        MUSIC_UNKNOWN
-        if reference is None or reference.user_count is None
-        else str(reference.user_count)[:MUSIC_SAMPLE_WANT_CHARS]
-    )
+    if reference is None or reference.user_count is None:
+        want = MUSIC_UNKNOWN
+    else:
+        # Clipped the same way, and marked for the same reason: a `want` cut to
+        # its first nine digits is still a legible number, and the whole clause
+        # is read as a comparison between it and the counts beside it.
+        want = str(reference.user_count)
+        if len(want) > MUSIC_SAMPLE_WANT_CHARS:
+            want = want[:MUSIC_SAMPLE_WANT_CHARS] + "…"
     return f"uses={body} want={want}"
 
 
