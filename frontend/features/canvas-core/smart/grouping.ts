@@ -418,3 +418,64 @@ export function applyDropMembership(
   const released = stripRfInternals({ ...restFields, position: abs } as CanvasNode);
   return nodes.map((n) => (String(asObj(n).id) === draggedId ? released : n));
 }
+
+
+// ---- Arrange members (IC parity — Infinite's 分组整理排列) ---------------
+
+const ARRANGE_GAP = 24;
+const ARRANGE_HEADER = 48;
+const ARRANGE_FALLBACK_W = 240;
+const ARRANGE_FALLBACK_H = 120;
+
+function childSize(node: CanvasNode): { w: number; h: number } {
+  const obj = asObj(node);
+  const measured = obj.measured as { width?: number; height?: number } | undefined;
+  const style = obj.style as { width?: number; height?: number } | undefined;
+  return {
+    w: measured?.width ?? style?.width ?? ARRANGE_FALLBACK_W,
+    h: measured?.height ?? style?.height ?? ARRANGE_FALLBACK_H,
+  };
+}
+
+/** Grid-arrange a group's member nodes inside the container (IC's
+ *  arrangeSmartGroupMembers): uniform cells sized to the largest member,
+ *  ceil(√n) columns, container grown to fit. The group's own position is
+ *  untouched — arranging is an internal tidy, not a move. Returns the input
+ *  array identity when the group has no members. */
+export function arrangeGroupChildren(
+  nodes: CanvasNode[],
+  groupId: string,
+): CanvasNode[] {
+  const children = nodes.filter((n) => asObj(n).parentId === groupId);
+  if (children.length === 0) return nodes;
+  const sizes = children.map(childSize);
+  const cellW = Math.max(...sizes.map((s) => s.w));
+  const cellH = Math.max(...sizes.map((s) => s.h));
+  const cols = Math.ceil(Math.sqrt(children.length));
+  const rows = Math.ceil(children.length / cols);
+  const slotOf = new Map(children.map((c, i) => [String(asObj(c).id), i]));
+  const width = GROUP_PADDING * 2 + cols * cellW + (cols - 1) * ARRANGE_GAP;
+  const height =
+    ARRANGE_HEADER + GROUP_PADDING + rows * cellH + (rows - 1) * ARRANGE_GAP;
+  return nodes.map((n) => {
+    const obj = asObj(n);
+    const id = String(obj.id);
+    if (id === groupId) {
+      return {
+        ...(n as object),
+        style: { ...((obj.style as object) ?? {}), width, height },
+      } as CanvasNode;
+    }
+    const slot = slotOf.get(id);
+    if (slot === undefined) return n;
+    const col = slot % cols;
+    const row = Math.floor(slot / cols);
+    return {
+      ...(n as object),
+      position: {
+        x: GROUP_PADDING + col * (cellW + ARRANGE_GAP),
+        y: ARRANGE_HEADER + row * (cellH + ARRANGE_GAP),
+      },
+    } as CanvasNode;
+  });
+}
