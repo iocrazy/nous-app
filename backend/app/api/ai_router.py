@@ -151,29 +151,6 @@ async def trigger_transcription_by_resource(
         resource_id, auth.user_id
     )
 
-    # === Dedup: something already occupies the transcription slot? ===
-    # Both task types can occupy it: when the media has no audio track yet
-    # this endpoint dispatches `extract_audio` (chain_transcription=True),
-    # which transcribes internally — the majority path for downloaded
-    # video. But `extract_audio` is ALSO created by the post-download chain
-    # and by the "Extract Audio" button, and those runs do NOT transcribe.
-    # Both block a new dispatch (migration 121's unique index is keyed on
-    # (resource_id, task_type) and cannot see intent), so the difference
-    # has to show up in what we tell the caller.
-    from app.services.ai.resource_ai_status import (
-        find_active_transcription_task,
-        is_active_task_conflict,
-    )
-
-    _active = await find_active_transcription_task(resource_id)
-    if _active is not None:
-        if _active.chains_transcription:
-            return _transcription_in_progress_response(resource_id, platform_id)
-        return _audio_extraction_blocks_response(
-            resource_id, platform_id, _active.workflow_id
-        )
-    # === End dedup ===
-
     # === Audio-readiness classification (BEFORE billing) ===
     # Three cases, decided up-front so a dead-end never leaves points
     # charged (the 409 used to raise AFTER check_and_consume):
@@ -195,6 +172,39 @@ async def trigger_transcription_by_resource(
             ),
         )
     # === End classification ===
+
+    # === Dedup: something already occupies the transcription slot? ===
+    # Which slot that is depends on the classification above, so this runs
+    # after it (still before billing — a short-circuit never charges).
+    #
+    #   audio ready  → we would insert `ai_transcription`, which collides
+    #                  only with another `ai_transcription`. A non-chaining
+    #                  `extract_audio` running alongside is a DIFFERENT
+    #                  task_type: it neither blocks that insert nor produces
+    #                  a transcript, so refusing on its account would be a
+    #                  pointless rejection.
+    #   no audio     → we would insert `extract_audio`, which collides with
+    #                  ANY active `extract_audio` (migration 121's unique
+    #                  index is keyed on (resource_id, task_type) and cannot
+    #                  see intent) — including the audio-only kind that will
+    #                  never transcribe. That one gets its own answer.
+    #
+    # Either way, a task that WILL produce a transcript means "already in
+    # progress" is true and re-dispatching would double-charge.
+    from app.services.ai.resource_ai_status import (
+        find_active_transcription_task,
+        is_active_task_conflict,
+    )
+
+    _active = await find_active_transcription_task(resource_id)
+    if _active is not None:
+        if _active.chains_transcription:
+            return _transcription_in_progress_response(resource_id, platform_id)
+        if not _has_audio:
+            return _audio_extraction_blocks_response(
+                resource_id, platform_id, _active.workflow_id
+            )
+    # === End dedup ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
@@ -374,6 +384,10 @@ async def trigger_transcription_by_resource(
             )
             if _has_audio or (_blocker is not None and _blocker.chains_transcription):
                 return _transcription_in_progress_response(resource_id, platform_id)
+            # `_blocker is None` means the winner finished between our
+            # failed INSERT and this re-read. Nothing is running, so a
+            # retry succeeds immediately — the null blocking_task_id says
+            # exactly that ("retry now" rather than "wait for this task").
             return _audio_extraction_blocks_response(
                 resource_id,
                 platform_id,

@@ -99,6 +99,34 @@ def _extract_audio_sites(tree: ast.AST) -> tuple[list, list]:
     return recorded, dispatched
 
 
+def _files_creating_extract_audio() -> set[str]:
+    """Every app/ file that creates an extract_audio task_tracking row."""
+    found = set()
+    for path in APP.rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:  # pragma: no cover - app/ must always parse
+            continue
+        recorded, _ = _extract_audio_sites(tree)
+        if recorded:
+            found.add(path.relative_to(APP).as_posix())
+    return found
+
+
+def test_no_fifth_creation_point_appeared_somewhere_else():
+    """The whole invariant is per-creation-point, so a new one landing in a
+    file this test does not know about would be invisible: it would record
+    no intent, every reader would call it non-chaining, and a genuine
+    chaining run would start telling users to retry for nothing.
+
+    Scanning all of app/ rather than the fixed list is the difference
+    between "the four we know about are consistent" and "there are only
+    four". Adding a creation point is fine — add it to EXPECTED_INTENT with
+    the intent it dispatches, and the pairing test covers it from then on.
+    """
+    assert _files_creating_extract_audio() == set(EXPECTED_INTENT)
+
+
 @pytest.mark.parametrize("rel_path", sorted(EXPECTED_INTENT))
 def test_every_extract_audio_creation_records_its_chain_intent(rel_path):
     tree = ast.parse((APP / rel_path).read_text())

@@ -384,6 +384,109 @@ class TestTranscribeDedup:
         assert dispatched == []
         assert created == []
 
+    def _audio_ready_media(self) -> dict:
+        return {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chains", [False, None])
+    async def test_audio_already_on_disk_is_not_blocked_by_an_audio_only_run(
+        self, monkeypatch, chains
+    ) -> None:
+        """With audio on disk we insert `ai_transcription`, and migration
+        121's index is per (resource_id, task_type) — a non-chaining
+        `extract_audio` is a different task_type, so it neither blocks that
+        insert nor produces a transcript. Refusing here would be a rejection
+        that protects nothing: the user is told to retry later when the
+        dispatch would have worked right now.
+        """
+        _patch_resource_resolver(monkeypatch, self._audio_ready_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch, _ActiveTaskSession("extract_audio", chains=chains)
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription queued"
+        assert res["transcription_pending_audio"] is False
+        assert [d["name"] for d in dispatched] == ["ai_transcription"]
+        assert created[0]["task_type"] == "ai_transcription"
+
+    @pytest.mark.asyncio
+    async def test_audio_already_on_disk_still_defers_to_a_chaining_run(
+        self, monkeypatch
+    ) -> None:
+        """The other half of the same rule: a run that WILL transcribe makes
+        "already in progress" true, and dispatching again would double-charge
+        for the same transcript."""
+        _patch_resource_resolver(monkeypatch, self._audio_ready_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch, _ActiveTaskSession("extract_audio", chains=True)
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert res["points_charged"] == 0
+        assert dispatched == []
+
+    @pytest.mark.asyncio
+    async def test_a_blocker_that_finished_first_yields_a_null_task_to_wait_on(
+        self, monkeypatch
+    ) -> None:
+        """Degenerate race: our INSERT lost, but by the time we re-read, the
+        winner had finished. Nothing is running, so `blocking_task_id: None`
+        tells the caller to retry now rather than wait on a task id."""
+        _patch_resource_resolver(monkeypatch, self._no_audio_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        class _AlwaysEmptySession:
+            async def execute(self, *_a, **_k):
+                class _Result:
+                    @staticmethod
+                    def mappings():
+                        class _M:
+                            @staticmethod
+                            def all():
+                                return []
+
+                        return _M()
+
+                return _Result()
+
+        _patch_dedup_session(monkeypatch, _AlwaysEmptySession())
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["transcription_pending_audio"] is True
+        assert res["blocking_task_id"] is None
+        assert res["points_charged"] == 0
+        assert dispatched == []
+
     @pytest.mark.asyncio
     async def test_losing_the_insert_race_reports_in_progress_not_500(
         self, monkeypatch
