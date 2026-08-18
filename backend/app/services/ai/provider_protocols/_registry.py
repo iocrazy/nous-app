@@ -8,6 +8,7 @@ from typing import Optional
 from app.services.ai.provider_protocols.ark import ArkProtocol
 from app.services.ai.provider_protocols.base import ProviderProtocol
 from app.services.ai.provider_protocols.claude import ClaudeProtocol
+from app.services.ai.provider_protocols.codex import CodexProtocol
 from app.services.ai.provider_protocols.deepseek import DeepSeekProtocol
 from app.services.ai.provider_protocols.doubao import DoubaoProtocol
 from app.services.ai.provider_protocols.jimeng import JimengProtocol
@@ -24,6 +25,7 @@ PROTOCOLS: tuple[ProviderProtocol, ...] = (
     ModelScopeProtocol(),
     ArkProtocol(),
     JimengProtocol(),
+    CodexProtocol(),
 )
 
 

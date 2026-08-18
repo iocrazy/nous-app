@@ -148,6 +148,29 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
     && command -v dreamina \
     && dreamina --help >/dev/null
 
+# ── gpt-image-2-skill (Codex / GPT Image 2) CLI ──────────────────────────
+# CodexCliProvider drives this binary as a subprocess for image generation
+# over the local Codex OAuth session (bind-mounted read-write at /app/.codex,
+# see docs/runbook/codex-image.md). The npm package is only a JS launcher; the
+# real program is a single static Rust binary shipped in the
+# `…-linux-x64-static` platform package, so we pull that tarball straight from
+# the registry and skip node/npm entirely. Pinned by version + sha256 —
+# upgrading is an explicit, reviewable change (same policy as base-image
+# digest pins). NPM_REGISTRY follows the APT_MIRROR convention: CN mirror by
+# default, override with https://registry.npmjs.org for builds abroad (the
+# tarball is byte-identical, the sha256 pin still holds).
+# NB: the CLI's -V/--help exit non-zero by design, so the sanity check greps
+# the version string instead of trusting the exit code.
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG GPT_IMAGE_2_SKILL_VERSION=0.7.3
+ARG GPT_IMAGE_2_SKILL_SHA256=9ff833f643736cd317e91c31ef976ff74356340c59ec95c343b112d98de92cc9
+RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-static/-/gpt-image-2-skill-linux-x64-static-${GPT_IMAGE_2_SKILL_VERSION}.tgz" \
+    && echo "${GPT_IMAGE_2_SKILL_SHA256}  /tmp/gis.tgz" | sha256sum -c - \
+    && tar xzf /tmp/gis.tgz -C /tmp package/bin/gpt-image-2-skill \
+    && install -m 0755 /tmp/package/bin/gpt-image-2-skill /usr/local/bin/gpt-image-2-skill \
+    && rm -rf /tmp/gis.tgz /tmp/package \
+    && gpt-image-2-skill -V 2>&1 | grep -q "${GPT_IMAGE_2_SKILL_VERSION}"
+
 # Install uv package manager
 RUN pip install uv
 

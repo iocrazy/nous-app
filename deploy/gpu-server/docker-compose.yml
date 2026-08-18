@@ -54,9 +54,17 @@ services:
       # 所以同一个 token 值要在 backend.env 与 browser.env 里各写一份。写歪了
       # 表现为 browser 返回 401 —— 可见的类型化失败,不是静默 no-op。
       - BROWSER_SERVICE_URL=http://nous-browser:8090
+      # CodexCliProvider(gpt-image-2-skill)的登录态文件。凭证是宿主机 heygo 的
+      # Codex OAuth 会话(bind mount,见下方 volumes),不是 api_key。
+      - CODEX_AUTH_FILE=/app/.codex/auth.json
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
+      # Codex OAuth 会话目录,必须读写:CLI 会把刷新后的 access_token 写回
+      # auth.json。容器 uid=1031 vs 宿主 heygo(1000) —— 用 ACL 授权,不改属主:
+      #   setfacl -R -m u:1031:rwX -m d:u:1031:rwX /home/heygo/.codex
+      # 部署后必须跑写入探针(读正常≠服务正常),见 docs/runbook/codex-image.md。
+      - /home/heygo/.codex:/app/.codex
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -189,9 +197,14 @@ services:
       # 同 backend:session 通道的发布/校验 workflow 实际跑在 worker 上,
       # 所以这条对 worker 才是必需的。token 同样来自共享的 secrets/backend.env。
       - BROWSER_SERVICE_URL=http://nous-browser:8090
+      # 同 backend:shot/canvas 生成 workflow 实际跑在 worker 上,codex 生图
+      # 的 subprocess 也在这里执行。
+      - CODEX_AUTH_FILE=/app/.codex/auth.json
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
+      # 同 backend:Codex OAuth 会话目录(读写,ACL 授权 uid 1031)。
+      - /home/heygo/.codex:/app/.codex
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
