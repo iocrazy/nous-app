@@ -459,6 +459,11 @@ MUSIC_ROW_ATTRIBUTE = "data-nous-music-row"
 # ran, so "these rows are new" is a fact about the page rather than a guess.
 # See `wait_for_music_results`.
 MUSIC_SEEN_ATTRIBUTE = "data-nous-music-seen"
+# Stamped by the ladder probe on the 「N人使用」 leaf it walked up FROM, so the
+# second pass can find that same leaf again and stamp the container this side
+# chose. The two passes exist because the choice is made here, in Python, where
+# it is a pure function a test can drive — see `resolve_music_row`.
+MUSIC_ANCHOR_ATTRIBUTE = "data-nous-music-anchor"
 
 # Every attribute THIS module writes onto the live page, in one list.
 #
@@ -475,7 +480,35 @@ MUSIC_SEEN_ATTRIBUTE = "data-nous-music-seen"
 # `test_every_attribute_this_module_stamps_is_registered` fails if a new
 # `data-nous-*` is introduced without joining it. **Adding a stamp means adding
 # it here.**
-MUSIC_OWN_ATTRIBUTES: tuple[str, ...] = (MUSIC_ROW_ATTRIBUTE, MUSIC_SEEN_ATTRIBUTE)
+MUSIC_OWN_ATTRIBUTES: tuple[str, ...] = (
+    MUSIC_ROW_ATTRIBUTE,
+    MUSIC_SEEN_ATTRIBUTE,
+    MUSIC_ANCHOR_ATTRIBUTE,
+)
+
+# How far above a 「N人使用」 leaf the probe is willing to look for the row.
+#
+# ⚠️ This is a BANDWIDTH bound, not the judgement. Which rung is the row is
+# decided by `resolve_music_row` — "the smallest one that reads as a whole row"
+# — and the ladder additionally stops the moment a rung holds two usage lines,
+# because a container with two rows in it is by definition above the row. Both
+# of those cut the walk long before this number does; it is here so that a page
+# whose 「N人使用」 copy appears somewhere that is not a result row cannot make
+# the probe serialise the whole document.
+#
+# ⚠️ Raising it is NOT a fix for a row that would not resolve. The previous
+# version of this walk stopped at "the first ancestor with two or more text
+# lines", which is a proxy for being a row rather than a test of it, and it
+# picked containers that read a title and a usage count but no author and no
+# running time (production, 2026-08-17: `au=0/5 du=0/5` — the fingerprint had
+# silently degraded to a title comparison). The cure for that is the criterion,
+# not the ceiling.
+MUSIC_ROW_MAX_DEPTH = 6
+# How many chosen containers get their attribute names censused. Rows in one
+# list share their markup, so a few are a census and twenty are a cost — the
+# same bound the census has always had, moved to the pass that knows which node
+# was actually chosen.
+MUSIC_CENSUS_ROWS = 3
 
 # The platform's usage copy (「N万人使用」), written down ONCE and used three
 # ways: both page probes `.test()` it — it is the row anchor AND the readiness
@@ -1240,44 +1273,276 @@ def parse_music_usage(text: str | None) -> str | None:
     return f"{match.group(1)}{match.group(2)}"
 
 
+#: A line that ENDS in a running time with nothing separating it from the text
+#: before it — 「吴青峰05:25」.
+#:
+#: This is not a guess about the platform's copy; it is a property of
+#: `innerText`. Chrome's `innerText` reproduces what is *laid out*, and
+#: CSS-generated content (`::before { content: "·" }`) is **not** laid out into
+#: it. A row that renders 「作者 · 时长」 with the dot as a pseudo-element
+#: therefore arrives here as the two halves run together, and the separator
+#: loop above finds nothing to split on. Reading that as "this row did not tell
+#: us its author" would be the same `?`-for-a-fact mistake the rest of this
+#: module refuses.
+_MUSIC_TRAILING_TIME_RE = re.compile(r"^(.*?)(\d{1,3}:\d{1,2}(?::\d{1,2})?)$")
+
+
+def parse_music_meta(text: str | None) -> tuple[str | None, int | None]:
+    """One line of a row → ``(author, seconds)``. Pure and total.
+
+    `None` on either half means "this line did not tell us", never a zero or an
+    empty string — the distinction `MusicRow` is built on.
+
+    Three renderings are accepted, and they are three renderings of ONE thing
+    (「作者 · 时长」), not three guesses:
+
+    * ``作者·时长`` — what the T0 survey read off the live dialog. The author is
+      everything before the LAST separator, so an uploader whose own name
+      contains one still parses;
+    * ``作者时长`` — the same row when the dot is CSS-generated content, which
+      `innerText` does not reproduce (see `_MUSIC_TRAILING_TIME_RE`);
+    * ``时长`` alone — the author is not on this line at all. The author is then
+      `None` here; whoever has the surrounding lines (`resolve_music_row`) can
+      look one line up, and nobody else may invent one.
+    """
+    body = (text or "").strip()
+    if not body:
+        return None, None
+    for separator in MUSIC_META_SEPARATORS:
+        if separator not in body:
+            continue
+        head, _, tail = body.rpartition(separator)
+        duration = parse_music_duration(tail)
+        if duration is None:
+            continue
+        return head.strip(), duration
+    # No separator produced a running time. The whole line may still be one
+    # (some rows show only a duration), and that is worth keeping.
+    duration = parse_music_duration(body)
+    if duration is not None:
+        return None, duration
+    match = _MUSIC_TRAILING_TIME_RE.match(body)
+    if match is None:
+        return None, None
+    author = match.group(1).strip()
+    duration = parse_music_duration(match.group(2))
+    if not author or duration is None:
+        # A bare running time was already handled above, so an empty head here
+        # means the line is something else that happens to end in digits and a
+        # colon. Claiming an empty author off it would be inventing a reading.
+        return None, None
+    return author, duration
+
+
 def parse_music_row(
     index: int, name: str, meta: str | None, usage: str | None = None
 ) -> MusicRow:
     """A probe row → a `MusicRow`. Pure.
 
-    The author is taken as everything before the LAST separator, so a track
-    whose uploader name itself contains one still parses. If the tail is not a
-    running time, nothing is claimed about either field: a half-parsed line is
-    the kind of evidence that reads as a match without being one.
+    The line itself is read by `parse_music_meta`; this only decides what a
+    half-parsed line is worth. If the tail is not a running time, nothing is
+    claimed about either field: a half-parsed line is the kind of evidence that
+    reads as a match without being one.
 
     `usage` is the anchor line the probe read off the row, and it is parsed on
     its own axis: an unreadable usage line costs the usage evidence and nothing
     else, exactly as an unreadable second line costs author and length.
     """
     count = parse_music_usage(usage)
-    text = (meta or "").strip()
-    if not text:
+    author, duration = parse_music_meta(meta)
+    if duration is None:
         return MusicRow(index=index, name=name, usage=count)
-    for separator in MUSIC_META_SEPARATORS:
-        if separator not in text:
+    return MusicRow(
+        index=index, name=name, author=author, duration_s=duration, usage=count
+    )
+
+
+@dataclass(frozen=True)
+class MusicRowLevel:
+    """One rung of the ladder from a 「N人使用」 leaf up towards its row.
+
+    Pure data, and deliberately thin: the page probe walks (which no test can
+    drive — there is no JS engine here), and everything that is a *judgement*
+    happens on this type, in Python, where a fixture can put a rung in front of
+    it and a regression turns red.
+    """
+
+    #: The rung's own text, split into non-empty trimmed lines, exactly as
+    #: `innerText` laid it out.
+    lines: tuple[str, ...] = ()
+    #: Whether the rung is outside the HTML namespace — i.e. an `<svg>` or one
+    #: of its children. A boolean, never a tag name's contents.
+    svg: bool = False
+
+
+@dataclass(frozen=True)
+class MusicRowSite:
+    """WHICH rung was taken for a row, and whether it read as a whole row.
+
+    `fit` is the load-bearing field and the reason this type exists. The walk
+    used to stop at "the first ancestor with two or more text lines", which is
+    a proxy for being a row rather than a test of it — and in production
+    (2026-08-17) it settled on containers that gave up a title and a usage count
+    and **no author, no running time**: `dims=name au=0/5 du=0/5`, the
+    fingerprint quietly degraded to the title-only matcher this path exists to
+    replace. Nothing in the failure said so, because nothing measured whether
+    the container we called a row was one.
+
+    Now it is measured, per row, and it is reported (`fit=`). A rung that does
+    not give up all three is never *called* the row: `fit` stays False, author
+    and length stay `None`, and `judge_music_reference` refuses exactly as it
+    does for any row it could not read. Publishing on a container we could not
+    read is the one outcome this whole path was built to prevent.
+    """
+
+    #: Rungs above the anchor of the container we settled on, 0-based
+    #: (0 = the anchor's parent). `None` = there was nothing to settle on.
+    level: int | None
+    #: How many rungs the probe offered, so `level` can be read as a position
+    #: rather than as a bare number.
+    levels: int
+    #: Did that rung give up a title, an author AND a running time?
+    fit: bool
+    #: How many text lines the chosen rung has. `0` when there is no rung.
+    lines: int = 0
+    #: Is the chosen rung outside the HTML namespace (an SVG icon's innards)?
+    svg: bool = False
+    name: str = ""
+    author: str | None = None
+    duration_s: int | None = None
+
+
+def _music_usage_lines(lines: Sequence[str]) -> set[int]:
+    """Which of a rung's lines are 「N人使用」 counts. Pure."""
+    return {
+        position
+        for position, line in enumerate(lines)
+        if _MUSIC_USAGE_RE.search(line)
+    }
+
+
+def _read_music_row_lines(
+    lines: Sequence[str], usage_at: set[int]
+) -> tuple[str, str, int] | None:
+    """A rung's lines → ``(title, author, seconds)``, or `None`. Pure.
+
+    `None` means "this rung is not a row", and it is the answer that keeps the
+    walk going. Every field has to come off the SAME rung, because the live
+    dialog puts all three on one row (cover, title, 作者·时长, N人使用) — a
+    container that yields two of them is a piece of a row, not a row.
+
+    The author may sit on the running time's own line or on the line above it;
+    both are `innerText` renderings of 「作者 · 时长」 (see `parse_music_meta`),
+    and which one a row produces depends on whether those two are block-level
+    siblings. The title is then the first remaining line — remaining meaning
+    "not the usage count and not part of the 作者·时长 reading", so its position
+    is derived from what was identified rather than assumed to be index 0.
+    """
+    for position, line in enumerate(lines):
+        if position in usage_at:
             continue
-        head, _, tail = text.rpartition(separator)
-        duration = parse_music_duration(tail)
+        author, duration = parse_music_meta(line)
         if duration is None:
             continue
-        return MusicRow(
-            index=index,
-            name=name,
-            author=head.strip(),
-            duration_s=duration,
-            usage=count,
-        )
-    # No separator produced a running time. The whole line may still be one
-    # (some rows show only a duration), and that is worth keeping.
-    duration = parse_music_duration(text)
-    if duration is not None:
-        return MusicRow(index=index, name=name, duration_s=duration, usage=count)
-    return MusicRow(index=index, name=name, usage=count)
+        consumed = {position}
+        if author is None:
+            # The line is a bare running time, so the author is whatever line
+            # sits immediately above it — not searched for further afield,
+            # because "some line up there" is a guess and this is meant to be a
+            # reading.
+            previous = position - 1
+            if previous < 0 or previous in usage_at:
+                continue
+            author = lines[previous].strip()
+            consumed.add(previous)
+        if not author:
+            continue
+        for other, candidate in enumerate(lines):
+            if other in usage_at or other in consumed or not candidate.strip():
+                continue
+            return candidate.strip(), author, duration
+    return None
+
+
+def resolve_music_row(levels: Sequence[MusicRowLevel]) -> MusicRowSite:
+    """Which rung of the ladder is the song's row. Pure. **The fix.**
+
+    Walked from the inside out, and the rung is taken on a *reading*, not on a
+    shape:
+
+    * a rung holding TWO usage counts is above the row — it is the list, and
+      everything further out holds the list too, so the walk stops there rather
+      than climbing into the dialog;
+    * a rung that gives up a title, an author and a running time IS the row.
+      The smallest such rung wins, so a container that happens to enclose the
+      row cannot be mistaken for it.
+
+    When nothing reads as a row, the innermost rung with more than one line is
+    still reported — the click has to land somewhere and this is what the old
+    walk would have chosen — but it is reported with ``fit=False`` and with
+    author and length left `None`. It is not called a row and nothing is
+    matched on it, which is what keeps "we could not find the row" from
+    publishing as "we found a row with no author".
+
+    ⚠️ This deliberately does not fall back to reading line 2 positionally. That
+    is precisely what produced `au=0/5 du=0/5` on a dialog whose every row shows
+    an author: line 2 of the container we happened to stop at was the usage
+    count, and the parse of it failed silently into "the page told us nothing".
+    """
+    if not levels:
+        return MusicRowSite(level=None, levels=0, fit=False)
+
+    fallback: int | None = None
+    fallback_name = ""
+    for position, level in enumerate(levels):
+        lines = list(level.lines)
+        usage_at = _music_usage_lines(lines)
+        if len(usage_at) > 1:
+            # Two rows' worth of usage counts: we have climbed out of the row.
+            break
+        read = _read_music_row_lines(lines, usage_at)
+        if read is not None:
+            name, author, duration = read
+            return MusicRowSite(
+                level=position,
+                levels=len(levels),
+                fit=True,
+                lines=len(lines),
+                svg=level.svg,
+                name=name,
+                author=author,
+                duration_s=duration,
+            )
+        if fallback is None:
+            # The smallest rung that says something other than the count. Not
+            # "the first rung with two lines" — that was the old proxy, and it
+            # is what settled on pieces of rows. This one is only ever used to
+            # give the click a target and the diagnostic a title; nothing is
+            # matched on it, and `fit` stays False so the caller goes on
+            # treating the row as one it could not read.
+            named = next(
+                (
+                    line.strip()
+                    for offset, line in enumerate(lines)
+                    if offset not in usage_at and line.strip()
+                ),
+                "",
+            )
+            if named:
+                fallback = position
+                fallback_name = named
+
+    if fallback is None:
+        return MusicRowSite(level=None, levels=len(levels), fit=False)
+    chosen = levels[fallback]
+    return MusicRowSite(
+        level=fallback,
+        levels=len(levels),
+        fit=False,
+        lines=len(chosen.lines),
+        svg=chosen.svg,
+        name=fallback_name,
+    )
 
 
 def _music_axis_prose(used: Sequence[str]) -> str:
@@ -2888,21 +3153,20 @@ _MUSIC_USAGE_JS = f"/{MUSIC_USAGE_PATTERN}/"
 _MUSIC_ROWS_JS = """
 (options) => {
   // __nous_music_rows_probe__
+  //
+  // Collects a LADDER per row and decides nothing. WHICH rung is the row is
+  // `resolve_music_row`'s call, on the Python side, and it moved there because
+  // it is a judgement: there is no JS engine in this project's test suite, so
+  // nothing written here has ever been executed by anything but a live page.
+  // What is left is mechanical — walk up, read the text, hand it over — and
+  // mechanical is what an unprovable layer is allowed to hold.
   const USAGE = __USAGE__;
-  const attribute = options.attribute;
-  // The two attributes THIS module stamps on the page, excluded from the
-  // census below by name. Reporting our own marks back to ourselves would
-  // read as "the rows carry data attributes" — the exact false positive the
-  // census exists to rule in or out. Structural, not a habit of remembering.
-  const ours = new Set(options.ours || []);
-  // Attribute NAMES on the result rows. Values are never touched: a `data-*`
-  // value on this page could be an id, an account handle or a token, and this
-  // string is stored, logged, and rendered in a UI on a PUBLIC repo.
-  // `getAttributeNames()` cannot return a value even by accident, which is
-  // why it is used instead of walking `.attributes` — the guarantee is in the
-  // API, not in remembering to strip something afterwards.
-  const attrs = new Set();
-  let censused = 0;
+  const anchorAttribute = options.anchor;
+  const maxDepth = options.depth;
+  const linesOf = (node) => (node.innerText || '')
+    .split('\\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
   const anchors = [];
   for (const el of document.querySelectorAll('*')) {
     if (el.children.length) continue;
@@ -2910,26 +3174,91 @@ _MUSIC_ROWS_JS = """
     if (own && USAGE.test(own)) anchors.push(el);
   }
   const rows = [];
-  const seen = new Set();
   for (const anchor of anchors) {
+    const index = rows.length;
+    const levels = [];
     let node = anchor.parentElement;
-    let row = null;
-    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
-      const lines = (node.innerText || '')
-        .split('\\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (lines.length >= 2) { row = node; break; }
+    for (let depth = 0; node && depth < maxDepth; depth += 1, node = node.parentElement) {
+      const lines = linesOf(node);
+      levels.push({
+        lines,
+        // A boolean about the NAMESPACE — never a tag name, never a class. It
+        // answers the one question the counts cannot: whether the thing we
+        // settled on is an icon's innards rather than a row.
+        svg: node.namespaceURI !== 'http://www.w3.org/1999/xhtml',
+      });
+      // Bandwidth only. A rung carrying two usage counts is the LIST, and the
+      // Python side stops there too — but it stops on rungs it has already been
+      // handed, and this keeps the handing-over from serialising the whole
+      // dialog. Same regex on both sides, so neither can disagree with the
+      // other about what a usage count is.
+      let usages = 0;
+      for (const line of lines) if (USAGE.test(line)) usages += 1;
+      if (usages > 1) break;
     }
-    if (!row || seen.has(row)) continue;
-    seen.add(row);
-    // Rows in one list share their markup, so a few are a census and twenty
-    // are a cost. Bounded here rather than by trusting the list to be short.
-    if (censused < 3) {
+    // Stamped on the LEAF, not on a container: the leaf is the only node this
+    // pass is sure about, and the second pass climbs from it to whichever rung
+    // Python chose. The row's own stamp is written there.
+    anchor.setAttribute(anchorAttribute, String(index));
+    rows.push({
+      index,
+      // The anchor's OWN text, unparsed. Evidence only — nothing in this
+      // module matches on it (see `judge_music_reference`) — because whether
+      // usage separates same-titled rows is a question we have never been able
+      // to answer from a failure.
+      usage: (anchor.innerText || anchor.textContent || '').trim(),
+      levels,
+    });
+  }
+  return { rows };
+}
+""".replace("__USAGE__", _MUSIC_USAGE_JS)
+
+
+# Pass two: stamp the containers Python chose, and census what THEY carry.
+#
+# The census lives here rather than in the ladder pass, and that move is the
+# whole point of it: a census is only worth something when it is taken on the
+# node that was actually chosen. Taken in the ladder pass it would have to
+# guess a rung, and a census of the wrong element is worse than no census — it
+# reports a vocabulary belonging to something else while looking exactly like
+# an answer. That is what 2026-08-17's `attrs=d,fill,fill-opacity` was: SVG
+# path attributes, read off whatever the old walk had settled on, and therefore
+# evidence about nothing.
+_MUSIC_SITE_JS = """
+(options) => {
+  // __nous_music_site_probe__
+  const anchorAttribute = options.anchor;
+  const rowAttribute = options.row;
+  // The attributes THIS module stamps on the page, excluded from the census
+  // below by name. Reporting our own marks back to ourselves would read as
+  // "the rows carry data attributes" — the exact false positive the census
+  // exists to rule in or out. Structural, not a habit of remembering.
+  const ours = new Set(options.ours || []);
+  // Attribute NAMES on the chosen containers. Values are never touched: a
+  // `data-*` value on this page could be an id, an account handle or a token,
+  // and this string is stored, logged, and rendered in a UI on a PUBLIC repo.
+  // `getAttributeNames()` cannot return a value even by accident, which is why
+  // it is used instead of walking `.attributes` — the guarantee is in the API,
+  // not in remembering to strip something afterwards.
+  const attrs = new Set();
+  let stamped = 0;
+  let censused = 0;
+  for (const item of options.plan || []) {
+    const anchor = document.querySelector(
+      '[' + anchorAttribute + '="' + String(item.index) + '"]'
+    );
+    if (!anchor) continue;
+    let node = anchor.parentElement;
+    for (let step = 0; step < item.level && node; step += 1) node = node.parentElement;
+    if (!node) continue;
+    node.setAttribute(rowAttribute, String(item.index));
+    stamped += 1;
+    if (censused < options.census) {
       censused += 1;
-      // `element`, not `node`: `node` is the walk-up cursor in the enclosing
-      // block, and shadowing it here would read as reuse to anyone skimming.
-      const scope = [row].concat(Array.from(row.querySelectorAll('*')));
+      // `element`, not `node`: `node` is the walk-up cursor above, and
+      // shadowing it here would read as reuse to anyone skimming.
+      const scope = [node].concat(Array.from(node.querySelectorAll('*')));
       for (const element of scope) {
         if (!element.getAttributeNames) continue;
         for (const name of element.getAttributeNames()) {
@@ -2937,40 +3266,13 @@ _MUSIC_ROWS_JS = """
         }
       }
     }
-    const lines = (row.innerText || '')
-      .split('\\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    // Line 1 is the title and line 2 is 「作者·时长」 — both measured at T0.
-    // The second line is what makes a title an identity: five rows can carry
-    // the same title, and the author + running time are what separate them.
-    // Read positionally rather than by class because the row's markup has
-    // never been measured; a made-up class selector would fire on the wrong
-    // node instead of on nothing.
-    // The anchor's OWN text is the usage line, unparsed. It comes back as
-    // evidence only — nothing in this module matches on it (see
-    // `judge_music_reference`, which is unchanged) — because whether usage
-    // separates same-titled rows is a question we have never been able to
-    // answer from a failure: the diagnostic only ever carried titles, and
-    // titles are precisely the dimension that is identical.
-    rows.push({
-      name: lines[0] || '',
-      meta: lines[1] || '',
-      usage: (anchor.innerText || anchor.textContent || '').trim(),
-      row,
-    });
   }
-  const out = rows.map((entry, index) => {
-    entry.row.setAttribute(attribute, String(index));
-    return { index, name: entry.name, meta: entry.meta, usage: entry.usage };
-  });
-  // An OBJECT, not the bare array this used to return. `attrs` is one fact
-  // about the list rather than one per row, and an empty array here is a real
-  // answer — "these rows carry no attributes at all" — which the reader keeps
-  // apart from "we could not look".
-  return { rows: out, attrs: Array.from(attrs) };
+  // An empty array is a real answer — "the chosen containers carry nothing" —
+  // which the reader keeps apart from "we could not look" (this call having
+  // failed, or there having been nothing to stamp).
+  return { stamped, attrs: Array.from(attrs) };
 }
-""".replace("__USAGE__", _MUSIC_USAGE_JS)
+"""
 
 
 # What the dialog looks like RIGHT NOW, in numbers only.
@@ -3287,6 +3589,16 @@ class MusicRowsRead:
     #: ids, handles or tokens, and this lands in a stored, logged, UI-rendered
     #: string in a public repo.
     attributes: tuple[str, ...] | None = None
+    #: Where each row's container was found on its ladder, and whether that
+    #: container read as a whole row. `None` = the probe never ran, the same
+    #: "we could not look" the other two fields keep apart from a zero.
+    #:
+    #: Parallel to `rows` in the order the probe reported them. It is kept
+    #: beside the rows rather than folded into `MusicRow` because it describes
+    #: **our reading of the page**, not the song: a `MusicRow` that came out of
+    #: an unfit container is a row we could not read, and the matcher must go
+    #: on treating it as exactly that.
+    sites: tuple[MusicRowSite, ...] | None = None
 
 
 #: How many titles a failure message quotes, and how long each may be. Bounded
@@ -3381,6 +3693,54 @@ def describe_music_attributes(read: MusicRowsRead) -> str:
     if len(ordered) > MUSIC_SAMPLE_ATTRS:
         body += f",+{len(ordered) - MUSIC_SAMPLE_ATTRS}"
     return f"attrs={body}"
+
+
+def describe_music_container(read: MusicRowsRead) -> str:
+    """What the thing we called a row actually was. Pure, counts and one flag.
+
+    Renders as ``fit=0/19 up=1/5 ln=2 svg=1`` — and every field is here because
+    the 2026-08-17 refusal could not distinguish two worlds it had to:
+
+    * ``fit=19/19`` — the containers gave up a title, an author and a running
+      time, so the fingerprint really was applied and the rows really are
+      indistinguishable. The next move is on the platform's side.
+    * ``fit=0/19`` — we never found the row. `dims=… au=0/5 du=0/5` said the
+      author was unread; it could not say whether that was because the page
+      does not show one or because we were reading the wrong element, and those
+      call for opposite work. This clause is the difference.
+
+    The remaining three describe the container the FIRST row settled on, which
+    is a census of one on purpose: rows in one list share their markup, the same
+    assumption `attrs=` has always made, and three copies of the same numbers
+    would cost characters the 500-char store does not have.
+
+    * ``up=1/5`` — rungs above the 「N人使用」 leaf, and how many the probe had
+      to offer. `up=1/5` with `fit=0` says we stopped at the leaf's own parent
+      with four rungs left unexamined; `up=5/5` says we ran out of ladder.
+    * ``ln=2`` — how many text lines that container has. A row shows three
+      (title, 作者·时长, N人使用), so `ln=2` is a piece of a row.
+    * ``svg=1`` — the container is outside the HTML namespace, i.e. an icon's
+      innards. A boolean, and the one reading that makes the whole hop
+      obviously wrong rather than merely unproductive.
+
+    Empty string when there are no rows: `rows=0` has already said it, and a
+    clause that adds nothing is spending a budget the sentence needs.
+    """
+    if read.sites is None:
+        # Never looked (the probe failed). `?`, not a zero — the same contract
+        # `rows=?` and `attrs=?` keep.
+        return f"fit={MUSIC_UNKNOWN}"
+    if not read.sites:
+        return ""
+    fitted = sum(1 for site in read.sites if site.fit)
+    first = read.sites[0]
+    up = MUSIC_UNKNOWN if first.level is None else str(first.level + 1)
+    return (
+        f"fit={fitted}/{len(read.sites)}"
+        f" up={up}/{first.levels}"
+        f" ln={first.lines}"
+        f" svg={1 if first.svg else 0}"
+    )
 
 
 def describe_music_dimensions(choice: MusicChoice) -> str:
@@ -3553,49 +3913,85 @@ async def _music_rows(page: Any) -> MusicRowsRead:
     nothing" and "we could not look" the same observation — and since the
     caller turns both into `music_not_found`, a real user's failure could not
     be attributed to either afterwards.
+
+    **Two passes, and the split is where the fix lives.** The first walks the
+    page and hands back a ladder per row; `resolve_music_row` — pure, in
+    Python, drivable by a fixture — says which rung of it is the row; the
+    second stamps exactly those rungs so the click has a selector, and censuses
+    what they carry. The judgement used to be a line of JavaScript nothing here
+    could run, and it was wrong in production for weeks without a single test
+    being able to notice.
     """
     try:
         raw = await page.evaluate(
             _MUSIC_ROWS_JS,
             {
-                "attribute": MUSIC_ROW_ATTRIBUTE,
-                "ours": list(MUSIC_OWN_ATTRIBUTES),
+                "anchor": MUSIC_ANCHOR_ATTRIBUTE,
+                "depth": MUSIC_ROW_MAX_DEPTH,
             },
         )
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         return MusicRowsRead([], error=type(exc).__name__)
-    # A LIST is the previous shape — a tab still running an older bundle. Its
-    # rows are perfectly good; what it cannot tell us is the census, and that
-    # stays `None` ("we could not look") rather than becoming `()` ("the rows
-    # carry nothing"). Reading a stale bundle as evidence about the platform is
-    # how a probe answers a question it never asked.
-    if isinstance(raw, Mapping):
-        rows = raw.get("rows") or []
-        raw_attrs = raw.get("attrs")
-    else:
-        rows = raw or []
-        raw_attrs = None
-    attributes: tuple[str, ...] | None = None
-    if isinstance(raw_attrs, (list, tuple)):
-        attributes = tuple(str(name) for name in raw_attrs if str(name))
+    rows = (raw.get("rows") if isinstance(raw, Mapping) else raw) or []
     out: list[MusicRow] = []
+    sites: list[MusicRowSite] = []
+    plan: list[dict[str, int]] = []
     for position, row in enumerate(rows):
         try:
             index = int(row.get("index", position))
-            name = str(row.get("name") or "")
-            meta = row.get("meta")
             usage = row.get("usage")
+            raw_levels = row.get("levels") or []
         except (AttributeError, TypeError, ValueError):
             continue
+        levels = tuple(
+            MusicRowLevel(
+                lines=tuple(str(line) for line in (level.get("lines") or ())),
+                svg=bool(level.get("svg")),
+            )
+            for level in raw_levels
+            if isinstance(level, Mapping)
+        )
+        site = resolve_music_row(levels)
+        if site.level is None:
+            # Nothing on this ladder could be called a container. The anchor is
+            # dropped rather than turned into a row we cannot address — a row
+            # in the list is a row `judge_music_choice` may click.
+            continue
+        sites.append(site)
+        plan.append({"index": index, "level": site.level})
         out.append(
-            parse_music_row(
-                index,
-                name,
-                None if meta is None else str(meta),
-                None if usage is None else str(usage),
+            MusicRow(
+                index=index,
+                name=site.name,
+                author=site.author,
+                duration_s=site.duration_s,
+                usage=parse_music_usage(None if usage is None else str(usage)),
             )
         )
-    return MusicRowsRead(out, attributes=attributes)
+
+    attributes: tuple[str, ...] | None = None
+    if plan:
+        try:
+            stamped = await page.evaluate(
+                _MUSIC_SITE_JS,
+                {
+                    "anchor": MUSIC_ANCHOR_ATTRIBUTE,
+                    "row": MUSIC_ROW_ATTRIBUTE,
+                    "ours": list(MUSIC_OWN_ATTRIBUTES),
+                    "census": MUSIC_CENSUS_ROWS,
+                    "plan": plan,
+                },
+            )
+        except Exception:  # noqa: BLE001 - the census is evidence, not a gate
+            # The rows themselves were read; what is lost is the stamp (so a
+            # click will fail loudly with its own reason) and the census, which
+            # stays `None` — "we could not look" — rather than becoming `()`.
+            stamped = None
+        if isinstance(stamped, Mapping):
+            raw_attrs = stamped.get("attrs")
+            if isinstance(raw_attrs, (list, tuple)):
+                attributes = tuple(str(name) for name in raw_attrs if str(name))
+    return MusicRowsRead(out, attributes=attributes, sites=tuple(sites))
 
 
 async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
@@ -3715,12 +4111,21 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # definition — so "the authors differ" and "we never read an author"
         # produced character-identical evidence until this clause existed.
         dims = describe_music_dimensions(choice)
+        # And the clause that says whether `dims=` was even entitled to blame
+        # the page. `au=0/5` means "no candidate exposed an author"; whether
+        # that is the platform's doing or ours depends entirely on whether the
+        # element we read was the row, and until this clause existed nothing in
+        # a refusal could tell those apart. Last in the bracket because it is
+        # the newest: the order is what guarantees a new clause can only ever
+        # crowd itself and then the prose, never the older evidence.
+        site = describe_music_container(read)
         raise StepFailure(
             SessionStatus.FAILED,
             f"{choice.reason} [{seen}"
             + (f" {usage}" if usage else "")
             + f" {attrs}"
             + f" {dims}"
+            + (f" {site}" if site else "")
             + "]. Nothing was published: a post's music "
             "cannot be changed afterwards, and a same-titled different track "
             "is the one failure that leaves no signal",
@@ -3739,6 +4144,13 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             # `None` when unread, an empty tuple when the rows really carry
             # nothing — the same three-state contract as the rendered clause.
             music_row_attributes=read.attributes,
+            # How many of the candidate rows were read off a container that
+            # gave up all three fields. `None` when the probe never ran.
+            music_rows_fit=(
+                None
+                if read.sites is None
+                else sum(1 for site in read.sites if site.fit)
+            ),
             # Structured twin of the `dims=` clause. Same caveat as the others:
             # the user-visible copy is the message, because `detail` is dropped.
             music_dimensions=(

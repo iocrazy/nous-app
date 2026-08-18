@@ -366,10 +366,18 @@ class FakePage:
         # agreeing with every test in the file. `None` renders `?`, which
         # asserts nothing, so a test that cares has to say so.
         self.music_attrs: Any = None
-        # True = a tab still running the bundle from before the census, whose
-        # probe answers with a bare ARRAY instead of `{rows, attrs}`. The
-        # rows are still good; the census is unavailable, not empty.
+        # True = the ladder probe answers with a bare ARRAY of rows instead of
+        # `{rows: [...]}`. The rows are still good; what is being exercised is
+        # the reader's tolerance of the outer shape.
         self.music_rows_legacy_shape = False
+        # True = the second pass (stamp + census) blows up. The rows were read;
+        # the stamp and the census are what is lost, and the census must then
+        # read `?` rather than `none`.
+        self.music_site_probe_fails = False
+        # The (index, level) plan the second pass was asked to stamp — i.e.
+        # which rung of each ladder this side chose. Recorded so a test can
+        # assert the hop itself, not only what came out of it.
+        self.music_stamped: list[Any] = []
         # What the readiness probe reports, or None for the default derived
         # from `music_rows`. Callable form takes (page, stamp) and returns the
         # probe's dict — that is how a test scripts a dialog that answers
@@ -517,18 +525,61 @@ class FakePage:
             # make every row in every fixture agree with every other one, which
             # is how "usage counts are indistinguishable" gets proven by the
             # fixture rather than by the code.
+            #
+            # ⚠️ A LADDER, not a flat row. The live probe hands back the chain
+            # of ancestors above the 「N人使用」 leaf and lets `resolve_music_row`
+            # pick which rung is the row — so a fake that handed back one
+            # already-correct row would skip the very hop that was broken in
+            # production. A fourth element replaces the derived ladder outright,
+            # which is how a fixture reproduces a shape the default cannot: the
+            # song's own lines split across rungs, an icon in the way, a
+            # container that carries a title and a usage count and no author.
             out = []
             for i, row in enumerate(rows):
                 if isinstance(row, (tuple, list)):
-                    name, meta, usage = (list(row) + ["", ""])[:3]
+                    fields = list(row)
+                    # Padded per position, not with one filler: the fourth is a
+                    # ladder and its absence has to read as `None` ("derive
+                    # one"), never as an empty one ("this row has no rungs").
+                    name, meta, usage = (fields + ["", ""])[:3]
+                    levels = fields[3] if len(fields) > 3 else None
                 else:
-                    name, meta, usage = row, "", ""
-                out.append({"index": i, "name": name, "meta": meta, "usage": usage})
+                    name, meta, usage, levels = row, "", "", None
+                if levels is None:
+                    # The plainest DOM that shows what the screenshot shows: a
+                    # cell holding the usage count, inside a row holding all
+                    # three. Both the old walk and the new reading find the row
+                    # here — which is why the fixtures that exercise the FIX
+                    # pass their own ladder.
+                    levels = [
+                        [usage] if usage else [],
+                        [line for line in (name, meta, usage) if line],
+                    ]
+                out.append(
+                    {
+                        "index": i,
+                        "usage": usage,
+                        "levels": [
+                            {"lines": list(lines), "svg": False}
+                            if not isinstance(lines, dict)
+                            else lines
+                            for lines in levels
+                        ],
+                    }
+                )
             if self.music_rows_legacy_shape:
                 return out
+            return {"rows": out}
+        if "__nous_music_site_probe__" in (_script or ""):
+            if self.music_site_probe_fails:
+                raise RuntimeError("site probe blew up")
+            plan = list((_arg or {}).get("plan") or [])
             attrs = self.music_attrs
+            self.music_stamped = plan
+            # `attrs=None` means the page was not asked — the fixture default,
+            # which renders `?` and asserts nothing about the platform.
             return {
-                "rows": out,
+                "stamped": len(plan),
                 "attrs": None if attrs is None else list(attrs),
             }
         if "__nous_music_readback_probe__" in (_script or ""):

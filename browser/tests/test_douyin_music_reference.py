@@ -683,9 +683,14 @@ def test_the_row_probe_hands_the_usage_line_back_out_of_the_page():
     page.
     """
     body = dp._MUSIC_ROWS_JS
-    collected, _, returned = body.partition("rows.map(")
-    assert "usage:" in collected, "the probe never reads the anchor's own text"
-    assert "usage" in returned, "the probe reads the usage line and drops it"
+    collected, marker, returned = body.rpartition("rows.push(")
+    assert marker, "the probe no longer builds its rows"
+    assert "anchor.innerText" in returned, (
+        "the probe never reads the anchor's own text"
+    )
+    assert "usage:" in returned, "the probe reads the usage line and drops it"
+    assert "levels," in returned, "the probe collects the ladder and drops it"
+    assert "levels.push(" in collected, "the probe never walks up from the anchor"
 
 
 def test_the_reader_survives_a_probe_that_answers_without_a_usage_key():
@@ -837,6 +842,10 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
 
     stored = f"[{excinfo.value.detail['reason']}] {excinfo.value.message}"
     assert "uses=" in stored and "attrs=" in stored and "dims=" in stored
+    # Named individually rather than counted: a clause that stopped rendering
+    # would free up budget and make this test PASS more easily, so "they are
+    # all here" has to be asserted before "they all fit".
+    assert "fit=" in stored
 
     # `waited_ms` renders as `1` here because this file shrinks the wait to
     # 60 ms; a real publish can print the full ceiling, so the widest that one
@@ -847,6 +856,13 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
     # numbers are two digits each; a longer result list would print four. The
     # difference is charged rather than enjoyed, for the same reason as above.
     slack += 4 * (len("9999") - len("20"))
+    # `fit=` prints the same pair over the same rows, plus the chosen
+    # container's line count. `up=` cannot widen (it is bounded by
+    # `MUSIC_ROW_MAX_DEPTH`, one digit) and `svg=` is a single character, but a
+    # container we could not read may have any number of lines, so the widest
+    # `ln=` this page could print is charged rather than enjoyed.
+    slack += 2 * (len("9999") - len("20"))
+    slack += len("999") - len("2")
 
     # **The contract.** The whole string no longer fits 500 in this shape, and
     # that is a deliberate trade rather than an oversight: what must fit is
@@ -878,7 +894,8 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
         ("ready=", "uses="),
         ("uses=", "attrs="),
         ("attrs=", "dims="),
-        ("dims=", "Nothing was published"),
+        ("dims=", "fit="),
+        ("fit=", "Nothing was published"),
     ):
         assert stored.index(earlier) < stored.index(later), f"{earlier} after {later}"
 
@@ -1030,12 +1047,14 @@ def test_the_census_survives_out_of_the_page():
     Structural, therefore: the value must be collected AND must appear in the
     object the probe actually returns.
     """
-    body = dp._MUSIC_ROWS_JS
+    body = dp._MUSIC_SITE_JS
     collected, marker, returned = body.rpartition("return {")
     assert marker, "the probe no longer returns an object"
     assert "attrs.add(" in collected, "the probe never collects any key"
     assert "attrs" in returned, "the probe collects the census and drops it"
-    assert "rows" in returned, "the probe stopped returning its rows"
+    assert "setAttribute(" in collected, "the probe stopped stamping the row"
+    # ...and the rows themselves still come back from the pass that reads them.
+    assert "rows" in dp._MUSIC_ROWS_JS.rpartition("return {")[2]
 
 
 def test_every_attribute_this_module_stamps_is_registered():
@@ -1069,16 +1088,17 @@ def test_the_census_never_reports_our_own_marks():
     Structural, because the fake cannot run the page: the probe must exclude
     them by name, and the caller must be the one telling it which names.
     """
-    body = dp._MUSIC_ROWS_JS
+    body = dp._MUSIC_SITE_JS
     assert "options.ours" in body
     assert "ours.has(name)" in body
-    # ...and the caller really passes both of them.
+    # ...and the caller really passes them.
     source = inspect.getsource(dp._music_rows)
     assert '"ours"' in source
     assert "MUSIC_OWN_ATTRIBUTES" in source
-    # The registry really does hold both stamps this module writes.
+    # The registry really does hold every stamp this module writes.
     assert dp.MUSIC_ROW_ATTRIBUTE in dp.MUSIC_OWN_ATTRIBUTES
     assert dp.MUSIC_SEEN_ATTRIBUTE in dp.MUSIC_OWN_ATTRIBUTES
+    assert dp.MUSIC_ANCHOR_ATTRIBUTE in dp.MUSIC_OWN_ATTRIBUTES
 
 
 def test_the_census_collects_names_and_cannot_reach_a_value():
@@ -1089,14 +1109,17 @@ def test_the_census_collects_names_and_cannot_reach_a_value():
     # Comments stripped first: a comment cannot read a value, and one that
     # explains WHY `.attributes` is avoided must not be what fails this test.
     code = "\n".join(
-        line.split("//")[0] for line in dp._MUSIC_ROWS_JS.splitlines()
+        line.split("//")[0]
+        for script in (dp._MUSIC_ROWS_JS, dp._MUSIC_SITE_JS)
+        for line in script.splitlines()
     )
     assert "getAttributeNames()" in code
     assert ".attributes" not in code
     assert ".dataset" not in code
     assert "getAttribute(" not in code.replace("getAttributeNames(", "")
-    # `setAttribute` is ours (the row stamp) and writes, never reads.
-    assert code.count("setAttribute(") == 1
+    # `setAttribute` is ours — the anchor stamp in the first pass and the row
+    # stamp in the second — and both write, never read.
+    assert code.count("setAttribute(") == 2
 
 
 async def test_the_census_changes_no_verdict():
@@ -1332,3 +1355,314 @@ def test_the_exact_sentence_drops_the_axis_the_reference_did_not_carry():
         rows(("起风了", "买辣椒也用券·05:11"), ("起风了", "吴青峰·05:25")),
     )
     assert choice.reason == "one row matched title and author"
+
+
+# --- finding the row a 「N人使用」 anchor belongs to ----------------------------
+#
+# [实测 2026-08-17, 生产] The refusal that produced this section read
+# `rows=19 … dims=name au=0/5 du=0/5`: nineteen rows on screen, five of them
+# sharing the requested title, and **not one gave up an author or a running
+# time** — on a dialog whose every row shows both. The fingerprint had degraded
+# to the title-only matcher this whole file exists to replace, silently,
+# through a data condition, on the one axis nothing was measuring: whether the
+# element we were calling a row was one.
+#
+# The walk stopped at "the first ancestor with two or more text lines", which is
+# a proxy for being a row and not a test of it. `resolve_music_row` replaces the
+# proxy with the reading — the row is the smallest container that gives up a
+# title, an author AND a running time — and a container that gives up fewer is
+# not called a row at all.
+#
+# ⚠️ Every fixture below hands the probe a LADDER whose rungs differ, because a
+# fixture whose innermost rung is already the right container proves nothing:
+# the old rule and the new one both pass it. The rung the old rule would have
+# taken is present in each one, and each test says which rung was taken.
+
+
+def ladder(*rungs: tuple[str, ...]) -> list[dict[str, object]]:
+    """Rungs from the anchor outwards, innermost first. Plain HTML nodes."""
+    return [{"lines": list(rung), "svg": False} for rung in rungs]
+
+
+# One row of the live dialog as the ladder it really is: the count's own cell,
+# then a header carrying the title beside the count, then the row. The middle
+# rung is the trap — two text lines, so the old walk stopped there, read line 1
+# as the title (correctly, which is why `saw:` looked fine) and line 2 as
+# 「作者·时长」, which is where `au=0/5 du=0/5` came from.
+NESTED = (
+    "起风了",
+    "吴青峰·05:25",
+    "30023人使用",
+    ladder(
+        ("30023人使用",),
+        ("起风了", "30023人使用"),
+        ("起风了", "吴青峰·05:25", "30023人使用"),
+    ),
+)
+# The same shape for a row that is NOT the one the reference points at, so a
+# list can hold both without the fixture deciding the verdict by having one row.
+NESTED_OTHER = (
+    "起风了",
+    "买辣椒也用券·05:11",
+    "5人使用",
+    ladder(
+        ("5人使用",),
+        ("起风了", "5人使用"),
+        ("起风了", "买辣椒也用券·05:11", "5人使用"),
+    ),
+)
+
+
+def test_the_row_is_the_smallest_container_that_reads_as_a_whole_row():
+    """**The fix, stated as the thing that goes red on a revert.**
+
+    Rung 1 has two text lines, so the old walk took it and read `30023人使用` as
+    the author line. Rung 2 is the row. Both the level and the reading are
+    asserted: a revert to "first rung with two lines" fails on `level`, and a
+    revert to "line 2 is the author" fails on `author`.
+    """
+    site = dp.resolve_music_row(
+        [
+            dp.MusicRowLevel(lines=("30023人使用",)),
+            dp.MusicRowLevel(lines=("起风了", "30023人使用")),
+            dp.MusicRowLevel(lines=("起风了", "吴青峰·05:25", "30023人使用")),
+        ]
+    )
+
+    assert site.level == 2
+    assert site.fit is True
+    assert (site.name, site.author, site.duration_s) == ("起风了", "吴青峰", 325)
+
+
+def test_a_container_that_reads_two_of_the_three_is_not_called_a_row():
+    """The production shape, with no outer rung ever rendering an author. It
+    still has to click somewhere and still has to quote a title, but it is
+    reported unfit and gives up nothing to match on — because "we could not read
+    it" and "the page says this" are the two readings the refusal turns on."""
+    site = dp.resolve_music_row(
+        [
+            dp.MusicRowLevel(lines=("30023人使用",)),
+            dp.MusicRowLevel(lines=("起风了", "30023人使用")),
+        ]
+    )
+
+    assert site.fit is False
+    assert site.name == "起风了"
+    assert site.author is None and site.duration_s is None
+
+
+def test_the_author_and_the_length_may_arrive_on_two_separate_lines():
+    """`innerText` does not reproduce CSS-generated content, so a row rendering
+    「作者 · 时长」 with the dot as a `::before` arrives as two lines with no
+    separator anywhere. Reading that as "this row did not tell us its author" is
+    the same `?`-for-a-fact this module refuses everywhere else."""
+    site = dp.resolve_music_row(
+        [dp.MusicRowLevel(lines=("起风了", "吴青峰", "05:25", "30023人使用"))]
+    )
+
+    assert site.fit is True
+    assert (site.name, site.author, site.duration_s) == ("起风了", "吴青峰", 325)
+
+
+def test_the_author_and_the_length_may_arrive_run_together():
+    """The same row when those two are inline siblings: `innerText` puts them on
+    one line and the generated dot is still absent."""
+    site = dp.resolve_music_row(
+        [dp.MusicRowLevel(lines=("起风了", "吴青峰05:25", "30023人使用"))]
+    )
+
+    assert site.fit is True
+    assert (site.name, site.author, site.duration_s) == ("起风了", "吴青峰", 325)
+
+
+def test_the_walk_stops_at_the_list_instead_of_calling_it_a_row():
+    """A rung carrying two 「N人使用」 counts holds two rows, so it is the list.
+    Climbing into it would find a title, an author and a length — belonging to
+    the row NEXT to this one — and call them this row's.
+
+    That is not a near miss but a confident wrong reading, which is the one
+    failure this path exists to prevent.
+    """
+    site = dp.resolve_music_row(
+        [
+            dp.MusicRowLevel(lines=("30023人使用",)),
+            dp.MusicRowLevel(lines=("起风了", "30023人使用")),
+            dp.MusicRowLevel(
+                lines=(
+                    "起风了",
+                    "30023人使用",
+                    "起风了",
+                    "买辣椒也用券·05:11",
+                    "5人使用",
+                )
+            ),
+        ]
+    )
+
+    assert site.fit is False
+    assert site.level == 1
+
+
+def test_an_icon_is_never_mistaken_for_the_row_and_says_so_when_it_was_taken():
+    """`svg=` exists because 2026-08-17's census came back `d,fill,fill-opacity`
+    — SVG path attributes — and nothing in the refusal could say whether that
+    meant "the row contains an icon" or "we were reading an icon". The chosen
+    container now answers it itself."""
+    icon_first = dp.resolve_music_row(
+        [
+            dp.MusicRowLevel(lines=("30023人使用", "使用"), svg=True),
+            dp.MusicRowLevel(lines=("起风了", "吴青峰·05:25", "30023人使用")),
+        ]
+    )
+    assert icon_first.level == 1 and icon_first.svg is False
+
+    # ...and when there is nothing better, the flag is what makes the bad hop
+    # legible instead of merely unproductive.
+    only_icon = dp.resolve_music_row(
+        [dp.MusicRowLevel(lines=("30023人使用", "使用"), svg=True)]
+    )
+    assert only_icon.fit is False and only_icon.svg is True
+
+
+def test_a_ladder_with_nothing_to_name_yields_no_row_at_all():
+    """No rung says anything but the count. There is nothing to click and
+    nothing to quote, and inventing either would be worse than the gap."""
+    assert dp.resolve_music_row([]).level is None
+    assert dp.resolve_music_row([dp.MusicRowLevel(lines=("30023人使用",))]).level is None
+
+
+# --- the same thing through the step -----------------------------------------
+
+
+async def test_the_publish_reads_the_row_off_the_container_that_holds_it_all():
+    """End to end on the nested shape. The old walk stopped one rung short, read
+    no author and no length off either row, and refused `music_ambiguous`; this
+    picks the user's row and publishes.
+
+    The stamp plan is asserted too, because that IS the hop: the click lands on
+    rung 2, not on the header the old walk chose.
+    """
+    page = music_page((NESTED_OTHER, NESTED))
+    result = await dp._set_music(
+        page, job(music="起风了", ref_payload=REF), Deadline(10)
+    )
+
+    assert result["music"] == "applied"
+    assert result["music_match"] == "exact"
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
+    assert page.music_stamped == [
+        {"index": 0, "level": 2},
+        {"index": 1, "level": 2},
+    ]
+
+
+async def test_an_ambiguous_refusal_says_whether_it_ever_found_the_row():
+    """**The clause that separates the two worlds `dims=` cannot.** Rows whose
+    container never renders an author are indistinguishable *to us*; rows that
+    read cleanly and still tie are indistinguishable *on the platform*. Both
+    refuse, and until this clause they produced identical evidence."""
+    unread = music_page(
+        (
+            ("起风了", "", "0人使用", ladder(("0人使用",), ("起风了", "0人使用"))),
+            ("起风了", "", "0人使用", ladder(("0人使用",), ("起风了", "0人使用"))),
+        )
+    )
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(unread, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "fit=0/2" in excinfo.value.message
+    assert "up=2/2 ln=2 svg=0" in excinfo.value.message
+    assert excinfo.value.detail["music_rows_fit"] == 0
+
+    # The other world: both rows read completely, and they still tie.
+    read = music_page(
+        (
+            ("起风了", "吴青峰·05:25", "0人使用"),
+            ("起风了", "吴青峰·05:25", "1人使用"),
+        )
+    )
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(read, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "fit=2/2" in excinfo.value.message
+    assert excinfo.value.detail["music_rows_fit"] == 2
+
+
+def test_the_container_clause_says_nothing_when_there_are_no_rows():
+    """`rows=0` has already said it, and a clause that repeats it spends
+    characters the sentence itself needs. A probe that never ran says `?`."""
+    assert dp.describe_music_container(dp.MusicRowsRead([], sites=())) == ""
+    assert dp.describe_music_container(dp.MusicRowsRead([])) == "fit=?"
+
+
+async def test_the_census_is_taken_on_the_container_that_was_chosen():
+    """The census answers "is there an id on the row?", and an answer read off
+    the header the old walk stopped at is an answer about the header. It rides
+    on the second pass precisely so it cannot be taken anywhere else."""
+    page = music_page(
+        (
+            ("起风了", "", "0人使用", ladder(("0人使用",), ("起风了", "0人使用"))),
+            NESTED,
+        )
+    )
+    page.music_attrs = ("class", "data-music-id")
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "attrs=data-music-id,class" in excinfo.value.message
+    # Row 0 never resolved past its header (rung 1); row 1 did (rung 2). The
+    # census was asked about exactly those two nodes.
+    assert page.music_stamped == [
+        {"index": 0, "level": 1},
+        {"index": 1, "level": 2},
+    ]
+
+
+async def test_a_second_pass_that_blows_up_costs_the_census_not_the_rows():
+    """The rows were read before the stamp was attempted, so they stand — and
+    the reading of their containers stands with them. What is lost is the
+    census, and it is lost as `?` ("we could not look"), never as `none` ("the
+    rows carry nothing"): a page nobody looked at must not retire the id idea.
+
+    ⚠️ The stamp is lost too, so a click would find no such selector and fail
+    with `music_click_failed`. `FakePage` cannot show that — it records the
+    selector rather than resolving it — so this pins what is observable here
+    and the click's own refusal stays pinned by its own test.
+    """
+    page = music_page(
+        (
+            ("起风了", "吴青峰·05:25", "0人使用"),
+            ("起风了", "吴青峰·05:25", "1人使用"),
+        )
+    )
+    page.music_attrs = ("class", "data-music-id")
+    page.music_site_probe_fails = True
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "rows=2" in excinfo.value.message
+    assert "fit=2/2" in excinfo.value.message
+    assert "attrs=?" in excinfo.value.message
+    assert excinfo.value.detail["music_row_attributes"] is None
+
+
+# --- the line reader ---------------------------------------------------------
+
+
+def test_one_line_is_read_as_author_and_length_in_three_renderings():
+    """Three renderings of ONE thing — 「作者·时长」 — and which one a row
+    produces is decided by CSS, not by the platform's copy."""
+    assert dp.parse_music_meta("吴青峰·05:25") == ("吴青峰", 325)
+    assert dp.parse_music_meta("吴青峰05:25") == ("吴青峰", 325)
+    assert dp.parse_music_meta("05:25") == (None, 325)
+
+
+def test_a_line_that_is_not_a_running_time_claims_nothing():
+    """Half a reading is the kind of evidence that looks like a match without
+    being one."""
+    assert dp.parse_music_meta("30023人使用") == (None, None)
+    assert dp.parse_music_meta("吴青峰") == (None, None)
+    assert dp.parse_music_meta("") == (None, None)
+    assert dp.parse_music_meta(None) == (None, None)
