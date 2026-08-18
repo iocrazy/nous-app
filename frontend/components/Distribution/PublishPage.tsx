@@ -121,16 +121,80 @@ const NO_VALUE = '—';
  *    A play button over one of those is the exact shape this repo keeps
  *    banning: a control that can only ever no-op.
  *
- * [Measured 2026-08-17] the real catalogue URLs are plain `https://` objects
- * on the platform's music CDN with no signature or expiry parameters, served
- * `206 audio/mpeg` with `accept-ranges: bytes` and `access-control-allow-origin: *`,
- * identically with and without a `Referer` — so there is no hotlink guard to
- * work around and nothing to refresh. That probe is why this feature exists at
- * all; it was checked before a single line of the control was written.
+ * ⚠️ [Corrected 2026-08-17] An earlier note here claimed the CDN answered
+ * "identically with and without a `Referer`". That probe used a stale URL out
+ * of a captured fixture, and it had the conclusion exactly backwards. Against a
+ * REAL `play_url` the platform's CDN is a *reverse* hotlink guard — it rejects
+ * requests that CARRY a referrer:
+ *
+ *     Referer: https://app.nous.ink/  ->  HTTP 403 (150-byte error body)
+ *     no Referer at all               ->  HTTP 206, audio (CORS: `*`)
+ *
+ * A browser loading media always sends one, so every audition was a guaranteed
+ * 403. `fetchMusicPreview` below is the response; see its note for why the
+ * obvious `referrerPolicy` attribute is not.
  */
 export function musicPreviewUrl(track: { play_url?: string | null }): string | null {
   const raw = (track.play_url ?? '').trim();
   return raw.startsWith('https://') ? raw : null;
+}
+
+/**
+ * Load an audition into a same-origin `blob:` URL, sending no referrer.
+ *
+ * ⚠️ Why not `<audio referrerPolicy="no-referrer">`, which is the obvious fix
+ * and the one this change originally set out to make: **the browser ignores
+ * it.** HTML defines the `referrerpolicy` content attribute on `a`, `area`,
+ * `img`, `iframe`, `link` and `script` — media elements are not on that list.
+ * React renders it as an unknown attribute, devtools shows it sitting on the
+ * node, and the request goes out with the referrer anyway.
+ *
+ * [Measured 2026-08-17, headless Chrome against a server echoing what it got]
+ *
+ *     <audio src>                              -> Referer: <origin>
+ *     <audio referrerpolicy="no-referrer">     -> Referer: <origin>   ← ignored
+ *     <img   referrerpolicy="no-referrer">     -> absent   (control)
+ *     fetch(url, {referrerPolicy:'no-referrer'}) -> absent
+ *
+ * The `<img>` row is a positive control: without it, "no suppression observed"
+ * could equally mean the probe was blind, and the whole result would prove
+ * nothing. It is the same reason a health probe has to be falsifiable.
+ *
+ * `fetch` is therefore the only per-request lever. The alternative — a
+ * document-level `<meta name="referrer">` — would change referrer behaviour for
+ * every request the app makes, which is a large blast radius for one button.
+ *
+ * The cost is that an audition downloads in full instead of streaming ranges,
+ * so the caller must show that it is loading. `fetch` also needs real CORS
+ * headers where a media element could have settled for an opaque response —
+ * the CDN sends `access-control-allow-origin: *`, which is what makes this
+ * possible at all.
+ */
+export async function fetchMusicPreview(
+  url: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  const response = await fetcher(url, {
+    // The entire point. Not a default worth relying on: Chrome's default is
+    // `strict-origin-when-cross-origin`, which still sends the origin — and the
+    // origin is exactly what this CDN rejects.
+    referrerPolicy: 'no-referrer',
+    // Stated rather than left implicit: an opaque response would give us a blob
+    // of zero length that plays as silence, which is a silent failure wearing
+    // the shape of success.
+    mode: 'cors',
+    credentials: 'omit',
+  });
+  if (!response.ok) {
+    throw new Error(`music preview responded ${response.status}`);
+  }
+  const blob = await response.blob();
+  if (blob.size === 0) {
+    // A zero-length body decodes to nothing and fires no `error` — the button
+    // would look like it worked and produce silence.
+    throw new Error('music preview was empty');
+  }
+  return URL.createObjectURL(blob);
 }
 
 /** `154` → `2:34`; `3616` → `1:00:16`. Null/negative → em dash. */
@@ -438,6 +502,31 @@ export const PublishPage: React.FC = () => {
   const [musicPlayingId, setMusicPlayingId] = useState<string | null>(null);
   const [musicPreviewFailed, setMusicPreviewFailed] = useState<string | null>(null);
   /**
+   * The row whose audio is being fetched right now.
+   *
+   * Needed because the audition no longer starts at the speed of a `src`
+   * assignment: the file is downloaded in full first (see `fetchMusicPreview`
+   * for why it cannot stream). Without this the button would sit inert for the
+   * length of a download and read as a dead control — the exact failure this
+   * panel keeps being audited for.
+   */
+  const [musicPreviewLoading, setMusicPreviewLoading] = useState<string | null>(null);
+  /**
+   * `music_id` → the `blob:` URL its audio was downloaded into.
+   *
+   * Kept so re-pressing a row costs nothing, and — the reason it is a ref and
+   * not state — so unmount can revoke every one of them. An object URL pins its
+   * blob in memory for the life of the document; a panel that is searched a few
+   * dozen times would otherwise hold every track it ever auditioned.
+   */
+  const musicPreviewBlobs = useRef<Map<string, string>>(new Map());
+  /**
+   * Which audition the user is currently waiting for. Compared on arrival so a
+   * slow first download cannot start playing on top of a second row the user
+   * pressed while it was in flight.
+   */
+  const musicPreviewSeq = useRef(0);
+  /**
    * The <audio> node, kept in a ref that is NEVER written back to null.
    *
    * React detaches refs before passive-effect cleanups run, so a cleanup that
@@ -452,7 +541,24 @@ export const PublishPage: React.FC = () => {
   /** Mirror of `musicPlayingId` readable from callbacks without re-binding them. */
   const musicPlayingIdRef = useRef<string | null>(null);
 
+  /**
+   * Take the spinner off ONE row.
+   *
+   * Guarded by id rather than written as `setMusicPreviewLoading(null)`: a
+   * download that finishes after the user has already pressed a different row
+   * would otherwise clear the new row's spinner, so the second press would
+   * look idle while it was still fetching.
+   */
+  const clearPreviewLoadingFor = useCallback((trackId: string) => {
+    setMusicPreviewLoading((current) => (current === trackId ? null : current));
+  }, []);
+
   const stopMusicPreview = useCallback(() => {
+    // A download in flight is also "the audition", so cancelling has to reach
+    // it: bumping the ticket makes its arrival a no-op, and clearing the
+    // spinner keeps the button from reading as busy forever.
+    musicPreviewSeq.current += 1;
+    setMusicPreviewLoading(null);
     // Nothing sounding, nothing to stop. The guard is not just tidiness: this
     // runs on mount and on every keystroke in the search box, and touching a
     // media element that never played is a call with no meaning behind it.
@@ -470,7 +576,7 @@ export const PublishPage: React.FC = () => {
    * that produces nothing at all — so it is caught and turned into the same
    * visible note the <audio> `error` event produces.
    */
-  const toggleMusicPreview = useCallback((track: MusicTrack) => {
+  const toggleMusicPreview = useCallback(async (track: MusicTrack) => {
     const el = musicAudioRef.current;
     const url = musicPreviewUrl(track);
     if (!el || !url) return;
@@ -480,7 +586,44 @@ export const PublishPage: React.FC = () => {
     }
     el.pause();
     setMusicPreviewFailed(null);
-    if (el.src !== url) el.src = url;
+
+    const ticket = ++musicPreviewSeq.current;
+    // Downloaded once per track and remembered: pressing a row a second time
+    // is instant, and the platform is not asked for the same object twice.
+    let objectUrl = musicPreviewBlobs.current.get(track.music_id);
+    if (!objectUrl) {
+      setMusicPreviewLoading(track.music_id);
+      try {
+        objectUrl = await fetchMusicPreview(url);
+        musicPreviewBlobs.current.set(track.music_id, objectUrl);
+      } catch (err) {
+        // 403 is the expected shape when the referrer suppression stops
+        // working, and it must reach the user as a note on the row rather than
+        // as a button that quietly does nothing.
+        //
+        // ⚠️ Reported WITHOUT consulting the ticket, unlike the playback path
+        // below. A download can be cancelled by things the user did not do —
+        // the results array is rebuilt whenever the debounced search re-runs,
+        // and the effect that stops playback on new results bumps the ticket —
+        // so gating this on the ticket meant a press could fail, say nothing,
+        // and leave the spinner turning. The note is keyed by track id and is
+        // cleared by that same effect, so a stale one cannot linger.
+        console.error('distribution: music preview could not be fetched', err);
+        clearPreviewLoadingFor(track.music_id);
+        setMusicPreviewFailed(track.music_id);
+        return;
+      }
+      if (musicPreviewSeq.current !== ticket) {
+        // A different row was pressed while this one was downloading. The blob
+        // is kept (it is cached above, and revoked on unmount) but it must not
+        // start sounding on top of whatever the user asked for since.
+        clearPreviewLoadingFor(track.music_id);
+        return;
+      }
+      clearPreviewLoadingFor(track.music_id);
+    }
+
+    if (el.src !== objectUrl) el.src = objectUrl;
     try {
       el.currentTime = 0;
     } catch (err) {
@@ -500,22 +643,55 @@ export const PublishPage: React.FC = () => {
         setMusicPreviewFailed(track.music_id);
       });
     }
-  }, [stopMusicPreview]);
+  }, [stopMusicPreview, clearPreviewLoadingFor]);
 
   /**
    * Sound whose source the user can no longer see is sound the user cannot
-   * stop. Closing the panel, retyping the search and a new result set each
-   * remove the row whose play button is the only control over it — so each one
-   * ends the audition. Unmount is covered by the cleanup below, which is why
-   * the element ref above is never nulled.
+   * stop. Closing the panel and retyping the search both take away the row
+   * whose play button is the only control over it, so both end the audition.
+   * Unmount is covered by the cleanup below, which is why the element ref
+   * above is never nulled.
    */
   useEffect(() => {
     stopMusicPreview();
     setMusicPreviewFailed(null);
-  }, [musicPanelOpen, musicQuery, musicResults, stopMusicPreview]);
+  }, [musicPanelOpen, musicQuery, stopMusicPreview]);
+
+  /**
+   * A new result set ends the audition only if the row it belongs to is
+   * actually gone.
+   *
+   * ⚠️ This used to hang off `musicResults` identity, and that was wrong in a
+   * way that only showed up as flakiness. The search effect rebuilds the array
+   * whenever it re-runs — which it does for reasons the user did not cause —
+   * and the rebuilt array is a new object even when it holds the same rows. So
+   * a press could have its download cancelled mid-flight by a refresh that
+   * changed nothing on screen, and the button would simply never do anything.
+   *
+   * Asking whether the row is still listed states the actual rule ("the
+   * control over this sound is gone") instead of using array identity as a
+   * proxy for it, and a refresh that returns the same rows now leaves the
+   * audition alone.
+   */
+  useEffect(() => {
+    const sounding = musicPlayingIdRef.current;
+    if (sounding === null) return;
+    if (musicResults.some((track) => track.music_id === sounding)) return;
+    stopMusicPreview();
+    setMusicPreviewFailed(null);
+  }, [musicResults, stopMusicPreview]);
 
   useEffect(() => () => {
     if (musicPlayingIdRef.current !== null) musicAudioRef.current?.pause();
+    // Every object URL pins its blob for the life of the DOCUMENT, not of this
+    // component — so a panel that was searched and auditioned a few dozen times
+    // would keep every track it ever played until a full page load. Read off
+    // the ref rather than from state for the same reason the element ref is
+    // never nulled: refs are detached before this runs.
+    for (const objectUrl of musicPreviewBlobs.current.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    musicPreviewBlobs.current.clear();
   }, []);
 
   const [allowDownload, setAllowDownload] = useState(true);
@@ -2477,6 +2653,7 @@ export const PublishPage: React.FC = () => {
                         {musicResults.map((track) => {
                           const previewUrl = musicPreviewUrl(track);
                           const playing = musicPlayingId === track.music_id;
+                          const loadingPreview = musicPreviewLoading === track.music_id;
                           const pick = () => {
                             setMusicTrack(track);
                             // The keyword the browser will type into the
@@ -2537,27 +2714,40 @@ export const PublishPage: React.FC = () => {
                               {previewUrl ? (
                                 <button
                                   type="button"
-                                  className={`mr-preview ${playing ? 'on' : ''}`}
+                                  className={`mr-preview ${playing ? 'on' : ''} ${loadingPreview ? 'loading' : ''}`}
                                   data-testid={`music-preview-${track.music_id}`}
                                   aria-pressed={playing}
+                                  /* The audition is downloaded in full before
+                                     it can sound (see `fetchMusicPreview`), so
+                                     there is a real interval where the button
+                                     is neither idle nor playing. Saying
+                                     "Loading" is what keeps that interval from
+                                     reading as a control that did nothing. */
+                                  aria-busy={loadingPreview}
                                   aria-label={
-                                    playing
-                                      ? t('distribution.publish.musicPreviewStop', 'Stop preview')
-                                      : t('distribution.publish.musicPreviewPlay', 'Preview track')
+                                    loadingPreview
+                                      ? t('distribution.publish.musicPreviewLoading', 'Loading preview')
+                                      : playing
+                                        ? t('distribution.publish.musicPreviewStop', 'Stop preview')
+                                        : t('distribution.publish.musicPreviewPlay', 'Preview track')
                                   }
                                   title={
-                                    playing
-                                      ? t('distribution.publish.musicPreviewStop', 'Stop preview')
-                                      : t('distribution.publish.musicPreviewPlay', 'Preview track')
+                                    loadingPreview
+                                      ? t('distribution.publish.musicPreviewLoading', 'Loading preview')
+                                      : playing
+                                        ? t('distribution.publish.musicPreviewStop', 'Stop preview')
+                                        : t('distribution.publish.musicPreviewPlay', 'Preview track')
                                   }
                                   onClick={(e) => {
                                     // The row behind this selects the track;
                                     // auditioning one is not choosing it.
                                     e.stopPropagation();
-                                    toggleMusicPreview(track);
+                                    void toggleMusicPreview(track);
                                   }}
                                 >
-                                  {playing ? <Pause /> : <Play />}
+                                  {loadingPreview
+                                    ? <Loader2 className="spin" />
+                                    : playing ? <Pause /> : <Play />}
                                 </button>
                               ) : (
                                 <span

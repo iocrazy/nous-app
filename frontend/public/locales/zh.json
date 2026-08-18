@@ -503,6 +503,7 @@
       "musicPrompt": "输入歌名或歌手，在平台曲库里搜索。",
       "musicEmpty": "平台对这个词没有返回任何结果 — 换个写法再试。",
       "musicUses": "人使用",
+      "musicPreviewLoading": "正在加载试听",
       "musicPreviewPlay": "试听",
       "musicPreviewStop": "停止试听",
       "musicPreviewUnavailable": "这首没有试听文件",

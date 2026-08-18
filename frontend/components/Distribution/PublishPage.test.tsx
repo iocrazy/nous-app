@@ -1035,6 +1035,17 @@ describe('PublishPage form fields', () => {
   // facts, and each test clears the spy immediately before the action it is
   // about so a pause from somewhere earlier cannot stand in for the one being
   // asserted.
+  //
+  // ⚠️ The audition does NOT put the catalogue URL on the element. It cannot:
+  // the platform's CDN answers 403 to any request carrying a referrer, a media
+  // element always sends one, and `<audio referrerpolicy>` does not exist —
+  // the browser ignores it (measured; see `fetchMusicPreview`). The file is
+  // fetched with `referrerPolicy: 'no-referrer'` and played from a `blob:`.
+  //
+  // So `fetch` and `URL.createObjectURL` are stubbed here, and the stub keeps a
+  // blob-URL → source-URL map. Assertions go through `sourceOf()`, which proves
+  // BOTH things at once: that the element is playing a blob rather than the raw
+  // URL, and WHICH track that blob came from.
   // ==================================================================
   describe('music audition', () => {
     const PREVIEWABLE = '6953836671917951012';
@@ -1042,11 +1053,94 @@ describe('PublishPage form fields', () => {
     const NO_PREVIEW = '7496840954545048329';
     const URL_A = 'https://sf3-cdn-tos.douyinstatic.com/obj/ies-music/6910889805266504461.mp3';
     const URL_B = 'https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7609946018960050970.mp3';
+    /** The two auditions this fixture can serve, used to tell them from page noise. */
+    const CDN_URLS = new Set([URL_A, URL_B]);
 
     let playSpy: ReturnType<typeof vi.spyOn>;
     let pauseSpy: ReturnType<typeof vi.spyOn>;
+    let fetchMock: ReturnType<typeof vi.fn>;
+    let revoked: string[];
+    /** blob: URL → the catalogue URL its bytes were fetched from. */
+    let blobToSource: Map<string, string>;
+    /**
+     * How the CDN should answer the next audition, when a test wants something
+     * other than the happy path.
+     *
+     * ⚠️ Routed BY URL rather than installed with `mockImplementationOnce`.
+     * The page makes fetches this block does not control (i18n and friends),
+     * and whether one of them lands before the audition is a race — with
+     * `once` semantics it sometimes ate the test's stub and the assertion
+     * failed about one run in five. A flaky gate is worse than no gate: it
+     * trains everyone to re-run instead of to read.
+     */
+    let previewResponder:
+      ((url: string) => Promise<Response | undefined>) | null;
+
+    const sourceOf = (blobUrl: string): string | undefined =>
+      blobToSource.get(blobUrl);
+
+    /** The catalogue URLs `fetch` was asked for, in order — page noise excluded. */
+    const fetchedUrls = (): string[] =>
+      fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => CDN_URLS.has(url));
 
     beforeEach(() => {
+      revoked = [];
+      blobToSource = new Map();
+      previewResponder = null;
+      let seq = 0;
+      const blobSource = new WeakMap<Blob, string>();
+
+      const audioResponse = (url: string) => {
+        const blob = new Blob(['audio-bytes'], { type: 'audio/mpeg' });
+        blobSource.set(blob, url);
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => blob,
+        } as unknown as Response;
+      };
+
+      fetchMock = vi.fn(async (url: unknown) => {
+        const requested = String(url);
+        if (!CDN_URLS.has(requested)) {
+          // Not an audition — something else on the page. Answered blandly so
+          // this block never depends on who called `fetch` first.
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({}),
+            text: async () => '',
+            blob: async () => new Blob([]),
+          } as unknown as Response;
+        }
+        if (previewResponder) {
+          // `undefined` means "not this one" — the responder is declining, and
+          // the default (which records the blob → source mapping `sourceOf`
+          // reads) serves it instead.
+          const answered = await previewResponder(requested);
+          if (answered !== undefined) return answered;
+        }
+        return audioResponse(requested);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      // jsdom implements neither of these. The stub is deliberately faithful on
+      // the one property the code depends on: an object URL is opaque, so the
+      // source is recovered through the map rather than by parsing the string.
+      (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(
+        (blob: Blob) => {
+          seq += 1;
+          const objectUrl = `blob:http://localhost/track-${seq}`;
+          blobToSource.set(objectUrl, blobSource.get(blob) ?? '<unknown>');
+          return objectUrl;
+        },
+      );
+      (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn(
+        (objectUrl: string) => { revoked.push(objectUrl); },
+      );
+
       playSpy = vi
         .spyOn(HTMLMediaElement.prototype, 'play')
         .mockImplementation(() => Promise.resolve());
@@ -1063,7 +1157,15 @@ describe('PublishPage form fields', () => {
       cleanup();
       playSpy.mockRestore();
       pauseSpy.mockRestore();
+      vi.unstubAllGlobals();
     });
+
+    /** Press a row's audition control and let the download settle. */
+    const pressPreview = async (id: string) => {
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(`music-preview-${id}`));
+      });
+    };
 
     const audio = (): HTMLAudioElement =>
       screen.getByTestId('music-preview-audio') as HTMLAudioElement;
@@ -1091,23 +1193,27 @@ describe('PublishPage form fields', () => {
 
     it('plays the URL of the row that was pressed', async () => {
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${OTHER}`));
+      await pressPreview(OTHER);
       // The SECOND row's URL, so "it played something" cannot pass for "it
       // played the right thing" — the same guard the id-not-title test uses.
-      expect(audio().src).toBe(URL_B);
+      expect(fetchedUrls()).toEqual([URL_B]);
+      // ...and what the element got is a blob of THOSE bytes, never the
+      // catalogue URL itself — putting that on the element is the 403.
+      expect(audio().src).toMatch(/^blob:/);
+      expect(sourceOf(audio().src)).toBe(URL_B);
       expect(playSpy).toHaveBeenCalled();
       expect(screen.getByTestId(`music-preview-${OTHER}`)).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('stops the first track when a second one is started', async () => {
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
-      expect(audio().src).toBe(URL_A);
+      await pressPreview(PREVIEWABLE);
+      expect(sourceOf(audio().src)).toBe(URL_A);
 
       pauseSpy.mockClear();
-      fireEvent.click(screen.getByTestId(`music-preview-${OTHER}`));
+      await pressPreview(OTHER);
       expect(pauseSpy).toHaveBeenCalled();
-      expect(audio().src).toBe(URL_B);
+      expect(sourceOf(audio().src)).toBe(URL_B);
       // Exactly one row reads as sounding. Two elements (or an untracked id)
       // would leave both pressed, which is the audible bug in DOM form.
       expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
@@ -1116,9 +1222,9 @@ describe('PublishPage form fields', () => {
 
     it('pressing the control again stops it', async () => {
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       pauseSpy.mockClear();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       expect(pauseSpy).toHaveBeenCalled();
       expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
     });
@@ -1128,7 +1234,7 @@ describe('PublishPage form fields', () => {
       // click the play button would pick the song AND close the panel — a
       // press that does something the user did not ask for.
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       expect(screen.getByTestId('music-panel')).toBeInTheDocument();
       expect(screen.queryByTestId('music-chosen')).toBeNull();
     });
@@ -1137,7 +1243,7 @@ describe('PublishPage form fields', () => {
       // Sound the user can no longer see the source of is sound the user
       // cannot stop.
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       pauseSpy.mockClear();
       fireEvent.click(screen.getByTestId('music-panel-toggle'));
       expect(screen.queryByTestId('music-panel')).toBeNull();
@@ -1146,7 +1252,7 @@ describe('PublishPage form fields', () => {
 
     it('stops when the search is retyped', async () => {
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       pauseSpy.mockClear();
       fireEvent.change(screen.getByLabelText(/^Search music$/i), {
         target: { value: 'something else' },
@@ -1162,16 +1268,20 @@ describe('PublishPage form fields', () => {
       await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
       await pickContentAndAccount();
       await openMusicAndSearch();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
 
       pauseSpy.mockClear();
       cleanup();
       expect(pauseSpy).toHaveBeenCalled();
+      // ...and the downloaded blob is released. An object URL pins its bytes
+      // for the life of the DOCUMENT, so a panel searched a few dozen times
+      // would otherwise hold every track it ever auditioned.
+      expect(revoked).toHaveLength(1);
     });
 
     it('says so when the file will not load, instead of going quiet', async () => {
       await openPanel();
-      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(PREVIEWABLE);
       expect(screen.queryByTestId('music-preview-error')).toBeNull();
 
       fireEvent.error(audio());
@@ -1192,6 +1302,162 @@ describe('PublishPage form fields', () => {
       });
       const note = await screen.findByTestId('music-preview-error');
       expect(note).toHaveTextContent(/would not play/i);
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    // ----------------------------------------------------------------
+    // The 403, and why the obvious fix is not the fix.
+    //
+    // [Measured 2026-08-17, against a real catalogue URL] the platform's music
+    // CDN is a REVERSE hotlink guard — it rejects requests that carry a
+    // referrer and serves the ones that do not:
+    //
+    //     Referer: https://app.nous.ink/  ->  403
+    //     no Referer                      ->  206, audio
+    //
+    // A media element ALWAYS sends one, so every audition was a guaranteed 403.
+    // And `<audio referrerpolicy="no-referrer">` does not help: the attribute
+    // is defined on a/area/img/iframe/link/script, not on media elements, so
+    // the browser ignores it — measured in headless Chrome against a server
+    // echoing what it received, with an <img> as the positive control:
+    //
+    //     <audio src>                          -> Referer sent
+    //     <audio referrerpolicy="no-referrer"> -> Referer sent   (ignored)
+    //     <img   referrerpolicy="no-referrer"> -> absent         (control)
+    //     fetch(url,{referrerPolicy:'no-referrer'}) -> absent
+    //
+    // Hence fetch + blob. The end-to-end run against the real URL played:
+    // 799 923 bytes, `audio/mp4`, duration 49.34s (the catalogue said 49), and
+    // `currentTime` advanced 0 -> 1.25 over 1.5s.
+    // ----------------------------------------------------------------
+
+    it('fetches the audition without a referrer instead of putting the URL on the element', async () => {
+      // RED before the fix, which assigned `el.src = url` and sent a referrer
+      // the CDN answers 403 to.
+      await openPanel();
+      await pressPreview(PREVIEWABLE);
+
+      expect(fetchedUrls()).toEqual([URL_A]);
+      const call = fetchMock.mock.calls.find((c) => String(c[0]) === URL_A);
+      const init = call![1] as RequestInit;
+      // The whole fix in one assertion. Chrome's default is
+      // `strict-origin-when-cross-origin`, which still sends the origin — and
+      // the origin is exactly what this CDN rejects, so the default is not
+      // good enough and leaving this off is the bug.
+      expect(init.referrerPolicy).toBe('no-referrer');
+      // `cors`, because an opaque response yields a zero-length blob that
+      // plays as silence — a failure wearing the shape of success.
+      expect(init.mode).toBe('cors');
+
+      // And the catalogue URL never reaches the element.
+      expect(audio().src).not.toBe(URL_A);
+      expect(audio().src).toMatch(/^blob:/);
+    });
+
+    it('shows the row as loading while the file downloads', async () => {
+      // The audition can no longer start at the speed of a src assignment —
+      // the file is downloaded in full first. A button that sits inert for the
+      // length of a download reads as a dead control.
+      let release: (() => void) | undefined;
+      previewResponder = async () => {
+        await new Promise<void>((res) => { release = res; });
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(['audio-bytes'], { type: 'audio/mpeg' }),
+        } as unknown as Response;
+      };
+
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+
+      const button = await screen.findByTestId(`music-preview-${PREVIEWABLE}`);
+      await waitFor(() => expect(button).toHaveAttribute('aria-busy', 'true'));
+      expect(button).toHaveAttribute('aria-label', expect.stringMatching(/loading/i));
+      // Not yet sounding — "busy" and "playing" are different claims.
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+
+      await act(async () => { release?.(); });
+      await waitFor(() => expect(button).toHaveAttribute('aria-busy', 'false'));
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('says so when the CDN refuses the download, instead of going quiet', async () => {
+      // The 403 shape itself. If the referrer suppression ever stops working
+      // this is what the user gets, and it has to be a visible note rather
+      // than a button that does nothing.
+      previewResponder = async () => ({
+        ok: false,
+        status: 403,
+        blob: async () => new Blob([]),
+      } as unknown as Response);
+
+      await openPanel();
+      await pressPreview(PREVIEWABLE);
+
+      const note = await screen.findByTestId('music-preview-error');
+      expect(note).toHaveTextContent(/would not play/i);
+      expect(note).toHaveAttribute('role', 'alert');
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-busy', 'false');
+      expect(playSpy).not.toHaveBeenCalled();
+    });
+
+    it('says so when the network refuses the download outright', async () => {
+      previewResponder = async () => { throw new TypeError('Failed to fetch'); };
+      await openPanel();
+      await pressPreview(PREVIEWABLE);
+      expect(await screen.findByTestId('music-preview-error')).toHaveAttribute('role', 'alert');
+      expect(playSpy).not.toHaveBeenCalled();
+    });
+
+    it('treats an empty body as a failure rather than as silence', async () => {
+      // A zero-length blob decodes to nothing and fires no `error` event, so
+      // without this the button would look like it worked and play nothing.
+      previewResponder = async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob([]),
+      } as unknown as Response);
+
+      await openPanel();
+      await pressPreview(PREVIEWABLE);
+      expect(await screen.findByTestId('music-preview-error')).toBeInTheDocument();
+      expect(playSpy).not.toHaveBeenCalled();
+    });
+
+    it('downloads a given track once, however often it is pressed', async () => {
+      await openPanel();
+      await pressPreview(PREVIEWABLE);   // play
+      await pressPreview(PREVIEWABLE);   // stop
+      await pressPreview(PREVIEWABLE);   // play again
+      expect(fetchedUrls()).toEqual([URL_A]);
+    });
+
+    it('a slow download does not start playing over the row pressed after it', async () => {
+      // Press A, and while its bytes are still in flight press B. A arriving
+      // late must not hijack the element — the user is waiting for B.
+      let releaseA: (() => void) | undefined;
+      previewResponder = async (url) => {
+        // Only A is held; B is declined so the default serves it normally.
+        if (url !== URL_A) return undefined;
+        await new Promise<void>((res) => { releaseA = res; });
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(['a-bytes'], { type: 'audio/mpeg' }),
+        } as unknown as Response;
+      };
+
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      await pressPreview(OTHER);
+      expect(sourceOf(audio().src)).toBe(URL_B);
+
+      await act(async () => { releaseA?.(); });
+      // Still B. The late arrival was dropped, not played.
+      expect(sourceOf(audio().src)).toBe(URL_B);
+      expect(screen.getByTestId(`music-preview-${OTHER}`)).toHaveAttribute('aria-pressed', 'true');
       expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
     });
 
