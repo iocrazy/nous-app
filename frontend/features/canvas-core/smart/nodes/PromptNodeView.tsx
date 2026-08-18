@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Library, Play } from 'lucide-react';
 
@@ -11,6 +11,7 @@ import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
+import { resolveSourceUrls } from '../promptInputs';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   elapsedSeconds,
@@ -120,6 +121,39 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     onSelectRef: handleSelectRef,
   });
 
+  // Wired input images (IC parity ⑤ — Infinite's 「N 输入图」row + the
+  // @-picker's 输入图 tab). Recomputed from the live graph so absorbing /
+  // rewiring upstream nodes updates the row immediately.
+  const storeNodes = useCanvasCoreStore((s) => s.nodes);
+  const storeConnections = useCanvasCoreStore((s) => s.connections);
+  const inputUrls = useMemo(
+    () =>
+      resolveSourceUrls(
+        id,
+        storeNodes as CanvasNode[],
+        storeConnections as CanvasConnection[],
+      ),
+    [id, storeNodes, storeConnections],
+  );
+  // Read source_ref from the store (not props): patches land there first,
+  // so the toggle highlight is correct even before React Flow re-renders
+  // the node with fresh data.
+  const sourceRef = useCanvasCoreStore(
+    (s) =>
+      ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as
+        | { data?: PromptNodeData }
+        | undefined)?.data ?? {}).source_ref,
+  );
+  const toggleSourceRef = useCallback(
+    (url: string) => {
+      patch({ source_ref: sourceRef === url ? undefined : url });
+    },
+    [patch, sourceRef],
+  );
+  // IC rule: the picker opens on the Input tab when inputs exist, else
+  // falls to the asset library; reset each time the picker opens.
+  const [mentionTab, setMentionTab] = useState<'input' | 'library'>('library');
+
   // Search for resources whenever the picker is open (debounced inside the hook).
   // Pass '' when picker is closed so cached data is reused on next open.
   const { data: searchData, loading: searchLoading } = useResourceSearch(
@@ -132,6 +166,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   useEffect(() => {
     mention.setItemCount(searchData.results.length);
   }, [searchData.results.length, mention.setItemCount]);
+
+  useEffect(() => {
+    if (mention.pickerOpen) {
+      setMentionTab(inputUrls.length > 0 ? 'input' : 'library');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on open only
+  }, [mention.pickerOpen]);
 
   // ── Library picker handler ───────────────────────────────────────────────
   // Applies the pure-function result: patch this node's body/negative_body,
@@ -260,6 +301,33 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
       <div className="relative p-3">
+        {inputUrls.length > 0 && (
+          <div
+            data-testid="prompt-input-row"
+            className="mb-1.5 flex items-center gap-1.5"
+          >
+            {inputUrls.slice(0, 8).map((url, i) => (
+              <button
+                key={url}
+                type="button"
+                data-testid="prompt-input-thumb"
+                title={sourceRef === url ? 'Selected as source' : 'Use as source'}
+                onClick={() => toggleSourceRef(url)}
+                disabled={readOnly}
+                className={`nodrag h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                  sourceRef === url
+                    ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                    : 'border-canvas-line/60'
+                }`}
+              >
+                <img src={url} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
+              </button>
+            ))}
+            <span className="text-[10px] font-semibold text-canvas-muted">
+              {inputUrls.length} inputs
+            </span>
+          </div>
+        )}
         <textarea
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
@@ -275,16 +343,71 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         />
 
         {mention.pickerOpen && (
-          <CanvasMentionPicker
-            items={searchData.results}
-            query={mention.query}
-            loading={searchLoading}
-            counts={searchData.counts}
-            activeKind={activeKind}
-            onKindChange={setActiveKind}
-            onSelect={mention.handleSelect}
-            activeIndex={mention.activeIndex}
-          />
+          <div
+            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {/* IC's mention-source-tabs: 输入图 / 资产库. */}
+            <div className="mb-1 flex items-center gap-1">
+              <button
+                type="button"
+                data-testid="mention-tab-input"
+                disabled={inputUrls.length === 0}
+                onClick={() => setMentionTab('input')}
+                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
+                  mentionTab === 'input'
+                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                Input images
+              </button>
+              <button
+                type="button"
+                data-testid="mention-tab-library"
+                onClick={() => setMentionTab('library')}
+                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                  mentionTab === 'library'
+                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                Library
+              </button>
+            </div>
+            {mentionTab === 'input' ? (
+              <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-canvas-line bg-canvas-card p-2">
+                {inputUrls.slice(0, 36).map((url, i) => (
+                  <button
+                    key={url}
+                    type="button"
+                    data-testid="mention-input-option"
+                    onClick={() => {
+                      mention.handleInsertText(`Image ${i + 1}`);
+                      patch({ source_ref: url });
+                    }}
+                    className="nodrag flex flex-col items-center gap-0.5"
+                  >
+                    <span className="h-12 w-12 overflow-hidden rounded-md border border-canvas-line/60">
+                      <img src={url} alt={`Image ${i + 1}`} className="h-full w-full object-cover" />
+                    </span>
+                    <span className="text-[9px] text-canvas-muted">Image {i + 1}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <CanvasMentionPicker
+                items={searchData.results}
+                query={mention.query}
+                loading={searchLoading}
+                counts={searchData.counts}
+                activeKind={activeKind}
+                onKindChange={setActiveKind}
+                onSelect={mention.handleSelect}
+                activeIndex={mention.activeIndex}
+              />
+            )}
+          </div>
         )}
 
         {/* Fixed full-screen modal — no relative positioning needed. */}

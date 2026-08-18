@@ -17,7 +17,7 @@ import {
 } from './genResume';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveEntityRef } from './entityRef';
-import { resolveSourceUrl } from './promptInputs';
+import { resolveEffectiveSourceUrl } from './promptInputs';
 import { regenKey, useRegenStore } from './regenStore';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -94,7 +94,7 @@ export async function rerunPrompt(
     gen: data.gen ?? null,
     // Upstream durable image (G4-F3) — makes a retried/rerun prompt keep
     // its i2i / i2v input.
-    source_url: resolveSourceUrl(promptId, nodes, connections),
+    source_url: resolveEffectiveSourceUrl(prompt!, nodes, connections),
     entity_ref: resolveEntityRef(promptId, nodes, connections),
   };
 

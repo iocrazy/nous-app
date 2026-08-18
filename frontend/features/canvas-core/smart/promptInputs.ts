@@ -85,3 +85,22 @@ export function resolveSourceUrl(
 ): string | null {
   return resolveSourceUrls(promptId, nodes, connections)[0] ?? null;
 }
+
+
+/** The i2i source for a prompt, honoring an @-selected input image (IC
+ *  parity ⑤): ``data.source_ref`` wins while it is still one of the wired
+ *  inputs; a stale ref (upstream image deleted/replaced) falls back to the
+ *  first input rather than silently generating from nothing. */
+export function resolveEffectiveSourceUrl(
+  prompt: CanvasNode,
+  nodes: CanvasNode[],
+  connections: CanvasConnection[],
+): string | null {
+  const promptId = String(asObj(prompt).id);
+  const inputs = resolveSourceUrls(promptId, nodes, connections);
+  if (inputs.length === 0) return null;
+  const ref = (asObj(prompt).data as { source_ref?: string } | undefined)
+    ?.source_ref;
+  if (ref && inputs.includes(ref)) return ref;
+  return inputs[0];
+}
