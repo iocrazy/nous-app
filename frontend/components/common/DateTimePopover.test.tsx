@@ -5,7 +5,12 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../public/locales/en.json';
 import zhJson from '../../public/locales/zh.json';
-import { CALENDAR_GRID_WIDTH, DateTimePopover, monthGrid } from './DateTimePopover';
+import {
+  CALENDAR_BODY_HEIGHT,
+  CALENDAR_GRID_WIDTH,
+  DateTimePopover,
+  monthGrid,
+} from './DateTimePopover';
 
 afterEach(() => {
   cleanup();
@@ -853,5 +858,104 @@ describe('DateTimePopover geometry', () => {
     // touching the constant and this fails instead of silently re-crushing the
     // month. The class names live in the component; this is the arithmetic.
     expect(CALENDAR_GRID_WIDTH).toBe(DAY_CELL * COLUMNS + DAY_GAP * (COLUMNS - 1));
+  });
+
+  // ------------------------------------------------------------------
+  // The vertical axis — the one that shipped wrong.
+  //
+  // The time columns carried a hand-tuned `max-h-[228px]` while the calendar
+  // beside them is 272px tall, and the row is a plain flex row: the time
+  // WRAPPER stretched to 272 while its two scroll columns stopped at 228,
+  // leaving a 44px dead box under the minute column. jsdom lays nothing out,
+  // so no test can *see* that box — but the two declared heights are both
+  // readable from the rendered DOM, and them disagreeing IS the bug.
+  //
+  // These tests read the height the component actually declares (inline style
+  // OR a Tailwind arbitrary-value class, so re-introducing a `max-h-[Npx]`
+  // cap is caught rather than skipped) and compare it against the calendar
+  // height computed from the ROWS THE COMPONENT REALLY RENDERED.
+  // ------------------------------------------------------------------
+  const NAV_ROW = 24; // `h-6` on the month-nav row
+  const NAV_ROW_MB = 8; // `mb-2` under it
+  const WEEKDAY_ROW = 24; // `h-6` on the weekday header cells
+  const WEEKDAY_ROW_MB = 4; // `mb-1` under it
+
+  /**
+   * The height this element declares for itself, in px — from the inline
+   * style, or from a `h-[Npx]` / `max-h-[Npx]` Tailwind arbitrary value.
+   * Returns null when it declares none. A `max-h` counts: the browser applies
+   * it against the stretched height, so a cap below the calendar's height is
+   * exactly the shipped bug and must not read as "declares nothing".
+   */
+  const declaredHeightPx = (el: HTMLElement): number | null => {
+    const inline = el.style.height;
+    if (inline.endsWith('px')) return Number.parseFloat(inline);
+    const cls = /(?:^|\s)(?:max-)?h-\[(\d+(?:\.\d+)?)px\]/.exec(el.className);
+    return cls ? Number.parseFloat(cls[1]) : null;
+  };
+
+  /** Height of the calendar column, measured off the DOM it actually built. */
+  const renderedCalendarHeight = (): number => {
+    const dayButtons = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('button[aria-label]'),
+    ).filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.getAttribute('aria-label') ?? ''));
+    expect(dayButtons.length).toBeGreaterThan(0);
+    expect(dayButtons.length % COLUMNS).toBe(0);
+    const rows = dayButtons.length / COLUMNS;
+    return (
+      NAV_ROW
+      + NAV_ROW_MB
+      + WEEKDAY_ROW
+      + WEEKDAY_ROW_MB
+      + DAY_CELL * rows
+      + DAY_GAP * (rows - 1)
+    );
+  };
+
+  const openWithTime = (): { hours: HTMLElement; minutes: HTMLElement } => {
+    const anchor = document.createElement('button');
+    document.body.appendChild(anchor);
+    render(
+      <DateTimePopover
+        mode="single"
+        withTime
+        anchorEl={anchor}
+        value="2026-08-17T09:30"
+        onChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const columns = screen.getByTestId('date-time-columns');
+    const [hours, minutes] = Array.from(columns.children) as HTMLElement[];
+    expect(hours).toBeTruthy();
+    expect(minutes).toBeTruthy();
+    return { hours, minutes };
+  };
+
+  it('gives the hour and minute columns the SAME height as the calendar beside them', () => {
+    // Falsifiable: with the shipped `max-h-[228px]` this reads 228 against a
+    // 272px calendar and fails, naming the 44px blank in the failure message.
+    const { hours, minutes } = openWithTime();
+    const calendar = renderedCalendarHeight();
+    expect(declaredHeightPx(hours)).toBe(calendar);
+    expect(declaredHeightPx(minutes)).toBe(calendar);
+  });
+
+  it('lets neither time column cap itself shorter than the calendar', () => {
+    // The `max-h` half stated on its own: a cap below the calendar height is
+    // what leaves the dead box, whatever else the element declares.
+    const { hours, minutes } = openWithTime();
+    const calendar = renderedCalendarHeight();
+    for (const col of [hours, minutes]) {
+      const cap = /(?:^|\s)max-h-\[(\d+(?:\.\d+)?)px\]/.exec(col.className);
+      if (cap) expect(Number.parseFloat(cap[1])).toBeGreaterThanOrEqual(calendar);
+    }
+  });
+
+  it('derives the exported height from the grid the component renders, not a literal', () => {
+    // Ties the constant to the real row count: change `monthGrid` to five rows,
+    // or `h-8` to `h-9`, and this fails instead of silently re-opening the gap.
+    openWithTime();
+    expect(CALENDAR_BODY_HEIGHT).toBe(renderedCalendarHeight());
   });
 });

@@ -142,6 +142,41 @@ const POPOVER_PAD = 12; // Tailwind `p-3` on the popover shell
 export const CALENDAR_GRID_WIDTH = DAY_CELL * 7 + DAY_GAP * 6;
 const CALENDAR_WIDTH = CALENDAR_GRID_WIDTH + POPOVER_PAD * 2;
 const TIME_WIDTH = 104;
+
+// The SAME relationship, one axis over — and the axis that was wrong.
+//
+// The hour/minute columns used to be capped at a hand-tuned `max-h-[228px]`
+// while the calendar column beside them is 272px of content. The row is a
+// plain flex row, so `align-items: stretch` grows the time WRAPPER (border and
+// all) to the calendar's 272px, while `max-height` pins the two scroll columns
+// inside it at 228 — leaving a 44px dead box under the minute column, framed
+// on the left by the wrapper's `border-l`. That is the blank the screenshot
+// shows, and it is present in EVERY month: `monthGrid()` always returns 42
+// cells, so the calendar is a constant six rows, never five. A picker whose
+// two halves disagree about their own height by 44px is not a rounding
+// artefact — it is two numbers that were never tied together.
+//
+// So tie them: the time columns are given the calendar body's exact height,
+// derived from the same cell/gap constants the width already rests on. Change
+// `h-8` on a day button, or `h-6` on the nav row, and BOTH axes move together.
+const NAV_ROW = 24; // Tailwind `h-6` on the month-nav row
+const NAV_ROW_MB = 8; // Tailwind `mb-2` under it
+const WEEKDAY_ROW = 24; // Tailwind `h-6` on the weekday header cells
+const WEEKDAY_ROW_MB = 4; // Tailwind `mb-1` under it
+/** `monthGrid()` is a fixed 6-week grid — see its docstring. 42 / 7. */
+const GRID_ROWS = 6;
+/**
+ * Height of the calendar column's content box, and therefore the height the
+ * time columns must match. Exported so the test can pin the relationship
+ * instead of re-deriving the number.
+ */
+export const CALENDAR_BODY_HEIGHT =
+  NAV_ROW
+  + NAV_ROW_MB
+  + WEEKDAY_ROW
+  + WEEKDAY_ROW_MB
+  + DAY_CELL * GRID_ROWS
+  + DAY_GAP * (GRID_ROWS - 1);
 /** Minutes are offered on a 5-minute grid — 60 rows of scroll is not a control. */
 const MINUTE_STEP = 5;
 const HOURS: number[] = Array.from({ length: 24 }, (_, h) => h);
@@ -251,7 +286,9 @@ export function monthGrid(year: number, month: number): MonthCell[] {
   const first = new Date(year, month, 1, 12);
   const gridStart = new Date(year, month, 1 - first.getDay(), 12);
   const cells: MonthCell[] = [];
-  for (let i = 0; i < 42; i++) {
+  // `GRID_ROWS * 7`, not a bare 42: the row count is also what the time
+  // columns size themselves against (see CALENDAR_BODY_HEIGHT).
+  for (let i = 0; i < GRID_ROWS * 7; i++) {
     const date = new Date(
       gridStart.getFullYear(),
       gridStart.getMonth(),
@@ -653,7 +690,7 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
             same run-on-smear failure as an undersized CALENDAR_GRID_WIDTH,
             except it only appears in `withTime` mode. */}
         <div className="shrink-0" style={{ width: CALENDAR_GRID_WIDTH }}>
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex h-6 items-center justify-between">
             <button
               type="button"
               disabled={prevDisabled}
@@ -709,7 +746,8 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
         {withTime && (
           <div className="ml-2 flex border-l border-line pl-2" data-testid="date-time-columns">
             <div
-              className="max-h-[228px] flex-1 overflow-y-auto"
+              className="flex-1 overflow-y-auto"
+              style={{ height: CALENDAR_BODY_HEIGHT }}
               aria-label={t('common.dateTimePopover.hours', 'Hours')}
             >
               {HOURS.map((h) => (
@@ -729,7 +767,8 @@ export function DateTimePopover(props: DateTimePopoverProps): React.ReactPortal 
               ))}
             </div>
             <div
-              className="max-h-[228px] flex-1 overflow-y-auto border-l border-line"
+              className="flex-1 overflow-y-auto border-l border-line"
+              style={{ height: CALENDAR_BODY_HEIGHT }}
               aria-label={t('common.dateTimePopover.minutes', 'Minutes')}
             >
               {MINUTES.map((m) => (
