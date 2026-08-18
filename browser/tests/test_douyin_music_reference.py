@@ -836,12 +836,17 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
         )
 
     stored = f"[{excinfo.value.detail['reason']}] {excinfo.value.message}"
-    assert "uses=" in stored and "attrs=" in stored
+    assert "uses=" in stored and "attrs=" in stored and "dims=" in stored
 
     # `waited_ms` renders as `1` here because this file shrinks the wait to
     # 60 ms; a real publish can print the full ceiling, so the widest that one
     # number can ever be is charged on top rather than quietly enjoyed as slack.
     slack = len(str(SHIPPED_MUSIC_READY_TIMEOUT_MS)) - 1
+    # `dims=` prints two counted pairs over the candidate rows. This fixture
+    # runs 20 (the width the production refusal actually had), so the four
+    # numbers are two digits each; a longer result list would print four. The
+    # difference is charged rather than enjoyed, for the same reason as above.
+    slack += 4 * (len("9999") - len("20"))
 
     # **The contract.** The whole string no longer fits 500 in this shape, and
     # that is a deliberate trade rather than an oversight: what must fit is
@@ -849,20 +854,31 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
     # boilerplate the frontend replaces with its own localized note anyway
     # (`RecordsPage.PUBLISH_NOTE_KEYS` matches on `[music_ambiguous]`), and the
     # raw text stays whole in the row's tooltip.
-    evidence = stored[: stored.index("]") + 1]
+    #
+    # ⚠️ The end of the evidence is found by the prose that FOLLOWS it, not by
+    # the first `]` in the string. The first `]` closes `[music_ambiguous]` —
+    # the reason prefix, 17 characters in — so measuring to it made this
+    # assertion `17 + slack <= 500` and the guard passed no matter how long the
+    # evidence grew. It was vacuous from the day it was written, and it is the
+    # only thing standing between a new clause and silent truncation, which
+    # reads as "the platform did not report that" rather than as a bug.
+    close = stored.index("]. Nothing was published")
+    evidence = stored[: close + 1]
     assert len(evidence) + slack <= 500, f"evidence={len(evidence)}+{slack}"
     # Said as the thing a reader of the stored row actually gets: after the
-    # caller's clamp, the bracket is closed — i.e. no clause was cut in half.
-    assert "]" in stored[:500]
+    # caller's clamp, the evidence bracket is closed — no clause was cut in half.
+    assert "]. Nothing was published" in stored[:500]
 
     # ...and the ORDER is what guarantees it stays true as clauses are added:
     # older evidence is nearer the front, so a new clause can only ever crowd
-    # itself and then the prose — never `rows=`, `saw:`, `ready=` or `uses=`.
+    # itself and then the prose — never `rows=`, `saw:`, `ready=`, `uses=` or
+    # `attrs=`.
     for earlier, later in (
         ("rows=", "ready="),
         ("ready=", "uses="),
         ("uses=", "attrs="),
-        ("attrs=", "Nothing was published"),
+        ("attrs=", "dims="),
+        ("dims=", "Nothing was published"),
     ):
         assert stored.index(earlier) < stored.index(later), f"{earlier} after {later}"
 
@@ -1108,3 +1124,211 @@ async def test_the_typed_name_path_is_untouched_by_any_of_this():
     assert result["music_match"] == "approximate"
     assert result["music_selected"] == "起风了 (Cover)"
     assert "music_match_by" not in result
+
+
+# --- one unreadable row no longer costs every row its fingerprint ------------
+#
+# The refusal of 2026-08-17 said 「4 results are indistinguishable」 for a track
+# the catalogue lists as separable — the picked upload and its siblings differ
+# by uploader and by running time, and the live dialog shows both on every row.
+# The reason the fingerprint did not separate them is that it was never applied:
+# the axis gate read
+#
+#     if ref.music_author and all(row.author is not None for row in pool):
+#
+# so ONE row anywhere in the list whose second line failed to parse withdrew the
+# author axis from **all twenty**, and the same for the length. What was left
+# compared titles — which on a same-titled list is exactly the axis guaranteed
+# to carry no information, i.e. the matcher this file exists to replace, re-
+# entered through a data condition rather than through a code change.
+#
+# ⚠️ The gate's INTENT was right and is preserved: an unreadable row is still
+# never excluded, because it may be the row the user picked. What changed is
+# that its unreadability is no longer contagious.
+
+
+def test_one_unparsed_row_no_longer_withdraws_the_author_axis_from_the_others():
+    """RED on the old gate. Three same-titled rows: the user's, a different
+    uploader's, and one whose second line did not parse.
+
+    Old: `all(...)` is false because of the third row, so neither axis runs and
+    all three tie — `ambiguous`, quoting three identical titles.
+    New: the different uploader is READ and dropped. Two remain (the match and
+    the unreadable one), so this still refuses — but on two, and the wrong
+    uploader is gone rather than padding the tie.
+    """
+    choice = dp.judge_music_reference(
+        ref(),
+        rows(
+            ("起风了", "吴青峰·05:25"),
+            ("起风了", "买辣椒也用券·05:11"),
+            ("起风了", ""),
+        ),
+    )
+    assert choice.match == "ambiguous"
+    # The count is the assertion that fails on the old code: it said 3.
+    assert len(choice.candidates) == 2
+    assert {row.index for row in choice.candidates} == {0, 2}
+
+
+def test_a_wrong_uploader_is_dropped_even_though_another_row_is_unreadable():
+    """RED on the old gate, and this one changes the VERDICT rather than the
+    count.
+
+    Two rows are read and both are the wrong uploader; one row did not parse.
+    Old: the axis never runs, three titles tie, `ambiguous`.
+    New: both wrong uploaders are excluded, leaving only the unreadable row —
+    which is refused for the right reason and with the right words, because a
+    row nothing was ever read on cannot be confirmed as the user's pick.
+    """
+    choice = dp.judge_music_reference(
+        ref(),
+        rows(
+            ("起风了", "买辣椒也用券·05:11"),
+            ("起风了", "翻唱君·05:25"),
+            ("起风了", ""),
+        ),
+    )
+    assert choice.match == "ambiguous"
+    assert len(choice.candidates) == 1
+    assert "nothing on it could be read" in choice.reason
+
+
+def test_the_length_axis_also_survives_a_neighbour_that_did_not_parse():
+    """The same gate guarded the running time, and the ground-truth case turns
+    on exactly that axis: the two surviving uploads share a title AND an
+    uploader, and differ only in length (0:38 vs 0:25).
+    """
+    choice = dp.judge_music_reference(
+        ref(music_author="", duration=325),
+        rows(
+            ("起风了", "吴青峰·05:25"),
+            ("起风了", "吴青峰·04:11"),
+            ("起风了", ""),
+        ),
+    )
+    assert choice.match == "ambiguous"
+    # Old code: 3 (the axis never ran). New: the 04:11 upload is read and gone.
+    assert {row.index for row in choice.candidates} == {0, 2}
+
+
+def test_a_fully_readable_list_still_resolves_to_the_one_row_that_matches():
+    """The fix must not cost the case that already worked."""
+    choice = dp.judge_music_reference(
+        ref(),
+        rows(
+            ("起风了", "买辣椒也用券·05:11"),
+            ("起风了", "吴青峰·05:25"),
+            ("起风了", "翻唱君·05:25"),
+        ),
+    )
+    assert (choice.match, choice.index) == ("exact", 1)
+
+
+def test_a_row_that_survived_only_because_its_siblings_were_excluded_is_refused():
+    """The bar that keeps the narrowing from becoming a new way to guess.
+
+    Two rows: one read as the wrong uploader, one unreadable. Dropping the first
+    leaves exactly one row standing — and clicking it would be a publish of a
+    row nothing was ever verified about beyond its title, which is the failure
+    this whole path exists to prevent. `exact` requires a row that AGREED, not
+    one that merely outlasted the others.
+
+    ⚠️ GREEN on the old code too, and deliberately so — it is a guard, not a
+    regression test. The old gate never excluded anything on a partially
+    readable list, so it could not reach this shape at all; the exclusion that
+    reaches it is new, and so is the risk. Kept because the assertion goes red
+    the moment someone relaxes the `full` requirement to "one row left".
+    """
+    choice = dp.judge_music_reference(
+        ref(), rows(("起风了", "买辣椒也用券·05:11"), ("起风了", ""))
+    )
+    assert choice.match == "ambiguous"
+
+
+# --- the axis census ---------------------------------------------------------
+#
+# `dims=` is the clause that tells the two worlds apart. Before it, a refusal
+# over same-titled rows was equally consistent with "the platform's rows really
+# do not differ in anything we can see" and with "our parser did not read the
+# second line", and `saw:` could not distinguish them because on an ambiguity
+# the titles are identical by definition. The two call for opposite work.
+
+
+def test_the_census_says_when_the_axes_were_read_on_every_row():
+    choice = dp.judge_music_reference(
+        ref(), rows(("起风了", "甲·05:25"), ("起风了", "乙·05:25"))
+    )
+    assert dp.describe_music_dimensions(choice) == "dims=name+author+dur au=2/2 du=2/2"
+
+
+def test_the_census_says_when_the_axes_were_read_on_nobody():
+    """The shape that names OUR parser as the defect. `au=0/3` cannot be read as
+    "the rows differ in ways we cannot see" — it says the rows were never asked
+    successfully, and the fix is on this side of the wire."""
+    choice = dp.judge_music_reference(
+        ref(), rows(("起风了", ""), ("起风了", ""), ("起风了", ""))
+    )
+    assert dp.describe_music_dimensions(choice) == "dims=name au=0/3 du=0/3"
+    # ...and the axis list says so a second way: no axis but the title ran.
+    assert choice.dimensions is not None
+    assert choice.dimensions.used == ("name",)
+
+
+def test_the_census_counts_partial_readability_rather_than_rounding_it_away():
+    """The exact shape that used to be invisible: some rows answered, some did
+    not, and the old gate turned that into "no axis at all" for everybody."""
+    choice = dp.judge_music_reference(
+        ref(),
+        rows(("起风了", "甲·05:25"), ("起风了", ""), ("起风了", "乙·05:11")),
+    )
+    assert dp.describe_music_dimensions(choice) == "dims=name+author+dur au=2/3 du=2/3"
+
+
+def test_an_axis_the_reference_never_carried_reads_as_absent_not_as_zero():
+    """`-` and `0/2` are different findings: one is "nothing was asked", the
+    other is "we asked and the page said nothing". Collapsing them would blame
+    the parser for a reference that simply had no author — the same
+    `?`-is-not-`0` rule `rows=` and `attrs=` follow."""
+    choice = dp.judge_music_reference(
+        ref(music_author="", duration=0),
+        rows(("起风了", "甲·05:25"), ("起风了", "乙·05:11")),
+    )
+    assert dp.describe_music_dimensions(choice) == "dims=name au=- du=-"
+
+
+def test_the_census_is_counts_only_and_never_quotes_a_row():
+    """It rides in a stored, logged, UI-rendered string in a PUBLIC repo."""
+    choice = dp.judge_music_reference(
+        ref(), rows(("起风了", "买辣椒也用券·05:11"), ("起风了", ""))
+    )
+    rendered = dp.describe_music_dimensions(choice)
+    assert "买辣椒也用券" not in rendered and "吴青峰" not in rendered
+
+
+# --- the sentence may not claim an axis the judge did not use ----------------
+
+
+def test_the_exact_sentence_names_only_the_axes_that_were_actually_compared():
+    """It used to say "title, author and length" unconditionally. On a list
+    whose second lines did not parse, that was a plain false statement about how
+    the row had been chosen — and it was the only thing a reader of a successful
+    publish had to go on."""
+    on_everything = dp.judge_music_reference(
+        ref(), rows(("起风了", "买辣椒也用券·05:11"), ("起风了", "吴青峰·05:25"))
+    )
+    assert on_everything.reason == "one row matched title, author and length"
+
+    # Nothing but the title was readable, so nothing but the title was compared.
+    on_title_only = dp.judge_music_reference(ref(), rows(("起风了", "")))
+    assert on_title_only.match == "exact"
+    assert on_title_only.reason == "one row matched title"
+    assert "author" not in on_title_only.reason
+
+
+def test_the_exact_sentence_drops_the_axis_the_reference_did_not_carry():
+    choice = dp.judge_music_reference(
+        ref(duration=0),
+        rows(("起风了", "买辣椒也用券·05:11"), ("起风了", "吴青峰·05:25")),
+    )
+    assert choice.reason == "one row matched title and author"
