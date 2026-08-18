@@ -37,9 +37,9 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.repositories.agent_repository import AgentRepository
-from app.utils.ai_status import ai_status_str
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.utils.ai_status import ai_status_str
 
 CACHE_BOUNDARY_MARKER = "<!-- CACHE_BOUNDARY -->"
 
