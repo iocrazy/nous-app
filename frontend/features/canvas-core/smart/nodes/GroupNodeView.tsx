@@ -13,14 +13,26 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { downloadBlob, downloadName } from '../downloadMedia';
+import { downloadCanvasAssetsZip } from '../../services/canvasGenerationService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import {
   CANVAS_MEDIA_MAX_BYTES,
   importCanvasMedia,
   isImportableCanvasFile,
 } from '../mediaImport';
-import { GRID_CELL, GRID_MAX, gridColsFor } from '../grouping';
+import {
+  GRID_CELL,
+  GRID_MAX,
+  arrangeGroupChildren,
+  gridColsFor,
+  ungroupNode,
+} from '../grouping';
+import { stitchImageItems } from '../stitchImages';
 import type { GeneratedImageRef, GroupNodeData } from '../types';
+import type { CanvasNode } from '../../types';
+import { GroupNodeToolbar } from './GroupNodeToolbar';
+import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
@@ -29,7 +41,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const { label, items, uploading } = data as unknown as GroupNodeData;
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
+  const memberCount = useCanvasCoreStore(
+    (s) =>
+      s.nodes.filter((n) => (n as { parentId?: string }).parentId === id).length,
+  );
   const [dragOver, setDragOver] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   // Read-only: the label edit and the file drop both write (the drop also
   // POSTs an import), so both go. The thumbnail grid stays fully visible.
   const readOnly = useCanvasReadOnly();
@@ -64,6 +81,63 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
     [canvasId, id, patch],
   );
 
+  const imageItems: LightboxItem[] = (items ?? [])
+    .filter((item) => item.kind !== 'video')
+    .map((item) => ({ url: item.url, name: item.name }));
+
+  const onArrange = useCallback(() => {
+    const { nodes, setNodes } = useCanvasCoreStore.getState();
+    setNodes(arrangeGroupChildren(nodes as CanvasNode[], id));
+  }, [id]);
+
+  const onUngroup = useCallback(() => {
+    const { nodes, setNodes } = useCanvasCoreStore.getState();
+    setNodes(ungroupNode(nodes as CanvasNode[], id));
+  }, [id]);
+
+  const onDownload = useCallback(() => {
+    void (async () => {
+      try {
+        const zipName = `${(label || 'group').replace(/[^\w.-]+/g, '-')}-assets.zip`;
+        const blob = await downloadCanvasAssetsZip(
+          zipName,
+          (items ?? []).map((it, i) => ({
+            url: it.url,
+            name: downloadName({ url: it.url, name: it.name }, i),
+          })),
+        );
+        downloadBlob(blob, zipName);
+      } catch (err) {
+        console.error('[GroupNodeView] zip download failed:', err);
+      }
+    })();
+  }, [items, label]);
+
+  const onStitch = useCallback(() => {
+    void (async () => {
+      const store = useCanvasCoreStore.getState;
+      const dataOf = () =>
+        ((store().nodes.find((n) => (n as { id?: unknown }).id === id) as
+          | { data?: GroupNodeData }
+          | undefined)?.data ?? {}) as GroupNodeData;
+      patch({ uploading: (dataOf().uploading ?? 0) + 1 });
+      try {
+        const blob = await stitchImageItems(imageItems);
+        const file = new File([blob], 'stitched-grid.png', { type: 'image/png' });
+        const item = await importCanvasMedia(file, canvasId, id);
+        const current = dataOf();
+        patch({
+          items: [...(current.items ?? []), item],
+          uploading: Math.max(0, (current.uploading ?? 1) - 1),
+        });
+      } catch (err) {
+        console.error('[GroupNodeView] stitch failed:', err);
+        const current = dataOf();
+        patch({ uploading: Math.max(0, (current.uploading ?? 1) - 1) });
+      }
+    })();
+  }, [canvasId, id, imageItems, patch]);
+
   const shown = (items ?? []).slice(0, GRID_MAX);
   const overflow = (items?.length ?? 0) - shown.length;
   const pending = Math.max(0, uploading ?? 0);
@@ -76,7 +150,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       data-testid="smart-group-node"
       // IC's group-node: a frosted-glass card (solid hairline, not dashed) —
       // the dashed affordance moves INTO the empty drop-zone below.
-      className={`mh-group-node flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
+      className={`group mh-group-node flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
       onDragOver={(e) => {
@@ -97,6 +171,17 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      <GroupNodeToolbar
+        imageCount={imageItems.length}
+        memberCount={memberCount}
+        onArrange={onArrange}
+        onPreview={() => setLightboxIndex(0)}
+        onStitch={onStitch}
+        onDownload={onDownload}
+        onUngroup={onUngroup}
+        readOnly={readOnly}
+        pinned={Boolean(selected)}
+      />
       <input
         className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text read-only:opacity-80 read-only:cursor-default"
         value={label ?? ''}
@@ -163,6 +248,15 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           into prompts as an i2i source. Always present — an empty group can
           be wired first and filled after. */}
       <Handle type="source" position={Position.Right} />
+      {lightboxIndex !== null && imageItems.length > 0 && (
+        <OutputLightbox
+          items={imageItems}
+          index={Math.min(lightboxIndex, imageItems.length - 1)}
+          kind="image"
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   );
 }

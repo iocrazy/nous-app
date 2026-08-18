@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { absorbMediaIntoGroup, applyDropMembership, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
+import { absorbMediaIntoGroup, applyDropMembership, arrangeGroupChildren, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
 import type { CanvasNode } from '../types';
 
 const n = (id: string, x: number, y: number, extra: Record<string, unknown> = {}): CanvasNode =>
@@ -284,5 +284,68 @@ describe('adaptive thumbnail grid geometry (IC smartGroupThumbLayout)', () => {
   it('width/height grow with the item count', () => {
     expect(groupGridWidth(8)).toBeGreaterThan(groupGridWidth(2));
     expect(groupGridHeight(8)).toBeGreaterThan(groupGridHeight(2));
+  });
+});
+
+
+// ---- arrangeGroupChildren (IC 整理排列) -----------------------------------
+
+describe('arrangeGroupChildren', () => {
+  const group = {
+    id: 'g1',
+    type: 'group',
+    position: { x: 100, y: 100 },
+    style: { width: 300, height: 200 },
+    data: {},
+  } as unknown as CanvasNode;
+
+  function child(id: string, x: number, y: number): CanvasNode {
+    return {
+      id,
+      type: 'media',
+      parentId: 'g1',
+      position: { x, y },
+      measured: { width: 100, height: 80 },
+      data: {},
+    } as unknown as CanvasNode;
+  }
+
+  it('lays members on a grid and grows the container to fit', () => {
+    const nodes = [group, child('a', 900, 900), child('b', -50, 40), child('c', 10, 500)];
+    const out = arrangeGroupChildren(nodes, 'g1');
+    const byId = new Map(out.map((n) => [(n as { id: string }).id, n]));
+    const a = byId.get('a') as { position: { x: number; y: number } };
+    const b = byId.get('b') as { position: { x: number; y: number } };
+    const c = byId.get('c') as { position: { x: number; y: number } };
+    // 3 members → 2 cols: a,b on row 1, c on row 2; all inside the padding.
+    expect(a.position.y).toBe(b.position.y);
+    expect(c.position.y).toBeGreaterThan(a.position.y);
+    expect(b.position.x).toBeGreaterThan(a.position.x);
+    expect(a.position.x).toBeGreaterThan(0);
+    expect(a.position.y).toBeGreaterThan(0);
+    const g = byId.get('g1') as { style: { width: number; height: number } };
+    expect(g.style.width).toBeGreaterThanOrEqual(2 * 100);
+    expect(g.style.height).toBeGreaterThanOrEqual(2 * 80);
+    // Group's own position is untouched — arrange is internal.
+    expect((byId.get('g1') as { position: { x: number } }).position.x).toBe(100);
+  });
+
+  it('no members → unchanged', () => {
+    const nodes = [group];
+    expect(arrangeGroupChildren(nodes, 'g1')).toBe(nodes);
+  });
+
+  it('non-members keep their positions', () => {
+    const loose = {
+      id: 'z',
+      type: 'media',
+      position: { x: 7, y: 8 },
+      data: {},
+    } as unknown as CanvasNode;
+    const out = arrangeGroupChildren([group, child('a', 0, 0), loose], 'g1');
+    const z = out.find((n) => (n as { id: string }).id === 'z') as {
+      position: { x: number; y: number };
+    };
+    expect(z.position).toEqual({ x: 7, y: 8 });
   });
 });
