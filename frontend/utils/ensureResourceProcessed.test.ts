@@ -18,6 +18,11 @@ vi.mock('../services/aiService', () => ({
   triggerSummaryByResource: (id: string) => summaryMock(id),
 }));
 
+const fetchResourceByIdMock = vi.fn();
+vi.mock('../services/resourceService', () => ({
+  fetchResourceById: (id: string) => fetchResourceByIdMock(id),
+}));
+
 import { ensureResourceProcessed } from './ensureResourceProcessed';
 import {
   resetTranscriptionFollowUps,
@@ -43,6 +48,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   transcribeMock.mockReset().mockResolvedValue(TRANSCRIBE_OK);
   summaryMock.mockReset().mockResolvedValue(SUMMARY_OK);
+  // Default: the lookup is not expected; a test that wants it says so.
+  fetchResourceByIdMock.mockReset().mockRejectedValue(new Error('unexpected lookup'));
 });
 
 describe('ensureResourceProcessed', () => {
@@ -123,10 +130,90 @@ describe('ensureResourceProcessed', () => {
     expect(transcribeMock).toHaveBeenCalledWith('r-6');
   });
 
-  it('treats a missing transcript_status as "not transcribed yet"', async () => {
+  it('never guesses from a missing transcript_status — it looks it up', async () => {
+    // "Nobody told me" is not "there is none". Guessing 'none' here bills a
+    // second transcription for an asset that already has one, because the
+    // trigger endpoint dedups in-flight work and nothing else.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchResourceByIdMock.mockResolvedValue({
+      id: 'r-7', transcript_status: 'completed', summary_status: 'completed',
+    });
+
     const result = await ensureResourceProcessed({ id: 'r-7', kind: 'video' });
 
+    expect(fetchResourceByIdMock).toHaveBeenCalledWith('r-7');
+    expect(result.action).toBe('ready');
+    expect(transcribeMock).not.toHaveBeenCalled();
+  });
+
+  it('acts on the looked-up status when there really is work', async () => {
+    fetchResourceByIdMock.mockResolvedValue({
+      id: 'r-7b', transcript_status: 'none', summary_status: 'none',
+    });
+
+    const result = await ensureResourceProcessed({ id: 'r-7b', kind: 'video' });
+
     expect(result.action).toBe('triggered_transcribe');
+    expect(transcribeMock).toHaveBeenCalledWith('r-7b');
+  });
+
+  it('looks up an unknown SUMMARY on a transcribed asset too', async () => {
+    // The summary endpoint charges as well, so the same guess is the same
+    // bug one step down the ladder.
+    fetchResourceByIdMock.mockResolvedValue({
+      id: 'r-7c', transcript_status: 'completed', summary_status: 'completed',
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-7c', kind: 'video', transcript_status: 'completed',
+    });
+
+    expect(fetchResourceByIdMock).toHaveBeenCalledWith('r-7c');
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(result.action).toBe('ready');
+  });
+
+  it('does no lookup when the caller already supplied the status', async () => {
+    await ensureResourceProcessed({
+      id: 'r-7d', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(fetchResourceByIdMock).not.toHaveBeenCalled();
+  });
+
+  it('treats an empty-string status as unknown, not as "none"', async () => {
+    fetchResourceByIdMock.mockResolvedValue({
+      id: 'r-7e', transcript_status: 'completed', summary_status: 'completed',
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-7e', kind: 'video', transcript_status: '', summary_status: '',
+    });
+
+    expect(result.action).toBe('ready');
+    expect(transcribeMock).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the status cannot be resolved at all', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchResourceByIdMock.mockRejectedValue(new Error('HTTP 404'));
+
+    const result = await ensureResourceProcessed({ id: 'r-7f', kind: 'video' });
+
+    // Failing towards "did less" is the deliberate trade: the other
+    // direction spends the user's points on work already done.
+    expect(result.action).toBe('status_unknown');
+    expect(result.error).toContain('404');
+    expect(transcribeMock).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the lookup answers without the status columns', async () => {
+    fetchResourceByIdMock.mockResolvedValue({ id: 'r-7g', filename: 'clip.mp4' });
+
+    const result = await ensureResourceProcessed({ id: 'r-7g', kind: 'video' });
+
+    expect(result.action).toBe('status_unknown');
+    expect(transcribeMock).not.toHaveBeenCalled();
   });
 
   it('does not trigger when the backend marked the step skipped', async () => {

@@ -19,6 +19,7 @@ import {
   triggerTranscriptionByResource,
 } from '../services/aiService';
 import type { ResourceAITriggerResponse } from '../services/aiService';
+import { fetchResourceById } from '../services/resourceService';
 import { rememberTranscriptionFollowUp } from './transcriptionFollowUp';
 
 /** What the helper did. `skipped` = nothing to trigger for this kind of
@@ -28,6 +29,7 @@ export type EnsureResourceProcessedAction =
   | 'triggered_summary'
   | 'ready'
   | 'skipped'
+  | 'status_unknown'
   | 'failed';
 
 export interface EnsureResourceProcessedResult {
@@ -55,7 +57,16 @@ export interface EnsureResourceProcessedInput {
   kind?: string | null;
   /** Falls back to the mime type when the caller has no kind. */
   mime?: string | null;
-  /** `none | pending | processing | completed | failed | skipped` */
+  /**
+   * `none | pending | processing | completed | failed | skipped`.
+   *
+   * Absent / empty means UNKNOWN, which is NOT the same as `'none'`: some
+   * callers hand over a row synthesised for the grid that never carried
+   * these columns (Project Assets' canvas adapter is one). Reading unknown
+   * as "never processed" re-triggers a PAID transcription on an
+   * already-transcribed asset, because the endpoint dedups in-flight work
+   * only, never finished work. Unknown is resolved by a lookup below.
+   */
   transcript_status?: string | null;
   summary_status?: string | null;
 }
@@ -72,10 +83,16 @@ export interface EnsureResourceProcessedInput {
  * "treat it as a new dispatch" (an over-reported charge in a toast), never
  * to a wrong trigger.
  */
-function isDedupedResponse(res: ResourceAITriggerResponse | undefined): boolean {
+export function isDedupedResponse(res: ResourceAITriggerResponse | undefined): boolean {
   if (!res) return false;
   if (res.points_charged === 0) return true;
   return /already in progress/i.test(res.message ?? '');
+}
+
+/** A status we were actually told. Empty string / null / undefined all
+ *  mean "nobody said", and must not be answered with a guess. */
+function isKnown(status: string | null | undefined): status is string {
+  return typeof status === 'string' && status !== '';
 }
 
 function isAudioVisual(input: EnsureResourceProcessedInput): boolean {
@@ -91,8 +108,26 @@ export async function ensureResourceProcessed(
 ): Promise<EnsureResourceProcessedResult> {
   if (!isAudioVisual(input)) return { action: 'skipped' };
 
-  const transcript = input.transcript_status ?? 'none';
-  const summary = input.summary_status ?? 'none';
+  let transcript = input.transcript_status;
+  let summary = input.summary_status;
+
+  // Resolve unknown status before deciding anything that costs money. Only
+  // when the step we are about to act on is the unknown one — a known
+  // "not transcribed" needs no lookup, we already know what to do.
+  if (!isKnown(transcript) || (transcript === 'completed' && !isKnown(summary))) {
+    try {
+      const row = await fetchResourceById(input.id);
+      transcript = row?.transcript_status ?? transcript;
+      summary = row?.summary_status ?? summary;
+    } catch (err) {
+      console.error('ensureResourceProcessed: status lookup failed', err);
+      return {
+        action: 'status_unknown',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    if (!isKnown(transcript)) return { action: 'status_unknown' };
+  }
 
   // 'skipped' is the backend saying "there is nothing here to process"
   // (e.g. no audio track). Re-triggering would just 409.
@@ -122,6 +157,9 @@ export async function ensureResourceProcessed(
 
   if (summary === 'skipped') return { action: 'skipped' };
   if (summary === 'completed') return { action: 'ready' };
+  // Reached only when the lookup above filled it in or the caller told us;
+  // an unknown summary on a transcribed asset never falls through here.
+  if (!isKnown(summary)) return { action: 'status_unknown' };
 
   try {
     const res = await triggerSummaryByResource(input.id);

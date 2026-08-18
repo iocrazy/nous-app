@@ -125,24 +125,63 @@ describe('pendingResource consumption', () => {
   });
 
   it('waits for the composer to mount instead of dropping the resource', () => {
-    const frames: FrameRequestCallback[] = [];
+    // cancelAnimationFrame is mocked to REALLY drop the frame. Mocking only
+    // requestAnimationFrame makes this probe unfalsifiable: a cancel against
+    // a fake handle is a no-op, so the queued callback survives and a
+    // retry arm that was cancelled still looks alive.
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
     const rafSpy = vi
       .spyOn(window, 'requestAnimationFrame')
       .mockImplementation((cb: FrameRequestCallback) => {
-        frames.push(cb);
-        return frames.length;
+        const handle = nextHandle++;
+        frames.set(handle, cb);
+        return handle;
       });
+    const cafSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation((handle: number) => { frames.delete(handle); });
     const editorRef = { current: null } as React.RefObject<any>;
     setup({ editorRef });
 
     act(() => { useGlobalChatStore.getState().sendResourceToChat(pending()); });
     expect(insertResourceRef).not.toHaveBeenCalled();
+    // The consume that just happened re-runs the effect; the retry frame
+    // must survive that, or the asset is dropped rather than awaited.
+    expect(frames.size).toBe(1);
 
     editorRef.current = fakeEditor();
-    act(() => { frames.shift()?.(0); });
+    act(() => { [...frames.values()][0]?.(0); });
 
     expect(insertResourceRef).toHaveBeenCalledTimes(1);
     rafSpy.mockRestore();
+    cafSpy.mockRestore();
+  });
+
+  it('cancels its pending retry when the panel unmounts', () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    const rafSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb: FrameRequestCallback) => {
+        const handle = nextHandle++;
+        frames.set(handle, cb);
+        return handle;
+      });
+    const cafSpy = vi
+      .spyOn(window, 'cancelAnimationFrame')
+      .mockImplementation((handle: number) => { frames.delete(handle); });
+    const editorRef = { current: null } as React.RefObject<any>;
+    const { view } = setup({ editorRef });
+
+    act(() => { useGlobalChatStore.getState().sendResourceToChat(pending()); });
+    expect(frames.size).toBe(1);
+
+    view.unmount();
+
+    expect(frames.size).toBe(0);
+    rafSpy.mockRestore();
+    cafSpy.mockRestore();
   });
 
   it('fires again for a repeat send of the same resource', () => {

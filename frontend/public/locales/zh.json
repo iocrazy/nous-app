@@ -2827,7 +2827,8 @@
       "transcribing": "正在转录该素材 —— 稍后 agent 即可读取",
       "summarizing": "正在生成该素材的摘要 —— 稍后 agent 即可读取",
       "failedWithReason": "无法开始处理该素材：{{error}}",
-      "failed": "无法开始处理该素材"
+      "failed": "无法开始处理该素材",
+      "statusUnknown": "无法确认该素材的处理状态 —— 已直接发送，未新增处理"
     }
   },
   "mcp": {

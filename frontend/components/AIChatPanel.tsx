@@ -394,7 +394,9 @@ export function AIChatPanel({
   // Second half of the F1 chain: a transcription started from either entry
   // point has no summary yet, and the summary endpoint has nothing to read
   // until the transcript lands. Watches the Task Center for that moment.
-  useTranscriptionSummaryFollowUp();
+  // It charges points like the other two paths, so it reports its outcome
+  // through the same toast.
+  useTranscriptionSummaryFollowUp({ notify: notifyProcessing, t });
 
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {

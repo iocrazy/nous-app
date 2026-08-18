@@ -74,3 +74,18 @@ describe('resourceProcessingNotice', () => {
     expect(notice?.message.length).toBeGreaterThan(0);
   });
 });
+
+describe('resourceProcessingNotice — unresolvable status', () => {
+  it('tells the user nothing was processed when the status could not be read', () => {
+    const notice = resourceProcessingNotice(
+      { action: 'status_unknown', error: 'HTTP 404' },
+      t,
+    );
+
+    // Visible, and honest about what did NOT happen — this arm is the one
+    // that trades "maybe re-bill" for "maybe do nothing".
+    expect(notice).not.toBeNull();
+    expect(notice?.message.length).toBeGreaterThan(0);
+    expect(notice?.message).not.toMatch(/\d+\s*points/i);
+  });
+});

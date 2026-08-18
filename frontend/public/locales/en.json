@@ -2827,7 +2827,8 @@
       "transcribing": "Transcribing this asset — the agent can read it shortly",
       "summarizing": "Summarising this asset — the agent can read it shortly",
       "failedWithReason": "Could not start processing this asset: {{error}}",
-      "failed": "Could not start processing this asset"
+      "failed": "Could not start processing this asset",
+      "statusUnknown": "Could not check this asset's processing state — sent without new processing"
     }
   },
   "mcp": {

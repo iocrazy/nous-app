@@ -22,12 +22,14 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const { fetchResourceById } = vi.hoisted(() => ({ fetchResourceById: vi.fn() }));
 vi.mock('../services/resourceService', () => ({
   getFolderContentCount: vi.fn(),
   getResourceFileUrl: vi.fn(() => 'blob:x'),
   copyResourceItem: vi.fn(),
   generateGenPrompt: vi.fn(),
   classifyResource: vi.fn(),
+  fetchResourceById,
 }));
 vi.mock('../services/unifiedTagService', () => ({ fetchResourceTags: vi.fn() }));
 vi.mock('../services/toPublishService', () => ({
@@ -123,7 +125,85 @@ beforeEach(() => {
   });
   summaryMock.mockReset().mockResolvedValue({ message: 'Summary generation queued' });
   resetTranscriptionFollowUps();
+  fetchResourceById.mockReset();
   useGlobalChatStore.setState({ pendingResource: null, open: false });
+});
+
+/**
+ * Project Assets → a canvas selection adapts `CanvasAssetItem` into a
+ * `ResourceItem` (ResourcesViewInner.tsx:508-530) and fills "only the
+ * fields ResourceGrid/ResourceCard actually read" — which does NOT include
+ * the two status columns, and the backing projection
+ * (canvas_refs_repository.py) does not select them either. That view passes
+ * `onFileContextMenu` through, so Send to Agent is live on rows whose
+ * status is genuinely UNKNOWN rather than known-empty.
+ */
+const canvasSynthesizedRow = () => ({
+  id: '339710259795355',
+  resource_id: '339710259795355',
+  resource: {
+    id: '339710259795355',
+    filename: 'clip.mp4',
+    file_type: 'video',
+    mime_type: 'video/mp4',
+    thumbnail_path: null,
+    cover_image_path: null,
+    created_at: '2026-08-17T00:00:00Z',
+  },
+});
+
+describe('Send to Agent — a row whose status columns were never loaded', () => {
+  it('does NOT bill a transcription for a video it never checked', async () => {
+    // The status is unknown, not absent. Reading unknown as "never
+    // transcribed" is what re-bills an already-processed video, because
+    // the endpoint dedups in-flight work only.
+    fetchResourceById.mockResolvedValue({
+      id: '339710259795355', transcript_status: 'completed', summary_status: 'completed',
+    });
+    const { result } = renderMenu(buildOptions(canvasSynthesizedRow()));
+
+    await act(async () => { await sendToAgent(result.current).onClick(); });
+
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(fetchResourceById).toHaveBeenCalledWith('339710259795355');
+  });
+
+  it('still processes it once the lookup says there is work to do', async () => {
+    fetchResourceById.mockResolvedValue({
+      id: '339710259795355', transcript_status: 'none', summary_status: 'none',
+    });
+    const { result } = renderMenu(buildOptions(canvasSynthesizedRow()));
+
+    await act(async () => { await sendToAgent(result.current).onClick(); });
+
+    expect(transcribeMock).toHaveBeenCalledWith('339710259795355');
+  });
+
+  it('does nothing and says so when the status cannot be resolved', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchResourceById.mockRejectedValue(new Error('HTTP 404'));
+    const { result } = renderMenu(buildOptions(canvasSynthesizedRow()));
+
+    await act(async () => { await sendToAgent(result.current).onClick(); });
+
+    expect(transcribeMock).not.toHaveBeenCalled();
+    // Doing less must still be visible — a silent no-op is not acceptable
+    // on a user-action → agent path.
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    // ...and the asset is still sent; only the top-up was skipped.
+    expect(useGlobalChatStore.getState().pendingResource).toBeTruthy();
+  });
+
+  it('does not re-look-up a row that already carries its status', async () => {
+    const { result } = renderMenu(buildOptions(videoRow(
+      { transcript_status: 'completed', summary_status: 'completed' },
+    )));
+
+    await act(async () => { await sendToAgent(result.current).onClick(); });
+
+    expect(fetchResourceById).not.toHaveBeenCalled();
+  });
 });
 
 describe('Send to Agent menu item', () => {

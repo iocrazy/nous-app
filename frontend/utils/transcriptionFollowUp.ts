@@ -16,17 +16,27 @@
  * outcome nobody watched.
  */
 
-const waiting = new Set<string>();
+/** resourceId → epoch ms when the transcription was triggered. The instant
+ *  matters: the Task Center may still be holding an OLDER completed
+ *  transcription for the same resource, and reading that as "the one we
+ *  just started has finished" would fire the summary against a transcript
+ *  that is about to be overwritten. */
+const waiting = new Map<string, number>();
 
 /** Called by `ensureResourceProcessed` right after it starts a transcription. */
 export function rememberTranscriptionFollowUp(resourceId: string): void {
   if (!resourceId) return;
-  waiting.add(String(resourceId));
+  waiting.set(String(resourceId), Date.now());
 }
 
 /** Resource ids still waiting for their transcript to land. */
 export function transcriptionFollowUps(): string[] {
-  return [...waiting];
+  return [...waiting.keys()];
+}
+
+/** When the wait for `resourceId` started, or null if it is not waiting. */
+export function transcriptionFollowUpSince(resourceId: string): number | null {
+  return waiting.get(String(resourceId)) ?? null;
 }
 
 /** Drop a follow-up — the summary was requested, or the transcription died. */

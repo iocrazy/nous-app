@@ -20,6 +20,11 @@ vi.mock('../services/aiService', () => ({
   triggerSummaryByResource: (id: string) => summaryMock(id),
 }));
 
+const notify = vi.fn();
+const t = (_k: string, def: string, opts?: Record<string, unknown>) =>
+  def.replace(/\{\{(\w+)\}\}/g, (_m, n) => String(opts?.[n] ?? ''));
+const useFollowUpWithNotify = () => useTranscriptionSummaryFollowUp({ notify, t });
+
 const taskManagerMock = vi.fn();
 vi.mock('./useOptionalTaskManager', () => ({
   useOptionalTaskManager: () => taskManagerMock(),
@@ -32,19 +37,23 @@ import {
   transcriptionFollowUps,
 } from '../utils/transcriptionFollowUp';
 
-/** Real task_tracking wire shape: resource_id is a STRING column. */
+/** Real task_tracking wire shape: resource_id is a STRING column.
+ *  `created_at` defaults to now because the hook only accepts tasks from
+ *  the trigger instant onward — a hard-coded date would make every fixture
+ *  a stale task the moment the suite outlives it. */
 function task(over: Record<string, unknown> = {}) {
   return {
     id: 'wf-1',
     task_type: 'ai_transcription',
     status: 'completed',
     resource_id: '339710259795355',
-    created_at: '2026-08-17T10:00:00Z',
+    created_at: new Date().toISOString(),
     ...over,
   };
 }
 
 beforeEach(() => {
+  notify.mockClear();
   summaryMock.mockReset().mockResolvedValue({ message: 'Summary generation queued' });
   taskManagerMock.mockReset().mockReturnValue(null);
   resetTranscriptionFollowUps();
@@ -144,5 +153,94 @@ describe('useTranscriptionSummaryFollowUp', () => {
 
     renderHook(() => useTranscriptionSummaryFollowUp());
     await vi.waitFor(() => expect(errSpy).toHaveBeenCalled());
+  });
+});
+
+/**
+ * This hook is the third user-action→agent trigger path this task creates,
+ * and it spends points exactly like the other two. "No news" would mean the
+ * user is billed for a summary they were never told about, and told nothing
+ * when it fails — the silent no-op the repo's discipline rules out.
+ */
+describe('useTranscriptionSummaryFollowUp — user-visible outcome', () => {
+  it('says the summary is being made', async () => {
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [task()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      expect.stringMatching(/summar/i), 'info',
+    ));
+  });
+
+  it('does not claim a charge when the backend deduped the summary', async () => {
+    summaryMock.mockResolvedValue({
+      message: 'Summary already in progress', resource_id: '339710259795355', points_charged: 0,
+    });
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [task()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      expect.stringMatching(/already/i), 'info',
+    ));
+  });
+
+  it('reports a failed summary trigger with its reason', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    summaryMock.mockRejectedValue(new Error('HTTP 402 Insufficient points'));
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [task()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Insufficient points'), 'error',
+    ));
+  });
+
+  it('still works with no notifier (the hook is optional-notify)', async () => {
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [task()] });
+
+    expect(() => renderHook(() => useTranscriptionSummaryFollowUp())).not.toThrow();
+    expect(summaryMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * M1: the waiting list is armed the moment the transcription is triggered,
+ * but the new task row only shows up in the Task Center a beat later. In
+ * that window a STALE completed transcription for the same resource would
+ * otherwise be read as "the one we just started has finished".
+ */
+describe('useTranscriptionSummaryFollowUp — only tasks from this trigger onward', () => {
+  it('ignores a transcription that completed before we asked for one', () => {
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({
+      tasks: [task({ created_at: '2026-08-01T00:00:00Z' })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    // Still waiting for the real one — an old row is not evidence either way.
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('accepts a task stamped slightly before the trigger (server clock skew)', () => {
+    // task_tracking.created_at is the SERVER's clock; the waiting list is
+    // stamped with the BROWSER's. A strict comparison would strand the
+    // chain forever whenever the server runs a few seconds behind.
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({
+      tasks: [task({ created_at: new Date(Date.now() - 5_000).toISOString() })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).toHaveBeenCalledWith('339710259795355');
   });
 });

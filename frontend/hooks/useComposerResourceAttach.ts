@@ -18,7 +18,7 @@
  * already walks.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Editor } from '@tiptap/core';
 
 import { useGlobalChatStore } from '../stores/globalChatStore';
@@ -67,6 +67,18 @@ export function useComposerResourceAttach({
 }: UseComposerResourceAttachOptions): UseComposerResourceAttachResult {
   const pendingResource = useGlobalChatStore((s) => s.pendingResource);
 
+  // Frames still waiting for the composer to mount. They must NOT be
+  // cancelled by the consuming effect's own cleanup: consuming the channel
+  // changes the store, which changes this effect's dep, which runs the
+  // previous cleanup — i.e. the retry would cancel itself one frame after
+  // arming and the asset would be dropped instead of awaited. Only an
+  // unmount may cancel them.
+  const pendingFrames = useRef<Set<number>>(new Set());
+  useEffect(() => () => {
+    pendingFrames.current.forEach((handle) => cancelAnimationFrame(handle));
+    pendingFrames.current.clear();
+  }, []);
+
   useEffect(() => {
     if (!pendingResource) return undefined;
 
@@ -95,13 +107,15 @@ export function useComposerResourceAttach({
     // insert the same chip twice; the retry below closes over `item`.
     useGlobalChatStore.getState().consumePendingResource();
 
-    let raf = 0;
+    let handle = 0;
     let tries = 0;
     const insertWhenReady = () => {
+      if (handle) pendingFrames.current.delete(handle);
       const editor = editorRef.current;
       if (!editor) {
         if (tries++ > 30) return; // give up quietly rather than loop forever
-        raf = requestAnimationFrame(insertWhenReady);
+        handle = requestAnimationFrame(insertWhenReady);
+        pendingFrames.current.add(handle);
         return;
       }
       insertChip(editor, item);
@@ -109,9 +123,9 @@ export function useComposerResourceAttach({
     };
     insertWhenReady();
 
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-    };
+    // No cleanup: each send owns its own retry loop (two sends in a row
+    // must both land, so a new one may not cancel the previous one).
+    return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingResource]);
 

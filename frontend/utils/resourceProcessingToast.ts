@@ -31,6 +31,20 @@ export function resourceProcessingNotice(
 ): ResourceProcessingNotice | null {
   if (result.action === 'ready' || result.action === 'skipped') return null;
 
+  // Doing LESS still has to be visible. This arm means "we could not find
+  // out whether this asset needs processing, so we did none" — the safe
+  // direction (the unsafe one bills a second transcription), but the user
+  // would otherwise attach an unprocessed asset believing it was handled.
+  if (result.action === 'status_unknown') {
+    return {
+      type: 'info',
+      message: t(
+        'chat.resourceProcessing.statusUnknown',
+        'Could not check this asset\'s processing state — sent without new processing',
+      ),
+    };
+  }
+
   if (result.action === 'failed') {
     return {
       type: 'error',
