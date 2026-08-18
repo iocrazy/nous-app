@@ -63,7 +63,7 @@ export function AgentSelector({
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 w-56 overflow-hidden rounded-[8px] border border-ink-700 bg-card p-1 shadow-[0_12px_34px_rgba(0,0,0,0.22)]">
+        <div className="absolute top-full right-0 z-50 mt-1 max-h-72 w-56 overflow-y-auto rounded-[8px] border border-ink-700 bg-card p-1 shadow-[0_12px_34px_rgba(0,0,0,0.22)]">
           {agents.length === 0 ? (
             <p className="px-3 py-2 text-xs text-content-3">No agents available</p>
           ) : (
