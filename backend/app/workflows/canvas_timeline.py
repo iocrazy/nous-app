@@ -73,7 +73,9 @@ async def generate_segment_step(
     provider, actual_model = await db_registry.resolve_video_provider(
         model or None, user_id=user_id
     )
-    gen_model = model or actual_model
+    # Picker value is the catalog row name; upstream gets actual_model
+    # (same rule as canvas_generation, 2026-08-18 incident).
+    gen_model = actual_model or model
 
     from app.services.library.generated_media_service import (
         generated_media_local_path,

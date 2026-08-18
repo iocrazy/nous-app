@@ -65,7 +65,10 @@ async def generate_canvas_media_step(
         provider, actual_model = await db_registry.resolve_video_provider(
             model or None, user_id=user_id
         )
-        gen_model = model or actual_model
+        # ``model`` is the picker's CATALOG ROW NAME (that's what resolve
+        # matched on); upstream must get the row's actual_model. Sending the
+        # row name upstream was the 2026-08-18 codex HTTP-400 incident.
+        gen_model = actual_model or model
         async with generated_media_local_path(
             source_url, media_kind="image"
         ) as image_path:
@@ -89,7 +92,8 @@ async def generate_canvas_media_step(
     provider, actual_model = await db_registry.resolve_image_provider(
         model or None, user_id=user_id
     )
-    gen_model = model or actual_model
+    # Same row-name-vs-actual_model rule as the video branch above.
+    gen_model = actual_model or model
     result = await provider.generate(
         prompt,
         gen_model,
