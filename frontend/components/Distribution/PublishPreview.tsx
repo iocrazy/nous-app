@@ -180,10 +180,21 @@ const MINE_INDEX = 2;
  * chrome around a Xiaohongshu post would be a fabrication of a different
  * app's interface, which is the same defect wearing a different hat.
  */
-const DOUYIN_CHROME = {
+/**
+ * ⚠️ SCOPED TO ONE VIEW ON PURPOSE — do not reuse this for another tab.
+ *
+ * The tab row is not a property of the app, it is a property of the SCREEN.
+ * The two-column card feed reproduced here shows 精选 / 关注 / 推荐 with 精选
+ * selected; the full-screen video view shows a different set entirely
+ * (同城 / 关注 / 推荐, with 推荐 selected). They share two words out of three,
+ * which is exactly what makes copying one into the other easy and wrong.
+ *
+ * So the name says which screen it belongs to. If the video tab ever grows
+ * chrome of its own, it gets its own constant — reusing this one would put a
+ * real app's furniture in a room it does not stand in.
+ */
+const DOUYIN_FEATURED_FEED_CHROME = {
   feedTabs: ['精选', '关注', '推荐'],
-  /* The two-column card feed is the 精选 tab. If the reference shows a
-     different tab underlined, this is the one word to change. */
   currentTab: '精选',
   navItems: ['首页', '朋友', '＋', '消息', '我'],
 } as const;
@@ -214,7 +225,7 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
   });
 
   const isImages = kind === 'images';
-  /** See DOUYIN_CHROME: only the platform we have actually seen. */
+  /** See DOUYIN_FEATURED_FEED_CHROME: only the platform we have seen. */
   const showsPlatformChrome = platform === 'douyin';
 
   const blockFor = (which: PreviewTab): TabBlock => {
@@ -457,15 +468,15 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
         ) : tab === 'cover' ? (
           <div className="pv-screen">
             {/* Platform chrome. Drawn ONLY for the platform we have actually
-                been shown — see DOUYIN_CHROME. Decoration end to end:
+                been shown — see DOUYIN_FEATURED_FEED_CHROME. Decoration end to end:
                 aria-hidden, no buttons, no counts. It earns its place because
                 it is the only thing that says "this is the feed", which is
                 what makes the two-column card layout below legible as a feed
                 rather than as a broken grid. */}
             {showsPlatformChrome && (
               <div className="pv-chrome-top" aria-hidden="true">
-                {DOUYIN_CHROME.feedTabs.map((label) => (
-                  <span key={label} className={label === DOUYIN_CHROME.currentTab ? 'cur' : ''}>
+                {DOUYIN_FEATURED_FEED_CHROME.feedTabs.map((label) => (
+                  <span key={label} className={label === DOUYIN_FEATURED_FEED_CHROME.currentTab ? 'cur' : ''}>
                     {label}
                   </span>
                 ))}
@@ -559,7 +570,7 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
 
             {showsPlatformChrome && (
               <div className="pv-chrome-bottom" aria-hidden="true">
-                {DOUYIN_CHROME.navItems.map((label, i) => (
+                {DOUYIN_FEATURED_FEED_CHROME.navItems.map((label, i) => (
                   <span key={label} className={i === 2 ? 'plus' : ''}>{label}</span>
                 ))}
               </div>

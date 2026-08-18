@@ -376,6 +376,22 @@ describe('where the first cell’s picture comes from is stated, never implied',
     expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
   });
 
+  /* The caption names a specific crop, so it has to follow the crop actually
+     on screen. A caption stuck on "vertical" while the horizontal cover is
+     displayed is a sentence about the picture that is not true of the picture
+     — the same defect as a fabricated count, in prose. */
+  it('renames the crop when the switch is flipped', () => {
+    const { update } = renderPanel({
+      covers: { vertical: 'cover-v', horizontal: 'cover-h' },
+      orientation: 'vertical',
+    });
+    expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
+
+    update({ orientation: 'horizontal' });
+    expect(screen.getByText('Showing your horizontal 4:3 cover.')).toBeTruthy();
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-h');
+  });
+
   it('falls back to the thumbnail AND says it is not a cover', () => {
     renderPanel({ covers: null, items: [CLIP] });
     expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/clip');
