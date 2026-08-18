@@ -16,22 +16,39 @@ import './distribution-v4.css';
 
 type Filter = 'all' | 'needs_action' | 'publishing' | 'failed' | 'done';
 
-const STATUS_META: Record<PublishTask['status'], { cls: string; pulse?: boolean }> = {
-  success: { cls: 'chip-green' },
-  partial: { cls: 'chip-amber' },
-  pending_share: { cls: 'chip-amber' },
-  publishing: { cls: 'chip-indigo', pulse: true },
-  failed: { cls: 'chip-red' },
-  pending: { cls: 'chip-mute' },
+/** A chip to draw: the copy to translate plus how to paint it. */
+export interface ChipSpec { key: string; fallback: string; cls: string; pulse?: boolean }
+
+const TASK_STATUS_CHIPS: Record<PublishTask['status'], ChipSpec> = {
+  success: { key: 'distribution.records.status_success', fallback: 'Published', cls: 'chip-green' },
+  partial: { key: 'distribution.records.status_partial', fallback: 'Partially published', cls: 'chip-amber' },
+  pending_share: { key: 'distribution.records.statusPendingShare', fallback: 'Waiting in Douyin', cls: 'chip-amber' },
+  publishing: { key: 'distribution.records.status_publishing', fallback: 'Publishing', cls: 'chip-indigo', pulse: true },
+  failed: { key: 'distribution.records.status_failed', fallback: 'Failed', cls: 'chip-red' },
+  pending: { key: 'distribution.records.statusQueued', fallback: 'Queued', cls: 'chip-mute' },
 };
 
-const ACCOUNT_STATUS_META: Record<PublishTaskAccount['status'], { cls: string; pulse?: boolean }> = {
-  success: { cls: 'chip-green' },
-  pending_share: { cls: 'chip-amber' },
-  publishing: { cls: 'chip-indigo', pulse: true },
-  failed: { cls: 'chip-red' },
-  pending: { cls: 'chip-mute' },
-  cancelled: { cls: 'chip-mute' },
+const ACCOUNT_STATUS_CHIPS: Record<PublishTaskAccount['status'], ChipSpec> = {
+  success: { key: 'distribution.records.status_success', fallback: 'Published', cls: 'chip-green' },
+  pending_share: { key: 'distribution.records.statusPendingShare', fallback: 'Waiting in Douyin', cls: 'chip-amber' },
+  publishing: { key: 'distribution.records.status_publishing', fallback: 'Publishing', cls: 'chip-indigo', pulse: true },
+  failed: { key: 'distribution.records.status_failed', fallback: 'Failed', cls: 'chip-red' },
+  pending: { key: 'distribution.records.statusQueued', fallback: 'Queued', cls: 'chip-mute' },
+  cancelled: { key: 'distribution.records.status_cancelled', fallback: 'Cancelled', cls: 'chip-mute' },
+};
+
+/**
+ * The chip a batch whose platform-side publish time has not arrived yet gets
+ * INSTEAD of "Published".
+ *
+ * `chip-violet` is not used by any other status on this page on purpose: the
+ * bug this replaces was two states rendering identically, so the new one has
+ * to differ on colour as well as on wording.
+ */
+const SCHEDULED_CHIP: ChipSpec = {
+  key: 'distribution.records.statusScheduled',
+  fallback: 'Scheduled',
+  cls: 'chip-violet',
 };
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -93,6 +110,90 @@ const formatTime = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+/**
+ * When the PLATFORM will publish this, if that moment is still ahead of us.
+ * Returns the epoch ms of go-live, or null when there is nothing to wait for.
+ *
+ * A scheduled batch is handed to Douyin as a scheduled post: our upload
+ * finishes within seconds, and the platform puts it out hours later. Those are
+ * two different facts and only the first one is `status: 'success'` — which is
+ * why this page said "Published" about a post that, as the user pointed out
+ * while looking at it, was not on the platform at all. `success` was never the
+ * lie; reading it as "it is up" was.
+ *
+ * `null` covers three genuinely different things that all mean "the clock has
+ * nothing more to say here": an immediate publish (go-live IS the upload), a
+ * schedule that has already come round, and an unparseable timestamp. The last
+ * one falls back to saying nothing extra rather than rendering `NaN` or
+ * inventing a wait — same call `describeSessionFreshness` makes for a
+ * timestamp it cannot read.
+ *
+ * ⚠️ Not scoped to the session channel, unlike `verifyDisplayFor`. That one
+ * asks "do we run a read-back for this row" (we only do for session); this one
+ * asks "has the platform published it yet", which the clock answers for every
+ * channel. In practice a non-session row can never be in this state at all —
+ * `unsupported_options` fails the row rather than publish a scheduled batch
+ * immediately — so scoping it would only add a condition nothing can exercise.
+ */
+export const pendingGoLiveAt = (
+  scheduledAt: string | null | undefined,
+  now: number = Date.now(),
+): number | null => {
+  if (!scheduledAt) return null;
+  const at = new Date(scheduledAt).getTime();
+  if (Number.isNaN(at)) return null;
+  return at > now ? at : null;
+};
+
+/**
+ * The batch card's chip. Pure, because two of the three inputs are not the
+ * batch's own status and getting the precedence wrong is exactly the bug.
+ *
+ * - `goLivePending` — the platform has it but has not published it yet. Only
+ *   overrides `success`: while the upload itself is still queued or failing,
+ *   the plain status is already the honest word for it.
+ * - `workflowRunning` — the publish workflow for this batch is executing right
+ *   now, per `task_tracking`. Only overrides `pending`, and it exists because
+ *   nothing ever writes `publish_task_accounts.status = 'publishing'`: the
+ *   rows go `pending` → `success`/`failed` directly, so a batch that is
+ *   actively uploading aggregates to `pending` and this page called it
+ *   "Queued" for the whole run while Task Center — reading the engine — said
+ *   "Running". Two views, one event, two answers.
+ *
+ * ⚠️ The two overrides must not merge. "The platform will publish this later"
+ * and "we are uploading it right now" are different situations with different
+ * waits, and collapsing them into one in-flight chip is the same information
+ * collapse that produced the bug above, just pointed the other way.
+ */
+export const taskChipFor = (input: {
+  status: PublishTask['status'];
+  goLivePending: boolean;
+  workflowRunning: boolean;
+}): ChipSpec => {
+  if (input.status === 'success' && input.goLivePending) return SCHEDULED_CHIP;
+  if (input.status === 'pending' && input.workflowRunning) return TASK_STATUS_CHIPS.publishing;
+  return TASK_STATUS_CHIPS[input.status];
+};
+
+/**
+ * One account row's chip.
+ *
+ * Takes `goLivePending` but deliberately NOT `workflowRunning`: a batch's
+ * workflow runs the accounts one after another and reports nothing per row,
+ * so "this batch is executing" does not establish that THIS account is being
+ * uploaded — it may still be waiting its turn. Painting every row "Publishing"
+ * off a batch-level signal would be inventing a precision we do not have, the
+ * same move as rendering `abandoned` (we never saw it) as `not_live` (we
+ * looked and it is gone).
+ */
+export const accountChipFor = (input: {
+  status: PublishTaskAccount['status'];
+  goLivePending: boolean;
+}): ChipSpec => {
+  if (input.status === 'success' && input.goLivePending) return SCHEDULED_CHIP;
+  return ACCOUNT_STATUS_CHIPS[input.status];
 };
 
 /** The reason the browser stamps when the publish dialog's music search came
@@ -192,7 +293,7 @@ export const PUBLISH_NOTE_KEYS: ReadonlyArray<{
  * work item correctly held for confirmation became indistinguishable from a
  * stuck one.
  */
-type VerifyDisplay = 'settled' | 'awaiting' | 'verified' | 'notLive' | 'unconfirmed';
+type VerifyDisplay = 'settled' | 'scheduled' | 'awaiting' | 'verified' | 'notLive' | 'unconfirmed';
 
 /**
  * `verify_state` → what to draw. Pure.
@@ -210,7 +311,10 @@ type VerifyDisplay = 'settled' | 'awaiting' | 'verified' | 'notLive' | 'unconfir
  * not happening. This mirrors the backend's `_readback_columns`, which scopes
  * the same way.
  */
-const verifyDisplayFor = (a: PublishTaskAccount): VerifyDisplay => {
+export const verifyDisplayFor = (
+  a: PublishTaskAccount,
+  goLivePending = false,
+): VerifyDisplay => {
   if (a.status !== 'success' || a.channel !== 'session') return 'settled';
   switch (a.verify_state) {
     case 'verified': return 'verified';
@@ -221,7 +325,19 @@ const verifyDisplayFor = (a: PublishTaskAccount): VerifyDisplay => {
     // as plainly published — same call the backend's `readback_verdict` makes.
     case 'not_supported': return 'settled';
     case 'pending':
-    default: return 'awaiting'; // includes null/undefined = never checked yet
+    default:
+      // Before go-live there is no confirmation to await: the read-back has
+      // not started and will not start, because `publish_readback.go_live_at`
+      // measures its grace period from `scheduled_at` (verified — the backend
+      // is already right about this, and its `readback_due_stmt` selects
+      // `scheduled_at` for exactly that reason). Saying "awaiting platform
+      // confirmation" here also told the user the check was ten minutes away
+      // when in truth it was ten minutes after a go-live still hours out.
+      //
+      // A terminal verdict above still wins: if the platform somehow answered
+      // early, its answer beats our clock.
+      if (goLivePending) return 'scheduled';
+      return 'awaiting'; // includes null/undefined = never checked yet
   }
 };
 
@@ -459,6 +575,58 @@ export const RecordsPage: React.FC = () => {
     if (publishSignature) void reload();
   }, [publishSignature, reload]);
 
+  /**
+   * Batches whose publish workflow the engine says is executing RIGHT NOW.
+   *
+   * Why this page has to ask at all: nothing in the backend ever writes
+   * `publish_task_accounts.status = 'publishing'` — the rows go `pending` →
+   * `success`/`failed` in one hop — so a batch that is midway through a real
+   * browser upload still aggregates to `pending`, and this page called it
+   * "Queued" for the entire run. Task Center, reading `task_tracking`, said
+   * "Running" at the same moment about the same batch. The user saw both.
+   *
+   * The fix reads the engine rather than adding a third derivation:
+   * `task_tracking` is the UI's single source of truth for execution phase
+   * (CLAUDE.md route C, rule 1), and TaskManagerContext already has it
+   * subscribed. The business rows keep owning the business answer (published /
+   * failed / waiting on the phone); the engine keeps owning "is it running".
+   *
+   * ⚠️ `metadata.publish_task_id` is a JSON **string** (verified against the
+   * live `task_tracking` rows, not assumed from how the id is spelled
+   * elsewhere), and `PublishTask.id` is a string too — but they are stamped by
+   * two different code paths, so this normalises both sides rather than trust
+   * that they will stay in step. A silent type mismatch here degrades to
+   * "no batch ever looks like it is running", which is precisely the shape of
+   * the string-vs-number id bug this repo has already paid for once.
+   */
+  const runningPublishTaskIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const tk of trackedTasks) {
+      if (tk.task_type !== 'publish') continue;
+      if (tk.status !== 'processing' && tk.phase !== 'processing') continue;
+      const id = (tk.metadata as { publish_task_id?: unknown } | undefined)?.publish_task_id;
+      if (id !== null && id !== undefined && id !== '') out.add(String(id));
+    }
+    return out;
+  }, [trackedTasks]);
+
+  // Go-live is a wall-clock deadline, and a records page is a tab people leave
+  // open. Without a tick, a batch that goes live while the page is idle keeps
+  // reading "Goes live 03:10" forever and never moves on to the read-back
+  // wait — stale rather than false, but it turns a self-correcting state into
+  // a stuck one. Only runs while something is genuinely still ahead of us,
+  // same shape as the pending_share poll below.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const hasFutureGoLive = useMemo(
+    () => tasks.some((tk) => pendingGoLiveAt(tk.scheduled_at, nowMs) !== null),
+    [tasks, nowMs],
+  );
+  useEffect(() => {
+    if (!hasFutureGoLive) return undefined;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [hasFutureGoLive]);
+
   // H5 hand-off rows flip pending_share → success via the Douyin WEBHOOK,
   // which writes business state only (publish_task_accounts) — task_tracking
   // never changes, so Realtime can't observe it. Poll gently, and only while
@@ -491,41 +659,22 @@ export const RecordsPage: React.FC = () => {
     [accounts],
   );
 
-  const taskStatusLabel = useCallback(
-    (status: PublishTask['status']): string => {
-      switch (status) {
-        case 'success': return t('distribution.records.status_success', 'Published');
-        case 'partial': return t('distribution.records.status_partial', 'Partially published');
-        case 'pending_share': return t('distribution.records.statusPendingShare', 'Waiting in Douyin');
-        case 'publishing': return t('distribution.records.status_publishing', 'Publishing');
-        case 'failed': return t('distribution.records.status_failed', 'Failed');
-        case 'pending': return t('distribution.records.statusQueued', 'Queued');
-        default: return status;
-      }
-    },
-    [t],
-  );
-
-  const accountStatusLabel = useCallback(
-    (status: PublishTaskAccount['status']): string => {
-      switch (status) {
-        case 'success': return t('distribution.records.status_success', 'Published');
-        case 'pending_share': return t('distribution.records.statusPendingShare', 'Waiting in Douyin');
-        case 'publishing': return t('distribution.records.status_publishing', 'Publishing');
-        case 'failed': return t('distribution.records.status_failed', 'Failed');
-        case 'pending': return t('distribution.records.statusQueued', 'Queued');
-        case 'cancelled': return t('distribution.records.status_cancelled', 'Cancelled');
-        default: return status;
-      }
-    },
-    [t],
-  );
-
   /** Chip copy + colour for a row whose platform standing we do know something
    *  about. `settled` returns null — the plain per-status chip already says it. */
   const verifyChip = useCallback(
-    (display: VerifyDisplay): { label: string; cls: string; pulse?: boolean } | null => {
+    (display: VerifyDisplay, goLiveAt: string | null): { label: string; cls: string; pulse?: boolean } | null => {
       switch (display) {
+        case 'scheduled':
+          // Names the moment rather than a countdown: the whole point is that
+          // the wait is the PLATFORM's schedule, which the user chose and can
+          // check against. Falls back to the plain word if the timestamp is
+          // unreadable — never a blank where a time should be.
+          return {
+            label: goLiveAt
+              ? t('distribution.records.verifyGoesLiveAt', 'Goes live {{at}}', { at: formatTime(goLiveAt) })
+              : t('distribution.records.statusScheduled', 'Scheduled'),
+            cls: 'chip-violet',
+          };
         case 'awaiting':
           return {
             label: t('distribution.records.verifyAwaiting', 'Awaiting platform confirmation'),
@@ -565,6 +714,33 @@ export const RecordsPage: React.FC = () => {
       'distribution.records.verifyAwaitingHintTimed',
       'The upload finished. We start checking the platform about {{first}} minutes later and keep trying for up to {{limit}} minutes.',
       { first, limit },
+    );
+  }, [readbackTiming, t]);
+
+  /**
+   * The same sentence for a batch the platform has not published yet — and the
+   * clocks in it are anchored to go-live, not to the upload.
+   *
+   * This is the half of the bug that survived the chip: the read-back's grace
+   * period runs from `scheduled_at` (`publish_readback.go_live_at`), so
+   * telling a user with a post due in two hours that we would check "in about
+   * 10 minutes" described a check that was never going to happen then. The
+   * backend was right all along; only this sentence was wrong.
+   */
+  const scheduledHint = useCallback((goLiveAt: string | null): string => {
+    const at = goLiveAt ? formatTime(goLiveAt) : '';
+    if (!readbackTiming || !at) {
+      return t(
+        'distribution.records.verifyScheduledHint',
+        'The upload finished and the platform has it queued as a scheduled post. It is not public yet; we check after it goes live and update this once the post is confirmed.',
+      );
+    }
+    const first = Math.max(1, Math.round(readbackTiming.first_check_after_seconds / 60));
+    const limit = Math.max(first, Math.round(readbackTiming.give_up_after_seconds / 60));
+    return t(
+      'distribution.records.verifyScheduledHintTimed',
+      'The upload finished, but the platform does not publish it until {{at}} — it is not public yet. We start checking about {{first}} minutes after that and keep trying for up to {{limit}} minutes.',
+      { at, first, limit },
     );
   }, [readbackTiming, t]);
 
@@ -667,17 +843,22 @@ export const RecordsPage: React.FC = () => {
 
   // Collapsed multi-account cards show a per-status breakdown
   // ("2 done · 1 publishing · 1 failed") like the v4 mockup.
-  const breakdownFor = useCallback((accounts: PublishTaskAccount[]): string => {
+  const breakdownFor = useCallback((accounts: PublishTaskAccount[], goLivePending: boolean): string => {
     const buckets: Record<string, number> = {};
     for (const a of accounts) {
       const k = (a.status === 'pending' || a.status === 'publishing') ? 'publishing'
         : a.status === 'pending_share' ? 'waiting'
-          : a.status === 'success' ? 'done'
+          // Same override as the chips, for the same reason: on a collapsed
+          // multi-account card this line IS the status, so letting it count a
+          // post the platform has not published yet as "done" reinstates the
+          // bug one level down.
+          : a.status === 'success' ? (goLivePending ? 'scheduled' : 'done')
             : a.status === 'cancelled' ? 'cancelled' : 'failed';
       buckets[k] = (buckets[k] ?? 0) + 1;
     }
     const parts: string[] = [];
     if (buckets.done) parts.push(t('distribution.records.bdDone', '{{n}} done', { n: buckets.done }));
+    if (buckets.scheduled) parts.push(t('distribution.records.bdScheduled', '{{n}} scheduled', { n: buckets.scheduled }));
     if (buckets.publishing) parts.push(t('distribution.records.bdPublishing', '{{n}} publishing', { n: buckets.publishing }));
     if (buckets.waiting) parts.push(t('distribution.records.bdWaiting', '{{n}} waiting', { n: buckets.waiting }));
     if (buckets.failed) parts.push(t('distribution.records.bdFailed', '{{n}} failed', { n: buckets.failed }));
@@ -726,10 +907,19 @@ export const RecordsPage: React.FC = () => {
           <div className="day-label">{dayLabel(day)}</div>
           {dayTasks.map((task) => {
             const open = Boolean(expanded[task.id]);
-            const chipMeta = STATUS_META[task.status];
-            const chipLabel = taskStatusLabel(task.status);
+            // The platform's own publish time, when it is still ahead of us.
+            // Everything below that says "not up yet" hangs off this one value
+            // so the card chip, the row chip and the sentence cannot disagree.
+            const goLiveMs = pendingGoLiveAt(task.scheduled_at, nowMs);
+            const goLiveAt = goLiveMs === null ? null : task.scheduled_at;
+            const chipMeta = taskChipFor({
+              status: task.status,
+              goLivePending: goLiveMs !== null,
+              workflowRunning: runningPublishTaskIds.has(String(task.id)),
+            });
+            const chipLabel = t(chipMeta.key, chipMeta.fallback);
             const singleAccount = task.accounts.length === 1 ? task.accounts[0] : null;
-            const breakdown = singleAccount ? '' : breakdownFor(task.accounts);
+            const breakdown = singleAccount ? '' : breakdownFor(task.accounts, goLiveMs !== null);
             const accountSummary = singleAccount
               ? `${singleAccount.username}${platformFor(singleAccount.account_id) ? ` (${platformFor(singleAccount.account_id)})` : ''}`
               : t('distribution.records.accountsCount', '{{n}} accounts', { n: task.accounts.length });
@@ -789,14 +979,17 @@ export const RecordsPage: React.FC = () => {
                 {open && task.accounts.length > 0 && (
                   <div className="rec-sub">
                     {task.accounts.map((a) => {
-                      const aChipMeta = ACCOUNT_STATUS_META[a.status];
-                      const aChipLabel = accountStatusLabel(a.status);
+                      const aChipMeta = accountChipFor({
+                        status: a.status,
+                        goLivePending: goLiveMs !== null,
+                      });
+                      const aChipLabel = t(aChipMeta.key, aChipMeta.fallback);
                       const platform = platformFor(a.account_id);
                       // What the PLATFORM says, which is a different question
                       // from whether our upload finished (`a.status`). Only a
                       // session-channel success has one at all.
-                      const vDisplay = verifyDisplayFor(a);
-                      const vChip = verifyChip(vDisplay);
+                      const vDisplay = verifyDisplayFor(a, goLiveMs !== null);
+                      const vChip = verifyChip(vDisplay, goLiveAt);
                       // What this row can actually offer. `music_ref` lives on
                       // the BATCH (the track was chosen once for the whole
                       // publish), while the reason that names the wall is on
@@ -838,6 +1031,14 @@ export const RecordsPage: React.FC = () => {
                           )}
                           {vDisplay === 'awaiting' && (
                             <span className="note">{awaitingHint()}</span>
+                          )}
+                          {/* Same shape as the awaiting note, different clock.
+                              Kept as a separate branch rather than one sentence
+                              with an optional clause because the two say
+                              different things about whether the post is public
+                              right now — the fact the user came to check. */}
+                          {vDisplay === 'scheduled' && (
+                            <span className="note">{scheduledHint(goLiveAt)}</span>
                           )}
                           {/* The typed reason, carried through to the pixel.
                               "Not live" on its own cannot be acted on — whether

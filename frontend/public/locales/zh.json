@@ -646,6 +646,7 @@
       "status_failed": "发布失败",
       "status_cancelled": "已取消",
       "statusQueued": "排队中",
+      "statusScheduled": "已定时",
       "statusPendingShare": "等待抖音处理",
       "export": "导出",
       "contentVideo": "视频",
@@ -676,7 +677,11 @@
       "verifyUnderReview": "平台还在审核这条作品，暂时不是公开状态。",
       "verifyNotFound": "账号里已经找不到这条作品了，可能已被删除。",
       "verifyNotLiveGeneric": "平台上看不到这条作品。",
-      "verifyUnconfirmedGeneric": "我们没能连上平台完成确认。作品很可能已经上线，去账号里看一眼。"
+      "verifyUnconfirmedGeneric": "我们没能连上平台完成确认。作品很可能已经上线，去账号里看一眼。",
+      "bdScheduled": "{{n}} 个已定时",
+      "verifyGoesLiveAt": "{{at}} 发布",
+      "verifyScheduledHint": "上传已完成，平台已把它排成定时稿。现在还没公开；等它到点发布后我们再去核对，确认上线后这里会更新。",
+      "verifyScheduledHintTimed": "上传已完成，但平台要到 {{at}} 才会发布，现在还没公开。到点之后大约 {{first}} 分钟我们会去核对，最多持续 {{limit}} 分钟。"
     },
     "platNoPublish": "暂不支持发布",
     "unbind": "解绑",
