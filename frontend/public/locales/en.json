@@ -641,6 +641,7 @@
       "status_failed": "Failed",
       "status_cancelled": "Cancelled",
       "statusQueued": "Queued",
+      "statusScheduled": "Scheduled",
       "statusPendingShare": "Waiting in Douyin",
       "export": "Export",
       "contentVideo": "Video",
@@ -671,7 +672,11 @@
       "verifyUnderReview": "The platform is still reviewing this post, so it is not public yet.",
       "verifyNotFound": "This post is not in the account any more — it may have been removed.",
       "verifyNotLiveGeneric": "The platform is not showing this post.",
-      "verifyUnconfirmedGeneric": "We could not reach the platform to confirm it. The post may well be live — check the account."
+      "verifyUnconfirmedGeneric": "We could not reach the platform to confirm it. The post may well be live — check the account.",
+      "bdScheduled": "{{n}} scheduled",
+      "verifyGoesLiveAt": "Goes live {{at}}",
+      "verifyScheduledHint": "The upload finished and the platform has it queued as a scheduled post. It is not public yet; we check after it goes live and update this once the post is confirmed.",
+      "verifyScheduledHintTimed": "The upload finished, but the platform does not publish it until {{at}} — it is not public yet. We start checking about {{first}} minutes after that and keep trying for up to {{limit}} minutes."
     },
     "platNoPublish": "Publishing not available yet",
     "unbind": "Unbind",
