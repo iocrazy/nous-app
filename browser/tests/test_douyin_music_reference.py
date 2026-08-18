@@ -31,6 +31,10 @@ user's ends in a typed refusal instead of a published guess.
 
 from __future__ import annotations
 
+import inspect
+import re
+from pathlib import Path
+
 import pytest
 
 from app.config import get_settings
@@ -679,7 +683,7 @@ def test_the_row_probe_hands_the_usage_line_back_out_of_the_page():
     page.
     """
     body = dp._MUSIC_ROWS_JS
-    collected, _, returned = body.partition("return rows.map(")
+    collected, _, returned = body.partition("rows.map(")
     assert "usage:" in collected, "the probe never reads the anchor's own text"
     assert "usage" in returned, "the probe reads the usage line and drops it"
 
@@ -832,16 +836,266 @@ async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
         )
 
     stored = f"[{excinfo.value.detail['reason']}] {excinfo.value.message}"
-    assert "uses=" in stored  # the clause really is in the measured string
+    assert "uses=" in stored and "attrs=" in stored
+
     # `waited_ms` renders as `1` here because this file shrinks the wait to
     # 60 ms; a real publish can print the full ceiling, so the widest that one
     # number can ever be is charged on top rather than quietly enjoyed as slack.
     slack = len(str(SHIPPED_MUSIC_READY_TIMEOUT_MS)) - 1
-    assert len(stored) + slack <= 500, f"len={len(stored)}+{slack}: {stored}"
-    # And the evidence sits BEFORE the closing prose, so if a future clause ever
-    # does overflow the cap, what gets cut is the boilerplate — the frontend
-    # replaces that sentence with its own note anyway (`PUBLISH_NOTE_KEYS`).
-    assert stored.index("uses=") < stored.index("Nothing was published")
+
+    # **The contract.** The whole string no longer fits 500 in this shape, and
+    # that is a deliberate trade rather than an oversight: what must fit is
+    # every clause of EVIDENCE, and what may be cut is the closing sentence —
+    # boilerplate the frontend replaces with its own localized note anyway
+    # (`RecordsPage.PUBLISH_NOTE_KEYS` matches on `[music_ambiguous]`), and the
+    # raw text stays whole in the row's tooltip.
+    evidence = stored[: stored.index("]") + 1]
+    assert len(evidence) + slack <= 500, f"evidence={len(evidence)}+{slack}"
+    # Said as the thing a reader of the stored row actually gets: after the
+    # caller's clamp, the bracket is closed — i.e. no clause was cut in half.
+    assert "]" in stored[:500]
+
+    # ...and the ORDER is what guarantees it stays true as clauses are added:
+    # older evidence is nearer the front, so a new clause can only ever crowd
+    # itself and then the prose — never `rows=`, `saw:`, `ready=` or `uses=`.
+    for earlier, later in (
+        ("rows=", "ready="),
+        ("ready=", "uses="),
+        ("uses=", "attrs="),
+        ("attrs=", "Nothing was published"),
+    ):
+        assert stored.index(earlier) < stored.index(later), f"{earlier} after {later}"
+
+
+# --- the row-attribute census -----------------------------------------------
+#
+# The fingerprint (title, author, length) can TIE — that is what
+# `music_ambiguous` is, and no amount of re-running the step changes it. The
+# only thing that cannot tie is `music_id`, and nothing here can address a row
+# by one, because the row's markup has never been measured: `dom_fixture.py`
+# contains no music rows at all, and the only proposal for getting them was to
+# drive a real browser by hand.
+#
+# So the census asks the page for the attribute NAMES its rows carry and lets
+# an ordinary failed publish carry the answer back. Names only, collected
+# in-page via `getAttributeNames()` — a `data-*` VALUE here could be an id, an
+# account handle or a token, and this string is stored, logged and rendered in
+# a UI, in a public repo. The guarantee is in the API, not in remembering.
+
+
+def test_the_census_tells_a_row_with_keys_apart_from_one_without():
+    """**The guard against this batch proving nothing.**
+
+    The obvious false green: every fixture row carries no attributes, so
+    "there is an id" and "there is no id" render the same and every assertion
+    below passes while answering neither. Both shapes are built here and their
+    renderings are asserted DIFFERENT.
+    """
+    with_keys = dp.describe_music_attributes(
+        dp.MusicRowsRead([], attributes=("class", "data-id", "role"))
+    )
+    class_only = dp.describe_music_attributes(
+        dp.MusicRowsRead([], attributes=("class", "style"))
+    )
+    bare = dp.describe_music_attributes(dp.MusicRowsRead([], attributes=()))
+
+    assert with_keys != class_only != bare
+    assert with_keys != bare
+    # The informative keys come FIRST, so a clip can only ever eat furniture.
+    assert with_keys == "attrs=data-id,role,class"
+    assert class_only == "attrs=class,style"
+    assert bare == "attrs=none"
+
+
+def test_a_census_we_could_not_take_is_not_a_row_without_attributes():
+    """**The guard**, and the same rule as `rows=?` vs `rows=0`.
+
+    Rendering "we could not look" as "there is nothing there" would retire the
+    click-by-id idea on the strength of an observation nobody made — and it
+    would retire it silently, because `attrs=none` is a perfectly plausible
+    answer.
+    """
+    unread = dp.describe_music_attributes(dp.MusicRowsRead([], attributes=None))
+    bare = dp.describe_music_attributes(dp.MusicRowsRead([], attributes=()))
+
+    assert unread == "attrs=?"
+    assert bare == "attrs=none"
+    assert unread != bare
+
+
+def test_furniture_is_sorted_last_and_never_dropped():
+    """Ordering, not filtering. A filter would decide for the reader which of
+    the platform's keys are interesting, and a census exists precisely because
+    we do not yet know which those are — so everything stays eligible and the
+    `+N` says how many did not fit."""
+    read = dp.MusicRowsRead(
+        [], attributes=("class", "style", "data-e2e", "data-id", "href", "role")
+    )
+    rendered = dp.describe_music_attributes(read)
+
+    assert rendered.startswith("attrs=data-e2e,data-id,href")
+    assert rendered.endswith(f"+{6 - dp.MUSIC_SAMPLE_ATTRS}")
+    # `class` and `style` really are still in the running — they were ranked
+    # last and then clipped, which the `+N` states.
+    assert "class" not in rendered and "style" not in rendered
+
+
+def test_the_census_is_bounded_and_marks_what_it_clipped():
+    """Bounded in both directions — how many keys, and how long each may be.
+    A clipped key is MARKED, for the same reason a clipped count is: `data-mus`
+    is a plausible attribute name, and someone would go looking for it."""
+    long_name = "data-" + "x" * 60
+    rendered = dp.describe_music_attributes(dp.MusicRowsRead([], attributes=(long_name,)))
+
+    assert len(rendered) < 30
+    assert "…" in rendered
+    assert long_name not in rendered
+    assert rendered.startswith("attrs=data-xxxxxxxxx")
+
+    # ...and the count bound, stated separately so one cannot mask the other.
+    many = dp.MusicRowsRead([], attributes=tuple(f"data-{i}" for i in range(9)))
+    listed = dp.describe_music_attributes(many)
+    assert listed.count(",") == dp.MUSIC_SAMPLE_ATTRS  # 2 separators + the "+N"
+    assert listed.endswith(f"+{9 - dp.MUSIC_SAMPLE_ATTRS}")
+    assert len(listed) < 60
+
+
+async def test_an_ambiguous_refusal_reports_the_keys_the_rows_carry():
+    """**The guard.** Delete the clause and this goes red — and with it goes
+    the only route to "is there an id on the row?" that does not need a human
+    driving a browser."""
+    page = music_page((("起风了", "", "0人使用"), ("起风了", "", "0人使用")))
+    page.music_attrs = ("class", "data-music-id")
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "attrs=data-music-id,class" in excinfo.value.message
+    assert excinfo.value.detail["music_row_attributes"] == ("class", "data-music-id")
+
+
+async def test_an_ambiguous_refusal_says_so_when_the_rows_carry_nothing():
+    """The other answer, and it is just as useful: the fingerprint really is
+    all there is, and the effort belongs elsewhere. If this and the test above
+    produced the same message the census would be decoration."""
+    page = music_page((("起风了", "", "0人使用"), ("起风了", "", "0人使用")))
+    page.music_attrs = ()
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert "attrs=none" in excinfo.value.message
+    assert excinfo.value.detail["music_row_attributes"] == ()
+
+
+async def test_a_tab_on_the_older_bundle_reports_no_census_not_an_empty_one():
+    """The probe used to answer with a bare ARRAY. A tab still running that
+    bundle has perfectly good rows and no census — `?`, never `none`."""
+    page = music_page((("起风了", "", "0人使用"), ("起风了", "", "0人使用")))
+    page.music_rows_legacy_shape = True
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    # The rows still parsed — this is not a broken read.
+    assert "rows=2" in excinfo.value.message
+    assert "attrs=?" in excinfo.value.message
+    assert excinfo.value.detail["music_row_attributes"] is None
+
+
+def test_the_census_survives_out_of_the_page():
+    """**The guard on the seam no fixture can drive**, and it was missing on the
+    first pass: a probe that collects the census and then drops it from its
+    return value left every test here green, because `FakePage` has no JS engine
+    and answers with a dict of its own. Production would then render `attrs=?`
+    for every publish — and `?` is the reading that blames our probe, so the bug
+    would arrive already wearing its own excuse.
+
+    Structural, therefore: the value must be collected AND must appear in the
+    object the probe actually returns.
+    """
+    body = dp._MUSIC_ROWS_JS
+    collected, marker, returned = body.rpartition("return {")
+    assert marker, "the probe no longer returns an object"
+    assert "attrs.add(" in collected, "the probe never collects any key"
+    assert "attrs" in returned, "the probe collects the census and drops it"
+    assert "rows" in returned, "the probe stopped returning its rows"
+
+
+def test_every_attribute_this_module_stamps_is_registered():
+    """**The guard for whoever adds the next stamp.**
+
+    The census subtracts `MUSIC_OWN_ATTRIBUTES` from what it found. A third
+    `data-nous-*` introduced without joining that tuple would be reported back
+    as the PLATFORM's — and that is the worst failure this file has, because it
+    is encouraging: it says "there is an id on the row", someone builds
+    click-by-id on it, every test passes, and the thing addresses nothing real.
+
+    So the registry is checked against the module's own source rather than
+    against anyone's memory.
+    """
+    source = Path(dp.__file__).read_text(encoding="utf-8")
+    stamped = set(re.findall(r'"(data-nous-[a-z0-9-]+)"', source))
+
+    assert stamped, "no stamped attributes found — has the naming changed?"
+    missing = stamped - set(dp.MUSIC_OWN_ATTRIBUTES)
+    assert not missing, f"stamped but not registered in MUSIC_OWN_ATTRIBUTES: {missing}"
+    # And the registry does not claim attributes the module never writes.
+    assert set(dp.MUSIC_OWN_ATTRIBUTES) <= stamped
+
+
+def test_the_census_never_reports_our_own_marks():
+    """**The guard on the one thing that would fake a positive.** This module
+    stamps two attributes on the page itself; reporting them back would read as
+    "the rows carry data attributes" and send someone building a click-by-id
+    path against markup that is ours.
+
+    Structural, because the fake cannot run the page: the probe must exclude
+    them by name, and the caller must be the one telling it which names.
+    """
+    body = dp._MUSIC_ROWS_JS
+    assert "options.ours" in body
+    assert "ours.has(name)" in body
+    # ...and the caller really passes both of them.
+    source = inspect.getsource(dp._music_rows)
+    assert '"ours"' in source
+    assert "MUSIC_OWN_ATTRIBUTES" in source
+    # The registry really does hold both stamps this module writes.
+    assert dp.MUSIC_ROW_ATTRIBUTE in dp.MUSIC_OWN_ATTRIBUTES
+    assert dp.MUSIC_SEEN_ATTRIBUTE in dp.MUSIC_OWN_ATTRIBUTES
+
+
+def test_the_census_collects_names_and_cannot_reach_a_value():
+    """**The privacy guard, structural.** Values could be ids, handles or
+    tokens; this lands in a stored, logged, UI-rendered string in a public
+    repo. `getAttributeNames()` cannot return a value even by accident —
+    walking `.attributes` or `.dataset` could, so neither may appear."""
+    # Comments stripped first: a comment cannot read a value, and one that
+    # explains WHY `.attributes` is avoided must not be what fails this test.
+    code = "\n".join(
+        line.split("//")[0] for line in dp._MUSIC_ROWS_JS.splitlines()
+    )
+    assert "getAttributeNames()" in code
+    assert ".attributes" not in code
+    assert ".dataset" not in code
+    assert "getAttribute(" not in code.replace("getAttributeNames(", "")
+    # `setAttribute` is ours (the row stamp) and writes, never reads.
+    assert code.count("setAttribute(") == 1
+
+
+async def test_the_census_changes_no_verdict():
+    """A row the fingerprint does pick is still picked, whatever the rows carry.
+    The census is evidence; it decides nothing."""
+    page = music_page(
+        (("起风了", "买辣椒也用券·05:11", ""), ("起风了", "吴青峰·05:25", ""))
+    )
+    page.music_attrs = ("data-music-id", "class")
+    result = await dp._set_music(
+        page, job(music="起风了", ref_payload=REF), Deadline(10)
+    )
+
+    assert result["music"] == "applied"
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
 
 
 async def test_the_typed_name_path_is_untouched_by_any_of_this():

@@ -460,6 +460,23 @@ MUSIC_ROW_ATTRIBUTE = "data-nous-music-row"
 # See `wait_for_music_results`.
 MUSIC_SEEN_ATTRIBUTE = "data-nous-music-seen"
 
+# Every attribute THIS module writes onto the live page, in one list.
+#
+# The row census (`describe_music_attributes`) subtracts these before reporting
+# what the platform's rows carry, and getting that subtraction wrong is the
+# worst failure available here — worse than reading nothing. A census that
+# reports our own stamps says "the rows carry data attributes", which is the
+# green light for building click-by-id; someone would implement it, watch every
+# test pass, ship it, and only then find it addresses nothing on a real page,
+# having been encouraged the whole way. A probe that reads nothing exposes
+# itself; a probe that reads its own handwriting does not.
+#
+# So the list is a constant rather than a literal at the call site, and
+# `test_every_attribute_this_module_stamps_is_registered` fails if a new
+# `data-nous-*` is introduced without joining it. **Adding a stamp means adding
+# it here.**
+MUSIC_OWN_ATTRIBUTES: tuple[str, ...] = (MUSIC_ROW_ATTRIBUTE, MUSIC_SEEN_ATTRIBUTE)
+
 # The platform's usage copy (「N万人使用」), written down ONCE and used three
 # ways: both page probes `.test()` it — it is the row anchor AND the readiness
 # signal — and `parse_music_usage` reads the count out of it here in Python.
@@ -2660,9 +2677,23 @@ async def _set_collection(page: Any, job: PublishJob, deadline: Deadline) -> dic
 _MUSIC_USAGE_JS = f"/{MUSIC_USAGE_PATTERN}/"
 
 _MUSIC_ROWS_JS = """
-(attribute) => {
+(options) => {
   // __nous_music_rows_probe__
   const USAGE = __USAGE__;
+  const attribute = options.attribute;
+  // The two attributes THIS module stamps on the page, excluded from the
+  // census below by name. Reporting our own marks back to ourselves would
+  // read as "the rows carry data attributes" — the exact false positive the
+  // census exists to rule in or out. Structural, not a habit of remembering.
+  const ours = new Set(options.ours || []);
+  // Attribute NAMES on the result rows. Values are never touched: a `data-*`
+  // value on this page could be an id, an account handle or a token, and this
+  // string is stored, logged, and rendered in a UI on a PUBLIC repo.
+  // `getAttributeNames()` cannot return a value even by accident, which is
+  // why it is used instead of walking `.attributes` — the guarantee is in the
+  // API, not in remembering to strip something afterwards.
+  const attrs = new Set();
+  let censused = 0;
   const anchors = [];
   for (const el of document.querySelectorAll('*')) {
     if (el.children.length) continue;
@@ -2683,6 +2714,20 @@ _MUSIC_ROWS_JS = """
     }
     if (!row || seen.has(row)) continue;
     seen.add(row);
+    // Rows in one list share their markup, so a few are a census and twenty
+    // are a cost. Bounded here rather than by trusting the list to be short.
+    if (censused < 3) {
+      censused += 1;
+      // `element`, not `node`: `node` is the walk-up cursor in the enclosing
+      // block, and shadowing it here would read as reuse to anyone skimming.
+      const scope = [row].concat(Array.from(row.querySelectorAll('*')));
+      for (const element of scope) {
+        if (!element.getAttributeNames) continue;
+        for (const name of element.getAttributeNames()) {
+          if (!ours.has(name)) attrs.add(name);
+        }
+      }
+    }
     const lines = (row.innerText || '')
       .split('\\n')
       .map((s) => s.trim())
@@ -2706,10 +2751,15 @@ _MUSIC_ROWS_JS = """
       row,
     });
   }
-  return rows.map((entry, index) => {
+  const out = rows.map((entry, index) => {
     entry.row.setAttribute(attribute, String(index));
     return { index, name: entry.name, meta: entry.meta, usage: entry.usage };
   });
+  // An OBJECT, not the bare array this used to return. `attrs` is one fact
+  // about the list rather than one per row, and an empty array here is a real
+  // answer — "these rows carry no attributes at all" — which the reader keeps
+  // apart from "we could not look".
+  return { rows: out, attrs: Array.from(attrs) };
 }
 """.replace("__USAGE__", _MUSIC_USAGE_JS)
 
@@ -3015,6 +3065,19 @@ class MusicRowsRead:
 
     rows: list[MusicRow]
     error: str | None = None
+    #: The distinct attribute NAMES the result rows carry, ours excluded.
+    #: Three states, and all three are answers to a different question:
+    #:
+    #: * ``("data-id", "class")`` — the rows expose these keys;
+    #: * ``()`` — the rows expose **nothing**, so there is no id to click by
+    #:   and the fingerprint really is all we have;
+    #: * ``None`` — we could not look (probe failed, or a page still running an
+    #:   older bundle that answers in the previous array shape).
+    #:
+    #: ⚠️ NAMES ONLY, and enforced on the page rather than here: values could be
+    #: ids, handles or tokens, and this lands in a stored, logged, UI-rendered
+    #: string in a public repo.
+    attributes: tuple[str, ...] | None = None
 
 
 #: How many titles a failure message quotes, and how long each may be. Bounded
@@ -3038,6 +3101,77 @@ MUSIC_SAMPLE_USAGE_CHARS = 5
 MUSIC_SAMPLE_WANT_CHARS = 9
 #: What an unreadable count renders as. Never `0` — see `MusicRow.usage`.
 MUSIC_UNKNOWN = "?"
+
+#: Bounds for the row-attribute census. Three names, fourteen characters:
+#: `data-music-id` is 13 and `data-e2e-selector` is the longest plausible key
+#: this page could carry, so the clip marker will rarely fire — and when it does
+#: it is marked, for the same reason a clipped count is.
+MUSIC_SAMPLE_ATTRS = 3
+MUSIC_SAMPLE_ATTR_CHARS = 14
+#: Names every HTML element has and which therefore answer nothing about
+#: identity. They are sorted LAST, never dropped: this is display order, not a
+#: filter, and the `+N` says how many names did not fit. A filter would decide
+#: for the reader which of the platform's keys are interesting, and the whole
+#: point of a census is that we do not yet know.
+MUSIC_ATTR_FURNITURE = ("class", "style")
+
+
+def describe_music_attributes(read: MusicRowsRead) -> str:
+    """Which attribute keys the dialog's rows carry. Pure, bounded, names only.
+
+    This exists to answer, **from an ordinary failed publish**, the one question
+    that decides whether this whole step can ever stop guessing: *is there an id
+    on the row?*
+
+    Matching on (title, author, length) is a fingerprint, and a fingerprint can
+    tie — that is what `music_ambiguous` is. `music_id` cannot tie, but nothing
+    in this module can address a row by it, because the row's markup has never
+    been measured: `tests/dom_fixture.py` contains no music rows at all, and the
+    only way anyone proposed to get them was to drive a real browser by hand.
+
+    A census of attribute NAMES makes the next ordinary failure carry the answer
+    back on its own — no browser session, no extra request to the platform, no
+    human in the loop. It is the same move as every other diagnostic on this
+    chain: ride along on a failure that was going to happen anyway.
+
+    Three renderings, three different next actions:
+
+    * ``attrs=data-id,class`` — there IS a key to look at; the next change reads
+      its value and matches `music_id` against it;
+    * ``attrs=none`` — the rows carry nothing, so the fingerprint is genuinely
+      all there is and the effort belongs elsewhere;
+    * ``attrs=?`` — we could not look, so nothing is claimed about the page.
+
+    ⚠️ `none` and `?` are separate on purpose, exactly like `rows=0` vs `rows=?`.
+    Rendering "we could not look" as "there is nothing there" would retire the
+    id idea on the strength of an observation nobody made.
+
+    ⚠️ Residual risk, stated rather than assumed away: an attribute NAME is
+    markup vocabulary, not per-row data, so it does not normally carry
+    anything about a user — framework-generated names (`data-v-7ba5bd90`,
+    `_ngcontent-c12`) are build hashes. A framework that instead varied the
+    name per row would show up as a census that dedupes to nothing: dozens of
+    near-identical keys and a large `+N`. That is the signal to look, not a
+    reason to trust the first three names as a vocabulary.
+    """
+    if read.attributes is None:
+        return f"attrs={MUSIC_UNKNOWN}"
+    if not read.attributes:
+        return "attrs=none"
+
+    def rank(name: str) -> tuple[int, str]:
+        return (1 if name in MUSIC_ATTR_FURNITURE else 0, name)
+
+    ordered = sorted(set(read.attributes), key=rank)
+    shown = []
+    for name in ordered[:MUSIC_SAMPLE_ATTRS]:
+        if len(name) > MUSIC_SAMPLE_ATTR_CHARS:
+            name = name[:MUSIC_SAMPLE_ATTR_CHARS] + "…"
+        shown.append(name)
+    body = ",".join(shown)
+    if len(ordered) > MUSIC_SAMPLE_ATTRS:
+        body += f",+{len(ordered) - MUSIC_SAMPLE_ATTRS}"
+    return f"attrs={body}"
 
 
 def describe_music_usage(
@@ -3168,11 +3302,31 @@ async def _music_rows(page: Any) -> MusicRowsRead:
     be attributed to either afterwards.
     """
     try:
-        rows = await page.evaluate(_MUSIC_ROWS_JS, MUSIC_ROW_ATTRIBUTE)
+        raw = await page.evaluate(
+            _MUSIC_ROWS_JS,
+            {
+                "attribute": MUSIC_ROW_ATTRIBUTE,
+                "ours": list(MUSIC_OWN_ATTRIBUTES),
+            },
+        )
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         return MusicRowsRead([], error=type(exc).__name__)
+    # A LIST is the previous shape — a tab still running an older bundle. Its
+    # rows are perfectly good; what it cannot tell us is the census, and that
+    # stays `None` ("we could not look") rather than becoming `()` ("the rows
+    # carry nothing"). Reading a stale bundle as evidence about the platform is
+    # how a probe answers a question it never asked.
+    if isinstance(raw, Mapping):
+        rows = raw.get("rows") or []
+        raw_attrs = raw.get("attrs")
+    else:
+        rows = raw or []
+        raw_attrs = None
+    attributes: tuple[str, ...] | None = None
+    if isinstance(raw_attrs, (list, tuple)):
+        attributes = tuple(str(name) for name in raw_attrs if str(name))
     out: list[MusicRow] = []
-    for position, row in enumerate(rows or []):
+    for position, row in enumerate(rows):
         try:
             index = int(row.get("index", position))
             name = str(row.get("name") or "")
@@ -3188,7 +3342,7 @@ async def _music_rows(page: Any) -> MusicRowsRead:
                 None if usage is None else str(usage),
             )
         )
-    return MusicRowsRead(out)
+    return MusicRowsRead(out, attributes=attributes)
 
 
 async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str, Any]:
@@ -3298,10 +3452,15 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # unknown: this makes the next failure say so itself instead of costing
         # another production round-trip. Nothing below reads it.
         usage = describe_music_usage(choice.candidates, reference)
+        # The census rides on the SAME failure. It answers a structural question
+        # (is there an id to click by?) that no amount of re-running this step
+        # can answer otherwise, and it costs one string per refusal.
+        attrs = describe_music_attributes(read)
         raise StepFailure(
             SessionStatus.FAILED,
             f"{choice.reason} [{seen}"
             + (f" {usage}" if usage else "")
+            + f" {attrs}"
             + "]. Nothing was published: a post's music "
             "cannot be changed afterwards, and a same-titled different track "
             "is the one failure that leaves no signal",
@@ -3317,6 +3476,9 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             # above, because `publish_distribution._finish_account` keeps only
             # `reason` and `message` and drops every other key of `detail`.
             music_candidate_usage=usage or None,
+            # `None` when unread, an empty tuple when the rows really carry
+            # nothing — the same three-state contract as the rendered clause.
+            music_row_attributes=read.attributes,
         )
 
     if (

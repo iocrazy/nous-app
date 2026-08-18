@@ -356,6 +356,20 @@ class FakePage:
         # could only express titles could not exercise the matching that keeps a
         # same-titled different upload from being published.
         self.music_rows: Any = ()
+        # The attribute-name census the row probe reports, or `None` for
+        # "the probe answered without one".
+        #
+        # `None` is the default DELIBERATELY. `()` would mean *the rows
+        # carry no attributes at all* — a positive claim about the page —
+        # and every fixture that never thought about attributes would be
+        # quietly making it. Then a census that stopped working would keep
+        # agreeing with every test in the file. `None` renders `?`, which
+        # asserts nothing, so a test that cares has to say so.
+        self.music_attrs: Any = None
+        # True = a tab still running the bundle from before the census, whose
+        # probe answers with a bare ARRAY instead of `{rows, attrs}`. The
+        # rows are still good; the census is unavailable, not empty.
+        self.music_rows_legacy_shape = False
         # What the readiness probe reports, or None for the default derived
         # from `music_rows`. Callable form takes (page, stamp) and returns the
         # probe's dict — that is how a test scripts a dialog that answers
@@ -510,7 +524,13 @@ class FakePage:
                 else:
                     name, meta, usage = row, "", ""
                 out.append({"index": i, "name": name, "meta": meta, "usage": usage})
-            return out
+            if self.music_rows_legacy_shape:
+                return out
+            attrs = self.music_attrs
+            return {
+                "rows": out,
+                "attrs": None if attrs is None else list(attrs),
+            }
         if "__nous_music_readback_probe__" in (_script or ""):
             mentions = self.music_mentions
             if callable(mentions):
