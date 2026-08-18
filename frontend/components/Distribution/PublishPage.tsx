@@ -25,6 +25,7 @@ import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
+import { PublishPreview } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
 import { DateTimePopover } from '../common/DateTimePopover';
 import { useToast } from '../Toast';
@@ -366,20 +367,11 @@ const PLATFORM_BADGE: Record<string, { bg: string; icon: React.ReactNode }> = {
   },
 };
 
-const HeartIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>
-);
-const CommentIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
-);
-const ShareGlyph: React.FC = () => (
-  <svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /></svg>
-);
-const MusicIcon: React.FC = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-  </svg>
-);
+/* The heart / comment / share / music glyphs that used to live here went with
+   the feed mock-up they decorated. Two of them carried a hardcoded `0`, which
+   is a measurement the post does not have, and the music line asserted
+   "Original sound" on a page that can attach a music track. Reintroducing any
+   of them means reintroducing them WITHOUT numbers beside them. */
 
 export const PublishPage: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -1747,7 +1739,17 @@ export const PublishPage: React.FC = () => {
     () => accounts.find((a) => a.id === selectedAccounts[0]),
     [accounts, selectedAccounts],
   );
-  const previewHandle = firstSelectedAccount?.username ?? 'yourhandle';
+  /**
+   * The handle the preview attributes the post to, or null when no account is
+   * picked yet.
+   *
+   * ⚠️ This used to fall back to the literal string `yourhandle`, rendered in
+   * the same position and the same style as a real one. A handle nobody owns,
+   * presented as this post's author, is the same defect as a fabricated like
+   * count — the preview panel now renders nothing rather than something
+   * invented. See the header comment in PublishPreview.tsx.
+   */
+  const previewHandle = firstSelectedAccount?.username ?? null;
 
   const visLabel = (v: Visibility): string => {
     if (v === 'public') return t('distribution.publish.vis_public', 'Public');
@@ -2848,43 +2850,21 @@ export const PublishPage: React.FC = () => {
 
         {/* ── right: rail ── */}
         <div className="pub-rail">
-          <div className="phone-card">
-            <div className="bar">
-              <h4>{t('distribution.publish.livePreview', 'Live preview')}</h4>
-              <div className="seg">
-                <button type="button" className={orientation === 'vertical' ? 'on' : ''} onClick={() => setOrientation('vertical')}>{t('distribution.publish.vertical', 'Vertical')}</button>
-                <button type="button" className={orientation === 'horizontal' ? 'on' : ''} onClick={() => setOrientation('horizontal')}>{t('distribution.publish.horizontal', 'Horizontal')}</button>
-              </div>
-            </div>
-            <div className="phone">
-              <span className="notch" />
-              <div
-                className="scene"
-                aria-label={isImages
-                  ? t('distribution.publish.imagePreviewAria', 'First image preview — gallery post')
-                  : undefined}
-                style={isImages && selectedVideoObjs[0]?.thumbnail_url
-                  ? { backgroundImage: `url(${selectedVideoObjs[0].thumbnail_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                  : undefined}
-              />
-              <div className="shade" />
-              <div className="ui">
-                <div className="tabs"><span>{t('distribution.publish.following', 'Following')}</span><span className="cur-t">{t('distribution.publish.forYou', 'For You')}</span></div>
-                <div className="bottom">
-                  <div className="meta">
-                    <div className="handle"><span className="a" />@{previewHandle}</div>
-                    <div className="cap">{title || t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')}</div>
-                    <div className="music"><MusicIcon />{t('distribution.publish.originalSound', 'Original sound · {{handle}}', { handle: previewHandle })}</div>
-                  </div>
-                  <div className="rail">
-                    <span className="act"><span className="ic"><HeartIcon /></span>0</span>
-                    <span className="act"><span className="ic"><CommentIcon /></span>0</span>
-                    <span className="act"><span className="ic"><ShareGlyph /></span>{t('distribution.publish.shareLabel', 'Share')}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* The orientation state finally does something. It has been on this
+              page since the card was first stubbed in, wired to nothing but
+              its own highlight — a switch the user could flip that changed
+              nothing on screen. It now chooses which derived crop the grid is
+              drawn with. */}
+          <PublishPreview
+            kind={contentType}
+            items={selectedVideoObjs}
+            title={title}
+            handle={previewHandle}
+            covers={covers}
+            mediaToken={mediaToken}
+            orientation={orientation}
+            onOrientationChange={setOrientation}
+          />
 
           <div className="fcard">
             <h4>
