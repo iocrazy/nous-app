@@ -56,6 +56,24 @@ export interface PendingQuote {
   nonce: number;
 }
 
+/** One-shot "put this library resource into the composer as a resource
+ *  chip" request (resource context menu's Send to Agent). The panel opens,
+ *  the agent stays whatever the user last picked, and the chip is inserted
+ *  once the composer is mounted. Any AI processing the resource still needs
+ *  is triggered by the caller (`ensureResourceProcessed`), not here — this
+ *  channel only carries the intent. Nonce disambiguates repeat sends of the
+ *  same resource. Consumed (cleared) by AIChatPanel; never persisted. */
+export interface PendingResource {
+  /** BIGINT serialized as string (Snowflake). */
+  resourceId: string;
+  /** Snapshot — the chip keeps rendering it even if the resource moves. */
+  name: string;
+  kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
+  mime: string | null;
+  scope: { type: 'personal' | 'team'; id: string };
+  nonce: number;
+}
+
 interface GlobalChatState {
   open: boolean;
   /** Window rect, anchored bottom-right (offsets in px). */
@@ -69,6 +87,8 @@ interface GlobalChatState {
   chatRequest: ChatRequest | null;
   /** Pending "quote this selection into the composer" request (not persisted). */
   pendingQuote: PendingQuote | null;
+  /** Pending "insert this resource chip" request (not persisted). */
+  pendingResource: PendingResource | null;
 
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -83,6 +103,9 @@ interface GlobalChatState {
   /** Open the floating chat and stage a quoted selection for the composer. */
   sendSelectionToChat: (quote: Omit<PendingQuote, 'nonce'>) => void;
   consumePendingQuote: () => void;
+  /** Open the floating chat and stage a resource chip for the composer. */
+  sendResourceToChat: (resource: Omit<PendingResource, 'nonce'>) => void;
+  consumePendingResource: () => void;
 }
 
 export const CHAT_MIN_W = 340;
@@ -100,6 +123,7 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       pageContext: null,
       chatRequest: null,
       pendingQuote: null,
+      pendingResource: null,
 
       setOpen: (open) => set({ open }),
       toggle: () => set((s) => ({ open: !s.open })),
@@ -117,10 +141,21 @@ export const useGlobalChatStore = create<GlobalChatState>()(
           pendingQuote: { ...quote, nonce: (s.pendingQuote?.nonce ?? 0) + 1 },
         })),
       consumePendingQuote: () => set({ pendingQuote: null }),
+      sendResourceToChat: (resource) =>
+        set((s) => ({
+          open: true,
+          pendingResource: {
+            ...resource,
+            nonce: (s.pendingResource?.nonce ?? 0) + 1,
+          },
+        })),
+      consumePendingResource: () => set({ pendingResource: null }),
     }),
     {
       name: 'mediahub.global_chat',
-      // pageContext holds page callbacks — never persist it.
+      // pageContext holds page callbacks — never persist it, and the
+      // three one-shot channels must not survive a reload either (a
+      // resurrected intent would re-fire on every page load).
       partialize: (s) => ({
         open: s.open,
         right: s.right,

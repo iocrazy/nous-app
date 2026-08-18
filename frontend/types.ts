@@ -2384,6 +2384,17 @@ export type ResourceRefAttachment = {
   scope: { type: 'personal' | 'team'; id: string };
 };
 
+/** AI processing state of a resource (`resources.transcript_status`
+ *  etc.). `skipped` means the backend decided there is nothing to
+ *  process — e.g. a video with no audio track. */
+export type ResourceProcessingStatus =
+  | 'none'
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'skipped';
+
 /** Search result row from GET /api/v1/resources/search */
 export type ResourceSearchResult = {
   id: string;
@@ -2393,7 +2404,13 @@ export type ResourceSearchResult = {
   size: number | null;
   scope: { type: 'personal' | 'team'; id: string };
   updated_at: string;
+  /** Relative path (`/api/v1/resources/{id}/cover`) or null when the
+   *  resource has no cover — prefix with the API base before use. */
   thumbnail_url: string | null;
+  /** AI processing state mirrored from `resources`. Optional because
+   *  older callers build this shape by hand; the API always sends both. */
+  transcript_status?: ResourceProcessingStatus | null;
+  summary_status?: ResourceProcessingStatus | null;
 };
 
 export type ResourceSearchResponse = {

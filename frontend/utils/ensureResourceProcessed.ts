@@ -1,0 +1,98 @@
+/**
+ * ensureResourceProcessed — top up whatever AI processing an attached
+ * resource is missing, so the agent has something to read this turn.
+ *
+ * Both entry points (the @ picker and the resource context menu's "Send
+ * to Agent") call this before the chip lands in the composer. The agent
+ * itself never triggers processing — that is a permission design left out
+ * of scope on purpose; the trigger stays on the user action.
+ *
+ * The backend endpoints dedup in flight (a repeat call answers 200
+ * "already in progress" and charges nothing), so this helper does not try
+ * to be clever about `pending` / `processing` — a stale status column that
+ * claims "processing" for a dead task would otherwise strand the resource
+ * forever.
+ */
+
+import {
+  triggerSummaryByResource,
+  triggerTranscriptionByResource,
+} from '../services/aiService';
+
+/** What the helper did. `skipped` = nothing to trigger for this kind of
+ *  resource (or the backend already declared the step not applicable). */
+export type EnsureResourceProcessedAction =
+  | 'triggered_transcribe'
+  | 'triggered_summary'
+  | 'ready'
+  | 'skipped'
+  | 'failed';
+
+export interface EnsureResourceProcessedResult {
+  action: EnsureResourceProcessedAction;
+  /** Which step was attempted — only set when `action === 'failed'`. */
+  attempted?: 'transcribe' | 'summary';
+  /** Message for a user-visible failure notice; only set when failed. */
+  error?: string;
+}
+
+export interface EnsureResourceProcessedInput {
+  id: string;
+  /** Search-result kind when known ('video' | 'audio' | 'image' | ...). */
+  kind?: string | null;
+  /** Falls back to the mime type when the caller has no kind. */
+  mime?: string | null;
+  /** `none | pending | processing | completed | failed | skipped` */
+  transcript_status?: string | null;
+  summary_status?: string | null;
+}
+
+function isAudioVisual(input: EnsureResourceProcessedInput): boolean {
+  if (input.kind === 'video' || input.kind === 'audio') return true;
+  const mime = input.mime ?? '';
+  return mime.startsWith('video/') || mime.startsWith('audio/');
+}
+
+/** Never throws: a failed trigger must not block the chat — the caller
+ *  gets a typed failure to surface instead. */
+export async function ensureResourceProcessed(
+  input: EnsureResourceProcessedInput,
+): Promise<EnsureResourceProcessedResult> {
+  if (!isAudioVisual(input)) return { action: 'skipped' };
+
+  const transcript = input.transcript_status ?? 'none';
+  const summary = input.summary_status ?? 'none';
+
+  // 'skipped' is the backend saying "there is nothing here to process"
+  // (e.g. no audio track). Re-triggering would just 409.
+  if (transcript === 'skipped') return { action: 'skipped' };
+
+  if (transcript !== 'completed') {
+    try {
+      await triggerTranscriptionByResource(input.id);
+      return { action: 'triggered_transcribe' };
+    } catch (err) {
+      console.error('ensureResourceProcessed: transcribe trigger failed', err);
+      return {
+        action: 'failed',
+        attempted: 'transcribe',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  if (summary === 'skipped') return { action: 'skipped' };
+  if (summary === 'completed') return { action: 'ready' };
+
+  try {
+    await triggerSummaryByResource(input.id);
+    return { action: 'triggered_summary' };
+  } catch (err) {
+    console.error('ensureResourceProcessed: summary trigger failed', err);
+    return {
+      action: 'failed',
+      attempted: 'summary',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
