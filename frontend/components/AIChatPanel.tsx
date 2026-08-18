@@ -54,6 +54,8 @@ import { useComposerDropzone } from '../hooks/useComposerDropzone';
 import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
+import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
+import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
 export interface AIChatPanelProps {
@@ -373,17 +375,36 @@ export function AIChatPanel({
     };
   }, [mentionPickerOpen]);
 
+  // Resource → composer, for both entry points: the @ picker below and the
+  // library context menu's "Send to Agent" (which arrives on the
+  // globalChatStore channel). Attaching also tops up whatever AI processing
+  // the asset is missing, and reports what that cost (spec F1/F3).
+  const notifyProcessing = useCallback(
+    (message: string, type: 'info' | 'error') => addToast(message, type),
+    [addToast],
+  );
+  const { attachResource } = useComposerResourceAttach({
+    editorRef: chatEditorRef,
+    selectedAgentSlug,
+    setSelectedAgentSlug,
+    lockedAgent,
+    notify: notifyProcessing,
+    t,
+  });
+  // The rest of the F1 chain, watched from the Task Center: a transcription
+  // started here has no summary until the transcript lands, and a
+  // transcription REFUSED because an audio extraction held the slot has to
+  // be asked for again once that finishes. Both charge points, so both
+  // report through the same toast.
+  useResourceProcessingFollowUps({ notify: notifyProcessing, t });
+
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {
-      if (chatEditorRef.current) {
-        (chatEditorRef.current.commands as unknown as {
-          insertResourceRef: (item: ResourceSearchResult) => boolean;
-        }).insertResourceRef(item);
-      }
+      attachResource(item);
       setMentionPickerOpen(false);
       setMentionQuery('');
     },
-    [],
+    [attachResource],
   );
 
   // Paste + drag-drop upload hooks — all three funnel files into handleFiles

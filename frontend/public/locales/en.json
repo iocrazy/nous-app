@@ -657,7 +657,7 @@
       "noteMusicApproximate": "Published, but with the closest matching track rather than the one you named.",
       "noteMusicNotFound": "The platform's music search returned nothing for this track, so nothing was published.",
       "noteMusicAmbiguous": "Several tracks on the platform look identical to the one you picked, so nothing was published rather than risk the wrong song. Pick a different version.",
-      "noteMusicResultsNotSeen": "The platform's music dialog did not answer in time, so we could not tell whether it has this track \u2014 nothing was published. Publishing again may work.",
+      "noteMusicResultsNotSeen": "The platform's music dialog did not answer in time, so we could not tell whether it has this track — nothing was published. Publishing again may work.",
       "noteMusicFailed": "The music could not be selected on the platform, so nothing was published.",
       "noteCollectionSkipped": "Published, but the collection was not applied.",
       "publishingNow": "Publishing now",
@@ -1109,6 +1109,7 @@
     "batchDownload": "Download",
     "batchDelete": "Delete",
     "generatePrompt": "Generate Prompt",
+    "sendToAgent": "Send to Agent",
     "autoTag": "Auto Tag",
     "batchGeneratePrompt": "Prompts",
     "batchGeneratePromptHint": "Reverse-engineer prompts for the selected images",
@@ -2687,7 +2688,9 @@
       "audio": "Audio",
       "pdf": "PDF",
       "noResults": "No resources match \"{{q}}\"",
-      "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel"
+      "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel",
+      "statusProcessing": "Processing…",
+      "statusUnprocessed": "Not processed yet"
     },
     "sidebarTitle": "Channels",
     "newChannel": "New channel",
@@ -2818,6 +2821,16 @@
       "saved": "Image saved to library",
       "saveError": "Failed to save image",
       "removeAttachment": "Remove attachment"
+    },
+    "resourceProcessing": {
+      "alreadyRunning": "This asset is already being processed — no extra points spent",
+      "transcribingWithCost": "Transcribing this asset ({{points}} points)",
+      "transcribing": "Transcribing this asset — the agent can read it shortly",
+      "summarizing": "Summarising this asset — the agent can read it shortly",
+      "failedWithReason": "Could not start processing this asset: {{error}}",
+      "failed": "Could not start processing this asset",
+      "statusUnknown": "Could not check this asset's processing state — sent without new processing",
+      "pendingAudio": "Audio is still being extracted from this asset — try again once that finishes"
     }
   },
   "mcp": {

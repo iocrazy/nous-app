@@ -92,6 +92,51 @@ def _format_duration_short(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+# Two ways a transcribe request can find the resource already occupied,
+# and they mean OPPOSITE things to the caller — collapsing them into one
+# "already in progress" is what made this endpoint answer 200 to requests
+# that then produced no transcription at all (silent no-op).
+#
+# ``transcription_pending_audio`` is the machine-readable discriminator;
+# every 200 from this endpoint carries it so a client can branch without
+# parsing prose.
+
+
+def _transcription_in_progress_response(resource_id: str, platform_id: str) -> dict:
+    """A transcript IS coming — either an ai_transcription run or an
+    extract_audio run that chains one."""
+    return {
+        "message": "Transcription already in progress",
+        "resource_id": resource_id,
+        "platform_id": platform_id,
+        "points_charged": 0,
+        "transcription_pending_audio": False,
+    }
+
+
+def _audio_extraction_blocks_response(
+    resource_id: str, platform_id: str, blocking_task_id: str | None
+) -> dict:
+    """Audio extraction holds the slot but will NOT transcribe.
+
+    Migration 121's unique index is keyed on (resource_id, task_type) and
+    knows nothing about intent, so a new extract_audio cannot be dispatched
+    until that one finishes. Saying so plainly — and handing back the task
+    id to wait on — is the only honest answer: the caller must retry.
+    """
+    return {
+        "message": (
+            "Audio extraction is already running for this media, and that run "
+            "will not start a transcription by itself — retry once it finishes"
+        ),
+        "resource_id": resource_id,
+        "platform_id": platform_id,
+        "points_charged": 0,
+        "transcription_pending_audio": True,
+        "blocking_task_id": blocking_task_id,
+    }
+
+
 # ------------------------------------------------------------------
 # Manual triggers (resource_id-based)
 # ------------------------------------------------------------------
@@ -105,29 +150,6 @@ async def trigger_transcription_by_resource(
     resource, platform_id, media = await _resolve_resource_to_platform_id(
         resource_id, auth.user_id
     )
-
-    # === Dedup: reject if already processing ===
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
-    from app.models import TaskTracking
-
-    async with read_scope() as session:
-        _active = (
-            await session.execute(
-                select(TaskTracking.dbos_workflow_id)
-                .where(TaskTracking.resource_id == resource_id)
-                .where(TaskTracking.task_type == "ai_transcription")
-                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
-                .limit(1)
-            )
-        ).first()
-    if _active:
-        return {
-            "message": "Transcription already in progress",
-            "resource_id": resource_id,
-        }
-    # === End dedup ===
 
     # === Audio-readiness classification (BEFORE billing) ===
     # Three cases, decided up-front so a dead-end never leaves points
@@ -150,6 +172,39 @@ async def trigger_transcription_by_resource(
             ),
         )
     # === End classification ===
+
+    # === Dedup: something already occupies the transcription slot? ===
+    # Which slot that is depends on the classification above, so this runs
+    # after it (still before billing — a short-circuit never charges).
+    #
+    #   audio ready  → we would insert `ai_transcription`, which collides
+    #                  only with another `ai_transcription`. A non-chaining
+    #                  `extract_audio` running alongside is a DIFFERENT
+    #                  task_type: it neither blocks that insert nor produces
+    #                  a transcript, so refusing on its account would be a
+    #                  pointless rejection.
+    #   no audio     → we would insert `extract_audio`, which collides with
+    #                  ANY active `extract_audio` (migration 121's unique
+    #                  index is keyed on (resource_id, task_type) and cannot
+    #                  see intent) — including the audio-only kind that will
+    #                  never transcribe. That one gets its own answer.
+    #
+    # Either way, a task that WILL produce a transcript means "already in
+    # progress" is true and re-dispatching would double-charge.
+    from app.services.ai.resource_ai_status import (
+        find_active_transcription_task,
+        is_active_task_conflict,
+    )
+
+    _active = await find_active_transcription_task(resource_id)
+    if _active is not None:
+        if _active.chains_transcription:
+            return _transcription_in_progress_response(resource_id, platform_id)
+        if not _has_audio:
+            return _audio_extraction_blocks_response(
+                resource_id, platform_id, _active.workflow_id
+            )
+    # === End dedup ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
@@ -269,6 +324,10 @@ async def trigger_transcription_by_resource(
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
+                # Mirrors chain_transcription=True below. The workflow arg
+                # is a frozen DBOS input that nothing can read back, so the
+                # intent is recorded here for the dedup and the read path.
+                metadata={"chain_transcription": True},
             )
             await start_workflow_routed(
                 "extract_audio",
@@ -286,6 +345,54 @@ async def trigger_transcription_by_resource(
     except HTTPException:
         raise
     except Exception as e:
+        # Lost the race: another request created the active task between our
+        # dedup SELECT and this INSERT, and migration 121's partial unique
+        # index rejected ours. Its own comment tells callers to treat that as
+        # "already in progress" — reporting a 500 would tell the user their
+        # media failed while it is in fact being processed. `_orphan_task_id`
+        # is still None here (the create() itself is what raised), so nothing
+        # needs marking failed; the charge does need giving back, since this
+        # request dispatched no work.
+        if _orphan_task_id is None and is_active_task_conflict(e):
+            if _points_cost > 0 and _team_id:
+                try:
+                    await points_service.refund_points(
+                        team_id=_team_id,
+                        user_id=auth.user_id,
+                        amount=_points_cost,
+                        reference_type="ai_transcription",
+                        reference_id=resource_id,
+                        reason="Another transcription task is already active",
+                    )
+                except Exception as refund_err:
+                    logger.error(
+                        f"Failed to refund points after dedup conflict: {refund_err}"
+                    )
+            # Which kind of task beat us decides what we may promise. When
+            # we were inserting ai_transcription, the winner is one too, so
+            # a transcript is coming; when we were inserting extract_audio,
+            # re-read to see whether the winner chains one.
+            _blocker = (
+                None
+                if _has_audio
+                else await find_active_transcription_task(resource_id)
+            )
+            logger.info(
+                f"[ai_router] transcription slot for resource {resource_id} "
+                f"already taken (unique index); has_audio={_has_audio} "
+                f"blocker_chains={getattr(_blocker, 'chains_transcription', None)}"
+            )
+            if _has_audio or (_blocker is not None and _blocker.chains_transcription):
+                return _transcription_in_progress_response(resource_id, platform_id)
+            # `_blocker is None` means the winner finished between our
+            # failed INSERT and this re-read. Nothing is running, so a
+            # retry succeeds immediately — the null blocking_task_id says
+            # exactly that ("retry now" rather than "wait for this task").
+            return _audio_extraction_blocks_response(
+                resource_id,
+                platform_id,
+                _blocker.workflow_id if _blocker else None,
+            )
         if _orphan_task_id:
             try:
                 from app.services.infra.unified_task_manager import get_task_manager
@@ -328,6 +435,9 @@ async def trigger_transcription_by_resource(
         "platform_id": platform_id,
         "points_charged": _points_cost,
         "extracting_audio": not _has_audio,
+        # False on both success paths: this dispatch either transcribes
+        # directly or extracts with chain_transcription=True.
+        "transcription_pending_audio": False,
     }
 
 
@@ -341,10 +451,20 @@ async def trigger_summary_by_resource(
     )
 
     # === Dedup: reject if already processing ===
+    # Only one task_type to look for here (summary never chains through a
+    # second one), so unlike the transcribe endpoint this SELECT is complete
+    # — but it is still a check-then-insert, and the conflict branch below
+    # covers the race it cannot. ACTIVE_TASK_STATUSES is copied
+    # from migration 121's index predicate so the check and the constraint
+    # cannot drift apart.
     from sqlalchemy import select
 
     from app.db.session import read_scope
     from app.models import TaskTracking
+    from app.services.ai.resource_ai_status import (
+        ACTIVE_TASK_STATUSES,
+        is_active_task_conflict,
+    )
 
     async with read_scope() as session:
         _active = (
@@ -352,12 +472,16 @@ async def trigger_summary_by_resource(
                 select(TaskTracking.dbos_workflow_id)
                 .where(TaskTracking.resource_id == resource_id)
                 .where(TaskTracking.task_type == "ai_summary")
-                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+                .where(TaskTracking.status.in_(ACTIVE_TASK_STATUSES))
                 .limit(1)
             )
         ).first()
     if _active:
-        return {"message": "Summary already in progress", "resource_id": resource_id}
+        return {
+            "message": "Summary already in progress",
+            "resource_id": resource_id,
+            "points_charged": 0,
+        }
     # === End dedup ===
 
     # === Points check — charge the resource owner's personal team ===
@@ -432,6 +556,10 @@ async def trigger_summary_by_resource(
                 "message": "Summary generation queued",
                 "resource_id": resource_id,
                 "platform_id": platform_id,
+                # Always present, so a caller never has to read "field
+                # absent" as "not charged" — the two already-in-progress
+                # branches report 0 for the same reason.
+                "points_charged": _points_cost,
             }
         else:
             # No transcript yet — dispatch transcription. PR-D7 phase
@@ -452,11 +580,47 @@ async def trigger_summary_by_resource(
                 },
             )
             return {
-                "message": "Transcription queued; trigger summary again once transcript is ready",
+                "message": (
+                    "Transcription queued; trigger summary again once "
+                    "transcript is ready"
+                ),
                 "resource_id": resource_id,
                 "platform_id": platform_id,
+                "points_charged": _points_cost,
             }
     except Exception as e:
+        # Same race as the transcribe endpoint: another request created the
+        # active ai_summary task between our dedup SELECT and this INSERT,
+        # and migration 121's partial unique index rejected ours. Its own
+        # comment tells callers to treat that as "already in progress" —
+        # a 500 would report failure for work that is actually running.
+        # `_orphan_task_id` is still None here (create() is what raised), so
+        # there is no task row to fail; the charge does need giving back.
+        if _orphan_task_id is None and is_active_task_conflict(e):
+            if _points_cost > 0 and _team_id:
+                try:
+                    await points_service.refund_points(
+                        team_id=_team_id,
+                        user_id=auth.user_id,
+                        amount=_points_cost,
+                        reference_type="ai_summary",
+                        reference_id=resource_id,
+                        reason="Another summary task is already active",
+                    )
+                except Exception as refund_err:
+                    logger.error(
+                        f"Failed to refund points after dedup conflict: {refund_err}"
+                    )
+            logger.info(
+                f"[ai_router] summary for resource {resource_id} already active "
+                "(unique index); returning already-in-progress"
+            )
+            return {
+                "message": "Summary already in progress",
+                "resource_id": resource_id,
+                "platform_id": platform_id,
+                "points_charged": 0,
+            }
         if _orphan_task_id:
             try:
                 from app.services.infra.unified_task_manager import get_task_manager
@@ -702,6 +866,8 @@ async def trigger_transcription(
                 media_id=platform_id,
                 resource_id=owner_resource_id,
                 dbos_workflow_id=wf_id,
+                # Same intent record as the by-resource endpoint above.
+                metadata={"chain_transcription": True},
             )
             await start_workflow_routed(
                 "extract_audio",

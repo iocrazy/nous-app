@@ -149,7 +149,7 @@ export interface TaskManagerState {
   revision: number;
 }
 
-interface TaskManagerContextType extends TaskManagerState {
+export interface TaskManagerContextType extends TaskManagerState {
   activeTasks: UnifiedTask[];
   totalActive: number;
   activeCounts: Record<TaskType, number>;
@@ -542,7 +542,10 @@ async function apiClearCompleted(): Promise<void> {
 
 // ─── Context ────────────────────────────────────────────
 
-const TaskManagerContext = createContext<TaskManagerContextType | null>(null);
+/** Exported so `useOptionalTaskManager` can read it without throwing —
+ *  the floating chat also mounts outside this provider (fullscreen
+ *  editor routes). Prefer the hooks over consuming it directly. */
+export const TaskManagerContext = createContext<TaskManagerContextType | null>(null);
 
 export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUserId } = useAuth();

@@ -14,6 +14,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.ai._mime_kind import kind_from_mime
+from app.services.ai.resource_ai_status import effective_ai_statuses
 
 # All endpoints here require auth (AuthDep) and are resources-dedicated, so the
 # ambient tenant Scope is established at the ROUTER level. Inert until
@@ -23,6 +24,39 @@ router = APIRouter(
     tags=["resources"],
     dependencies=[Depends(scoped_request)],
 )
+
+
+def _thumbnail_url(row: dict, resource_id: str) -> Optional[str]:
+    """Relative cover URL when the resource can plausibly render one.
+
+    Same ladder the frontend's ``buildThumbnailSrc`` walks and the same one
+    ``serve_resource_cover`` resolves against: an explicit thumbnail, an
+    explicit cover, a parsed_media backing row (cover lives there for
+    downloads), or an image whose original file *is* the cover.
+
+    Returning a URL is a bet that the endpoint will find something, and the
+    bet can lose: ``serve_resource_cover``'s inline-SVG placeholder sits
+    behind a ``not media_id`` guard, so it is unreachable for exactly the
+    parsed_media-backed arm this function most often bets on — that arm
+    resolves ``parsed_media.cover_download_path`` against the local download
+    root with no ``sb://`` branch, and every non-null cover path in
+    production is ``sb://`` (1187/1187, measured 2026-08-17). Those requests
+    fall through to a 404. The frontend handles it with an ``onError``
+    fallback, so a false positive costs one failed image request, not a
+    broken-looking tile — but it is a 404, not a placeholder.
+
+    The endpoint is intentionally unauthenticated (RECON#8) so the URL can go
+    straight into ``<img src>``; the search results themselves are already
+    scoped to what the caller may read, so this adds no exposure.
+    """
+    if (
+        row.get("thumbnail_path")
+        or row.get("cover_image_path")
+        or row.get("media_id")
+        or (row.get("mime") or "").startswith("image/")
+    ):
+        return f"/api/v1/resources/{resource_id}/cover"
+    return None
 
 
 @router.get("/search")
@@ -54,6 +88,11 @@ async def search_resources(
         scope_team_id=scope_team_id,
     )
 
+    # The status columns only ever hold terminal values, so the picker's
+    # "being processed" chip has to come from task_tracking. One batched
+    # query for the whole page — see services/ai/resource_ai_status.
+    effective = await effective_ai_statuses({str(row["id"]): row for row in rows})
+
     results = []
     counts: dict[str, int] = {
         "all": 0,
@@ -67,9 +106,15 @@ async def search_resources(
         kind = kind_from_mime(row.get("mime"))
         counts[kind] += 1
         counts["all"] += 1
+        rid = str(row["id"])
+        _eff = effective.get(rid, {})
+        # Whitelist, never a `**row` spread: the repo now selects storage
+        # paths and the media FK purely so the ladder below can be walked
+        # here. They are inputs, not output — pinned by the tripwire in
+        # tests/api/test_resources_search_status_fields.py.
         results.append(
             {
-                "id": str(row["id"]),
+                "id": rid,
                 "name": row["name"],
                 "kind": kind,
                 "mime": row.get("mime"),
@@ -79,7 +124,9 @@ async def search_resources(
                     "id": str(row["scope_id"]),
                 },
                 "updated_at": row["updated_at"],
-                "thumbnail_url": None,
+                "thumbnail_url": _thumbnail_url(row, rid),
+                "transcript_status": _eff.get("transcript_status"),
+                "summary_status": _eff.get("summary_status"),
             }
         )
 

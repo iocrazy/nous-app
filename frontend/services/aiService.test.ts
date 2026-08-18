@@ -16,8 +16,11 @@ import {
   saveAISettings,
   testAIConnection,
   triggerSummary,
+  triggerSummaryByResource,
   triggerTranscription,
+  triggerTranscriptionByResource,
   triggerVisualAnalysis,
+  triggerVisualAnalysisByResource,
 } from './aiService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
@@ -437,5 +440,59 @@ describe('transcription hotwords settings mapping', () => {
       (spy.mock.calls[0][1] as RequestInit).body as string,
     );
     expect(body.transcription_hotwords).toBe('');
+  });
+});
+
+describe('resource-scoped trigger response contract (RECON#4)', () => {
+  it('passes through the real transcribe body — message, not task_id', async () => {
+    // Wire body copied from ai_router.trigger_transcription_by_resource.
+    stubJson({
+      message: 'Audio extraction started — transcription will follow',
+      resource_id: '7301234567890123456',
+      platform_id: 'p-1',
+      points_charged: 5,
+      extracting_audio: true,
+    });
+
+    const res = await triggerTranscriptionByResource('7301234567890123456');
+
+    expect(res.message).toBe(
+      'Audio extraction started — transcription will follow',
+    );
+    expect(res.resource_id).toBe('7301234567890123456');
+    expect(res.extracting_audio).toBe(true);
+    expect('task_id' in res).toBe(false);
+  });
+
+  it('passes through the dedup body (200 "already in progress")', async () => {
+    stubJson({ message: 'Summary already in progress', resource_id: 'r-1' });
+
+    const res = await triggerSummaryByResource('r-1');
+
+    expect(res.message).toBe('Summary already in progress');
+    expect(res.platform_id).toBeUndefined();
+  });
+
+  it('passes through the analyze body', async () => {
+    stubJson({
+      message: 'Visual analysis queued',
+      resource_id: 'r-1',
+      platform_id: 'p-1',
+    });
+
+    const res = await triggerVisualAnalysisByResource('r-1');
+
+    expect(res.message).toBe('Visual analysis queued');
+  });
+
+  it('does not type the response as carrying a task id', async () => {
+    stubJson({ message: 'Transcription queued', resource_id: 'r-1' });
+    const res = await triggerTranscriptionByResource('r-1');
+
+    // Compile-time tripwire: `tsc --noEmit` reports the directive below
+    // as unused the moment someone re-adds task_id to the return type
+    // without the backend actually returning one.
+    // @ts-expect-error the trigger endpoints never return a task id
+    void res.task_id;
   });
 });

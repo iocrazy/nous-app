@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from app.models import ResourceSummaries, ResourceTranscripts
+from app.models import ResourceSummaries, ResourceTranscripts, TaskTracking
 
 RID = 331438000000001
 
@@ -52,6 +52,16 @@ CREATE TABLE resource_summaries (
     llm_model TEXT,
     llm_provider TEXT,
     created_at TEXT
+);
+CREATE TABLE task_tracking (
+    dbos_workflow_id TEXT PRIMARY KEY,
+    user_id TEXT,
+    resource_id TEXT,
+    task_type TEXT NOT NULL,
+    title TEXT,
+    status TEXT NOT NULL,
+    phase TEXT,
+    metadata TEXT
 );
 """
 
@@ -268,3 +278,99 @@ def test_dead_videos_table_reference_is_gone():
     assert (
         "FROM public.videos" not in src
     ), "the phantom public.videos table must not be queried"
+
+
+@pytest.mark.asyncio
+async def test_a_running_task_turns_not_available_into_being_generated(
+    sqlite_session_factory,
+):
+    """End-to-end on a real engine: no transcript row, no intermediate value
+    in the status column (production never writes one) — the "still working
+    on it" answer has to come from an active task_tracking row.
+
+    Runs the actual ORM statement rather than a stubbed reducer, so a
+    predicate that does not compile or does not match is a red test.
+    """
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-1",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="extract_audio",
+                title="Audio clip",
+                status="processing",
+                phase="in_progress",
+                # Only a chaining run ends in a transcript — see the
+                # non-chaining twin below.
+                metadata={"chain_transcription": True},
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert "being generated" in out["error"]
+    assert "not available" not in out["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [{"chain_transcription": False}, {}, None],
+    ids=["false", "empty", "null"],
+)
+async def test_a_non_chaining_extract_audio_does_not_promise_a_transcript(
+    sqlite_session_factory, metadata
+):
+    """The post-download auto-extract and the "Extract Audio" button create
+    this same task_type without chain_transcription, so no transcript
+    follows unless the resource carries intent tags. Telling the agent
+    "being generated; ask the user to retry shortly" there sends it —
+    and the user — to wait for something that never arrives.
+
+    The three parameters are the shapes really present in the table: the
+    recorded false, an empty metadata object, and every row written before
+    the field existed.
+    """
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-audio-only",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="extract_audio",
+                title="Audio clip",
+                status="processing",
+                phase="in_progress",
+                metadata=metadata,
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert out == {"error": "transcript not available; resource not yet processed"}
+
+
+@pytest.mark.asyncio
+async def test_a_finished_task_leaves_the_not_available_wording_alone(
+    sqlite_session_factory,
+):
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-2",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="ai_transcription",
+                title="Transcribe clip",
+                status="completed",
+                phase="completed",
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert out == {"error": "transcript not available; resource not yet processed"}

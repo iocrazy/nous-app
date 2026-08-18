@@ -226,6 +226,469 @@ class TestTranscribeByResource:
         assert dispatched == []
 
 
+# ─── dedup during the extract-audio window (T2 review I1) ─────────
+
+
+class _ActiveTaskSession:
+    """Dedup probe that answers "yes, one is running" ONLY when the query
+    really asks about the given task_type.
+
+    Compiling the statement rather than returning a canned row is what makes
+    this falsifiable: drop ``extract_audio`` from the dedup's IN list and
+    the probe goes back to empty, the endpoint dispatches, and the
+    assertions below fail — which is exactly the bug being fixed.
+
+    ``chains`` is the recorded chain_transcription intent of the row it
+    serves; ``None`` models a row written before that field existed.
+    """
+
+    def __init__(self, task_type: str, chains=None, workflow_id="wf-existing"):
+        self._task_type = task_type
+        self._chains = chains
+        self._workflow_id = workflow_id
+        self.seen_sql: str | None = None
+
+    async def execute(self, stmt, *_a, **_k):
+        from sqlalchemy.dialects import postgresql
+
+        self.seen_sql = str(
+            stmt.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        rows = (
+            [
+                {
+                    "dbos_workflow_id": self._workflow_id,
+                    "resource_id": "res-1",
+                    "task_type": self._task_type,
+                    "status": "processing",
+                    "phase": "in_progress",
+                    "task_metadata": (
+                        None
+                        if self._chains is None
+                        else {"chain_transcription": self._chains}
+                    ),
+                }
+            ]
+            if self._task_type in self.seen_sql
+            else []
+        )
+
+        class _Result:
+            @staticmethod
+            def mappings():
+                class _M:
+                    @staticmethod
+                    def all():
+                        return rows
+
+                return _M()
+
+        return _Result()
+
+
+def _patch_dedup_session(monkeypatch, session):
+    import app.db.session as dbs
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+
+
+class TestTranscribeDedup:
+    def _no_audio_media(self) -> dict:
+        return {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "bilibili/329/video.mp4",
+            "title": "Old Bilibili clip",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "active_type,chains",
+        [("ai_transcription", None), ("extract_audio", True)],
+    )
+    async def test_a_task_that_will_transcribe_short_circuits(
+        self, monkeypatch, active_type, chains
+    ) -> None:
+        """``extract_audio`` is the half that used to be missed: a video with
+        no audio track yet is transcribed via extract_audio(chain=True), so
+        during that whole window the dedup found nothing, dispatched again,
+        and tripped migration 121's unique index into a 500.
+
+        Both rows here really do end in a transcript, so "already in
+        progress" is a true statement."""
+        _patch_resource_resolver(monkeypatch, self._no_audio_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch, _ActiveTaskSession(active_type, chains=chains)
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert res["transcription_pending_audio"] is False
+        # The contract task-1b-status.md hands to the frontend: "already in
+        # progress" always means "and you were not charged for it".
+        assert res["points_charged"] == 0
+        assert dispatched == []
+        assert created == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chains", [False, None])
+    async def test_a_non_chaining_extract_audio_is_not_reported_as_transcribing(
+        self, monkeypatch, chains
+    ) -> None:
+        """THE silent no-op this rework exists for.
+
+        The post-download auto-extract (download.py) and the "Extract Audio"
+        button create `extract_audio` WITHOUT chain_transcription, so they
+        end in `chain_transcript_summary_for_tags`, which returns early
+        unless the resource carries intent tags — production: 14/14
+        historical rows are of this kind. Answering "Transcription already
+        in progress" there is a 200 that promises work nobody will do:
+        the user waits, and no transcript ever appears.
+
+        `chains=None` is every row written before the intent was recorded —
+        it must degrade to the honest answer, not to the convenient one.
+        """
+        _patch_resource_resolver(monkeypatch, self._no_audio_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch,
+            _ActiveTaskSession("extract_audio", chains=chains, workflow_id="wf-audio"),
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] != "Transcription already in progress"
+        # Machine-readable, so the caller can act without parsing prose.
+        assert res["transcription_pending_audio"] is True
+        assert res["blocking_task_id"] == "wf-audio"
+        assert res["points_charged"] == 0
+        assert "retry" in res["message"]
+        # Still no dispatch — the unique index would reject it anyway.
+        assert dispatched == []
+        assert created == []
+
+    def _audio_ready_media(self) -> dict:
+        return {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chains", [False, None])
+    async def test_audio_already_on_disk_is_not_blocked_by_an_audio_only_run(
+        self, monkeypatch, chains
+    ) -> None:
+        """With audio on disk we insert `ai_transcription`, and migration
+        121's index is per (resource_id, task_type) — a non-chaining
+        `extract_audio` is a different task_type, so it neither blocks that
+        insert nor produces a transcript. Refusing here would be a rejection
+        that protects nothing: the user is told to retry later when the
+        dispatch would have worked right now.
+        """
+        _patch_resource_resolver(monkeypatch, self._audio_ready_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch, _ActiveTaskSession("extract_audio", chains=chains)
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription queued"
+        assert res["transcription_pending_audio"] is False
+        assert [d["name"] for d in dispatched] == ["ai_transcription"]
+        assert created[0]["task_type"] == "ai_transcription"
+
+    @pytest.mark.asyncio
+    async def test_audio_already_on_disk_still_defers_to_a_chaining_run(
+        self, monkeypatch
+    ) -> None:
+        """The other half of the same rule: a run that WILL transcribe makes
+        "already in progress" true, and dispatching again would double-charge
+        for the same transcript."""
+        _patch_resource_resolver(monkeypatch, self._audio_ready_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        _patch_dedup_session(
+            monkeypatch, _ActiveTaskSession("extract_audio", chains=True)
+        )
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert res["points_charged"] == 0
+        assert dispatched == []
+
+    @pytest.mark.asyncio
+    async def test_a_blocker_that_finished_first_yields_a_null_task_to_wait_on(
+        self, monkeypatch
+    ) -> None:
+        """Degenerate race: our INSERT lost, but by the time we re-read, the
+        winner had finished. Nothing is running, so `blocking_task_id: None`
+        tells the caller to retry now rather than wait on a task id."""
+        _patch_resource_resolver(monkeypatch, self._no_audio_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        class _AlwaysEmptySession:
+            async def execute(self, *_a, **_k):
+                class _Result:
+                    @staticmethod
+                    def mappings():
+                        class _M:
+                            @staticmethod
+                            def all():
+                                return []
+
+                        return _M()
+
+                return _Result()
+
+        _patch_dedup_session(monkeypatch, _AlwaysEmptySession())
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["transcription_pending_audio"] is True
+        assert res["blocking_task_id"] is None
+        assert res["points_charged"] == 0
+        assert dispatched == []
+
+    @pytest.mark.asyncio
+    async def test_losing_the_insert_race_reports_in_progress_not_500(
+        self, monkeypatch
+    ) -> None:
+        """TOCTOU: another request creates the active row between our SELECT
+        and our INSERT. Migration 121's own comment says callers must treat
+        the unique violation as "already in progress" — a 500 would tell the
+        user their media failed while it is being processed."""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert res["points_charged"] == 0
+        assert dispatched == []
+        mgr.fail.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_race_loser_gets_its_points_back(self, monkeypatch) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+            "duration": 600,
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        settings_repo = MagicMock()
+        settings_repo.get_by_user_id = AsyncMock(
+            return_value={
+                "settings_json": {
+                    "ai_settings": {"task_assignment": {"transcription": "nous-asr"}}
+                }
+            }
+        )
+        monkeypatch.setattr(
+            "app.repositories.user_settings_repository.UserSettingsRepository",
+            lambda: settings_repo,
+        )
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value="team-1")
+        )
+        nous_repo = MagicMock()
+        nous_repo.get_by_name = AsyncMock(
+            return_value={
+                "is_enabled": True,
+                "pricing_type": "per_hour",
+                "pricing_value": 60,
+            }
+        )
+        monkeypatch.setattr(
+            "app.repositories.mediahub_model_repository."
+            "get_mediahub_model_repository",
+            lambda: nous_repo,
+        )
+        refund = AsyncMock()
+        pts = MagicMock()
+        pts.ensure_team_quota = AsyncMock()
+        pts.check_and_consume = AsyncMock(
+            return_value={"success": True, "points_cost": 10}
+        )
+        pts.refund_points = refund
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        refund.assert_awaited_once()
+        assert refund.await_args.kwargs["amount"] == 10
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "chains,expect_in_progress",
+        [(True, True), (False, False), (None, False)],
+    )
+    async def test_losing_the_extract_audio_race_answers_by_the_winners_intent(
+        self, monkeypatch, chains, expect_in_progress
+    ) -> None:
+        """TOCTOU on the extract_audio slot: our dedup found nothing, but
+        between the SELECT and the INSERT someone created one and migration
+        121's unique index rejected ours.
+
+        The unique index is keyed on (resource_id, task_type) and cannot see
+        intent, so the winner may or may not transcribe — the endpoint must
+        re-read and answer accordingly rather than assuming the convenient
+        case.
+        """
+        _patch_resource_resolver(monkeypatch, self._no_audio_media())
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        # Empty on the dedup probe, populated on the conflict re-read.
+        probe = _ActiveTaskSession("extract_audio", chains=chains, workflow_id="wf-won")
+        calls = {"n": 0}
+
+        class _RaceSession:
+            async def execute(self, stmt, *a, **k):
+                calls["n"] += 1
+                if calls["n"] == 1:
+
+                    class _Empty:
+                        @staticmethod
+                        def mappings():
+                            class _M:
+                                @staticmethod
+                                def all():
+                                    return []
+
+                            return _M()
+
+                    return _Empty()
+                return await probe.execute(stmt, *a, **k)
+
+        _patch_dedup_session(monkeypatch, _RaceSession())
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert dispatched == []
+        assert res["points_charged"] == 0
+        if expect_in_progress:
+            assert res["message"] == "Transcription already in progress"
+            assert res["transcription_pending_audio"] is False
+        else:
+            assert res["message"] != "Transcription already in progress"
+            assert res["transcription_pending_audio"] is True
+            assert res["blocking_task_id"] == "wf-won"
+
+    @pytest.mark.asyncio
+    async def test_an_unrelated_dispatch_failure_is_still_a_500(
+        self, monkeypatch
+    ) -> None:
+        """The conflict branch must not swallow real failures — a broken
+        dispatch reported as "already in progress" would be the silent
+        no-op this codebase keeps banning."""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        async def _boom(**_kwargs):
+            raise RuntimeError("DBOS is not launched")
+
+        mgr.create = AsyncMock(side_effect=_boom)
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert exc.value.status_code == 500
+
+
 # ─── legacy platform_id endpoint ──────────────────────────────────
 
 

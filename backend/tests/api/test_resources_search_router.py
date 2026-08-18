@@ -13,6 +13,22 @@ from app.main import app
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _no_active_ai_tasks(monkeypatch):
+    """Task 1b added a task_tracking lookup behind the resource AI status
+    (the columns themselves only ever hold terminal values). These tests
+    predate it and are about a different query, so stub it to "nothing
+    running" rather than teach every fake session a second shape. The
+    lookup itself is pinned in tests/services/ai/test_resource_ai_status.py.
+    """
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _none(resource_ids):
+        return {}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _none)
+
+
 def test_search_requires_auth():
     r = client.get("/api/v1/resources/search?q=story")
     assert r.status_code in (401, 403)

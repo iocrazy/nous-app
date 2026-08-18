@@ -30,7 +30,10 @@ export function useResourceSearch(query: string, kinds: string, teamId?: string)
       setLoading(true);
       setError(null);
       try {
-        const resp = await searchResources({ q: query, kinds, limit: 20, teamId, signal: ctrl.signal });
+        // 50 = the backend's own ceiling (`Query(20, ge=1, le=50)`), not a
+        // guess: 20 was a frontend-side under-ask that hid results the API
+        // was willing to return. The list container scrolls to match.
+        const resp = await searchResources({ q: query, kinds, limit: 50, teamId, signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
         // Shape guard: consumers read `data.results.length` unconditionally,
         // so a malformed body (wrong envelope, proxy HTML) must degrade to

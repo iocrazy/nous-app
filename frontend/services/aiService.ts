@@ -34,6 +34,31 @@ export async function pollForResult<T>(
   throw new Error('Polling timed out');
 }
 
+/** Real response body of the resource-scoped AI trigger endpoints
+ *  (`POST /api/v1/ai/{transcribe,summarize,analyze}/resource/{id}`).
+ *
+ *  There is NO task id in it — dispatch happens through DBOS and the
+ *  router answers with a human-readable message. Callers that need
+ *  progress look the task up in the Task Center by
+ *  `task_type + resource_id` instead (see VideoDetailPanel). The
+ *  optional fields are absent on the in-flight dedup answer
+ *  ("… already in progress"), which is a 200, not an error. */
+export interface ResourceAITriggerResponse {
+  message: string;
+  resource_id: string;
+  platform_id?: string;
+  /** Transcription only. */
+  points_charged?: number;
+  /** Transcription only: audio is being extracted first. */
+  extracting_audio?: boolean;
+  /** Transcription only, and NOT a success: an audio extraction that will
+   *  not chain into a transcription holds migration 121's unique slot, so
+   *  nothing was queued and the caller must retry once it finishes. */
+  transcription_pending_audio?: boolean;
+  /** The task to wait on when `transcription_pending_audio` is set. */
+  blocking_task_id?: string | null;
+}
+
 // --- Transcription ---
 
 /** @deprecated Use triggerTranscriptionByResource instead */
@@ -57,7 +82,7 @@ export const triggerTranscription = async (
 
 export const triggerTranscriptionByResource = async (
   resourceId: string
-): Promise<{ task_id: string }> => {
+): Promise<ResourceAITriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/transcribe/resource/${resourceId}`, {
@@ -158,7 +183,7 @@ export const triggerSummary = async (
 
 export const triggerSummaryByResource = async (
   resourceId: string
-): Promise<{ task_id: string }> => {
+): Promise<ResourceAITriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/summarize/resource/${resourceId}`, {
@@ -257,7 +282,7 @@ export const triggerVisualAnalysis = async (
 
 export const triggerVisualAnalysisByResource = async (
   resourceId: string
-): Promise<{ task_id: string }> => {
+): Promise<ResourceAITriggerResponse> => {
   const apiUrl = getApiUrl();
 
   const response = await fetch(`${apiUrl}/api/v1/ai/analyze/resource/${resourceId}`, {
