@@ -492,6 +492,13 @@ async def chain_followups_step(
                     resource_id=str(resource_id),
                     dbos_workflow_id=audio_wf_id,
                     flow_id=flow_id,
+                    # Records that this run will NOT transcribe on its own
+                    # (no chain_transcription below → the workflow falls to
+                    # the tag-gated helper). Readers must be able to tell
+                    # this apart from the manual-transcribe extract_audio,
+                    # or they promise a transcript that never arrives —
+                    # see services/ai/resource_ai_status.
+                    metadata={"chain_transcription": False},
                 )
             except Exception as e:
                 logger.warning(f"[download.chain] pre-create extract_audio row: {e}")

@@ -125,6 +125,10 @@ async def test_summary_dispatch_uses_resource_owner_not_caller(monkeypatch) -> N
     res = await ai_router.trigger_summary_by_resource("res-1", _auth(), None)
 
     assert res["message"] == "Summary generation queued"
+    # points_charged is on every exit of this endpoint, success included, so
+    # "field absent" never has to be read as "not charged" (the two
+    # already-in-progress branches report 0).
+    assert res["points_charged"] == 5
     assert len(dispatched) == 1
     kwargs = dispatched[0]["dbos_workflow_kwargs"]
     assert kwargs["user_id"] == "owner-uuid"  # resource creator_id, not caller

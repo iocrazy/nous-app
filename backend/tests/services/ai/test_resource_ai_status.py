@@ -69,13 +69,22 @@ def _patch_task_query(monkeypatch, task_rows):
 
 
 def _task(
-    resource_id="1", task_type="ai_transcription", status="pending", phase="queued"
+    resource_id="1",
+    task_type="ai_transcription",
+    status="pending",
+    phase="queued",
+    chains=None,
+    workflow_id="wf-1",
 ):
+    """One active task row. ``chains`` is the recorded chain_transcription
+    intent — ``None`` models every row written before that field existed."""
     return {
+        "dbos_workflow_id": workflow_id,
         "resource_id": resource_id,
         "task_type": task_type,
         "status": status,
         "phase": phase,
+        "task_metadata": None if chains is None else {"chain_transcription": chains},
     }
 
 
@@ -113,17 +122,52 @@ async def test_active_transcription_task_lights_up_the_status(
     assert out["1"]["summary_status"] == "none"
 
 
-async def test_extract_audio_counts_as_transcription_in_flight(monkeypatch):
-    """The transcribe endpoint dispatches ``extract_audio`` (which chains
-    transcription internally) whenever the media has no audio track yet —
+async def test_chaining_extract_audio_counts_as_transcription_in_flight(monkeypatch):
+    """The transcribe endpoint dispatches ``extract_audio`` with
+    chain_transcription=True whenever the media has no audio track yet —
     the majority path for downloaded video. Ignoring that task_type would
     leave exactly those resources reading 'none' while work is running."""
     out, _ = await _effective(
         monkeypatch,
         {"1": {"transcript_status": "none", "summary_status": "none"}},
-        [_task(task_type="extract_audio", status="processing", phase="in_progress")],
+        [
+            _task(
+                task_type="extract_audio",
+                status="processing",
+                phase="in_progress",
+                chains=True,
+            )
+        ],
     )
     assert out["1"]["transcript_status"] == "processing"
+
+
+@pytest.mark.parametrize("chains", [False, None])
+async def test_non_chaining_extract_audio_says_nothing_about_the_transcript(
+    monkeypatch, chains
+):
+    """The post-download auto-extract and the "Extract Audio" button create
+    the same task_type but never transcribe on their own. Calling those
+    'transcript processing' tells the picker, the agent prompt and
+    ResourceFetch to wait for something that is never going to arrive —
+    and the user's retry finds nothing either.
+
+    ``chains=None`` is every row written before the intent was recorded;
+    it must degrade to "not chaining", not to "probably chaining".
+    """
+    out, _ = await _effective(
+        monkeypatch,
+        {"1": {"transcript_status": "none", "summary_status": "none"}},
+        [
+            _task(
+                task_type="extract_audio",
+                status="processing",
+                phase="in_progress",
+                chains=chains,
+            )
+        ],
+    )
+    assert out["1"]["transcript_status"] == "none"
 
 
 async def test_summary_task_only_moves_the_summary_status(monkeypatch):
@@ -144,7 +188,12 @@ async def test_processing_outranks_pending_when_both_tasks_are_active(monkeypatc
         {"1": {"transcript_status": "none", "summary_status": "none"}},
         [
             _task(task_type="ai_transcription", status="pending", phase="queued"),
-            _task(task_type="extract_audio", status="processing", phase="in_progress"),
+            _task(
+                task_type="extract_audio",
+                status="processing",
+                phase="in_progress",
+                chains=True,
+            ),
         ],
     )
     assert out["1"]["transcript_status"] == "processing"
@@ -300,3 +349,49 @@ async def test_conflict_is_recognised_via_the_driver_constraint_name():
         orig = _Orig()
 
     assert is_active_task_conflict(_Wrapped("opaque")) is True
+
+
+# ── find_active_transcription_task (what the dedup branches on) ──────
+
+
+async def _find(monkeypatch, task_rows):
+    from app.services.ai.resource_ai_status import find_active_transcription_task
+
+    _patch_task_query(monkeypatch, task_rows)
+    return await find_active_transcription_task("1")
+
+
+async def test_no_active_task_is_reported_as_none(monkeypatch):
+    assert await _find(monkeypatch, []) is None
+
+
+async def test_an_ai_transcription_task_always_chains(monkeypatch):
+    task = await _find(monkeypatch, [_task(task_type="ai_transcription")])
+    assert task is not None
+    assert task.chains_transcription is True
+    assert task.workflow_id == "wf-1"
+
+
+@pytest.mark.parametrize(
+    "chains,expected", [(True, True), (False, False), (None, False)]
+)
+async def test_extract_audio_reports_its_recorded_intent(monkeypatch, chains, expected):
+    task = await _find(monkeypatch, [_task(task_type="extract_audio", chains=chains)])
+    assert task is not None
+    assert task.chains_transcription is expected
+    assert task.task_type == "extract_audio"
+
+
+async def test_a_chaining_task_wins_over_a_non_chaining_one(monkeypatch):
+    """If anything in flight will produce a transcript, "already in
+    progress" is a true statement — report that one."""
+    task = await _find(
+        monkeypatch,
+        [
+            _task(task_type="extract_audio", chains=False, workflow_id="wf-idle"),
+            _task(task_type="ai_transcription", workflow_id="wf-real"),
+        ],
+    )
+    assert task is not None
+    assert task.chains_transcription is True
+    assert task.workflow_id == "wf-real"

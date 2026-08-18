@@ -60,7 +60,8 @@ CREATE TABLE task_tracking (
     task_type TEXT NOT NULL,
     title TEXT,
     status TEXT NOT NULL,
-    phase TEXT
+    phase TEXT,
+    metadata TEXT
 );
 """
 
@@ -301,6 +302,9 @@ async def test_a_running_task_turns_not_available_into_being_generated(
                 title="Audio clip",
                 status="processing",
                 phase="in_progress",
+                # Only a chaining run ends in a transcript — see the
+                # non-chaining twin below.
+                metadata={"chain_transcription": True},
             )
         )
         await s.commit()
@@ -308,6 +312,45 @@ async def test_a_running_task_turns_not_available_into_being_generated(
     out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
     assert "being generated" in out["error"]
     assert "not available" not in out["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metadata",
+    [{"chain_transcription": False}, {}, None],
+    ids=["false", "empty", "null"],
+)
+async def test_a_non_chaining_extract_audio_does_not_promise_a_transcript(
+    sqlite_session_factory, metadata
+):
+    """The post-download auto-extract and the "Extract Audio" button create
+    this same task_type without chain_transcription, so no transcript
+    follows unless the resource carries intent tags. Telling the agent
+    "being generated; ask the user to retry shortly" there sends it —
+    and the user — to wait for something that never arrives.
+
+    The three parameters are the shapes really present in the table: the
+    recorded false, an empty metadata object, and every row written before
+    the field existed.
+    """
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-audio-only",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="extract_audio",
+                title="Audio clip",
+                status="processing",
+                phase="in_progress",
+                metadata=metadata,
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert out == {"error": "transcript not available; resource not yet processed"}
 
 
 @pytest.mark.asyncio

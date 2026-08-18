@@ -418,6 +418,11 @@ async def extract_audio(
                 media_id=str(platform_id),
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
+                # Audio only: no chain_transcription below, so this run
+                # transcribes only if the resource carries the intent tags.
+                # See services/ai/resource_ai_status for why readers must
+                # be able to tell that apart from a chaining run.
+                metadata={"chain_transcription": False},
             )
         except Exception as e:
             logger.warning(f"[ExtractAudio] pre-create task_tracking row: {e}")
