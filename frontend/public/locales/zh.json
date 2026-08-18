@@ -1108,6 +1108,7 @@
     "batchDownload": "下载",
     "batchDelete": "删除",
     "generatePrompt": "反推提示词",
+    "sendToAgent": "发送给 Agent",
     "autoTag": "智能打标",
     "batchGeneratePrompt": "反推",
     "batchGeneratePromptHint": "为选中的图片批量反推提示词",
@@ -2819,6 +2820,14 @@
       "saved": "图片已保存到素材库",
       "saveError": "图片保存失败",
       "removeAttachment": "移除附件"
+    },
+    "resourceProcessing": {
+      "alreadyRunning": "该素材正在处理中 —— 未额外扣分",
+      "transcribingWithCost": "正在转录该素材（{{points}} 积分）",
+      "transcribing": "正在转录该素材 —— 稍后 agent 即可读取",
+      "summarizing": "正在生成该素材的摘要 —— 稍后 agent 即可读取",
+      "failedWithReason": "无法开始处理该素材：{{error}}",
+      "failed": "无法开始处理该素材"
     }
   },
   "mcp": {

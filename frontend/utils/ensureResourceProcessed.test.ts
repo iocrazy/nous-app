@@ -19,6 +19,10 @@ vi.mock('../services/aiService', () => ({
 }));
 
 import { ensureResourceProcessed } from './ensureResourceProcessed';
+import {
+  resetTranscriptionFollowUps,
+  transcriptionFollowUps,
+} from './transcriptionFollowUp';
 
 /** Real wire body of POST /api/v1/ai/transcribe/resource/{id} — no task_id. */
 const TRANSCRIBE_OK = {
@@ -196,5 +200,102 @@ describe('ensureResourceProcessed', () => {
     expect(first.action).toBe('triggered_transcribe');
     expect(second.action).toBe('triggered_transcribe');
     expect(transcribeMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * The response body is the ONLY way the caller can tell "I just queued a
+ * paid transcription" from "the backend deduped an in-flight one and
+ * charged nothing" — both are 200s. Transcribe carries `points_charged`
+ * (0 on the dedup path since Task 1b); summary's dedup arm carries only
+ * the message, so both signals have to be read.
+ */
+describe('ensureResourceProcessed — response passthrough', () => {
+  it('reports the points a fresh transcription charged', async () => {
+    const result = await ensureResourceProcessed({
+      id: 'r-20',
+      kind: 'video',
+      transcript_status: 'none',
+    });
+
+    expect(result.action).toBe('triggered_transcribe');
+    expect(result.pointsCharged).toBe(5);
+    expect(result.alreadyInProgress).toBe(false);
+    expect(result.message).toBe('Transcription queued');
+  });
+
+  it('flags the deduped transcription as already running, not as a new charge', async () => {
+    transcribeMock.mockResolvedValue({
+      message: 'Transcription already in progress',
+      resource_id: 'r-21',
+      points_charged: 0,
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-21',
+      kind: 'video',
+      transcript_status: 'processing',
+    });
+
+    expect(result.action).toBe('triggered_transcribe');
+    expect(result.alreadyInProgress).toBe(true);
+    expect(result.pointsCharged).toBe(0);
+  });
+
+  it('flags a deduped summary from the message alone (no points field on that arm)', async () => {
+    summaryMock.mockResolvedValue({
+      message: 'Summary already in progress',
+      resource_id: 'r-22',
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-22',
+      kind: 'video',
+      transcript_status: 'completed',
+      summary_status: 'none',
+    });
+
+    expect(result.action).toBe('triggered_summary');
+    expect(result.alreadyInProgress).toBe(true);
+    expect(result.pointsCharged).toBeUndefined();
+  });
+});
+
+/**
+ * F1's "chain whatever is missing" only completes if something notices the
+ * transcript landing and asks for the summary. The helper is the single
+ * place that knows a transcription was just started, so it is the place
+ * that records the follow-up — a caller cannot forget to.
+ */
+describe('ensureResourceProcessed — transcript → summary follow-up', () => {
+  beforeEach(() => {
+    resetTranscriptionFollowUps();
+  });
+
+  it('records a follow-up when it starts a transcription', async () => {
+    await ensureResourceProcessed({ id: 'r-30', kind: 'video', transcript_status: 'none' });
+
+    expect(transcriptionFollowUps()).toContain('r-30');
+  });
+
+  it('records nothing when no transcription was started', async () => {
+    await ensureResourceProcessed({
+      id: 'r-31', kind: 'video', transcript_status: 'completed', summary_status: 'none',
+    });
+    await ensureResourceProcessed({
+      id: 'r-32', kind: 'video', transcript_status: 'completed', summary_status: 'completed',
+    });
+    await ensureResourceProcessed({ id: 'r-33', kind: 'image', mime: 'image/png' });
+
+    expect(transcriptionFollowUps()).toHaveLength(0);
+  });
+
+  it('records nothing when the transcription trigger failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    transcribeMock.mockRejectedValue(new Error('HTTP 402'));
+
+    await ensureResourceProcessed({ id: 'r-34', kind: 'video', transcript_status: 'none' });
+
+    expect(transcriptionFollowUps()).toHaveLength(0);
   });
 });

@@ -71,6 +71,14 @@ export interface PendingResource {
   kind: 'video' | 'image' | 'doc' | 'audio' | 'pdf';
   mime: string | null;
   scope: { type: 'personal' | 'team'; id: string };
+  /** Relative cover path (`/api/v1/resources/{id}/cover`) or null. */
+  thumbnailUrl?: string | null;
+  /** Processing-status snapshot taken at send time. Optional in shape but
+   *  NOT optional in practice for the context-menu sender: the receiver
+   *  stamps them onto the chip, and a chip with no status says nothing
+   *  rather than mislabelling a finished video as unprocessed. */
+  transcriptStatus?: string | null;
+  summaryStatus?: string | null;
   nonce: number;
 }
 

@@ -18,6 +18,8 @@ import {
   triggerSummaryByResource,
   triggerTranscriptionByResource,
 } from '../services/aiService';
+import type { ResourceAITriggerResponse } from '../services/aiService';
+import { rememberTranscriptionFollowUp } from './transcriptionFollowUp';
 
 /** What the helper did. `skipped` = nothing to trigger for this kind of
  *  resource (or the backend already declared the step not applicable). */
@@ -34,6 +36,17 @@ export interface EnsureResourceProcessedResult {
   attempted?: 'transcribe' | 'summary';
   /** Message for a user-visible failure notice; only set when failed. */
   error?: string;
+  /** The backend's own message, verbatim; only set when a trigger ran. */
+  message?: string;
+  /** Points the call actually charged. Transcribe only — the summary
+   *  endpoint never reports a cost. 0 on the dedup path (Task 1b). */
+  pointsCharged?: number;
+  /** True when the 200 came from in-flight dedup rather than a new
+   *  dispatch: nothing was queued and nothing was charged. Both trigger
+   *  endpoints answer 200 either way, so the caller cannot tell from the
+   *  status code — and the difference is the difference between "we are
+   *  spending your points" and "we are not". */
+  alreadyInProgress?: boolean;
 }
 
 export interface EnsureResourceProcessedInput {
@@ -45,6 +58,22 @@ export interface EnsureResourceProcessedInput {
   /** `none | pending | processing | completed | failed | skipped` */
   transcript_status?: string | null;
   summary_status?: string | null;
+}
+
+/**
+ * Did this 200 actually start anything?
+ *
+ * Two signals, because neither covers both endpoints: transcribe returns
+ * `points_charged: 0` on its dedup arm (ai_router.py, Task 1b) while the
+ * summary endpoint's dedup arm returns only a message. The message match is
+ * therefore load-bearing, and it is matching a backend-owned English string
+ * — if that wording changes, this degrades to "treat it as a new dispatch"
+ * (an over-reported charge in a toast), never to a wrong trigger.
+ */
+function isDedupedResponse(res: ResourceAITriggerResponse | undefined): boolean {
+  if (!res) return false;
+  if (res.points_charged === 0) return true;
+  return /already in progress/i.test(res.message ?? '');
 }
 
 function isAudioVisual(input: EnsureResourceProcessedInput): boolean {
@@ -69,8 +98,16 @@ export async function ensureResourceProcessed(
 
   if (transcript !== 'completed') {
     try {
-      await triggerTranscriptionByResource(input.id);
-      return { action: 'triggered_transcribe' };
+      const res = await triggerTranscriptionByResource(input.id);
+      // Only now is there a transcript worth waiting for; the summary half
+      // of the chain is picked up by useTranscriptionSummaryFollowUp.
+      rememberTranscriptionFollowUp(input.id);
+      return {
+        action: 'triggered_transcribe',
+        message: res?.message,
+        pointsCharged: res?.points_charged,
+        alreadyInProgress: isDedupedResponse(res),
+      };
     } catch (err) {
       console.error('ensureResourceProcessed: transcribe trigger failed', err);
       return {
@@ -85,8 +122,13 @@ export async function ensureResourceProcessed(
   if (summary === 'completed') return { action: 'ready' };
 
   try {
-    await triggerSummaryByResource(input.id);
-    return { action: 'triggered_summary' };
+    const res = await triggerSummaryByResource(input.id);
+    return {
+      action: 'triggered_summary',
+      message: res?.message,
+      pointsCharged: res?.points_charged,
+      alreadyInProgress: isDedupedResponse(res),
+    };
   } catch (err) {
     console.error('ensureResourceProcessed: summary trigger failed', err);
     return {

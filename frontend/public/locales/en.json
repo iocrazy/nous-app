@@ -1108,6 +1108,7 @@
     "batchDownload": "Download",
     "batchDelete": "Delete",
     "generatePrompt": "Generate Prompt",
+    "sendToAgent": "Send to Agent",
     "autoTag": "Auto Tag",
     "batchGeneratePrompt": "Prompts",
     "batchGeneratePromptHint": "Reverse-engineer prompts for the selected images",
@@ -2819,6 +2820,14 @@
       "saved": "Image saved to library",
       "saveError": "Failed to save image",
       "removeAttachment": "Remove attachment"
+    },
+    "resourceProcessing": {
+      "alreadyRunning": "This asset is already being processed — no extra points spent",
+      "transcribingWithCost": "Transcribing this asset ({{points}} points)",
+      "transcribing": "Transcribing this asset — the agent can read it shortly",
+      "summarizing": "Summarising this asset — the agent can read it shortly",
+      "failedWithReason": "Could not start processing this asset: {{error}}",
+      "failed": "Could not start processing this asset"
     }
   },
   "mcp": {
