@@ -9,6 +9,7 @@ from .audit_logs_router import router as audit_logs_router
 from .backfill_router import router as backfill_router
 from .boundary_audit_router import router as boundary_audit_router
 from .celery_router import router as celery_router
+from .codex_auth_router import router as codex_auth_router
 from .credits_router import router as credits_router
 
 # NOTE: aliased to ``..._api_router`` (not ``distribution_inspect_router``) —
@@ -19,7 +20,6 @@ from .credits_router import router as credits_router
 # instead. Same trap, and same fix, as ``distribution_api_router`` in
 # ``app/api/__init__.py``.
 from .distribution_inspect_router import router as distribution_inspect_api_router
-from .codex_auth_router import router as codex_auth_router
 from .jimeng_auth_router import router as jimeng_auth_router
 from .mediahub_model_router import router as mediahub_model_router
 from .monitoring_router import router as monitoring_router
