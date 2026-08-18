@@ -159,4 +159,39 @@ describe('useResourceDataMap — has_prompt', () => {
     await waitFor(() => expect(sb.filters.length).toBeGreaterThan(0));
     expect(sb.filters[0]).not.toContain('gen_prompt_negative');
   });
+
+  // ── Send to Agent depends on these columns (review finding I2) ──────
+  //
+  // Losing `mime_type` here does not raise anything. It degrades in silence:
+  // `resourceKind()` falls through to 'doc' (the `file_type` column is no
+  // help — downloads store aweme-type numerals like '0' / '68' in it), so
+  // `ensureResourceProcessed` sees a non-audio-visual asset, returns
+  // `{action:'skipped'}`, and triggers NOTHING while showing NO notice. The
+  // user watches the chip land and assumes the agent can read the video.
+
+  it('selects the columns Send to Agent needs from the resource row', async () => {
+    renderHook(() => useResourceDataMap(['m1']));
+
+    await waitFor(() => expect(sb.selects.length).toBeGreaterThan(1));
+    // The resource-row read is the one that is not the media_id-only probe.
+    const mainSelect = sb.selects.find((c) => c.includes('transcript_status'));
+    expect(mainSelect).toBeDefined();
+    expect(mainSelect).toContain('mime_type');
+    // The chip's label; without it the chip falls back to the card title.
+    expect(mainSelect).toContain('filename');
+  });
+
+  it('exposes mime_type on the map so the kind can be derived', async () => {
+    // Twin of the select assertion above, one layer down: the column can be
+    // fetched and still be dropped on the way into the map.
+    sb.rows = [
+      { id: 'r1', media_id: 'm1', filename: 'clip.mp4', mime_type: 'video/mp4',
+        notes: null, rating: 0 },
+    ];
+    const { result } = renderHook(() => useResourceDataMap(['m1']));
+
+    await waitFor(() => expect(result.current.resourceDataMap.m1).toBeDefined());
+    expect(result.current.resourceDataMap.m1.mime_type).toBe('video/mp4');
+    expect(result.current.resourceDataMap.m1.filename).toBe('clip.mp4');
+  });
 });
