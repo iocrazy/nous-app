@@ -25,6 +25,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { isSmartFamily } from '../types';
+import {
+  createMediaNodeFromFiles,
+  pasteFilesToCanvas,
+} from '../smart/dropCreate';
 import { stripRfInternals, useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
@@ -90,6 +94,9 @@ export interface CanvasSurfaceProps {
 }
 
 export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
+  // Kept locally so file paste can convert the viewport center to flow
+  // coords; the upstream onInit consumer still gets the instance.
+  const rfRef = useRef<ReactFlowInstance | null>(null);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const viewport = useCanvasCoreStore((s) => s.viewport);
@@ -109,6 +116,42 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
    * every node `visibility:hidden`, the 2026-08-12 blank-canvas symptom).
    */
   const readOnly = useCanvasCoreStore((s) => s.readOnly);
+  // Infinite parity: files dropped on the empty pane create a media node at
+  // the drop point (media/group nodes keep their own append-drop handlers).
+  const canTakeFiles =
+    (isSmartFamily(kind) || kind === 'storyboard') && !readOnly;
+  const onFileDrop = useCallback(
+    (files: File[], flowPosition: { x: number; y: number }) => {
+      void createMediaNodeFromFiles(files, flowPosition);
+    },
+    [],
+  );
+  // Infinite parity: pasting files appends to the selected media node, else
+  // creates one at the viewport center. Node-clipboard paste (mod+V keydown)
+  // is untouched — real clipboard files only arrive on the native paste
+  // event, which the keydown path never sees.
+  useEffect(() => {
+    if (!canTakeFiles) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.closest('input, textarea, [contenteditable="true"]') !== null)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const center = rfRef.current?.screenToFlowPosition({
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      }) ?? { x: 0, y: 0 };
+      void pasteFilesToCanvas(files, center);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [canTakeFiles]);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
@@ -495,7 +538,10 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   return (
     <CanvasEngine
       themedChrome
-      onInit={onInit}
+      onInit={(instance) => {
+        rfRef.current = instance;
+        onInit?.(instance);
+      }}
       // Infinite-parity zoom range (P0-6): RF's default 0.5–2 clamp feels
       // "stuck" next to Infinite's effectively unbounded zoom, and capped
       // the `z` overview on large graphs.
@@ -504,6 +550,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       // Free placement (P2-6): Infinite has no drag lattice — the one-shot
       // alignment snap on drop keeps things tidy without the "sticky" feel.
       snapToGrid={false}
+      onFileDrop={canTakeFiles ? onFileDrop : undefined}
       // Infinite chrome corners (P1-11): glass minimap bottom-RIGHT, zoom
       // controls swap to bottom-left so the two clusters don't stack.
       minimap={{ position: 'bottom-right' }}
