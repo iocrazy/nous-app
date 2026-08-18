@@ -23,12 +23,19 @@
  * `aria-hidden` and WITHOUT numbers beside them: the icon says "this is a feed
  * post", a number claims a measurement.
  *
- * The nine-cell grid follows the same rule from the other side: the eight
- * cells around the user's own are EMPTY placeholders, deliberately. They are
- * not a sample of the real feed and must never be wired to one — the point of
- * the view is how one cover and one title read at that size, and filling the
- * neighbours with real posts would both mislead and bury the thing being
- * looked at.
+ * The feed view follows the same rule from the other side: every card around
+ * the user's own is an EMPTY placeholder, deliberately. They are not a sample
+ * of the real feed and must never be wired to one — the point of the view is
+ * how one cover and one title read at that size, and filling the neighbours
+ * with real posts would both mislead and bury the thing being looked at.
+ *
+ * ⚠️ This view was first built as a three-column profile grid. That was the
+ * wrong reference entirely: the screen being reproduced is the two-column
+ * recommendation FEED, which three details give away — a feed tab row at the
+ * top, the app's bottom navigation, and an author name on every card. A
+ * profile grid has none of those (every post there is already yours). The
+ * cards are two-up, and the user's own is the left card of the first fully
+ * visible row, with the row above it cut off the way a mid-scroll feed is.
  *
  * ══ WHEN THE PLAYER STOPS, AND WHAT THAT RULE HANGS OFF ═════════════════════
  *
@@ -47,7 +54,9 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
+import {
+  AlertTriangle, ChevronLeft, ChevronRight, Heart, ImageOff, SlidersHorizontal,
+} from 'lucide-react';
 
 import { getResourceFileUrl } from '../../services/resourceService';
 import type { CoverPair } from './CoverPicker';
@@ -84,6 +93,24 @@ export interface PublishPreviewProps {
    * is the same defect as a fabricated like count wearing different clothes.
    */
   handle: string | null;
+  /**
+   * The account's avatar, or null when it has none.
+   *
+   * Null draws nothing. A grey circle in the avatar's place is a picture of an
+   * account that does not look like that — small, but the same category of
+   * invention as a fabricated like count.
+   */
+  avatarUrl: string | null;
+  /**
+   * Which platform the post is going to, from the first selected account, or
+   * null when none is selected.
+   *
+   * This gates the platform chrome. We have been shown what Douyin's feed
+   * looks like and nothing else, so Douyin is the only value that draws it —
+   * for `kuaishou`, `xiaohongshu` or null the cards render on a bare screen
+   * rather than inside an interface we would be making up.
+   */
+  platform: string | null;
   /** Derived cover crops, or null when the user has not made any. */
   covers: CoverPair | null;
   /** Supabase JWT for `<img src>` / `<video src>` against the file endpoint,
@@ -108,10 +135,73 @@ type TabBlock = 'wrongKind' | null;
  */
 type CoverProvenance = 'cover' | 'firstImage' | 'thumbnail' | 'none';
 
-const GRID_CELLS = 9;
+/**
+ * Enough cards to overflow the screen in either orientation, so the feed
+ * always reaches the bottom edge and gets clipped there — the way a feed you
+ * have not finished scrolling looks.
+ *
+ * NOT a claim that this many posts exist. It is a fill count: horizontal cards
+ * are the shorter ones, so the number is chosen against those, and the extra
+ * rows a vertical layout does not need are simply clipped away.
+ */
+const FEED_CARDS = 12;
+
+/**
+ * Where the user's own card sits: left column, first FULLY visible row.
+ *
+ * Two columns means index 2 is the left card of the second row, and the feed
+ * is offset upwards so row 0 is half cut off at the top — which is what the
+ * platform's feed actually looks like mid-scroll, and where the user's post
+ * was observed sitting. The old three-column layout put it at index 0 because
+ * it was modelled on the profile grid; that was the wrong view entirely.
+ */
+const MINE_INDEX = 2;
+
+/**
+ * The platform's own chrome, reproduced verbatim.
+ *
+ * ⚠️ WHY THIS IS NOT IN i18n, AND WHY IT IS NOT IN ENGLISH.
+ *
+ * The house rule is that UI text is English and goes through i18n. That rule
+ * governs text WE author. These strings are not ours — they are a depiction of
+ * a third party's screen, in the same category as a screenshot.
+ *
+ * Translating them would be the very thing this component exists to stop.
+ * Douyin's app does not say "Featured / Following / For You" to the users this
+ * preview is for; writing that here would put invented words in a real app's
+ * mouth and present the invention as what the user will see. Accuracy and the
+ * style guide point in opposite directions, and accuracy wins, because the
+ * whole value of the panel is that what it shows is true.
+ *
+ * The narrowness of the exemption is the safeguard: these are decoration
+ * (`aria-hidden`, no buttons, no counts), they are never translated, they are
+ * never mixed into our own copy, and — see `showsPlatformChrome` — they are
+ * drawn ONLY when the post is actually going to Douyin. Rendering Douyin's
+ * chrome around a Xiaohongshu post would be a fabrication of a different
+ * app's interface, which is the same defect wearing a different hat.
+ */
+/**
+ * ⚠️ SCOPED TO ONE VIEW ON PURPOSE — do not reuse this for another tab.
+ *
+ * The tab row is not a property of the app, it is a property of the SCREEN.
+ * The two-column card feed reproduced here shows 精选 / 关注 / 推荐 with 精选
+ * selected; the full-screen video view shows a different set entirely
+ * (同城 / 关注 / 推荐, with 推荐 selected). They share two words out of three,
+ * which is exactly what makes copying one into the other easy and wrong.
+ *
+ * So the name says which screen it belongs to. If the video tab ever grows
+ * chrome of its own, it gets its own constant — reusing this one would put a
+ * real app's furniture in a room it does not stand in.
+ */
+const DOUYIN_FEATURED_FEED_CHROME = {
+  feedTabs: ['精选', '关注', '推荐'],
+  currentTab: '精选',
+  navItems: ['首页', '朋友', '＋', '消息', '我'],
+} as const;
 
 export const PublishPreview: React.FC<PublishPreviewProps> = ({
-  kind, items, title, handle, covers, mediaToken, orientation, onOrientationChange,
+  kind, items, title, handle, avatarUrl, platform, covers, mediaToken,
+  orientation, onOrientationChange,
 }) => {
   const { t } = useTranslation();
 
@@ -135,6 +225,8 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
   });
 
   const isImages = kind === 'images';
+  /** See DOUYIN_FEATURED_FEED_CHROME: only the platform we have seen. */
+  const showsPlatformChrome = platform === 'douyin';
 
   const blockFor = (which: PreviewTab): TabBlock => {
     if (which === 'cover') return null;
@@ -358,24 +450,6 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
     <div className="phone-card pv-card">
       <div className="bar">
         <h4>{t('distribution.publish.previewHeading', 'Preview')}</h4>
-        {tab === 'cover' && (
-          <div className="seg">
-            <button
-              type="button"
-              className={orientation === 'vertical' ? 'on' : ''}
-              onClick={() => onOrientationChange('vertical')}
-            >
-              {t('distribution.publish.vertical', 'Vertical')}
-            </button>
-            <button
-              type="button"
-              className={orientation === 'horizontal' ? 'on' : ''}
-              onClick={() => onOrientationChange('horizontal')}
-            >
-              {t('distribution.publish.horizontal', 'Horizontal')}
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="pv-tabs" role="tablist" aria-label={t('distribution.publish.previewHeading', 'Preview')}>
@@ -393,35 +467,114 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
           </div>
         ) : tab === 'cover' ? (
           <div className="pv-screen">
+            {/* Platform chrome. Drawn ONLY for the platform we have actually
+                been shown — see DOUYIN_FEATURED_FEED_CHROME. Decoration end to end:
+                aria-hidden, no buttons, no counts. It earns its place because
+                it is the only thing that says "this is the feed", which is
+                what makes the two-column card layout below legible as a feed
+                rather than as a broken grid. */}
+            {showsPlatformChrome && (
+              <div className="pv-chrome-top" aria-hidden="true">
+                {DOUYIN_FEATURED_FEED_CHROME.feedTabs.map((label) => (
+                  <span key={label} className={label === DOUYIN_FEATURED_FEED_CHROME.currentTab ? 'cur' : ''}>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="pv-feed-scroll">
+              <div
+                className={`pv-feed ${orientation === 'vertical' ? 'v' : 'h'}`}
+                /* `role="group"` so the label is announced — an `aria-label`
+                   on a bare <div> has no role to attach to and is dropped by
+                   most screen readers. It is the only thing telling a
+                   non-sighted reader that every card but one is empty. */
+                role="group"
+                aria-label={t(
+                  'distribution.publish.previewFeedAria',
+                  'Feed preview — your post is one card; every card around it is an empty placeholder.',
+                )}
+              >
+                {Array.from({ length: FEED_CARDS }, (_, i) => {
+                  if (i !== MINE_INDEX) {
+                    return <div className="pv-fcard empty" key={i} aria-hidden="true" />;
+                  }
+                  return (
+                    <div className="pv-fcard mine" key={i}>
+                      <div className="pv-fcover">
+                        {picture(
+                          coverSource.url,
+                          t('distribution.publish.previewCoverAlt', 'Cover for this post'),
+                          t('distribution.publish.previewNoCover', 'No cover yet'),
+                        )}
+                      </div>
+                      <div className="pv-ffoot">
+                        <span className={`pv-ftitle ${titleText === '' ? 'ph' : ''}`}>
+                          {titleText === ''
+                            ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
+                            : titleText}
+                        </span>
+                        {/* The by-line only exists when there is a real account
+                            behind it. No handle, no line — and no grey circle
+                            standing in for an avatar the account does not have.
+                            The heart is scenery and carries NO number: the post
+                            has no likes, which is a different statement from
+                            zero likes. */}
+                        {handle !== null && (
+                          <span className="pv-fby">
+                            {avatarUrl !== null && (
+                              <img className="pv-favatar" src={avatarUrl} alt="" />
+                            )}
+                            <span className="pv-fname">{handle}</span>
+                            <Heart className="pv-fheart" size={9} aria-hidden="true" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* OURS, not the platform's. It sits where the screenshot puts it,
+                which means it sits inside a mock-up of somebody else's app — so
+                it is deliberately drawn in our accent on our own surface,
+                carries our icon, and names itself in its accessible label. A
+                control the user cannot tell apart from the platform's own is a
+                control that teaches them something false about the platform. */}
             <div
-              className={`pv-grid ${orientation === 'vertical' ? 'v' : 'h'}`}
-              /* `role="group"` so the label below is actually announced — an
-                 `aria-label` on a bare <div> has no role to attach to and is
-                 dropped by most screen readers. The label is the only thing
-                 telling a non-sighted reader that eight of the nine cells are
-                 empty on purpose. */
+              className="pv-ours"
               role="group"
               aria-label={t(
-                'distribution.publish.previewGridAria',
-                'Profile grid — your post is the first cell; the eight cells around it are empty placeholders.',
+                'distribution.publish.previewOwnControlAria',
+                'Preview control (part of this page, not the platform)',
               )}
             >
-              <div className="pv-cell mine">
-                {picture(
-                  coverSource.url,
-                  t('distribution.publish.previewCoverAlt', 'Cover for this post'),
-                  t('distribution.publish.previewNoCover', 'No cover yet'),
-                )}
-                <span className={`pv-cell-title ${titleText === '' ? 'ph' : ''}`}>
-                  {titleText === ''
-                    ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
-                    : titleText}
-                </span>
-              </div>
-              {Array.from({ length: GRID_CELLS - 1 }, (_, i) => (
-                <div className="pv-cell empty" key={i} aria-hidden="true" />
-              ))}
+              <SlidersHorizontal size={10} aria-hidden="true" />
+              <button
+                type="button"
+                className={orientation === 'vertical' ? 'on' : ''}
+                onClick={() => onOrientationChange('vertical')}
+              >
+                {t('distribution.publish.vertical', 'Vertical')}
+              </button>
+              <button
+                type="button"
+                className={orientation === 'horizontal' ? 'on' : ''}
+                onClick={() => onOrientationChange('horizontal')}
+              >
+                {t('distribution.publish.horizontal', 'Horizontal')}
+              </button>
             </div>
+
+            {showsPlatformChrome && (
+              <div className="pv-chrome-bottom" aria-hidden="true">
+                {DOUYIN_FEATURED_FEED_CHROME.navItems.map((label, i) => (
+                  <span key={label} className={i === 2 ? 'plus' : ''}>{label}</span>
+                ))}
+              </div>
+            )}
           </div>
         ) : tab === 'video' ? (
           <div className="pv-screen pv-gallery">
@@ -514,10 +667,18 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
           {provenanceNote !== null && <p className="pv-note">{provenanceNote}</p>}
           <p className="pv-note">
             {t(
-              'distribution.publish.previewGridPlaceholderNote',
-              'The surrounding cells are empty placeholders, not real posts.',
+              'distribution.publish.previewFeedPlaceholderNote',
+              'Every card except yours is an empty placeholder, not a real post.',
             )}
           </p>
+          {showsPlatformChrome && (
+            <p className="pv-note">
+              {t(
+                'distribution.publish.previewChromeNote',
+                'The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.',
+              )}
+            </p>
+          )}
         </>
       )}
     </div>

@@ -2860,6 +2860,8 @@ export const PublishPage: React.FC = () => {
             items={selectedVideoObjs}
             title={title}
             handle={previewHandle}
+            avatarUrl={firstSelectedAccount?.avatar_url ?? null}
+            platform={firstSelectedAccount?.platform ?? null}
             covers={covers}
             mediaToken={mediaToken}
             orientation={orientation}

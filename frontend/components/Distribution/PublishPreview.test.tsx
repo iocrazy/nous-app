@@ -17,7 +17,15 @@
  * whole subtree's text, not as a `not.toContain`. An equality still fails when
  * the subtree is empty.
  *
- * ⚠️ jsdom resolves the CSS cascade but does NOT do layout: every
+ * ⚠️ TWO THINGS jsdom CANNOT DO, both of which shape what is asserted below.
+ *
+ * It does NOT resolve custom properties: any rule written as `var(--token)`
+ * reads back as the property's default, whatever the token holds. So no
+ * assertion here may depend on a token-derived colour — those are confirmed in
+ * a real browser instead. Literal values (`aspect-ratio`, `grid-template-
+ * columns`, `margin-top`) resolve normally and are asserted directly.
+ *
+ * And it does NOT do layout: every
  * `getBoundingClientRect()` is zeroes. So this file checks style RULES plus
  * the DOM shape they apply to. It cannot and does not measure that the grid
  * renders as three columns of the right proportion on screen — that was
@@ -81,6 +89,8 @@ const baseProps: PublishPreviewProps = {
   items: [CLIP],
   title: '',
   handle: null,
+  avatarUrl: null,
+  platform: 'douyin',
   covers: null,
   mediaToken: undefined,
   orientation: 'vertical',
@@ -106,9 +116,12 @@ const renderPanel = (props: Partial<PublishPreviewProps> = {}) => {
   };
 };
 
-const grid = (): HTMLElement => screen.getByLabelText(
-  'Profile grid — your post is the first cell; the eight cells around it are empty placeholders.',
+const feed = (): HTMLElement => screen.getByLabelText(
+  'Feed preview — your post is one card; every card around it is an empty placeholder.',
 );
+
+/** The user's own card. Everything else in the feed is an empty placeholder. */
+const mine = (): HTMLElement => feed().querySelector('.pv-fcard.mine') as HTMLElement;
 
 const tab = (name: string): HTMLElement => screen.getByRole('tab', { name });
 
@@ -121,56 +134,62 @@ describe('the stylesheet under test is actually loaded', () => {
   });
 });
 
-describe('the nine-cell grid', () => {
-  it('is three columns of nine cells, one real and eight empty', () => {
+describe('the two-column feed', () => {
+  /**
+   * ⚠️ This replaced a three-column nine-cell profile grid, which was the
+   * wrong reference: the screen being reproduced is the recommendation FEED.
+   * The column count is asserted POSITIVELY (`repeat(2, 1fr)`) — never as
+   * "not three columns", which an unparsed stylesheet would satisfy by
+   * returning ''.
+   */
+  it('lays the cards out two to a row', () => {
     renderPanel({ items: [CLIP], covers: { vertical: 'cv', horizontal: 'ch' } });
+    expect(getComputedStyle(feed()).gridTemplateColumns).toBe('repeat(2, 1fr)');
+  });
 
-    const cells = grid().querySelectorAll('.pv-cell');
-    expect(cells.length).toBe(9);
-    expect(getComputedStyle(grid()).gridTemplateColumns).toBe('repeat(3, 1fr)');
+  it('fills the screen with cards, exactly one of which is the user’s', () => {
+    renderPanel({ items: [CLIP], covers: { vertical: 'cv', horizontal: 'ch' } });
+    const cards = feed().querySelectorAll('.pv-fcard');
 
-    // The user's own post is the FIRST cell — the whole point of the layout.
-    expect(cells[0].classList.contains('mine')).toBe(true);
-    expect(cells[0].querySelectorAll('img').length).toBe(1);
+    // Enough to overflow and be clipped at the bottom edge — a feed that stops
+    // short of the screen reads as "there is nothing more", which is a claim.
+    expect(cards.length).toBe(12);
+    expect(feed().querySelectorAll('.pv-fcard.mine').length).toBe(1);
+    expect(feed().querySelectorAll('.pv-fcard.empty').length).toBe(11);
 
-    /* DOM order alone does not pin "top-left": in a grid, `order` and `dir`
-       both reposition a child without touching the markup, and jsdom cannot
-       see where anything actually lands. So the two properties that could
-       move it are asserted at their neutral values — positively, so a missing
-       stylesheet cannot satisfy them by returning ''. Together with the three
-       equal columns above, first-in-DOM then really is top-left.
-       (Verified visually in a real browser; see the PR body.) */
-    expect(getComputedStyle(cells[0]).order).toBe('0');
-    expect(getComputedStyle(grid()).direction).toBe('ltr');
-
-    // The other eight are placeholders. Asserted as a count of zero images
-    // across all of them, which is a number that changes the moment somebody
-    // wires this grid to real posts.
-    const others = Array.from(cells).slice(1);
-    expect(others.length).toBe(8);
-    expect(others.filter((c) => c.classList.contains('empty')).length).toBe(8);
-    expect(others.filter((c) => c.getAttribute('aria-hidden') === 'true').length).toBe(8);
+    // No placeholder ever carries content.
+    const others = Array.from(cards).filter((c) => !c.classList.contains('mine'));
     expect(others.reduce((n, c) => n + c.querySelectorAll('img').length, 0)).toBe(0);
+    expect(others.filter((c) => c.getAttribute('aria-hidden') === 'true').length).toBe(11);
   });
 
   /**
-   * The real-browser measurements in the PR body were taken against a static
-   * page reproducing this nesting. That evidence only transfers to the shipped
-   * component if the component really emits it, so the chain is asserted here:
-   * phone shell → screen → grid → cells, each a DIRECT child of the last.
-   * Every rule that positions the grid is written against that chain.
+   * Left column, first FULLY visible row — not the top-left corner, which is
+   * where the discarded profile-grid version put it.
+   *
+   * Index 2 of a two-column grid is the left card of row 2, and the feed is
+   * offset upwards so row 1 is cut off at the top. Both halves are asserted:
+   * the DOM position, and the negative offset that does the cutting. jsdom has
+   * no layout, so the offset is read as a style rule; the pixels were measured
+   * in a real browser and are in the PR body.
    */
-  it('nests the grid inside the phone screen, which the CSS rules assume', () => {
-    const { container } = renderPanel();
-    expect(container.querySelectorAll('.phone > .pv-screen > .pv-grid').length).toBe(1);
-    expect(container.querySelectorAll('.pv-grid > .pv-cell').length).toBe(9);
-    expect(container.querySelectorAll('.pv-cell.mine > .pv-cell-title').length).toBe(1);
+  it('puts the user’s card in the left column of the first fully visible row', () => {
+    renderPanel({ items: [CLIP], covers: { vertical: 'cv', horizontal: 'ch' } });
+    const cards = Array.from(feed().querySelectorAll('.pv-fcard'));
+    expect(cards.indexOf(mine())).toBe(2);
+
+    // The row above it is cut off — that is what makes row 2 the first fully
+    // visible one rather than merely the second row.
+    expect(getComputedStyle(feed()).marginTop).toBe('-76px');
+    // Neutral values for the two properties that could reorder a grid child.
+    expect(getComputedStyle(mine()).order).toBe('0');
+    expect(getComputedStyle(feed()).direction).toBe('ltr');
   });
 
-  it('says in words that the neighbours are placeholders', () => {
+  it('says in words that the other cards are placeholders', () => {
     renderPanel();
     expect(
-      screen.getByText('The surrounding cells are empty placeholders, not real posts.'),
+      screen.getByText('Every card except yours is an empty placeholder, not a real post.'),
     ).toBeTruthy();
   });
 
@@ -179,32 +198,157 @@ describe('the nine-cell grid', () => {
    * card it replaces rendered `0` beside a heart and `0` beside a speech
    * bubble, plus an unconditional "Original sound" line.
    *
-   * Asserted as an EQUALITY on the grid's entire text content rather than as a
+   * Asserted as an EQUALITY on the card's entire text content rather than as a
    * `not.toContain('0')`: an equality fails both when a fabricated number
-   * comes back AND when the grid renders nothing at all.
+   * comes back AND when the card renders nothing at all.
    */
-  it('shows the title and nothing else — no counts, no invented metadata', () => {
-    renderPanel({ title: 'Rooftop timelapse', items: [CLIP] });
-    expect(grid().textContent).toBe('Rooftop timelapse');
+  it('shows the title and the handle, and no counts of any kind', () => {
+    renderPanel({ title: 'Rooftop timelapse', items: [CLIP], handle: 'realaccount' });
+    // The heart is scenery; it is aria-hidden and carries no number, so the
+    // card's text is exactly the title followed by the handle.
+    expect(mine().textContent).toBe('Rooftop timelapserealaccount');
+    expect(mine().querySelectorAll('.pv-fheart').length).toBe(1);
+  });
+
+  it('draws no by-line at all when no account is selected', () => {
+    renderPanel({ title: 'Rooftop timelapse', items: [CLIP], handle: null });
+    // Equality again: an invented `@yourhandle` returning turns this red.
+    expect(mine().textContent).toBe('Rooftop timelapse');
+    expect(mine().querySelectorAll('.pv-fby').length).toBe(0);
+  });
+
+  it('shows a real avatar, and draws none when the account has no picture', () => {
+    const { update } = renderPanel({ items: [CLIP], handle: 'realaccount', avatarUrl: null });
+    // No grey circle standing in for a picture the account does not have.
+    expect(mine().querySelectorAll('.pv-favatar').length).toBe(0);
+
+    update({ avatarUrl: '/avatar/real.png' });
+    expect(mine().querySelector('.pv-favatar')?.getAttribute('src')).toBe('/avatar/real.png');
   });
 
   it('marks an empty title as a placeholder instead of leaving a blank strip', () => {
     renderPanel({ title: '' });
-    const caption = grid().querySelector('.pv-cell-title');
+    const caption = mine().querySelector('.pv-ftitle');
     expect(caption?.textContent).toBe('Your title appears here');
     expect(caption?.classList.contains('ph')).toBe(true);
   });
 });
 
+/**
+ * The borrowed interface around the cards.
+ *
+ * It is drawn only for the one platform we have actually been shown. Drawing
+ * Douyin's feed around a Xiaohongshu post would be inventing a different app's
+ * screen — the same defect as a fabricated like count, one level up.
+ */
+describe('the platform chrome', () => {
+  it('draws the feed tabs and bottom bar for the platform it depicts', () => {
+    const { container } = renderPanel({ platform: 'douyin', items: [CLIP] });
+    expect(container.querySelectorAll('.pv-chrome-top').length).toBe(1);
+    expect(container.querySelectorAll('.pv-chrome-bottom').length).toBe(1);
+  });
+
+  it('draws none of it for a platform whose feed we have not seen', () => {
+    const { container } = renderPanel({ platform: 'xiaohongshu', items: [CLIP] });
+    expect(container.querySelectorAll('.pv-chrome-top').length).toBe(0);
+    expect(container.querySelectorAll('.pv-chrome-bottom').length).toBe(0);
+    // ...and the cards are still there, so this is a chrome decision rather
+    // than the whole view failing to render.
+    expect(feed().querySelectorAll('.pv-fcard.mine').length).toBe(1);
+  });
+
+  it('draws none of it before an account has been chosen', () => {
+    const { container } = renderPanel({ platform: null, items: [CLIP] });
+    expect(container.querySelectorAll('.pv-chrome-top').length).toBe(0);
+    expect(container.querySelectorAll('.pv-chrome-bottom').length).toBe(0);
+  });
+
+  it('is scenery: hidden from assistive tech, and not clickable', () => {
+    const { container } = renderPanel({ platform: 'douyin', items: [CLIP] });
+    const top = container.querySelector('.pv-chrome-top') as HTMLElement;
+    const bottom = container.querySelector('.pv-chrome-bottom') as HTMLElement;
+    expect(top.getAttribute('aria-hidden')).toBe('true');
+    expect(bottom.getAttribute('aria-hidden')).toBe('true');
+    // No hit targets anywhere in it — a decoration that looks operable is a
+    // promise the preview cannot keep.
+    expect(top.querySelectorAll('button, a, input').length).toBe(0);
+    expect(bottom.querySelectorAll('button, a, input').length).toBe(0);
+  });
+
+  it('says which parts of the phone are borrowed and which are ours', () => {
+    renderPanel({ platform: 'douyin', items: [CLIP] });
+    expect(screen.getByText(
+      'The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.',
+    )).toBeTruthy();
+  });
+});
+
+describe('the orientation switch is recognisably ours', () => {
+  /**
+   * ⚠️ The colour half of "recognisably ours" is NOT asserted here, and that is
+   * a limitation rather than an oversight.
+   *
+   * The pill is drawn with `var(--t-indigo)` on `var(--card)`, and **jsdom
+   * does not resolve custom properties at all** — `getComputedStyle` hands
+   * back `rgb(0, 0, 0)` / `rgba(0, 0, 0, 0)` for any `var()` rule no matter
+   * what the token is set to (probed directly before writing this). So a
+   * colour assertion here could only ever be a statement about jsdom's
+   * defaults, and a `not.toBe(...)` version would pass vacuously — the exact
+   * shape this file exists to avoid. The accent is confirmed by eye in a real
+   * browser; see the PR body.
+   *
+   * What IS asserted is the structural half, which is the part that actually
+   * separates our control from the scenery around it: ours is operable and
+   * carries a name that says whose it is; the platform's chrome is inert and
+   * hidden from assistive tech.
+   */
+  it('lives inside the phone but names itself as this page’s control', () => {
+    const { container } = renderPanel({ platform: 'douyin', items: [CLIP] });
+    const own = screen.getByRole('group', {
+      name: 'Preview control (part of this page, not the platform)',
+    });
+
+    // Inside the phone, where the reference puts it.
+    expect(container.querySelectorAll('.phone .pv-ours').length).toBe(1);
+    // Operable, unlike every borrowed pixel around it.
+    expect(own.querySelectorAll('button').length).toBe(2);
+    // And not swallowed by the chrome's aria-hidden: a control the screen
+    // reader cannot reach is a control that is ours in name only.
+    expect(own.closest('[aria-hidden="true"]')).toBe(null);
+  });
+
+  it('offers it whichever platform is selected, chrome or no chrome', () => {
+    renderPanel({ platform: 'xiaohongshu', items: [CLIP] });
+    expect(screen.getByRole('button', { name: 'Vertical' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Horizontal' })).toBeEnabled();
+  });
+});
+
 describe('the vertical / horizontal switch', () => {
-  it('draws 3:4 cells for vertical and 4:3 cells for horizontal', () => {
+  it('draws 3:4 covers for vertical and 4:3 covers for horizontal', () => {
+    const cover = () => mine().querySelector('.pv-fcover') as Element;
+
     const { update } = renderPanel({ orientation: 'vertical' });
-    expect(getComputedStyle(grid().querySelector('.pv-cell') as Element).aspectRatio)
-      .toBe('3 / 4');
+    expect(getComputedStyle(cover()).aspectRatio).toBe('3 / 4');
+    // The empty cards follow the same shape, so the columns stay on one
+    // rhythm rather than the user's card standing out by size alone.
+    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty') as Element).aspectRatio)
+      .toBe('3 / 4.62');
 
     update({ orientation: 'horizontal' });
-    expect(getComputedStyle(grid().querySelector('.pv-cell') as Element).aspectRatio)
-      .toBe('4 / 3');
+    expect(getComputedStyle(cover()).aspectRatio).toBe('4 / 3');
+    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty') as Element).aspectRatio)
+      .toBe('4 / 3.9');
+  });
+
+  /* Shorter cards need a smaller bite taken out of the top row, or the cut-off
+     row stops being a cut-off row. */
+  it('keeps the top row cut off in both orientations', () => {
+    const { update } = renderPanel({ orientation: 'vertical' });
+    expect(getComputedStyle(feed()).marginTop).toBe('-76px');
+
+    update({ orientation: 'horizontal' });
+    expect(getComputedStyle(feed()).marginTop).toBe('-52px');
   });
 
   it('shows the matching cover crop, not just a differently shaped box', () => {
@@ -212,10 +356,10 @@ describe('the vertical / horizontal switch', () => {
       orientation: 'vertical',
       covers: { vertical: 'cover-v', horizontal: 'cover-h' },
     });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v');
 
     update({ orientation: 'horizontal' });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/file/cover-h');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-h');
   });
 
   it('reports the pressed state back to the page', () => {
@@ -232,9 +376,25 @@ describe('where the first cell’s picture comes from is stated, never implied',
     expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
   });
 
+  /* The caption names a specific crop, so it has to follow the crop actually
+     on screen. A caption stuck on "vertical" while the horizontal cover is
+     displayed is a sentence about the picture that is not true of the picture
+     — the same defect as a fabricated count, in prose. */
+  it('renames the crop when the switch is flipped', () => {
+    const { update } = renderPanel({
+      covers: { vertical: 'cover-v', horizontal: 'cover-h' },
+      orientation: 'vertical',
+    });
+    expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
+
+    update({ orientation: 'horizontal' });
+    expect(screen.getByText('Showing your horizontal 4:3 cover.')).toBeTruthy();
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-h');
+  });
+
   it('falls back to the thumbnail AND says it is not a cover', () => {
     renderPanel({ covers: null, items: [CLIP] });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/thumb/clip');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/clip');
     expect(screen.getByText(
       'No cover set — this is the stored thumbnail, not a cover. The platform picks its own frame at publish time.',
     )).toBeTruthy();
@@ -242,37 +402,37 @@ describe('where the first cell’s picture comes from is stated, never implied',
 
   it('states the absence rather than drawing an empty box', () => {
     renderPanel({ covers: null, items: [] });
-    expect(within(grid()).getByText('No cover yet')).toBeTruthy();
+    expect(within(mine()).getByText('No cover yet')).toBeTruthy();
   });
 
   it('uses the first image for an image post and says so', () => {
     renderPanel({ kind: 'images', items: [IMAGE_A, IMAGE_B] });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/thumb/a');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/a');
     expect(screen.getByText('Image posts take their cover from the first image.')).toBeTruthy();
   });
 
   it('signs the file URL with the session token when there is one', () => {
     renderPanel({ covers: { vertical: 'cover-v', horizontal: 'cover-h' }, mediaToken: 'jwt' });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v?token=jwt');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v?token=jwt');
   });
 });
 
 describe('a picture that fails to load says so', () => {
   it('replaces the cell with a stated failure instead of an empty box', () => {
     renderPanel({ covers: { vertical: 'cover-v', horizontal: 'cover-h' } });
-    fireEvent.error(grid().querySelector('img') as Element);
-    expect(within(grid()).getByText('This image could not be loaded.')).toBeTruthy();
+    fireEvent.error(mine().querySelector('img') as Element);
+    expect(within(mine()).getByText('This image could not be loaded.')).toBeTruthy();
   });
 
   it('re-tries when the URL changes, rather than staying failed forever', () => {
     const { update } = renderPanel({ covers: { vertical: 'cover-v', horizontal: 'cover-h' } });
-    fireEvent.error(grid().querySelector('img') as Element);
-    expect(within(grid()).getByText('This image could not be loaded.')).toBeTruthy();
+    fireEvent.error(mine().querySelector('img') as Element);
+    expect(within(mine()).getByText('This image could not be loaded.')).toBeTruthy();
 
     // A token arriving late produces a different URL — that attempt deserves
     // its own verdict.
     update({ mediaToken: 'jwt' });
-    expect(grid().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v?token=jwt');
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v?token=jwt');
   });
 });
 
