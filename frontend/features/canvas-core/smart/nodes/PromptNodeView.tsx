@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Library } from 'lucide-react';
+import { Library, Play } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
 import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
@@ -414,17 +414,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               )}
             </div>
           )}
-          {/* In-node Run (Infinite parity: 生成节点自带运行) — same
-              single-prompt runner the failure panel's Retry uses; the regen
-              store's per-prompt lock makes double-dispatch a no-op. */}
+          {/* In-node Run (Infinite parity: footer 右端的深色「运行」药丸) —
+              same single-prompt runner the failure panel's Retry uses; the
+              regen store's per-prompt lock makes double-dispatch a no-op. */}
           <button
             type="button"
             onClick={() => void rerunPrompt(id)}
             disabled={readOnly || run_status === 'running'}
             data-testid="prompt-node-run"
             aria-label="Run prompt"
-            className="nodrag mh-chip !border-canvas-strong/60 font-bold disabled:cursor-not-allowed disabled:opacity-50"
+            className="nodrag ml-auto flex shrink-0 items-center gap-1 rounded-full border border-transparent bg-canvas-strong px-3 py-0.5 text-xs font-bold text-canvas-card hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
+            <Play size={11} />
             Run
           </button>
         </div>
