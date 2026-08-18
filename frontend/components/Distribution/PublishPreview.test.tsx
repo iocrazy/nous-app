@@ -30,7 +30,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import React from 'react';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import enJson from '../../public/locales/en.json';
 
@@ -286,10 +286,13 @@ describe('tab availability follows the post type', () => {
     expect(tab('Gallery preview')).toBeEnabled();
   });
 
-  it('refuses the video tab to image posts', () => {
-    renderPanel({ kind: 'images', items: [IMAGE_A] });
+  it('refuses the video tab to image posts and offers it to video posts', () => {
+    const { update } = renderPanel({ kind: 'images', items: [IMAGE_A] });
     expect(tab('Video preview')).toBeDisabled();
     expect(tab('Video preview').title).toBe('This is an image post — there is no video to play.');
+
+    update({ kind: 'video', items: [CLIP] });
+    expect(tab('Video preview')).toBeEnabled();
   });
 
   it('keeps the cover tab open for both, and starts there', () => {
@@ -403,5 +406,182 @@ describe('the gallery pager', () => {
 
     update({ title: 'Studio tour', handle: 'realaccount' });
     expect(caption().textContent).toBe('@realaccountStudio tour');
+  });
+});
+
+describe('the video tab', () => {
+  const CLIP_B = { id: 'clip-2', filename: 'take-5.mp4', thumbnail_url: '/thumb/clip-b' };
+  const CLIP_C = { id: 'clip-3', filename: 'take-6.mp4', thumbnail_url: null };
+
+  const openVideo = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'video', items: [CLIP], ...props });
+    fireEvent.click(tab('Video preview'));
+    return utils;
+  };
+
+  const player = (): HTMLVideoElement =>
+    document.querySelector('.pv-stage video') as HTMLVideoElement;
+
+  it('plays the selected clip from the file endpoint, signed with the session token', () => {
+    openVideo({ mediaToken: 'jwt' });
+    expect(player().getAttribute('src')).toBe('/file/clip-1?token=jwt');
+  });
+
+  it('gives the user a seek bar, and does not start on its own', () => {
+    openVideo();
+    const el = player();
+    /* Native controls ARE the draggable progress bar. jsdom cannot drag one —
+       no layout means no pointer geometry — so what is pinned here is that the
+       control surface is present and that playback is not automatic. Actual
+       dragging was exercised in a real browser; see the PR body. */
+    expect(el.hasAttribute('controls')).toBe(true);
+    expect(el.getAttribute('preload')).toBe('metadata');
+    expect(el.autoplay).toBe(false);
+  });
+
+  it('uses the clip’s own thumbnail as the poster frame when there is one', () => {
+    const { update } = openVideo({ items: [CLIP, CLIP_C] });
+    expect(player().getAttribute('poster')).toBe('/thumb/clip');
+
+    // No thumbnail is not a reason to invent one: the attribute is simply
+    // absent, and the element falls back to its own first frame.
+    update({ items: [CLIP_C] });
+    expect(player().getAttribute('poster')).toBe(null);
+  });
+
+  it('says so when the clip cannot be loaded', () => {
+    openVideo();
+    fireEvent.error(player());
+    expect(screen.getByText('This clip could not be loaded.')).toBeTruthy();
+  });
+
+  it('pages through several selected clips', () => {
+    openVideo({ items: [CLIP, CLIP_B, CLIP_C] });
+    expect(screen.getByText('1 / 3')).toBeTruthy();
+    expect(player().getAttribute('src')).toBe('/file/clip-1');
+    expect(screen.getByRole('button', { name: 'Previous clip' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next clip' }));
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+    expect(player().getAttribute('src')).toBe('/file/clip-2');
+  });
+
+  it('states an empty selection instead of mounting a player with no source', () => {
+    renderPanel({ kind: 'video', items: [] });
+    fireEvent.click(tab('Video preview'));
+    expect(screen.getByText('Nothing selected yet.')).toBeTruthy();
+    expect(document.querySelectorAll('.pv-stage video').length).toBe(0);
+  });
+});
+
+/**
+ * ══ WHEN THE PLAYER STOPS ═══════════════════════════════════════════════════
+ *
+ * Sound whose source the user can no longer see is sound the user cannot stop.
+ * The cases below are the whole contract — and the last one, the case that
+ * must NOT stop it, is the reason the rule is written the way it is.
+ *
+ * `pause` is spied on the prototype because jsdom's own implementation is a
+ * stub; the spy is both the stand-in and the assertion surface.
+ */
+describe('playback stops when the user loses sight of it', () => {
+  const CLIP_B = { id: 'clip-2', filename: 'take-5.mp4', thumbnail_url: null };
+
+  let pauseSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  });
+  afterEach(() => { pauseSpy.mockRestore(); });
+
+  const openVideo = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'video', items: [CLIP], ...props });
+    fireEvent.click(tab('Video preview'));
+    return utils;
+  };
+
+  it('stops when the reader switches to another tab', () => {
+    openVideo();
+    expect(pauseSpy.mock.calls.length).toBe(0);
+
+    fireEvent.click(tab('Cover & title'));
+    expect(pauseSpy.mock.calls.length).toBe(1);
+  });
+
+  /**
+   * ⚠️ WHICH element gets paused is the whole substance of this one.
+   *
+   * Every clip gets its own element (`key`), so on a clip change React has
+   * already detached the old one and pointed the ref at the new one by the
+   * time the effect cleanup runs. A cleanup that reads `videoRef.current`
+   * therefore pauses the NEW element — `pause` is still called exactly once,
+   * the call count still reads 1, and the OLD element goes on playing to an
+   * empty room. Counting calls cannot tell those two apart; `mock.contexts`
+   * can, so the identity is asserted rather than the count alone.
+   */
+  it('stops the clip being left behind, not the one being opened', () => {
+    openVideo({ items: [CLIP, CLIP_B] });
+    const leaving = document.querySelector('.pv-stage video');
+    expect(pauseSpy.mock.calls.length).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next clip' }));
+    const opened = document.querySelector('.pv-stage video');
+
+    expect(pauseSpy.mock.calls.length).toBe(1);
+    expect(pauseSpy.mock.contexts[0]).toBe(leaving);
+    // And the new element really is a different one, so the check above is a
+    // distinction and not a tautology.
+    expect(opened === leaving).toBe(false);
+  });
+
+  it('stops when the panel unmounts', () => {
+    const { unmount } = openVideo();
+    expect(pauseSpy.mock.calls.length).toBe(0);
+
+    unmount();
+    expect(pauseSpy.mock.calls.length).toBe(1);
+  });
+
+  it('stops when the selection is emptied out from under it', () => {
+    const { update } = openVideo();
+    expect(pauseSpy.mock.calls.length).toBe(0);
+
+    update({ items: [] });
+    expect(pauseSpy.mock.calls.length).toBe(1);
+  });
+
+  it('stops when the post turns into an image post', () => {
+    const { update } = openVideo();
+    expect(pauseSpy.mock.calls.length).toBe(0);
+
+    update({ kind: 'images', items: [IMAGE_A] });
+    expect(pauseSpy.mock.calls.length).toBe(1);
+  });
+
+  /**
+   * ⚠️ THE ONE THAT MUST NOT STOP IT.
+   *
+   * The page shipped this bug on the music panel: the audition's stop rule
+   * hung off the search results array's IDENTITY, the search effect rebuilt
+   * that array for reasons the user did not cause, and so a refresh that
+   * changed nothing whatsoever on screen cut off the track being listened to.
+   *
+   * Both halves matter. The first proves a no-op rebuild leaves playback
+   * alone; the second proves the spy would have caught it — without that, a
+   * `pause` that never fires at all would satisfy the first half vacuously.
+   */
+  it('does NOT stop when the selection array is rebuilt with the same clip', () => {
+    const { update } = openVideo({ items: [CLIP, CLIP_B] });
+    const before = document.querySelector('.pv-stage video');
+
+    // Same ids, brand-new objects, brand-new array — a Library refresh.
+    update({ items: [{ ...CLIP }, { ...CLIP_B }] });
+    expect(pauseSpy.mock.calls.length).toBe(0);
+    // Same element too: the decoder was never torn down and rebuilt.
+    expect(document.querySelector('.pv-stage video')).toBe(before);
+
+    // The control: a real change to the clip being played DOES stop it, so the
+    // zero above is a fact about the rule and not about a dead spy.
+    fireEvent.click(screen.getByRole('button', { name: 'Next clip' }));
+    expect(pauseSpy.mock.calls.length).toBe(1);
   });
 });
