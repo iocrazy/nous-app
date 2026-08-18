@@ -503,6 +503,7 @@
       "musicPrompt": "Type a track or artist to search the platform.",
       "musicEmpty": "The platform returned nothing for that — try a different wording.",
       "musicUses": "uses",
+      "musicPreviewLoading": "Loading preview",
       "musicPreviewPlay": "Preview track",
       "musicPreviewStop": "Stop preview",
       "musicPreviewUnavailable": "No preview for this track",
