@@ -414,6 +414,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               )}
             </div>
           )}
+          {/* In-node Run (Infinite parity: 生成节点自带运行) — same
+              single-prompt runner the failure panel's Retry uses; the regen
+              store's per-prompt lock makes double-dispatch a no-op. */}
+          <button
+            type="button"
+            onClick={() => void rerunPrompt(id)}
+            disabled={readOnly || run_status === 'running'}
+            data-testid="prompt-node-run"
+            aria-label="Run prompt"
+            className="nodrag mh-chip !border-canvas-strong/60 font-bold disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Run
+          </button>
         </div>
 
         {/* Ref chips: show attached resources below the textarea */}
