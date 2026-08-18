@@ -88,3 +88,45 @@ describe('FloatingChatWidget drag handle', () => {
     expect(screen.queryByTestId('chat-drag-handle')).toBeNull();
   });
 });
+
+describe('FloatingChatWidget top-chrome clamp', () => {
+  // The TopBar (48px, z-50) sits ABOVE the widget (z-40): if the title bar
+  // slides underneath it, pointerdown lands on the TopBar and the window
+  // can never be grabbed again. These tests pin the invariant that the top
+  // edge (innerHeight - bottom - height) never enters that band.
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true });
+    useGlobalChatStore.setState({
+      open: true,
+      right: 16,
+      bottom: 16,
+      width: 400,
+      height: 620,
+      pageContext: null,
+    });
+  });
+
+  it('stops a drag before the title bar slides under the TopBar', () => {
+    renderWidget();
+    const handle = screen.getByTestId('chat-drag-handle');
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 500, clientY: 0 });
+    fireEvent.pointerUp(window);
+    const s = useGlobalChatStore.getState();
+    const top = 768 - s.bottom - s.height;
+    // 768 - 620 - 56 = 92: the drag must clamp exactly at the chrome band.
+    expect(s.bottom).toBe(92);
+    expect(top).toBeGreaterThanOrEqual(56);
+  });
+
+  it('self-heals a persisted rect that is already stuck under the TopBar', () => {
+    // localStorage from before this fix (or from a taller browser window)
+    // can restore bottom so large the title bar is unreachable. fit() on
+    // mount must pull it back out.
+    useGlobalChatStore.setState({ bottom: 700 });
+    renderWidget();
+    const s = useGlobalChatStore.getState();
+    expect(768 - s.bottom - s.height).toBeGreaterThanOrEqual(56);
+  });
+});
