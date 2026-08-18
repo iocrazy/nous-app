@@ -72,7 +72,10 @@ async def test_image_step_returns_local_path_from_jimeng():
             kind="image", prompt="a cat", model="explicit", params={}, source_url=None
         )
 
-    assert provider.generate.await_args.args[1] == "explicit"  # explicit model wins
+    # The picker sends the CATALOG ROW NAME ("explicit" here); the upstream
+    # model must be the resolved row's actual_model — sending the row name
+    # upstream is the 2026-08-18 codex HTTP-400 incident.
+    assert provider.generate.await_args.args[1] == "5.0"
     assert out["local_path"] == "/tmp/jimeng_a/x.png"
     assert out["remote_url"] is None
 
@@ -195,3 +198,61 @@ async def test_persist_without_user_raises():
             prompt="p",
             params={},
         )
+
+
+@pytest.mark.asyncio
+async def test_image_step_never_sends_catalog_row_name_upstream():
+    """Regression (2026-08-18): the canvas picker's value is the mediahub_models
+    ROW NAME (e.g. 'codex-image'); the upstream call must use the resolved
+    row's actual_model ('gpt-5.4'). Sending the row name produced a live
+    HTTP 400: "The 'codex-image' model is not supported"."""
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="", image_path="/tmp/c/x.png")
+        )
+    )
+    with patch(
+        "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+        new=AsyncMock(return_value=(provider, "gpt-5.4")),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a small apple",
+            model="codex-image",
+            params={"ratio": "1:1"},
+            source_url=None,
+        )
+
+    assert provider.generate.await_args.args[1] == "gpt-5.4"
+    assert out["model"] == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_video_step_never_sends_catalog_row_name_upstream():
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/c/v.mp4")
+        )
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm(None),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="pan left",
+            model="jimeng-cli-seedance",
+            params={"aspect": "16:9"},
+            source_url=None,
+        )
+
+    assert (
+        provider.generate_video.await_args.kwargs["model_version"] == "seedance2.0fast"
+    )
+    assert out["model"] == "seedance2.0fast"
