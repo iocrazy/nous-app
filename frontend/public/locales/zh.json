@@ -656,7 +656,7 @@
       "noteMusicApproximate": "已发布，但用的是最接近的一首，不是你填的那首。",
       "noteMusicNotFound": "平台的音乐搜索没有返回这首曲子，本次未发布。",
       "noteMusicAmbiguous": "平台上有好几首和你选的那首长得一样，为避免发错歌，本次没有发布。换一个版本再试。",
-      "noteMusicResultsNotSeen": "\u5e73\u53f0\u7684\u97f3\u4e50\u5f39\u7a97\u6ca1\u6709\u53ca\u65f6\u7ed9\u51fa\u7ed3\u679c\uff0c\u6240\u4ee5\u6211\u4eec\u4e5f\u4e0d\u77e5\u9053\u5b83\u6709\u6ca1\u6709\u8fd9\u9996\u66f2\u5b50 \u2014 \u672c\u6b21\u672a\u53d1\u5e03\u3002\u518d\u53d1\u4e00\u6b21\u53ef\u80fd\u5c31\u6210\u4e86\u3002",
+      "noteMusicResultsNotSeen": "平台的音乐弹窗没有及时给出结果，所以我们也不知道它有没有这首曲子 — 本次未发布。再发一次可能就成了。",
       "noteMusicFailed": "配乐没能在平台页面上选中，本次未发布。",
       "noteCollectionSkipped": "已发布，但合集没有挂上。",
       "publishingNow": "正在立即发布",
@@ -2686,7 +2686,9 @@
       "audio": "音频",
       "pdf": "PDF",
       "noResults": "没有匹配 \"{{q}}\" 的资源",
-      "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消"
+      "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消",
+      "statusProcessing": "处理中…",
+      "statusUnprocessed": "尚未处理"
     },
     "sidebarTitle": "频道",
     "newChannel": "新建频道",

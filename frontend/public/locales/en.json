@@ -656,7 +656,7 @@
       "noteMusicApproximate": "Published, but with the closest matching track rather than the one you named.",
       "noteMusicNotFound": "The platform's music search returned nothing for this track, so nothing was published.",
       "noteMusicAmbiguous": "Several tracks on the platform look identical to the one you picked, so nothing was published rather than risk the wrong song. Pick a different version.",
-      "noteMusicResultsNotSeen": "The platform's music dialog did not answer in time, so we could not tell whether it has this track \u2014 nothing was published. Publishing again may work.",
+      "noteMusicResultsNotSeen": "The platform's music dialog did not answer in time, so we could not tell whether it has this track — nothing was published. Publishing again may work.",
       "noteMusicFailed": "The music could not be selected on the platform, so nothing was published.",
       "noteCollectionSkipped": "Published, but the collection was not applied.",
       "publishingNow": "Publishing now",
@@ -2686,7 +2686,9 @@
       "audio": "Audio",
       "pdf": "PDF",
       "noResults": "No resources match \"{{q}}\"",
-      "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel"
+      "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel",
+      "statusProcessing": "Processing…",
+      "statusUnprocessed": "Not processed yet"
     },
     "sidebarTitle": "Channels",
     "newChannel": "New channel",
