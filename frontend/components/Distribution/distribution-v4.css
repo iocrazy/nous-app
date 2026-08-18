@@ -403,6 +403,13 @@
 .dist-v4 .music-row .mr-title { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dist-v4 .music-row .mr-meta { color: var(--content-4); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dist-v4 .music-row .mr-uses { color: var(--content-4); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dist-v4 .music-row .mr-preview { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; border: 1px solid var(--line-strong); background: transparent; color: var(--content-3); cursor: pointer; padding: 0; }
+.dist-v4 .music-row .mr-preview svg { width: 12px; height: 12px; }
+.dist-v4 .music-row .mr-preview:hover, .dist-v4 .music-row .mr-preview:focus-visible { color: var(--content); border-color: var(--content-4); outline: none; }
+.dist-v4 .music-row .mr-preview.on { color: var(--content); border-color: var(--content-4); background: var(--island-3, rgba(99, 102, 241, .16)); }
+/* Not a button: a row the catalogue gave no playable file for must not look
+   pressable. Auto width so the words fit; no cursor, no hover. */
+.dist-v4 .music-row .mr-preview-none { width: auto; height: auto; padding: 2px 7px; border-radius: 999px; border-style: dashed; color: var(--content-4); font-size: 10.5px; white-space: nowrap; cursor: default; }
 
 /* ═══ records ═══ */
 .dist-v4 .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
