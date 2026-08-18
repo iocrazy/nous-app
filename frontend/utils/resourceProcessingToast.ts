@@ -45,6 +45,20 @@ export function resourceProcessingNotice(
     };
   }
 
+  // Nothing was queued and nothing was charged, but this is NOT "already
+  // running": the blocking task will not produce a transcript, so the user
+  // has to come back. Saying "already being processed" here would leave
+  // them waiting forever for work nobody started.
+  if (result.action === 'pending_audio') {
+    return {
+      type: 'info',
+      message: t(
+        'chat.resourceProcessing.pendingAudio',
+        'Audio is still being extracted from this asset — try again once that finishes',
+      ),
+    };
+  }
+
   if (result.action === 'failed') {
     return {
       type: 'error',

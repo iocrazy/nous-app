@@ -51,6 +51,12 @@ export interface ResourceAITriggerResponse {
   points_charged?: number;
   /** Transcription only: audio is being extracted first. */
   extracting_audio?: boolean;
+  /** Transcription only, and NOT a success: an audio extraction that will
+   *  not chain into a transcription holds migration 121's unique slot, so
+   *  nothing was queued and the caller must retry once it finishes. */
+  transcription_pending_audio?: boolean;
+  /** The task to wait on when `transcription_pending_audio` is set. */
+  blocking_task_id?: string | null;
 }
 
 // --- Transcription ---

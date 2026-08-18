@@ -409,3 +409,48 @@ describe('ensureResourceProcessed — transcript → summary follow-up', () => {
     expect(transcriptionFollowUps()).toHaveLength(0);
   });
 });
+
+/**
+ * The transcribe endpoint has a 200 arm that queues NOTHING: an audio
+ * extraction started with no transcription intent holds migration 121's
+ * unique slot, so the call is refused politely and the user must retry.
+ * It looks like a dedup (`points_charged: 0`) and is not one — reading it
+ * as "already being processed" strands the user waiting for work nobody
+ * started, which is the lie the backend fix removed.
+ */
+describe('ensureResourceProcessed — blocked behind an audio extraction', () => {
+  it('does not report a no-op dispatch as work in progress', async () => {
+    transcribeMock.mockResolvedValue({
+      message: 'Audio extraction is already running for this media, and that run '
+        + 'will not start a transcription by itself — retry once it finishes',
+      resource_id: 'r-40',
+      platform_id: 'p-40',
+      points_charged: 0,
+      transcription_pending_audio: true,
+      blocking_task_id: 'wf-audio-1',
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-40', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(result.action).toBe('pending_audio');
+    expect(result.alreadyInProgress).toBeFalsy();
+  });
+
+  it('does not wait for a transcript that was never started', async () => {
+    resetTranscriptionFollowUps();
+    transcribeMock.mockResolvedValue({
+      message: 'Audio extraction is already running…',
+      resource_id: 'r-41',
+      points_charged: 0,
+      transcription_pending_audio: true,
+    });
+
+    await ensureResourceProcessed({
+      id: 'r-41', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(transcriptionFollowUps()).not.toContain('r-41');
+  });
+});

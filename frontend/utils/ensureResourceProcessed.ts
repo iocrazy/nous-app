@@ -30,6 +30,7 @@ export type EnsureResourceProcessedAction =
   | 'ready'
   | 'skipped'
   | 'status_unknown'
+  | 'pending_audio'
   | 'failed';
 
 export interface EnsureResourceProcessedResult {
@@ -136,6 +137,14 @@ export async function ensureResourceProcessed(
   if (transcript !== 'completed') {
     try {
       const res = await triggerTranscriptionByResource(input.id);
+      // A 200 that queued NOTHING: an audio extraction with no transcription
+      // intent holds the unique slot. It reports `points_charged: 0` like a
+      // dedup does, but calling it "already being processed" would be the
+      // exact lie the backend removed — no transcription is coming until
+      // the caller retries.
+      if (res?.transcription_pending_audio) {
+        return { action: 'pending_audio', message: res.message, pointsCharged: 0 };
+      }
       // Only now is there a transcript worth waiting for; the summary half
       // of the chain is picked up by useTranscriptionSummaryFollowUp.
       rememberTranscriptionFollowUp(input.id);

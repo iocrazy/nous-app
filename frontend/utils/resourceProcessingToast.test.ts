@@ -89,3 +89,15 @@ describe('resourceProcessingNotice — unresolvable status', () => {
     expect(notice?.message).not.toMatch(/\d+\s*points/i);
   });
 });
+
+describe('resourceProcessingNotice — blocked behind an audio extraction', () => {
+  it('tells the user to retry rather than to wait', () => {
+    const notice = resourceProcessingNotice({ action: 'pending_audio', pointsCharged: 0 }, t);
+
+    expect(notice?.type).toBe('info');
+    expect(notice?.message.toLowerCase()).toMatch(/again|retry/);
+    // Must NOT reuse the "already being processed" sentence: nothing is
+    // processing this asset.
+    expect(notice?.message.toLowerCase()).not.toContain('already being processed');
+  });
+});
