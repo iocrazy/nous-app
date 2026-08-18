@@ -874,7 +874,7 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
     scene_repo.get_by_id = AsyncMock(return_value={"heading": "INT"})
     provider = _FakeVideoProvider("/tmp/jimeng_x/clip.mp4")
 
-    async def _resolve(name):
+    async def _resolve(name, *, user_id=None):
         return provider, "seedance2.0fast"
 
     with (
@@ -918,7 +918,7 @@ async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
     scene_repo.get_by_id = AsyncMock(return_value={"heading": "INT"})
     provider = _FakeVideoProvider("/tmp/jimeng_y/clip.mp4")
 
-    async def _resolve(name):
+    async def _resolve(name, *, user_id=None):
         return provider, "seedance2.0fast"
 
     with (
@@ -958,7 +958,7 @@ async def test_video_step_raises_when_no_file(monkeypatch):
     scene_repo.get_by_id = AsyncMock(return_value={})
     provider = _FakeVideoProvider("")  # empty local_path → no file
 
-    async def _resolve(name):
+    async def _resolve(name, *, user_id=None):
         return provider, "seedance2.0fast"
 
     with (

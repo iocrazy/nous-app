@@ -54,6 +54,7 @@ class ImageGenerationService:
         provider_name: Optional[str],
         reference_image_url: Optional[str] = None,
         aspect_ratio: str = "16:9",
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a single image via the named provider.
 
@@ -71,6 +72,8 @@ class ImageGenerationService:
             reference_image_url: Optional URL of a reference image passed to the
                 provider.
             aspect_ratio: Output aspect ratio string (e.g. "16:9", "1:1").
+            user_id: Requesting user, threaded to the catalog resolver so
+                owner-scoped rows (migration 431) resolve only for their owner.
 
         Returns:
             ImageGenResult serialised as a dict.
@@ -103,7 +106,7 @@ class ImageGenerationService:
                 )
 
                 image_provider, actual_model = await resolve_image_provider(
-                    provider_name
+                    provider_name, user_id=user_id
                 )
                 gen_model = (
                     model if (model and model != _DEFAULT_IMAGE_MODEL) else actual_model
@@ -144,6 +147,7 @@ class ImageGenerationService:
         model: str = "",
         duration_seconds: float = 5.0,
         motion_intensity: str = "medium",
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a video clip from a source image via the named provider.
 
@@ -180,6 +184,7 @@ class ImageGenerationService:
                     prompt=prompt,
                     provider_name=provider_name,
                     model=model,
+                    user_id=user_id,
                 )
 
             result: VideoGenResult = await video_provider.generate(
@@ -216,6 +221,7 @@ class ImageGenerationService:
         prompt: str,
         provider_name: str,
         model: str,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """DB-catalog video fallback (G4-B0), mirroring the image path.
 
@@ -235,7 +241,7 @@ class ImageGenerationService:
         from app.services.media.parsers.video_providers import db_registry
 
         video_provider, actual_model = await db_registry.resolve_video_provider(
-            provider_name or None
+            provider_name or None, user_id=user_id
         )
         gen_model = model or actual_model
 

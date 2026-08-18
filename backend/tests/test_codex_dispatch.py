@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.services.ai.provider_protocols.codex import _CodexImageAdapter
 from app.services.media.parsers.video_providers.codex_cli import (
     CodexCliProvider,
@@ -109,3 +111,100 @@ async def test_adapter_drops_http_reference_url(tmp_path):
     )
 
     assert stub.calls[0]["ref_image_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# Owner scoping at dispatch (fail-closed)
+# ---------------------------------------------------------------------------
+_OWNER = "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
+
+
+async def test_owned_row_resolves_for_its_owner(monkeypatch):
+    _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
+    provider, model = await resolve_image_provider("codex-image", user_id=_OWNER)
+    assert isinstance(provider, _CodexImageAdapter)
+    assert model == "gpt-5.4"
+
+
+async def test_owned_row_rejected_for_other_user(monkeypatch):
+    _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
+    with pytest.raises(RuntimeError, match="private"):
+        await resolve_image_provider("codex-image", user_id="someone-else")
+
+
+async def test_owned_row_rejected_without_user(monkeypatch):
+    # A call path that never threads user_id must NOT reach a private provider.
+    _patch_repo(monkeypatch, [_row(owner_user_id=_OWNER)])
+    with pytest.raises(RuntimeError, match="private"):
+        await resolve_image_provider("codex-image")
+
+
+async def test_owned_row_never_silently_falls_back(monkeypatch):
+    # Explicitly asking for a private row must raise, not quietly dispatch to
+    # whatever public row happens to exist (silent-substitution trap).
+    public = _row(
+        name="jimeng-cli-image", actual_provider="jimeng-cli", actual_model="5.0"
+    )
+    _patch_repo(monkeypatch, [public, _row(owner_user_id=_OWNER)])
+    with pytest.raises(RuntimeError, match="private"):
+        await resolve_image_provider("codex-image", user_id="someone-else")
+
+
+async def test_unowned_rows_resolve_for_anyone(monkeypatch):
+    _patch_repo(monkeypatch, [_row(owner_user_id=None)])
+    provider, _ = await resolve_image_provider("codex-image", user_id="anyone")
+    assert isinstance(provider, _CodexImageAdapter)
+
+
+async def test_video_dispatch_honors_owner(monkeypatch):
+    from app.services.media.parsers.video_providers.db_registry import (
+        resolve_video_provider,
+    )
+
+    jimeng_video = _row(
+        name="jimeng-cli-seedance",
+        type="video",
+        actual_provider="jimeng-cli",
+        actual_model="seedance2.0fast",
+        owner_user_id=_OWNER,
+    )
+    _patch_repo(monkeypatch, [jimeng_video])
+    provider, model = await resolve_video_provider(
+        "jimeng-cli-seedance", user_id=_OWNER
+    )
+    assert model == "seedance2.0fast"
+    with pytest.raises(RuntimeError):
+        await resolve_video_provider("jimeng-cli-seedance", user_id="someone-else")
+
+
+# ---------------------------------------------------------------------------
+# user_id threading: service → resolver
+# ---------------------------------------------------------------------------
+async def test_image_service_threads_user_id_to_resolver(monkeypatch):
+    from app.services.ai.media.image_generation_service import ImageGenerationService
+    from app.services.media.parsers.video_providers import db_registry
+    from app.services.media.parsers.video_providers.base import ImageGenResult
+
+    captured = {}
+
+    class _StubAdapter:
+        async def generate(self, prompt, model, **kwargs):
+            return ImageGenResult(image_url="https://x/y.png", provider="stub")
+
+    async def fake_resolve(name=None, *, user_id=None):
+        captured["name"] = name
+        captured["user_id"] = user_id
+        return _StubAdapter(), "gpt-5.4"
+
+    monkeypatch.setattr(db_registry, "resolve_image_provider", fake_resolve)
+
+    svc = ImageGenerationService()
+    await svc.generate_image(
+        project_id="",
+        node_id="n1",
+        prompt="p",
+        model="",
+        provider_name="codex-image",
+        user_id=_OWNER,
+    )
+    assert captured["user_id"] == _OWNER

@@ -103,6 +103,7 @@ async def generate_shot_image_step(
     shot_id: str,
     model: str,
     provider: Optional[str],
+    user_id: Optional[str] = None,
 ) -> str:
     """Read the shot + its scene, compose the prompt, and run the image provider.
 
@@ -127,6 +128,7 @@ async def generate_shot_image_step(
         prompt=prompt,
         model=model,
         provider_name=provider,
+        user_id=user_id,
     )
     # URL providers (Ark) return image_url; the jimeng-cli adapter returns a
     # local image_path instead (the CLI wrote the file to disk, no URL). Carry
@@ -299,7 +301,7 @@ async def script_shot_generate_workflow(
     re-raised (route-C: DBOS records FAILED; shot.status is a business column).
     ``user_id`` is optional (frozen DBOS input compat)."""
     try:
-        provider_url = await generate_shot_image_step(shot_id, model, provider)
+        provider_url = await generate_shot_image_step(shot_id, model, provider, user_id)
         urls = await persist_generation(shot_id, provider_url, model, provider, user_id)
         await mark_shot_done(shot_id, urls["image_url"], urls["thumbnail_url"])
         return {

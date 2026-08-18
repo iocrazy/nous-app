@@ -365,3 +365,33 @@ def test_factory_returns_collapsed_repo() -> None:
     """Post-rollout the factory unconditionally returns the collapsed ORM repo."""
     repo = mod.get_mediahub_model_repository()
     assert type(repo) is MediahubModelRepository
+
+
+# ---------------------------------------------------------------------------
+# Owner scoping (owner_user_id, migration 431)
+# ---------------------------------------------------------------------------
+async def test_list_enabled_without_viewer_excludes_owned_rows(fake_session):
+    """No viewer → fail-closed: only rows with owner_user_id IS NULL."""
+    repo = MediahubModelRepository()
+    await repo.list_enabled("image")
+    sql, _binds = fake_session.calls[0]
+    assert "owner_user_id IS NULL" in sql
+    assert "OR" not in sql.split("WHERE", 1)[1].split("ORDER BY")[0].replace(
+        "owner_user_id IS NULL", ""
+    )
+
+
+async def test_list_enabled_with_viewer_includes_own_rows(fake_session):
+    viewer = "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
+    repo = MediahubModelRepository()
+    await repo.list_enabled("image", viewer_user_id=viewer)
+    sql, binds = fake_session.calls[0]
+    assert "owner_user_id IS NULL" in sql
+    assert "owner_user_id =" in sql
+    assert any(str(v) == viewer for v in binds.values())
+
+
+def test_public_projection_still_hides_owner_user_id():
+    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+
+    assert "owner_user_id" not in {c.key for c in _PUBLIC_COLS}

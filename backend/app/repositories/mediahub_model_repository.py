@@ -55,7 +55,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 
 from app.core.secure_settings import MARKER, encrypt_marked, reveal
 from app.db.session import read_scope, write_scope
@@ -158,11 +158,17 @@ class MediahubModelRepository:
     # ------------------------------------------------------------------
 
     async def list_enabled(
-        self, type_filter: Optional[str] = None
+        self,
+        type_filter: Optional[str] = None,
+        viewer_user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List enabled Nous models, optionally filtered by model type.
 
         Returns public fields only (no api_key, app_id, base_url).
+
+        Owner scoping (migration 431): rows with a non-NULL ``owner_user_id``
+        belong to one user's personal credential; they are listed only for that
+        viewer. No viewer → fail-closed (platform rows only).
         """
         try:
             stmt = (
@@ -170,6 +176,15 @@ class MediahubModelRepository:
                 .where(MediahubModels.is_enabled.is_(True))
                 .order_by(MediahubModels.sort_order)
             )
+            if viewer_user_id:
+                stmt = stmt.where(
+                    or_(
+                        MediahubModels.owner_user_id.is_(None),
+                        MediahubModels.owner_user_id == viewer_user_id,
+                    )
+                )
+            else:
+                stmt = stmt.where(MediahubModels.owner_user_id.is_(None))
             if type_filter:
                 stmt = stmt.where(MediahubModels.type == type_filter)
             async with read_scope() as session:
