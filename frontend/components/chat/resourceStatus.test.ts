@@ -46,13 +46,25 @@ describe('resourceProcessingState', () => {
   });
 
   it('detects audio-visual by mime when kind is missing', () => {
-    expect(resourceProcessingState({ mime: 'video/mp4' })).toBe('unprocessed');
-    expect(resourceProcessingState({ mime: 'audio/mpeg' })).toBe('unprocessed');
+    expect(resourceProcessingState({ mime: 'video/mp4', transcriptStatus: 'none' })).toBe('unprocessed');
+    expect(resourceProcessingState({ mime: 'audio/mpeg', transcriptStatus: 'none' })).toBe('unprocessed');
+  });
+
+  it('says nothing at all when the status columns were never supplied', () => {
+    // "we were not told" is not "we were told there is nothing". A caller
+    // that hands over {id, name, kind} only (the context-menu path) must not
+    // make the chip claim an already-transcribed video is unprocessed.
+    expect(resourceProcessingState({ kind: 'video' })).toBeNull();
+    expect(resourceProcessingState({ kind: 'video', transcriptStatus: '', summaryStatus: '' })).toBeNull();
+    expect(resourceProcessingState({ kind: 'audio', transcriptStatus: null })).toBeNull();
+    // Transcript known-done but summary never supplied → still no claim.
+    expect(resourceProcessingState({ kind: 'video', transcriptStatus: 'completed' })).toBeNull();
   });
 
   it('flags an untranscribed video as unprocessed', () => {
+    // Only an EXPLICIT backend verdict earns the dot — 'none' means the
+    // column was read and it is empty, 'failed' means a run went wrong.
     expect(resourceProcessingState({ kind: 'video', transcriptStatus: 'none' })).toBe('unprocessed');
-    expect(resourceProcessingState({ kind: 'video', transcriptStatus: null })).toBe('unprocessed');
     expect(resourceProcessingState({ kind: 'video', transcriptStatus: 'failed' })).toBe('unprocessed');
   });
 

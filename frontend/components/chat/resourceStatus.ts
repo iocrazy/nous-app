@@ -39,7 +39,16 @@ function isAudioVisual(input: ResourceProcessingInput): boolean {
   return mime.startsWith('video/') || mime.startsWith('audio/');
 }
 
-function stepState(status: string | null | undefined): ResourceProcessingState | 'done' | 'skip' {
+function stepState(
+  status: string | null | undefined,
+): ResourceProcessingState | 'done' | 'skip' | 'unknown' {
+  // Absent is NOT the same as 'none'. A caller that never had the status
+  // columns (the context-menu path hands over {id, name, kind}) must not
+  // make us assert anything: telling a user their fully-transcribed video is
+  // "Not processed yet" is a plain lie, and the same conflation one layer up
+  // re-runs a *paid* transcription, because the trigger endpoint only dedups
+  // in-flight work, not already-finished work.
+  if (!status) return 'unknown';
   if (status === 'skipped') return 'skip';
   if (status === 'completed') return 'done';
   if (status === 'pending' || status === 'processing') return 'processing';
@@ -58,11 +67,11 @@ export function resourceProcessingState(input: ResourceProcessingInput): Resourc
   if (!isAudioVisual(input)) return null;
 
   const transcript = stepState(input.transcriptStatus);
-  if (transcript === 'skip') return null;
+  if (transcript === 'skip' || transcript === 'unknown') return null;
   if (transcript !== 'done') return transcript;
 
   const summary = stepState(input.summaryStatus);
-  if (summary === 'skip' || summary === 'done') return null;
+  if (summary === 'skip' || summary === 'done' || summary === 'unknown') return null;
   return summary;
 }
 

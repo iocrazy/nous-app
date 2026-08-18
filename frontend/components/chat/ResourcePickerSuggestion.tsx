@@ -1,16 +1,9 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image, Video, Music, FileType2, LayoutGrid } from 'lucide-react';
+import { FileText, Image, Video, LayoutGrid } from 'lucide-react';
 import type { ResourceSearchResult, ResourceSearchResponse } from '../../types';
-import { resolveResourceThumbnailSrc, resourceProcessingState } from './resourceStatus';
-
-const ICON: Record<ResourceSearchResult['kind'], React.ComponentType<{ size?: number }>> = {
-  video: Video,
-  image: Image,
-  audio: Music,
-  doc: FileText,
-  pdf: FileType2,
-};
+import { resourceProcessingState } from './resourceStatus';
+import { ResourceThumb } from './ResourceThumb';
 
 function _formatSize(n: number | null): string {
   if (!n) return '';
@@ -98,9 +91,7 @@ export function ResourcePickerSuggestion({
         // pushes the tail below the viewport where it cannot be reached.
         <div className="py-1 max-h-[288px] overflow-y-auto" data-testid="resource-picker-list">
           {items.map((item, idx) => {
-            const Icon = ICON[item.kind] ?? FileText;
             const active = idx === activeIndex;
-            const thumb = resolveResourceThumbnailSrc(item.thumbnail_url);
             const status = resourceProcessingState({
               kind: item.kind,
               mime: item.mime,
@@ -117,22 +108,15 @@ export function ResourcePickerSuggestion({
                 data-testid="resource-picker-row"
               >
                 <span className="relative w-7 h-7 shrink-0">
-                  {thumb ? (
-                    <img
-                      data-testid="resource-picker-thumb"
-                      src={thumb}
-                      alt=""
-                      loading="lazy"
-                      className="w-7 h-7 object-cover rounded bg-ink-800"
-                    />
-                  ) : (
-                    <span
-                      data-testid="resource-picker-icon"
-                      className="w-7 h-7 flex items-center justify-center bg-ink-800 rounded"
-                    >
-                      <Icon size={14} />
-                    </span>
-                  )}
+                  <ResourceThumb
+                    thumbnailUrl={item.thumbnail_url}
+                    kind={item.kind}
+                    iconSize={14}
+                    imgClassName="w-7 h-7 object-cover rounded bg-ink-800"
+                    iconClassName="w-7 h-7 flex items-center justify-center bg-ink-800 rounded"
+                    imgTestId="resource-picker-thumb"
+                    iconTestId="resource-picker-icon"
+                  />
                   {status && (
                     <span
                       data-testid="resource-picker-status"

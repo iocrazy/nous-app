@@ -2,24 +2,14 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { NodeViewWrapper, NodeViewProps, ReactNodeViewRenderer } from '@tiptap/react';
 import { Node, mergeAttributes } from '@tiptap/core';
-import { FileText, Image, Video, Music, FileType2, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useOptionalTaskManager } from '../../hooks/useOptionalTaskManager';
-import {
-  resolveChipProcessingState,
-  resolveResourceThumbnailSrc,
-  resourceProcessingState,
-} from './resourceStatus';
-
-const ICON_BY_KIND: Record<string, React.ComponentType<{ size?: number }>> = {
-  video: Video, image: Image, audio: Music, doc: FileText, pdf: FileType2,
-};
+import { resolveChipProcessingState, resourceProcessingState } from './resourceStatus';
+import { ResourceThumb } from './ResourceThumb';
 
 export function ResourceChipView({ node, deleteNode }: NodeViewProps): React.ReactElement {
   const { t } = useTranslation();
   const { resourceId, name, kind, mime, thumbnailUrl, transcriptStatus, summaryStatus } = node.attrs;
-  const Icon = ICON_BY_KIND[kind] ?? FileText;
-  const thumb = resolveResourceThumbnailSrc(thumbnailUrl);
-
   // Optional on purpose: the floating chat also mounts on the fullscreen
   // Script / Storyboard routes, which have no TaskManagerProvider. There the
   // chip falls back to the snapshot taken when it was inserted instead of
@@ -33,14 +23,15 @@ export function ResourceChipView({ node, deleteNode }: NodeViewProps): React.Rea
       <span data-testid="resource-chip"
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border
                        border-agent-line bg-agent-soft text-agent text-[12px] mx-0.5 select-none">
-        {thumb ? (
-          <img data-testid="resource-chip-thumb" src={thumb} alt=""
-               className="w-4 h-4 rounded object-cover" />
-        ) : (
-          <span data-testid="resource-chip-icon" className="inline-flex">
-            <Icon size={11} />
-          </span>
-        )}
+        <ResourceThumb
+          thumbnailUrl={thumbnailUrl}
+          kind={kind}
+          iconSize={11}
+          imgClassName="w-4 h-4 rounded object-cover"
+          iconClassName="inline-flex"
+          imgTestId="resource-chip-thumb"
+          iconTestId="resource-chip-icon"
+        />
         <span className="font-medium">{name}</span>
         {status && (
           <span

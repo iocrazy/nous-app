@@ -64,6 +64,15 @@ describe('ResourceChipView', () => {
     expect(screen.getByTestId('resource-chip-icon')).toBeInTheDocument();
   });
 
+  it('falls back to the kind icon when the cover 404s', () => {
+    // Same `/cover` miss as the picker row, but inline in the composer —
+    // a broken-image glyph mid-sentence is louder than one in a list.
+    renderChip();
+    fireEvent.error(screen.getByTestId('resource-chip-thumb'));
+    expect(screen.queryByTestId('resource-chip-thumb')).toBeNull();
+    expect(screen.getByTestId('resource-chip-icon')).toBeInTheDocument();
+  });
+
   it('uses the semantic agent token, never the retired indigo hues', () => {
     // K1 remapped the hue palette, so `indigo-*` no longer carries the
     // meaning it was picked for (CLAUDE.md UI rules, RECON#12).
@@ -85,6 +94,14 @@ describe('ResourceChipView', () => {
 
   it('shows no dot once both steps are done', () => {
     renderChip({ transcriptStatus: 'completed', summaryStatus: 'completed' });
+    expect(screen.queryByTestId('resource-chip-status')).toBeNull();
+  });
+
+  it('claims nothing about a chip inserted without the status attrs', () => {
+    // The context-menu path can hand over {id, name, kind} only. Painting
+    // "Not processed yet" on a video that is in fact fully transcribed is a
+    // plain lie — absent is not the same as 'none'.
+    renderChip({ transcriptStatus: '', summaryStatus: '' });
     expect(screen.queryByTestId('resource-chip-status')).toBeNull();
   });
 

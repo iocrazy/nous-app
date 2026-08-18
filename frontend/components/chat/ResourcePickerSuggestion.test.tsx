@@ -82,6 +82,19 @@ describe('ResourcePickerSuggestion', () => {
     expect(screen.getByTestId('resource-picker-icon')).toBeInTheDocument();
   });
 
+  it('falls back to the kind icon when the cover 404s', () => {
+    // `/cover` does NOT always answer with a placeholder: for a media_id
+    // backed resource whose cover lives in S3 it raises 404
+    // (resources_crud_router.py:698-739 has no sb:// branch, so it falls
+    // through to :797). Without onError the row paints a broken image and
+    // the icon branch — which only covers thumbnail_url === null — never
+    // gets a chance to run.
+    renderPicker([ROWS[1]]);
+    fireEvent.error(screen.getByTestId('resource-picker-thumb'));
+    expect(screen.queryByTestId('resource-picker-thumb')).toBeNull();
+    expect(screen.getByTestId('resource-picker-icon')).toBeInTheDocument();
+  });
+
   it('badges an untranscribed video so the user knows what they are attaching', () => {
     renderPicker();
     const badges = screen.getAllByTestId('resource-picker-status');
