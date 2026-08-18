@@ -88,24 +88,24 @@ async def search_resources(
         scope_team_id=scope_team_id,
     )
 
+    # Tab badges come from their own aggregate over the WHOLE visible set —
+    # deliberately not from ``rows``. ``rows`` is one tab's slice, cut off at
+    # ``limit``; tallying it made every badge describe the page instead of the
+    # library (open the Video tab and Image read 0; "All" never passed 50).
+    counts = await repo.count_accessible_by_kind_for_user(
+        user_id=str(auth.user_id),
+        q=q,
+        scope_team_id=scope_team_id,
+    )
+
     # The status columns only ever hold terminal values, so the picker's
     # "being processed" chip has to come from task_tracking. One batched
     # query for the whole page — see services/ai/resource_ai_status.
     effective = await effective_ai_statuses({str(row["id"]): row for row in rows})
 
     results = []
-    counts: dict[str, int] = {
-        "all": 0,
-        "video": 0,
-        "image": 0,
-        "doc": 0,
-        "audio": 0,
-        "pdf": 0,
-    }
     for row in rows:
         kind = kind_from_mime(row.get("mime"))
-        counts[kind] += 1
-        counts["all"] += 1
         rid = str(row["id"])
         _eff = effective.get(rid, {})
         # Whitelist, never a `**row` spread: the repo now selects storage

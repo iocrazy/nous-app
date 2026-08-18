@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Eye,
   ExternalLink,
   Download,
   Music,
+  Bot,
   Pencil,
   Share2,
   Link,
@@ -24,6 +26,7 @@ interface DownloadContextMenuProps {
   onOpenNewTab: () => void;
   onDownloadVideo: () => void;
   onDownloadAudio: () => void;
+  onSendToAgent: () => void;
   onRename: () => void;
   onShare: () => void;
   onCopyLink: () => void;
@@ -38,11 +41,18 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
   onOpenNewTab,
   onDownloadVideo,
   onDownloadAudio,
+  onSendToAgent,
   onRename,
   onShare,
   onCopyLink,
   onDelete,
 }) => {
+  // Only the Send to Agent label is translated: it has to read the same as
+  // the resource library's identical item, which uses this key. The rest of
+  // this menu predates the i18n pass and stays as-is rather than being
+  // half-migrated in a bugfix.
+  const { t } = useTranslation();
+
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => onClose();
@@ -94,6 +104,18 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
           Download Audio
         </button>
       )}
+      <div className="border-t border-ink-800 my-1" />
+      {/* Send to Agent: same action, same wording, same chain as the resource
+          library's context menu (utils/sendResourceToAgent). It was missing
+          here for a release, which hid the feature from the view holding
+          most of the user's media. */}
+      <button
+        onClick={onSendToAgent}
+        className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
+      >
+        <Bot size={14} className="text-ink-500" />
+        {t('resources.sendToAgent', 'Send to Agent')}
+      </button>
       <div className="border-t border-ink-800 my-1" />
       <button
         onClick={onRename}

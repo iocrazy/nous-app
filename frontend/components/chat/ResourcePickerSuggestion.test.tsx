@@ -129,4 +129,51 @@ describe('ResourcePickerSuggestion', () => {
     const tabs = screen.getByTestId('resource-picker-tabs');
     expect(tabs.textContent ?? '').not.toMatch(/\p{Extended_Pictographic}/u);
   });
+
+  // ── audio reachability (user-reported 2026-08-18) ──────────────────
+  // 293 of the library's 1421 resources are audio. The backend has always
+  // accepted `kinds=audio`; with no tab to click, the only way to reach one
+  // was to scroll "All" past everything else.
+
+  it('lets the tab strip wrap so no tab is pushed out of the popover', () => {
+    // Five tabs with real counts ("All 1421", "Video 950", …) are wider than
+    // the 340px popover. jsdom has no layout engine, so this pins the class
+    // that prevents the overflow rather than measuring it.
+    renderPicker();
+    expect(screen.getByTestId('resource-picker-tabs').className).toMatch(/flex-wrap/);
+  });
+
+  it('offers an Audio tab', () => {
+    renderPicker();
+    const tabs = screen.getByTestId('resource-picker-tabs');
+    expect(tabs.querySelector('[data-kind="audio"]')).not.toBeNull();
+  });
+
+  it('asks the parent for audio when the Audio tab is clicked', () => {
+    const onKindChange = vi.fn();
+    render(
+      <ResourcePickerSuggestion
+        items={ROWS} query="" loading={false} counts={COUNTS}
+        activeKind="" onKindChange={onKindChange} onSelect={vi.fn()} />,
+    );
+    fireEvent.click(
+      screen.getByTestId('resource-picker-tabs').querySelector('[data-kind="audio"]')!,
+    );
+    expect(onKindChange).toHaveBeenCalledWith('audio');
+  });
+
+  it('shows each tab its own count, not the page size', () => {
+    // The badges come from a whole-library aggregate now, so a tab can and
+    // should report far more than the rows currently rendered.
+    const counts = { all: 1421, video: 950, image: 159, doc: 19, audio: 293, pdf: 0 };
+    render(
+      <ResourcePickerSuggestion
+        items={ROWS} query="" loading={false} counts={counts}
+        activeKind="video" onKindChange={() => {}} onSelect={vi.fn()} />,
+    );
+    const tabs = screen.getByTestId('resource-picker-tabs');
+    expect(tabs.querySelector('[data-kind="audio"]')!.textContent).toContain('293');
+    expect(tabs.querySelector('[data-kind="image"]')!.textContent).toContain('159');
+    expect(tabs.querySelector('[data-kind="all"]')!.textContent).toContain('1421');
+  });
 });

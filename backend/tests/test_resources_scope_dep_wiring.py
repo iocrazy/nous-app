@@ -70,27 +70,46 @@ def test_search_endpoint_establishes_user_scope(client, monkeypatch):
         limit: int = 20,
         scope_team_id: Optional[str] = None,
     ) -> list:
-        captured["scope"] = current_scope()
+        captured["rows_scope"] = current_scope()
         return []
+
+    async def _fake_count_by_kind(
+        self,
+        *,
+        user_id: str,
+        q: str = "",
+        scope_team_id: Optional[str] = None,
+    ) -> dict:
+        # The tab badges are a SECOND repo read on this endpoint. It touches
+        # the same table, so it has to run under the same ambient scope —
+        # capture it separately rather than assume it inherits.
+        captured["counts_scope"] = current_scope()
+        return {"all": 0, "video": 0, "image": 0, "doc": 0, "audio": 0, "pdf": 0}
 
     monkeypatch.setattr(
         "app.repositories.resources_repository.ResourcesRepository."
         "list_accessible_for_user",
         _fake_list_accessible_for_user,
     )
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository."
+        "count_accessible_by_kind_for_user",
+        _fake_count_by_kind,
+    )
 
     resp = client.get("/api/v1/resources/search", params={"q": "x"})
     assert resp.status_code == 200, resp.text
 
-    scope = captured.get("scope")
-    assert isinstance(scope, Scope), (
-        f"ambient scope not set during the request: {scope!r}. "
-        "ScopedRequestDep wiring regression on resources_search_router."
-    )
-    assert scope.user_id == _USER_A, f"scope user_id mismatch: {scope.user_id!r}"
-    # Single-axis user scope (resources is UserScoped only) — no team/project sets.
-    assert scope.team_ids == frozenset()
-    assert scope.project_ids == frozenset()
+    for where in ("rows_scope", "counts_scope"):
+        scope = captured.get(where)
+        assert isinstance(scope, Scope), (
+            f"ambient scope not set during the request ({where}): {scope!r}. "
+            "ScopedRequestDep wiring regression on resources_search_router."
+        )
+        assert scope.user_id == _USER_A, f"scope user_id mismatch: {scope.user_id!r}"
+        # Single-axis user scope (resources is UserScoped only) — no team/project sets.
+        assert scope.team_ids == frozenset()
+        assert scope.project_ids == frozenset()
 
 
 def test_ambient_scope_resets_after_request(client, monkeypatch):
@@ -100,10 +119,18 @@ def test_ambient_scope_resets_after_request(client, monkeypatch):
     async def _fake(self, **_kw) -> list:
         return []
 
+    async def _fake_counts(self, **_kw) -> dict:
+        return {"all": 0, "video": 0, "image": 0, "doc": 0, "audio": 0, "pdf": 0}
+
     monkeypatch.setattr(
         "app.repositories.resources_repository.ResourcesRepository."
         "list_accessible_for_user",
         _fake,
+    )
+    monkeypatch.setattr(
+        "app.repositories.resources_repository.ResourcesRepository."
+        "count_accessible_by_kind_for_user",
+        _fake_counts,
     )
 
     assert current_scope() is None, "precondition: no ambient scope before request"

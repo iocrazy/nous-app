@@ -1110,6 +1110,7 @@
     "batchDelete": "删除",
     "generatePrompt": "反推提示词",
     "sendToAgent": "发送给 Agent",
+    "sendToAgentUnavailable": "无法发送：尚未关联资源库条目",
     "autoTag": "智能打标",
     "batchGeneratePrompt": "反推",
     "batchGeneratePromptHint": "为选中的图片批量反推提示词",

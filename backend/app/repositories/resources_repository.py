@@ -93,7 +93,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, or_, select, text, update
+from sqlalchemy import distinct, func, insert, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.pg_coerce import coerce_datetime_strings
@@ -152,6 +152,86 @@ _FIND_BY_HASH_COLS = (
     "created_at",
     "file_hash",
 )
+
+
+# ── @-reference picker: ONE kind ladder for both the filter and the counts ──
+#
+# The tab badge and the tab's own contents have to agree, so both are derived
+# from the same expression instead of two hand-written predicates that drift.
+# They did drift: the badge used to be tallied from the page the router was
+# about to return — already narrowed to one kind and already cut off at
+# ``limit`` — so opening the Video tab zeroed the Image badge and "All" could
+# never exceed 50.
+#
+# The ladder mirrors ``app/services/ai/_mime_kind.py::kind_from_mime`` rung for
+# rung, catch-all ``doc`` included. That function is what labels every row in
+# the response, so a disagreement here would badge a resource under a tab that
+# then refuses to list it (pre-fix: application/zip and friends counted as doc
+# rows in "All" but were invisible under the Doc tab, which matched only
+# ``text/`` and ``application/json``).
+_PICKER_KINDS = ("video", "image", "audio", "pdf", "doc")
+
+
+def _picker_kind_expr():
+    """SQL twin of ``kind_from_mime``: a resource row -> its canonical kind."""
+    from sqlalchemy import case
+
+    mime = func.lower(func.coalesce(Resources.mime_type, ""))
+    return case(
+        (mime.regexp_match("^video/"), "video"),
+        (mime.regexp_match("^image/"), "image"),
+        (mime.regexp_match("^audio/"), "audio"),
+        (mime.regexp_match("^application/pdf$"), "pdf"),
+        else_="doc",
+    )
+
+
+def _picker_visibility_filters(
+    *, user_id: str, q: str, scope_team_id: str | None
+) -> list:
+    """WHERE conditions for "resources this caller may reference".
+
+    Extracted so the row query and the counts aggregate share ONE definition
+    of visible: this is an authorization predicate, and a copy-pasted second
+    version is how one of the two silently stops matching the other.
+
+    Assumes the caller has already joined ``resource_items`` to ``resources``.
+
+    ``scope_team_id`` is a CALLER-SUPPLIED, unvalidated query-string value, so
+    it is compared as TEXT (a non-numeric value must yield zero matches, not
+    raise) — see ``list_accessible_for_user`` for the full note.
+    """
+    from sqlalchemy import String, cast
+
+    scope_id_text = cast(ResourceItems.scope_id, String)
+
+    if scope_team_id is not None:
+        # Issue-scoped picker: narrow to the current team (only if the caller
+        # is a member — no escalation) OR the caller's personal team.
+        membership_ids = (
+            select(cast(TeamMembers.team_id, String))
+            .where(
+                TeamMembers.user_id == user_id,
+                cast(TeamMembers.team_id, String) == scope_team_id,
+            )
+            .union(
+                select(cast(Teams.id, String)).where(
+                    Teams.owner_id == user_id, Teams.kind == "personal"
+                )
+            )
+        )
+    else:
+        membership_ids = select(cast(TeamMembers.team_id, String)).where(
+            TeamMembers.user_id == user_id
+        )
+
+    conditions = [
+        Resources.is_trashed.is_(False),
+        scope_id_text.in_(membership_ids),
+    ]
+    if q:
+        conditions.append(Resources.filename.ilike(f"%{q}%"))
+    return conditions
 
 
 def _to_rest_value(value: Any) -> Any:
@@ -2648,8 +2728,10 @@ class ResourcesRepository(AsyncpgRepository):
         ``scope_team_id`` is a CALLER-SUPPLIED, unvalidated query-string value
         (``resources_search_router.search_resources`` has no int() coercion),
         so — matching the legacy ``team_id::text = :scope_team_id`` — it is
-        compared as TEXT here too: a non-numeric value must yield zero
-        matches, not raise. Resources carries UserScoped(creator_id), but
+        compared as TEXT in ``_picker_visibility_filters`` (which this method
+        shares with ``count_accessible_by_kind_for_user``): a non-numeric
+        value must yield zero matches, not raise. Resources carries
+        UserScoped(creator_id), but
         this access check is governed by TEAM membership, not creator_id (a
         resource shared to the caller's team must stay visible even if they
         didn't create it) — wrapped in an ``is_enforced``-gated
@@ -2668,37 +2750,20 @@ class ResourcesRepository(AsyncpgRepository):
         from sqlalchemy import String, case, cast
 
         capped_limit = min(max(int(limit), 1), 50)
-        kinds_list = list(kinds or [])
+        # Unknown kinds are dropped rather than matched: an all-unknown list
+        # collapses to no filter (the documented wildcard), which is what the
+        # old ``kinds_re = "."`` fallback did.
+        kinds_list = [k for k in (kinds or []) if k in _PICKER_KINDS]
 
         id_text = cast(Resources.id, String)
         scope_id_text = cast(ResourceItems.scope_id, String)
 
         # PR-E 4c: scope_type column is being dropped; derive the personal/team
         # label from teams.kind (aliased as scope_type so the caller's response
-        # shape is unchanged). scope_id is always a teams.id snowflake post PR-C.
-        #
-        # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
-        # personal scope is a single-member team containing the user.
-        if scope_team_id is not None:
-            # Issue-scoped picker: narrow to the current team (only if the
-            # caller is a member — no escalation) OR the caller's personal team.
-            membership_ids = (
-                select(cast(TeamMembers.team_id, String))
-                .where(
-                    TeamMembers.user_id == user_id,
-                    cast(TeamMembers.team_id, String) == scope_team_id,
-                )
-                .union(
-                    select(cast(Teams.id, String)).where(
-                        Teams.owner_id == user_id, Teams.kind == "personal"
-                    )
-                )
-            )
-        else:
-            membership_ids = select(cast(TeamMembers.team_id, String)).where(
-                TeamMembers.user_id == user_id
-            )
-
+        # shape is unchanged). After Spec 1 PR-C, ri.scope_id is always a
+        # teams.id snowflake; personal scope is a single-member team containing
+        # the user — which is why the membership predicate in
+        # ``_picker_visibility_filters`` can be expressed purely over teams.
         stmt = (
             select(
                 id_text.label("id"),
@@ -2726,28 +2791,15 @@ class ResourcesRepository(AsyncpgRepository):
             )
             .join(ResourceItems, ResourceItems.resource_id == Resources.id)
             .outerjoin(Teams, Teams.id == ResourceItems.scope_id)
-            .where(Resources.is_trashed.is_(False))
-            .where(scope_id_text.in_(membership_ids))
+            .where(
+                *_picker_visibility_filters(
+                    user_id=user_id, q=q, scope_team_id=scope_team_id
+                )
+            )
         )
 
-        if q:
-            stmt = stmt.where(Resources.filename.ilike(f"%{q}%"))
-
         if kinds_list:
-            regex_segments = []
-            for k in kinds_list:
-                if k == "video":
-                    regex_segments.append("^video/")
-                elif k == "image":
-                    regex_segments.append("^image/")
-                elif k == "audio":
-                    regex_segments.append("^audio/")
-                elif k == "pdf":
-                    regex_segments.append("^application/pdf$")
-                elif k == "doc":
-                    regex_segments.append("^(text/|application/json)")
-            kinds_re = "|".join(regex_segments) if regex_segments else "."
-            stmt = stmt.where(Resources.mime_type.regexp_match(kinds_re))
+            stmt = stmt.where(_picker_kind_expr().in_(kinds_list))
 
         stmt = stmt.order_by(Resources.updated_at.desc()).limit(capped_limit)
 
@@ -2760,6 +2812,63 @@ class ResourcesRepository(AsyncpgRepository):
             async with read_scope() as session:
                 rows = (await session.execute(stmt)).mappings().all()
         return [dict(r) for r in rows] or []
+
+    async def count_accessible_by_kind_for_user(
+        self,
+        *,
+        user_id: str,
+        q: str = "",
+        scope_team_id: str | None = None,
+    ) -> dict[str, int]:
+        """Per-kind totals for the @-reference picker's tab badges.
+
+        Deliberately takes NO ``kinds`` and NO ``limit``. A tab badge answers
+        "how many of these can I reach with the query I have typed", which is
+        a property of ``q`` + scope alone. Deriving it from the returned page
+        instead — what the router used to do — makes the badge report the
+        page: opening the Video tab dropped the Image badge to 0, and the
+        "All" badge could never say more than 50.
+
+        Returns every key the response contract promises (``all`` plus the
+        five kinds), zero-filled, so a kind with no rows still renders a "0"
+        rather than disappearing.
+
+        ``count(DISTINCT resources.id)``, not ``count(*)``: a resource with
+        two ``resource_items`` rows (production has one such row today) is
+        still ONE thing the user can reference.
+        """
+        kind_expr = _picker_kind_expr()
+        stmt = (
+            select(
+                kind_expr.label("kind"),
+                func.count(distinct(Resources.id)).label("n"),
+            )
+            .select_from(Resources)
+            .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+            .where(
+                *_picker_visibility_filters(
+                    user_id=user_id, q=q, scope_team_id=scope_team_id
+                )
+            )
+            .group_by(kind_expr)
+        )
+
+        scope_cm = (
+            system_request_scope(reason="resources-search-team-membership-access")
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
+
+        counts: dict[str, int] = {"all": 0}
+        counts.update({k: 0 for k in _PICKER_KINDS})
+        for row in rows:
+            n = int(row["n"])
+            counts[str(row["kind"])] = n
+            counts["all"] += n
+        return counts
 
     # ── Temp-folder sweeper helpers ─────────────────────────────────
 

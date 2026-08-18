@@ -10,6 +10,12 @@ export interface ResourceData {
   id: string;
   notes: string | null;
   rating: number;
+  // Identity of the backing `resources` row. Send to Agent needs both: the
+  // chip is labelled with the filename, and `mime_type` is the only reliable
+  // kind signal here — downloads store aweme-type numerals ('0', '68', …) in
+  // `file_type`, so it cannot be used to tell a video from an image.
+  filename?: string | null;
+  mime_type?: string | null;
   // AI pipeline statuses — sourced from resources.* (migration 067/075 moved
   // them off parsed_media). Passed to CompactMediaCard.aiStatus so the
   // transcript/summary/analysis icons light up correctly after processing.
@@ -47,7 +53,7 @@ export function useResourceDataMap(libraryIds: string[]) {
           supabase
             .from('resources')
             .select(
-              'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
+              'id, media_id, filename, mime_type, notes, rating, transcript_status, summary_status, visual_analysis_status',
             )
             .in('media_id', ids),
         ),
@@ -80,6 +86,8 @@ export function useResourceDataMap(libraryIds: string[]) {
           if (row.media_id) {
             map[row.media_id] = {
               id: String(row.id),
+              filename: row.filename ?? null,
+              mime_type: row.mime_type ?? null,
               notes: row.notes,
               rating: row.rating || 0,
               transcript_status: row.transcript_status ?? undefined,
