@@ -79,6 +79,12 @@ def _search(rows, query: str = "?q=x", active: dict | None = None):
     async def _fake_list(self, **kwargs):
         return rows
 
+    # Tab badges are their own aggregate query now. These tests are about the
+    # per-row projection, so stub it — the counts contract itself is pinned in
+    # test_resources_search_counts.py.
+    async def _fake_counts(self, **kwargs):
+        return {"all": 0, "video": 0, "image": 0, "doc": 0, "audio": 0, "pdf": 0}
+
     async def _fake_active(resource_ids):
         return active or {}
 
@@ -92,6 +98,11 @@ def _search(rows, query: str = "?q=x", active: dict | None = None):
                 "app.repositories.resources_repository.ResourcesRepository"
                 ".list_accessible_for_user",
                 new=_fake_list,
+            ),
+            patch(
+                "app.repositories.resources_repository.ResourcesRepository"
+                ".count_accessible_by_kind_for_user",
+                new=_fake_counts,
             ),
             patch(
                 "app.services.ai.resource_ai_status._active_ai_tasks",

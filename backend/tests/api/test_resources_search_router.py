@@ -29,6 +29,20 @@ def _no_active_ai_tasks(monkeypatch):
     monkeypatch.setattr(status_module, "_active_ai_tasks", _none)
 
 
+@pytest.fixture(autouse=True)
+def _stub_counts(monkeypatch):
+    """Tab badges moved to their own aggregate query (it reads the whole
+    visible set, not the returned page), which needs a DB these tests do not
+    have. Stub it here — the counts contract is pinned in
+    test_resources_search_counts.py."""
+    from app.repositories.resources_repository import ResourcesRepository
+
+    async def _zero(self, **kwargs):
+        return {"all": 0, "video": 0, "image": 0, "doc": 0, "audio": 0, "pdf": 0}
+
+    monkeypatch.setattr(ResourcesRepository, "count_accessible_by_kind_for_user", _zero)
+
+
 def test_search_requires_auth():
     r = client.get("/api/v1/resources/search?q=story")
     assert r.status_code in (401, 403)

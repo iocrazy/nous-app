@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image, Video, LayoutGrid } from 'lucide-react';
+import { FileText, Image, Video, Music, LayoutGrid } from 'lucide-react';
 import type { ResourceSearchResult, ResourceSearchResponse } from '../../types';
 import { resourceProcessingState } from './resourceStatus';
 import { ResourceThumb } from './ResourceThumb';
@@ -53,6 +53,12 @@ export function ResourcePickerSuggestion({
   }[] = [
     { key: '', label: t('chat.mentionPicker.all'), count: counts.all, Icon: LayoutGrid },
     { key: 'video', label: t('chat.mentionPicker.video'), count: counts.video, Icon: Video },
+    // Audio outnumbers images in the real library (293 vs 159, measured
+    // 2026-08-18) and the backend has always accepted `kinds=audio` — the tab
+    // was simply never drawn, so those rows were reachable only by scrolling
+    // "All". PDF stays out for now: 0 rows today, and a sixth tab starts
+    // wrapping the strip.
+    { key: 'audio', label: t('chat.mentionPicker.audio'), count: counts.audio, Icon: Music },
     { key: 'image', label: t('chat.mentionPicker.image'), count: counts.image, Icon: Image },
     { key: 'doc', label: t('chat.mentionPicker.doc'), count: counts.doc, Icon: FileText },
   ];
@@ -62,13 +68,19 @@ export function ResourcePickerSuggestion({
       className="bg-ink-900 border border-ink-700 rounded-lg shadow-xl w-[340px] p-1.5"
       data-testid="resource-picker"
     >
+      {/* `flex-wrap`, not nowrap: five tabs carrying real four-digit counts
+          ("All 1421", "Video 950", …) measure well past the 340px popover,
+          and a nowrap strip would push the last one outside the rounded box
+          where it cannot be clicked. Wrapping to a second row costs 18px and
+          keeps every tab reachable. */}
       <div
-        className="flex gap-1 px-1 pb-1.5 border-b border-ink-800"
+        className="flex flex-wrap gap-1 px-1 pb-1.5 border-b border-ink-800"
         data-testid="resource-picker-tabs"
       >
         {tabs.map((tab) => (
           <button
             key={tab.key || 'all'}
+            data-kind={tab.key || 'all'}
             onClick={() => onKindChange(tab.key)}
             className={`text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
               activeKind === tab.key

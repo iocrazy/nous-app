@@ -1110,6 +1110,7 @@
     "batchDelete": "Delete",
     "generatePrompt": "Generate Prompt",
     "sendToAgent": "Send to Agent",
+    "sendToAgentUnavailable": "Cannot send: no library resource linked yet",
     "autoTag": "Auto Tag",
     "batchGeneratePrompt": "Prompts",
     "batchGeneratePromptHint": "Reverse-engineer prompts for the selected images",

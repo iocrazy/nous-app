@@ -47,6 +47,8 @@ import { trashResourceByPlatformId, updateResource } from '../services/resourceS
 import { createTag, addResourceTag } from '../services/unifiedTagService';
 import { getDownloadUrl, getMusicDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
+import { sendResourceToAgent } from '../utils/sendResourceToAgent';
+import { buildDownloadAgentPayload } from './DownloadsView/downloadAgentPayload';
 import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -894,6 +896,40 @@ export const DownloadsView: React.FC = () => {
     });
   }, [contextMenu, addToast]);
 
+  // Send to Agent — the same chain the resource library's context menu runs
+  // (utils/sendResourceToAgent). The one thing this view has to do first is
+  // translate identities: a row here is a `parsed_media` item, while every
+  // AI trigger and the chat chip are keyed by `resources.id`. That mapping
+  // is `resources.media_id -> parsed_media.id`, already loaded per page by
+  // useResourceDataMap — the same lookup Share uses two handlers down.
+  const handleCtxSendToAgent = useCallback(async () => {
+    if (!contextMenu) return;
+    const video = contextMenu.video;
+    const payload = buildDownloadAgentPayload(video, resourceDataMap[String(video.id)]);
+    setContextMenu(null);
+    // No resource row (or the page's map has not landed yet) means there is
+    // nothing an agent could be given. Say so — a silent no-op on a
+    // user-action -> agent path is the failure mode this codebase keeps
+    // paying for.
+    if (!payload.ok) {
+      addToast(
+        t('resources.sendToAgentUnavailable', 'Cannot send: no library resource linked yet'),
+        'error',
+      );
+      return;
+    }
+    await sendResourceToAgent(
+      payload.resource,
+      {
+        scope: selectedTeamId
+          ? { type: 'team', id: String(selectedTeamId) }
+          : { type: 'personal', id: '' },
+        addToast,
+        t,
+      },
+    );
+  }, [contextMenu, resourceDataMap, selectedTeamId, addToast, t]);
+
   const handleCtxShare = useCallback(() => {
     if (!contextMenu) return;
     const video = contextMenu.video;
@@ -1434,6 +1470,7 @@ export const DownloadsView: React.FC = () => {
         onOpenNewTab={handleCtxOpenNewTab}
         onDownloadVideo={handleCtxDownloadVideo}
         onDownloadAudio={handleCtxDownloadAudio}
+        onSendToAgent={handleCtxSendToAgent}
         onRename={handleCtxRename}
         onShare={handleCtxShare}
         onCopyLink={handleCtxCopyLink}

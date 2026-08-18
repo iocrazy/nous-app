@@ -24,9 +24,7 @@ import {
 import { fetchResourceTags } from '../services/unifiedTagService';
 import { hasToPublishTag, toggleToPublish } from '../services/toPublishService';
 import { downloadWithAuth } from '../utils/download';
-import { useGlobalChatStore } from '../stores/globalChatStore';
-import { ensureResourceProcessed } from '../utils/ensureResourceProcessed';
-import { resourceProcessingNotice } from '../utils/resourceProcessingToast';
+import { sendResourceToAgent } from '../utils/sendResourceToAgent';
 
 // Publishing currently supports video only, mirroring the Distribution publish
 // picker (uploads/generated videos; downloads aren't publishable). The
@@ -35,36 +33,6 @@ function isVideoResource(resource: Resource | undefined): boolean {
   if (!resource) return false;
   return resource.file_type === 'video'
     || Boolean(resource.mime_type && resource.mime_type.startsWith('video/'));
-}
-
-/** Canonical kind for the @-reference chip, mirroring the backend's
- *  `app/services/ai/_mime_kind.py` so a resource looks the same however it
- *  reached the composer. `file_type` is the fallback for rows whose mime
- *  never got recorded. */
-function resourceKind(resource: Resource | undefined): 'video' | 'image' | 'doc' | 'audio' | 'pdf' {
-  const mime = (resource?.mime_type ?? '').toLowerCase();
-  if (mime.startsWith('video/')) return 'video';
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime === 'application/pdf') return 'pdf';
-  const fileType = (resource?.file_type ?? '').toLowerCase();
-  if (fileType === 'video' || fileType === 'image' || fileType === 'audio' || fileType === 'pdf') {
-    return fileType;
-  }
-  return 'doc';
-}
-
-/** Same ladder as the search router's `_thumbnail_url` and the picker's
- *  `buildThumbnailSrc`: bet on a cover whenever any signal exists. The bet
- *  can lose (the endpoint 404s for some parsed_media rows), which is why
- *  the chip renders the URL behind an onError icon fallback. */
-function resourceCoverPath(resource: Resource | undefined): string | null {
-  if (!resource?.id) return null;
-  const isImage = resource.mime_type?.startsWith('image/') ?? false;
-  if (resource.thumbnail_path || resource.cover_image_path || resource.media_id || isImage) {
-    return `/api/v1/resources/${resource.id}/cover`;
-  }
-  return null;
 }
 
 interface ContextMenuState {
@@ -209,34 +177,14 @@ export function useContextMenuItems({
         onClick: async () => {
           const resource = item.resource as Resource | undefined;
           if (!resourceId || !resource) return;
-          const id = String(resourceId);
-          // The status columns ride along on purpose (RECON#15): without
-          // them the helper reads "never transcribed" and re-triggers a
-          // PAID transcription, because the endpoint dedups in-flight work
-          // only — never finished work.
-          const processing = ensureResourceProcessed({
-            id,
-            kind: resourceKind(resource),
-            mime: resource.mime_type,
-            transcript_status: resource.transcript_status,
-            summary_status: resource.summary_status,
-          }).then((result) => {
-            const notice = resourceProcessingNotice(result, t);
-            if (notice) addToast(notice.message, notice.type);
-          });
-          // Stage regardless of how the top-up goes: a failed trigger must
-          // not swallow the send, it just means the agent reads less.
-          useGlobalChatStore.getState().sendResourceToChat({
-            resourceId: id,
-            name: resource.filename ?? '',
-            kind: resourceKind(resource),
-            mime: resource.mime_type ?? null,
-            scope: { type: isPersonal ? 'personal' : 'team', id: String(scopeId) },
-            thumbnailUrl: resourceCoverPath(resource),
-            transcriptStatus: resource.transcript_status ?? null,
-            summaryStatus: resource.summary_status ?? null,
-          });
-          await processing;
+          await sendResourceToAgent(
+            { ...resource, id: String(resourceId) },
+            {
+              scope: { type: isPersonal ? 'personal' : 'team', id: String(scopeId) },
+              addToast,
+              t,
+            },
+          );
         },
         disabled: !resourceId,
         divider: true,
