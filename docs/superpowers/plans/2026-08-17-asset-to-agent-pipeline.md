@@ -30,10 +30,18 @@
 - [ ] RED：resolver 状态测试、available_resources 渲染测试、ResourceFetch processing 文案测试（区分 processing vs none/failed）、search 响应新字段测试 + 凭据 tripwire。
 - [ ] 实现 → GREEN → 既有相关测试保持绿 → commit。
 
+### Task 1b: in-flight 状态从 task_tracking 派生（T2 审查 Critical 修复，后端）
+
+**背景**：`resources.transcript_status/summary_status` 生产写点只有 completed/failed，中间态 0 行——T1 三态分支与前端 processing 徽标按列现状永不点亮（task-2-review.md Critical）。
+**拍板**：方案 (b)——不往列写中间态（避免第二个会说谎的状态持有者）；后端读路径计算有效状态：终态列优先，否则 task_tracking 在飞（queued→pending / in_progress→processing，转录链含 extract_audio），否则 none。wire 契约不变，前端无感。
+**Files:** 共享 helper + `resource_ref_resolver` / `resource_fetch_tool` / `resources_search_router` 三处消费；触发端点 dedup 纳入 extract_audio（T2 审查 I1，修 500）。
+- [ ] RED：task_tracking 在飞→pending/processing；终态列优先；无行→none；extract_audio 在飞时触发转录回 200。
+- [ ] 实现 → GREEN → commit。详见 task-1b-brief.md。
+
 ### Task 2: 前端基础设施（F1 前端触发 + 通道）
 
 **Files:** Create: `frontend/utils/ensureResourceProcessed.ts`、`frontend/hooks/useOptionalTaskManager.ts`；Modify: `frontend/services/aiService.ts:58-71/159-172`（返回类型对齐真实响应体，RECON#4）、`frontend/stores/globalChatStore.ts`（第三通道 pendingResource，照 PendingQuote 形状：nonce + sendResourceToChat(open:true) + consumePendingResource）、`frontend/types.ts`（ResourceSearchResult 新字段）。
-**Interfaces:** Produces: `ensureResourceProcessed(r: {id, kind/mime, transcript_status?, summary_status?}): Promise<'triggered_transcribe'|'triggered_summary'|'ready'|'skipped'>`（video/audio：无转录→触发转录；转录完无摘要→触发摘要；其余 skip；异常吞并 console.error——触发失败不能阻塞聊天）；`useOptionalTaskManager(): TaskManagerContextType | null`（无 Provider 返 null 不 throw，照 useOptionalToast 形状——先读 TaskManagerContext 确认 Context 是否导出，未导出则导出之）；store 三通道互不干扰。
+**Interfaces:** Produces: `ensureResourceProcessed(r): Promise<EnsureResourceProcessedResult>`——**对象返回**：`{action: 'triggered_transcribe'|'triggered_summary'|'ready'|'skipped'|'failed', attempted?, error?}`（video/audio：无转录→触发转录；转录完无摘要→触发摘要；其余 skip；触发 reject 返回 `action:'failed'` 的类型化结果并 console.error，**不抛**——触发失败不能阻塞聊天，但消费方必须给用户可见回显。权威契约见 task-2-status.md §1，**读 `.action`，别把返回值当字符串比**）；`useOptionalTaskManager(): TaskManagerContextType | null`（无 Provider 返 null 不 throw，照 useOptionalToast 形状——先读 TaskManagerContext 确认 Context 是否导出，未导出则导出之）；store 三通道互不干扰。
 - [ ] RED：helper 四分支 + 触发失败不抛；optional hook 无 Provider 不 throw；store 通道测试（照既有 store 测试写法）。
 - [ ] 实现 → GREEN → commit。
 
@@ -47,8 +55,9 @@
 ### Task 4: 右键发送 + 消费接线（F3 + F1 入口接线）
 
 **Files:** Modify: `frontend/hooks/useContextMenuItems.tsx`（file 分支加 Send to Agent，lucide Bot，onClick = ensureResourceProcessed + sendResourceToChat）、`frontend/components/AIChatPanel.tsx`（消费 pendingResource：照 pendingQuote 的 rAF 30 帧范式插入 insertResourceRef；selectedAgentSlug 为空先设 'analyze'；@ 选中路径 handleMentionSelect 也调 ensureResourceProcessed）、i18n en/zh 加菜单项文案 key。
-**Interfaces:** Consumes: Task 2 的通道与 helper、Task 3 的 insertResourceRef 新签名。
-- [ ] RED：菜单项存在且 onClick 触发两个调用；AIChatPanel 消费测试（有 pendingResource 时插入芯片并 consume；无 agent 时落到 analyze）；@ 选中触发 ensureResourceProcessed。
+**Interfaces:** Consumes: Task 2 的通道与 helper（契约见 task-2-status.md，读 `.action`）、Task 3 的 insertResourceRef 新签名。
+**T2 审查移交（task-2-review.md）**：① `action:'failed'` 必须有用户可见回显（toast，CLAUDE.md「触发路径必须类型化失败回显」）；② helper 需把响应体 `message`/`points_charged` 透传出来（T2 审查 I2——区分「已在处理中」与「新排队扣分」两种 toast）；③ **spec F1 的「转录完成后自动补摘要」在此认领**：用 TaskManager（useOptionalTaskManager）监听本会话触发的转录任务完成→调 triggerSummaryByResource（与既有前端 transcribe→summarize 链同族，RECON#19 范式）。
+- [ ] RED：菜单项存在且 onClick 触发两个调用；AIChatPanel 消费测试（有 pendingResource 时插入芯片并 consume；无 agent 时落到 analyze）；@ 选中触发 ensureResourceProcessed；failed 回显 toast；转录完成→自动触发摘要。
 - [ ] 实现 → GREEN → commit。
 
 ### Task 5: 全量回归（纯验证，无 commit）
