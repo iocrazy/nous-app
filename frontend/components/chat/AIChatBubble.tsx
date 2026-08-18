@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import DOMPurify from 'dompurify';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Copy, Check, FileText } from 'lucide-react';
 
 import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
@@ -45,6 +47,105 @@ export interface MessageBubbleProps {
    *  to TurnWriteSummary so its Undo button knows what to undo. */
   runId?: string | null;
 }
+
+/** Agents emit **markdown**, not HTML. This bubble used to run the text
+    through DOMPurify and inject it as innerHTML, so every `**bold**` and
+    `> quote` reached the user as literal syntax characters.
+
+    Security note: react-markdown does not parse embedded raw HTML (no
+    rehype-raw here, on purpose), so an LLM-authored `<img onerror=...>`
+    renders as literal text rather than a live element, and its
+    defaultUrlTransform drops `javascript:`/`data:` hrefs. That makes the
+    sanitizer unnecessary rather than merely redundant. The cost of the
+    tradeoff is that intentional inline HTML shows up as text — acceptable
+    for chat prose.
+
+    Styling is per-element (same idiom as AILibrary/MarkdownBody.tsx),
+    tightened for bubble density. The `prose prose-invert prose-sm` classes
+    this replaced were inert anyway — @tailwindcss/typography is not
+    installed, so they styled nothing. */
+const MARKDOWN_PLUGINS = [remarkGfm, remarkBreaks];
+
+const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => (
+    <h1 className="mt-3 mb-1.5 text-base font-bold text-ink-100 first:mt-0">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mt-3 mb-1.5 text-[15px] font-semibold text-ink-100 first:mt-0">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mt-2.5 mb-1 text-sm font-semibold text-ink-100 first:mt-0">{children}</h3>
+  ),
+  p: ({ children }) => (
+    <p className="my-1.5 break-words first:mt-0 last:mb-0">{children}</p>
+  ),
+  strong: ({ children }) => (
+    <strong className="font-semibold text-ink-100">{children}</strong>
+  ),
+  ul: ({ children }) => (
+    <ul className="my-1.5 ml-5 list-disc space-y-0.5 marker:text-ink-500 first:mt-0 last:mb-0">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="my-1.5 ml-5 list-decimal space-y-0.5 marker:text-ink-500 first:mt-0 last:mb-0">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="my-0.5">{children}</li>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[var(--accent-text)] underline-offset-2 hover:underline"
+    >
+      {children}
+    </a>
+  ),
+  code: ({ className: cls, children, ...rest }) => {
+    const inline = !/language-/.test(cls ?? '');
+    if (inline) {
+      return (
+        <code
+          className="rounded bg-ink-900/70 px-1 py-0.5 font-mono text-[12px] text-warn"
+          {...rest}
+        >
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className={cls} {...rest}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => (
+    <pre className="my-2 overflow-x-auto rounded-lg border border-ink-700 bg-ink-900 p-2.5 font-mono text-[12px] leading-relaxed text-ink-200">
+      {children}
+    </pre>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-2 border-ink-600 pl-3 italic text-ink-400">
+      {children}
+    </blockquote>
+  ),
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto">
+      <table className="w-full border-collapse text-[12px]">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border-b border-ink-700 px-2 py-1 text-left font-semibold text-ink-100">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border-b border-ink-800 px-2 py-1">{children}</td>
+  ),
+  hr: () => <hr className="my-3 border-ink-700" />,
+};
 
 /** Image strip + file chips shown above the message text. resource_ref
     attachments are skipped — the @-mention is already part of the text. */
@@ -126,9 +227,11 @@ export function MessageBubble({
     };
   }, [toolCalls]);
 
+  // Copies the raw markdown. It used to strip `<...>` on the assumption the
+  // content was HTML; it never was, and markdown source is what a user wants
+  // to paste elsewhere anyway.
   const handleCopy = useCallback(() => {
-    const plain = content.replace(/<[^>]+>/g, '');
-    navigator.clipboard.writeText(plain).catch(() => {});
+    navigator.clipboard.writeText(content).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
     onCopy?.();
@@ -181,20 +284,11 @@ export function MessageBubble({
 
         {awaitingApproval && <ApprovalCard approval={awaitingApproval} />}
 
-        <div
-          className="px-3 py-2 prose prose-invert prose-sm max-w-none"
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(content, {
-              ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'p', 'strong', 'em', 'code', 'pre',
-                             'hr', 'br', 'ul', 'ol', 'li', 'blockquote', 'a', 'span'],
-              ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
-              // Only permit http(s) and mailto: URLs. Blocks javascript:, data:, vbscript:,
-              // etc. in href/src attributes to prevent XSS from LLM-generated links.
-              ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
-            }),
-          }}
-        />
+        <div className="px-3 py-2 max-w-none break-words" data-testid="bubble-markdown">
+          <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS} components={MARKDOWN_COMPONENTS}>
+            {content}
+          </ReactMarkdown>
+        </div>
 
         <div className="flex items-center gap-3 px-3 pb-2 pt-1 border-t border-ink-700/50">
           {tokens !== undefined && (
