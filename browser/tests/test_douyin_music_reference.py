@@ -1595,6 +1595,18 @@ def test_the_container_clause_says_nothing_when_there_are_no_rows():
     assert dp.describe_music_container(dp.MusicRowsRead([])) == "fit=?"
 
 
+def test_a_row_with_no_container_at_all_renders_its_position_as_unknown():
+    """`_music_rows` drops such a row rather than reporting one it cannot
+    address, so this branch is not reachable through the step today. It is
+    pinned anyway, because the alternative to a `?` here is a `TypeError` in
+    the middle of composing a failure message — a diagnostic that crashes while
+    explaining a failure replaces the diagnosis with its own stack trace."""
+    site = dp.MusicRowSite(level=None, levels=4, fit=False)
+    assert dp.describe_music_container(
+        dp.MusicRowsRead([], sites=(site,))
+    ) == "fit=0/1 up=?/4 ln=0 svg=0"
+
+
 async def test_the_census_is_taken_on_the_container_that_was_chosen():
     """The census answers "is there an id on the row?", and an answer read off
     the header the old walk stopped at is an answer about the header. It rides
