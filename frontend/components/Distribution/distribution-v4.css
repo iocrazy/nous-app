@@ -370,25 +370,53 @@
 .dist-v4 .pv-screen { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: #0b0b0d; color: #fff; overflow: hidden; }
 .dist-v4 .pv-blocked { align-items: center; justify-content: center; gap: 8px; padding: 20px; text-align: center; font-size: 11px; line-height: 1.5; color: rgba(255, 255, 255, .8); }
 
-/* ── cover / title grid ─────────────────────────────────────────────────── */
-/* Nine cells; the first is the user's post and the other eight are empty on
-   purpose (see the header comment in PublishPreview.tsx). */
-/* `flex: none` is precautionary, not currently load-bearing: measured today
-   the grid is 284px inside a 410px screen, so nothing shrinks it either way.
-   It matters the moment anything else is added to `.pv-screen` — a default
-   flex item would then be squashed below the height its three aspect-ratio
-   rows need, and grid rows keep their size regardless, so the rows would
-   silently spill out of a too-short grid box rather than the layout looking
-   obviously wrong. */
-.dist-v4 .pv-grid { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 24px 3px 8px; }
-.dist-v4 .pv-grid .pv-cell { position: relative; overflow: hidden; border-radius: 3px; background: rgba(255, 255, 255, .05); }
-.dist-v4 .pv-grid.v .pv-cell { aspect-ratio: 3 / 4; }
-.dist-v4 .pv-grid.h .pv-cell { aspect-ratio: 4 / 3; }
-.dist-v4 .pv-cell.mine { outline: 1.5px solid var(--t-indigo); outline-offset: -1.5px; }
-.dist-v4 .pv-cell.empty { border: 1px dashed rgba(255, 255, 255, .12); background: transparent; }
-.dist-v4 .pv-cell img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.dist-v4 .pv-cell-title { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 4px 3px; font-size: 8px; line-height: 1.3; color: #fff; background: linear-gradient(180deg, transparent, rgba(0, 0, 0, .8)); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.dist-v4 .pv-cell-title.ph { color: rgba(255, 255, 255, .55); font-style: italic; }
+/* ── cover / title: the two-column feed ─────────────────────────────────── */
+/* Reproduces the platform's recommendation feed, not a profile grid. Every
+   card but one is empty on purpose (see the header comment in
+   PublishPreview.tsx). */
+
+/* Platform chrome. Decoration only — no hit targets, no numbers. */
+.dist-v4 .pv-chrome-top { flex: none; display: flex; justify-content: center; gap: 13px; padding: 22px 0 6px; font-size: 10px; color: rgba(255, 255, 255, .5); }
+.dist-v4 .pv-chrome-top .cur { color: #fff; font-weight: 600; border-bottom: 1.5px solid #fff; padding-bottom: 2px; }
+.dist-v4 .pv-chrome-bottom { flex: none; display: flex; justify-content: space-around; align-items: center; padding: 6px 4px 8px; font-size: 9px; color: rgba(255, 255, 255, .55); border-top: 1px solid rgba(255, 255, 255, .08); }
+.dist-v4 .pv-chrome-bottom .plus { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 14px; border-radius: 4px; background: rgba(255, 255, 255, .85); color: #0b0b0d; font-weight: 700; }
+
+/* The clipping window. The feed is pulled up so the top row is half cut off —
+   what a feed looks like once it has been scrolled — which is what puts the
+   user's own card in the first FULLY visible row rather than at the very top.
+   The offsets differ per orientation because the cards do. */
+.dist-v4 .pv-feed-scroll { flex: 1; min-height: 0; overflow: hidden; }
+.dist-v4 .pv-feed { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 0 6px; }
+.dist-v4 .pv-feed.v { margin-top: -76px; }
+.dist-v4 .pv-feed.h { margin-top: -52px; }
+
+.dist-v4 .pv-fcard { display: flex; flex-direction: column; border-radius: 5px; overflow: hidden; background: rgba(255, 255, 255, .05); }
+.dist-v4 .pv-fcard.empty { border: 1px dashed rgba(255, 255, 255, .12); background: transparent; }
+.dist-v4 .pv-fcard.mine { outline: 1.5px solid var(--t-indigo); outline-offset: -1.5px; }
+.dist-v4 .pv-fcover { position: relative; overflow: hidden; }
+.dist-v4 .pv-feed.v .pv-fcover { aspect-ratio: 3 / 4; }
+.dist-v4 .pv-feed.h .pv-fcover { aspect-ratio: 4 / 3; }
+.dist-v4 .pv-fcover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Empty cards get the same cover box so the columns stay on a shared rhythm. */
+.dist-v4 .pv-feed.v .pv-fcard.empty { aspect-ratio: 3 / 4.62; }
+.dist-v4 .pv-feed.h .pv-fcard.empty { aspect-ratio: 4 / 3.9; }
+
+.dist-v4 .pv-ffoot { padding: 4px 5px 5px; }
+.dist-v4 .pv-ftitle { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 9px; line-height: 1.35; color: #fff; }
+.dist-v4 .pv-ftitle.ph { color: rgba(255, 255, 255, .55); font-style: italic; }
+.dist-v4 .pv-fby { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 8px; color: rgba(255, 255, 255, .62); }
+.dist-v4 .pv-favatar { width: 11px; height: 11px; border-radius: 50%; object-fit: cover; flex: none; }
+.dist-v4 .pv-fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-v4 .pv-fheart { flex: none; stroke: rgba(255, 255, 255, .62); }
+
+/* OURS, sitting inside a mock-up of somebody else's app — so it is drawn on
+   our own surface in our accent, not in the platform's greys. Anything that
+   made it blend in would be teaching the user a control the platform does not
+   have. */
+.dist-v4 .pv-ours { flex: none; display: flex; align-items: center; justify-content: center; gap: 3px; margin: 0 auto 6px; padding: 3px 4px 3px 6px; border-radius: 999px; background: var(--card); border: 1px solid var(--t-indigo); box-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+.dist-v4 .pv-ours svg { color: var(--t-indigo); flex: none; }
+.dist-v4 .pv-ours button { font: inherit; font-size: 9px; font-weight: 550; padding: 2px 7px; border: 0; border-radius: 999px; background: transparent; color: var(--content-3); cursor: pointer; }
+.dist-v4 .pv-ours button.on { background: var(--accent-soft); color: var(--t-indigo); }
 
 /* ── gallery pager ──────────────────────────────────────────────────────── */
 .dist-v4 .pv-gallery { padding: 22px 0 0; }
@@ -412,8 +440,8 @@
 .dist-v4 .pv-fail { display: flex; align-items: center; justify-content: center; gap: 6px; margin: auto; padding: 6px 9px; border-radius: 8px; font-size: 10px; line-height: 1.4; text-align: center; }
 .dist-v4 .pv-missing { background: rgba(255, 255, 255, .9); color: var(--content-3); }
 .dist-v4 .pv-fail { background: rgba(255, 255, 255, .92); color: var(--danger); }
-.dist-v4 .pv-cell .pv-missing,
-.dist-v4 .pv-cell .pv-fail { position: absolute; inset: 4px; margin: 0; }
+.dist-v4 .pv-fcover .pv-missing,
+.dist-v4 .pv-fcover .pv-fail { position: absolute; inset: 4px; margin: 0; }
 
 /* ═══ checks / more-options rows ═══ */
 .dist-v4 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 11.5px; line-height: 1.5; padding: 9px 11px; border-radius: 10px; margin-top: 8px; }
