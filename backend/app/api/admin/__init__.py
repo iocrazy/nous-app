@@ -19,6 +19,7 @@ from .credits_router import router as credits_router
 # instead. Same trap, and same fix, as ``distribution_api_router`` in
 # ``app/api/__init__.py``.
 from .distribution_inspect_router import router as distribution_inspect_api_router
+from .codex_auth_router import router as codex_auth_router
 from .jimeng_auth_router import router as jimeng_auth_router
 from .mediahub_model_router import router as mediahub_model_router
 from .monitoring_router import router as monitoring_router
@@ -141,6 +142,9 @@ admin_router.include_router(
 )
 admin_router.include_router(
     jimeng_auth_router, prefix="/jimeng", tags=["Admin - Jimeng Auth"]
+)
+admin_router.include_router(
+    codex_auth_router, prefix="/codex", tags=["Admin - Codex Auth"]
 )
 admin_router.include_router(
     ai_usage_router, prefix="/ai-usage", tags=["Admin - AI Usage"]
