@@ -388,10 +388,19 @@ async def trigger_summary_by_resource(
     )
 
     # === Dedup: reject if already processing ===
+    # Only one task_type to look for here (summary never chains through a
+    # second one), so unlike the transcribe endpoint this SELECT is complete
+    # — but it is still a check-then-insert, and the conflict branch below
+    # covers the race it cannot. ACTIVE_TASK_STATUSES mirrors migration
+    # 121's index predicate so the check and the constraint cannot drift.
     from sqlalchemy import select
 
     from app.db.session import read_scope
     from app.models import TaskTracking
+    from app.services.ai.resource_ai_status import (
+        ACTIVE_TASK_STATUSES,
+        is_active_task_conflict,
+    )
 
     async with read_scope() as session:
         _active = (
@@ -399,12 +408,16 @@ async def trigger_summary_by_resource(
                 select(TaskTracking.dbos_workflow_id)
                 .where(TaskTracking.resource_id == resource_id)
                 .where(TaskTracking.task_type == "ai_summary")
-                .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+                .where(TaskTracking.status.in_(ACTIVE_TASK_STATUSES))
                 .limit(1)
             )
         ).first()
     if _active:
-        return {"message": "Summary already in progress", "resource_id": resource_id}
+        return {
+            "message": "Summary already in progress",
+            "resource_id": resource_id,
+            "points_charged": 0,
+        }
     # === End dedup ===
 
     # === Points check — charge the resource owner's personal team ===
@@ -504,6 +517,38 @@ async def trigger_summary_by_resource(
                 "platform_id": platform_id,
             }
     except Exception as e:
+        # Same race as the transcribe endpoint: another request created the
+        # active ai_summary task between our dedup SELECT and this INSERT,
+        # and migration 121's partial unique index rejected ours. Its own
+        # comment tells callers to treat that as "already in progress" —
+        # a 500 would report failure for work that is actually running.
+        # `_orphan_task_id` is still None here (create() is what raised), so
+        # there is no task row to fail; the charge does need giving back.
+        if _orphan_task_id is None and is_active_task_conflict(e):
+            if _points_cost > 0 and _team_id:
+                try:
+                    await points_service.refund_points(
+                        team_id=_team_id,
+                        user_id=auth.user_id,
+                        amount=_points_cost,
+                        reference_type="ai_summary",
+                        reference_id=resource_id,
+                        reason="Another summary task is already active",
+                    )
+                except Exception as refund_err:
+                    logger.error(
+                        f"Failed to refund points after dedup conflict: {refund_err}"
+                    )
+            logger.info(
+                f"[ai_router] summary for resource {resource_id} already active "
+                "(unique index); returning already-in-progress"
+            )
+            return {
+                "message": "Summary already in progress",
+                "resource_id": resource_id,
+                "platform_id": platform_id,
+                "points_charged": 0,
+            }
         if _orphan_task_id:
             try:
                 from app.services.infra.unified_task_manager import get_task_manager
