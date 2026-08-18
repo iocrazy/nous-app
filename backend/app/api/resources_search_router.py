@@ -32,10 +32,18 @@ def _thumbnail_url(row: dict, resource_id: str) -> Optional[str]:
     Same ladder the frontend's ``buildThumbnailSrc`` walks and the same one
     ``serve_resource_cover`` resolves against: an explicit thumbnail, an
     explicit cover, a parsed_media backing row (cover lives there for
-    downloads), or an image whose original file *is* the cover. Returning a
-    URL is a bet that the endpoint will find something — it falls back to an
-    inline SVG placeholder on a miss, so a false positive costs a placeholder,
-    never a broken image.
+    downloads), or an image whose original file *is* the cover.
+
+    Returning a URL is a bet that the endpoint will find something, and the
+    bet can lose: ``serve_resource_cover``'s inline-SVG placeholder sits
+    behind a ``not media_id`` guard, so it is unreachable for exactly the
+    parsed_media-backed arm this function most often bets on — that arm
+    resolves ``parsed_media.cover_download_path`` against the local download
+    root with no ``sb://`` branch, and every non-null cover path in
+    production is ``sb://`` (1187/1187, measured 2026-08-17). Those requests
+    fall through to a 404. The frontend handles it with an ``onError``
+    fallback, so a false positive costs one failed image request, not a
+    broken-looking tile — but it is a 404, not a placeholder.
 
     The endpoint is intentionally unauthenticated (RECON#8) so the URL can go
     straight into ``<img src>``; the search results themselves are already
