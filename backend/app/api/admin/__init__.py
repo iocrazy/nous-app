@@ -9,6 +9,7 @@ from .audit_logs_router import router as audit_logs_router
 from .backfill_router import router as backfill_router
 from .boundary_audit_router import router as boundary_audit_router
 from .celery_router import router as celery_router
+from .codex_auth_router import router as codex_auth_router
 from .credits_router import router as credits_router
 
 # NOTE: aliased to ``..._api_router`` (not ``distribution_inspect_router``) —
@@ -141,6 +142,9 @@ admin_router.include_router(
 )
 admin_router.include_router(
     jimeng_auth_router, prefix="/jimeng", tags=["Admin - Jimeng Auth"]
+)
+admin_router.include_router(
+    codex_auth_router, prefix="/codex", tags=["Admin - Codex Auth"]
 )
 admin_router.include_router(
     ai_usage_router, prefix="/ai-usage", tags=["Admin - AI Usage"]

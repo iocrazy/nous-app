@@ -5,6 +5,7 @@ import {
 } from '@arco-design/web-react'
 import { IconPlus, IconDelete, IconSync, IconEdit } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
+import { CodexAuthCard } from './CodexAuthCard'
 import { JimengAuthCard } from './JimengAuthCard'
 
 const { Title, Text } = Typography
@@ -639,6 +640,7 @@ export function AIModelsPage() {
       </div>
 
       <JimengAuthCard />
+      <CodexAuthCard />
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spin /></div>
