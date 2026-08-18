@@ -30,6 +30,13 @@ import {
   useGlobalChatStore,
 } from '../stores/globalChatStore';
 
+// The app's TopBar is 48px tall (h-12) at z-50 — ABOVE this widget's z-40.
+// If the title bar slides under it, every pointerdown lands on the TopBar
+// and the window can never be grabbed again (reported twice as "the chat
+// window can't be moved"). Keep the top edge out of that band everywhere
+// the rect is computed: fit(), drag, and north-edge resize.
+const TOP_CHROME_PX = 56; // 48px TopBar + 8px breathing room
+
 type ResizeMode = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 export function FloatingChatWidget(): React.ReactElement | null {
@@ -69,9 +76,9 @@ export function FloatingChatWidget(): React.ReactElement | null {
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       const w = clamp(s.width, CHAT_MIN_W, Math.max(CHAT_MIN_W, vw - 16));
-      const h = clamp(s.height, CHAT_MIN_H, Math.max(CHAT_MIN_H, vh - 48));
+      const h = clamp(s.height, CHAT_MIN_H, Math.max(CHAT_MIN_H, vh - TOP_CHROME_PX - 8));
       const r = clamp(s.right, 8, Math.max(8, vw - w - 8));
-      const b = clamp(s.bottom, 8, Math.max(8, vh - h - 8));
+      const b = clamp(s.bottom, 8, Math.max(8, vh - h - TOP_CHROME_PX));
       if (w !== s.width || h !== s.height || r !== s.right || b !== s.bottom) {
         setRect({ width: w, height: h, right: r, bottom: b });
       }
@@ -128,7 +135,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
         if (!d) return;
         const { width: w, height: h } = useGlobalChatStore.getState();
         const maxRight = window.innerWidth - w - 8;
-        const maxBottom = window.innerHeight - h - 8;
+        const maxBottom = window.innerHeight - h - TOP_CHROME_PX;
         setRect({
           right: clamp(d.startRight - (ev.clientX - d.startX), 8, Math.max(8, maxRight)),
           bottom: clamp(d.startBottom - (ev.clientY - d.startY), 8, Math.max(8, maxBottom)),
@@ -185,7 +192,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
           right: number;
           bottom: number;
         }> = {};
-        const maxH = window.innerHeight - 48;
+        const maxH = window.innerHeight - TOP_CHROME_PX - 8;
         if (r.mode.includes('w')) {
           // Left edge follows the pointer; right edge anchored. Cap width
           // so the left edge can't be pushed past the viewport's left side.
@@ -201,7 +208,10 @@ export function FloatingChatWidget(): React.ReactElement | null {
           next.right = r.startRight - (w - r.startW);
         }
         if (r.mode.includes('n')) {
-          next.height = clamp(r.startH - dy, CHAT_MIN_H, maxH);
+          // Top edge follows the pointer; bottom anchored — so the height
+          // cap depends on where the bottom sits, not just the viewport.
+          const capN = window.innerHeight - r.startBottom - TOP_CHROME_PX;
+          next.height = clamp(r.startH - dy, CHAT_MIN_H, Math.max(CHAT_MIN_H, capN));
         }
         if (r.mode.includes('s')) {
           // Bottom edge follows the pointer; TOP edge anchored.
