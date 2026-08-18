@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, ChevronLeft,
-  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Play, Plus, Radio,
+  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Music, Pause, Play, Plus, Radio,
   RefreshCw, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
@@ -105,6 +105,33 @@ const formatViewCount = (n: number, lang: string): string => {
 /** Em dash for "we do not have this value". One constant so the fallback is
  *  identical everywhere and greppable. */
 const NO_VALUE = '—';
+
+/**
+ * The URL this track can actually be auditioned from, or null.
+ *
+ * Two separate reasons a row has no preview, and BOTH have to read as "no
+ * preview" rather than as a control that does nothing:
+ *
+ *  - `play_url` is empty. The backend documents this as the norm, not the
+ *    exception ("上游白送的，缺失是常态") — the upstream catalogue simply does
+ *    not carry an audition file for every row.
+ *  - `play_url` is `http://`. The backend's `_first_url` accepts anything
+ *    starting with `http`, and app.nous.ink is https — a mixed-content URL is
+ *    blocked by the browser BEFORE any error event we could show reaches us.
+ *    A play button over one of those is the exact shape this repo keeps
+ *    banning: a control that can only ever no-op.
+ *
+ * [Measured 2026-08-17] the real catalogue URLs are plain `https://` objects
+ * on the platform's music CDN with no signature or expiry parameters, served
+ * `206 audio/mpeg` with `accept-ranges: bytes` and `access-control-allow-origin: *`,
+ * identically with and without a `Referer` — so there is no hotlink guard to
+ * work around and nothing to refresh. That probe is why this feature exists at
+ * all; it was checked before a single line of the control was written.
+ */
+export function musicPreviewUrl(track: { play_url?: string | null }): string | null {
+  const raw = (track.play_url ?? '').trim();
+  return raw.startsWith('https://') ? raw : null;
+}
 
 /** `154` → `2:34`; `3616` → `1:00:16`. Null/negative → em dash. */
 const formatDuration = (seconds: number | null | undefined): string => {
@@ -400,6 +427,97 @@ export const PublishPage: React.FC = () => {
   /** Whose session the catalogue was read with — shown, never inferred. */
   const [musicIdentity, setMusicIdentity] = useState<MusicBrowseIdentity | null>(null);
   const musicSeq = useRef(0);
+  /**
+   * Audition state. `musicPlayingId` is the ONE track sounding right now — a
+   * single <audio> element enforces that structurally: starting a second row
+   * cannot leave the first one playing, because there is no second element to
+   * play it on. `musicPreviewFailed` holds the id whose playback we could not
+   * start or could not load — pressing play and getting silence with no
+   * explanation is exactly the silent no-op this repo forbids.
+   */
+  const [musicPlayingId, setMusicPlayingId] = useState<string | null>(null);
+  const [musicPreviewFailed, setMusicPreviewFailed] = useState<string | null>(null);
+  /**
+   * The <audio> node, kept in a ref that is NEVER written back to null.
+   *
+   * React detaches refs before passive-effect cleanups run, so a cleanup that
+   * read `ref.current` on unmount would find null and pause nothing — the
+   * element would go on sounding with its panel gone from the screen. Holding
+   * the (possibly detached) node is harmless; pausing it is the entire point.
+   */
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const attachMusicAudio = useCallback((el: HTMLAudioElement | null) => {
+    if (el) musicAudioRef.current = el;
+  }, []);
+  /** Mirror of `musicPlayingId` readable from callbacks without re-binding them. */
+  const musicPlayingIdRef = useRef<string | null>(null);
+
+  const stopMusicPreview = useCallback(() => {
+    // Nothing sounding, nothing to stop. The guard is not just tidiness: this
+    // runs on mount and on every keystroke in the search box, and touching a
+    // media element that never played is a call with no meaning behind it.
+    if (musicPlayingIdRef.current === null) return;
+    musicAudioRef.current?.pause();
+    musicPlayingIdRef.current = null;
+    setMusicPlayingId(null);
+  }, []);
+
+  /**
+   * Start (or stop) the audition for a row.
+   *
+   * `play()` returns a promise that REJECTS on the browser's autoplay policy
+   * and on a decode failure, and a rejected promise nobody handles is a click
+   * that produces nothing at all — so it is caught and turned into the same
+   * visible note the <audio> `error` event produces.
+   */
+  const toggleMusicPreview = useCallback((track: MusicTrack) => {
+    const el = musicAudioRef.current;
+    const url = musicPreviewUrl(track);
+    if (!el || !url) return;
+    if (musicPlayingIdRef.current === track.music_id) {
+      stopMusicPreview();
+      return;
+    }
+    el.pause();
+    setMusicPreviewFailed(null);
+    if (el.src !== url) el.src = url;
+    try {
+      el.currentTime = 0;
+    } catch (err) {
+      // Seeking before any metadata exists throws in some engines; the fresh
+      // `src` above already starts at zero, so this is not worth failing on.
+      console.warn('distribution: could not rewind music preview', err);
+    }
+    musicPlayingIdRef.current = track.music_id;
+    setMusicPlayingId(track.music_id);
+    const started = el.play();
+    if (started && typeof started.catch === 'function') {
+      started.catch((err: unknown) => {
+        console.error('distribution: music preview failed to start', err);
+        if (musicPlayingIdRef.current !== track.music_id) return;
+        musicPlayingIdRef.current = null;
+        setMusicPlayingId(null);
+        setMusicPreviewFailed(track.music_id);
+      });
+    }
+  }, [stopMusicPreview]);
+
+  /**
+   * Sound whose source the user can no longer see is sound the user cannot
+   * stop. Closing the panel, retyping the search and a new result set each
+   * remove the row whose play button is the only control over it — so each one
+   * ends the audition. Unmount is covered by the cleanup below, which is why
+   * the element ref above is never nulled.
+   */
+  useEffect(() => {
+    stopMusicPreview();
+    setMusicPreviewFailed(null);
+  }, [musicPanelOpen, musicQuery, musicResults, stopMusicPreview]);
+
+  useEffect(() => () => {
+    if (musicPlayingIdRef.current !== null) musicAudioRef.current?.pause();
+  }, []);
+
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
   // Not user-selectable: the backend routes per account (see the Channel type).
@@ -2198,6 +2316,33 @@ export const PublishPage: React.FC = () => {
                 — the same capability read as before. */}
             {musicSupported && (
               <div className="opt-row opt-row-stack">
+                {/* The ONE audition element. It lives out here, with the row
+                    rather than inside the panel, for two reasons: a single
+                    element is what makes "only one track at a time" structural
+                    rather than bookkeeping, and closing the panel has to leave
+                    something behind that can still be paused. `preload="none"`
+                    so opening the panel costs no bytes until a play is asked
+                    for. */}
+                <audio
+                  ref={attachMusicAudio}
+                  data-testid="music-preview-audio"
+                  preload="none"
+                  style={{ display: 'none' }}
+                  onEnded={() => {
+                    musicPlayingIdRef.current = null;
+                    setMusicPlayingId(null);
+                  }}
+                  onError={() => {
+                    // The file did not load. Say so on the row that was
+                    // pressed — a play button that goes quiet and stays quiet
+                    // tells the user nothing about whose fault it was.
+                    const failed = musicPlayingIdRef.current;
+                    console.error('distribution: music preview could not be loaded');
+                    musicPlayingIdRef.current = null;
+                    setMusicPlayingId(null);
+                    if (failed) setMusicPreviewFailed(failed);
+                  }}
+                />
                 <div className="opt-row-head">
                   <Music />
                   <span className="ol">{t('distribution.publish.music', 'Music')}</span>
@@ -2329,48 +2474,122 @@ export const PublishPage: React.FC = () => {
                     )}
                     {musicState === 'ready' && musicResults.length > 0 && (
                       <div className="music-results" role="listbox">
-                        {musicResults.map((track) => (
-                          <button
-                            key={track.music_id}
-                            type="button"
-                            role="option"
-                            aria-selected={musicTrack?.music_id === track.music_id}
-                            className={`music-row ${musicTrack?.music_id === track.music_id ? 'sel' : ''}`}
-                            /* The id is the identity — carried on the node so a
-                               test (and a human in devtools) can see WHICH row
-                               was taken, not merely that a row with that title
-                               was. */
-                            data-music-id={track.music_id}
-                            onClick={() => {
-                              setMusicTrack(track);
-                              // The keyword the browser will type into the
-                              // platform's own dialog. Derived from the track,
-                              // never typed independently: two sources of truth
-                              // here means the search cannot find the pick.
-                              setMusicName(track.title);
-                              setMusicPanelOpen(false);
-                            }}
-                          >
-                            {track.cover_url ? (
-                              <img className="mr-cover" src={track.cover_url} alt="" loading="lazy" />
-                            ) : (
-                              <span className="mr-cover mr-cover-empty" aria-hidden="true" />
-                            )}
-                            <span className="mr-main">
-                              <span className="mr-title">{track.title}</span>
-                              <span className="mr-meta">
-                                {track.author || NO_VALUE}
-                                {' · '}
-                                {formatDuration(track.duration)}
+                        {musicResults.map((track) => {
+                          const previewUrl = musicPreviewUrl(track);
+                          const playing = musicPlayingId === track.music_id;
+                          const pick = () => {
+                            setMusicTrack(track);
+                            // The keyword the browser will type into the
+                            // platform's own dialog. Derived from the track,
+                            // never typed independently: two sources of truth
+                            // here means the search cannot find the pick.
+                            setMusicName(track.title);
+                            setMusicPanelOpen(false);
+                          };
+                          return (
+                            /* A div, not a button. The row now holds a second
+                               control (audition), and a button inside a button
+                               is invalid HTML that browsers resolve by
+                               dropping one of them. `role="option"` +
+                               tabIndex + the key handler keep exactly the
+                               keyboard and a11y contract the <button> had. */
+                            <div
+                              key={track.music_id}
+                              role="option"
+                              tabIndex={0}
+                              aria-selected={musicTrack?.music_id === track.music_id}
+                              className={`music-row ${musicTrack?.music_id === track.music_id ? 'sel' : ''}`}
+                              /* The id is the identity — carried on the node so
+                                 a test (and a human in devtools) can see WHICH
+                                 row was taken, not merely that a row with that
+                                 title was. */
+                              data-music-id={track.music_id}
+                              onClick={pick}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  pick();
+                                }
+                              }}
+                            >
+                              {track.cover_url ? (
+                                <img className="mr-cover" src={track.cover_url} alt="" loading="lazy" />
+                              ) : (
+                                <span className="mr-cover mr-cover-empty" aria-hidden="true" />
+                              )}
+                              <span className="mr-main">
+                                <span className="mr-title">{track.title}</span>
+                                <span className="mr-meta">
+                                  {track.author || NO_VALUE}
+                                  {' · '}
+                                  {formatDuration(track.duration)}
+                                </span>
                               </span>
-                            </span>
-                            <span className="mr-uses">
-                              <b>{formatViewCount(track.user_count, i18n.language)}</b>
-                              {' '}
-                              {t('distribution.publish.musicUses', 'uses')}
-                            </span>
-                          </button>
-                        ))}
+                              <span className="mr-uses">
+                                <b>{formatViewCount(track.user_count, i18n.language)}</b>
+                                {' '}
+                                {t('distribution.publish.musicUses', 'uses')}
+                              </span>
+                              {/* Two outcomes, never one dead button. A row the
+                                  catalogue gave no playable file for says so
+                                  and is not pressable; only a row we can
+                                  actually sound gets a control. */}
+                              {previewUrl ? (
+                                <button
+                                  type="button"
+                                  className={`mr-preview ${playing ? 'on' : ''}`}
+                                  data-testid={`music-preview-${track.music_id}`}
+                                  aria-pressed={playing}
+                                  aria-label={
+                                    playing
+                                      ? t('distribution.publish.musicPreviewStop', 'Stop preview')
+                                      : t('distribution.publish.musicPreviewPlay', 'Preview track')
+                                  }
+                                  title={
+                                    playing
+                                      ? t('distribution.publish.musicPreviewStop', 'Stop preview')
+                                      : t('distribution.publish.musicPreviewPlay', 'Preview track')
+                                  }
+                                  onClick={(e) => {
+                                    // The row behind this selects the track;
+                                    // auditioning one is not choosing it.
+                                    e.stopPropagation();
+                                    toggleMusicPreview(track);
+                                  }}
+                                >
+                                  {playing ? <Pause /> : <Play />}
+                                </button>
+                              ) : (
+                                <span
+                                  className="mr-preview mr-preview-none"
+                                  data-testid={`music-preview-none-${track.music_id}`}
+                                  title={t(
+                                    'distribution.publish.musicPreviewUnavailable',
+                                    'No preview for this track',
+                                  )}
+                                >
+                                  {t('distribution.publish.musicPreviewUnavailableShort', 'No preview')}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* A preview that refused to play says so. Silence with no
+                        note is indistinguishable from a track that is simply
+                        quiet at the start, and leaves the user pressing again. */}
+                    {musicPreviewFailed && (
+                      <div
+                        className="music-note music-error"
+                        role="alert"
+                        data-testid="music-preview-error"
+                      >
+                        <AlertCircle />
+                        {t(
+                          'distribution.publish.musicPreviewFailed',
+                          'That preview would not play — the platform\u2019s file did not load. Picking the track still works.',
+                        )}
                       </div>
                     )}
                   </div>

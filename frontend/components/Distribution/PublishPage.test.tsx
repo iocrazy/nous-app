@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { CoverFramesMeta } from '../../types';
@@ -33,12 +33,25 @@ const {
   // into one numeric id would prove something the real payload never does
   // (CLAUDE.md: boundary mocks copy the wire shape).
   // `duration` is SECONDS — measured 49 / 221 / 323 / 267 in one response.
+  //
+  // `play_url` is the audition file, and the fixture carries BOTH of its real
+  // states because the panel renders a different thing for each and a fixture
+  // that only had one would let "renders nothing either way" pass as a result.
+  // The two URLs are real captured wire values (see `test/parse.json` and
+  // `test/aweme-68.json` in this repo) — plain https objects on the platform's
+  // music CDN with no signature or expiry parameters, which is exactly why an
+  // audition is possible at all. The third row has none: the backend documents
+  // a missing `play_url` as the norm, not the exception.
   searchMusic: vi.fn().mockResolvedValue({
     tracks: [
       { music_id: '6953836671917951012', title: 'Dream It Possible', author: 'Delacey',
-        duration: 221, user_count: 30025, cover_url: '', play_url: '' },
+        duration: 221, user_count: 30025, cover_url: '',
+        play_url: 'https://sf3-cdn-tos.douyinstatic.com/obj/ies-music/6910889805266504461.mp3' },
       { music_id: '7673728791198320674', title: 'Dream It Possible', author: 'Someone Else',
-        duration: 195, user_count: 9, cover_url: '', play_url: '' },
+        duration: 195, user_count: 9, cover_url: '',
+        play_url: 'https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7609946018960050970.mp3' },
+      { music_id: '7496840954545048329', title: 'Quiet Morning', author: 'No Preview',
+        duration: 132, user_count: 4, cover_url: '', play_url: '' },
     ],
     cursor: 20,
     has_more: true,
@@ -609,7 +622,38 @@ describe('PublishPage', () => {
 
 // ── Douyin form fields the creator page has and we lacked (mig 407) ──
 
-import { scheduleProblem } from './PublishPage';
+import { musicPreviewUrl, scheduleProblem } from './PublishPage';
+
+describe('musicPreviewUrl', () => {
+  // The panel tests cover the two shapes the catalogue is MEASURED to return
+  // (an https object, or nothing at all). This one covers the shape the
+  // backend's `_first_url` would also let through — it accepts anything
+  // starting with `http` — and that the panel fixture therefore cannot show
+  // without inventing wire data we have never seen.
+  it('refuses an http:// audition, which the browser would block before we saw an error', () => {
+    // app.nous.ink is https. A mixed-content media URL is blocked by the
+    // browser BEFORE any `error` event reaches the page, so a play button over
+    // one could only ever no-op — worse than no button, because it looks like
+    // it should work.
+    expect(musicPreviewUrl({ play_url: 'http://sf3-cdn-tos.example.com/obj/ies-music/1.mp3' }))
+      .toBeNull();
+  });
+
+  it('treats missing, blank and whitespace-only alike — the documented common case', () => {
+    expect(musicPreviewUrl({ play_url: '' })).toBeNull();
+    expect(musicPreviewUrl({ play_url: '   ' })).toBeNull();
+    expect(musicPreviewUrl({ play_url: null })).toBeNull();
+    expect(musicPreviewUrl({})).toBeNull();
+  });
+
+  it('passes an https URL through untouched — no rewriting, no proxying', () => {
+    const real = 'https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7609946018960050970.mp3';
+    expect(musicPreviewUrl({ play_url: real })).toBe(real);
+    // Trimmed, because the value is upstream text and a stray newline would
+    // otherwise produce a src the CDN answers 404 for.
+    expect(musicPreviewUrl({ play_url: `  ${real}\n` })).toBe(real);
+  });
+});
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -976,6 +1020,197 @@ describe('PublishPage form fields', () => {
     expect(screen.queryByText(/connected by QR code/i)).toBeNull();
     fireEvent.click(screen.getByText('OAuth One'));
     expect(screen.getByText(/connected by QR code/i)).toBeInTheDocument();
+  });
+
+  // ==================================================================
+  // Auditioning a track.
+  //
+  // `play_url` has been on the wire since the panel shipped and nothing read
+  // it, so "can I hear it first?" had no answer. Every test below drives the
+  // real panel — a hook tested on its own would pass just as happily wired to
+  // nothing.
+  //
+  // jsdom implements neither `play()` nor `pause()`, so both are spied. That
+  // makes "was it asked to play" and "was it asked to stop" the observable
+  // facts, and each test clears the spy immediately before the action it is
+  // about so a pause from somewhere earlier cannot stand in for the one being
+  // asserted.
+  // ==================================================================
+  describe('music audition', () => {
+    const PREVIEWABLE = '6953836671917951012';
+    const OTHER = '7673728791198320674';
+    const NO_PREVIEW = '7496840954545048329';
+    const URL_A = 'https://sf3-cdn-tos.douyinstatic.com/obj/ies-music/6910889805266504461.mp3';
+    const URL_B = 'https://sf6-cdn-tos.douyinstatic.com/obj/ies-music/7609946018960050970.mp3';
+
+    let playSpy: ReturnType<typeof vi.spyOn>;
+    let pauseSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      playSpy = vi
+        .spyOn(HTMLMediaElement.prototype, 'play')
+        .mockImplementation(() => Promise.resolve());
+      pauseSpy = vi
+        .spyOn(HTMLMediaElement.prototype, 'pause')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      // Unmount BEFORE the stubs come off. Testing Library's auto-cleanup runs
+      // after this hook, and the unmount pauses a still-playing element — with
+      // the spy already restored that reaches jsdom's unimplemented `pause()`
+      // and prints a page of noise that has nothing to do with any assertion.
+      cleanup();
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+    });
+
+    const audio = (): HTMLAudioElement =>
+      screen.getByTestId('music-preview-audio') as HTMLAudioElement;
+
+    const openPanel = async () => {
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+      await pickContentAndAccount();
+      return openMusicAndSearch();
+    };
+
+    it('offers a control only on rows the catalogue can actually play', async () => {
+      // Both halves matter. The "no button" half alone would pass on a page
+      // with no audition at all — the pressable one on the row that HAS a
+      // file is what makes this test about the feature.
+      await openPanel();
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`).tagName).toBe('BUTTON');
+      expect(screen.getByTestId(`music-preview-${OTHER}`).tagName).toBe('BUTTON');
+      expect(screen.queryByTestId(`music-preview-${NO_PREVIEW}`)).toBeNull();
+      // …and the row without one says so, rather than going silently bare.
+      const none = screen.getByTestId(`music-preview-none-${NO_PREVIEW}`);
+      expect(none.tagName).not.toBe('BUTTON');
+      expect(none).toHaveTextContent(/no preview/i);
+    });
+
+    it('plays the URL of the row that was pressed', async () => {
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${OTHER}`));
+      // The SECOND row's URL, so "it played something" cannot pass for "it
+      // played the right thing" — the same guard the id-not-title test uses.
+      expect(audio().src).toBe(URL_B);
+      expect(playSpy).toHaveBeenCalled();
+      expect(screen.getByTestId(`music-preview-${OTHER}`)).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('stops the first track when a second one is started', async () => {
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      expect(audio().src).toBe(URL_A);
+
+      pauseSpy.mockClear();
+      fireEvent.click(screen.getByTestId(`music-preview-${OTHER}`));
+      expect(pauseSpy).toHaveBeenCalled();
+      expect(audio().src).toBe(URL_B);
+      // Exactly one row reads as sounding. Two elements (or an untracked id)
+      // would leave both pressed, which is the audible bug in DOM form.
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByTestId(`music-preview-${OTHER}`)).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('pressing the control again stops it', async () => {
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      pauseSpy.mockClear();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      expect(pauseSpy).toHaveBeenCalled();
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('auditioning a track is not choosing it', async () => {
+      // The control sits inside the row that selects, so without a stopped
+      // click the play button would pick the song AND close the panel — a
+      // press that does something the user did not ask for.
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      expect(screen.getByTestId('music-panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('music-chosen')).toBeNull();
+    });
+
+    it('stops when the panel is closed', async () => {
+      // Sound the user can no longer see the source of is sound the user
+      // cannot stop.
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      pauseSpy.mockClear();
+      fireEvent.click(screen.getByTestId('music-panel-toggle'));
+      expect(screen.queryByTestId('music-panel')).toBeNull();
+      expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('stops when the search is retyped', async () => {
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      pauseSpy.mockClear();
+      fireEvent.change(screen.getByLabelText(/^Search music$/i), {
+        target: { value: 'something else' },
+      });
+      expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('stops when the page unmounts', async () => {
+      // The one that pins the never-nulled ref: React detaches refs before
+      // passive cleanups run, so a cleanup reading a plain ref finds null and
+      // pauses nothing — and the audio outlives the page.
+      render(<MemoryRouter><PublishPage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+      await pickContentAndAccount();
+      await openMusicAndSearch();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+
+      pauseSpy.mockClear();
+      cleanup();
+      expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('says so when the file will not load, instead of going quiet', async () => {
+      await openPanel();
+      fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      expect(screen.queryByTestId('music-preview-error')).toBeNull();
+
+      fireEvent.error(audio());
+      const note = await screen.findByTestId('music-preview-error');
+      expect(note).toHaveTextContent(/would not play/i);
+      expect(note).toHaveAttribute('role', 'alert');
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('says so when play() itself is refused', async () => {
+      // Autoplay policy and decode failures reject the promise rather than
+      // firing `error`. An unhandled rejection is a press that produces
+      // nothing at all.
+      playSpy.mockImplementation(() => Promise.reject(new Error('NotAllowedError')));
+      await openPanel();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(`music-preview-${PREVIEWABLE}`));
+      });
+      const note = await screen.findByTestId('music-preview-error');
+      expect(note).toHaveTextContent(/would not play/i);
+      expect(screen.getByTestId(`music-preview-${PREVIEWABLE}`)).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('picking a track still works with the control in the row', async () => {
+      // The row became a div to hold a second control; this is the check that
+      // it did not stop being selectable on the way.
+      const rows = await openPanel();
+      fireEvent.click(rows[1]);
+      fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+      await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+      expect(createPublishTask.mock.calls.at(-1)?.[0].music_ref.music_id).toBe(OTHER);
+    });
+
+    it('a row is still selectable from the keyboard', async () => {
+      const rows = await openPanel();
+      fireEvent.keyDown(rows[1], { key: 'Enter' });
+      expect(screen.getByTestId('music-chosen')).toHaveTextContent('Dream It Possible');
+      expect(screen.queryByTestId('music-panel')).toBeNull();
+    });
   });
 });
 
