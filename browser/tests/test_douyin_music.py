@@ -456,6 +456,25 @@ def test_the_two_music_probes_share_one_anchor():
     assert dp._MUSIC_READY_JS.count("人使用") == 1
 
 
+def test_the_python_usage_reader_matches_the_same_copy_the_probes_anchor_on():
+    """**The guard**, and the third party to that same agreement.
+
+    `parse_music_usage` reads the count out of the very line the probes select
+    rows BY. A hand-rolled second regex on the Python side would drift exactly
+    like a second copy in the JS does — except worse, because the failure is
+    silent and inverted: every row would still be found, and every row's count
+    would render `?`, which reads as "the platform stopped publishing usage
+    counts" rather than as "our parser is stale".
+    """
+    assert dp.MUSIC_USAGE_PATTERN in dp._MUSIC_USAGE_JS
+    assert dp._MUSIC_USAGE_RE.pattern == dp.MUSIC_USAGE_PATTERN
+    # Not merely equal strings: the SAME object, so a second literal cannot be
+    # slipped in beside it and stay green.
+    assert dp._MUSIC_USAGE_RE.pattern is dp.MUSIC_USAGE_PATTERN
+    # And the one pattern really does read a real line, both ways.
+    assert dp.parse_music_usage("1.2万人使用") == "1.2万"
+
+
 def test_the_shipped_music_wait_is_not_the_shrunk_test_value():
     """The fixture above shrinks these to 60 ms/1 ms. Pinned separately so the
     shrink cannot be the thing that ships — and bounded well under the

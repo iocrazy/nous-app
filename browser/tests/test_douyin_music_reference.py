@@ -58,6 +58,10 @@ REF = {
     "user_count": 30023,
 }
 
+# Captured before `fast_polling` shrinks it, so the length budget below is
+# charged the wait a real publish can print, not the 60 ms this file runs with.
+SHIPPED_MUSIC_READY_TIMEOUT_MS = dp.MUSIC_READY_TIMEOUT_MS
+
 
 @pytest.fixture(autouse=True)
 def fast_polling(monkeypatch):
@@ -71,11 +75,18 @@ def fast_polling(monkeypatch):
     get_settings.cache_clear()
 
 
-def rows(*entries: tuple[str, str]) -> list[dp.MusicRow]:
-    """`(title, second line)` pairs → parsed rows, as the probe would deliver."""
+def rows(*entries: tuple[str, ...]) -> list[dp.MusicRow]:
+    """`(title, second line[, usage line])` → parsed rows, as the probe delivers.
+
+    The usage line is the OPTIONAL third element and defaults to `""` — "this
+    row showed no readable count" — never to a stand-in number. A default like
+    `"0人使用"` would make every row of every fixture carry the same count, and
+    "the counts are indistinguishable" would then be a property of this helper
+    rather than of the code under test.
+    """
     return [
-        dp.parse_music_row(index, name, meta)
-        for index, (name, meta) in enumerate(entries)
+        dp.parse_music_row(index, entry[0], entry[1], entry[2] if len(entry) > 2 else "")
+        for index, entry in enumerate(entries)
     ]
 
 
@@ -317,7 +328,11 @@ def music_page(result_rows: tuple[tuple[str, str], ...]) -> FakePage:
         row_clicked = any(
             selector.startswith(f"[{dp.MUSIC_ROW_ATTRIBUTE}=") for selector in pg.clicks
         )
-        titles = {name for name, _ in result_rows}
+        # Indexed, not unpacked: a row may carry a third element (its 「N人使用」
+        # line). Unpacking raises inside `_music_mentions`, which swallows it
+        # and returns 0 — i.e. the fixture would fail the read-back for a
+        # reason that has nothing to do with the code under test.
+        titles = {entry[0] for entry in result_rows}
         return 1 if row_clicked and needle in titles else 0
 
     page.music_mentions = mentions
@@ -505,6 +520,323 @@ async def test_the_diagnostic_changes_no_verdict():
     assert result["music"] == "applied"
     assert result["music_match"] == "exact"
     assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
+
+
+# --- the ambiguity's usage counts -------------------------------------------
+#
+# 2026-08-17, production: a refusal came back reading
+#
+#   [music_ambiguous] 4 results are indistinguishable … [rows=20, saw: 未来 | 未来
+#   | 未来 ready=results/1617ms anchors=20/20 fresh=20 leaves=452/440 …]
+#
+# Everything in that line is true and none of it moves the problem: on an
+# ambiguity the titles are identical BY DEFINITION, so the sample quoted the one
+# axis that cannot ever separate the rows. The open question — is the usage
+# count a usable fourth dimension? — was unanswerable from the failure, and the
+# track in question showed `user_count: 0`, so it is not even a rare case.
+#
+# These pin that the next such failure answers it by itself. ⚠️ They pin
+# EVIDENCE only: no test below asserts that a differing usage count disambiguates
+# anything, because that judge has not been proven and clicking on an unproven
+# judge is the exact move this whole path exists to refuse.
+
+
+def test_a_usage_count_is_kept_as_the_platform_wrote_it():
+    assert dp.parse_music_usage("30023人使用") == "30023"
+    assert dp.parse_music_usage("1.2万人使用") == "1.2万"
+    assert dp.parse_music_usage("3亿人使用") == "3亿"
+    # Whitespace between the number and its unit is the platform's, not ours.
+    assert dp.parse_music_usage("3 万人使用") == "3万"
+
+
+def test_an_unreadable_count_is_not_the_count_zero():
+    """**The guard**, and the one that matters most on this field: 「0人使用」 is
+    a real catalogue value — the track behind the production refusal had exactly
+    that — so a row we could not read must not land on the same rendering."""
+    assert dp.parse_music_usage("0人使用") == "0"
+    assert dp.parse_music_usage("") is None
+    assert dp.parse_music_usage(None) is None
+    assert dp.parse_music_usage("人气很高") is None
+
+    unread = dp.describe_music_usage(rows(("未来", "", "")), ref())
+    zero = dp.describe_music_usage(rows(("未来", "", "0人使用")), ref())
+    assert unread != zero
+    assert "uses=?" in unread
+    assert "uses=0" in zero
+
+
+def test_counts_that_differ_and_counts_that_agree_do_not_render_alike():
+    """**The guard against this batch proving nothing.**
+
+    The whole point of the clause is to separate two futures — "usage is a real
+    fourth dimension" from "these rows are identical on it too" — so a fixture
+    where both render the same string would make every assertion below pass
+    while answering nothing. Both shapes are built here, and their renderings
+    are asserted DIFFERENT.
+    """
+    distinct = dp.describe_music_usage(
+        rows(
+            ("未来", "", "0人使用"),
+            ("未来", "", "31人使用"),
+            ("未来", "", "1.2万人使用"),
+        ),
+        ref(user_count=0),
+    )
+    identical = dp.describe_music_usage(
+        rows(
+            ("未来", "", "0人使用"),
+            ("未来", "", "0人使用"),
+            ("未来", "", "0人使用"),
+        ),
+        ref(user_count=0),
+    )
+
+    assert distinct != identical
+    assert distinct == "uses=0|31|1.2万 want=0"
+    assert identical == "uses=0|0|0 want=0"
+    # And each is readable as its own answer without the other next to it.
+    assert len(set(distinct.split("uses=")[1].split(" ")[0].split("|"))) == 3
+    assert len(set(identical.split("uses=")[1].split(" ")[0].split("|"))) == 1
+
+
+def test_the_count_we_expected_is_shown_and_zero_is_not_unknown():
+    """`want=` is what the panel stored at pick time. `0` and "the panel stored
+    none" are different facts, and on this exact track the real value WAS 0 —
+    rendering the absence as `0` would fabricate a match against the rows."""
+    picked_at_zero = dp.describe_music_usage(rows(("未来", "", "0人使用")), ref(user_count=0))
+    never_stored = dp.describe_music_usage(
+        rows(("未来", "", "0人使用")), dp.MusicReference(music_id="1", music_name="未来")
+    )
+
+    assert picked_at_zero.endswith("want=0")
+    assert never_stored.endswith("want=?")
+    assert picked_at_zero != never_stored
+    # A typed name has no reference at all, and that is also `?`, never `0`.
+    assert dp.describe_music_usage(rows(("未来", "", "0人使用")), None).endswith("want=?")
+
+
+def test_the_wire_keeps_a_stored_zero_apart_from_a_missing_one():
+    """**The guard on the boundary**, and it was missing on the first pass: the
+    test above built its `MusicReference` by hand, so `read_music_reference`
+    could have collapsed `absent` into `0` (`int(raw or 0)` — the obvious way to
+    write it) and everything stayed green.
+
+    `user_count: 0` is what the panel really stored for the track behind the
+    2026-08-17 refusal, so a reader that renders "the panel stored nothing" as
+    `want=0` would have the diagnostic assert a match against every row reading
+    `uses=0` — a fabricated agreement, in the one field added to detect one.
+    """
+    stored_zero = dp.read_music_reference({**REF, "user_count": 0})
+    absent = dp.read_music_reference({k: v for k, v in REF.items() if k != "user_count"})
+    unparseable = dp.read_music_reference({**REF, "user_count": "lots"})
+    assert stored_zero is not None and absent is not None and unparseable is not None
+
+    assert stored_zero.user_count == 0
+    assert absent.user_count is None
+    assert unparseable.user_count is None
+
+    candidates = rows(("起风了", "", "0人使用"))
+    assert dp.describe_music_usage(candidates, stored_zero).endswith("want=0")
+    assert dp.describe_music_usage(candidates, absent).endswith("want=?")
+
+
+def test_the_usage_clause_is_bounded_in_number_and_length():
+    """Same reason the titles are bounded: this lands in
+    `publish_task_accounts.error_message`, which the caller caps at 500 chars.
+    A truncated list also says so — "all of them agree" read off a silent sample
+    of a wider set would be the wrong conclusion drawn confidently."""
+    many = rows(*[("未来", "", "1234567890人使用")] * 10)
+    clause = dp.describe_music_usage(many, ref(user_count=30023))
+
+    assert clause.count("|") == dp.MUSIC_SAMPLE_USAGE  # 3 separators + the "+N"
+    assert f"+{10 - dp.MUSIC_SAMPLE_USAGE}" in clause
+    assert len(clause) < 60
+    # A clipped count says it was clipped. `1234567890` cut silently to
+    # `12345` is still a legible number, and four of those compared side by
+    # side would be a comparison of prefixes wearing the look of a comparison
+    # of counts — the one reading this clause exists to support.
+    assert "12345…" in clause
+    assert "|12345|" not in clause
+    # A count that fits is printed whole, no decoration.
+    assert "31" == dp.describe_music_usage(rows(("未来", "", "31人使用")), None).split("uses=")[1].split(" ")[0]
+
+
+def test_the_row_probe_hands_the_usage_line_back_out_of_the_page():
+    """**The guard on the one seam no fixture can drive.**
+
+    `FakePage` has no JS engine — it answers the probe with a dict of its own —
+    so a probe that stopped *returning* `usage` would leave every test here
+    green while every production row rendered `?`. And `?` is the reading that
+    blames the platform, so the bug would arrive disguised as its own answer.
+
+    Structural, therefore: the value has to survive into the RETURNED mapping,
+    not merely be collected into the intermediate object that never leaves the
+    page.
+    """
+    body = dp._MUSIC_ROWS_JS
+    collected, _, returned = body.partition("return rows.map(")
+    assert "usage:" in collected, "the probe never reads the anchor's own text"
+    assert "usage" in returned, "the probe reads the usage line and drops it"
+
+
+def test_the_reader_survives_a_probe_that_answers_without_a_usage_key():
+    """An older browser tab still running the previous bundle answers in the
+    previous shape. That is a row we could not read a count for — `None` — and
+    emphatically not a row with zero users."""
+    assert dp.parse_music_row(0, "起风了", "吴青峰·05:25").usage is None
+    assert dp.parse_music_row(0, "起风了", "吴青峰·05:25", None).usage is None
+
+
+def test_no_candidates_means_no_clause_at_all():
+    """An empty string, so the caller appends nothing rather than an empty
+    bracket that reads as "we looked and there were none"."""
+    assert dp.describe_music_usage((), ref()) == ""
+
+
+async def test_an_ambiguous_refusal_shows_each_candidates_usage_count():
+    """**The guard.** Delete the clause from the message and this goes red — and
+    with it goes the only way to learn, from an ordinary failed publish, whether
+    usage separates same-titled rows. `detail` cannot carry it: the caller
+    (`publish_distribution._finish_account`) keeps `reason` + `message` and drops
+    every other key.
+    """
+    page = music_page(
+        (
+            ("起风了", "", "0人使用"),
+            ("起风了", "", "31人使用"),
+            ("起风了", "", "1.2万人使用"),
+        )
+    )
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(
+            page, job(music="起风了", ref_payload={**REF, "user_count": 0}), Deadline(10)
+        )
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert "uses=0|31|1.2万 want=0" in excinfo.value.message
+
+
+async def test_an_ambiguous_refusal_shows_identical_counts_as_identical():
+    """The other future, end to end. If this and the test above produced the
+    same message, the clause would be decoration."""
+    page = music_page(
+        (
+            ("起风了", "", "0人使用"),
+            ("起风了", "", "0人使用"),
+            ("起风了", "", "0人使用"),
+        )
+    )
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(
+            page, job(music="起风了", ref_payload={**REF, "user_count": 0}), Deadline(10)
+        )
+
+    assert "uses=0|0|0 want=0" in excinfo.value.message
+
+
+async def test_a_row_whose_count_we_could_not_read_says_so_in_the_refusal():
+    """Third future: the probe is the problem, and the platform is off the hook.
+    Rendered `?`, so nobody reads it as "this row has zero users"."""
+    page = music_page((("起风了", "", ""), ("起风了", "", "31人使用")))
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(
+            page, job(music="起风了", ref_payload={**REF, "user_count": 0}), Deadline(10)
+        )
+
+    assert "uses=?|31 want=0" in excinfo.value.message
+
+
+async def test_usage_counts_that_differ_still_publish_nothing():
+    """**The guard on requirement zero: this batch adds evidence, not a judge.**
+
+    Three rows whose usage counts are all different is exactly the shape a
+    usage-based tie-break would resolve — and it must still refuse, still click
+    nothing. Whether usage identifies a row has not been proven, and publishing
+    on an unproven judge is the same move as publishing a same-titled stranger:
+    it looks like a success and cannot be undone.
+    """
+    page = music_page(
+        (
+            ("起风了", "", "0人使用"),
+            ("起风了", "", "31人使用"),
+            ("起风了", "", "1.2万人使用"),
+        )
+    )
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(
+            page, job(music="起风了", ref_payload={**REF, "user_count": 31}), Deadline(10)
+        )
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert excinfo.value.status is SessionStatus.FAILED
+    # Not even the row whose count equals `want`.
+    assert not any(
+        selector.startswith(f"[{dp.MUSIC_ROW_ATTRIBUTE}=") for selector in page.clicks
+    )
+
+
+async def test_a_row_that_the_fingerprint_does_pick_is_unaffected_by_its_count():
+    """The verdict is still (title, author, length). A usage count that
+    disagrees with the panel's — it climbs, that is the whole reason it cannot
+    be a matching dimension — must not turn a good pick into a refusal."""
+    page = music_page(
+        (
+            ("起风了", "买辣椒也用券·05:11", "5人使用"),
+            ("起风了", "吴青峰·05:25", "999999人使用"),
+        )
+    )
+    result = await dp._set_music(
+        page, job(music="起风了", ref_payload={**REF, "user_count": 30023}), Deadline(10)
+    )
+
+    assert result["music"] == "applied"
+    assert result["music_match"] == "exact"
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
+
+
+async def test_the_whole_refusal_still_fits_what_the_caller_will_store():
+    """`publish_distribution._finish_account` writes `f"[{reason}] {message}"`
+    truncated to **500** characters. A diagnostic that pushes the sentence it
+    explains off the end has made the failure less legible, not more — so the
+    pessimistic shape is measured here rather than hoped for.
+
+    Pessimistic on every axis at once: twenty rows, titles past the sample's
+    clip, every row a candidate (so the `+N` marker fires), and a readiness
+    reading whose counts are six digits wide.
+    """
+
+    def painted_a_lot(page, _stamp):
+        answered = page.keyboard.pressed
+        return {
+            "anchors": 20 if answered else 0,
+            "fresh": 20 if answered else 0,
+            "leaves": 999999,
+            "sig": 2 if answered else 1,
+            "textlen": 999999,
+        }
+
+    page = music_page(
+        tuple(("起" * 40, "", "1234567890人使用") for _ in range(20))
+    )
+    page.music_probe = painted_a_lot
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(
+            page,
+            job(music="起" * 40, ref_payload={**REF, "music_name": "起" * 40}),
+            Deadline(10),
+        )
+
+    stored = f"[{excinfo.value.detail['reason']}] {excinfo.value.message}"
+    assert "uses=" in stored  # the clause really is in the measured string
+    # `waited_ms` renders as `1` here because this file shrinks the wait to
+    # 60 ms; a real publish can print the full ceiling, so the widest that one
+    # number can ever be is charged on top rather than quietly enjoyed as slack.
+    slack = len(str(SHIPPED_MUSIC_READY_TIMEOUT_MS)) - 1
+    assert len(stored) + slack <= 500, f"len={len(stored)}+{slack}: {stored}"
+    # And the evidence sits BEFORE the closing prose, so if a future clause ever
+    # does overflow the cap, what gets cut is the boilerplate — the frontend
+    # replaces that sentence with its own note anyway (`PUBLISH_NOTE_KEYS`).
+    assert stored.index("uses=") < stored.index("Nothing was published")
 
 
 async def test_the_typed_name_path_is_untouched_by_any_of_this():

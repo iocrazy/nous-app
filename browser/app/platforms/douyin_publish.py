@@ -460,6 +460,19 @@ MUSIC_ROW_ATTRIBUTE = "data-nous-music-row"
 # See `wait_for_music_results`.
 MUSIC_SEEN_ATTRIBUTE = "data-nous-music-seen"
 
+# The platform's usage copy (「N万人使用」), written down ONCE and used three
+# ways: both page probes `.test()` it — it is the row anchor AND the readiness
+# signal — and `parse_music_usage` reads the count out of it here in Python.
+#
+# The capture groups are invisible to `.test()`, so adding them moved neither
+# probe. Writing a second, hand-rolled copy for the Python side would be the
+# same drift the two probes already refuse between themselves (see
+# `_MUSIC_USAGE_JS`): the parser would render `?` for every row while the
+# probes went on matching them, and that `?` would read as "the platform
+# stopped showing usage counts" — a wrong answer wearing a humble one's face.
+MUSIC_USAGE_PATTERN = r"(\d+(?:\.\d+)?)\s*([万亿]?)\s*人使用"
+_MUSIC_USAGE_RE = re.compile(MUSIC_USAGE_PATTERN)
+
 # How long to wait for the search's results, and how often to look.
 #
 # [实测 2026-08-17, 生产库] The step never waited for anything: it pressed Enter,
@@ -871,6 +884,15 @@ class MusicReference:
     #: Seconds. `0` = upstream gave none, which costs a dimension of the
     #: fingerprint rather than corrupting it — see `judge_music_reference`.
     duration_s: int = 0
+    #: How many people were using the track at the instant the user picked the
+    #: card. `None` = the panel stored none, which is **not** zero: zero is a
+    #: real catalogue value (the 2026-08-17 refusal was over a track with
+    #: exactly that), so the two have to stay tellable apart or the evidence
+    #: below answers its own question wrong.
+    #:
+    #: ⚠️ Carried so a refusal can SHOW it, never matched on — see
+    #: `MusicRow.usage`.
+    user_count: int | None = None
 
 
 def read_music_reference(raw: Any) -> MusicReference | None:
@@ -893,11 +915,19 @@ def read_music_reference(raw: Any) -> MusicReference | None:
         duration_s = max(0, int(duration))
     except (TypeError, ValueError):
         duration_s = 0
+    # `0` is a value, `None` is an absence, and `raw.get(...) or 0` would erase
+    # the difference — which is the whole point of carrying this field.
+    raw_count = raw.get("user_count")
+    try:
+        user_count = None if raw_count is None else max(0, int(raw_count))
+    except (TypeError, ValueError):
+        user_count = None
     return MusicReference(
         music_id=music_id,
         music_name=name,
         music_author=str(raw.get("music_author") or "").strip(),
         duration_s=duration_s,
+        user_count=user_count,
     )
 
 
@@ -1026,6 +1056,12 @@ class MusicChoice:
     index: int | None
     match: str
     reason: str
+    #: The rows that survived every dimension both sides could supply — i.e.
+    #: the ones the verdict could not tell apart. Populated on `ambiguous`
+    #: only, and **read by the diagnostic, never by the caller's decision**:
+    #: `_set_music` refuses on `match == "ambiguous"` exactly as before,
+    #: whatever is in here.
+    candidates: tuple["MusicRow", ...] = ()
 
 
 def judge_music_choice(requested: str, candidates: Sequence[str]) -> MusicChoice:
@@ -1109,19 +1145,57 @@ class MusicRow:
     name: str
     author: str | None = None
     duration_s: int | None = None
+    #: The row's usage count exactly as the platform wrote it (``"0"``,
+    #: ``"1.2万"``), or `None` for "this row did not tell us" — the same
+    #: `?`-is-not-`0` rule `author`/`duration_s` follow, and it matters more
+    #: here than anywhere: **`0` is a value the catalogue really shows**, and
+    #: the track that produced 2026-08-17's refusal had exactly that. Collapsing
+    #: an unreadable row into `0` would make it look like a match for it.
+    #:
+    #: ⚠️ EVIDENCE ONLY. Nothing matches on this field. Whether usage even
+    #: separates same-titled rows is the open question the field exists to
+    #: answer; using an unproven judge to decide which row to click is the
+    #: "publish a guess" move this whole path was built to refuse.
+    usage: str | None = None
 
 
-def parse_music_row(index: int, name: str, meta: str | None) -> MusicRow:
+def parse_music_usage(text: str | None) -> str | None:
+    """「1.2万人使用」 → ``"1.2万"``. `None` when the line is not a usage count.
+
+    Pure and total. The count is kept **as written**, not converted to an
+    integer: 「1.2万」 is the platform rounding 12 000-something to two
+    significant figures, and turning it into ``12000`` would invent a precision
+    the page never had — two rows that both read 「1.2万」 are indistinguishable
+    on this axis, and the diagnostic has to say so rather than imply they are
+    equal.
+
+    `None` is not `"0"`. A row whose usage we could not read is unobserved; a
+    row showing 「0人使用」 is a measurement.
+    """
+    match = _MUSIC_USAGE_RE.search(text or "")
+    if match is None:
+        return None
+    return f"{match.group(1)}{match.group(2)}"
+
+
+def parse_music_row(
+    index: int, name: str, meta: str | None, usage: str | None = None
+) -> MusicRow:
     """A probe row → a `MusicRow`. Pure.
 
     The author is taken as everything before the LAST separator, so a track
     whose uploader name itself contains one still parses. If the tail is not a
     running time, nothing is claimed about either field: a half-parsed line is
     the kind of evidence that reads as a match without being one.
+
+    `usage` is the anchor line the probe read off the row, and it is parsed on
+    its own axis: an unreadable usage line costs the usage evidence and nothing
+    else, exactly as an unreadable second line costs author and length.
     """
+    count = parse_music_usage(usage)
     text = (meta or "").strip()
     if not text:
-        return MusicRow(index=index, name=name)
+        return MusicRow(index=index, name=name, usage=count)
     for separator in MUSIC_META_SEPARATORS:
         if separator not in text:
             continue
@@ -1130,14 +1204,18 @@ def parse_music_row(index: int, name: str, meta: str | None) -> MusicRow:
         if duration is None:
             continue
         return MusicRow(
-            index=index, name=name, author=head.strip(), duration_s=duration
+            index=index,
+            name=name,
+            author=head.strip(),
+            duration_s=duration,
+            usage=count,
         )
     # No separator produced a running time. The whole line may still be one
     # (some rows show only a duration), and that is worth keeping.
     duration = parse_music_duration(text)
     if duration is not None:
-        return MusicRow(index=index, name=name, duration_s=duration)
-    return MusicRow(index=index, name=name)
+        return MusicRow(index=index, name=name, duration_s=duration, usage=count)
+    return MusicRow(index=index, name=name, usage=count)
 
 
 def judge_music_reference(
@@ -1215,6 +1293,10 @@ def judge_music_reference(
         "ambiguous",
         f"{len(pool)} results are indistinguishable from the track that was "
         "picked; refusing to guess which one to publish",
+        # The survivors ride along so the refusal can show what it saw. The
+        # verdict above is unchanged — this is the difference between a failure
+        # that can be diagnosed and one that can only be re-run.
+        candidates=tuple(pool),
     )
 
 
@@ -2566,13 +2648,16 @@ async def _set_collection(page: Any, job: PublishJob, deadline: Deadline) -> dic
 # Python) can be executed with an exact selector. Clicking by the song's text
 # instead would resolve against any node carrying that string.
 #
-# ⚠️ The anchor pattern lives in ONE place and is substituted into both probes.
-# Two literal copies is how the readiness probe keeps answering "the list is
-# there" about a pattern the row reader no longer matches — the two would then
-# disagree about the same page, which is exactly the ambiguity the readiness
-# diagnostic exists to remove. `test_the_two_music_probes_share_one_anchor`
-# fails if they ever drift apart.
-_MUSIC_USAGE_JS = r"/\d+(?:\.\d+)?\s*[万亿]?\s*人使用/"
+# ⚠️ The anchor pattern lives in ONE place (`MUSIC_USAGE_PATTERN`) and is
+# substituted into both probes — and read by `parse_music_usage` on the Python
+# side, so there are now three consumers of the one literal. Two literal copies
+# is how the readiness probe keeps answering "the list is there" about a pattern
+# the row reader no longer matches — the two would then disagree about the same
+# page, which is exactly the ambiguity the readiness diagnostic exists to
+# remove. `test_the_two_music_probes_share_one_anchor` and
+# `test_the_python_usage_reader_matches_the_same_copy_the_probes_anchor_on`
+# fail if any of the three ever drifts apart.
+_MUSIC_USAGE_JS = f"/{MUSIC_USAGE_PATTERN}/"
 
 _MUSIC_ROWS_JS = """
 (attribute) => {
@@ -2608,11 +2693,22 @@ _MUSIC_ROWS_JS = """
     // Read positionally rather than by class because the row's markup has
     // never been measured; a made-up class selector would fire on the wrong
     // node instead of on nothing.
-    rows.push({ name: lines[0] || '', meta: lines[1] || '', row });
+    // The anchor's OWN text is the usage line, unparsed. It comes back as
+    // evidence only — nothing in this module matches on it (see
+    // `judge_music_reference`, which is unchanged) — because whether usage
+    // separates same-titled rows is a question we have never been able to
+    // answer from a failure: the diagnostic only ever carried titles, and
+    // titles are precisely the dimension that is identical.
+    rows.push({
+      name: lines[0] || '',
+      meta: lines[1] || '',
+      usage: (anchor.innerText || anchor.textContent || '').trim(),
+      row,
+    });
   }
   return rows.map((entry, index) => {
     entry.row.setAttribute(attribute, String(index));
-    return { index, name: entry.name, meta: entry.meta };
+    return { index, name: entry.name, meta: entry.meta, usage: entry.usage };
   });
 }
 """.replace("__USAGE__", _MUSIC_USAGE_JS)
@@ -2928,6 +3024,76 @@ class MusicRowsRead:
 MUSIC_SAMPLE_ROWS = 3
 MUSIC_SAMPLE_TITLE_CHARS = 24
 
+#: The same bound for the ambiguity's usage counts. Four, because four is what
+#: the live refusal had; five characters, because 「30023」 and 「9999万」 both fit
+#: and nothing wider is a number this page shows.
+#:
+#: ⚠️ A clipped count is marked, unlike a clipped title. `12345678` cut to
+#: `123456` still reads as a number, and a reader comparing four of those would
+#: be comparing prefixes while believing he was comparing counts — a title cut
+#: mid-word cannot mislead anyone that way.
+MUSIC_SAMPLE_USAGE = 4
+MUSIC_SAMPLE_USAGE_CHARS = 5
+#: The expected count is ours, not the page's, so it is bounded separately.
+MUSIC_SAMPLE_WANT_CHARS = 9
+#: What an unreadable count renders as. Never `0` — see `MusicRow.usage`.
+MUSIC_UNKNOWN = "?"
+
+
+def describe_music_usage(
+    candidates: Sequence[MusicRow], reference: "MusicReference | None"
+) -> str:
+    """The usage counts the ambiguous rows carried, next to the one we wanted.
+
+    Pure, bounded, and **evidence only** — it decides nothing. It exists to
+    make the NEXT refusal answer a question this one could not:
+
+    * counts that differ  → usage is a real fourth dimension, and a later
+      change could align on it;
+    * counts that agree   → it is not, and only `music_id` can separate these
+      rows (which needs a DOM measurement we have not taken);
+    * counts that read `?` → our probe is the problem, and the platform is off
+      the hook.
+
+    Until now the refusal quoted titles, which on an ambiguity are identical by
+    definition: the message described the one axis guaranteed to say nothing.
+
+    ⚠️ `want=0` is weaker evidence than it looks, and the weakness is upstream
+    of this module: `music_catalog` already writes `int(row.get("user_count")
+    or 0)`, so a catalogue response that simply omitted the field arrives here
+    as a stored `0`. `want=?` therefore means "no count reached us at all"
+    (an older task row, or a caller that never sent the key) — it is not the
+    only shape "we do not know" can take. Read `want=0` as "zero **or** the
+    catalogue said nothing", and if that ambiguity ever matters, the fix is at
+    that `or 0`, not here.
+
+    Empty string when there is nothing to show, so the caller appends nothing
+    rather than an empty bracket. Counts are the platform's own catalogue
+    figures (public); nothing here is anything the user wrote.
+    """
+    if not candidates:
+        return ""
+
+    def count(row: MusicRow) -> str:
+        if not row.usage:
+            return MUSIC_UNKNOWN
+        if len(row.usage) <= MUSIC_SAMPLE_USAGE_CHARS:
+            return row.usage
+        return row.usage[:MUSIC_SAMPLE_USAGE_CHARS] + "…"
+
+    shown = [count(row) for row in candidates[:MUSIC_SAMPLE_USAGE]]
+    body = "|".join(shown)
+    if len(candidates) > MUSIC_SAMPLE_USAGE:
+        # Said explicitly: a truncated list that looked complete would let
+        # "all four agree" be read off a sample of a wider set.
+        body += f"|+{len(candidates) - MUSIC_SAMPLE_USAGE}"
+    want = (
+        MUSIC_UNKNOWN
+        if reference is None or reference.user_count is None
+        else str(reference.user_count)[:MUSIC_SAMPLE_WANT_CHARS]
+    )
+    return f"uses={body} want={want}"
+
 
 def describe_music_rows(
     read: MusicRowsRead, readiness: MusicReadiness | None = None
@@ -3007,10 +3173,16 @@ async def _music_rows(page: Any) -> MusicRowsRead:
             index = int(row.get("index", position))
             name = str(row.get("name") or "")
             meta = row.get("meta")
+            usage = row.get("usage")
         except (AttributeError, TypeError, ValueError):
             continue
         out.append(
-            parse_music_row(index, name, None if meta is None else str(meta))
+            parse_music_row(
+                index,
+                name,
+                None if meta is None else str(meta),
+                None if usage is None else str(usage),
+            )
         )
     return MusicRowsRead(out)
 
@@ -3114,9 +3286,19 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         choice = judge_music_reference(reference, rows)
 
     if choice.match == "ambiguous":
+        # The one clause that can move this refusal forward. `seen` quotes
+        # titles, and on an ambiguity the titles are identical **by
+        # definition** — so the message described the single axis guaranteed to
+        # carry no information. The usage counts are the only other thing every
+        # row was measured to show, and whether they separate these rows is
+        # unknown: this makes the next failure say so itself instead of costing
+        # another production round-trip. Nothing below reads it.
+        usage = describe_music_usage(choice.candidates, reference)
         raise StepFailure(
             SessionStatus.FAILED,
-            f"{choice.reason} [{seen}]. Nothing was published: a post's music "
+            f"{choice.reason} [{seen}"
+            + (f" {usage}" if usage else "")
+            + "]. Nothing was published: a post's music "
             "cannot be changed afterwards, and a same-titled different track "
             "is the one failure that leaves no signal",
             reason="music_ambiguous",
@@ -3127,6 +3309,10 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             music_id=reference.music_id if reference else None,
             music_rows_seen=None if read.error else len(rows),
             music_rows_error=read.error,
+            # Logged for completeness; the user-visible copy is in the message
+            # above, because `publish_distribution._finish_account` keeps only
+            # `reason` and `message` and drops every other key of `detail`.
+            music_candidate_usage=usage or None,
         )
 
     if (

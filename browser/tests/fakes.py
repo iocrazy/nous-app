@@ -493,13 +493,23 @@ class FakePage:
             # `meta` mirrors the probe's second line; a bare string row means
             # "this row's second line could not be read", which is a state the
             # live dialog can genuinely be in.
+            #
+            # A THIRD element is the 「N人使用」 anchor line. It defaults to `""`
+            # — "this row showed no readable usage count" — rather than to a
+            # made-up number, so a fixture that does not care about usage
+            # exercises the `?` path instead of quietly asserting `0`. That
+            # distinction is the entire point of the field (see
+            # `douyin_publish.MusicRow.usage`): a default of `"0人使用"` would
+            # make every row in every fixture agree with every other one, which
+            # is how "usage counts are indistinguishable" gets proven by the
+            # fixture rather than by the code.
             out = []
             for i, row in enumerate(rows):
                 if isinstance(row, (tuple, list)):
-                    name, meta = (list(row) + [""])[:2]
+                    name, meta, usage = (list(row) + ["", ""])[:3]
                 else:
-                    name, meta = row, ""
-                out.append({"index": i, "name": name, "meta": meta})
+                    name, meta, usage = row, "", ""
+                out.append({"index": i, "name": name, "meta": meta, "usage": usage})
             return out
         if "__nous_music_readback_probe__" in (_script or ""):
             mentions = self.music_mentions
