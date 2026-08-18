@@ -61,7 +61,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, ClassVar, Mapping, Sequence
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -1054,6 +1054,46 @@ def canonical_music(text: str | None) -> str:
 
 
 @dataclass(frozen=True)
+class MusicDimensions:
+    """Which axes of the fingerprint actually did any separating, and how much
+    of each one the page gave up. Pure data, counts only.
+
+    This exists because "the authors differ" and "we could not read the
+    authors" produced the **same** refusal and the same evidence, and the two
+    call for opposite next moves: the first says the picked track is genuinely
+    not in the results, the second says our own row parser is broken and the
+    platform is blameless. 2026-08-17's refusal could not be attributed to
+    either, and the only way to tell them apart was to drive a real browser by
+    hand.
+
+    ⚠️ Counts, never values. An author name is user-adjacent content and this
+    lands in a stored, logged, UI-rendered string in a public repo.
+    """
+
+    #: The axes that took part: ``("name",)``, ``("name", "author")``,
+    #: ``("name", "author", "dur")``. An axis is listed when the reference
+    #: supplied it **and** at least one same-titled row exposed it — i.e. when
+    #: it could actually exclude somebody.
+    used: tuple[str, ...] = ("name",)
+    #: ``(readable, total)`` over the rows that shared the title, or `None`
+    #: when the **reference** carried no author to compare against. The
+    #: distinction is the whole point: `None` is "there was nothing to check",
+    #: `0/20` is "there was, and the page told us nothing" — a defect on our
+    #: side that no amount of re-running the publish would have revealed.
+    author: tuple[int, int] | None = None
+    #: Same contract on the running time.
+    duration: tuple[int, int] | None = None
+
+    #: How each axis reads in the `exact` sentence. Kept beside the axis names
+    #: so the two cannot drift into disagreeing about what was compared.
+    PROSE: ClassVar[dict[str, str]] = {
+        "name": "title",
+        "author": "author",
+        "dur": "length",
+    }
+
+
+@dataclass(frozen=True)
 class MusicChoice:
     """Which row of the search results to click, and how sure we are.
 
@@ -1079,6 +1119,11 @@ class MusicChoice:
     #: `_set_music` refuses on `match == "ambiguous"` exactly as before,
     #: whatever is in here.
     candidates: tuple["MusicRow", ...] = ()
+    #: Which axes separated the rows, and how readable each was. `None` on the
+    #: verdicts reached before any row was inspected. Read by the diagnostic
+    #: **and** by the `exact` wording, so the sentence cannot claim an axis the
+    #: judge never used.
+    dimensions: MusicDimensions | None = None
 
 
 def judge_music_choice(requested: str, candidates: Sequence[str]) -> MusicChoice:
@@ -1235,6 +1280,18 @@ def parse_music_row(
     return MusicRow(index=index, name=name, usage=count)
 
 
+def _music_axis_prose(used: Sequence[str]) -> str:
+    """``["name", "author", "dur"]`` → ``"title, author and length"``. Pure.
+
+    Drives the `exact` sentence off the axes the judge really applied, so the
+    claim and the comparison cannot disagree.
+    """
+    words = [MusicDimensions.PROSE.get(axis, axis) for axis in used]
+    if len(words) == 1:
+        return words[0]
+    return ", ".join(words[:-1]) + " and " + words[-1]
+
+
 def judge_music_reference(
     ref: MusicReference, rows: Sequence[MusicRow]
 ) -> MusicChoice:
@@ -1252,68 +1309,220 @@ def judge_music_reference(
       fine, the read-back passes (the page really does show that title), and
       nobody re-checks a published post's audio.
 
-    So the result is only `exact` when exactly one row survives every dimension
-    both sides could supply. More than one survivor is `ambiguous` (the caller
-    raises); none is `none`.
+    The rule, stated as the reader of a refusal needs it
+    ====================================================
+    An axis is applied **per row**, not per list. For each axis the reference
+    supplies, every same-titled row falls into exactly one of three buckets:
 
-    ⚠️ A dimension is used only when the reference has it AND **every**
-    surviving row has it. Filtering on a field half the rows do not expose
-    would drop the real row for lacking data rather than for being wrong.
+    * **matched** — the row exposed the value and it agrees;
+    * **contradicted** — the row exposed the value and it disagrees. Dropped:
+      we read it, and it is not the track that was picked;
+    * **unreadable** — the row exposed nothing on this axis. **Kept**, because
+      "we could not read it" is not evidence against it, and the real row may
+      be exactly the one whose second line failed to parse.
+
+    `exact` needs ONE row still standing and a positive reason for it: that row
+    must have been read on every axis the reference supplied and agreed with all
+    of them. Anything else is `ambiguous` and the caller refuses; nothing left
+    standing is `none`.
+
+    ⚠️ What the fix does and does not change
+    ---------------------------------------
+    It changes **which rows are excluded**, not how willing this function is to
+    click. A row that exposed a value and disagreed is now dropped even when a
+    *different* row failed to parse — previously one bad parse anywhere
+    withdrew the axis from everybody. So a refusal that used to read
+    "4 results are indistinguishable" can now read "2", or become a clean
+    `none`, or resolve to `exact` once the rows in the way are recognised as
+    the wrong uploader.
+
+    It does **not** relax the bar: while any row that could not be read is still
+    standing, this still refuses, because that row might be the one the user
+    picked. Concretely — one row matching title+author+length beside one
+    unreadable row is `ambiguous`, not a click
+    (`test_a_dimension_only_some_rows_expose_is_not_used_to_narrow`).
+
+    ⚠️ Consequence worth stating plainly: if the row parser cannot read the
+    second line at all, this refuses **every** time and no amount of narrowing
+    helps. That is the point of `dims=` — `au=0/20` names the parser as the
+    defect, which is a fix on our side, not a policy question.
+
+    ⚠️ The one place a lone survivor is taken on the title alone
+    ----------------------------------------------------------
+    A single same-titled row whose second line did not parse, with **no** axis
+    readable on anybody. Nothing was excluded to produce it, the title is all
+    either side has, and refusing would make the picker unusable for every
+    uniquely-named track while preventing no known wrong-song failure. That
+    decision predates this change and is pinned by
+    `test_one_row_with_no_second_line_is_still_a_match`.
+
+    ⚠️ What this replaced, and why the old shape was wrong
+    -----------------------------------------------------
+    It used to read `all(row.author is not None for row in pool)`: **one**
+    unreadable row anywhere in the list withdrew that axis from **every** row,
+    collapsing the fingerprint to a title comparison — precisely the matcher
+    this file was written to replace, re-entered silently through a data
+    condition. Twenty rows and one bad parse was enough. The intent behind it
+    was right (do not exclude a row for lacking data) and is preserved above by
+    keeping the unreadable rows rather than by discarding the axis.
     """
     key = canonical_music(ref.music_name)
     pool = [row for row in rows if row.name.strip() and canonical_music(row.name) == key]
     if not pool:
         return MusicChoice(None, None, "none", "no result carried that title")
 
-    if ref.music_author and all(row.author is not None for row in pool):
-        wanted = canonical_music(ref.music_author)
-        narrowed = [row for row in pool if canonical_music(row.author or "") == wanted]
-        if not narrowed:
-            # Same title, different uploader — the 「电子布洛芬（Live）」 case:
-            # the search really does not have the track that was picked, and
-            # saying so is the difference between a refused publish and a
-            # published wrong song.
-            return MusicChoice(
-                None,
-                None,
-                "none",
+    # The census is taken over the rows that SHARE THE TITLE — exactly the set a
+    # fingerprint has to separate — and over that same set for both axes, so the
+    # two numbers stay comparable and neither depends on the order the axes run.
+    titled = tuple(pool)
+    author_census = (
+        (sum(1 for row in titled if row.author is not None), len(titled))
+        if ref.music_author
+        else None
+    )
+    duration_census = (
+        (sum(1 for row in titled if row.duration_s is not None), len(titled))
+        if ref.duration_s > 0
+        else None
+    )
+
+    def agrees_on_author(row: MusicRow) -> bool | None:
+        """`True`/`False` when the row answered, `None` when it did not."""
+        if row.author is None:
+            return None
+        return canonical_music(row.author) == canonical_music(ref.music_author)
+
+    def agrees_on_duration(row: MusicRow) -> bool | None:
+        if row.duration_s is None:
+            return None
+        return abs(row.duration_s - ref.duration_s) <= MUSIC_DURATION_TOLERANCE_S
+
+    # Only the axes the REFERENCE carried are asked at all, and an axis it did
+    # not carry is absent from the verdict tuple rather than present as `None`.
+    # Folding "nothing was asked" into the same value as "the row did not
+    # answer" is how the two get confused, and they are opposite findings — one
+    # is a thin reference, the other is our parser failing.
+    supplied: list[tuple[str, Callable[[MusicRow], bool | None]]] = []
+    if ref.music_author:
+        supplied.append(("author", agrees_on_author))
+    if ref.duration_s > 0:
+        supplied.append(("dur", agrees_on_duration))
+
+    verdicts = {
+        row.index: tuple(answer(row) for _, answer in supplied) for row in titled
+    }
+    used = ["name"] + [
+        axis
+        for position, (axis, _) in enumerate(supplied)
+        # The axis ran only if somebody actually answered it; an axis nobody
+        # could answer excluded nothing and must not read as though it had.
+        if any(verdicts[row.index][position] is not None for row in titled)
+    ]
+
+    def dimensions() -> MusicDimensions:
+        return MusicDimensions(
+            used=tuple(used), author=author_census, duration=duration_census
+        )
+
+    # Two populations, and the verdict is a statement about how they relate.
+    #
+    # `survivors` — nothing READ about this row disagreed. An axis the row did
+    #   not expose leaves it standing: "we could not read it" is not evidence
+    #   against it, and the picked row may well be the one whose second line
+    #   failed to parse. **This is the fix**: the per-row form of a rule the old
+    #   code applied to the whole list via `all(...)`, where a single unreadable
+    #   row withdrew the axis from every row and collapsed the fingerprint back
+    #   to a title comparison — the very matcher this file replaced, re-entered
+    #   silently through a data condition. Twenty rows and one bad parse was
+    #   enough.
+    # `full` — this row was READ on every axis the reference supplied and agreed
+    #   with all of them. It is what turns "last one standing" into "the one
+    #   that matched", and only a `full` row is ever clicked. A reference that
+    #   supplied no axis makes this vacuously true for every row, which is the
+    #   intended reading: nothing was asked, so nothing went unanswered.
+    survivors = [
+        row for row in titled if all(v is not False for v in verdicts[row.index])
+    ]
+    full = [row for row in titled if all(v is True for v in verdicts[row.index])]
+
+    if not survivors:
+        # Every row was read on some axis and every one of them disagreed. The
+        # search really does not have the track that was picked, and saying so
+        # is the difference between a refused publish and a published wrong
+        # song — the 「电子布洛芬（Live）」 case.
+        # Asked directly rather than by position in the verdict tuple: the tuple
+        # is built from whichever axes the reference happened to supply, so an
+        # index into it is only accidentally the author.
+        if ref.music_author and not any(agrees_on_author(row) for row in titled):
+            reason = (
                 f"rows titled '{ref.music_name}' came back, but none by "
-                f"'{ref.music_author}'",
+                f"'{ref.music_author}'"
             )
-        pool = narrowed
-
-    if ref.duration_s > 0 and all(row.duration_s is not None for row in pool):
-        narrowed = [
-            row
-            for row in pool
-            if abs((row.duration_s or 0) - ref.duration_s) <= MUSIC_DURATION_TOLERANCE_S
-        ]
-        if not narrowed:
-            return MusicChoice(
-                None,
-                None,
-                "none",
+        else:
+            reason = (
                 "the matching titles all run a different length from the track "
-                "that was picked",
+                "that was picked"
             )
-        pool = narrowed
+        return MusicChoice(None, None, "none", reason, dimensions=dimensions())
 
-    if len(pool) == 1:
-        row = pool[0]
+    # `exact` requires ONE row standing and a positive reason for it. Both
+    # halves matter and they fail differently:
+    #
+    #   * more than one standing → we cannot tell them apart, whether the others
+    #     disagreed silently or simply never answered;
+    #   * one standing but nothing read on it → it is last man standing because
+    #     its siblings were excluded, not because it agreed with anything.
+    #
+    # ⚠️ The second case is NOT an old bug being fixed; it is a new one being
+    # pre-empted. The old code could never reach it, because it never excluded
+    # anything on a partially-readable list — that was the whole defect. Now
+    # that exclusion works, "the only row left" stops implying "the row that
+    # matched", and this is the guard that keeps the fix from opening a fresh
+    # way to publish a guess.
+    #
+    # The single exception is a list where NO axis was applied to anybody — the
+    # reference carried none, or no row exposed any. Then the title is all
+    # either side ever had, and a lone survivor is as identified as this
+    # reference can make it. That is the pre-existing policy for a uniquely
+    # named track (`test_one_row_with_no_second_line_is_still_a_match`); refusing
+    # there would make the picker unusable for every such track without
+    # preventing any known wrong-song failure.
+    if len(survivors) == 1 and (full or len(used) == 1):
+        row = survivors[0]
         return MusicChoice(
-            row.name, row.index, "exact", "one row matched title, author and length"
+            row.name,
+            row.index,
+            "exact",
+            # Named from the axes the judge actually applied. The sentence used
+            # to say "title, author and length" unconditionally, which on a list
+            # whose second lines did not parse was a plain false statement about
+            # how the row had been chosen.
+            f"one row matched {_music_axis_prose(used)}",
+            dimensions=dimensions(),
+        )
+
+    if len(survivors) == 1:
+        return MusicChoice(
+            None,
+            None,
+            "ambiguous",
+            "one row still carried that title, but nothing on it could be read "
+            "back to confirm it is the track that was picked",
+            candidates=tuple(survivors),
+            dimensions=dimensions(),
         )
 
     return MusicChoice(
         None,
         None,
         "ambiguous",
-        f"{len(pool)} results are indistinguishable from the track that was "
-        "picked; refusing to guess which one to publish",
+        f"{len(survivors)} results are indistinguishable from the track that "
+        "was picked; refusing to guess which one to publish",
         # The survivors ride along so the refusal can show what it saw. The
         # verdict above is unchanged — this is the difference between a failure
         # that can be diagnosed and one that can only be re-run.
-        candidates=tuple(pool),
+        candidates=tuple(survivors),
+        dimensions=dimensions(),
     )
 
 
@@ -3174,6 +3383,50 @@ def describe_music_attributes(read: MusicRowsRead) -> str:
     return f"attrs={body}"
 
 
+def describe_music_dimensions(choice: MusicChoice) -> str:
+    """Which axes actually separated the rows, and how readable each one was.
+
+    Pure, bounded, counts only. Renders as
+    ``dims=name+author+dur au=20/20 du=20/20``.
+
+    **Why this clause exists.** Every other piece of evidence on this refusal
+    describes the *page*; this one describes *us*. Until it existed, a refusal
+    over five same-titled rows was consistent with two opposite worlds:
+
+    * the rows really do differ only in ways the reference cannot see, or
+    * the rows carry an author and a running time — the screenshot of the live
+      dialog shows both on every row — and **our parser did not read them**,
+      collapsing the fingerprint to a title comparison.
+
+    `au=0/20` says the second world outright; `au=20/20` rules it out. The two
+    call for opposite work, and the diagnostic could not previously tell them
+    apart because `saw:` quotes only titles, which on an ambiguity are
+    identical by definition.
+
+    Three renderings per axis, mirroring `attrs=`:
+
+    * ``au=20/20`` — every candidate exposed an author;
+    * ``au=3/20`` — three did; **seventeen rows would have been dropped** by a
+      matcher that filtered on this axis blindly, which is why they are kept;
+    * ``au=-`` — the *reference* carried no author, so nothing was asked. Kept
+      distinct from `0/20` ("we asked and the page said nothing") for the same
+      reason `rows=?` is kept distinct from `rows=0`.
+    """
+    dims = choice.dimensions
+    if dims is None:
+        # We never got as far as looking at rows, so nothing is claimed.
+        return f"dims={MUSIC_UNKNOWN}"
+
+    def census(counts: tuple[int, int] | None) -> str:
+        if counts is None:
+            return "-"
+        readable, total = counts
+        return f"{readable}/{total}"
+
+    used = "+".join(dims.used) if dims.used else "none"
+    return f"dims={used} au={census(dims.author)} du={census(dims.duration)}"
+
+
 def describe_music_usage(
     candidates: Sequence[MusicRow], reference: "MusicReference | None"
 ) -> str:
@@ -3456,11 +3709,18 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # (is there an id to click by?) that no amount of re-running this step
         # can answer otherwise, and it costs one string per refusal.
         attrs = describe_music_attributes(read)
+        # Rides on the same failure again, and answers the question the other
+        # clauses structurally cannot: whether the fingerprint was even applied.
+        # `saw:` quotes titles, and on an ambiguity the titles are identical by
+        # definition — so "the authors differ" and "we never read an author"
+        # produced character-identical evidence until this clause existed.
+        dims = describe_music_dimensions(choice)
         raise StepFailure(
             SessionStatus.FAILED,
             f"{choice.reason} [{seen}"
             + (f" {usage}" if usage else "")
             + f" {attrs}"
+            + f" {dims}"
             + "]. Nothing was published: a post's music "
             "cannot be changed afterwards, and a same-titled different track "
             "is the one failure that leaves no signal",
@@ -3479,6 +3739,11 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             # `None` when unread, an empty tuple when the rows really carry
             # nothing — the same three-state contract as the rendered clause.
             music_row_attributes=read.attributes,
+            # Structured twin of the `dims=` clause. Same caveat as the others:
+            # the user-visible copy is the message, because `detail` is dropped.
+            music_dimensions=(
+                None if choice.dimensions is None else choice.dimensions.used
+            ),
         )
 
     if (
