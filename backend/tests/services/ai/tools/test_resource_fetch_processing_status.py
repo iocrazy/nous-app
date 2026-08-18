@@ -146,9 +146,12 @@ async def test_not_in_flight_transcript_keeps_the_existing_wording(monkeypatch, 
 
 
 async def test_transcript_status_enum_member_is_understood(monkeypatch):
-    """Real rows carry ``AiTaskStatus`` members, not plain strings — and that
-    class is a ``(str, Enum)`` mixin whose ``str()`` renders its repr, so a
-    naive string compare would silently fall through to the wrong branch."""
+    """Real rows carry ``AiTaskStatus`` members, not plain strings. Branch
+    logic itself is safe (``in {"pending", ...}`` holds for a ``(str, Enum)``
+    mixin) — the real hazard is any boundary that ``str()``s the value into
+    user/agent-visible text, where the member renders as its repr
+    (``'AiTaskStatus.PROCESSING'``). This test pins that enum members flow
+    through the tool without leaking that repr."""
     from app.models._enums import AiTaskStatus
 
     out, _ = await _dispatch(
@@ -166,14 +169,14 @@ async def test_transcript_status_enum_member_is_understood(monkeypatch):
 # ── summary branch ──────────────────────────────────────────────────
 
 
-async def test_in_flight_summary_says_it_is_being_generated(monkeypatch):
+async def test_in_flight_summary_reports_processing(monkeypatch):
     out, _ = await _dispatch(
         monkeypatch,
         mime="video/mp4",
         mode="summary",
         row_extra={"transcript_status": "completed", "summary_status": "processing"},
     )
-    assert "being generated" in out["error"]
+    assert "still being processed" in out["error"]
     assert "retry" in out["error"]
 
 
@@ -188,7 +191,7 @@ async def test_summary_falls_back_to_transcript_progress(monkeypatch):
         mode="summary",
         row_extra={"transcript_status": "processing", "summary_status": "none"},
     )
-    assert "being generated" in out["error"]
+    assert "still being processed" in out["error"]
 
 
 async def test_idle_summary_keeps_the_existing_wording(monkeypatch):
@@ -218,7 +221,7 @@ async def test_present_content_wins_over_any_status(monkeypatch):
 # ── scope tripwire ──────────────────────────────────────────────────
 
 
-def test_tool_never_triggers_processing_itself():
+async def test_tool_never_triggers_processing_itself():
     """spec §2: agents do not start consumption tasks. The trigger helpers
     live in ai_router / the transcription+summary services; none of them may
     be reachable from this module."""

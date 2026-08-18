@@ -228,10 +228,13 @@ async def _fetch_dispatch(
                 # while transcription runs). Reporting a flat failure there
                 # is exactly the bug this branch is fixing.
                 if summary_status in in_flight or transcript_status in in_flight:
+                    # The in-flight step may be the *transcript* (frontend
+                    # chains transcribe → summarize), so stay neutral about
+                    # which stage is running.
                     return {
                         "error": (
-                            "summary is being generated; ask the user to "
-                            "retry shortly"
+                            "summary is not ready yet; the media is still "
+                            "being processed — ask the user to retry shortly"
                         )
                     }
                 return {"error": "summary not available; resource not yet processed"}

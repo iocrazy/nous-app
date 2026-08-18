@@ -85,3 +85,23 @@ def test_refs_without_status_keys_render_exactly_as_before():
     assert "status=" not in block
     assert "retry" not in block.lower()
     assert 'name="pitch.mp4"' in block
+
+
+def test_enum_members_never_leak_their_repr_into_the_prompt():
+    """The f-string in ``_status_attr`` is the boundary where a raw
+    ``AiTaskStatus`` member would render as ``'AiTaskStatus.PROCESSING'``.
+    The composer must coerce locally — not rely on every caller having
+    passed through the resolver's coercion first."""
+    from app.models._enums import AiTaskStatus
+
+    block = render_available_resources(
+        [
+            _video(
+                transcript_status=AiTaskStatus.PROCESSING,
+                summary_status=AiTaskStatus.NONE,
+            )
+        ]
+    )
+    assert "AiTaskStatus" not in block
+    assert "transcript:processing" in block
+    assert "summary:none" in block

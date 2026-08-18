@@ -37,6 +37,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.repositories.agent_repository import AgentRepository
+from app.utils.ai_status import ai_status_str
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import ComposedSystemPrompt
 
@@ -621,8 +622,11 @@ def render_available_resources(refs: list[dict] | None) -> str:
         """
         if r.get("kind") not in ("video", "audio"):
             return None
-        transcript = r.get("transcript_status")
-        summary = r.get("summary_status")
+        # Coerce here, at the f-string boundary where a raw AiTaskStatus
+        # member would render as its repr — not just upstream in the
+        # resolver (any future caller feeding refs directly must be safe).
+        transcript = ai_status_str(r.get("transcript_status"))
+        summary = ai_status_str(r.get("summary_status"))
         if transcript is None and summary is None:
             return None
         return f'status="transcript:{transcript or "none"} summary:{summary or "none"}"'

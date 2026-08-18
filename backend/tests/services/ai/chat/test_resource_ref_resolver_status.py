@@ -88,12 +88,27 @@ async def test_query_selects_the_status_columns(monkeypatch):
 
 
 async def test_meta_exposes_both_statuses(monkeypatch):
-    session = _CapturingSession(rows=[_row()])
+    # Real ORM rows carry AiTaskStatus members, not plain strings — the
+    # test double must match, or the coercion checks below prove nothing.
+    from app.models._enums import AiTaskStatus
+
+    session = _CapturingSession(
+        rows=[
+            _row(
+                transcript_status=AiTaskStatus.PROCESSING,
+                summary_status=AiTaskStatus.NONE,
+            )
+        ]
+    )
     _patch_scopes(monkeypatch, session)
 
     meta = await _fetch_accessible_meta("u1", ["1"])
 
     assert meta["1"]["transcript_status"] == "processing"
+    # `is str`, not `==`: AiTaskStatus.PROCESSING == "processing" is True,
+    # so an equality check cannot detect a dropped ai_status_str coercion.
+    assert type(meta["1"]["transcript_status"]) is str
+    assert type(meta["1"]["summary_status"]) is str
     assert meta["1"]["summary_status"] == "none"
 
 
