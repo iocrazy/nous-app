@@ -14,7 +14,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.ai._mime_kind import kind_from_mime
-from app.utils.ai_status import ai_status_str
+from app.services.ai.resource_ai_status import effective_ai_statuses
 
 # All endpoints here require auth (AuthDep) and are resources-dedicated, so the
 # ambient tenant Scope is established at the ROUTER level. Inert until
@@ -80,6 +80,11 @@ async def search_resources(
         scope_team_id=scope_team_id,
     )
 
+    # The status columns only ever hold terminal values, so the picker's
+    # "being processed" chip has to come from task_tracking. One batched
+    # query for the whole page — see services/ai/resource_ai_status.
+    effective = await effective_ai_statuses({str(row["id"]): row for row in rows})
+
     results = []
     counts: dict[str, int] = {
         "all": 0,
@@ -94,6 +99,7 @@ async def search_resources(
         counts[kind] += 1
         counts["all"] += 1
         rid = str(row["id"])
+        _eff = effective.get(rid, {})
         # Whitelist, never a `**row` spread: the repo now selects storage
         # paths and the media FK purely so the ladder below can be walked
         # here. They are inputs, not output — pinned by the tripwire in
@@ -111,8 +117,8 @@ async def search_resources(
                 },
                 "updated_at": row["updated_at"],
                 "thumbnail_url": _thumbnail_url(row, rid),
-                "transcript_status": ai_status_str(row.get("transcript_status")),
-                "summary_status": ai_status_str(row.get("summary_status")),
+                "transcript_status": _eff.get("transcript_status"),
+                "summary_status": _eff.get("summary_status"),
             }
         )
 

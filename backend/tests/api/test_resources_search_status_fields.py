@@ -17,12 +17,28 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.deps import AuthContext, get_auth
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _no_active_tasks(monkeypatch):
+    """Task 1b: the picker's status is now the COLUMN merged with any
+    in-flight task_tracking row. Default that second half to "nothing
+    running" so the tests below stay about the router, and drive it
+    explicitly via ``_search(..., active=...)`` where it is the subject."""
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _none(resource_ids):
+        return {}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _none)
+
 
 # Anything in here leaking into the picker response is a finding, not a
 # nitpick: storage paths are the input to the download/serve routes, and
@@ -59,19 +75,28 @@ def _row(**over):
     return base
 
 
-def _search(rows, query: str = "?q=x"):
+def _search(rows, query: str = "?q=x", active: dict | None = None):
     async def _fake_list(self, **kwargs):
         return rows
+
+    async def _fake_active(resource_ids):
+        return active or {}
 
     def _fake_auth() -> AuthContext:
         return AuthContext(user_id="u", auth_type="jwt")
 
     app.dependency_overrides[get_auth] = _fake_auth
     try:
-        with patch(
-            "app.repositories.resources_repository.ResourcesRepository"
-            ".list_accessible_for_user",
-            new=_fake_list,
+        with (
+            patch(
+                "app.repositories.resources_repository.ResourcesRepository"
+                ".list_accessible_for_user",
+                new=_fake_list,
+            ),
+            patch(
+                "app.services.ai.resource_ai_status._active_ai_tasks",
+                new=_fake_active,
+            ),
         ):
             r = client.get(f"/api/v1/resources/search{query}")
     finally:
@@ -162,6 +187,28 @@ def test_enum_members_serialize_to_their_values():
     ).json()
     assert body["results"][0]["transcript_status"] == "failed"
     assert body["results"][0]["summary_status"] == "none"
+
+
+# ── in-flight comes from task_tracking, not the column ──────────────
+
+
+def test_a_running_task_shows_up_as_processing():
+    """Production shape: nothing ever writes 'processing' into the column,
+    so a picker chip keyed on the column alone could never light up."""
+    body = _search(
+        [_row(mime="video/mp4", transcript_status="none")],
+        active={"331438000000001": {"transcript_status": "processing"}},
+    ).json()
+    assert body["results"][0]["transcript_status"] == "processing"
+    assert body["results"][0]["summary_status"] == "none"
+
+
+def test_a_completed_column_is_not_overwritten_by_a_task_row():
+    body = _search(
+        [_row(mime="video/mp4", transcript_status="completed")],
+        active={"331438000000001": {"transcript_status": "processing"}},
+    ).json()
+    assert body["results"][0]["transcript_status"] == "completed"
 
 
 # ── tripwire: the new SELECT columns must not reach the client ──────

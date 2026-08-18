@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from app.utils.ai_status import ai_status_str
+from app.services.ai.resource_ai_status import effective_ai_statuses
 
 
 def _contained_doc_path(fp: str) -> Optional[Path]:
@@ -207,8 +207,14 @@ async def _fetch_dispatch(
     if mime.startswith("video/") or mime.startswith("audio/"):
         m = mode or ("summary" if mime.startswith("video/") else "transcript")
         rid = int(resource_id)
-        transcript_status = ai_status_str(row.get("transcript_status"))
-        summary_status = ai_status_str(row.get("summary_status"))
+        # The status columns only ever receive terminal values, so a
+        # column-only read could never say "in flight" — the live half comes
+        # from task_tracking (see services/ai/resource_ai_status).
+        _effective = (await effective_ai_statuses({resource_id: row})).get(
+            resource_id, {}
+        )
+        transcript_status = _effective.get("transcript_status")
+        summary_status = _effective.get("summary_status")
         in_flight = {"pending", "processing"}
         if m == "summary":
             async with read_scope() as session:

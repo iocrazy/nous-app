@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from app.services.ai._mime_kind import kind_from_mime
+from app.services.ai.resource_ai_status import effective_ai_statuses
 from app.utils.ai_status import ai_status_str
 
 
@@ -104,7 +105,7 @@ async def _fetch_accessible_meta(
         async with read_scope() as session:
             rows = (await session.execute(stmt)).mappings().all()
 
-    return {
+    metas: dict[str, dict[str, Any]] = {
         row["id"]: {
             "id": row["id"],
             "name": row["name"],
@@ -123,6 +124,13 @@ async def _fetch_accessible_meta(
         }
         for row in (rows or [])
     }
+
+    # The two columns only ever hold terminal values, so "being processed
+    # right now" has to come from task_tracking — see resource_ai_status.
+    # One batched query for the whole @-mention set, not one per ref.
+    for rid, statuses in (await effective_ai_statuses(metas)).items():
+        metas[rid].update(statuses)
+    return metas
 
 
 async def resolve_resource_refs(

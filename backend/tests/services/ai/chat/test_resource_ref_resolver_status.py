@@ -17,6 +17,29 @@ from app.services.ai.chat.resource_ref_resolver import _fetch_accessible_meta
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
+@pytest.fixture(autouse=True)
+def _no_active_tasks(monkeypatch):
+    """Isolate the COLUMN half of the effective status (Task 1b moved the
+    in-flight half to task_tracking; ``_with_active_task`` below drives
+    that side, and the reducer itself is pinned in
+    tests/services/ai/test_resource_ai_status.py)."""
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _none(resource_ids):
+        return {}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _none)
+
+
+def _with_active_task(monkeypatch, **fields):
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _active(resource_ids):
+        return {"1": dict(fields)}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _active)
+
+
 class _CapturingSession:
     def __init__(self, rows):
         self._rows = rows
@@ -158,3 +181,28 @@ async def test_existing_meta_keys_are_untouched(monkeypatch):
     assert meta["1"]["name"] == "pitch.mp4"
     assert meta["1"]["kind"] == "video"
     assert meta["1"]["scope"] == "personal"
+
+
+async def test_a_running_task_surfaces_in_the_meta(monkeypatch):
+    """Production shape: the column says 'none' forever while an
+    ai_transcription workflow runs. The prompt composer renders this meta,
+    so without the task_tracking half the agent is told the video was never
+    processed while it is being transcribed right now."""
+    session = _CapturingSession(rows=[_row(transcript_status="none")])
+    _patch_scopes(monkeypatch, session)
+    _with_active_task(monkeypatch, transcript_status="processing")
+
+    meta = await _fetch_accessible_meta("u1", ["1"])
+
+    assert meta["1"]["transcript_status"] == "processing"
+    assert meta["1"]["summary_status"] == "none"
+
+
+async def test_a_completed_column_is_not_overwritten_by_a_task_row(monkeypatch):
+    session = _CapturingSession(rows=[_row(transcript_status="completed")])
+    _patch_scopes(monkeypatch, session)
+    _with_active_task(monkeypatch, transcript_status="processing")
+
+    meta = await _fetch_accessible_meta("u1", ["1"])
+
+    assert meta["1"]["transcript_status"] == "completed"

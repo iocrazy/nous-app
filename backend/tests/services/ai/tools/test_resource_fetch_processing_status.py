@@ -21,6 +21,35 @@ import pytest
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
+@pytest.fixture(autouse=True)
+def _no_active_tasks(monkeypatch):
+    """Default the task_tracking half of the effective status to "nothing
+    running" so each test below isolates the COLUMN semantics.
+
+    The columns only ever hold terminal values in production, so the
+    in-flight signal now comes from task_tracking (Task 1b). The tests that
+    exercise THAT half stub this seam themselves (see
+    ``_with_active_task``) or live in tests/services/ai/
+    test_resource_ai_status.py.
+    """
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _none(resource_ids):
+        return {}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _none)
+
+
+def _with_active_task(monkeypatch, **fields):
+    """Make the shared resolver report an in-flight task for resource "1"."""
+    import app.services.ai.resource_ai_status as status_module
+
+    async def _active(resource_ids):
+        return {"1": dict(fields)}
+
+    monkeypatch.setattr(status_module, "_active_ai_tasks", _active)
+
+
 class _FakeMappingsResult:
     def __init__(self, rows):
         self._rows = rows
@@ -216,6 +245,49 @@ async def test_present_content_wins_over_any_status(monkeypatch):
         content="the gist",
     )
     assert out["content"] == "the gist"
+
+
+# ── the in-flight half comes from task_tracking, not the column ─────
+
+
+async def test_a_running_task_makes_an_idle_column_read_as_in_flight(monkeypatch):
+    """The production shape: transcript_status is 'none' (nothing ever
+    writes an intermediate value) while an ai_transcription workflow is
+    actually running. Before Task 1b this returned the flat "not yet
+    processed" failure — the bug spec §3-③ is about."""
+    _with_active_task(monkeypatch, transcript_status="processing")
+    out, _ = await _dispatch(
+        monkeypatch,
+        mime="audio/mpeg",
+        mode="transcript",
+        row_extra={"transcript_status": "none", "summary_status": "none"},
+    )
+    assert "being generated" in out["error"]
+    assert "not available" not in out["error"]
+
+
+async def test_a_running_transcription_also_covers_the_summary_mode(monkeypatch):
+    _with_active_task(monkeypatch, transcript_status="pending")
+    out, _ = await _dispatch(
+        monkeypatch,
+        mime="video/mp4",
+        mode="summary",
+        row_extra={"transcript_status": "none", "summary_status": "none"},
+    )
+    assert "still being processed" in out["error"]
+
+
+async def test_a_failed_column_still_wins_over_a_stale_task_row(monkeypatch):
+    """Terminal column beats the task table: a transcript that failed is a
+    result the agent can report, not a promise to wait."""
+    _with_active_task(monkeypatch, transcript_status="processing")
+    out, _ = await _dispatch(
+        monkeypatch,
+        mime="audio/mpeg",
+        mode="transcript",
+        row_extra={"transcript_status": "failed", "summary_status": "none"},
+    )
+    assert out == {"error": "transcript not available; resource not yet processed"}
 
 
 # ── scope tripwire ──────────────────────────────────────────────────

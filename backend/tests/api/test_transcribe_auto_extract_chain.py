@@ -226,6 +226,216 @@ class TestTranscribeByResource:
         assert dispatched == []
 
 
+# ─── dedup during the extract-audio window (T2 review I1) ─────────
+
+
+class _ActiveTaskSession:
+    """Dedup probe that answers "yes, one is running" ONLY when the query
+    really asks about the given task_type.
+
+    Compiling the statement rather than returning a canned row is what makes
+    this falsifiable: drop ``extract_audio`` from the dedup's IN list and
+    the probe goes back to None, the endpoint dispatches, and the assertions
+    below fail — which is exactly the bug being fixed.
+    """
+
+    def __init__(self, task_type: str):
+        self._task_type = task_type
+        self.seen_sql: str | None = None
+
+    async def execute(self, stmt, *_a, **_k):
+        from sqlalchemy.dialects import postgresql
+
+        self.seen_sql = str(
+            stmt.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        result = MagicMock()
+        result.first.return_value = (
+            ("wf-existing",) if self._task_type in self.seen_sql else None
+        )
+        return result
+
+
+def _patch_dedup_session(monkeypatch, session):
+    import app.db.session as dbs
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+
+
+class TestTranscribeDedup:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("active_type", ["ai_transcription", "extract_audio"])
+    async def test_an_active_task_short_circuits_without_dispatching(
+        self, monkeypatch, active_type
+    ) -> None:
+        """``extract_audio`` is the half that used to be missed: a video with
+        no audio track yet is transcribed via extract_audio(chain=True), so
+        during that whole window the dedup found nothing, dispatched again,
+        and tripped migration 121's unique index into a 500."""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "bilibili/329/video.mp4",
+            "title": "Old Bilibili clip",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+        session = _ActiveTaskSession(active_type)
+        _patch_dedup_session(monkeypatch, session)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert dispatched == []
+        assert created == []
+
+    @pytest.mark.asyncio
+    async def test_losing_the_insert_race_reports_in_progress_not_500(
+        self, monkeypatch
+    ) -> None:
+        """TOCTOU: another request creates the active row between our SELECT
+        and our INSERT. Migration 121's own comment says callers must treat
+        the unique violation as "already in progress" — a 500 would tell the
+        user their media failed while it is being processed."""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        assert res["points_charged"] == 0
+        assert dispatched == []
+        mgr.fail.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_race_loser_gets_its_points_back(self, monkeypatch) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+            "duration": 600,
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        settings_repo = MagicMock()
+        settings_repo.get_by_user_id = AsyncMock(
+            return_value={
+                "settings_json": {
+                    "ai_settings": {"task_assignment": {"transcription": "nous-asr"}}
+                }
+            }
+        )
+        monkeypatch.setattr(
+            "app.repositories.user_settings_repository.UserSettingsRepository",
+            lambda: settings_repo,
+        )
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value="team-1")
+        )
+        nous_repo = MagicMock()
+        nous_repo.get_by_name = AsyncMock(
+            return_value={
+                "is_enabled": True,
+                "pricing_type": "per_hour",
+                "pricing_value": 60,
+            }
+        )
+        monkeypatch.setattr(
+            "app.repositories.mediahub_model_repository."
+            "get_mediahub_model_repository",
+            lambda: nous_repo,
+        )
+        refund = AsyncMock()
+        pts = MagicMock()
+        pts.ensure_team_quota = AsyncMock()
+        pts.check_and_consume = AsyncMock(
+            return_value={"success": True, "points_cost": 10}
+        )
+        pts.refund_points = refund
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+
+        async def _conflict(**_kwargs):
+            raise Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_task_tracking_active_per_resource_type"'
+            )
+
+        mgr.create = AsyncMock(side_effect=_conflict)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["message"] == "Transcription already in progress"
+        refund.assert_awaited_once()
+        assert refund.await_args.kwargs["amount"] == 10
+
+    @pytest.mark.asyncio
+    async def test_an_unrelated_dispatch_failure_is_still_a_500(
+        self, monkeypatch
+    ) -> None:
+        """The conflict branch must not swallow real failures — a broken
+        dispatch reported as "already in progress" would be the silent
+        no-op this codebase keeps banning."""
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        async def _boom(**_kwargs):
+            raise RuntimeError("DBOS is not launched")
+
+        mgr.create = AsyncMock(side_effect=_boom)
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert exc.value.status_code == 500
+
+
 # ─── legacy platform_id endpoint ──────────────────────────────────
 
 

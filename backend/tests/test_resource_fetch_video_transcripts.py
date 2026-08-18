@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from app.models import ResourceSummaries, ResourceTranscripts
+from app.models import ResourceSummaries, ResourceTranscripts, TaskTracking
 
 RID = 331438000000001
 
@@ -52,6 +52,15 @@ CREATE TABLE resource_summaries (
     llm_model TEXT,
     llm_provider TEXT,
     created_at TEXT
+);
+CREATE TABLE task_tracking (
+    dbos_workflow_id TEXT PRIMARY KEY,
+    user_id TEXT,
+    resource_id TEXT,
+    task_type TEXT NOT NULL,
+    title TEXT,
+    status TEXT NOT NULL,
+    phase TEXT
 );
 """
 
@@ -268,3 +277,57 @@ def test_dead_videos_table_reference_is_gone():
     assert (
         "FROM public.videos" not in src
     ), "the phantom public.videos table must not be queried"
+
+
+@pytest.mark.asyncio
+async def test_a_running_task_turns_not_available_into_being_generated(
+    sqlite_session_factory,
+):
+    """End-to-end on a real engine: no transcript row, no intermediate value
+    in the status column (production never writes one) — the "still working
+    on it" answer has to come from an active task_tracking row.
+
+    Runs the actual ORM statement rather than a stubbed reducer, so a
+    predicate that does not compile or does not match is a red test.
+    """
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-1",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="extract_audio",
+                title="Audio clip",
+                status="processing",
+                phase="in_progress",
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert "being generated" in out["error"]
+    assert "not available" not in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_finished_task_leaves_the_not_available_wording_alone(
+    sqlite_session_factory,
+):
+    factory = sqlite_session_factory
+    async with factory() as s:
+        await s.execute(
+            TaskTracking.__table__.insert().values(
+                dbos_workflow_id="wf-2",
+                user_id=uuid.uuid4(),
+                resource_id=str(RID),
+                task_type="ai_transcription",
+                title="Transcribe clip",
+                status="completed",
+                phase="completed",
+            )
+        )
+        await s.commit()
+
+    out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
+    assert out == {"error": "transcript not available; resource not yet processed"}
