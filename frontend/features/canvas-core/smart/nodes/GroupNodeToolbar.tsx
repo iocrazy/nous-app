@@ -47,20 +47,27 @@ export function GroupNodeToolbar({
         pinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
       }`}
     >
+      {/* IC shows icon+text on every key (整理排列/预览/宫格拼接/批量下载/
+          解散分组) — text visible, not tooltip-only. */}
       <BarButton label="Arrange" onClick={onArrange} disabled={readOnly || !hasContent}>
         <LayoutGrid size={13} />
+        <span>Arrange</span>
       </BarButton>
       <BarButton label="Preview" onClick={onPreview} disabled={imageCount < 1}>
         <Eye size={13} />
+        <span>Preview</span>
       </BarButton>
       <BarButton label="Stitch" onClick={onStitch} disabled={readOnly || imageCount < 2}>
         <Grid3x3 size={13} />
+        <span>Stitch</span>
       </BarButton>
       <BarButton label="Download" onClick={onDownload} disabled={imageCount < 1}>
         <Archive size={13} />
+        <span>Download</span>
       </BarButton>
       <BarButton label="Ungroup" onClick={onUngroup} disabled={readOnly}>
         <UngroupIcon size={13} />
+        <span>Ungroup</span>
       </BarButton>
     </div>
   );
