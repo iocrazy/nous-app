@@ -38,6 +38,8 @@ export interface MentionPickerBag {
   handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
   /** Call when the user picks an item from the picker */
   handleSelect: (item: ResourceSearchResult) => void;
+  /** Replace the @-token with plain text (no resource ref persisted). */
+  handleInsertText: (name: string) => void;
   /** Call to close the picker (e.g. `onBlur`) */
   closePicker: () => void;
   /**
@@ -137,6 +139,20 @@ export function useCanvasMentionPicker({
 
   const closePicker = useCallback(() => setPickerOpen(false), []);
 
+  // Insert a plain @name (IC parity ⑤ — the 输入图 tab): replaces the
+  // @-token like handleSelect but persists NO resource ref; the caller owns
+  // whatever state the pick maps to (e.g. source_ref).
+  const handleInsertText = useCallback(
+    (name: string) => {
+      const tokenLen = 1 + query.length;
+      const before = value.slice(0, tokenStartRef.current);
+      const after = value.slice(tokenStartRef.current + tokenLen);
+      onValueChange(`${before}@${name} ${after}`);
+      setPickerOpen(false);
+    },
+    [value, query, onValueChange],
+  );
+
   return {
     pickerOpen,
     query,
@@ -144,6 +160,7 @@ export function useCanvasMentionPicker({
     handleChange,
     handleKeyDown,
     handleSelect,
+    handleInsertText,
     closePicker,
     setItemCount,
   };

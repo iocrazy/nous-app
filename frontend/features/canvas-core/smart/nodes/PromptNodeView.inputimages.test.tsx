@@ -1,0 +1,164 @@
+/**
+ * PromptNodeView — IC-parity ⑤ input-image row + @-picker「输入图」tab.
+ *
+ * The wired inputs (resolveSourceUrls) render as a thumbnail row above the
+ * textarea (Infinite's「2 输入图」); clicking one selects it as the i2i
+ * source (data.source_ref, toggles off on re-click). Typing @ opens a
+ * two-tab picker — Input images / Library — defaulting to Input when
+ * inputs exist (IC rule); picking an input inserts @Image N and sets
+ * source_ref.
+ */
+
+import { ReactFlowProvider } from '@xyflow/react';
+import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import type { CanvasNode } from '../../types';
+import { PromptNodeView } from './PromptNodeView';
+import type { ResourceSearchResponse } from '../../../../types';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, d?: unknown) => (typeof d === 'string' ? d : k),
+  }),
+}));
+vi.mock('../../../../hooks/useResourceSearch', () => ({
+  useResourceSearch: vi.fn(),
+}));
+import { useResourceSearch } from '../../../../hooks/useResourceSearch';
+
+const EMPTY_SEARCH: ResourceSearchResponse = {
+  results: [],
+  counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+  next_cursor: null,
+};
+
+const URL_A = '/api/v1/generated-media/a.png';
+const URL_B = '/api/v1/generated-media/b.png';
+
+const baseProps = {
+  selected: false, dragging: false, zIndex: 0, isConnectable: true,
+  positionAbsoluteX: 0, positionAbsoluteY: 0, deletable: true,
+  draggable: true, selectable: true,
+} as const;
+
+function seed(withInputs: boolean): void {
+  useCanvasCoreStore.getState().reset();
+  const media: CanvasNode = {
+    id: 'm1',
+    type: 'media',
+    position: { x: 0, y: 0 },
+    data: {
+      title: 'Media',
+      items: [
+        { url: URL_A, kind: 'image', name: 'a.png' },
+        { url: URL_B, kind: 'image', name: 'b.png' },
+      ],
+    },
+  } as unknown as CanvasNode;
+  const prompt: CanvasNode = {
+    id: 'p1',
+    type: 'prompt',
+    position: { x: 0, y: 300 },
+    data: {
+      body: '',
+      provider_slug: '',
+      agent_id: null,
+      run_status: 'idle',
+      resource_refs: [],
+      gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+    },
+  } as unknown as CanvasNode;
+  useCanvasCoreStore.setState({
+    kind: 'smart',
+    nodes: withInputs ? [media, prompt] : [prompt],
+    connections: withInputs
+      ? [{ id: 'e1', source: 'm1', target: 'p1', sourceHandle: null, targetHandle: null }]
+      : [],
+    selection: [],
+  });
+}
+
+function renderPrompt(): void {
+  const data = (useCanvasCoreStore
+    .getState()
+    .nodes.find((n) => (n as { id: string }).id === 'p1') as { data: unknown }).data;
+  render(
+    <ReactFlowProvider>
+      <PromptNodeView {...baseProps} id="p1" type="prompt" data={data as never} />
+    </ReactFlowProvider>,
+  );
+}
+
+function promptData(): { source_ref?: string; body: string } {
+  return (useCanvasCoreStore
+    .getState()
+    .nodes.find((n) => (n as { id: string }).id === 'p1') as { data: never }).data;
+}
+
+beforeEach(() => {
+  vi.mocked(useResourceSearch).mockReturnValue({
+    data: EMPTY_SEARCH,
+    loading: false,
+  } as never);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  useCanvasCoreStore.getState().reset();
+});
+
+describe('input image row', () => {
+  it('renders wired inputs as thumbnails with a count', () => {
+    seed(true);
+    renderPrompt();
+    const row = screen.getByTestId('prompt-input-row');
+    expect(row.querySelectorAll('img')).toHaveLength(2);
+    expect(row.textContent).toContain('2 inputs');
+  });
+
+  it('clicking a thumbnail toggles it as the i2i source', () => {
+    seed(true);
+    renderPrompt();
+    const thumbs = screen.getAllByTestId('prompt-input-thumb');
+    fireEvent.click(thumbs[1]);
+    expect(promptData().source_ref).toBe(URL_B);
+    fireEvent.click(thumbs[1]);
+    expect(promptData().source_ref).toBeUndefined();
+  });
+
+  it('no wired inputs → no row', () => {
+    seed(false);
+    renderPrompt();
+    expect(screen.queryByTestId('prompt-input-row')).toBeNull();
+  });
+});
+
+describe('@ picker input tab', () => {
+  function openPicker(): void {
+    const textarea = screen.getByRole('textbox', { name: 'Prompt body' });
+    fireEvent.change(textarea, { target: { value: '@', selectionStart: 1 } });
+  }
+
+  it('defaults to the Input tab when inputs exist; picking sets source_ref and inserts text', () => {
+    seed(true);
+    renderPrompt();
+    openPicker();
+    const options = screen.getAllByTestId('mention-input-option');
+    expect(options).toHaveLength(2);
+    fireEvent.mouseDown(options[1]);
+    fireEvent.click(options[1]);
+    expect(promptData().source_ref).toBe(URL_B);
+    expect(promptData().body).toContain('@');
+  });
+
+  it('without inputs the Input tab is disabled and Library is active', () => {
+    seed(false);
+    renderPrompt();
+    openPicker();
+    expect(screen.getByTestId('mention-tab-input')).toBeDisabled();
+    expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
+  });
+});

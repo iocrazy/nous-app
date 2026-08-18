@@ -21,6 +21,7 @@ import {
 } from '../mediaImport';
 import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { CreateFromNodeBar } from './CreateFromNodeBar';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -110,7 +111,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-media-node"
-      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
+      className={`group relative mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
         dragOver ? 'ring-2 ring-indigo-500/50' : ''
       }`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.media }}
@@ -130,6 +131,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      <CreateFromNodeBar nodeId={id} pinned={Boolean(selected)} readOnly={readOnly} />
       <div className="mh-node-head">
         <div className="mh-node-title">
           {title || t('canvas.mediaNode.title', 'Media')}

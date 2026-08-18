@@ -28,6 +28,7 @@ import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
+import { CreateFromNodeBar } from './CreateFromNodeBar';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -367,6 +368,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       />
       {/* Floating toolbar (P2-3): pinned while selected, hover-revealed
           otherwise. Preview bypasses the 250ms crop-disambiguation delay. */}
+      <CreateFromNodeBar
+        nodeId={id}
+        pinned={Boolean(selected)}
+        readOnly={readOnly}
+      />
       {lightboxItems.length > 0 && (
         <OutputNodeToolbar
           items={lightboxItems}

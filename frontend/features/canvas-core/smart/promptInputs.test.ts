@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveSourceUrl, resolveSourceUrls } from './promptInputs';
+import { resolveEffectiveSourceUrl, resolveSourceUrl, resolveSourceUrls } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';
 
 const NODES: CanvasNode[] = [
@@ -155,5 +155,72 @@ describe('groups with absorbed media as sources (group v2)', () => {
     expect(resolveSourceUrls('p9', nodes, [conn('g1', 'p9')])).toEqual([
       '/api/v1/generated-media/31/cover',
     ]);
+  });
+});
+
+
+// ---- resolveEffectiveSourceUrl (IC parity ⑤ — @输入图 selects the i2i src) --
+
+describe('resolveEffectiveSourceUrl', () => {
+  const media = {
+    id: 'm1',
+    type: 'media',
+    position: { x: 0, y: 0 },
+    data: {
+      title: 'Media',
+      items: [
+        { url: '/api/v1/generated-media/a.png', kind: 'image' },
+        { url: '/api/v1/generated-media/b.png', kind: 'image' },
+      ],
+    },
+  } as unknown as CanvasNode;
+  const conn = {
+    id: 'e1',
+    source: 'm1',
+    target: 'p1',
+    sourceHandle: null,
+    targetHandle: null,
+  };
+
+  function prompt(source_ref?: string): CanvasNode {
+    return {
+      id: 'p1',
+      type: 'prompt',
+      position: { x: 0, y: 0 },
+      data: {
+        body: 'x',
+        provider_slug: '',
+        agent_id: null,
+        run_status: 'idle',
+        resource_refs: [],
+        ...(source_ref ? { source_ref } : {}),
+      },
+    } as unknown as CanvasNode;
+  }
+
+  it('honors a source_ref that is still among the inputs', () => {
+    const p = prompt('/api/v1/generated-media/b.png');
+    expect(resolveEffectiveSourceUrl(p, [media, p], [conn])).toBe(
+      '/api/v1/generated-media/b.png',
+    );
+  });
+
+  it('falls back to the first input when source_ref went stale', () => {
+    const p = prompt('/api/v1/generated-media/gone.png');
+    expect(resolveEffectiveSourceUrl(p, [media, p], [conn])).toBe(
+      '/api/v1/generated-media/a.png',
+    );
+  });
+
+  it('defaults to the first input without a source_ref', () => {
+    const p = prompt();
+    expect(resolveEffectiveSourceUrl(p, [media, p], [conn])).toBe(
+      '/api/v1/generated-media/a.png',
+    );
+  });
+
+  it('null when the prompt has no image inputs at all', () => {
+    const p = prompt('/api/v1/generated-media/a.png');
+    expect(resolveEffectiveSourceUrl(p, [p], [])).toBeNull();
   });
 });

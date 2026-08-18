@@ -46,7 +46,7 @@ import {
 import { resolveEntityRef } from './entityRef';
 import { buildPromptAssetLoad } from './loadPromptAsset';
 import { importResourceAsCanvasMedia } from './mediaImport';
-import { resolveSourceUrl } from './promptInputs';
+import { resolveEffectiveSourceUrl } from './promptInputs';
 import { rerunPrompt } from './regenerate';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -362,7 +362,7 @@ export function CanvasComposer({
             provider_slug: data.provider_slug,
             agent_id: data.agent_id,
             gen: data.gen ?? null,
-            source_url: resolveSourceUrl(id, nodes, connections),
+            source_url: resolveEffectiveSourceUrl(n as never, nodes, connections),
             entity_ref: resolveEntityRef(id, nodes, connections),
           };
         })

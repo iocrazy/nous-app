@@ -143,6 +143,10 @@ export interface PromptNodeData {
   /** In-flight generation batch (P1-13) — task ids persisted at dispatch
    *  so a reload can resume polling (genResume). [] once the run settles. */
   gen_tasks?: Array<{ task_id: string; kind: 'image' | 'video' }>;
+  /** @-selected input image url (IC parity ⑤ — the mention picker's
+   *  「输入图」tab): overrides which wired input feeds i2i. Stale refs
+   *  fall back to the first input (resolveEffectiveSourceUrl). */
+  source_ref?: string;
 }
 
 /** Image/video generation settings on a prompt node. */
