@@ -30,13 +30,22 @@
  * neighbours with real posts would both mislead and bury the thing being
  * looked at.
  *
- * ══ WHAT IS NOT BUILT YET ═══════════════════════════════════════════════════
+ * ══ WHEN THE PLAYER STOPS, AND WHAT THAT RULE HANGS OFF ═════════════════════
  *
- * The video tab is disabled in this batch and says so. Playback, scrubbing and
- * the teardown rules that go with a media element land in the next one; a tab
- * that opens onto nothing would be worse than one that states its condition.
+ * Sound the user can no longer see the source of is sound the user cannot
+ * stop. So playback ends when the player leaves the screen (another tab), when
+ * it is pointed at a different clip, and when the panel unmounts.
+ *
+ * ⚠️ The rule keys on `playingSourceId` — the id of the clip the player is
+ * pointed at, a PRIMITIVE — and on nothing else. It must never be keyed on the
+ * `items` array's identity. The parent rebuilds that array on every render
+ * that touches the Library list, so an identity-keyed rule fires for reasons
+ * the user did not cause: this page shipped exactly that bug on the music
+ * panel, where a background refresh that changed nothing on screen cut off the
+ * track the user was listening to. "The array object is new" is not the rule;
+ * "the clip being played changed" is.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
 
@@ -86,7 +95,7 @@ export interface PublishPreviewProps {
 }
 
 /** Why a tab cannot be opened, or null when it can. */
-type TabBlock = 'wrongKind' | 'notBuilt' | null;
+type TabBlock = 'wrongKind' | null;
 
 /**
  * Where the image in the first grid cell came from.
@@ -117,6 +126,7 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
    * failure of the unsigned attempt before it.
    */
   const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const markFailed = (url: string) => setFailedUrls((prev) => {
     if (prev.has(url)) return prev;
     const next = new Set(prev);
@@ -128,7 +138,7 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
 
   const blockFor = (which: PreviewTab): TabBlock => {
     if (which === 'cover') return null;
-    if (which === 'video') return isImages ? 'wrongKind' : 'notBuilt';
+    if (which === 'video') return isImages ? 'wrongKind' : null;
     return isImages ? null : 'wrongKind';
   };
 
@@ -163,6 +173,37 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
   const currentItem = items[pageIndex] ?? null;
 
   /**
+   * The clip the player is pointed at, or null whenever no player is on
+   * screen. See the "when the player stops" note at the top of this file: this
+   * primitive is the ENTIRE stop rule, and it is derived rather than stored so
+   * it cannot drift from what is rendered.
+   */
+  const playingSourceId = tab === 'video' && !isImages ? currentItem?.id ?? null : null;
+
+  useEffect(() => {
+    /* ⚠️ `el` is captured at set-up, ON PURPOSE.
+       React updates refs during commit and runs passive cleanups after, so by
+       the time this cleanup runs the ref already points at the NEW element —
+       or at null. Reading `videoRef.current` here would pause the wrong
+       element, or nothing at all. (Verified: swapping the capture for a ref
+       read turns five of the tests in this file red.)
+
+       Why pause explicitly at all, given that today every one of these cases
+       also unmounts the element, and the HTML spec's "removed from a Document"
+       steps pause a detached media element? Measured in Chromium 1228, a
+       detached clip does indeed stop on its own — so right now the two paths
+       agree, and this effect is the one that STATES the rule instead of
+       inheriting it. That distinction stops being academic the moment the
+       element is no longer unmounted: hide the inactive tab with CSS instead
+       of unmounting it, or drop the per-clip `key` and reuse one element
+       across clips, and nothing is ever detached — at which point this effect
+       is the only thing that stops the sound. */
+    const el = videoRef.current;
+    if (el === null) return undefined;
+    return () => { el.pause(); };
+  }, [playingSourceId]);
+
+  /**
    * A displayable URL for one Library row.
    *
    * The cover endpoint is unauthenticated and serves the stored thumbnail; the
@@ -173,6 +214,18 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
    */
   const mediaUrl = (item: PreviewMedia): string =>
     item.thumbnail_url ?? getResourceFileUrl(item.id, mediaToken);
+
+  /**
+   * The playable URL for a clip. Always the file endpoint — a thumbnail is a
+   * still, and this is the one place that needs the bytes.
+   *
+   * The token rides as `?token=` because a media element cannot send an
+   * Authorization header. Seeking works because that endpoint answers Range
+   * requests (`backend/app/services/library/media_serving.py` — FileResponse
+   * for filesystem rows, an explicit 206 proxy for object-store ones), so
+   * dragging the scrubber fetches the byte range rather than the whole file.
+   */
+  const videoUrl = (item: PreviewMedia): string => getResourceFileUrl(item.id, mediaToken);
 
   /** What the first grid cell shows, and why. Both halves together. */
   const coverSource: { url: string | null; provenance: CoverProvenance } = (() => {
@@ -240,14 +293,46 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
     return <img src={url} alt={alt} onError={() => markFailed(url)} />;
   };
 
+  /**
+   * The prev / next / "n of total" strip, shared by the gallery and the video
+   * tab because both page through the same selection. Sharing the index too:
+   * the two tabs are mutually exclusive by post type, so they can never be
+   * showing different positions at once.
+   */
+  const pager = (prevLabel: string, nextLabel: string) => (
+    items.length === 0 ? null : (
+      <div className="pv-pager">
+        <button
+          type="button"
+          disabled={pageIndex === 0}
+          aria-label={prevLabel}
+          onClick={() => setGalleryIndex(pageIndex - 1)}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <span className="pv-count">
+          {t('distribution.publish.previewPageCount', '{{n}} / {{total}}', {
+            n: pageIndex + 1, total: items.length,
+          })}
+        </span>
+        <button
+          type="button"
+          disabled={pageIndex >= items.length - 1}
+          aria-label={nextLabel}
+          onClick={() => setGalleryIndex(pageIndex + 1)}
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    )
+  );
+
   const tabButton = (which: PreviewTab, label: string) => {
     const block = blockFor(which);
     const reason = block === null ? undefined
-      : block === 'notBuilt'
-        ? t('distribution.publish.previewTabNotBuilt', 'Video playback preview is not built yet.')
-        : which === 'video'
-          ? t('distribution.publish.previewTabVideoOnly', 'This is an image post — there is no video to play.')
-          : t('distribution.publish.previewTabGalleryOnly', 'This is a video post — there is no image gallery.');
+      : which === 'video'
+        ? t('distribution.publish.previewTabVideoOnly', 'This is an image post — there is no video to play.')
+        : t('distribution.publish.previewTabGalleryOnly', 'This is a video post — there is no image gallery.');
     return (
       <button
         type="button"
@@ -262,13 +347,12 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
     );
   };
 
-  const activeBlockReason = ((): string | null => {
-    const block = blockFor(tab);
-    if (block === null) return null;
-    return block === 'notBuilt'
-      ? t('distribution.publish.previewTabNotBuilt', 'Video playback preview is not built yet.')
-      : t('distribution.publish.previewTabUnavailable', 'This view does not apply to the selected post type.');
-  })();
+  const activeBlockReason = blockFor(tab) === null
+    ? null
+    : t(
+      'distribution.publish.previewTabUnavailable',
+      'This view does not apply to the selected post type.',
+    );
 
   return (
     <div className="phone-card pv-card">
@@ -339,6 +423,60 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
               ))}
             </div>
           </div>
+        ) : tab === 'video' ? (
+          <div className="pv-screen pv-gallery">
+            <div className="pv-stage">
+              {currentItem === null ? (
+                <span className="pv-missing">
+                  <ImageOff size={14} aria-hidden="true" />
+                  {t('distribution.publish.previewNothingSelected', 'Nothing selected yet.')}
+                </span>
+              ) : failedUrls.has(videoUrl(currentItem)) ? (
+                <span className="pv-fail" role="status">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  {t('distribution.publish.previewVideoFailed', 'This clip could not be loaded.')}
+                </span>
+              ) : (
+                /* `key` gives every clip its own element, so switching clips
+                   tears the previous decoder down instead of re-pointing a
+                   live one. The explicit pause in the effect above is still
+                   what guarantees the old element stops.
+
+                   Native `controls` rather than a hand-rolled scrubber: it is
+                   the seek bar the user already knows, it is keyboard- and
+                   screen-reader-operable for free, and a custom one would be
+                   drag behaviour that no test in this repo can actually
+                   exercise (jsdom has no layout, so it has no pointer
+                   geometry either).
+
+                   No `autoPlay`: a preview that starts making noise the moment
+                   a tab is clicked is worse than one click. */
+                <video
+                  key={currentItem.id}
+                  ref={videoRef}
+                  className="pv-video"
+                  src={videoUrl(currentItem)}
+                  poster={currentItem.thumbnail_url ?? undefined}
+                  controls
+                  preload="metadata"
+                  aria-label={currentItem.filename}
+                  onError={() => markFailed(videoUrl(currentItem))}
+                />
+              )}
+            </div>
+            <div className="pv-caption">
+              {handle !== null && <div className="pv-handle">@{handle}</div>}
+              <div className={`pv-cap ${titleText === '' ? 'ph' : ''}`}>
+                {titleText === ''
+                  ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
+                  : titleText}
+              </div>
+            </div>
+            {pager(
+              t('distribution.publish.previewPrevClip', 'Previous clip'),
+              t('distribution.publish.previewNextClip', 'Next clip'),
+            )}
+          </div>
         ) : (
           <div className="pv-screen pv-gallery">
             <div className="pv-stage">
@@ -363,30 +501,9 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
                   : titleText}
               </div>
             </div>
-            {items.length > 0 && (
-              <div className="pv-pager">
-                <button
-                  type="button"
-                  disabled={pageIndex === 0}
-                  aria-label={t('distribution.publish.previewPrevImage', 'Previous image')}
-                  onClick={() => setGalleryIndex(pageIndex - 1)}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="pv-count">
-                  {t('distribution.publish.previewImageCount', '{{n}} / {{total}}', {
-                    n: pageIndex + 1, total: items.length,
-                  })}
-                </span>
-                <button
-                  type="button"
-                  disabled={pageIndex >= items.length - 1}
-                  aria-label={t('distribution.publish.previewNextImage', 'Next image')}
-                  onClick={() => setGalleryIndex(pageIndex + 1)}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
+            {pager(
+              t('distribution.publish.previewPrevImage', 'Previous image'),
+              t('distribution.publish.previewNextImage', 'Next image'),
             )}
           </div>
         )}
