@@ -20,7 +20,10 @@ import {
 } from '../services/aiService';
 import type { ResourceAITriggerResponse } from '../services/aiService';
 import { fetchResourceById } from '../services/resourceService';
-import { rememberTranscriptionFollowUp } from './transcriptionFollowUp';
+import {
+  rememberPendingAudioRetry,
+  rememberTranscriptionFollowUp,
+} from './transcriptionFollowUp';
 
 /** What the helper did. `skipped` = nothing to trigger for this kind of
  *  resource (or the backend already declared the step not applicable). */
@@ -44,6 +47,9 @@ export interface EnsureResourceProcessedResult {
   /** Points the call actually charged. Transcribe only — the summary
    *  endpoint never reports a cost. 0 on the dedup path (Task 1b). */
   pointsCharged?: number;
+  /** Set on `pending_audio`: the extraction task to wait on, or null when
+   *  it had already finished before the response was written. */
+  blockingTaskId?: string | null;
   /** True when the 200 came from in-flight dedup rather than a new
    *  dispatch: nothing was queued and nothing was charged. Both trigger
    *  endpoints answer 200 either way, so the caller cannot tell from the
@@ -143,10 +149,19 @@ export async function ensureResourceProcessed(
       // exact lie the backend removed — no transcription is coming until
       // the caller retries.
       if (res?.transcription_pending_audio) {
-        return { action: 'pending_audio', message: res.message, pointsCharged: 0 };
+        // Retried by useResourceProcessingFollowUps once the blocker reaches
+        // a terminal state — by then the audio exists and the same call
+        // dispatches a real transcription.
+        rememberPendingAudioRetry(input.id, res.blocking_task_id);
+        return {
+          action: 'pending_audio',
+          message: res.message,
+          pointsCharged: 0,
+          blockingTaskId: res.blocking_task_id ?? null,
+        };
       }
       // Only now is there a transcript worth waiting for; the summary half
-      // of the chain is picked up by useTranscriptionSummaryFollowUp.
+      // of the chain is picked up by useResourceProcessingFollowUps.
       rememberTranscriptionFollowUp(input.id);
       return {
         action: 'triggered_transcribe',

@@ -55,7 +55,7 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
-import { useTranscriptionSummaryFollowUp } from '../hooks/useTranscriptionSummaryFollowUp';
+import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
 export interface AIChatPanelProps {
@@ -391,12 +391,12 @@ export function AIChatPanel({
     notify: notifyProcessing,
     t,
   });
-  // Second half of the F1 chain: a transcription started from either entry
-  // point has no summary yet, and the summary endpoint has nothing to read
-  // until the transcript lands. Watches the Task Center for that moment.
-  // It charges points like the other two paths, so it reports its outcome
-  // through the same toast.
-  useTranscriptionSummaryFollowUp({ notify: notifyProcessing, t });
+  // The rest of the F1 chain, watched from the Task Center: a transcription
+  // started here has no summary until the transcript lands, and a
+  // transcription REFUSED because an audio extraction held the slot has to
+  // be asked for again once that finishes. Both charge points, so both
+  // report through the same toast.
+  useResourceProcessingFollowUps({ notify: notifyProcessing, t });
 
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {

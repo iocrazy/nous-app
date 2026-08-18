@@ -1,6 +1,6 @@
 /**
- * transcriptionFollowUp — the waiting list behind F1's "chain whatever is
- * missing".
+ * transcriptionFollowUp — the two waiting lists behind F1's "chain whatever
+ * is missing".
  *
  * `ensureResourceProcessed` can only ever start ONE step per call: a video
  * with no transcript gets a transcription, and the summary it also needs
@@ -44,7 +44,47 @@ export function forgetTranscriptionFollowUp(resourceId: string): void {
   waiting.delete(String(resourceId));
 }
 
+/**
+ * Second list: resources whose transcription was REFUSED because an audio
+ * extraction with no transcription intent holds migration 121's unique slot
+ * (`transcription_pending_audio: true`). Nothing was queued and nothing was
+ * charged; the request has to be made again once the blocker finishes.
+ *
+ * `blockingTaskId` is null when the blocker had already finished by the time
+ * the response was written — there is nothing left to observe, so that entry
+ * is retried straight away instead of waiting for a task that will never
+ * change state.
+ */
+export interface PendingAudioRetry {
+  resourceId: string;
+  blockingTaskId: string | null;
+  since: number;
+}
+
+const pendingAudio = new Map<string, PendingAudioRetry>();
+
+export function rememberPendingAudioRetry(
+  resourceId: string,
+  blockingTaskId: string | null | undefined,
+): void {
+  if (!resourceId) return;
+  pendingAudio.set(String(resourceId), {
+    resourceId: String(resourceId),
+    blockingTaskId: blockingTaskId ? String(blockingTaskId) : null,
+    since: Date.now(),
+  });
+}
+
+export function pendingAudioRetries(): PendingAudioRetry[] {
+  return [...pendingAudio.values()];
+}
+
+export function forgetPendingAudioRetry(resourceId: string): void {
+  pendingAudio.delete(String(resourceId));
+}
+
 /** Tests only: module state outlives a single test otherwise. */
 export function resetTranscriptionFollowUps(): void {
   waiting.clear();
+  pendingAudio.clear();
 }

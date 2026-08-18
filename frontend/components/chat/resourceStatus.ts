@@ -3,8 +3,13 @@
  * up in the composer: the @ picker rows and the inline tiptap chip.
  *
  * Both need the same two answers — "what image do I paint?" and "is this
- * thing still being processed?" — and they must agree, because the picker
- * row and the chip it produces are the same resource one click apart.
+ * thing still being processed?" — and they agree except in one case, on
+ * purpose: while an audio extraction with no transcription intent is
+ * running, the backend-derived picker badge says `unprocessed` (it answers
+ * "is a transcript coming?", and it is not), while the chip says
+ * `processing` from the Task Center (it answers "is anything running for
+ * this asset?", and there is). Neither is wrong; they are answering
+ * different questions.
  */
 
 import { getApiUrl } from '../../utils/apiConfig';

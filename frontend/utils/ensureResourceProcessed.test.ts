@@ -25,6 +25,7 @@ vi.mock('../services/resourceService', () => ({
 
 import { ensureResourceProcessed } from './ensureResourceProcessed';
 import {
+  pendingAudioRetries,
   resetTranscriptionFollowUps,
   transcriptionFollowUps,
 } from './transcriptionFollowUp';
@@ -436,6 +437,46 @@ describe('ensureResourceProcessed — blocked behind an audio extraction', () =>
 
     expect(result.action).toBe('pending_audio');
     expect(result.alreadyInProgress).toBeFalsy();
+    expect(result.blockingTaskId).toBe('wf-audio-1');
+  });
+
+  it('queues a retry against the task that is holding the slot', async () => {
+    resetTranscriptionFollowUps();
+    transcribeMock.mockResolvedValue({
+      message: 'Audio extraction is already running…',
+      resource_id: 'r-42',
+      points_charged: 0,
+      transcription_pending_audio: true,
+      blocking_task_id: 'wf-audio-9',
+    });
+
+    await ensureResourceProcessed({
+      id: 'r-42', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(pendingAudioRetries()).toEqual([
+      expect.objectContaining({ resourceId: 'r-42', blockingTaskId: 'wf-audio-9' }),
+    ]);
+  });
+
+  it('queues a retry with no blocker when the winner already finished', async () => {
+    resetTranscriptionFollowUps();
+    transcribeMock.mockResolvedValue({
+      message: 'Audio extraction is already running…',
+      resource_id: 'r-43',
+      points_charged: 0,
+      transcription_pending_audio: true,
+      blocking_task_id: null,
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-43', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(result.blockingTaskId).toBeNull();
+    expect(pendingAudioRetries()).toEqual([
+      expect.objectContaining({ resourceId: 'r-43', blockingTaskId: null }),
+    ]);
   });
 
   it('does not wait for a transcript that was never started', async () => {
