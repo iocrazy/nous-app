@@ -91,6 +91,10 @@
 - summarize 无-transcript 分支不建 task 行（#6）——F1 的链式触发绕开了该分支
   （总是先确保 transcript 再调 summarize），不改后端该分支。
 - 转录/摘要端点返回 task_id（依赖面大；F1 用 #19 范式不需要它）。
+  ⚠️ 已批准的一个边缘例外（终审记录）：T1b 在**拒绝路径**返回 `blocking_task_id`——那是
+  **别人的**（挡路的抽音轨任务的）workflow_id，不是本次派发的 task_id，仅供前端观察
+  blocker 终态后重发，`null` 合法且有"立刻重试"分支。成功路径依旧不返回任何 task_id，
+  不得引用此例外去给成功路径加。
 
 ## 3. 验证
 
