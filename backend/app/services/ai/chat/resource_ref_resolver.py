@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from app.services.ai._mime_kind import kind_from_mime
+from app.utils.ai_status import ai_status_str
 
 
 async def _fetch_accessible_meta(
@@ -26,6 +27,7 @@ async def _fetch_accessible_meta(
       SELECT r.id::text AS id, r.filename AS name,
              r.mime_type AS mime, r.file_size_bytes AS size,
              r.notes AS brief, r.updated_at,
+             r.transcript_status, r.summary_status,
              ri.scope_id::text AS scope_id,
              t.name AS team_name, t.kind AS scope_kind
         FROM public.resources r
@@ -61,6 +63,12 @@ async def _fetch_accessible_meta(
             Resources.file_size_bytes.label("size"),
             Resources.notes.label("brief"),
             Resources.updated_at,
+            # Spec 2026-08-17 §1-F1: without these the prompt cannot tell
+            # "never processed" from "being processed right now", so an
+            # @-mentioned video that is mid-transcription reads to the agent
+            # as a flat failure.
+            Resources.transcript_status,
+            Resources.summary_status,
             scope_text.label("scope_id"),
             Teams.name.label("team_name"),
             Teams.kind.label("scope_kind"),
@@ -110,6 +118,8 @@ async def _fetch_accessible_meta(
             ),
             "updated_at": row["updated_at"],
             "brief": row.get("brief"),
+            "transcript_status": ai_status_str(row.get("transcript_status")),
+            "summary_status": ai_status_str(row.get("summary_status")),
         }
         for row in (rows or [])
     }

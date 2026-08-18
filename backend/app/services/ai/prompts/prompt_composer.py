@@ -609,7 +609,26 @@ def render_available_resources(refs: list[dict] | None) -> str:
             return f"{n // 1024}KB"
         return f"{n // (1024 * 1024)}MB"
 
+    def _status_attr(r: dict) -> str | None:
+        """``status="transcript:X summary:Y"`` for media that can carry AI
+        text, or None.
+
+        Gated to video/audio on purpose: transcript/summary are meaningless
+        for a markdown file, and emitting ``transcript:none`` on every doc
+        mention would be noise the model has to read past — plus needless
+        churn in the cache fingerprint. Refs that predate the resolver
+        change carry neither key and render exactly as before.
+        """
+        if r.get("kind") not in ("video", "audio"):
+            return None
+        transcript = r.get("transcript_status")
+        summary = r.get("summary_status")
+        if transcript is None and summary is None:
+            return None
+        return f'status="transcript:{transcript or "none"} summary:{summary or "none"}"'
+
     lines = ["<available_resources>"]
+    any_status = False
     for r in refs:
         attrs = [
             f'id="{r["id"]}"',
@@ -620,6 +639,10 @@ def render_available_resources(refs: list[dict] | None) -> str:
             f'updated="{r.get("updated_at") or ""}"',
             f'name="{r["name"]}"',
         ]
+        status_attr = _status_attr(r)
+        if status_attr:
+            any_status = True
+            attrs.append(status_attr)
         if r.get("brief"):
             brief = r["brief"].replace('"', "'")
             attrs.append(f'brief="{brief}"')
@@ -633,4 +656,14 @@ def render_available_resources(refs: list[dict] | None) -> str:
     lines.append("  - mode for pdf: excerpt (default) | page (args.page)")
     lines.append("  - mode for image: omit (returns image part)")
     lines.append("  - mode for audio: transcript (default)")
+    if any_status:
+        # Without this the model sees an opaque attribute and still relays a
+        # bare failure — the exact complaint that motivated the change.
+        lines.append("")
+        lines.append(
+            "The status attribute is the AI processing state of that media. "
+            "pending/processing means the text is being generated right now: "
+            "say so and ask the user to retry in a moment — do NOT report it "
+            "as unavailable. none/failed means nothing has been generated yet."
+        )
     return "\n".join(lines)

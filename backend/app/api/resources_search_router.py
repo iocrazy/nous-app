@@ -14,6 +14,7 @@ from app.core.deps import AuthDep
 from app.core.scope_dep import scoped_request
 from app.repositories.resources_repository import ResourcesRepository
 from app.services.ai._mime_kind import kind_from_mime
+from app.utils.ai_status import ai_status_str
 
 # All endpoints here require auth (AuthDep) and are resources-dedicated, so the
 # ambient tenant Scope is established at the ROUTER level. Inert until
@@ -23,6 +24,31 @@ router = APIRouter(
     tags=["resources"],
     dependencies=[Depends(scoped_request)],
 )
+
+
+def _thumbnail_url(row: dict, resource_id: str) -> Optional[str]:
+    """Relative cover URL when the resource can plausibly render one.
+
+    Same ladder the frontend's ``buildThumbnailSrc`` walks and the same one
+    ``serve_resource_cover`` resolves against: an explicit thumbnail, an
+    explicit cover, a parsed_media backing row (cover lives there for
+    downloads), or an image whose original file *is* the cover. Returning a
+    URL is a bet that the endpoint will find something — it falls back to an
+    inline SVG placeholder on a miss, so a false positive costs a placeholder,
+    never a broken image.
+
+    The endpoint is intentionally unauthenticated (RECON#8) so the URL can go
+    straight into ``<img src>``; the search results themselves are already
+    scoped to what the caller may read, so this adds no exposure.
+    """
+    if (
+        row.get("thumbnail_path")
+        or row.get("cover_image_path")
+        or row.get("media_id")
+        or (row.get("mime") or "").startswith("image/")
+    ):
+        return f"/api/v1/resources/{resource_id}/cover"
+    return None
 
 
 @router.get("/search")
@@ -67,9 +93,14 @@ async def search_resources(
         kind = kind_from_mime(row.get("mime"))
         counts[kind] += 1
         counts["all"] += 1
+        rid = str(row["id"])
+        # Whitelist, never a `**row` spread: the repo now selects storage
+        # paths and the media FK purely so the ladder below can be walked
+        # here. They are inputs, not output — pinned by the tripwire in
+        # tests/api/test_resources_search_status_fields.py.
         results.append(
             {
-                "id": str(row["id"]),
+                "id": rid,
                 "name": row["name"],
                 "kind": kind,
                 "mime": row.get("mime"),
@@ -79,7 +110,9 @@ async def search_resources(
                     "id": str(row["scope_id"]),
                 },
                 "updated_at": row["updated_at"],
-                "thumbnail_url": None,
+                "thumbnail_url": _thumbnail_url(row, rid),
+                "transcript_status": ai_status_str(row.get("transcript_status")),
+                "summary_status": ai_status_str(row.get("summary_status")),
             }
         )
 

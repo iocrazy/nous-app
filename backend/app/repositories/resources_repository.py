@@ -2625,7 +2625,10 @@ class ResourcesRepository(AsyncpgRepository):
         """Resources the user can read: own personal + team-shared.
 
         Returns list of dicts with keys: id, name, mime, size, updated_at,
-        scope_type, scope_id. Used by the @-reference picker.
+        scope_type, scope_id, thumbnail_path, cover_image_path, media_id,
+        transcript_status, summary_status. Used by the @-reference picker;
+        the last five are router-internal inputs (thumbnail decision + status
+        badges), not response fields — see resources_search_router.
 
         Args:
             user_id: caller's auth id; used for both personal-owned and
@@ -2703,6 +2706,19 @@ class ResourcesRepository(AsyncpgRepository):
                 Resources.mime_type.label("mime"),
                 Resources.file_size_bytes.label("size"),
                 Resources.updated_at,
+                # Cover signals: the router turns these into a thumbnail_url
+                # and does NOT emit them (the same ladder serve_resource_cover
+                # walks — thumbnail_path > cover_image_path > parsed_media via
+                # media_id > the original file for image/*). media_id in
+                # particular must not reach the client: it is a Snowflake
+                # BIGINT that JS silently rounds.
+                Resources.thumbnail_path,
+                Resources.cover_image_path,
+                Resources.media_id,
+                # AI processing state, so the picker can badge an unprocessed
+                # video before the user attaches it (spec 2026-08-17 §1-F2).
+                Resources.transcript_status,
+                Resources.summary_status,
                 scope_id_text.label("scope_id"),
                 case((Teams.kind == "personal", "personal"), else_="team").label(
                     "scope_type"

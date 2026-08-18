@@ -19,6 +19,8 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from app.utils.ai_status import ai_status_str
+
 
 def _contained_doc_path(fp: str) -> Optional[Path]:
     """Resolve a resource ``file_path`` under DOWNLOAD_PATH, or None if it
@@ -74,7 +76,8 @@ async def _fetch_dispatch(
 
     # Original SQL (kept for reference — same JOIN/WHERE/LIMIT shape):
     #   SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
-    #          r.file_path, r.notes AS brief
+    #          r.file_path, r.notes AS brief,
+    #          r.transcript_status, r.summary_status
     #     FROM public.resources r
     #     JOIN public.resource_items ri ON ri.resource_id = r.id
     #    WHERE r.id::text = :rid AND r.is_trashed = false
@@ -96,6 +99,11 @@ async def _fetch_dispatch(
             Resources.filename.label("name"),
             Resources.file_path,
             Resources.notes.label("brief"),
+            # Read alongside the access check (one round trip) so the
+            # video/audio branch can tell "being generated" from "never
+            # processed" — spec 2026-08-17 §1-F1.
+            Resources.transcript_status,
+            Resources.summary_status,
         )
         .join(ResourceItems, ResourceItems.resource_id == Resources.id)
         .where(id_text == resource_id)
@@ -199,6 +207,9 @@ async def _fetch_dispatch(
     if mime.startswith("video/") or mime.startswith("audio/"):
         m = mode or ("summary" if mime.startswith("video/") else "transcript")
         rid = int(resource_id)
+        transcript_status = ai_status_str(row.get("transcript_status"))
+        summary_status = ai_status_str(row.get("summary_status"))
+        in_flight = {"pending", "processing"}
         if m == "summary":
             async with read_scope() as session:
                 text = (
@@ -210,6 +221,19 @@ async def _fetch_dispatch(
                     )
                 ).scalar()
             if not text:
+                # A summary can only follow a transcript, so a resource that
+                # is still transcribing is "in flight" for summary too — and
+                # that is the common case, since the frontend chains
+                # transcribe → summarize (summary_status is still 'none'
+                # while transcription runs). Reporting a flat failure there
+                # is exactly the bug this branch is fixing.
+                if summary_status in in_flight or transcript_status in in_flight:
+                    return {
+                        "error": (
+                            "summary is being generated; ask the user to "
+                            "retry shortly"
+                        )
+                    }
                 return {"error": "summary not available; resource not yet processed"}
             return {"content": text, "meta": {"name": row["name"], "mode": "summary"}}
         if m == "transcript":
@@ -223,6 +247,13 @@ async def _fetch_dispatch(
                     )
                 ).scalar()
             if not text:
+                if transcript_status in in_flight:
+                    return {
+                        "error": (
+                            "transcript is being generated; ask the user to "
+                            "retry shortly"
+                        )
+                    }
                 return {"error": "transcript not available; resource not yet processed"}
             return {
                 "content": text,
