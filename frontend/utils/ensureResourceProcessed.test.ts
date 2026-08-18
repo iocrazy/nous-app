@@ -242,10 +242,11 @@ describe('ensureResourceProcessed — response passthrough', () => {
     expect(result.pointsCharged).toBe(0);
   });
 
-  it('flags a deduped summary from the message alone (no points field on that arm)', async () => {
+  it('flags a deduped summary — same shape as transcribe since the conflict-capture fix', async () => {
     summaryMock.mockResolvedValue({
       message: 'Summary already in progress',
       resource_id: 'r-22',
+      points_charged: 0,
     });
 
     const result = await ensureResourceProcessed({
@@ -257,7 +258,29 @@ describe('ensureResourceProcessed — response passthrough', () => {
 
     expect(result.action).toBe('triggered_summary');
     expect(result.alreadyInProgress).toBe(true);
-    expect(result.pointsCharged).toBeUndefined();
+    expect(result.pointsCharged).toBe(0);
+  });
+
+  it('falls back to the message when an arm reports no cost field at all', async () => {
+    // The fresh-summary arm genuinely omits `points_charged`, so an omitted
+    // field cannot mean "deduped" on its own — this is the belt for an arm
+    // that dedups without saying so numerically.
+    summaryMock.mockResolvedValue({ message: 'Summary already in progress', resource_id: 'r-23' });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-23', kind: 'video', transcript_status: 'completed', summary_status: 'none',
+    });
+
+    expect(result.alreadyInProgress).toBe(true);
+  });
+
+  it('does not read a freshly queued summary as deduped', async () => {
+    const result = await ensureResourceProcessed({
+      id: 'r-24', kind: 'video', transcript_status: 'completed', summary_status: 'none',
+    });
+
+    expect(result.action).toBe('triggered_summary');
+    expect(result.alreadyInProgress).toBe(false);
   });
 });
 

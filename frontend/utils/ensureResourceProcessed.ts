@@ -63,12 +63,14 @@ export interface EnsureResourceProcessedInput {
 /**
  * Did this 200 actually start anything?
  *
- * Two signals, because neither covers both endpoints: transcribe returns
- * `points_charged: 0` on its dedup arm (ai_router.py, Task 1b) while the
- * summary endpoint's dedup arm returns only a message. The message match is
- * therefore load-bearing, and it is matching a backend-owned English string
- * — if that wording changes, this degrades to "treat it as a new dispatch"
- * (an over-reported charge in a toast), never to a wrong trigger.
+ * Both endpoints now answer their dedup arm with `points_charged: 0`
+ * (transcribe since Task 1b, summary since the same conflict-capture fix),
+ * while their fresh-dispatch arms carry either the real cost or no field at
+ * all — so the numeric check alone separates the two. The message match is
+ * kept as a fallback for any arm that forgets the field; it matches a
+ * backend-owned English string, so if that wording drifts this degrades to
+ * "treat it as a new dispatch" (an over-reported charge in a toast), never
+ * to a wrong trigger.
  */
 function isDedupedResponse(res: ResourceAITriggerResponse | undefined): boolean {
   if (!res) return false;
