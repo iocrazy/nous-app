@@ -40,11 +40,16 @@ def _auth() -> AuthContext:
 
 
 class _NoActiveSession:
-    """Dedup probe's ORM session stand-in — no in-flight summary."""
+    """ORM session stand-in for both reads this endpoint makes on the
+    session boundary: the dedup probe (``.first()``) and the flow-join
+    lookup (``.scalars().first()``). Both must answer "no row" — leaving
+    the second one as a bare MagicMock would hand the endpoint a truthy
+    object and fake a flow id into the created row."""
 
     async def execute(self, *_a, **_k):
         result = MagicMock()
         result.first.return_value = None
+        result.scalars.return_value.first.return_value = None
         return result
 
 
