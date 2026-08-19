@@ -7,6 +7,7 @@
  * Items render as a 2-col thumbnail grid (images <img>, videos <video>).
  */
 
+import { mediaSrc } from '../mediaUrl';
 import { useCallback, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, UploadCloud } from 'lucide-react';
@@ -190,14 +191,14 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
                       {isVideo ? (
                         <video
                           data-testid={`media-node-video-${i}`}
-                          src={item.url}
+                          src={mediaSrc(item.url)}
                           preload="metadata"
                           muted
                           className="aspect-square w-full object-cover"
                         />
                       ) : (
                         <img
-                          src={item.url}
+                          src={mediaSrc(item.url)}
                           alt={item.name ?? ''}
                           loading="lazy"
                           className="aspect-square w-full object-cover"

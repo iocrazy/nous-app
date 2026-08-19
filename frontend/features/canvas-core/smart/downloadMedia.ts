@@ -5,6 +5,8 @@
 // on cross-origin URLs (the API host differs from the app origin), so a
 // plain anchor would navigate away instead of saving.
 
+import { mediaSrc } from './mediaUrl';
+
 export interface DownloadableItem {
   url: string;
   name?: string;
@@ -36,7 +38,7 @@ export async function downloadUrl(
   item: DownloadableItem,
   fallbackIndex: number,
 ): Promise<void> {
-  const res = await fetch(item.url);
+  const res = await fetch(mediaSrc(item.url));
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const blob = await res.blob();
   const href = URL.createObjectURL(blob);

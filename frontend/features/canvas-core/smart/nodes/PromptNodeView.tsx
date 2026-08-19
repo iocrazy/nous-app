@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { mediaSrc } from '../mediaUrl';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Library, Play } from 'lucide-react';
 
@@ -115,11 +116,57 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     [resource_refs, patch],
   );
 
+  // ── IME-safe draft mirror (2026-08-18 incident) ─────────────────────────
+  // The textarea renders a LOCAL draft, not the store body: patching the
+  // store on every keystroke round-trips through React Flow asynchronously,
+  // and a controlled value rewrite mid-composition breaks the IME (raw
+  // pinyin commits as text). While composing nothing is pushed; the store
+  // gets the final text once on compositionend. `lastPushedRef` keeps a
+  // late-arriving echo of our own patch from stomping newer local input.
+  const [draft, setDraft] = useState(body);
+  const composingRef = useRef(false);
+  const lastPushedRef = useRef(body);
+  useEffect(() => {
+    if (!composingRef.current && body !== lastPushedRef.current) {
+      lastPushedRef.current = body;
+      setDraft(body);
+    }
+  }, [body]);
+  const pushBody = useCallback(
+    (v: string) => {
+      lastPushedRef.current = v;
+      setDraft(v);
+      patch({ body: v });
+    },
+    [patch],
+  );
+
   const mention = useCanvasMentionPicker({
-    value: body,
-    onValueChange: (v) => patch({ body: v }),
+    value: draft,
+    onValueChange: pushBody,
     onSelectRef: handleSelectRef,
   });
+
+  const handleBodyChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setDraft(e.target.value);
+      if (composingRef.current) return;
+      mention.handleChange(e);
+    },
+    [mention.handleChange],
+  );
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+      composingRef.current = false;
+      mention.handleChange({
+        target: e.currentTarget,
+      } as unknown as React.ChangeEvent<HTMLTextAreaElement>);
+    },
+    [mention.handleChange],
+  );
 
   // Wired input images (IC parity ⑤ — Infinite's 「N 输入图」row + the
   // @-picker's 输入图 tab). Recomputed from the live graph so absorbing /
@@ -320,7 +367,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     : 'border-canvas-line/60'
                 }`}
               >
-                <img src={url} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
+                <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
               </button>
             ))}
             <span className="text-[10px] font-semibold text-canvas-muted">
@@ -333,8 +380,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           // nowheel → wheel events scroll the textarea instead of zooming canvas
           className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
           placeholder="What should the model generate? Type @ to reference an asset"
-          value={body}
-          onChange={mention.handleChange}
+          value={draft}
+          onChange={handleBodyChange}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           onKeyDown={mention.handleKeyDown}
           onBlur={mention.closePicker}
           aria-label="Prompt body"
@@ -389,7 +438,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     className="nodrag flex flex-col items-center gap-0.5"
                   >
                     <span className="h-12 w-12 overflow-hidden rounded-md border border-canvas-line/60">
-                      <img src={url} alt={`Image ${i + 1}`} className="h-full w-full object-cover" />
+                      <img src={mediaSrc(url)} alt={`Image ${i + 1}`} className="h-full w-full object-cover" />
                     </span>
                     <span className="text-[9px] text-canvas-muted">Image {i + 1}</span>
                   </button>

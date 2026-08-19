@@ -8,6 +8,7 @@
 // drag a block to reorder, tail-frame thumbnails, live "Segment i/N"
 // progress and the failed-segment mark.
 
+import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Plus, X } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -229,7 +230,7 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
               {segment_thumbs[i] && (
                 <img
                   data-testid={`timeline-thumb-${i}`}
-                  src={segment_thumbs[i]}
+                  src={mediaSrc(segment_thumbs[i])}
                   alt=""
                   draggable={false}
                   className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"

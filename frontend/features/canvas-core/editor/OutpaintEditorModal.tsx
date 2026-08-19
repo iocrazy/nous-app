@@ -14,6 +14,7 @@
  * Extend is disabled until at least one side has padding.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import { useCallback, useEffect, useState } from 'react';
 
 import { OutpaintTool } from './OutpaintTool';
@@ -177,7 +178,7 @@ export function OutpaintEditorModal({
 
         <div className="flex-1 overflow-auto">
           <OutpaintTool
-            src={src}
+            src={mediaSrc(src)}
             alt={alt}
             value={padding}
             onChange={setPadding}
