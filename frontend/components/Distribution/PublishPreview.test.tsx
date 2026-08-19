@@ -1131,13 +1131,11 @@ describe('the immersive full-screen view', () => {
  * it must not appear on a video post — a badge that shows up on both marks
  * nothing, which is worse than not drawing it.
  *
- * ⚠️ This badge was deliberately LEFT OUT of the first cut of this screen,
- * because the description available then was second-hand and did not include
- * the literal text, and guessing a word to print inside a reproduction of
- * somebody else's app is the same defect as an invented count. A screenshot
- * has since confirmed it. The tests below pin the exact characters for the
- * same reason the tab row's are pinned: the whole value of this panel is that
- * what it shows is true.
+ * ⚠️ The exact characters are pinned, for the same reason the tab row's are:
+ * everything in `DOUYIN_IMMERSIVE_CHROME` must be the literal text as it was
+ * actually seen on the platform, and a near-miss word is the failure this
+ * guards against — 「图集」 would render just as convincingly as 「图文」 and be
+ * just as wrong. Asserting "a badge is drawn" would pass on either.
  *
  * Every assertion is an equality on the by-line's whole text. "The video view
  * has no badge" is satisfied by a video view that renders no by-line at all,

@@ -289,6 +289,11 @@ const MINE_INDEX = 2;
  * So the name says which screen it belongs to. If the video tab ever grows
  * chrome of its own, it gets its own constant — reusing this one would put a
  * real app's furniture in a room it does not stand in.
+ *
+ * ⚠️ The admission rule for BOTH chrome tables is written out on
+ * `DOUYIN_IMMERSIVE_CHROME` below: every entry must be the literal text as it
+ * was actually seen on the platform, and not-seen means not-drawn. Read it
+ * before adding anything here.
  */
 const DOUYIN_FEATURED_FEED_CHROME = {
   feedTabs: ['精选', '关注', '推荐'],
@@ -314,6 +319,16 @@ const DOUYIN_FEATURED_FEED_CHROME = {
  * translated, `aria-hidden`, no hit targets, no counts, never mixed into our
  * own copy, and drawn ONLY when the post is actually going to Douyin.
  *
+ * ⚠️ AND ONE ADMISSION RULE, which is what keeps every fence above honest:
+ * every entry in this table must be the literal text as it was actually seen
+ * on the platform. Not seen means NOT DRAWN — never a near-miss word picked
+ * because the shape of the screen implies something belongs in that spot.
+ * Printing a guessed word inside a reproduction of somebody else's app is the
+ * same defect as an invented count, and a harder one to catch: a plausible
+ * word reads as research. A gap here is the correct state of affairs until the
+ * real text is in hand, so a missing badge is not an oversight to be filled in
+ * from memory.
+ *
  * `defaultSoundLabel` is the platform's own word for "no track attached" and
  * belongs to this table for the same reason the tab names do — it is a
  * depiction of what Douyin writes there, not a string we authored. It is only
@@ -324,13 +339,6 @@ const DOUYIN_FEATURED_FEED_CHROME = {
  * post. Same category, one extra condition: it is a CONTENT-TYPE marker, so it
  * is drawn only for an image post, never on a video one — the platform does
  * not put it there, and a badge that appears on both marks nothing.
- *
- * ⚠️ It was left out of the first cut of this screen ON PURPOSE, because the
- * only description available then was second-hand and did not include the
- * literal text. Guessing a word and printing it inside a reproduction of
- * somebody else's app is the same defect as an invented count — a screenshot
- * has since confirmed it reads 「图文」. The rule the omission came from still
- * stands: nothing goes in this table that has not actually been seen.
  */
 const DOUYIN_IMMERSIVE_CHROME = {
   feedTabs: ['同城', '关注', '推荐'],
