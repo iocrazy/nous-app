@@ -29,7 +29,7 @@ import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
-import { CreateFromNodeBar } from './CreateFromNodeBar';
+import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -369,8 +369,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       />
       {/* Floating toolbar (P2-3): pinned while selected, hover-revealed
           otherwise. Preview bypasses the 250ms crop-disambiguation delay. */}
-      <CreateFromNodeBar
+      <AttachedComposerPanel
         nodeId={id}
+        inputUrls={lightboxItems.map((it) => it.url)}
         pinned={Boolean(selected)}
         readOnly={readOnly}
       />
@@ -379,6 +380,10 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           items={lightboxItems}
           pinned={selected}
           onPreview={() => openLightbox(0)}
+          onCrop={canCrop ? openEditor : undefined}
+          onExpand={canSplit ? openOutpaintEditor : undefined}
+          onMask={canSplit ? openMaskEditor : undefined}
+          onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}
           readOnly={readOnly}
