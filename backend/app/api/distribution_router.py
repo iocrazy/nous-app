@@ -1516,6 +1516,14 @@ async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
         ) from e
 
     wf_id = str(_uuid.uuid4())
+    # 单步也要挂 flow：任务中心的流程卡按 flow_id 分组（flowGrouping.ts），没有
+    # flow_id 的行只能渲成一条孤立行，同一批手动任务里就会出现"有的是流程卡、有
+    # 的不是"这种不一致。单步 flow 渲染成 "1/1 steps"，是正常形态。
+    # create_flow 是 best-effort（失败返回 None）——分组是呈现，不该阻断派工。
+    flow_id = await get_task_manager().create_flow(
+        user_id=user["id"],
+        name=f"Cover frames: {source.filename}",
+    )
     await get_task_manager().create(
         user_id=user["id"],
         task_type=COVER_FRAMES_TASK_TYPE,  # ≤20 chars (VARCHAR(20))
@@ -1523,6 +1531,7 @@ async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
         subtitle="Sampling frames",
         resource_id=str(body.resource_id),
         dbos_workflow_id=wf_id,
+        flow_id=flow_id,
         metadata={
             "cover_frames": {
                 "source_resource_id": str(body.resource_id),

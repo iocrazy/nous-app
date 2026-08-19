@@ -288,6 +288,22 @@ async def trigger_transcription_by_resource(
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())
 
+        # A manual transcribe click IS a pipeline root, so the flow is
+        # created here — the same place the parse/download roots create
+        # theirs (api/media_fetch_helpers.py). Two chain shapes hang off it:
+        #   audio ready → one step  (ai_transcription)
+        #   no audio    → two steps (extract_audio → chained ai_transcription)
+        # Both carry the same flow_id so the Task Center groups them into one
+        # step card (flowGrouping.ts groups by flow_id) instead of showing
+        # unrelated single rows. create_flow is best-effort and returns None
+        # on failure; flow_id=None simply falls back to the old un-grouped
+        # behaviour — grouping is presentation and must never fail dispatch.
+        _video_title = (media.get("title") or platform_id)[:50]
+        flow_id = await tracker.create_flow(
+            user_id=auth.user_id,
+            name=f"Transcribe {_video_title}",
+        )
+
         if _has_audio:
             from app.workflows.ai_transcription import ai_transcription_workflow
 
@@ -298,6 +314,7 @@ async def trigger_transcription_by_resource(
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=flow_id,
             )
             await start_workflow_routed(
                 "ai_transcription",
@@ -315,7 +332,6 @@ async def trigger_transcription_by_resource(
             # into a working extract→transcribe chain.
             from app.workflows.extract_audio import extract_audio_workflow
 
-            _video_title = (media.get("title") or platform_id)[:50]
             _orphan_task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="extract_audio",
@@ -324,6 +340,7 @@ async def trigger_transcription_by_resource(
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=flow_id,
                 # Mirrors chain_transcription=True below. The workflow arg
                 # is a frozen DBOS input that nothing can read back, so the
                 # intent is recorded here for the dedup and the read path.
@@ -336,6 +353,11 @@ async def trigger_transcription_by_resource(
                     "platform_id": platform_id,
                     "user_id": auth.user_id,
                     "resource_id": resource_id,
+                    # Threaded into the workflow so the ai_transcription row
+                    # it chains (download_helpers.chain_transcription_
+                    # unconditional) lands on this same flow — without it the
+                    # second step shows up as an orphan row.
+                    "flow_id": flow_id,
                     "video_title": _video_title,
                     "chain_transcription": True,
                 },
@@ -831,6 +853,17 @@ async def trigger_transcription(
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())
 
+        # Same flow root as the by-resource endpoint above. This legacy
+        # platform_id path is still what the homepage MediaCard's Transcribe
+        # button calls (frontend/components/MediaCard.tsx), so leaving it
+        # flow-less would make the step card depend on which button was
+        # clicked.
+        _video_title = (media_row.get("title") or platform_id)[:50]
+        flow_id = await tracker.create_flow(
+            user_id=auth.user_id,
+            name=f"Transcribe {_video_title}",
+        )
+
         if _has_audio:
             # PR-D7 phase 3b: dispatch ai_transcription_workflow directly.
             from app.workflows.ai_transcription import ai_transcription_workflow
@@ -842,6 +875,7 @@ async def trigger_transcription(
                 media_id=platform_id,
                 resource_id=owner_resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=flow_id,
             )
             await start_workflow_routed(
                 "ai_transcription",
@@ -857,7 +891,6 @@ async def trigger_transcription(
             # then chain transcription unconditionally.
             from app.workflows.extract_audio import extract_audio_workflow
 
-            _video_title = (media_row.get("title") or platform_id)[:50]
             _orphan_task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="extract_audio",
@@ -866,6 +899,7 @@ async def trigger_transcription(
                 media_id=platform_id,
                 resource_id=owner_resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=flow_id,
                 # Same intent record as the by-resource endpoint above.
                 metadata={"chain_transcription": True},
             )
@@ -876,6 +910,7 @@ async def trigger_transcription(
                     "platform_id": platform_id,
                     "user_id": auth.user_id,
                     "resource_id": owner_resource_id,
+                    "flow_id": flow_id,
                     "video_title": _video_title,
                     "chain_transcription": True,
                 },

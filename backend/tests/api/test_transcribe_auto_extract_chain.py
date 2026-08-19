@@ -38,6 +38,9 @@ from app.core.deps import AuthContext
 # ─── helpers ──────────────────────────────────────────────────────
 
 
+FLOW_ID = "flow-uuid-1"
+
+
 def _auth() -> AuthContext:
     return AuthContext(user_id="user-1", auth_type="jwt")
 
@@ -72,6 +75,12 @@ def _patch_common(monkeypatch, dispatched: list, created: list):
     fake_mgr = MagicMock()
     fake_mgr.create = AsyncMock(side_effect=_create)
     fake_mgr.fail = AsyncMock()
+    # Both manual transcribe endpoints create a task_flows parent row before
+    # dispatching, so the chain's steps group into ONE Task Center step card.
+    # Has to be an AsyncMock: a bare MagicMock attribute returns a non-
+    # awaitable, which would blow up inside the dispatch try/except and turn
+    # every test in this file into a 500 for the wrong reason.
+    fake_mgr.create_flow = AsyncMock(return_value=FLOW_ID)
 
     import app.services.infra.unified_task_manager as utm
 
@@ -924,3 +933,185 @@ class TestChainTranscriptionUnconditional:
         assert "ai_transcription_workflow" in source
         assert "dbos_workflow_id=tr_wf_id" in source
         assert "workflow_id=tr_wf_id" in source
+
+
+# ─── flow grouping (manual click = one pipeline root) ─────────────
+
+
+class TestManualTranscribeFlowGrouping:
+    """A manual Transcribe click must produce ONE step card in the Task
+    Center, not loose rows.
+
+    The Task Center groups rows client-side by ``task_tracking.flow_id``
+    (frontend/components/TaskCenter/flowGrouping.ts) and renders each group
+    as a "N/N steps" card. Before this, the URL parse/download pipelines
+    created a ``task_flows`` root but the manual transcribe endpoints did
+    not — so the very chain that most needs the grouping (extract_audio →
+    ai_transcription, two rows, minutes apart) showed up as two unrelated
+    single rows and the user had no way to tell they belonged together.
+
+    Two shapes, one flow either way:
+      audio on disk → 1 row  (ai_transcription)
+      no audio      → 2 rows (extract_audio, then the ai_transcription the
+                      workflow chains) — which means flow_id has to travel
+                      into the workflow kwargs too, not just onto the first
+                      row. The last test here closes that loop by running
+                      the chain helper itself.
+    """
+
+    @staticmethod
+    def _media(*, audio: bool) -> dict:
+        return {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a" if audio else "",
+            "music_download_path": "",
+            "download_path": "d/video.mp4",
+            "title": "Clip title",
+        }
+
+    @pytest.mark.asyncio
+    async def test_audio_ready_single_step_still_gets_a_flow(self, monkeypatch) -> None:
+        """One-step chains are flows too — a 1/1 step card is the normal
+        rendering, and it keeps the presentation consistent regardless of
+        whether the media happened to have its audio already."""
+        _patch_resource_resolver(monkeypatch, self._media(audio=True))
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        mgr.create_flow.assert_awaited_once()
+        flow_kwargs = mgr.create_flow.await_args.kwargs
+        assert flow_kwargs["user_id"] == "user-1"
+        assert flow_kwargs["name"] == "Transcribe Clip title"
+        assert len(created) == 1
+        assert created[0]["task_type"] == "ai_transcription"
+        assert created[0]["flow_id"] == FLOW_ID
+
+    @pytest.mark.asyncio
+    async def test_extract_chain_puts_both_steps_on_one_flow(self, monkeypatch) -> None:
+        """The extract_audio row AND the workflow kwargs must carry the same
+        flow_id. Dropping it from the kwargs is the silent half of the bug:
+        step 1 would be grouped, step 2 would appear as an orphan row minutes
+        later."""
+        _patch_resource_resolver(monkeypatch, self._media(audio=False))
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        mgr.create_flow.assert_awaited_once()  # one click == one flow
+        assert len(created) == 1
+        assert created[0]["task_type"] == "extract_audio"
+        assert created[0]["flow_id"] == FLOW_ID
+        kwargs = dispatched[0]["dbos_workflow_kwargs"]
+        assert kwargs["chain_transcription"] is True
+        assert kwargs["flow_id"] == FLOW_ID, (
+            "extract_audio must hand the flow to the transcription it chains, "
+            "otherwise step 2 lands outside the step card"
+        )
+
+    @pytest.mark.asyncio
+    async def test_legacy_platform_id_endpoint_groups_the_same_chain(
+        self, monkeypatch
+    ) -> None:
+        """The deprecated platform_id endpoint is still what the homepage
+        MediaCard's Transcribe button calls, so it needs the same flow —
+        otherwise whether the user gets a step card depends on which button
+        they clicked."""
+        media = self._media(audio=False)
+        media["platform_id"] = "pf-legacy"
+
+        async def _get(_pid):
+            return media
+
+        monkeypatch.setattr(ai_router, "_get_media_or_404", _get)
+        repo = MagicMock()
+        repo.get_resource_by_media_id_and_creator = AsyncMock(
+            return_value={"id": "res-9"}
+        )
+        monkeypatch.setattr(
+            "app.repositories.resources_repository.ResourcesRepository",
+            lambda: repo,
+        )
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(ai_router, "PointsService", lambda: MagicMock())
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+
+        await ai_router.trigger_transcription("pf-legacy", _auth(), None)
+
+        mgr.create_flow.assert_awaited_once()
+        assert mgr.create_flow.await_args.kwargs["name"] == "Transcribe Clip title"
+        assert created[0]["flow_id"] == FLOW_ID
+        assert dispatched[0]["dbos_workflow_kwargs"]["flow_id"] == FLOW_ID
+
+    @pytest.mark.asyncio
+    async def test_flow_creation_failure_does_not_block_dispatch(
+        self, monkeypatch
+    ) -> None:
+        """``create_flow`` is best-effort and returns None on failure.
+        Grouping is presentation — losing it must degrade to the old
+        un-grouped rows, never to a failed transcription."""
+        _patch_resource_resolver(monkeypatch, self._media(audio=False))
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        mgr = _patch_common(monkeypatch, dispatched, created)
+        mgr.create_flow = AsyncMock(return_value=None)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["extracting_audio"] is True
+        assert len(dispatched) == 1
+        assert created[0]["flow_id"] is None
+        assert dispatched[0]["dbos_workflow_kwargs"]["flow_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_chained_transcription_row_lands_on_the_given_flow(
+        self, monkeypatch
+    ) -> None:
+        """Closes the loop: the workflow hands ``flow_id`` to
+        ``chain_transcription_unconditional``, which must write it onto the
+        ai_transcription row it creates. That row is step 2 of the card."""
+        from app.tasks import download_helpers
+
+        media_repo = MagicMock()
+        media_repo.get_by_platform_id = AsyncMock(
+            return_value={"id": 111, "title": "Clip title"}
+        )
+        monkeypatch.setattr(
+            "app.repositories.media_repository.MediaRepository", lambda: media_repo
+        )
+        res_repo = MagicMock()
+        res_repo.get_resource_by_media_id_and_creator = AsyncMock(
+            return_value={"id": "res-1"}
+        )
+        monkeypatch.setattr(
+            "app.repositories.resources_repository.ResourcesRepository",
+            lambda: res_repo,
+        )
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        await download_helpers.chain_transcription_unconditional(
+            "pf-1", "user-1", flow_id=FLOW_ID, video_title="Clip title"
+        )
+
+        # The helper swallows its own exceptions (it must never fail the
+        # extract_audio workflow), so assert the row exists BEFORE reading it
+        # — otherwise a broken mock would make this test vacuously green.
+        assert len(created) == 1, "no ai_transcription row was created at all"
+        assert created[0]["task_type"] == "ai_transcription"
+        assert created[0]["flow_id"] == FLOW_ID
+        assert len(dispatched) == 1
+        assert dispatched[0]["name"] == "ai_transcription"

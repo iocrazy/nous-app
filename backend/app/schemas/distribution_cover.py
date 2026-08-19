@@ -29,8 +29,10 @@ class CoverExtractRequest(BaseModel):
         ge=1,
         le=MAX_COVER_FRAMES,
         description=(
-            "How many evenly-spaced frames to sample. Each becomes a resource "
-            "row, so the ceiling is deliberately lower than the extractor's own."
+            "How many evenly-spaced frames to sample. Candidates are temporary "
+            "base64 previews carried on task_tracking.metadata (they are NOT "
+            "resource rows), so the ceiling is what keeps that Realtime row "
+            "under its size limit — see MAX_COVER_FRAMES in cover_frames.py."
         ),
     )
 

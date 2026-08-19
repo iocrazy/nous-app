@@ -49,11 +49,20 @@ class _Spy:
     def __init__(self) -> None:
         self.created: List[Dict[str, Any]] = []
         self.started: List[Dict[str, Any]] = []
+        self.flows: List[Dict[str, Any]] = []
 
     def manager(self):
         spy = self
 
         class _Mgr:
+            async def create_flow(self, **kw):
+                # The extract endpoint creates a task_flows parent row so the
+                # Task Center can render the run as a step card. Grouping
+                # assertions live in tests/api/test_cover_frames_flow.py; the
+                # spy only has to be a real boundary here.
+                spy.flows.append(kw)
+                return "flow-spy"
+
             async def create(self, **kw):
                 spy.created.append(kw)
                 return kw.get("dbos_workflow_id")
