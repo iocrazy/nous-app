@@ -125,3 +125,32 @@ describe('M1 MiniMax workbench additions', () => {
     expect(screen.getByTestId('clip-player')).toBeInTheDocument();
   });
 });
+
+describe('M2 additions', () => {
+  const TWO_RESULTS = {
+    ...DATA,
+    segments: [
+      { id: 's1', prompt: 'a', seconds: 3, result_url: '/api/v1/generated-media/1/stream' },
+      { id: 's2', prompt: 'b', seconds: 4, result_url: '/api/v1/generated-media/2/stream' },
+    ],
+  };
+
+  it('Play all chains clips through onEnded and stops at the end', () => {
+    renderTimeline(TWO_RESULTS);
+    fireEvent.click(screen.getByTestId('timeline-seg-s1'));
+    fireEvent.click(screen.getByTestId('play-all'));
+    const player = () => screen.getByTestId('clip-player') as HTMLVideoElement;
+    expect(player().src).toContain('/generated-media/1/stream');
+    fireEvent.ended(player());
+    expect(player().src).toContain('/generated-media/2/stream');
+    fireEvent.ended(player());
+    // Sequence exhausted → back to the selected clip's own result.
+    expect(screen.getByTestId('play-all').textContent).toBe('Play all');
+  });
+
+  it('Download clip appears only for segments with a result', () => {
+    renderTimeline(TWO_RESULTS);
+    fireEvent.click(screen.getByTestId('timeline-seg-s1'));
+    expect(screen.getByTestId('download-clip')).toBeInTheDocument();
+  });
+});

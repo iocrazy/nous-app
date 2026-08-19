@@ -30,8 +30,9 @@ import {
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { runSegmentClip } from '../clipRun';
-import { setSegmentRef } from '../timeline';
+import { playableClips, setSegmentRef } from '../timeline';
 import { resolveSourceUrls } from '../promptInputs';
+import { downloadUrl } from '../downloadMedia';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
@@ -58,6 +59,8 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   // to inspect its prompt is view-only and stays.
   const readOnly = useCanvasReadOnly();
   const [clipRunning, setClipRunning] = useState<string | null>(null);
+  const [playAllIndex, setPlayAllIndex] = useState<number | null>(null);
+  const clips = playableClips(segments);
   const [clipError, setClipError] = useState<string | null>(null);
   const storeNodes = useCanvasCoreStore((st) => st.nodes);
   const storeConnections = useCanvasCoreStore((st) => st.connections);
@@ -393,13 +396,26 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 })}
               </div>
             )}
-            {/* Clip result player (IC's player stage, per-clip form). */}
-            {active.result_url && (
+            {/* Clip result player (IC's player stage, per-clip form).
+                Play-all chains clips via onEnded (M2). */}
+            {(active.result_url || playAllIndex !== null) && (
               <video
+                key={playAllIndex !== null ? clips[playAllIndex]?.id : active.id}
                 data-testid="clip-player"
-                src={mediaSrc(active.result_url)}
+                src={mediaSrc(
+                  playAllIndex !== null
+                    ? clips[playAllIndex]?.url ?? ''
+                    : active.result_url ?? '',
+                )}
                 controls
+                autoPlay={playAllIndex !== null}
                 preload="metadata"
+                onEnded={() => {
+                  if (playAllIndex === null) return;
+                  setPlayAllIndex(
+                    playAllIndex + 1 < clips.length ? playAllIndex + 1 : null,
+                  );
+                }}
                 className="nodrag nowheel mt-1.5 max-h-40 w-full rounded-lg bg-black/60"
               />
             )}
@@ -412,7 +428,34 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                 {clipError}
               </div>
             )}
-            <div className="mt-1.5 flex items-center">
+            <div className="mt-1.5 flex items-center gap-1.5">
+              {clips.length > 1 && (
+                <button
+                  type="button"
+                  data-testid="play-all"
+                  onClick={() =>
+                    setPlayAllIndex(playAllIndex === null ? 0 : null)
+                  }
+                  className="nodrag rounded-full border border-canvas-line px-2.5 py-0.5 text-xs text-canvas-text"
+                >
+                  {playAllIndex === null ? 'Play all' : 'Stop'}
+                </button>
+              )}
+              {active.result_url && (
+                <button
+                  type="button"
+                  data-testid="download-clip"
+                  onClick={() =>
+                    void downloadUrl(
+                      { url: active.result_url!, name: `clip-${active.id}.mp4` },
+                      0,
+                    )
+                  }
+                  className="nodrag rounded-full border border-canvas-line px-2.5 py-0.5 text-xs text-canvas-text"
+                >
+                  Download clip
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="generate-clip"
