@@ -687,6 +687,44 @@ class ProbeResult:
 
 
 @dataclass(frozen=True)
+class MusicHarvestResult:
+    """``POST /session/music/charts`` 的传输层结果。
+
+    ``charts`` 是**已经结构化**的榜单（每条含 category_kind/category_id/ok/
+    tracks），不是抓包摘要 —— 这条链跟勘探链的分野就在这里：勘探要描述一个
+    页面而不引用它，采集必须原样引用（``music_id`` 是 19 位数字，勘探那边会
+    把它脱敏成 ``***``）。
+    """
+
+    result: SessionOpResult
+    charts: list[dict[str, Any]] = field(default_factory=list)
+    updated_storage_state: Optional[dict[str, Any]] = None
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    @property
+    def message(self) -> str:
+        return self.result.message
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        return self.result.detail
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        return (
+            f"MusicHarvestResult(status={self.status!r}, charts={len(self.charts)}, "
+            f"updated_storage_state="
+            f"{'set' if self.updated_storage_state else 'none'})"
+        )
+
+
+@dataclass(frozen=True)
 class BrowserHealth:
     """``GET /healthz`` 的类型化结果 —— 同样不抛异常。
 
@@ -1397,6 +1435,77 @@ class BrowserClient:
             ),
             observation=observation,
             updated_storage_state=updated_state,
+        )
+
+    async def harvest_music_charts(
+        self,
+        platform: str,
+        storage_state: Mapping[str, Any],
+        url: str,
+        *,
+        seed_file: Mapping[str, Any],
+        environment: Optional[SessionEnvironment] = None,
+        options: Optional[Mapping[str, Any]] = None,
+    ) -> "MusicHarvestResult":
+        """``POST /session/music/charts`` —— 采集「选择音乐」面板的榜单。
+
+        ⚠️ **这个调用有副作用**：够到面板必须先上传，所以每次运行会在账号上
+        留一条草稿。调用方应当是定时任务，不是页面点开即触发 —— 代价写在这里
+        而不是留给人去发现。
+
+        永不抛传输异常；参数非法才 raise ``ValueError``。
+        """
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            raise ValueError("storage_state must be a non-empty JSON object")
+        if not url or not url.strip():
+            raise ValueError("url must be a non-empty string")
+        if not isinstance(seed_file, Mapping) or not seed_file.get("url"):
+            raise ValueError("seed_file must carry a url")
+        env = environment or SessionEnvironment()
+        payload: dict[str, Any] = {
+            "platform": platform,
+            "storage_state": dict(storage_state),
+            "environment": env.to_payload(),
+            "url": url.strip(),
+            "seed_file": dict(seed_file),
+        }
+        payload.update({k: v for k, v in (options or {}).items() if v is not None})
+        try:
+            data = await self._call(
+                "POST",
+                "/session/music/charts",
+                read_timeout=self._publish_timeout,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.music] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            return MusicHarvestResult(result=self._transport_result(failure))
+
+        raw_status = data.get("status")
+        if raw_status not in _INSPECT_STATUSES:
+            logger.warning(
+                f"[browser.music] platform={platform} illegal status={raw_status!r}"
+            )
+            return MusicHarvestResult(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    f"browser returned an unknown status {raw_status!r}",
+                    reason="illegal_status",
+                )
+            )
+        charts = data.get("charts")
+        return MusicHarvestResult(
+            result=SessionOpResult(
+                success=bool(data.get("success")),
+                status=str(raw_status),
+                message=str(data.get("message") or ""),
+                detail=dict(data.get("detail") or {}),
+            ),
+            charts=[dict(c) for c in charts] if isinstance(charts, list) else [],
+            updated_storage_state=data.get("updated_storage_state"),
         )
 
     async def probe_page(

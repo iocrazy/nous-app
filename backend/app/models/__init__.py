@@ -86,6 +86,8 @@ from app.models.chat import (  # noqa: F401
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
     DistributionOauthStates,
+    MusicChartTracks,
+    MusicCharts,
     PublishTaskAccounts,
     PublishTasks,
     SocialAccounts,
@@ -395,6 +397,8 @@ __all__ = [
     # distribution
     "AccountEnvironments",
     "DistributionOauthStates",
+    "MusicChartTracks",
+    "MusicCharts",
     "PublishTaskAccounts",
     "PublishTasks",
     "SocialAccounts",

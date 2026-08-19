@@ -9,6 +9,9 @@
   * ``PublishTasks``         — publish_tasks (mig 356)
   * ``PublishTaskAccounts``  — publish_task_accounts (mig 356; per-account
     business status, layered apart from the DBOS phase per route C)
+  * ``MusicCharts`` / ``MusicChartTracks`` — music_charts, music_chart_tracks
+    (mig 428; the 「选择音乐」 panel's chart tabs, cached per account because
+    reading them costs a browser run and leaves a draft)
 
 No scope mixin — scope checks live in the routers/services; the tables are
 RLS-locked to service_role (engine role bypasses via BYPASSRLS).
@@ -323,4 +326,132 @@ class DistributionOauthStates(Base):
     scope_id: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class MusicCharts(Base):
+    """One tab of the 「选择音乐」 panel, cached for one account (mig 428).
+
+    Per ACCOUNT, not global: 「收藏」 is plainly account-private and 「推荐」 is
+    personalised too — showing one account's favourites under another is a
+    leak, not a cache optimisation.
+
+    ⚠️ ``(category_kind, category_id)`` together are the identity. 推荐 and
+    收藏 both answer ``category_id='1'`` on the live panel and differ only by
+    ``type``; a unique key without the kind lets the two overwrite each other
+    while everything still looks healthy.
+
+    ⚠️ ``ok`` is load-bearing. ``ok=True`` with zero tracks is a genuinely empty
+    chart (measured: an account with no favourites gets a 137-byte body with no
+    ``songs`` key at all); ``ok=False`` is a chart we failed to read. Merging
+    them makes an empty favourites list look broken forever, or a failed
+    harvest look like a platform with nothing on it.
+    """
+
+    __tablename__ = "music_charts"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="music_charts_pkey"),
+        UniqueConstraint(
+            "account_id",
+            "category_kind",
+            "category_id",
+            name="music_charts_identity_key",
+        ),
+        ForeignKeyConstraint(
+            ["account_id"],
+            ["public.social_accounts.id"],
+            ondelete="CASCADE",
+            name="music_charts_account_id_fkey",
+        ),
+        Index("idx_music_charts_account", "account_id", "position"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    category_id: Mapped[str] = mapped_column(Text, nullable=False)
+    category_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    category_name: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    ok: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    error: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    cursor: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    has_more: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    #: When the tracks currently stored were read. Advances on SUCCESS only.
+    fetched_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    #: When we last tried. Advances every attempt, including failures. Kept
+    #: apart from ``fetched_at`` so a failed run cannot stamp stale tracks as
+    #: fresh — "updated 1 minute ago" would otherwise stay true through a
+    #: three-day outage.
+    checked_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class MusicChartTracks(Base):
+    """One track on one chart, at one position (mig 428).
+
+    ⚠️ ``music_id`` is TEXT. It is Douyin's 19-digit catalogue id and the list
+    endpoint ships it as a JSON string; putting it through a number loses
+    precision above 2^53 in every JS consumer — and the picker keys its
+    selection on exactly this value.
+
+    ⚠️ ``user_count`` is nullable and NULL is not zero. Zero is a real
+    catalogue value (a track with exactly that produced the 2026-08-17
+    production refusal); NULL means the payload did not say.
+    """
+
+    __tablename__ = "music_chart_tracks"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="music_chart_tracks_pkey"),
+        UniqueConstraint(
+            "chart_id", "position", name="music_chart_tracks_position_key"
+        ),
+        ForeignKeyConstraint(
+            ["chart_id"],
+            ["public.music_charts.id"],
+            ondelete="CASCADE",
+            name="music_chart_tracks_chart_id_fkey",
+        ),
+        Index("idx_music_chart_tracks_chart", "chart_id", "position"),
+        Index("idx_music_chart_tracks_music", "music_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    chart_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: The chart IS an ordered list; losing the order loses its whole meaning.
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    music_id: Mapped[str] = mapped_column(Text, nullable=False)
+    music_name: Mapped[str] = mapped_column(Text, nullable=False)
+    music_author: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    duration_s: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    user_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cover_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    #: A time-limited CDN link. Refreshed with every harvest; no long-term
+    #: promise is made about it.
+    play_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
     )
