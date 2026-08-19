@@ -44,13 +44,32 @@ UID = "b2180063-6860-4f97-9785-ad4eede16064"
 class _FakeMappingsResult:
     """``first()`` serves the access-check row; ``all()`` serves
     ``effective_ai_statuses``' in-flight task lookup (no active tasks —
-    frames never consults the AI status columns anyway)."""
+    frames never consults the AI status columns anyway).
 
-    def __init__(self, row):
+    ``first()`` projects the fixture through the columns the REAL
+    statement selects (``columns``), rather than handing back the
+    hand-written dict wholesale. That projection is the only thing
+    connecting these tests to the SELECT itself: without it, dropping
+    ``Resources.media_id`` from the query leaves every test green while
+    production loses the PR-B ladder's second rung — i.e. loses frames
+    for every ``source_type='web'`` video, which is most of them. Same
+    family as CLAUDE.md's "边界 mock 必须用真实 JSON 形状": here the
+    boundary mock's row SHAPE has to come from the real query.
+    """
+
+    def __init__(self, row, columns):
         self._row = row
+        self._columns = columns
 
     def first(self):
-        return self._row
+        if self._row is None:
+            return None
+        missing = [c for c in self._columns if c not in self._row]
+        assert not missing, (
+            f"the access-check SELECT reads {missing}, which this fixture row "
+            f"does not carry — add the column(s) to the fixture"
+        )
+        return {c: self._row[c] for c in self._columns}
 
     def all(self):
         return []
@@ -62,12 +81,13 @@ class _FakeResult:
     call-order queue: access check → ``.mappings().first()``, AI status →
     ``.mappings().all()``, PR-B ladder → ``.scalar()``."""
 
-    def __init__(self, row, ladder):
+    def __init__(self, row, ladder, columns):
         self._row = row
         self._ladder = ladder
+        self._columns = columns
 
     def mappings(self):
-        return _FakeMappingsResult(self._row)
+        return _FakeMappingsResult(self._row, self._columns)
 
     def scalar(self):
         return self._ladder
@@ -78,8 +98,8 @@ class _StubSession:
         self._row = row
         self._ladder = ladder
 
-    async def execute(self, _stmt):
-        return _FakeResult(self._row, self._ladder)
+    async def execute(self, stmt):
+        return _FakeResult(self._row, self._ladder, list(stmt.selected_columns.keys()))
 
 
 def _patch_db(row: dict | None, *, ladder_download_path=None):
@@ -140,14 +160,25 @@ class _FakePath:
         return self._p
 
 
-def _patch_extraction(result, *, materialize_exists=True, spy=None):
+def _patch_extraction(
+    result, *, materialize_exists=True, spy=None, materialize_delay=0.0
+):
     """Patch materialize + extract_frames at the lazy-import source
-    modules (the tool imports them inside the function body)."""
+    modules (the tool imports them inside the function body).
+
+    ``materialize_delay`` stalls INSIDE materialize — i.e. in the half
+    that has no timeout of its own — so a test can prove the outer
+    deadline covers the download and not just the ffmpeg run.
+    """
 
     @asynccontextmanager
     async def _materialize(file_path):
         if spy is not None:
             spy["file_path"] = file_path
+        if materialize_delay:
+            import asyncio as _asyncio
+
+            await _asyncio.sleep(materialize_delay)
         yield _FakePath(file_path, materialize_exists)
 
     async def _extract_frames(path, **kwargs):
@@ -175,12 +206,16 @@ async def _call(
     ladder_download_path=None,
     spy=None,
     materialize_exists=True,
+    materialize_delay=0.0,
 ):
     read_scope_patch, system_scope_patch = _patch_db(
         row, ladder_download_path=ladder_download_path
     )
     mat_patch, extract_patch = _patch_extraction(
-        extraction, materialize_exists=materialize_exists, spy=spy
+        extraction,
+        materialize_exists=materialize_exists,
+        spy=spy,
+        materialize_delay=materialize_delay,
     )
     with read_scope_patch, system_scope_patch, mat_patch, extract_patch:
         return await resource_fetch(
@@ -255,6 +290,85 @@ async def test_frames_uses_the_prb_ladder_not_the_file_path_column():
     )
     assert "error" not in result, result
     assert spy["file_path"] == "sb://library/t42/ab/cd/abcd.mp4"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_access_check_selects_media_id_so_the_ladder_can_use_it():
+    """The SELECT must read media_id, not just the code that consumes it.
+
+    The ladder's second rung keys off ``media_id``; drop that column from
+    the query and ``resolve_resource_file_path`` silently sees ``None``
+    and returns "no file" for every ``source_type='web'`` video — most of
+    them in production. Nothing else in this suite reads the statement,
+    so without this the column is deletable with the whole suite green.
+    ``_FakeMappingsResult.first`` projects the fixture through the real
+    statement's columns, which is what makes this falsifiable.
+    """
+    seen: dict = {}
+
+    async def _spy_ladder(resource: dict):
+        seen["row"] = dict(resource)
+        return "personal/u1/from-ladder.mp4"
+
+    read_scope_patch, system_scope_patch = _patch_db(
+        _video_row(file_path=None, media_id=771000000000009)
+    )
+    mat_patch, extract_patch = _patch_extraction(
+        FrameExtractionResult([_jpeg_attachment(1.0)], 4.0, [1.0])
+    )
+    with (
+        read_scope_patch,
+        system_scope_patch,
+        mat_patch,
+        extract_patch,
+        patch(
+            "app.services.library.resource_file_path.resolve_resource_file_path",
+            new=_spy_ladder,
+        ),
+    ):
+        result = await resource_fetch(
+            resource_id=RID,
+            mode="frames",
+            args=None,
+            user_id=UID,
+            available_refs={RID},
+            request_cache={},
+        )
+
+    assert "error" not in result, result
+    assert "media_id" in seen["row"], (
+        "the access-check SELECT no longer reads media_id — the PR-B "
+        "ladder's second rung is dead and every source_type='web' video "
+        "loses frames"
+    )
+    assert seen["row"]["media_id"] == 771000000000009
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_outer_deadline_covers_the_download_not_just_ffmpeg(monkeypatch):
+    """The 180 s bound must wrap materialize(), which has no timeout of
+    its own — a multi-GB source video meeting a storage hiccup would
+    otherwise hang the chat turn indefinitely.
+
+    ``test_timeout_is_typed`` does NOT cover this: it injects a
+    TimeoutError as extract_frames' result, which only proves the
+    ``except TimeoutError`` arm exists. Here the stall is inside
+    materialize and extract_frames must never be reached — that second
+    assertion is the whole point, since a stall on the ffmpeg side would
+    pass even with the deadline moved inside the download.
+    """
+    monkeypatch.setattr(rft, "FRAMES_TOTAL_DEADLINE_SECONDS", 0.05)
+    spy: dict = {}
+    result = await _call(
+        _video_row(),
+        FrameExtractionResult([_jpeg_attachment(1.0)], 4.0, [1.0]),
+        spy=spy,
+        materialize_delay=0.5,
+    )
+    assert "timed out" in result["error"], result
+    assert "path" not in spy, "extract_frames ran despite the deadline expiring"
 
 
 @pytest.mark.unit
@@ -397,6 +511,24 @@ async def test_oversize_frame_is_dropped_and_counted():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_every_frame_oversize_says_so_instead_of_no_usable_frames():
+    """ "ffmpeg produced nothing" and "ffmpeg produced frames we refused to
+    inline" need different answers from the user (retry vs. the video is
+    pathological), so they must not collapse into one message."""
+    huge = b"x" * (rft.FRAMES_MAX_BYTES_PER_FRAME + 1024)
+    frames = FrameExtractionResult(
+        attachments=[_jpeg_attachment(1.0, huge), _jpeg_attachment(2.0, huge)],
+        duration_seconds=6.0,
+        sampled_at_seconds=[1.0, 2.0],
+    )
+    result = await _call(_video_row(), frames, args={"frames": 2})
+    assert "content" not in result
+    assert "exceeded the per-frame size budget" in result["error"]
+    assert "no usable frames" not in result["error"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_zero_usable_frames_is_an_error_not_an_empty_success():
     """An empty content list would promote nothing and read to the model
     as "I looked and there was nothing" — a wrong answer, not a failure."""
@@ -436,6 +568,29 @@ async def test_frames_arg_is_clamped(requested, expected):
         spy=spy,
     )
     assert spy["num_frames"] == expected
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_args", ["frames=6", ["frames"], 6])
+async def test_non_object_args_is_typed_not_an_attributeerror(bad_args):
+    """The tool schema declares args as an object but nothing enforces
+    it, and models violate that regularly. Before frames, ``args`` was
+    never dereferenced (it only fed the cache key's json.dumps), so a
+    non-dict was harmless; dereferencing it turns the same input into
+    ``fetch failed: AttributeError`` from the entry point's broad except
+    plus an ERROR in the log — opaque to the model, which then has no
+    idea what to fix."""
+    spy: dict = {}
+    result = await _call(
+        _video_row(),
+        FrameExtractionResult([_jpeg_attachment(1.0)], 4.0, [1.0]),
+        args=bad_args,
+        spy=spy,
+    )
+    assert "AttributeError" not in result.get("error", "")
+    assert "args must be an object" in result["error"]
+    assert spy == {}, "no extraction may run on a rejected argument"
 
 
 @pytest.mark.unit
@@ -482,6 +637,8 @@ async def test_frames_on_an_image_returns_the_image_itself():
         "file_path": "sb://library/t42/ab/cd/abcd.png",
         "media_id": None,
         "brief": None,
+        "transcript_status": "none",
+        "summary_status": "none",
     }
 
     async def _fake_get_stream(self, key, **kwargs):
@@ -540,6 +697,36 @@ def test_frame_budget_constants_match_their_sources():
 
     assert rft.FRAMES_DEFAULT_COUNT == MAX_VIDEO_FRAMES_PER_ATTACHMENT
     assert rft.FRAMES_MAX_COUNT == MAX_COVER_FRAMES
+
+
+@pytest.mark.unit
+def test_the_prompt_advertises_the_counts_the_tool_actually_enforces():
+    """The system message hardcodes "default 6, max 12". FRAMES_MAX_COUNT
+    is pinned to MAX_COVER_FRAMES, so moving that constant turns the tool
+    test red and gets the constant fixed — while this sentence would go
+    on quietly promising 12 and the model would keep getting clamped to
+    something else. Advertising a number the tool does not honour is the
+    smaller version of the bug this whole task existed to fix."""
+    from app.services.ai.prompts.prompt_composer import render_available_resources
+
+    block = render_available_resources(
+        [
+            {
+                "id": "1",
+                "name": "clip.mp4",
+                "kind": "video",
+                "mime": "video/mp4",
+                "size": 18_000_000,
+                "scope": "personal",
+                "updated_at": "2026-08-01T00:00:00Z",
+                "brief": None,
+                "transcript_status": "none",
+                "summary_status": "none",
+            }
+        ]
+    )
+    assert f"default {rft.FRAMES_DEFAULT_COUNT}" in block
+    assert f"max {rft.FRAMES_MAX_COUNT}" in block
 
 
 @pytest.mark.unit

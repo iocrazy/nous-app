@@ -63,10 +63,13 @@ _FRAMES_MAX_DATA_URL_CHARS = (FRAMES_MAX_BYTES_PER_FRAME * 4 + 2) // 3 + 32
 
 # Two bounds, same shape as cover_frames' pair but far tighter: this runs
 # inside a live chat turn with the user watching a stream, not in a
-# background workflow (cover_frames allows 180 s / 600 s). ffmpeg's own
-# budget is divided across the frames by extract_frames; the outer
-# deadline additionally covers materialize()'s download, which has no
-# timeout of its own.
+# background workflow (cover_frames allows 180 s / 600 s). extract_frames
+# divides the ffmpeg budget across the frames (12 frames → 7.5 s each),
+# but note it ALSO runs an ffprobe with its own separate 15 s timeout
+# that this number does not cover — the real extractor-side ceiling is
+# ~105 s. The outer deadline additionally covers materialize()'s
+# download, which has no timeout of its own; that is the half a stalled
+# object store hangs in, so the bound has to sit outside it.
 FRAMES_EXTRACT_TIMEOUT_SECONDS = 90.0
 FRAMES_TOTAL_DEADLINE_SECONDS = 180.0
 
@@ -80,6 +83,18 @@ def _parse_frame_count(args: Optional[dict]) -> tuple[Optional[int], Optional[st
     substituting the default there would answer a question the model did
     not ask and give it no way to notice.
     """
+    # ``args`` is declared ``type: object`` in the tool schema and nothing
+    # enforces that, and models violate it regularly (a bare string, a
+    # list). Before frames nothing dereferenced ``args`` — it only fed the
+    # cache key's json.dumps — so a non-dict was harmless. Dereferencing
+    # it without this guard turns the same input into an AttributeError
+    # that the entry point's broad except flattens to "fetch failed:
+    # AttributeError", which tells the model nothing about what to fix.
+    if args is not None and not isinstance(args, dict):
+        return None, (
+            f'args must be an object, e.g. {{"frames": 6}}; got '
+            f"{type(args).__name__}"
+        )
     raw = (args or {}).get("frames")
     if raw is None:
         return FRAMES_DEFAULT_COUNT, None
