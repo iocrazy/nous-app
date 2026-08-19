@@ -534,6 +534,7 @@
       "previewFeedAria": "Feed preview — your post is one card; every card around it is an empty placeholder.",
       "previewFeedPlaceholderNote": "Every card except yours is an empty placeholder, not a real post.",
       "previewChromeNote": "The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.",
+      "previewImmersiveChromeNote": "The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.",
       "previewOwnControlAria": "Preview control (part of this page, not the platform)",
       "previewCoverVertical": "Showing your vertical 3:4 cover.",
       "previewCoverHorizontal": "Showing your horizontal 4:3 cover.",

@@ -441,6 +441,56 @@
 .dist-v4 .pv-fcover .pv-missing,
 .dist-v4 .pv-fcover .pv-fail { position: absolute; inset: 4px; margin: 0; }
 
+/* ── video / gallery: the immersive full-screen view ─────────────────────── */
+/* The content IS the screen and the interface floats on top of it. The layout
+   this replaced centred a small player in an otherwise empty phone with the
+   title printed underneath, which read as a video embedded in a picture of a
+   phone rather than as the post.
+   These rules all carry one more class than the `.pv-gallery` / `.pv-stage`
+   rules above, so they win on specificity wherever the two disagree. */
+.dist-v4 .pv-im { padding: 0; }
+.dist-v4 .pv-im .pv-stage { position: absolute; inset: 0; z-index: 1; padding: 0; }
+/* `contain`, not `cover`: the platform letterboxes anything that is not the
+   screen's own shape, and cropping the user's frame would misreport what gets
+   posted. The element still spans the whole screen — the black around a
+   letterboxed clip is the app's background, not empty page. */
+.dist-v4 .pv-im .pv-stage img,
+.dist-v4 .pv-im .pv-stage .pv-video { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+
+/* Platform chrome. Decoration only — no hit targets, no counts. */
+.dist-v4 .pv-im-top { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 13px; padding: 22px 10px 6px; font-size: 10px; color: rgba(255, 255, 255, .62); text-shadow: 0 1px 3px rgba(0, 0, 0, .65); }
+.dist-v4 .pv-im-top .cur { color: #fff; font-weight: 600; border-bottom: 1.5px solid #fff; padding-bottom: 2px; }
+.dist-v4 .pv-im-top .pv-im-search { position: absolute; right: 10px; top: 23px; color: rgba(255, 255, 255, .8); }
+.dist-v4 .pv-im-rail { position: absolute; right: 6px; bottom: 78px; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 11px; color: #fff; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
+.dist-v4 .pv-im-rail .pv-im-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 1px solid #fff; }
+.dist-v4 .pv-im-rail .pv-im-disc { opacity: .85; }
+.dist-v4 .pv-im-nav { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: space-around; align-items: center; padding: 6px 4px 8px; font-size: 9px; color: rgba(255, 255, 255, .6); background: linear-gradient(to top, rgba(0, 0, 0, .78), rgba(0, 0, 0, 0)); }
+.dist-v4 .pv-im-nav .plus { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 14px; border-radius: 4px; background: rgba(255, 255, 255, .85); color: #0b0b0d; font-weight: 700; }
+/* The native control bar is painted inside the player, i.e. below every
+   overlay. The bottom navigation is the only decoration low enough to sit on
+   top of it, so it steps aside while the bar is up: a real control the reader
+   asked for outranks a sketch of somebody else's. */
+.dist-v4 .pv-im.ctl .pv-im-nav { opacity: 0; }
+/* And the caption steps up out of the bar's row for the same reason. Measured
+   in Chromium 1228 on this 196×410 screen: the native panel occupies the
+   bottom ~40px, which the caption's resting position at 44px only just
+   clears. */
+.dist-v4 .pv-im.ctl .pv-caption { bottom: 56px; }
+
+/* The caption block: by-line, title, sound line. Inset on the right so it
+   clears the side rail. */
+.dist-v4 .pv-im .pv-caption { position: absolute; left: 0; right: 38px; bottom: 44px; z-index: 5; padding: 0 10px; text-shadow: 0 1px 3px rgba(0, 0, 0, .75); }
+.dist-v4 .pv-im .pv-sound { display: flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 9.5px; color: rgba(255, 255, 255, .9); }
+.dist-v4 .pv-im .pv-sound svg { flex: none; }
+
+/* Ours, not the platform's — same treatment as the cover view's orientation
+   switch. Parked under the tab row because both the caption block and the
+   player's control bar own the bottom of this screen. */
+.dist-v4 .pv-im .pv-pager { position: absolute; top: 42px; left: 50%; transform: translateX(-50%); z-index: 6; gap: 6px; padding: 2px 5px; border-radius: 999px; background: var(--card); border: 1px solid var(--t-indigo); box-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+.dist-v4 .pv-im .pv-pager button { width: 18px; height: 18px; background: transparent; color: var(--content-3); }
+.dist-v4 .pv-im .pv-pager button:not(:disabled):hover { background: var(--accent-soft); color: var(--t-indigo); }
+.dist-v4 .pv-im .pv-pager .pv-count { font-size: 9px; color: var(--content-2); }
+
 /* ═══ checks / more-options rows ═══ */
 .dist-v4 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 11.5px; line-height: 1.5; padding: 9px 11px; border-radius: 10px; margin-top: 8px; }
 .dist-v4 .check svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1.5px; }

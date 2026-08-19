@@ -25,7 +25,7 @@ import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
-import { PublishPreview } from './PublishPreview';
+import { PublishPreview, type PreviewSoundtrack } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
 import { DateTimePopover } from '../common/DateTimePopover';
 import { useToast } from '../Toast';
@@ -370,8 +370,15 @@ const PLATFORM_BADGE: Record<string, { bg: string; icon: React.ReactNode }> = {
 /* The heart / comment / share / music glyphs that used to live here went with
    the feed mock-up they decorated. Two of them carried a hardcoded `0`, which
    is a measurement the post does not have, and the music line asserted
-   "Original sound" on a page that can attach a music track. Reintroducing any
-   of them means reintroducing them WITHOUT numbers beside them. */
+   "Original sound" on a page that can attach a music track.
+
+   They came back on the immersive preview's side rail under exactly the terms
+   this note set: `aria-hidden`, no hit targets, and NO numbers beside them —
+   see `immersiveOverlay` in PublishPreview.tsx. The music line came back too,
+   but only as one of three explicitly distinguished cases; `previewSoundtrack`
+   below is where that decision is made, and it is the caller's job precisely
+   because the view has no way to tell "nothing picked" from "a keyword whose
+   result nobody knows yet". */
 
 export const PublishPage: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -1751,6 +1758,31 @@ export const PublishPage: React.FC = () => {
    */
   const previewHandle = firstSelectedAccount?.username ?? null;
 
+  /**
+   * What the preview may say about the post's sound — the three cases are
+   * documented on `PreviewSoundtrack`, and this is the only place that has the
+   * information to tell them apart.
+   *
+   * ⚠️ The three-way split is the whole point. A picked track is a known
+   * title; an untouched music control means the platform keeps the clip's own
+   * audio (see the `musicName` state's own note); a typed keyword with no
+   * track picked is the one case where nobody knows what will be attached —
+   * one search comes back with several character-identical titles under
+   * different ids, which is exactly why `music_ambiguous` exists. Folding the
+   * third case into either of the other two would put a claim on screen that
+   * the publish step itself refuses to make.
+   */
+  const previewSoundtrack: PreviewSoundtrack = musicTrack !== null
+    ? {
+      kind: 'track',
+      label: musicTrack.author.trim() === ''
+        ? musicTrack.title
+        : `${musicTrack.title} - ${musicTrack.author}`,
+    }
+    : musicName.trim() === ''
+      ? { kind: 'platformDefault' }
+      : { kind: 'unresolved' };
+
   const visLabel = (v: Visibility): string => {
     if (v === 'public') return t('distribution.publish.vis_public', 'Public');
     if (v === 'private') return t('distribution.publish.vis_private', 'Private');
@@ -2861,6 +2893,7 @@ export const PublishPage: React.FC = () => {
             avatarUrl={firstSelectedAccount?.avatar_url ?? null}
             platform={firstSelectedAccount?.platform ?? null}
             covers={covers}
+            soundtrack={previewSoundtrack}
             mediaToken={mediaToken}
             orientation={orientation}
             onOrientationChange={setOrientation}

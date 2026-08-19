@@ -534,6 +534,7 @@
       "previewFeedAria": "信息流预览 —— 你的作品是其中一张卡片，周围每一张都是空占位。",
       "previewFeedPlaceholderNote": "除了你这张，其余卡片都是空占位，不是真实作品。",
       "previewChromeNote": "顶部标签和底部导航是平台 App 的示意。只有高亮的那个切换属于本页面。",
+      "previewImmersiveChromeNote": "顶部标签、右侧图标和底部导航都是平台 App 的示意，没有任何计数——这条作品还没有。只有描边的翻页控件属于本页面。",
       "previewOwnControlAria": "预览控件（属于本页面，不是平台的）",
       "previewCoverVertical": "显示的是你的竖版 3:4 封面。",
       "previewCoverHorizontal": "显示的是你的横版 4:3 封面。",

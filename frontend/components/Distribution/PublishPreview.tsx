@@ -37,6 +37,30 @@
  * cards are two-up, and the user's own is the left card of the first fully
  * visible row, with the row above it cut off the way a mid-scroll feed is.
  *
+ * ══ THE TWO SCREENS THIS PANEL REPRODUCES ══════════════════════════════════
+ *
+ * The cover view is the two-column recommendation FEED (above). The video and
+ * gallery views are the IMMERSIVE full-screen player: the content fills the
+ * whole screen and the app's interface floats on top of it.
+ *
+ * The immersive views were rebuilt because they were not reproducing anything.
+ * They centred a small player inside an otherwise empty phone, with native
+ * controls on it and the title printed underneath — which reads as "a video
+ * embedded in a picture of a phone", not as "here is what this post looks
+ * like". A preview whose whole value is that it is true was not true about the
+ * one thing it is for.
+ *
+ * ⚠️ The two screens have DIFFERENT chrome, and they overlap enough to invite
+ * the wrong copy: the feed's tab row is 精选/关注/推荐 and the player's is
+ * 同城/关注/推荐. Two constants, named after their screen, neither a default for
+ * the other — see `DOUYIN_FEATURED_FEED_CHROME` / `DOUYIN_IMMERSIVE_CHROME`.
+ *
+ * The fabrication rule above governs the floating layer without exception, and
+ * that layer is where it is easiest to break: the rail carries glyphs and no
+ * counts, the by-line and the avatar are drawn only when they are real, and no
+ * decorative progress bar is drawn at all (it would assert a playback position
+ * — a fabricated measurement is one whether it is a number or a bar).
+ *
  * ══ WHEN THE PLAYER STOPS, AND WHAT THAT RULE HANGS OFF ═════════════════════
  *
  * Sound the user can no longer see the source of is sound the user cannot
@@ -55,7 +79,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AlertTriangle, ChevronLeft, ChevronRight, Heart, ImageOff, SlidersHorizontal,
+  AlertTriangle, ChevronLeft, ChevronRight, Disc3, Heart, ImageOff, MessageCircle,
+  Music2, Search, Share2, SlidersHorizontal, Star,
 } from 'lucide-react';
 
 import { getResourceFileUrl } from '../../services/resourceService';
@@ -66,6 +91,35 @@ export type PreviewTab = 'video' | 'gallery' | 'cover';
 
 /** Which of the two derived crops the grid is drawn with. */
 export type CoverOrientation = 'vertical' | 'horizontal';
+
+/**
+ * What, if anything, this page can truthfully say about the post's sound.
+ *
+ * A discriminated union rather than `string | null` because the three cases
+ * are three different STATEMENTS, and only the caller knows which one holds:
+ *
+ *   `track`            a track was picked out of the platform's own catalogue,
+ *                      so its real title (and author) are known facts.
+ *   `platformDefault`  nothing was picked at all. `PublishPage` documents what
+ *                      that means — the publish step leaves the platform's
+ *                      music control alone, so the post keeps 原声. Known, not
+ *                      guessed.
+ *   `unresolved`       a search KEYWORD was typed but no track picked. The
+ *                      browser will type that keyword into the platform's own
+ *                      dialog and whatever comes back gets attached — five
+ *                      character-identical titles under different ids is a
+ *                      real case here (`music_ambiguous`). We do not know the
+ *                      answer, so the line is not drawn.
+ *
+ * Collapsing this to a nullable string would push the decision into the view,
+ * which does not have the information to make it — and the shape it would
+ * reach for is exactly the unconditional "原声" this component's header names
+ * as one of the fabrications it exists to prevent.
+ */
+export type PreviewSoundtrack =
+  | { kind: 'track'; label: string }
+  | { kind: 'platformDefault' }
+  | { kind: 'unresolved' };
 
 /** The subset of a Library row this panel needs. Structurally satisfied by
  *  `LibraryVideo`, kept narrow so the panel cannot start depending on fields
@@ -113,6 +167,15 @@ export interface PublishPreviewProps {
   platform: string | null;
   /** Derived cover crops, or null when the user has not made any. */
   covers: CoverPair | null;
+  /**
+   * What the sound line may say — see `PreviewSoundtrack`.
+   *
+   * Required rather than optional on purpose: an omitted prop would default to
+   * "say nothing", which is the silent version of the caller forgetting to
+   * wire the music panel up at all. Making it explicit means the caller has to
+   * state which of the three cases holds.
+   */
+  soundtrack: PreviewSoundtrack;
   /** Supabase JWT for `<img src>` / `<video src>` against the file endpoint,
    *  which takes it as `?token=` because a media element cannot send a header.
    *  Undefined while the session is still being read. */
@@ -233,8 +296,39 @@ const DOUYIN_FEATURED_FEED_CHROME = {
   navItems: ['首页', '朋友', '＋', '消息', '我'],
 } as const;
 
+/**
+ * ⚠️ THE OTHER SCREEN. Read the note on `DOUYIN_FEATURED_FEED_CHROME` first.
+ *
+ * This is the full-screen (immersive) player, not the two-column card feed,
+ * and the two are DIFFERENT SCREENS of the same app:
+ *
+ *                       featured feed              immersive player
+ *   tab row             精选 / 关注 / 推荐          同城 / 关注 / 推荐
+ *   selected            精选                        推荐
+ *
+ * Two words out of three are shared, which is precisely what makes copying one
+ * constant into the other easy to do and impossible to notice. They are kept
+ * apart, named after their screen, and neither is a default for the other.
+ *
+ * Same fences as the featured-feed constant, without exception: verbatim, never
+ * translated, `aria-hidden`, no hit targets, no counts, never mixed into our
+ * own copy, and drawn ONLY when the post is actually going to Douyin.
+ *
+ * `defaultSoundLabel` is the platform's own word for "no track attached" and
+ * belongs to this table for the same reason the tab names do — it is a
+ * depiction of what Douyin writes there, not a string we authored. It is only
+ * ever reached through `soundtrack.kind === 'platformDefault'`; see
+ * `PreviewSoundtrack` for why the caller, not this file, decides that.
+ */
+const DOUYIN_IMMERSIVE_CHROME = {
+  feedTabs: ['同城', '关注', '推荐'],
+  currentTab: '推荐',
+  navItems: ['首页', '朋友', '＋', '消息', '我'],
+  defaultSoundLabel: '原声',
+} as const;
+
 export const PublishPreview: React.FC<PublishPreviewProps> = ({
-  kind, items, title, handle, avatarUrl, platform, covers, mediaToken,
+  kind, items, title, handle, avatarUrl, platform, covers, soundtrack, mediaToken,
   orientation, onOrientationChange,
 }) => {
   const { t } = useTranslation();
@@ -250,6 +344,31 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
    * failure of the unsigned attempt before it.
    */
   const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
+  /**
+   * Whether the player's NATIVE control bar is currently drawn.
+   *
+   * ⚠️ This is the one knob where "looks right" and "can be tested" pull
+   * against each other, so the trade is written down rather than left in a
+   * commit message.
+   *
+   * The controls stay NATIVE — a hand-rolled scrubber is drag behaviour, and
+   * jsdom has no layout, therefore no pointer geometry, therefore no test in
+   * this repo could exercise it. Hand-rolling would move the most breakable
+   * part of this panel outside the gate entirely.
+   *
+   * But a permanently-visible native bar (play button, volume slider, overflow
+   * menu) is most of what made the old preview read as "a player embedded in a
+   * picture of a phone" rather than as the post. So it is revealed on
+   * INTERACTION instead of removed: pointer over the screen, a click/tap on
+   * it, or keyboard focus on the player. Every one of those is a plain DOM
+   * event, so the reveal rule itself IS testable — what stays untestable here
+   * is only dragging the bar once it is on screen, exactly as before.
+   *
+   * `tabIndex={0}` on the player is load-bearing: a `<video>` WITHOUT
+   * `controls` is not focusable, so without it the keyboard path could never
+   * fire the focus that reveals the bar.
+   */
+  const [controlsVisible, setControlsVisible] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const markFailed = (url: string) => setFailedUrls((prev) => {
     if (prev.has(url)) return prev;
@@ -393,6 +512,36 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
 
   const titleText = title.trim();
 
+  /**
+   * The text of the sound line, or null when this panel has nothing true to
+   * put there. Read `PreviewSoundtrack` for who decides what.
+   *
+   * Two extra refusals live here rather than in the caller, because both are
+   * facts about the SCREEN being drawn:
+   *
+   *  - No line at all off Douyin. The label would be the platform's own word,
+   *    and putting it on a sketch of a different app is the same fabrication
+   *    the chrome gate already stops.
+   *  - No `platformDefault` line on an image post. "Leave the music control
+   *    alone" means a video keeps its own recorded audio — 原声 is then a
+   *    fact. A gallery has no recorded audio to keep, so what ends up on it is
+   *    not something this page knows, and the honest line is no line.
+   */
+  const soundLabel = ((): string | null => {
+    if (!showsPlatformChrome) return null;
+    switch (soundtrack.kind) {
+      case 'track': {
+        const label = soundtrack.label.trim();
+        return label === '' ? null : label;
+      }
+      case 'platformDefault':
+        return isImages ? null : DOUYIN_IMMERSIVE_CHROME.defaultSoundLabel;
+      case 'unresolved':
+      default:
+        return null;
+    }
+  })();
+
   /** One image, or a stated reason there is none. Never a silent empty box. */
   const picture = (url: string | null, alt: string, missing: string) => {
     if (url === null) {
@@ -422,7 +571,19 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
    */
   const pager = (prevLabel: string, nextLabel: string) => (
     items.length === 0 ? null : (
-      <div className="pv-pager">
+      /* OURS, floating inside a mock-up of somebody else's app — so it says so
+         in its accessible name and is drawn in our accent, exactly like the
+         orientation switch on the cover view. A control the reader cannot tell
+         apart from the platform's own teaches them something false about the
+         platform. */
+      <div
+        className="pv-pager"
+        role="group"
+        aria-label={t(
+          'distribution.publish.previewOwnControlAria',
+          'Preview control (part of this page, not the platform)',
+        )}
+      >
         <button
           type="button"
           disabled={pageIndex === 0}
@@ -447,6 +608,87 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
       </div>
     )
   );
+
+  /**
+   * ══ THE IMMERSIVE VIEW'S FLOATING LAYER ═══════════════════════════════════
+   *
+   * Everything here is drawn ON TOP of content that fills the whole screen.
+   * That is the entire shape of this view and the reason it was rebuilt: the
+   * version before it centred a small player inside an otherwise empty phone
+   * with the title printed underneath, which reads as "a video embedded in a
+   * picture of a phone" rather than as the post. On the real screen the media
+   * IS the background and the interface floats over it.
+   *
+   * Shared by the video and the gallery views because it is the same screen —
+   * the only difference is whether a clip or a still is filling it.
+   *
+   * ⚠️ The rules from the top of this file apply here without exception, and
+   * this layer is where they are easiest to break:
+   *
+   *   · The rail carries glyphs and NO numbers. Douyin puts a like / comment /
+   *     favourite count beside each one; we do not have those numbers, and an
+   *     unpublished post does not have them either. The icon says "this is a
+   *     feed post"; a number claims a measurement.
+   *   · The avatar is drawn only when the account really has one — no grey
+   *     circle standing in for a picture that does not exist.
+   *   · The by-line is drawn only when an account is actually selected. It
+   *     used to read `@yourhandle`, a handle nobody owns, in the exact spot
+   *     the real one goes.
+   *   · No progress bar is drawn. Douyin has a thin one along the bottom, but
+   *     a decorative one asserts a playback position, and the real position is
+   *     already on the native control bar. A fabricated measurement is a
+   *     fabricated measurement whether it is a number or a bar.
+   */
+  const immersiveOverlay = () => (
+    <>
+      {showsPlatformChrome && (
+        <div className="pv-im-top" aria-hidden="true">
+          {DOUYIN_IMMERSIVE_CHROME.feedTabs.map((label) => (
+            <span key={label} className={label === DOUYIN_IMMERSIVE_CHROME.currentTab ? 'cur' : ''}>
+              {label}
+            </span>
+          ))}
+          <Search className="pv-im-search" size={11} />
+        </div>
+      )}
+
+      {showsPlatformChrome && (
+        <div className="pv-im-rail" aria-hidden="true">
+          {avatarUrl !== null && <img className="pv-im-avatar" src={avatarUrl} alt="" />}
+          <Heart size={15} />
+          <MessageCircle size={15} />
+          <Star size={15} />
+          <Share2 size={15} />
+          <Disc3 className="pv-im-disc" size={15} />
+        </div>
+      )}
+
+      <div className="pv-caption">
+        {handle !== null && <div className="pv-handle">@{handle}</div>}
+        <div className={`pv-cap ${titleText === '' ? 'ph' : ''}`}>
+          {titleText === ''
+            ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
+            : titleText}
+        </div>
+        {soundLabel !== null && (
+          <div className="pv-sound">
+            <Music2 size={9} aria-hidden="true" />
+            <span>{soundLabel}</span>
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  /** The app's bottom navigation. Decoration, drawn last so it sits under the
+   *  player's own control bar rather than over it. */
+  const immersiveNav = () => (showsPlatformChrome ? (
+    <div className="pv-im-nav" aria-hidden="true">
+      {DOUYIN_IMMERSIVE_CHROME.navItems.map((label, i) => (
+        <span key={label} className={i === 2 ? 'plus' : ''}>{label}</span>
+      ))}
+    </div>
+  ) : null);
 
   const tabLabel = (which: PreviewTab): string => {
     switch (which) {
@@ -594,7 +836,16 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
             )}
           </div>
         ) : tab === 'video' ? (
-          <div className="pv-screen pv-gallery">
+          /* The clip fills the screen and the interface floats over it — see
+             `immersiveOverlay`. The controls-on-interaction handlers live on
+             this container rather than on the player so that pointing at any
+             part of the screen counts, which is how the real thing behaves. */
+          <div
+            className={`pv-screen pv-gallery pv-im ${controlsVisible ? 'ctl' : ''}`}
+            onMouseEnter={() => setControlsVisible(true)}
+            onMouseLeave={() => setControlsVisible(false)}
+            onClick={() => setControlsVisible(true)}
+          >
             <div className="pv-stage">
               {currentItem === null ? (
                 <span className="pv-missing">
@@ -612,12 +863,9 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
                    live one. The explicit pause in the effect above is still
                    what guarantees the old element stops.
 
-                   Native `controls` rather than a hand-rolled scrubber: it is
-                   the seek bar the user already knows, it is keyboard- and
-                   screen-reader-operable for free, and a custom one would be
-                   drag behaviour that no test in this repo can actually
-                   exercise (jsdom has no layout, so it has no pointer
-                   geometry either).
+                   `controls` is NATIVE but conditional — see `controlsVisible`
+                   for the whole trade. `tabIndex` is what makes the keyboard
+                   path reachable at all while the bar is hidden.
 
                    No `autoPlay`: a preview that starts making noise the moment
                    a tab is clicked is worse than one click. */
@@ -627,28 +875,25 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
                   className="pv-video"
                   src={videoUrl(currentItem)}
                   poster={currentItem.thumbnail_url ?? undefined}
-                  controls
+                  controls={controlsVisible}
+                  tabIndex={0}
                   preload="metadata"
                   aria-label={currentItem.filename}
+                  onFocus={() => setControlsVisible(true)}
+                  onBlur={() => setControlsVisible(false)}
                   onError={() => markFailed(videoUrl(currentItem))}
                 />
               )}
             </div>
-            <div className="pv-caption">
-              {handle !== null && <div className="pv-handle">@{handle}</div>}
-              <div className={`pv-cap ${titleText === '' ? 'ph' : ''}`}>
-                {titleText === ''
-                  ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
-                  : titleText}
-              </div>
-            </div>
+            {immersiveOverlay()}
             {pager(
               t('distribution.publish.previewPrevClip', 'Previous clip'),
               t('distribution.publish.previewNextClip', 'Next clip'),
             )}
+            {immersiveNav()}
           </div>
         ) : (
-          <div className="pv-screen pv-gallery">
+          <div className="pv-screen pv-gallery pv-im">
             <div className="pv-stage">
               {currentItem === null
                 ? (
@@ -663,21 +908,24 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
                   t('distribution.publish.previewNoImage', 'No image to show'),
                 )}
             </div>
-            <div className="pv-caption">
-              {handle !== null && <div className="pv-handle">@{handle}</div>}
-              <div className={`pv-cap ${titleText === '' ? 'ph' : ''}`}>
-                {titleText === ''
-                  ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
-                  : titleText}
-              </div>
-            </div>
+            {immersiveOverlay()}
             {pager(
               t('distribution.publish.previewPrevImage', 'Previous image'),
               t('distribution.publish.previewNextImage', 'Next image'),
             )}
+            {immersiveNav()}
           </div>
         )}
       </div>
+
+      {tab !== 'cover' && showsPlatformChrome && (
+        <p className="pv-note">
+          {t(
+            'distribution.publish.previewImmersiveChromeNote',
+            'The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.',
+          )}
+        </p>
+      )}
 
       {tab === 'cover' && (
         <>
