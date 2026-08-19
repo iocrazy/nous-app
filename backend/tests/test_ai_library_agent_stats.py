@@ -323,6 +323,31 @@ async def test_scanner_killed_run_still_reports_a_fault(
 
 
 @pytest.mark.asyncio
+async def test_legacy_row_without_an_error_code_still_reports_a_fault(
+    client: AsyncClient,
+) -> None:
+    """Backward compatibility with rows written before error_code was set.
+
+    The restart carve-out keys off error_code, so a dead run that predates it
+    (or any writer that left it NULL) has nothing to match on. Those must keep
+    their old behaviour — an unexplained NULL is not evidence of a restart, so
+    it stays a fault. Without this the carve-out could silently widen to
+    "anything we can't classify is fine".
+    """
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "analyze")],
+        dead={AGENT_A: _health(None, "boom")},
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    item = resp.json()["items"][AGENT_A]
+    assert item["fault"]["kind"] == "dead_runs"
+    assert item["fault"]["detail"] == "boom"
+    assert item["interrupted_reason"] is None
+
+
+@pytest.mark.asyncio
 async def test_stuck_run_without_a_reason_reports_nothing(
     client: AsyncClient,
 ) -> None:

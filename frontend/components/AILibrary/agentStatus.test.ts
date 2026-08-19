@@ -130,6 +130,13 @@ describe('deriveAgentStatus', () => {
   });
 
   it('ranks interrupted above idle', () => {
+    // A contrast pair, because the earlier version of this test asserted only
+    // the idle half — which restated 'falls back to idle' and stayed green
+    // even with the whole interrupted branch deleted. The two calls differ in
+    // exactly one field, so the ordering is what's actually being pinned.
+    expect(
+      deriveAgentStatus(agent(), stats({ interrupted_reason: 'restart' }), new Set()).kind,
+    ).toBe('interrupted');
     expect(deriveAgentStatus(agent(), stats(), new Set()).kind).toBe('idle');
   });
 
