@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveEffectiveSourceUrl, resolveSourceUrl, resolveSourceUrls } from './promptInputs';
+import { resolveEffectiveSourceUrl, resolveSourceUrl, resolveSourceUrls, upstreamPromptText } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';
 
 const NODES: CanvasNode[] = [
@@ -222,5 +222,93 @@ describe('resolveEffectiveSourceUrl', () => {
   it('null when the prompt has no image inputs at all', () => {
     const p = prompt('/api/v1/generated-media/a.png');
     expect(resolveEffectiveSourceUrl(p, [p], [])).toBeNull();
+  });
+});
+
+
+// ---- manual reference images (IC ⑨C — manualInputRefs) --------------------
+
+describe('manual_refs feed the input chain', () => {
+  const conn = {
+    id: 'e1',
+    source: 'm1',
+    target: 'p1',
+    sourceHandle: null,
+    targetHandle: null,
+  };
+  const media = {
+    id: 'm1',
+    type: 'media',
+    position: { x: 0, y: 0 },
+    data: {
+      title: 'Media',
+      items: [{ url: '/api/v1/generated-media/a.png', kind: 'image' }],
+    },
+  } as unknown as CanvasNode;
+
+  it('wired inputs come first, then manual refs, deduped', () => {
+    const p = {
+      id: 'p1',
+      type: 'prompt',
+      position: { x: 0, y: 0 },
+      data: {
+        body: '',
+        provider_slug: '',
+        agent_id: null,
+        run_status: 'idle',
+        resource_refs: [],
+        manual_refs: [
+          { url: '/api/v1/generated-media/manual.png', kind: 'image' },
+          { url: '/api/v1/generated-media/a.png', kind: 'image' },
+        ],
+      },
+    } as unknown as CanvasNode;
+    expect(resolveSourceUrls('p1', [media, p], [conn])).toEqual([
+      '/api/v1/generated-media/a.png',
+      '/api/v1/generated-media/manual.png',
+    ]);
+  });
+
+  it('manual refs alone make a prompt an i2i source', () => {
+    const p = {
+      id: 'p1',
+      type: 'prompt',
+      position: { x: 0, y: 0 },
+      data: {
+        body: '',
+        provider_slug: '',
+        agent_id: null,
+        run_status: 'idle',
+        resource_refs: [],
+        manual_refs: [{ url: '/api/v1/generated-media/solo.png', kind: 'image' }],
+      },
+    } as unknown as CanvasNode;
+    expect(resolveSourceUrls('p1', [p], [])).toEqual([
+      '/api/v1/generated-media/solo.png',
+    ]);
+  });
+});
+
+
+describe('upstreamPromptText', () => {
+  it('joins non-empty upstream prompt bodies, ignores non-text cards', () => {
+    const up1 = {
+      id: 'u1', type: 'prompt', position: { x: 0, y: 0 },
+      data: { body: 'a red apple', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [] },
+    } as unknown as CanvasNode;
+    const up2 = {
+      id: 'u2', type: 'media', position: { x: 0, y: 0 },
+      data: { title: 'Media', items: [] },
+    } as unknown as CanvasNode;
+    const p = {
+      id: 'p1', type: 'prompt', position: { x: 0, y: 0 },
+      data: { body: '', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [] },
+    } as unknown as CanvasNode;
+    const conns = [
+      { id: 'e1', source: 'u1', target: 'p1', sourceHandle: null, targetHandle: null },
+      { id: 'e2', source: 'u2', target: 'p1', sourceHandle: null, targetHandle: null },
+    ];
+    expect(upstreamPromptText('p1', [up1, up2, p], conns)).toBe('a red apple');
+    expect(upstreamPromptText('p1', [p], [])).toBe('');
   });
 });

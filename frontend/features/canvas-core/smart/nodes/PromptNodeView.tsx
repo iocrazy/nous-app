@@ -1,10 +1,10 @@
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Library, Play } from 'lucide-react';
+import { ImagePlus, Library, Play } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
-import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
+import type { GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useTextModels } from './useTextModels';
@@ -12,7 +12,7 @@ import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { rerunPrompt } from '../regenerate';
-import { resolveSourceUrls } from '../promptInputs';
+import { resolveSourceUrls, upstreamPromptText } from '../promptInputs';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   elapsedSeconds,
@@ -185,6 +185,50 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Read source_ref from the store (not props): patches land there first,
   // so the toggle highlight is correct even before React Flow re-renders
   // the node with fresh data.
+  const upstreamText = useMemo(
+    () =>
+      upstreamPromptText(
+        id,
+        storeNodes as CanvasNode[],
+        storeConnections as CanvasConnection[],
+      ),
+    [id, storeNodes, storeConnections],
+  );
+  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
+  const manualUrlSet = new Set(manualRefs.map((r) => r.url));
+  const addManualRef = useCallback(
+    async (resourceId: string) => {
+      try {
+        const minted = await importResourceAsCanvasMedia(resourceId);
+        const current =
+          ((useCanvasCoreStore
+            .getState()
+            .nodes.find((n) => (n as { id?: unknown }).id === id) as
+            | { data?: PromptNodeData }
+            | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
+        if (current.some((r) => r.url === minted.url)) return;
+        patch({ manual_refs: [...current, { url: minted.url, kind: minted.kind }] });
+      } catch (err) {
+        console.error('[PromptNodeView] add reference failed:', err);
+      } finally {
+        setRefPickerOpen(false);
+      }
+    },
+    [id, patch],
+  );
+  const removeManualRef = useCallback(
+    (url: string) => {
+      const current =
+        ((useCanvasCoreStore
+          .getState()
+          .nodes.find((n) => (n as { id?: unknown }).id === id) as
+          | { data?: PromptNodeData }
+          | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
+      patch({ manual_refs: current.filter((r) => r.url !== url) });
+    },
+    [id, patch],
+  );
   const sourceRef = useCanvasCoreStore(
     (s) =>
       ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as
@@ -348,33 +392,105 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
       <div className="relative p-3">
+        {/* Upstream prompt preview (IC inputPromptPreview). */}
+        {upstreamText && (
+          <div
+            data-testid="prompt-upstream-preview"
+            className="mb-1.5 rounded-lg border border-dashed border-canvas-line/70 px-2 py-1"
+          >
+            <div className="text-[9px] font-bold uppercase tracking-wider text-canvas-muted">
+              Upstream
+            </div>
+            <div className="truncate text-[10px] text-canvas-muted">
+              {upstreamText}
+            </div>
+          </div>
+        )}
         {inputUrls.length > 0 && (
           <div
             data-testid="prompt-input-row"
             className="mb-1.5 flex items-center gap-1.5"
           >
             {inputUrls.slice(0, 8).map((url, i) => (
-              <button
-                key={url}
-                type="button"
-                data-testid="prompt-input-thumb"
-                title={sourceRef === url ? 'Selected as source' : 'Use as source'}
-                onClick={() => toggleSourceRef(url)}
-                disabled={readOnly}
-                className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
-                  sourceRef === url
-                    ? 'border-canvas-strong ring-1 ring-canvas-strong'
-                    : 'border-canvas-line/60'
-                }`}
-              >
-                <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
-                {/* IC 图N corner badge */}
-                <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
-              </button>
+              <span key={url} className="relative inline-flex">
+                <button
+                  type="button"
+                  data-testid="prompt-input-thumb"
+                  title={sourceRef === url ? 'Selected as source' : 'Use as source'}
+                  onClick={() => toggleSourceRef(url)}
+                  disabled={readOnly}
+                  className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                    sourceRef === url
+                      ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                      : 'border-canvas-line/60'
+                  }`}
+                >
+                  <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
+                  {/* IC 图N corner badge */}
+                  <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
+                </button>
+                {/* Manual refs are removable (IC input-thumb-remove). */}
+                {!readOnly && manualUrlSet.has(url) && (
+                  <button
+                    type="button"
+                    data-testid="remove-reference"
+                    aria-label="Remove reference"
+                    onClick={() => removeManualRef(url)}
+                    className="nodrag absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-canvas-strong text-[8px] font-bold text-canvas-card"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
             ))}
             <span className="text-[10px] font-semibold text-canvas-muted">
               {inputUrls.length} inputs
             </span>
+            {!readOnly && (
+              <button
+                type="button"
+                data-testid="add-reference"
+                aria-label="Add reference image"
+                title="Add reference image"
+                onClick={() => setRefPickerOpen((v) => !v)}
+                className="nodrag ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
+              >
+                <ImagePlus size={12} />
+              </button>
+            )}
+          </div>
+        )}
+        {inputUrls.length === 0 && gen && !readOnly && (
+          <div className="mb-1.5 flex items-center">
+            <button
+              type="button"
+              data-testid="add-reference"
+              aria-label="Add reference image"
+              title="Add reference image"
+              onClick={() => setRefPickerOpen((v) => !v)}
+              className="nodrag flex h-6 items-center gap-1 rounded border border-dashed border-canvas-line px-2 text-[10px] text-canvas-muted hover:text-canvas-text"
+            >
+              <ImagePlus size={12} />
+              Add reference
+            </button>
+          </div>
+        )}
+        {refPickerOpen && (
+          <div
+            data-testid="reference-picker"
+            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <CanvasMentionPicker
+              items={searchData.results}
+              query=""
+              loading={searchLoading}
+              counts={searchData.counts}
+              activeKind={activeKind}
+              onKindChange={setActiveKind}
+              onSelect={(item) => void addManualRef(item.id)}
+              activeIndex={0}
+            />
           </div>
         )}
         <textarea

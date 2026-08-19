@@ -74,6 +74,19 @@ export function resolveSourceUrls(
       urls.push(url);
     }
   }
+  // Manually attached references (IC's manualInputRefs) ride AFTER the
+  // wired inputs, deduped against them.
+  const self = byId.get(promptId);
+  const manual = ((asObj(self ?? {}).data ?? {}) as {
+    manual_refs?: GeneratedImageRef[];
+  }).manual_refs;
+  for (const url of durableUrls(
+    (manual ?? []).filter((i) => i.kind !== 'video').map((i) => i.url),
+  )) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
   return urls;
 }
 
@@ -103,4 +116,28 @@ export function resolveEffectiveSourceUrl(
     ?.source_ref;
   if (ref && inputs.includes(ref)) return ref;
   return inputs[0];
+}
+
+
+/** Upstream prompt text preview (IC's inputPromptPreview, ⑨C): non-empty
+ *  bodies of wired upstream prompt/llm cards, joined for a one-line hint. */
+export function upstreamPromptText(
+  promptId: string,
+  nodes: CanvasNode[],
+  connections: CanvasConnection[],
+): string {
+  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  const parts: string[] = [];
+  for (const c of connections) {
+    if (String(c.target) !== promptId) continue;
+    const upstream = byId.get(String(c.source));
+    if (!upstream) continue;
+    const type = asObj(upstream).type;
+    if (type !== 'prompt' && type !== 'llm') continue;
+    const body = String(
+      ((asObj(upstream).data ?? {}) as { body?: string }).body ?? '',
+    ).trim();
+    if (body) parts.push(body);
+  }
+  return parts.join(' · ');
 }

@@ -147,6 +147,10 @@ export interface PromptNodeData {
    *  「输入图」tab): overrides which wired input feeds i2i. Stale refs
    *  fall back to the first input (resolveEffectiveSourceUrl). */
   source_ref?: string;
+  /** Manually attached reference images (IC's manualInputRefs, ⑨C):
+   *  durable generated-media items picked from the library via the
+   *  input-row's add key. Appended after wired inputs in the i2i chain. */
+  manual_refs?: GeneratedImageRef[];
 }
 
 /** Image/video generation settings on a prompt node. */
