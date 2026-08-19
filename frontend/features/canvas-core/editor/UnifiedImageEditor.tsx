@@ -12,6 +12,7 @@
 import {
   Brush as BrushIcon,
   Crop as CropIcon,
+  Download,
   Expand,
   Eye,
   Grid3x3,
@@ -119,6 +120,8 @@ export function UnifiedImageEditor({
   const [lines, setLines] = useState<GridLines>(EMPTY_GRID);
   const [scale, setScale] = useState(0.5);
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  // IC chrome: preview wheel-zoom percentage (100 = fit).
+  const [zoom, setZoom] = useState(100);
 
   // Fresh session on every open (same contract as the standalone modals).
   useEffect(() => {
@@ -177,13 +180,15 @@ export function UnifiedImageEditor({
   const meta = MODE_META.find((m) => m.mode === mode)!;
 
   return (
-    <div
-      data-testid="unified-image-editor"
-      className="fixed inset-0 z-[100] flex flex-col bg-canvas-bg/95 p-4 backdrop-blur"
-    >
-      {/* Header: mode tab bar (IC image-edit-mode) + close. */}
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex items-center gap-1 rounded-xl border border-canvas-line bg-canvas-card p-1">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div
+        data-testid="unified-image-editor"
+        className="flex h-[92vh] w-[94vw] max-w-6xl flex-col rounded-2xl bg-canvas-card p-4 shadow-2xl"
+      >
+      {/* Header: centered mode tab bar (IC image-edit-mode) + download/close
+          floated right — the IC card puts tabs top-center. */}
+      <div className="relative mb-3 flex items-center justify-center gap-2">
+        <div className="flex items-center gap-1 rounded-xl border border-canvas-line bg-canvas-bg p-1">
           {MODE_META.filter((m) => enabled(m.mode)).map((m) => (
             <button
               key={m.mode}
@@ -202,15 +207,26 @@ export function UnifiedImageEditor({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          aria-label="Close editor"
-          onClick={onClose}
-          disabled={committing}
-          className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-canvas-line text-canvas-text hover:bg-canvas-card"
-        >
-          <X size={14} />
-        </button>
+        <div className="absolute right-0 flex items-center gap-1.5">
+          <a
+            data-testid="editor-download"
+            href={mediaSrc(src)}
+            download
+            aria-label="Download image"
+            className="nodrag flex h-8 w-8 items-center justify-center rounded-lg border border-canvas-line text-canvas-text hover:bg-canvas-bg"
+          >
+            <Download size={14} />
+          </a>
+          <button
+            type="button"
+            aria-label="Close editor"
+            onClick={onClose}
+            disabled={committing}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-canvas-line text-canvas-text hover:bg-canvas-bg"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Mode toolbars. */}
@@ -350,12 +366,23 @@ export function UnifiedImageEditor({
       )}
 
       {/* Stage. */}
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl border border-canvas-line bg-canvas-card/40 p-3">
+      <div
+        data-testid="editor-stage"
+        onWheel={(e) => {
+          if (mode !== 'preview') return;
+          // IC lightbox wheel-zoom, clamped 20%–400%.
+          setZoom((z) =>
+            Math.min(400, Math.max(20, Math.round(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))),
+          );
+        }}
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl border border-canvas-line bg-canvas-bg/60 p-3"
+      >
         {mode === 'preview' && (
           <img
             src={mediaSrc(src)}
             alt={alt}
             className="max-h-full max-w-full object-contain"
+            style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}
             onLoad={(e) =>
               setNaturalSize({
                 width: e.currentTarget.naturalWidth,
@@ -425,6 +452,14 @@ export function UnifiedImageEditor({
         {mode === 'split' && (
           <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
         )}
+        {mode === 'preview' && (
+          <span
+            data-testid="editor-zoom"
+            className="absolute bottom-2 left-2 rounded-md bg-canvas-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-canvas-muted"
+          >
+            {zoom}%
+          </span>
+        )}
       </div>
 
       {/* Footer. */}
@@ -449,6 +484,7 @@ export function UnifiedImageEditor({
             {committing ? 'Working…' : meta.apply}
           </button>
         )}
+      </div>
       </div>
     </div>
   );
