@@ -122,7 +122,7 @@ function openDragAndCommit() {
     }),
   );
   fireEvent.pointerUp(handle, { pointerId: 1 });
-  fireEvent.click(screen.getByTestId('outpaint-editor-commit'));
+  fireEvent.click(screen.getByTestId('editor-apply'));
 }
 
 describe('OutputNodeView — Expand button', () => {
@@ -202,7 +202,7 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByTestId('outpaint-editor-modal'),
+        screen.queryByTestId('unified-image-editor'),
       ).not.toBeInTheDocument();
     });
   });
@@ -223,7 +223,7 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
     await waitFor(() => {
       expect(deriveOutpaint).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByTestId('outpaint-editor-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('outpaint-commit-error');
     expect(banner.textContent).toMatch(/padding/i);
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);

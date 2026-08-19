@@ -126,7 +126,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByTestId('crop-open'));
-    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
       expect(deriveCrop).toHaveBeenCalledTimes(1);
@@ -155,7 +155,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
     expect(node.data.crop_region).toBeNull();
     // Modal closed.
     await waitFor(() => {
-      expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
     });
   });
 
@@ -171,13 +171,13 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByTestId('crop-open'));
-    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
       expect(deriveCrop).toHaveBeenCalledTimes(1);
     });
     // Modal stays open.
-    expect(screen.getByTestId('crop-editor-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     // Error banner shows the backend message.
     const banner = await screen.findByTestId('crop-commit-error');
     expect(banner.textContent).toMatch(/invalid region/i);
@@ -197,7 +197,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByTestId('crop-open'));
-    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
 
     // deriveCrop must NOT be called when there's no source resource.
     expect(deriveCrop).not.toHaveBeenCalled();

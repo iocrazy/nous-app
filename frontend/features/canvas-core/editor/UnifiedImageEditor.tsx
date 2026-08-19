@@ -1,0 +1,455 @@
+// features/canvas-core/editor/UnifiedImageEditor.tsx
+//
+// IC-parity unified image editor (B): ONE modal, seven inline tabs —
+// Preview / Crop / Expand / Mask / Brush / Resize / Split (IC's
+// imageEditModal tab bar). The four existing tool kernels mount directly
+// (they are controlled src/value/onChange components); Brush and Resize are
+// the two new client-side modes (PaintTool + imageBake). Commit channels
+// are per-mode props — an absent channel hides its tab, so callers without
+// a derive path (e.g. media cards until the resources bridge lands) get an
+// honest subset instead of dead buttons.
+
+import {
+  Brush as BrushIcon,
+  Crop as CropIcon,
+  Expand,
+  Eye,
+  Grid3x3,
+  Minimize2,
+  Paintbrush,
+  X,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { mediaSrc } from '../smart/mediaUrl';
+import { CropTool } from './CropTool';
+import { GridSplitTool } from './GridSplitTool';
+import { MaskBrushTool } from './MaskBrushTool';
+import { OutpaintTool } from './OutpaintTool';
+import { PaintTool, type PaintShape, type PaintShapeTool } from './PaintTool';
+import { FULL_REGION, type CropRegion } from './types';
+import { EMPTY_GRID, presetGrid, type GridLines } from './gridMath';
+import {
+  BRUSH_SIZES,
+  FALLBACK_MASK_SIZE,
+  hasMaskContent,
+  type MaskStroke,
+  type MaskTool,
+} from './maskMath';
+import { ZERO_PADDING, hasExtension, type OutpaintPadding } from './outpaintMath';
+
+export type EditorMode =
+  | 'preview'
+  | 'crop'
+  | 'outpaint'
+  | 'mask'
+  | 'brush'
+  | 'resize'
+  | 'split';
+
+export interface UnifiedImageEditorProps {
+  open: boolean;
+  src: string;
+  alt?: string;
+  initialMode?: EditorMode;
+  /** Seed for the crop rectangle (the node's persisted crop_region). */
+  cropInitialRegion?: CropRegion;
+  /** Seed for the outpaint prompt (the node's caption). */
+  outpaintInitialPrompt?: string;
+  onClose(): void;
+  onCropCommit?(region: CropRegion): void;
+  onOutpaintCommit?(padding: OutpaintPadding, prompt: string): void;
+  onMaskCommit?(strokes: MaskStroke[], size: { width: number; height: number }): void;
+  onSplitCommit?(lines: GridLines): void;
+  onBrushCommit?(shapes: PaintShape[]): void;
+  onResizeCommit?(scale: number): void;
+  committing?: boolean;
+}
+
+const MODE_META: Array<{
+  mode: EditorMode;
+  label: string;
+  icon: React.ReactNode;
+  apply?: string;
+}> = [
+  { mode: 'preview', label: 'Preview', icon: <Eye size={13} /> },
+  { mode: 'crop', label: 'Crop', icon: <CropIcon size={13} />, apply: 'Apply Crop' },
+  { mode: 'outpaint', label: 'Expand', icon: <Expand size={13} />, apply: 'Apply Expand' },
+  { mode: 'mask', label: 'Mask', icon: <BrushIcon size={13} />, apply: 'Cut Out' },
+  { mode: 'brush', label: 'Brush', icon: <Paintbrush size={13} />, apply: 'Apply Brush' },
+  { mode: 'resize', label: 'Resize', icon: <Minimize2 size={13} />, apply: 'Apply Resize' },
+  { mode: 'split', label: 'Split', icon: <Grid3x3 size={13} />, apply: 'Split' },
+];
+
+const PAINT_TOOLS: Array<{ tool: PaintShapeTool; label: string }> = [
+  { tool: 'free', label: 'Free' },
+  { tool: 'rect', label: 'Rect' },
+  { tool: 'ellipse', label: 'Ellipse' },
+  { tool: 'label', label: 'Number' },
+  { tool: 'text', label: 'Text' },
+];
+
+export function UnifiedImageEditor({
+  open,
+  src,
+  alt = '',
+  initialMode = 'preview',
+  cropInitialRegion,
+  outpaintInitialPrompt = '',
+  onClose,
+  onCropCommit,
+  onOutpaintCommit,
+  onMaskCommit,
+  onSplitCommit,
+  onBrushCommit,
+  onResizeCommit,
+  committing = false,
+}: UnifiedImageEditorProps) {
+  const [mode, setMode] = useState<EditorMode>(initialMode);
+  const [region, setRegion] = useState<CropRegion>(FULL_REGION);
+  const [padding, setPadding] = useState<OutpaintPadding>(ZERO_PADDING);
+  const [outpaintPrompt, setOutpaintPrompt] = useState('');
+  const [strokes, setStrokes] = useState<MaskStroke[]>([]);
+  const [maskTool] = useState<MaskTool>('brush');
+  const [maskSize, setMaskSize] = useState<number>(BRUSH_SIZES[1].value);
+  const [shapes, setShapes] = useState<PaintShape[]>([]);
+  const [paintTool, setPaintTool] = useState<PaintShapeTool>('free');
+  const [paintColor, setPaintColor] = useState('#ff2d55');
+  const [paintSize, setPaintSize] = useState(14);
+  const [lines, setLines] = useState<GridLines>(EMPTY_GRID);
+  const [scale, setScale] = useState(0.5);
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+
+  // Fresh session on every open (same contract as the standalone modals).
+  useEffect(() => {
+    if (open) {
+      setMode(initialMode);
+      setRegion(cropInitialRegion ?? FULL_REGION);
+      setPadding(ZERO_PADDING);
+      setOutpaintPrompt(outpaintInitialPrompt);
+      setStrokes([]);
+      setShapes([]);
+      setLines(EMPTY_GRID);
+      setScale(0.5);
+    }
+  }, [open, initialMode, cropInitialRegion, outpaintInitialPrompt]);
+
+  if (!open) return null;
+
+  const enabled = (m: EditorMode): boolean => {
+    switch (m) {
+      case 'preview':
+        return true;
+      case 'crop':
+        return Boolean(onCropCommit);
+      case 'outpaint':
+        return Boolean(onOutpaintCommit);
+      case 'mask':
+        return Boolean(onMaskCommit);
+      case 'brush':
+        return Boolean(onBrushCommit);
+      case 'resize':
+        return Boolean(onResizeCommit);
+      case 'split':
+        return Boolean(onSplitCommit);
+    }
+  };
+
+  const applyDisabled = (): boolean => {
+    if (committing) return true;
+    if (mode === 'mask') return !hasMaskContent(strokes);
+    if (mode === 'outpaint') return !hasExtension(padding);
+    if (mode === 'brush') return shapes.length === 0;
+    if (mode === 'split') return lines.xs.length === 0 && lines.ys.length === 0;
+    return false;
+  };
+
+  const apply = () => {
+    if (mode === 'crop') onCropCommit?.(region);
+    else if (mode === 'outpaint') onOutpaintCommit?.(padding, outpaintPrompt);
+    else if (mode === 'mask')
+      onMaskCommit?.(strokes, naturalSize ?? FALLBACK_MASK_SIZE);
+    else if (mode === 'brush') onBrushCommit?.(shapes);
+    else if (mode === 'resize') onResizeCommit?.(scale);
+    else if (mode === 'split') onSplitCommit?.(lines);
+  };
+
+  const meta = MODE_META.find((m) => m.mode === mode)!;
+
+  return (
+    <div
+      data-testid="unified-image-editor"
+      className="fixed inset-0 z-[100] flex flex-col bg-canvas-bg/95 p-4 backdrop-blur"
+    >
+      {/* Header: mode tab bar (IC image-edit-mode) + close. */}
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex items-center gap-1 rounded-xl border border-canvas-line bg-canvas-card p-1">
+          {MODE_META.filter((m) => enabled(m.mode)).map((m) => (
+            <button
+              key={m.mode}
+              type="button"
+              data-testid={`editor-tab-${m.mode}`}
+              onClick={() => setMode(m.mode)}
+              disabled={committing}
+              className={`nodrag flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                mode === m.mode
+                  ? 'bg-canvas-strong text-canvas-card'
+                  : 'text-canvas-text hover:bg-canvas-bg'
+              }`}
+            >
+              {m.icon}
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          aria-label="Close editor"
+          onClick={onClose}
+          disabled={committing}
+          className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-canvas-line text-canvas-text hover:bg-canvas-card"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Mode toolbars. */}
+      {mode === 'mask' && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-canvas-muted">
+          <span>Brush</span>
+          {BRUSH_SIZES.map((b) => (
+            <button
+              key={b.value}
+              type="button"
+              onClick={() => setMaskSize(b.value)}
+              className={`nodrag rounded-lg px-2 py-0.5 ${
+                maskSize === b.value
+                  ? 'bg-canvas-strong text-canvas-card'
+                  : 'border border-canvas-line text-canvas-text'
+              }`}
+            >
+              {b.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setStrokes([])}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text"
+          >
+            Clear
+          </button>
+          <span className="ml-2">Painted areas will be cut out</span>
+        </div>
+      )}
+      {mode === 'brush' && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-canvas-muted">
+          {PAINT_TOOLS.map((t) => (
+            <button
+              key={t.tool}
+              type="button"
+              data-testid={`paint-tool-${t.tool}`}
+              onClick={() => setPaintTool(t.tool)}
+              className={`nodrag rounded-lg px-2 py-0.5 ${
+                paintTool === t.tool
+                  ? 'bg-canvas-strong text-canvas-card'
+                  : 'border border-canvas-line text-canvas-text'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+          <label className="ml-2 flex items-center gap-1">
+            Color
+            <input
+              type="color"
+              value={paintColor}
+              onChange={(e) => setPaintColor(e.target.value)}
+              aria-label="Brush color"
+              className="h-5 w-8 cursor-pointer border-0 bg-transparent p-0"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            Size
+            <input
+              type="range"
+              min={2}
+              max={80}
+              value={paintSize}
+              onChange={(e) => setPaintSize(Number(e.target.value))}
+              aria-label="Brush size"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setShapes(shapes.slice(0, -1))}
+            disabled={shapes.length === 0}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => setShapes([])}
+            disabled={shapes.length === 0}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      {mode === 'split' && (
+        <div className="mb-2 flex items-center gap-1.5 text-xs text-canvas-muted">
+          <span>Presets</span>
+          {[
+            [1, 2],
+            [2, 1],
+            [2, 2],
+            [2, 3],
+            [3, 2],
+            [3, 3],
+          ].map(([r, c]) => (
+            <button
+              key={`${r}x${c}`}
+              type="button"
+              data-testid={`grid-preset-${r}x${c}`}
+              onClick={() => setLines(presetGrid(r, c))}
+              className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text"
+            >
+              {r}×{c}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setLines(EMPTY_GRID)}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      {mode === 'resize' && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-canvas-muted">
+          <span>Scale</span>
+          <input
+            type="range"
+            min={0.05}
+            max={1}
+            step={0.05}
+            value={scale}
+            onChange={(e) => setScale(Number(e.target.value))}
+            aria-label="Resize scale"
+          />
+          <span className="font-semibold text-canvas-text">{scale.toFixed(2)}×</span>
+          {naturalSize && (
+            <span data-testid="resize-resolution">
+              {Math.round(naturalSize.width * scale)} x{' '}
+              {Math.round(naturalSize.height * scale)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Stage. */}
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-xl border border-canvas-line bg-canvas-card/40 p-3">
+        {mode === 'preview' && (
+          <img
+            src={mediaSrc(src)}
+            alt={alt}
+            className="max-h-full max-w-full object-contain"
+            onLoad={(e) =>
+              setNaturalSize({
+                width: e.currentTarget.naturalWidth,
+                height: e.currentTarget.naturalHeight,
+              })
+            }
+          />
+        )}
+        {mode === 'crop' && (
+          <CropTool src={mediaSrc(src)} alt={alt} value={region} onChange={setRegion} />
+        )}
+        {mode === 'outpaint' && (
+          <div className="flex flex-col items-center gap-2">
+            <OutpaintTool
+              src={mediaSrc(src)}
+              alt={alt}
+              value={padding}
+              onChange={setPadding}
+              onNaturalSize={setNaturalSize}
+            />
+            <input
+              type="text"
+              value={outpaintPrompt}
+              onChange={(e) => setOutpaintPrompt(e.target.value)}
+              placeholder="Describe what fills the extended area (optional)"
+              aria-label="Outpaint prompt"
+              className="nodrag w-96 rounded-lg border border-canvas-line bg-transparent px-2 py-1 text-xs text-canvas-text outline-none"
+            />
+          </div>
+        )}
+        {mode === 'mask' && (
+          <MaskBrushTool
+            src={mediaSrc(src)}
+            alt={alt}
+            value={strokes}
+            onChange={setStrokes}
+            tool={maskTool}
+            brushSize={maskSize}
+            onNaturalSize={setNaturalSize}
+          />
+        )}
+        {mode === 'brush' && (
+          <PaintTool
+            src={src}
+            alt={alt}
+            value={shapes}
+            onChange={setShapes}
+            tool={paintTool}
+            color={paintColor}
+            size={paintSize}
+          />
+        )}
+        {mode === 'resize' && (
+          <img
+            src={mediaSrc(src)}
+            alt={alt}
+            className="max-h-full max-w-full object-contain opacity-90"
+            style={{ transform: `scale(${Math.max(scale, 0.2)})` }}
+            onLoad={(e) =>
+              setNaturalSize({
+                width: e.currentTarget.naturalWidth,
+                height: e.currentTarget.naturalHeight,
+              })
+            }
+          />
+        )}
+        {mode === 'split' && (
+          <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
+        )}
+      </div>
+
+      {/* Footer. */}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="editor-cancel"
+          onClick={onClose}
+          disabled={committing}
+          className="nodrag ml-auto rounded-full border border-canvas-line px-3 py-1 text-xs text-canvas-text"
+        >
+          Cancel
+        </button>
+        {meta.apply && (
+          <button
+            type="button"
+            data-testid="editor-apply"
+            onClick={apply}
+            disabled={applyDisabled()}
+            className="nodrag rounded-full border border-transparent bg-canvas-strong px-3 py-1 text-xs font-bold text-canvas-card disabled:opacity-40"
+          >
+            {committing ? 'Working…' : meta.apply}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
