@@ -601,12 +601,15 @@ describe('the gallery pager', () => {
   it('shows the caption with the real handle, and only the title without one', () => {
     const { update } = openGallery();
     const caption = () => document.querySelector('.pv-caption') as HTMLElement;
-    // No account picked: the caption is the title alone. Asserted as an
-    // equality so an invented `@yourhandle` coming back turns this red.
-    expect(caption().textContent).toBe('Your title appears here');
+    /* No account picked: the caption is the platform's gallery badge and the
+       title, and nothing else. Asserted as an equality so an invented
+       `@yourhandle` coming back turns this red — the badge is there because
+       this IS an image post going to Douyin, which is a fact about the post
+       rather than about the account. */
+    expect(caption().textContent).toBe('图文Your title appears here');
 
     update({ title: 'Studio tour', handle: 'realaccount' });
-    expect(caption().textContent).toBe('@realaccountStudio tour');
+    expect(caption().textContent).toBe('@realaccount图文Studio tour');
   });
 });
 
@@ -1013,7 +1016,9 @@ describe('the immersive full-screen view', () => {
      */
     it('says nothing on an image post with no track picked', () => {
       openGallery({ title: 'Studio tour', handle: 'realaccount' });
-      expect(caption().textContent).toBe('@realaccountStudio tour');
+      // 「图文」 is the post-type badge, not a sound line — see the by-line
+      // tests below. The absence being asserted here is the sound.
+      expect(caption().textContent).toBe('@realaccount图文Studio tour');
     });
   });
 
@@ -1114,5 +1119,113 @@ describe('the immersive full-screen view', () => {
       expect(window.getComputedStyle(nav()).opacity).toBe('0');
       expect(window.getComputedStyle(caption()).bottom).toBe('56px');
     });
+  });
+});
+
+/**
+ * ══ THE PLATFORM'S GALLERY BADGE ════════════════════════════════════════════
+ *
+ * Douyin puts 「图文」 beside the by-line on an image post. It is a CONTENT-TYPE
+ * marker, so the two conditions below are both load-bearing and are tested
+ * separately: it needs the same platform gate as the rest of the chrome, and
+ * it must not appear on a video post — a badge that shows up on both marks
+ * nothing, which is worse than not drawing it.
+ *
+ * ⚠️ This badge was deliberately LEFT OUT of the first cut of this screen,
+ * because the description available then was second-hand and did not include
+ * the literal text, and guessing a word to print inside a reproduction of
+ * somebody else's app is the same defect as an invented count. A screenshot
+ * has since confirmed it. The tests below pin the exact characters for the
+ * same reason the tab row's are pinned: the whole value of this panel is that
+ * what it shows is true.
+ *
+ * Every assertion is an equality on the by-line's whole text. "The video view
+ * has no badge" is satisfied by a video view that renders no by-line at all,
+ * so the video case asserts what the row DOES contain, not what it lacks.
+ */
+describe('the image-post badge', () => {
+  const byline = (): HTMLElement =>
+    document.querySelector('.pv-im .pv-byline') as HTMLElement;
+
+  const openVideo = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'video', items: [CLIP], ...props });
+    fireEvent.click(tab('Video preview'));
+    return utils;
+  };
+  const openGallery = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'images', items: [IMAGE_A], ...props });
+    fireEvent.click(tab('Gallery preview'));
+    return utils;
+  };
+
+  it('marks an image post with the platform’s own word', () => {
+    openGallery({ handle: 'realaccount' });
+    expect(byline().textContent).toBe('@realaccount图文');
+  });
+
+  /**
+   * ⚠️ THE HALF THAT MAKES IT A MARKER.
+   *
+   * The platform does not put this badge on a video post. Asserted as the
+   * exact content of the by-line rather than as "图文 is absent", so a video
+   * view that stopped rendering its by-line altogether fails instead of
+   * passing.
+   */
+  it('leaves a video post unmarked', () => {
+    openVideo({ handle: 'realaccount' });
+    expect(byline().textContent).toBe('@realaccount');
+  });
+
+  /**
+   * Which kind of post this is, is known whether or not an account has been
+   * picked — so the badge does not hang off the handle. The row exists for the
+   * badge alone.
+   */
+  it('marks the post before an account has been picked', () => {
+    openGallery({ handle: null });
+    expect(byline().textContent).toBe('图文');
+  });
+
+  /** A video post with no account has no by-line to draw at all. */
+  it('draws no by-line row at all for a video post with no account', () => {
+    openVideo({ handle: null });
+    expect(document.querySelectorAll('.pv-im .pv-byline').length).toBe(0);
+    // Paired with a positive: the caption itself is there, so the emptiness
+    // above is about the row and not about a panel that failed to render.
+    expect((document.querySelector('.pv-im .pv-caption') as HTMLElement).textContent)
+      .toBe('Your title appears here原声');
+  });
+
+  /**
+   * Same gate as every other piece of this chrome. Drawing Douyin's badge on a
+   * Xiaohongshu post would be inventing a different app's interface.
+   */
+  it('draws no badge when the post is not going to Douyin', () => {
+    openGallery({ handle: 'realaccount', platform: 'xiaohongshu' });
+    expect(byline().textContent).toBe('@realaccount');
+  });
+
+  /**
+   * It is decoration, so it is hidden from assistive technology — a screen
+   * reader announcing a Chinese word wedged against the user's own handle
+   * would be reading our mock-up out as if it were content.
+   */
+  it('is decoration, not content', () => {
+    openGallery({ handle: 'realaccount' });
+    const mark = document.querySelector('.pv-im .pv-im-mark') as HTMLElement;
+    expect(mark.textContent).toBe('图文');
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  /**
+   * The cover view is the two-column feed, and `TABS_BY_KIND` offers it to
+   * video posts only — so an image post can never reach it and the badge has
+   * no business being in that layout. Pinned because "it happens not to render
+   * there" and "it cannot render there" look identical until someone adds the
+   * tab back.
+   */
+  it('is not part of the two-column feed view', () => {
+    renderPanel({ kind: 'images', items: [IMAGE_A] });
+    expect(tabNames()).toEqual(['Gallery preview']);
   });
 });

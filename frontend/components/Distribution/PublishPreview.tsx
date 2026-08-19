@@ -319,12 +319,25 @@ const DOUYIN_FEATURED_FEED_CHROME = {
  * depiction of what Douyin writes there, not a string we authored. It is only
  * ever reached through `soundtrack.kind === 'platformDefault'`; see
  * `PreviewSoundtrack` for why the caller, not this file, decides that.
+ *
+ * `imagePostMarker` is the badge Douyin puts beside the by-line on a gallery
+ * post. Same category, one extra condition: it is a CONTENT-TYPE marker, so it
+ * is drawn only for an image post, never on a video one — the platform does
+ * not put it there, and a badge that appears on both marks nothing.
+ *
+ * ⚠️ It was left out of the first cut of this screen ON PURPOSE, because the
+ * only description available then was second-hand and did not include the
+ * literal text. Guessing a word and printing it inside a reproduction of
+ * somebody else's app is the same defect as an invented count — a screenshot
+ * has since confirmed it reads 「图文」. The rule the omission came from still
+ * stands: nothing goes in this table that has not actually been seen.
  */
 const DOUYIN_IMMERSIVE_CHROME = {
   feedTabs: ['同城', '关注', '推荐'],
   currentTab: '推荐',
   navItems: ['首页', '朋友', '＋', '消息', '我'],
   defaultSoundLabel: '原声',
+  imagePostMarker: '图文',
 } as const;
 
 export const PublishPreview: React.FC<PublishPreviewProps> = ({
@@ -380,6 +393,19 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
   const isImages = kind === 'images';
   /** See DOUYIN_FEATURED_FEED_CHROME: only the platform we have seen. */
   const showsPlatformChrome = platform === 'douyin';
+  /**
+   * The platform's 「图文」 badge — drawn only on a Douyin IMAGE post.
+   *
+   * Both halves are load-bearing. It is platform chrome, so it needs the same
+   * gate as everything else in `DOUYIN_IMMERSIVE_CHROME`; and it is a
+   * content-type marker, so putting it on a video post would mark a thing that
+   * is not the case. A badge that shows up on both kinds distinguishes
+   * nothing, which is worse than not drawing it.
+   *
+   * Not reachable from the cover view: `TABS_BY_KIND` offers that tab to video
+   * posts only, so the two-column feed never renders an image post at all.
+   */
+  const showsImagePostMarker = showsPlatformChrome && isImages;
 
   const availableTabs: readonly PreviewTab[] = TABS_BY_KIND[kind];
 
@@ -664,7 +690,29 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
       )}
 
       <div className="pv-caption">
-        {handle !== null && <div className="pv-handle">@{handle}</div>}
+        {/* The by-line row. Two independent things share it, and each is drawn
+            on its own terms:
+
+            · the handle, only when an account is really selected (it used to
+              read `@yourhandle` — a handle nobody owns, in the exact position
+              the real one goes);
+            · the platform's gallery badge, only on an image post going to
+              Douyin. It does NOT hang off the handle: which kind of post this
+              is, is known whether or not an account has been picked yet.
+
+            The badge sits BESIDE our content, never inside it — its own
+            element, `aria-hidden`, never translated. Same fence as the tab row
+            above: it is a depiction of the platform's screen, not our copy. */}
+        {(handle !== null || showsImagePostMarker) && (
+          <div className="pv-byline">
+            {handle !== null && <span className="pv-handle">@{handle}</span>}
+            {showsImagePostMarker && (
+              <span className="pv-im-mark" aria-hidden="true">
+                {DOUYIN_IMMERSIVE_CHROME.imagePostMarker}
+              </span>
+            )}
+          </div>
+        )}
         <div className={`pv-cap ${titleText === '' ? 'ph' : ''}`}>
           {titleText === ''
             ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
