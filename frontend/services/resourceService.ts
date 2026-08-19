@@ -1203,12 +1203,134 @@ export async function linkExistingResource(
 
 // ─── Upload ──────────────────────────────────────────────
 
+/**
+ * One progress sample from an upload in flight.
+ *
+ * ⚠️ RAW NUMBERS AND A CLOCK READING — NO RATE, NO PERCENTAGE, NO ETA.
+ *
+ * A rate is a display decision: how long a window to average over, when a
+ * stall counts as zero rather than as "no reading", how much to smooth so the
+ * figure does not flicker. Those are answers about what a person can read off
+ * a screen, and the service layer has no business holding an opinion about
+ * them. It reports what the browser told it, plus WHEN it was told, which is
+ * the one piece a caller cannot recover afterwards.
+ *
+ * The predecessor of this type was `(progress: number) => void` carrying a
+ * rounded percentage. A percentage is lossy in exactly the direction that
+ * matters here — it cannot be turned back into bytes, so no caller could ever
+ * have derived a rate from it no matter how it was smoothed.
+ */
+export interface UploadProgressSample {
+  /** Bytes handed to the socket so far, as reported by the browser. */
+  loaded: number;
+  /**
+   * Total bytes of the request body, or null when the browser says it cannot
+   * compute one (`lengthComputable === false`).
+   *
+   * Null rather than a fallback to `file.size`: the request body is the file
+   * plus multipart framing, so `file.size` is a different number, and quietly
+   * substituting it would report a denominator the browser never agreed to.
+   * A caller that wants to estimate from `file.size` can — knowingly.
+   */
+  total: number | null;
+  /**
+   * `Date.now()` when the sample was taken.
+   *
+   * Carried rather than left for the caller to read on arrival, because the
+   * two are not the same instant: samples can be delivered in a burst after a
+   * long task blocks the main thread, and a caller timestamping on receipt
+   * would compute a rate from the gap between two deliveries instead of the
+   * gap between two measurements.
+   */
+  at: number;
+}
+
+/**
+ * Why an upload did not produce a resource.
+ *
+ * Typed rather than prose because the caller has to DO different things:
+ * `aborted` is not a failure to report at all, `unauthorized` and `too_large`
+ * are the user's to fix, `network` is worth retrying, `server` is ours.
+ *
+ * The thing this replaces was `new Error('Failed to upload resource')` for
+ * every non-2xx — a sentence that says nothing, on the one path where the
+ * backend had already said something specific (`413 File too large. Maximum
+ * size is 500 MB.` arrives as a `detail` and used to be thrown away).
+ */
+export type UploadFailureReason =
+  | 'aborted'
+  | 'network'
+  | 'unauthorized'
+  | 'too_large'
+  | 'rejected'
+  | 'server'
+  | 'malformed';
+
+/** A failed upload, with enough on it for the caller to say something true. */
+export class ResourceUploadError extends Error {
+  readonly reason: UploadFailureReason;
+
+  /** HTTP status, or null when the request never got an answer. */
+  readonly status: number | null;
+
+  /** The backend's own `detail`, when it sent one. Never invented. */
+  readonly detail: string | null;
+
+  constructor(
+    reason: UploadFailureReason,
+    status: number | null,
+    detail: string | null,
+    /* The original throw, when there was one. Kept so a network failure's real
+       cause is not erased by the act of classifying it. */
+    options?: { cause?: unknown },
+  ) {
+    super(detail ?? `Upload failed (${reason})`, options);
+    this.name = 'ResourceUploadError';
+    this.reason = reason;
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Classify a completed-but-unsuccessful upload response.
+ *
+ * Exported so the mapping is testable on its own: it is a table, and a table
+ * that is only ever exercised through a mocked XHR is a table nobody checks.
+ */
+export function classifyUploadStatus(status: number): UploadFailureReason {
+  if (status === 401 || status === 403) return 'unauthorized';
+  if (status === 413) return 'too_large';
+  if (status >= 500) return 'server';
+  return 'rejected';
+}
+
+/** Pull FastAPI's `{"detail": "..."}` out of a body, or null if it is not there. */
+function uploadDetail(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.detail;
+    return typeof detail === 'string' && detail !== '' ? detail : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Upload one file into a scope's library.
+ *
+ * `onProgress` selects the XHR path — `fetch` cannot report upload progress at
+ * all, which is why the two implementations exist. `signal` works on BOTH
+ * paths: a cancel button that only stops the UI while the bytes keep going is
+ * not a cancel button, it is a lie about one.
+ */
 export async function uploadResource(
   file: File,
   scopeId: string,
   folderId?: string | null,
-  onProgress?: (progress: number) => void,
+  onProgress?: (sample: UploadProgressSample) => void,
   libraryId?: string | null,
+  signal?: AbortSignal,
 ): Promise<Resource> {
   const apiUrl = getApiUrl();
   const formData = new FormData();
@@ -1231,32 +1353,76 @@ export async function uploadResource(
   if (onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      /* Checked BEFORE opening the request, not only wired to the event: an
+         already-aborted signal would otherwise send the whole file and cancel
+         it a moment later, which is the bytes-on-the-wire version of the bug
+         the signal exists to prevent. */
+      if (signal?.aborted === true) {
+        reject(new ResourceUploadError('aborted', null, null));
+        return;
+      }
+      const onAbort = () => xhr.abort();
+      signal?.addEventListener('abort', onAbort);
+      const done = () => signal?.removeEventListener('abort', onAbort);
+
       xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
-        }
+        onProgress({
+          loaded: e.loaded,
+          total: e.lengthComputable ? e.total : null,
+          at: Date.now(),
+        });
       });
       xhr.addEventListener('load', () => {
+        done();
         if (xhr.status >= 200 && xhr.status < 300) {
-          const json = JSON.parse(xhr.responseText);
-          resolve(json.data);
-        } else {
-          reject(new Error('Failed to upload resource'));
+          try {
+            resolve(JSON.parse(xhr.responseText).data);
+          } catch {
+            /* A 2xx we cannot read is its own failure and says so, rather than
+               surfacing as a SyntaxError from inside a promise executor. */
+            reject(new ResourceUploadError('malformed', xhr.status, null));
+          }
+          return;
         }
+        reject(new ResourceUploadError(
+          classifyUploadStatus(xhr.status),
+          xhr.status,
+          uploadDetail(xhr.responseText),
+        ));
       });
-      xhr.addEventListener('error', () => reject(new Error('Upload failed')));
+      xhr.addEventListener('error', () => {
+        done();
+        reject(new ResourceUploadError('network', null, null));
+      });
+      xhr.addEventListener('abort', () => {
+        done();
+        reject(new ResourceUploadError('aborted', null, null));
+      });
       xhr.open('POST', `${apiUrl}/api/v1/resources/upload?${params}`);
       Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
       xhr.send(formData);
     });
   }
 
-  const response = await fetch(`${apiUrl}/api/v1/resources/upload?${params}`, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
-  if (!response.ok) throw new Error('Failed to upload resource');
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/api/v1/resources/upload?${params}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted === true) throw new ResourceUploadError('aborted', null, null, { cause: err });
+    throw new ResourceUploadError('network', null, null, { cause: err });
+  }
+  if (!response.ok) {
+    throw new ResourceUploadError(
+      classifyUploadStatus(response.status),
+      response.status,
+      uploadDetail(await response.text().catch(() => '')),
+    );
+  }
   const json = await response.json();
   return json.data;
 }

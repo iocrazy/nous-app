@@ -164,6 +164,29 @@
 .dist-v4 .seg button.on { background: var(--accent-soft); color: var(--t-indigo); font-weight: 550; }
 .dist-v4 .seg button:disabled { color: var(--content-4); cursor: not-allowed; opacity: .6; }
 
+/* ═══ inline upload: progress + typed failures ═══ */
+/* Every figure in here comes off the browser's own progress events. The rate
+   is the one derived number and is prefixed to say it is approximate; there is
+   no remaining-time figure at all (see `foldUploadRate` in PublishPage.tsx). */
+.dist-v4 .up-panel { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--island-2); }
+.dist-v4 .up-head { display: flex; align-items: center; gap: 8px; }
+.dist-v4 .up-head .up-title { font-size: 12.5px; font-weight: 550; color: var(--content-2); }
+.dist-v4 .up-head .up-pct { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--t-indigo); font-weight: 600; }
+.dist-v4 .up-head .up-cancel { margin-left: auto; }
+.dist-v4 .up-bar { margin-top: 8px; height: 5px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.dist-v4 .up-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--t-indigo); transition: width .18s linear; }
+.dist-v4 .up-rows { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--content-3); }
+.dist-v4 .up-warn { margin: 7px 0 0; font-size: 11px; line-height: 1.45; color: var(--content-4); }
+
+.dist-v4 .up-fails { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dist-v4 .up-fails li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; padding: 7px 9px; border: 1px solid var(--danger); border-radius: 9px; font-size: 11.5px; line-height: 1.45; color: var(--content-2); }
+.dist-v4 .up-fails li svg { flex: none; color: var(--danger); align-self: center; }
+.dist-v4 .up-fails li b { font-weight: 600; word-break: break-all; }
+.dist-v4 .up-fails li span { color: var(--content-3); }
+/* The backend's own words, set apart from ours so the two are not read as one
+   sentence written by the same author. */
+.dist-v4 .up-fails li em { flex-basis: 100%; font-style: normal; font-size: 11px; color: var(--content-4); }
+
 /* ═══ content thumbs ═══ */
 .dist-v4 .thumbs { display: flex; gap: 10px; margin-top: 13px; flex-wrap: wrap; }
 .dist-v4 .thumb { width: 92px; height: 124px; border-radius: 11px; position: relative; border: 1px solid var(--thumb-line); overflow: hidden; cursor: pointer; padding: 0; background-size: cover; background-position: center; }

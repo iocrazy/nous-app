@@ -15,6 +15,7 @@ import {
 } from '../../services/distributionService';
 import {
   uploadResource, getGalleryItems, getResourceCoverUrl, getResourceFileUrl, GALLERY_MIME,
+  type ResourceUploadError, type UploadFailureReason,
 } from '../../services/resourceService';
 import { getSupabaseClient } from '../../supabaseClient';
 import {
@@ -229,6 +230,143 @@ const formatBytes = (bytes: number | null | undefined): string => {
   }
   return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 };
+
+/**
+ * ══ HOW FAST IS THIS UPLOAD GOING ═══════════════════════════════════════════
+ *
+ * A rate is a DISPLAY decision, which is why it is computed here and not in
+ * `resourceService`. The service reports what the browser told it plus when
+ * (`UploadProgressSample`); everything below — how long a window to average
+ * over, how much to smooth, when a reading is not a reading — is about what a
+ * person can read off a screen without being misled.
+ *
+ * ⚠️ WHY SMOOTHED AT ALL, AND WHY NOT AN ETA.
+ *
+ * The browser delivers upload progress in bursts as socket buffers drain, so
+ * the instantaneous rate between two adjacent samples swings by an order of
+ * magnitude for reasons that have nothing to do with the connection. Printed
+ * raw it is a number that changes every frame and means nothing — worse than
+ * no number, because it looks like a measurement.
+ *
+ * A remaining-time figure is the same problem multiplied: it divides a
+ * remainder by that same jittery rate, so it jumps around AND carries an
+ * authority ("6 seconds") that the underlying reading cannot support. So there
+ * is no ETA here. A stable rate lets the reader judge the wait themselves; a
+ * flickering countdown just asserts a precision nobody has.
+ */
+
+/**
+ * How far apart two samples must be before the pair counts as a reading.
+ *
+ * Under this, the denominator is small enough that ordinary burstiness
+ * dominates the answer. Samples closer together than this are not discarded —
+ * they are simply not folded in yet, and the next one far enough out measures
+ * across the whole gap.
+ */
+export const UPLOAD_RATE_MIN_GAP_MS = 400;
+
+/** Weight given to the newest reading. Lower = steadier, slower to react. */
+export const UPLOAD_RATE_SMOOTHING = 0.3;
+
+export interface UploadRateState {
+  /**
+   * Smoothed bytes per second, or null until a first real reading exists.
+   *
+   * Null is a state the UI must render as "not known yet", NOT as zero. Zero
+   * is a measurement meaning "stalled"; before the first reading there is no
+   * measurement at all, and the two look identical on screen if collapsed.
+   */
+  bytesPerSecond: number | null;
+  /** The sample the next reading will be measured against. */
+  last: { loaded: number; at: number } | null;
+}
+
+export const emptyUploadRate = (): UploadRateState => ({ bytesPerSecond: null, last: null });
+
+/**
+ * Fold one aggregate sample into the running estimate.
+ *
+ * Pure and exported so it can be tested as arithmetic rather than only through
+ * a mocked XHR — the smoothing is the part most likely to be quietly wrong,
+ * and it is invisible from the outside.
+ */
+export function foldUploadRate(
+  state: UploadRateState,
+  sample: { loaded: number; at: number },
+): UploadRateState {
+  if (state.last === null) {
+    // First sample: an anchor, not yet a reading. One point has no rate.
+    return { bytesPerSecond: state.bytesPerSecond, last: sample };
+  }
+  const gapMs = sample.at - state.last.at;
+  if (gapMs < UPLOAD_RATE_MIN_GAP_MS) return state;
+
+  const deltaBytes = sample.loaded - state.last.loaded;
+  if (deltaBytes < 0) {
+    /* The aggregate went backwards — a file dropped out of the batch, say.
+       Re-anchor rather than fold a negative rate in, which would print a
+       speed the connection never ran at. */
+    return { bytesPerSecond: state.bytesPerSecond, last: sample };
+  }
+
+  const instant = (deltaBytes * 1000) / gapMs;
+  return {
+    bytesPerSecond: state.bytesPerSecond === null
+      ? instant
+      : state.bytesPerSecond + (instant - state.bytesPerSecond) * UPLOAD_RATE_SMOOTHING,
+    last: sample,
+  };
+}
+
+/**
+ * One file that did not upload, in terms the UI can put a sentence to.
+ *
+ * `'unknown'` is deliberately its own case rather than being folded into
+ * `'network'`: a throw we did not classify is not evidence of a dropped
+ * connection, and saying so would be inventing a cause — the same defect as
+ * inventing a number, in prose.
+ */
+export interface UploadFailureNote {
+  name: string;
+  reason: UploadFailureReason | 'unknown';
+  /** The backend's own words, when it sent any. Never ours. */
+  detail: string | null;
+}
+
+/**
+ * Classify a rejected upload without guessing at anything it did not say.
+ *
+ * ⚠️ Recognises the service's error by its `name` and the shape of `reason`,
+ * NOT with `instanceof`. Crossing a module boundary to compare constructor
+ * identity is exactly the check that quietly stops holding when the other side
+ * is a test double or a second copy of the module in a bundle — and it fails
+ * by throwing from inside a `catch`, so the failure surfaces as the upload
+ * handler blowing up rather than as a misclassified error. `name` is a stable,
+ * declared discriminant; the reason is re-validated as a string because a
+ * label alone is not a payload.
+ *
+ * Anything else is `'unknown'`, which is its own case for a reason: a throw we
+ * did not classify is not evidence of a dropped connection, and calling it one
+ * would be inventing a cause.
+ */
+export function describeUploadFailure(
+  name: string,
+  err: unknown,
+): UploadFailureNote {
+  const candidate = err as Partial<ResourceUploadError> | null;
+  if (
+    err instanceof Error
+    && candidate?.name === 'ResourceUploadError'
+    && typeof candidate.reason === 'string'
+  ) {
+    return {
+      name,
+      reason: candidate.reason,
+      detail: typeof candidate.detail === 'string' ? candidate.detail : null,
+    };
+  }
+  return { name, reason: 'unknown', detail: null };
+}
 
 /**
  * `"1080x2142"` → `"1080×2142"` (real multiplication sign).
@@ -739,6 +877,43 @@ export const PublishPage: React.FC = () => {
   const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  /**
+   * The batch in flight, or null when nothing is uploading.
+   *
+   * ⚠️ `uploadResource` has reported progress since it was written; this page
+   * simply never passed the callback. That is the fourth instance of the same
+   * shape in this module alone — a capability that exists, a caller that does
+   * not use it, and no error anywhere to say so. The reason the user saw a
+   * spinner with no numbers behind it was not a missing feature.
+   */
+  const [uploadBatch, setUploadBatch] = useState<{
+    fileCount: number;
+    /** Sum of the batch's file sizes: the denominator, known up front. */
+    totalBytes: number;
+    /** Sum of bytes reported so far, capped per file at that file's size. */
+    loadedBytes: number;
+    rate: UploadRateState;
+  } | null>(null);
+  /**
+   * Bytes reported per file, indexed by pick order.
+   *
+   * A ref rather than state because every one of the batch's uploads writes to
+   * it concurrently: reading a sum out of React state inside a progress
+   * handler would read a snapshot that its siblings have already moved past,
+   * and the aggregate would sag by whatever landed in between.
+   */
+  const uploadLoadedRef = useRef<number[]>([]);
+  /** Live for the duration of a batch; `abort()` really stops the requests. */
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  /**
+   * Files the last batch could not upload, with a typed reason each.
+   *
+   * Kept on screen rather than announced once in a toast: the thing this
+   * replaces said "{{n}} image(s) failed to upload", which names no file and
+   * no cause, so a user whose 500 MB shot was rejected for being 500 MB got
+   * the same sentence as one whose connection dropped.
+   */
+  const [uploadFailures, setUploadFailures] = useState<UploadFailureNote[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Gallery cards expand into their child images on pick. Cache the ordered
   // child ids per gallery so the toggle-off path can remove the exact group
@@ -1419,56 +1594,125 @@ export const PublishPage: React.FC = () => {
     fileInputRef.current?.click();
   };
 
+  /**
+   * Fold one file's progress reading into the batch total.
+   *
+   * The per-file figure is capped at that file's own size because the browser
+   * counts the multipart framing too, so `loaded` runs a few hundred bytes
+   * past `file.size` at the end — uncapped, a finished batch reports more
+   * bytes sent than the batch contains.
+   */
+  const noteUploadProgress = (index: number, loaded: number, cap: number, at: number) => {
+    uploadLoadedRef.current[index] = Math.min(loaded, cap);
+    const loadedBytes = uploadLoadedRef.current.reduce((sum, n) => sum + n, 0);
+    setUploadBatch((prev) => (prev === null ? prev : {
+      ...prev,
+      loadedBytes,
+      rate: foldUploadRate(prev.rate, { loaded: loadedBytes, at }),
+    }));
+  };
+
   // Upload one file into the current scope's My Uploads root (source_type
-  // 'upload' is the endpoint default). Returns the new resource row, or null
-  // so a single failure never aborts the rest of the batch.
-  const uploadOne = async (file: File): Promise<{ id: string; name: string } | null> => {
+  // 'upload' is the endpoint default). Returns the new resource row, or a
+  // typed note about why it did not, so one failure never aborts the rest of
+  // the batch AND never disappears silently either.
+  const uploadOne = async (
+    file: File,
+    index: number,
+    signal: AbortSignal,
+  ): Promise<{ id: string; name: string } | UploadFailureNote> => {
     try {
-      const r = await uploadResource(file, scopeId);
+      const r = await uploadResource(
+        file,
+        scopeId,
+        undefined,
+        (sample) => noteUploadProgress(index, sample.loaded, file.size, sample.at),
+        undefined,
+        signal,
+      );
       return { id: r.id, name: r.filename };
     } catch (err) {
       console.error('distribution: inline image upload failed', err);
-      return null;
+      return describeUploadFailure(file.name, err);
     }
+  };
+
+  /** Cancel the batch in flight. Aborts the requests themselves — a button
+   *  that only hid the panel would leave the bytes going. */
+  const onCancelUpload = () => {
+    uploadAbortRef.current?.abort();
   };
 
   // Upload the picked images (concurrency ≤ UPLOAD_CONCURRENCY), then insert the
   // successes into the Library rows and auto-select them IN PICK ORDER — the
   // result slot is keyed by the original index, so completion timing can't
-  // reorder the gallery. Aggregates failures into a single toast.
+  // reorder the gallery. Failures are kept with their reasons.
   const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     // Reset so re-picking the same file still fires a change event.
     e.target.value = '';
     if (files.length === 0) return;
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    uploadLoadedRef.current = new Array(files.length).fill(0);
+    setUploadFailures([]);
+    setUploadBatch({
+      fileCount: files.length,
+      totalBytes: files.reduce((sum, f) => sum + f.size, 0),
+      loadedBytes: 0,
+      rate: emptyUploadRate(),
+    });
     setUploading(true);
     try {
-      const results: Array<{ id: string; name: string } | null> = new Array(files.length).fill(null);
+      const results: Array<{ id: string; name: string } | UploadFailureNote | null> =
+        new Array(files.length).fill(null);
       let cursor = 0;
       const worker = async () => {
         while (cursor < files.length) {
           const idx = cursor;
           cursor += 1;
-          results[idx] = await uploadOne(files[idx]);
+          results[idx] = await uploadOne(files[idx], idx, controller.signal);
         }
       };
       await Promise.all(
         Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker),
       );
-      let failures = 0;
+      const failures: UploadFailureNote[] = [];
+      let cancelled = 0;
       results.forEach((res) => {
-        if (!res) { failures += 1; return; }
+        if (res === null) { cancelled += 1; return; }
+        if ('reason' in res) {
+          // An abort is the user's own doing, not a failure to report back.
+          if (res.reason === 'aborted') cancelled += 1;
+          else failures.push(res);
+          return;
+        }
         ensureVideoRow(res.id, res.name);
         setSelectedVideos((s) => (s.includes(res.id) ? s : [...s, res.id]));
       });
-      if (failures > 0) {
+      setUploadFailures(failures);
+      if (cancelled > 0) {
         addToast(
-          t('distribution.publish.uploadFailed', '{{n}} image(s) failed to upload', { n: failures }),
+          t(
+            'distribution.publish.uploadCancelled',
+            '{{n}} file(s) were not uploaded — you cancelled.',
+            { n: cancelled },
+          ),
+          'info',
+        );
+      }
+      if (failures.length > 0) {
+        addToast(
+          t('distribution.publish.uploadFailed', '{{n}} image(s) failed to upload', {
+            n: failures.length,
+          }),
           'error',
         );
       }
     } finally {
       setUploading(false);
+      setUploadBatch(null);
+      uploadAbortRef.current = null;
     }
   };
 
@@ -1783,6 +2027,50 @@ export const PublishPage: React.FC = () => {
       ? { kind: 'platformDefault' }
       : { kind: 'unresolved' };
 
+  /**
+   * Whole-percent progress for the batch, or null when there is nothing to
+   * divide by (a pick of zero-byte files). Null renders as no figure at all —
+   * `0%` would be a reading of a thing that was never measured.
+   */
+  const uploadPercent = uploadBatch === null || uploadBatch.totalBytes <= 0
+    ? null
+    : Math.min(100, Math.round((uploadBatch.loadedBytes / uploadBatch.totalBytes) * 100));
+
+  /** One sentence per typed failure reason. Every branch is reachable from
+   *  `classifyUploadStatus` or from a throw we could not classify. */
+  const uploadReasonText = (reason: UploadFailureReason | 'unknown'): string => {
+    switch (reason) {
+      case 'unauthorized':
+        return t(
+          'distribution.publish.uploadFailUnauthorized',
+          'This workspace did not accept the upload — check you still have access to it.',
+        );
+      case 'too_large':
+        return t('distribution.publish.uploadFailTooLarge', 'The file is over the size limit.');
+      case 'network':
+        return t(
+          'distribution.publish.uploadFailNetwork',
+          'The connection dropped before the file finished sending.',
+        );
+      case 'server':
+        return t('distribution.publish.uploadFailServer', 'The server could not store the file.');
+      case 'rejected':
+        return t('distribution.publish.uploadFailRejected', 'The server refused this file.');
+      case 'malformed':
+        return t(
+          'distribution.publish.uploadFailMalformed',
+          'The upload finished but the reply could not be read, so it is not certain the file was stored.',
+        );
+      case 'aborted':
+      case 'unknown':
+      default:
+        return t(
+          'distribution.publish.uploadFailUnknown',
+          'The upload failed, and the reason was not one this page recognises.',
+        );
+    }
+  };
+
   const visLabel = (v: Visibility): string => {
     if (v === 'public') return t('distribution.publish.vis_public', 'Public');
     if (v === 'private') return t('distribution.publish.vis_private', 'Private');
@@ -2030,6 +2318,85 @@ export const PublishPage: React.FC = () => {
                 aria-label={t('distribution.publish.uploadImagesAria', 'Upload images')}
                 onChange={onFilesSelected}
               />
+            )}
+            {/* ══ THE UPLOAD IN FLIGHT ══════════════════════════════════════
+                A spinner says "something is happening". These say how much of
+                it is done, how fast, and give the reader a way out. Every
+                figure here comes off the browser's own progress events; the
+                only derived one is the rate, and it says it is approximate.
+                There is deliberately NO remaining-time figure — see
+                `foldUploadRate` for why. */}
+            {uploadBatch !== null && (
+              <div className="up-panel" role="status" aria-live="polite">
+                <div className="up-head">
+                  <span className="up-title">
+                    {t('distribution.publish.uploadingCount', 'Uploading {{n}} file(s)', {
+                      n: uploadBatch.fileCount,
+                    })}
+                  </span>
+                  {uploadPercent !== null && (
+                    <span className="up-pct">{`${uploadPercent}%`}</span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm up-cancel"
+                    onClick={onCancelUpload}
+                  >
+                    {t('distribution.publish.uploadCancel', 'Cancel Upload')}
+                  </button>
+                </div>
+                <div
+                  className="up-bar"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  /* Omitted rather than sent as 0 when the batch has no bytes
+                     to divide by: `aria-valuenow="0"` is a reading, and an
+                     indeterminate bar is not at zero, it is unmeasured. */
+                  aria-valuenow={uploadPercent ?? undefined}
+                >
+                  <span style={{ width: `${uploadPercent ?? 0}%` }} />
+                </div>
+                <div className="up-rows">
+                  <span>
+                    {t('distribution.publish.uploadBytes', '{{done}} of {{total}}', {
+                      done: formatBytes(uploadBatch.loadedBytes),
+                      total: formatBytes(uploadBatch.totalBytes),
+                    })}
+                  </span>
+                  <span>
+                    {uploadBatch.rate.bytesPerSecond === null
+                      ? t('distribution.publish.uploadSpeedPending', 'Measuring speed…')
+                      : t('distribution.publish.uploadSpeed', '≈ {{rate}}/s', {
+                        rate: formatBytes(Math.round(uploadBatch.rate.bytesPerSecond)),
+                      })}
+                  </span>
+                </div>
+                <p className="up-warn">
+                  {t(
+                    'distribution.publish.uploadKeepFiles',
+                    'Leave these files where they are until the upload finishes.',
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* Typed failure read-out. One line per file that did not make it,
+                naming the file and what went wrong — and the backend's own
+                words when it sent any, which is where "Maximum size is 500 MB"
+                comes from. The toast alongside is a count; this is the answer
+                to "which one, and why". */}
+            {uploadFailures.length > 0 && (
+              <ul className="up-fails">
+                {uploadFailures.map((f, i) => (
+                  <li key={`${f.name}-${String(i)}`}>
+                    <AlertTriangle size={12} aria-hidden="true" />
+                    <b>{f.name}</b>
+                    <span>{uploadReasonText(f.reason)}</span>
+                    {f.detail !== null && <em>{f.detail}</em>}
+                  </li>
+                ))}
+              </ul>
             )}
             <div className="thumbs">
               {selectedVideoObjs.map((v, idx) => {
