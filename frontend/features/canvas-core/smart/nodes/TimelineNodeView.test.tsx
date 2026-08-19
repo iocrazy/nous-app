@@ -99,3 +99,29 @@ describe('TimelineNodeView', () => {
     expect(startTimelineRun).toHaveBeenCalledWith('tl1');
   });
 });
+
+
+describe('M1 MiniMax workbench additions', () => {
+  it('active segment panel offers Generate clip and dispatches the clip run', async () => {
+    const clipRun = await import('../clipRun');
+    const spy = vi
+      .spyOn(clipRun, 'runSegmentClip')
+      .mockResolvedValue({ ok: true });
+    renderTimeline();
+    fireEvent.click(screen.getByTestId('timeline-seg-s1'));
+    fireEvent.click(screen.getByTestId('generate-clip'));
+    expect(spy).toHaveBeenCalledWith('tl1', 's1');
+    spy.mockRestore();
+  });
+
+  it('a segment with a result renders the clip player', () => {
+    renderTimeline({
+      ...DATA,
+      segments: [
+        { id: 's1', prompt: 'x', seconds: 5, result_url: '/api/v1/generated-media/3/stream' },
+      ],
+    });
+    fireEvent.click(screen.getByTestId('timeline-seg-s1'));
+    expect(screen.getByTestId('clip-player')).toBeInTheDocument();
+  });
+});

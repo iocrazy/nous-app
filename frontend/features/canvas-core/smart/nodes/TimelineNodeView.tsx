@@ -11,7 +11,7 @@
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Plus, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -29,6 +29,10 @@ import {
   type TimelineSegment,
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
+import { runSegmentClip } from '../clipRun';
+import { setSegmentRef } from '../timeline';
+import { resolveSourceUrls } from '../promptInputs';
+import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -53,6 +57,22 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   // seconds + prompt editors, the aspect picker and Run. Clicking a block
   // to inspect its prompt is view-only and stays.
   const readOnly = useCanvasReadOnly();
+  const [clipRunning, setClipRunning] = useState<string | null>(null);
+  const [clipError, setClipError] = useState<string | null>(null);
+  const storeNodes = useCanvasCoreStore((st) => st.nodes);
+  const storeConnections = useCanvasCoreStore((st) => st.connections);
+  const upstreamImages = useMemo(
+    () => resolveSourceUrls(id, storeNodes as never, storeConnections as never),
+    [id, storeNodes, storeConnections],
+  );
+  const generateClip = (segId: string) => {
+    setClipError(null);
+    setClipRunning(segId);
+    void runSegmentClip(id, segId).then((out) => {
+      setClipRunning(null);
+      if (!out.ok) setClipError(out.error ?? 'clip generation failed');
+    });
+  };
   const running = useTimelineRunStore((s) => !!s.running[id]) || run_status === 'running' || run_status === 'queued';
   const [activeId, setActiveId] = useState<string | null>(segments[0]?.id ?? null);
   const active = segments.find((s) => s.id === activeId) ?? null;
@@ -329,6 +349,80 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
               aria-label="Segment prompt"
               readOnly={readOnly}
             />
+            {/* Per-clip reference frame (IC Refs, M1 simple form): pick one
+                of the wired upstream images; the chosen frame drives i2v. */}
+            {upstreamImages.length > 0 && (
+              <div
+                className="mt-1.5 flex items-center gap-1.5"
+                data-testid="clip-ref-row"
+              >
+                <span className="text-[9px] font-bold uppercase tracking-wider text-canvas-muted">
+                  Ref
+                </span>
+                {upstreamImages.slice(0, 6).map((url) => {
+                  const selected = (active.ref_url ?? upstreamImages[0]) === url;
+                  return (
+                    <button
+                      key={url}
+                      type="button"
+                      data-testid="clip-ref-thumb"
+                      title={selected ? 'Reference frame' : 'Use as reference'}
+                      disabled={readOnly}
+                      onClick={() =>
+                        patch({
+                          segments: setSegmentRef(
+                            segments,
+                            active.id,
+                            active.ref_url === url ? null : url,
+                          ),
+                        })
+                      }
+                      className={`nodrag h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                        selected
+                          ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                          : 'border-canvas-line/60'
+                      }`}
+                    >
+                      <img
+                        src={mediaSrc(url)}
+                        alt="Reference"
+                        className="h-full w-full object-cover"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {/* Clip result player (IC's player stage, per-clip form). */}
+            {active.result_url && (
+              <video
+                data-testid="clip-player"
+                src={mediaSrc(active.result_url)}
+                controls
+                preload="metadata"
+                className="nodrag nowheel mt-1.5 max-h-40 w-full rounded-lg bg-black/60"
+              />
+            )}
+            {clipError && clipRunning === null && (
+              <div
+                data-testid="clip-error"
+                role="alert"
+                className="mt-1.5 rounded bg-rose-400/10 px-2 py-1 text-[10px] text-rose-500"
+              >
+                {clipError}
+              </div>
+            )}
+            <div className="mt-1.5 flex items-center">
+              <button
+                type="button"
+                data-testid="generate-clip"
+                onClick={() => generateClip(active.id)}
+                disabled={readOnly || clipRunning !== null}
+                className="nodrag ml-auto flex items-center gap-1 rounded-full border border-transparent bg-canvas-strong px-2.5 py-0.5 text-xs font-bold text-canvas-card hover:opacity-90 disabled:opacity-40"
+              >
+                {clipRunning === active.id ? 'Generating…' : 'Generate clip'}
+              </button>
+            </div>
           </div>
         )}
 

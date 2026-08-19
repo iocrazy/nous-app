@@ -11,6 +11,10 @@ import {
   totalSeconds,
   DEFAULT_SEGMENT_SECONDS,
   MAX_TIMELINE_SEGMENTS,
+  playableClips,
+  setSegmentRef,
+  setSegmentResult,
+  reorderSegments,
 } from './timeline';
 
 const SEGS = [
@@ -108,5 +112,40 @@ describe('reorderThumbs (P2-1)', () => {
     // 3 segments, tails exist for 0 and 1 only.
     expect(reorderThumbs(['t0', 't1'], 3, 0, 2)).toEqual(['t1', null, 't0']);
     expect(reorderThumbs(['t0', 't1'], 3, 2, 0)).toEqual([null, 't0', 't1']);
+  });
+});
+
+
+// ---- M1 MiniMax workbench: per-clip results ------------------------------
+
+describe('per-clip results (M1)', () => {
+  const segs = [
+    { id: 'a', prompt: 'p1', seconds: 3 },
+    { id: 'b', prompt: 'p2', seconds: 5 },
+  ];
+
+  it('setSegmentResult stores the clip url on its segment', () => {
+    const out = setSegmentResult(segs, 'b', '/api/v1/generated-media/9/stream');
+    expect(out[1].result_url).toBe('/api/v1/generated-media/9/stream');
+    expect(out[0].result_url).toBeUndefined();
+  });
+
+  it('setSegmentRef stores / clears the i2v reference', () => {
+    const withRef = setSegmentRef(segs, 'a', '/api/v1/generated-media/1/cover');
+    expect(withRef[0].ref_url).toBe('/api/v1/generated-media/1/cover');
+    const cleared = setSegmentRef(withRef, 'a', null);
+    expect(cleared[0].ref_url).toBeNull();
+  });
+
+  it('reorder keeps results travelling with their segment', () => {
+    const withRes = setSegmentResult(segs, 'a', '/r1');
+    const out = reorderSegments(withRes, 0, 1);
+    expect(out[1].id).toBe('a');
+    expect(out[1].result_url).toBe('/r1');
+  });
+
+  it('playableClips lists result urls in order, skipping empties', () => {
+    const withRes = setSegmentResult(segs, 'b', '/r2');
+    expect(playableClips(withRes)).toEqual([{ id: 'b', url: '/r2' }]);
   });
 });
