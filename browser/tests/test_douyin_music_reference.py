@@ -1678,3 +1678,143 @@ def test_a_line_that_is_not_a_running_time_claims_nothing():
     assert dp.parse_music_meta("吴青峰") == (None, None)
     assert dp.parse_music_meta("") == (None, None)
     assert dp.parse_music_meta(None) == (None, None)
+
+
+# --- the identity path: the dialog's own search response ---------------------
+#
+# Everything above is about being *unsure* which row is the user's, and every
+# one of those tests ends in a refusal. This section is the first thing in this
+# file that can end in a **click on a list of character-identical rows** — and
+# it can only do so because the click no longer rests on what the row looked
+# like.
+#
+# [实测 2026-08-19] Opening the dialog and typing makes the page fetch
+#
+#     GET tsearch.amemv.com/openapi/aweme/v1/music/search/?keyword=...
+#     → {"music": [{"id_str": "...", "title": "...", "duration": 30, ...}]}
+#
+# so the identity the fingerprint was standing in for is one listener away. The
+# fixtures below copy that wire shape exactly (`id_str` a STRING — the sibling
+# `id` is Snowflake-scale and lossy in JSON), per CLAUDE.md's 「边界 mock 必须
+# 用真实 JSON 形状」.
+
+
+def _song(music_id: str, title: str, *, duration: int = 325) -> dict:
+    return {"id_str": music_id, "title": title, "author": "x", "duration": duration}
+
+
+async def test_the_search_response_resolves_the_ambiguity_it_used_to_refuse():
+    """**The payoff, and the one test that had to go red before.**
+
+    These are the same three character-identical rows that
+    `test_an_ambiguous_result_publishes_nothing_and_says_why` refuses — the
+    shape production hit twice (「未来」, `4 results are indistinguishable`).
+    Nothing about the ROWS changed; what changed is that the platform's own
+    response says which of them is `6953836671917951012`.
+
+    Run this against the code before the id path and it raises
+    `music_ambiguous`. That is the point: the fingerprint could only ever
+    refuse this case, never resolve it.
+    """
+    page = music_page((("起风了", ""), ("起风了", ""), ("起风了", "")))
+    page.music_catalog = [
+        _song("1111111111111111111", "起风了"),
+        _song(REF["music_id"], "起风了"),
+        _song("3333333333333333333", "起风了"),
+    ]
+
+    result = await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert result["music"] == "applied"
+    assert result["music_match"] == "exact"
+    # Not `reference`. The two are both `exact` and they are NOT the same
+    # claim: one says a scraped fingerprint agreed, the other says the platform
+    # named the row. Collapsing them would hide the day this path stopped
+    # running, which would look exactly like nothing having changed.
+    assert result["music_match_by"] == "id"
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="0"]' not in page.clicks
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="2"]' not in page.clicks
+
+
+async def test_a_payload_that_does_not_line_up_refuses_exactly_as_before():
+    """The safety property, and the reason the pairing is checked at all.
+
+    The id is right there and unambiguous. The ONLY thing wrong is that the
+    payload's second entry is a different track from the row rendered second —
+    so the index would address a row nobody proved is the right one. An
+    implementation that clicks anyway publishes the wrong song and every gate
+    stays green.
+    """
+    page = music_page((("起风了", ""), ("起风了", ""), ("起风了", "")))
+    page.music_catalog = [
+        _song("1111111111111111111", "起风了"),
+        _song(REF["music_id"], "另一首完全不同的歌"),
+        _song("3333333333333333333", "起风了"),
+    ]
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert "ids=misaligned@1" in excinfo.value.message
+    assert not any(
+        selector.startswith(f"[{dp.MUSIC_ROW_ATTRIBUTE}=") for selector in page.clicks
+    )
+
+
+async def test_a_refusal_with_no_payload_says_so_rather_than_staying_silent():
+    """`ids=none` names OUR listener, not the platform.
+
+    Without this clause, "we never captured a response" and "we captured one
+    that carried no matching id" produce the same refusal — and they send a
+    reader to opposite places (our URL fragment vs. the catalogue).
+    """
+    page = music_page((("起风了", ""), ("起风了", "")))
+    assert page.music_catalog is None
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert "ids=none" in excinfo.value.message
+
+
+async def test_an_id_that_is_absent_from_the_payload_still_refuses():
+    """A captured, well-aligned payload that simply does not contain the track.
+
+    This must NOT click: the alignment holding says the rows are addressable,
+    it says nothing about the picked track being among them.
+    """
+    page = music_page((("起风了", ""), ("起风了", "")))
+    page.music_catalog = [
+        _song("1111111111111111111", "起风了"),
+        _song("3333333333333333333", "起风了"),
+    ]
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_music(page, job(music="起风了", ref_payload=REF), Deadline(10))
+
+    assert excinfo.value.detail["reason"] == "music_ambiguous"
+    assert "ids=2/2" in excinfo.value.message
+
+
+async def test_the_typed_name_path_never_consults_the_payload():
+    """A typed name is a different request and keeps its own policy.
+
+    The payload is present and its second entry is the user's word; the typed
+    path must still take the row the TITLE matched, because "some song called
+    this" was the whole request. Reading an id here would silently convert one
+    policy into the other.
+    """
+    page = music_page((("起风了", ""), ("海阔天空", "")))
+    page.music_catalog = [
+        _song("1111111111111111111", "起风了"),
+        _song(REF["music_id"], "海阔天空"),
+    ]
+
+    result = await dp._set_music(page, job(music="海阔天空", ref_payload=None), Deadline(10))
+
+    assert result["music_match"] == "exact"
+    assert "music_match_by" not in result
+    assert f'[{dp.MUSIC_ROW_ATTRIBUTE}="1"]' in page.clicks

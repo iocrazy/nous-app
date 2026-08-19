@@ -8,6 +8,7 @@ while the only thing needing a real Chromium stays the driver itself.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from app.login import LoginFlowSpec, LoginJudgement, LoginPageSnapshot, LoginProfile
@@ -292,15 +293,34 @@ class FakeLocator:
 
 
 class FakeKeyboard:
-    def __init__(self) -> None:
+    def __init__(self, on_press: Any = None) -> None:
         self.typed: list[str] = []
         self.pressed: list[str] = []
+        self._on_press = on_press
 
     async def type(self, text: str) -> None:
         self.typed.append(text)
 
     async def press(self, key: str) -> None:
         self.pressed.append(key)
+        if self._on_press is not None:
+            self._on_press(key)
+
+
+class FakeResponse:
+    """One network response, in the shape the production listener reads.
+
+    Only the three members that side touches — a fake that grew a richer
+    surface would be describing a Playwright API this code does not use.
+    """
+
+    def __init__(self, url: str, body: bytes, status: int = 200) -> None:
+        self.url = url
+        self.status = status
+        self._body = body
+
+    async def body(self) -> bytes:
+        return self._body
 
 
 class FakePage:
@@ -402,7 +422,48 @@ class FakePage:
         # (page, needle), which is how a test says "the preview starts showing
         # the track only after its row was clicked".
         self.music_mentions: Any = {}
-        self.keyboard = FakeKeyboard()
+        # The search response the dialog would produce, as a list of `music[]`
+        # entries in the REAL wire shape (`id_str` a string, `duration` an int
+        # of seconds — see `test_douyin_music_catalog.py` for the capture it
+        # copies). `None` is the default and means **the page emits no search
+        # response at all**, which is the honest description of every fixture
+        # written before this existed: those pages have rows and no payload, and
+        # the production code must fall back to the fingerprint match for them.
+        #
+        # Emitted on Enter, because that is when the live dialog searches —
+        # a fixture that delivered it earlier would let a listener attached too
+        # late still pass.
+        self.music_catalog: Any = None
+        self.response_listeners: list[Any] = []
+        self.keyboard = FakeKeyboard(on_press=self._on_key)
+
+    # ── network listeners ────────────────────────────────────────────
+    #
+    # A real `Page` has these; the fake grew them because the music step now
+    # reads the dialog's own search response. Making the production side
+    # tolerate a page WITHOUT them was the alternative, and it is the wrong
+    # one: it would turn "Playwright renamed this" into a silently disabled id
+    # path that still publishes, which is the exact failure mode the id path
+    # exists to remove.
+
+    def on(self, event: str, handler: Any) -> None:
+        if event == "response":
+            self.response_listeners.append(handler)
+
+    def remove_listener(self, event: str, handler: Any) -> None:
+        if event == "response" and handler in self.response_listeners:
+            self.response_listeners.remove(handler)
+
+    def _on_key(self, key: str) -> None:
+        if key != "Enter" or self.music_catalog is None:
+            return
+        body = json.dumps({"status_code": 0, "music": list(self.music_catalog)}).encode()
+        response = FakeResponse(
+            "https://tsearch.amemv.com/openapi/aweme/v1/music/search/?keyword=x",
+            body,
+        )
+        for handler in list(self.response_listeners):
+            handler(response)
 
     @property
     def url(self) -> str:
