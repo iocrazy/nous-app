@@ -2098,27 +2098,25 @@ export const PublishPage: React.FC = () => {
             )}
           </div>
 
-          {/* Cover.
-              Images mode gets a sentence instead of the picker, not a disabled
-              copy of it (D4). The frame picker's two empty slots read as "a
-              cover can be attached here" — and an image post that carries a
-              separate cover asset is refused outright
-              (`cover_not_supported_for_images`), because the platform's image
-              cover is CHOSEN FROM the uploaded images rather than uploaded.
+          {/* Cover — a video-post section, and only that.
+              An image post has no cover to set: the platform takes it FROM the
+              first uploaded image, and a gallery carrying a separate cover
+              asset is refused outright (`cover_not_supported_for_images`), so
+              there is no second upload to offer.
               [实测 2026-08-11] the image-post page shows 封面设置 / 选择一张图片
-              作为封面 while the video page's 设置封面 is absent — so there is no
-              second upload to offer. */}
-          {isImages ? (
-            <div className="fcard">
-              <h4>
-                {t('distribution.publish.cover', 'Cover')}
-                <span className="aux">{t('distribution.publish.coverFromFirstImage', 'First image')}</span>
-              </h4>
-              <p className="hint">
-                {t('distribution.publish.coverImagesMode', 'Image posts use the first image as their cover — there is no video to sample.')}
-              </p>
-            </div>
-          ) : (
+              作为封面 while the video page's 设置封面 is absent.
+
+              ⚠️ ABSENT, NOT DISABLED — and not a card of explanatory prose
+              either, which is what stood here before. The house rule is to
+              disable and say why, because a control nobody can see is a
+              control nobody can ask about; that rule is about things which
+              SHOULD apply and happen not to yet. This one can never apply, and
+              a whole card whose entire content was "this section does not
+              apply to you" is a section the reader has to read in order to
+              learn it was not for them. The fact it carried is not lost: the
+              Summary on the right still states that the first image is the
+              cover, in one line, where the rest of the post's facts are. */}
+          {!isImages && (
             <div className="fcard">
               <h4>
                 {t('distribution.publish.cover', 'Cover')}
