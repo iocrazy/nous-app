@@ -32,7 +32,8 @@ import { ResourcesModals } from './ResourcesModals';
 import { GalleryUploadDialog } from './GalleryUploadDialog';
 import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
 import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
-import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, promoteGeneration, type GenerationItem } from '../services/generatedMediaService';
+import { fetchGenerations, type GenerationItem } from '../services/generatedMediaService';
+import { GenerationsGrid } from './resources/GenerationsGrid';
 import type { Resource } from '../types';
 import {
   moveResourceItem,
@@ -637,53 +638,11 @@ export const ResourcesViewInner: React.FC = () => {
                 ) : generationItems.length === 0 ? (
                   <div className="p-6 text-ink-500">{t('projectAssets.noGenerations', 'No generations yet')}</div>
                 ) : (
-                  <div className="p-4">
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
-                      {generationItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-lg overflow-hidden border border-ink-800/40 bg-ink-900 hover:border-ink-600 transition-colors"
-                        >
-                          <div className="aspect-square bg-ink-800 flex items-center justify-center overflow-hidden">
-                            <img
-                              src={generatedMediaCoverUrl(item.id)}
-                              alt={item.prompt ?? item.media_kind}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          </div>
-                          <div className="px-2 py-1.5 space-y-0.5">
-                            {item.prompt && (
-                              <p className="text-xs text-ink-300 truncate" title={item.prompt}>
-                                {item.prompt}
-                              </p>
-                            )}
-                            <p className="text-xs text-ink-500">
-                              {[item.model, item.provider].filter(Boolean).join(' · ')}
-                            </p>
-                            <p className="text-xs text-ink-600">
-                              {new Date(item.created_at).toLocaleDateString()}
-                            </p>
-                            <button
-                              type="button"
-                              className="mt-1 w-full rounded px-2 py-0.5 text-xs font-medium bg-ink-700 hover:bg-ink-600 text-ink-200 hover:text-ink-100 transition-colors"
-                              onClick={async () => {
-                                try {
-                                  await promoteGeneration(item.id);
-                                  addToast(t('projectAssets.kept', 'Saved to library'), 'success');
-                                } catch (err) {
-                                  console.error('[Generations] promote failed:', err);
-                                  addToast(t('common.error', 'Something went wrong'), 'error');
-                                }
-                              }}
-                            >
-                              {t('projectAssets.keep', 'Keep')}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <GenerationsGrid
+                    items={generationItems}
+                    onItemsChange={setGenerationItems}
+                    addToast={addToast}
+                  />
                 )
               ) : canvasAssetsLoading && paSelection.kind === 'canvas' ? (
                 <div className="p-6 text-ink-500">{t('common.loading')}</div>

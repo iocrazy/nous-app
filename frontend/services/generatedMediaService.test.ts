@@ -108,7 +108,11 @@ describe('generatedMediaFileUrl', () => {
   });
 });
 
-import { promoteGeneration } from './generatedMediaService';
+import {
+  deleteGeneration,
+  GeneratedMediaError,
+  promoteGeneration,
+} from './generatedMediaService';
 
 describe('promoteGeneration', () => {
   it('POSTs to the promote endpoint and unwraps data', async () => {
@@ -119,6 +123,86 @@ describe('promoteGeneration', () => {
     expect(spy.mock.calls[0][0]).toContain('/api/v1/generated-media/7/promote');
     expect(spy.mock.calls[0][1].method).toBe('POST');
     expect(out.promoted_resource_id).toBe('555');
+    vi.unstubAllGlobals();
+  });
+
+  // Before 2026-08 this threw a bare `Error('HTTP 403')`, and the only caller
+  // rendered it as "Something went wrong" — a message that says nothing.
+  it('rejects with a typed reason so the caller can name the failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    const err = await promoteGeneration('7').catch((e) => e);
+    expect(err).toBeInstanceOf(GeneratedMediaError);
+    expect((err as GeneratedMediaError).reason).toBe('forbidden');
+    expect((err as GeneratedMediaError).status).toBe(403);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('deleteGeneration', () => {
+  function stubDelete(impl: unknown) {
+    const spy = vi.fn().mockImplementation(() => impl as never);
+    vi.stubGlobal('fetch', spy);
+    return spy;
+  }
+
+  it('sends DELETE to the item endpoint and resolves when the row is gone', async () => {
+    const spy = stubDelete(
+      Promise.resolve({ ok: true, status: 200, json: async () => ({ data: { deleted: true } }) }),
+    );
+    await expect(deleteGeneration('7')).resolves.toBeUndefined();
+    expect(spy.mock.calls[0][0]).toContain('/api/v1/generated-media/7');
+    expect(spy.mock.calls[0][1].method).toBe('DELETE');
+    vi.unstubAllGlobals();
+  });
+
+  // The backend answers "already deleted" and "not in your scope" with the same
+  // 200 + {deleted:false} so a delete cannot probe another workspace. Both land
+  // on `not-found`; a caller that ignored the flag would report a false success.
+  it('maps a 200 carrying deleted:false onto not-found', async () => {
+    stubDelete(
+      Promise.resolve({ ok: true, status: 200, json: async () => ({ data: { deleted: false } }) }),
+    );
+    const err = await deleteGeneration('7').catch((e) => e);
+    expect(err).toBeInstanceOf(GeneratedMediaError);
+    expect((err as GeneratedMediaError).reason).toBe('not-found');
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [401, 'unauthenticated'],
+    [403, 'forbidden'],
+    [404, 'not-found'],
+    [500, 'server'],
+  ])('maps HTTP %i onto the %s reason', async (status, reason) => {
+    stubDelete(Promise.resolve({ ok: false, status }));
+    const err = await deleteGeneration('7').catch((e) => e);
+    expect(err).toBeInstanceOf(GeneratedMediaError);
+    expect((err as GeneratedMediaError).reason).toBe(reason);
+    expect((err as GeneratedMediaError).status).toBe(status);
+    vi.unstubAllGlobals();
+  });
+
+  it('maps a transport failure onto the network reason', async () => {
+    stubDelete(Promise.reject(new TypeError('Failed to fetch')));
+    const err = await deleteGeneration('7').catch((e) => e);
+    expect(err).toBeInstanceOf(GeneratedMediaError);
+    expect((err as GeneratedMediaError).reason).toBe('network');
+    vi.unstubAllGlobals();
+  });
+
+  it('treats an unreadable success body as a server failure, not a success', async () => {
+    stubDelete(
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        },
+      }),
+    );
+    const err = await deleteGeneration('7').catch((e) => e);
+    expect(err).toBeInstanceOf(GeneratedMediaError);
+    expect((err as GeneratedMediaError).reason).toBe('server');
     vi.unstubAllGlobals();
   });
 });
