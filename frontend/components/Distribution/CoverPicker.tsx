@@ -240,7 +240,11 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
     // while a candidate strip from the previous video is still on screen; the
     // covers must come from the video these frames belong to.
     const from = meta?.source_resource_id ?? activeSource;
-    if (!from || !Number.isFinite(candidate.timestamp_seconds)) {
+    const byCoordinate = Boolean(from) && Number.isFinite(candidate.timestamp_seconds);
+    // Legacy candidates (see `CoverCandidate.resource_id`) carry an id instead
+    // of a preview, and the backend that produced them only understands ids.
+    const legacyId = candidate.preview_data_url ? undefined : candidate.resource_id;
+    if (!byCoordinate && !legacyId) {
       // Never post a coordinate we cannot stand behind — a bad one would crop
       // the wrong frame or 400, and both look like "the button did nothing".
       console.error('distribution: candidate has no usable coordinate', candidate);
@@ -253,10 +257,14 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
     setDeriveError(null);
     setPickedFrame(candidate.index);
     try {
-      const res = await selectCoverFrame({
-        source_resource_id: from,
-        timestamp_seconds: candidate.timestamp_seconds,
-      });
+      const res = await selectCoverFrame(
+        legacyId
+          ? { frame_resource_id: legacyId }
+          : {
+            source_resource_id: from as string,
+            timestamp_seconds: candidate.timestamp_seconds,
+          },
+      );
       onChange({
         vertical: res.cover_vertical_resource_id,
         horizontal: res.cover_horizontal_resource_id,
@@ -471,8 +479,16 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
                         onClick={() => void onPickFrame(c)}
                       >
                         {/* The preview is inline base64 — no fetch, no token,
-                            and nothing persisted to fetch it from. */}
-                        <img src={c.preview_data_url} alt="" />
+                            and nothing persisted to fetch it from. The
+                            `frameUrl` arm only fires for legacy candidates
+                            from a not-yet-shipped backend (see
+                            `CoverCandidate.resource_id`); without it the strip
+                            would render broken images for the few minutes the
+                            frontend is ahead of the backend. */}
+                        <img
+                          src={c.preview_data_url ?? frameUrl(String(c.resource_id))}
+                          alt=""
+                        />
                         {stamp && <span className="stamp">{stamp}</span>}
                         {on && !deriving && (
                           <span className="pi-check"><Check size={12} strokeWidth={3} /></span>

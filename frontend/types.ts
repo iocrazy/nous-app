@@ -2808,6 +2808,18 @@ export interface CoverCandidate {
   preview_data_url: string;
   preview_width: number;
   preview_height: number;
+  /**
+   * DEPRECATED — the persisted frame row an OLD backend still writes.
+   *
+   * Present only during the deploy-skew window, and that window is not
+   * hypothetical: the frontend ships from a managed runner in ~4 minutes while
+   * the backend builds on the self-hosted box for ~10+, so a new UI talking to
+   * the previous backend is the LIKELY intermediate state, not the unlikely
+   * one. Without this the strip would render broken images and every pick
+   * would 422. `CoverPicker` prefers `preview_data_url` and only falls back
+   * here. Delete once a release has passed.
+   */
+  resource_id?: string;
 }
 
 /**

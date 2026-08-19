@@ -238,6 +238,30 @@ describe('cover candidates are transient, not library resources', () => {
     expect(selectCoverFrame).not.toHaveBeenCalled();
   });
 
+  it('survives a backend that has not shipped yet', async () => {
+    // Deploy skew is not hypothetical here, and it points THIS way: the
+    // frontend builds on a managed runner in ~4 minutes, the backend on the
+    // self-hosted box in ~10+. So "new UI, previous backend" is the likely
+    // intermediate state. That backend still persists candidate frames and
+    // only understands an id — without the fallback the strip would render
+    // broken images and every pick would 422.
+    const legacy = [
+      { index: 0, timestamp_seconds: 1.5, filename: 'f1.jpg', resource_id: 'f-1' },
+    ] as unknown as CoverCandidate[];
+    renderPicker();
+    await sampleAndDeliver({ candidates: legacy });
+
+    const tiles = await screen.findAllByRole('radio');
+    expect(tiles).toHaveLength(1);
+    // Falls back to the resource URL rather than rendering an empty <img>.
+    expect(tiles[0].querySelector('img')?.getAttribute('src')).toBe('/file/f-1');
+    expect(resourceUrl).toHaveBeenCalledWith('f-1', 'jwt');
+
+    fireEvent.click(tiles[0]);
+    await waitFor(() =>
+      expect(selectCoverFrame).toHaveBeenCalledWith({ frame_resource_id: 'f-1' }));
+  });
+
   it('still reports a workflow failure with the server-authored reason', async () => {
     renderPicker();
     await sampleAndDeliver(

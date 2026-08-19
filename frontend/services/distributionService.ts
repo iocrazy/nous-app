@@ -619,6 +619,12 @@ export const selectCoverFrame = (body: {
   source_resource_id: string;
   timestamp_seconds: number;
   publish_task_id?: string;
+} | {
+  /** DEPRECATED shape, for the deploy-skew window only — a backend that has
+   *  not shipped yet still persists candidate frames and only understands an
+   *  id. See `CoverCandidate.resource_id`. */
+  frame_resource_id: string;
+  publish_task_id?: string;
 }): Promise<CoverSelectResult> =>
   request<CoverSelectResult>('/covers/select', {
     method: 'POST',
