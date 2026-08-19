@@ -137,7 +137,9 @@ async def test_resolve_video_unknown_provider(monkeypatch):
 async def test_jimeng_image_adapter_returns_local_path(monkeypatch):
     provider = JimengCliProvider()
 
-    async def fake_generate_image(*, prompt, aspect, model_version):
+    async def fake_generate_image(
+        *, prompt, aspect, model_version, resolution_type=None
+    ):
         assert aspect == "16:9"
         assert model_version == "5.0"
         return GenResult(
@@ -152,3 +154,19 @@ async def test_jimeng_image_adapter_returns_local_path(monkeypatch):
     assert result.image_path == "/tmp/out.png"
     assert result.provider == "jimeng-cli"
     assert result.metadata["mime"] == "image/png"
+
+
+async def test_jimeng_adapter_forwards_resolution(monkeypatch):
+    from app.services.media.parsers.video_providers import jimeng_cli as m
+
+    calls = []
+
+    async def fake_generate_image(self, **kwargs):
+        calls.append(kwargs)
+        return GenResult(local_path="/tmp/x.png", mime="image/png", raw={})
+
+    monkeypatch.setattr(m.JimengCliProvider, "generate_image", fake_generate_image)
+    _patch_repo(monkeypatch, [_row(name="jimeng-cli-image")])
+    provider, model = await resolve_image_provider("jimeng-cli-image")
+    await provider.generate("p", model, aspect_ratio="1:1", resolution="2k")
+    assert calls[0]["resolution_type"] == "2k"

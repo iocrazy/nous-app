@@ -76,6 +76,8 @@ export function withGenerationRunner(
       if (gen.kind === 'image' && gen.quality) params.quality = gen.quality;
       if (gen.kind === 'image' && ctx.source_urls?.length)
         params.source_urls = ctx.source_urls;
+      if (gen.kind === 'image' && gen.resolution)
+        params.resolution = gen.resolution;
       if (gen.kind === 'video' && gen.aspect) params.aspect = gen.aspect;
       if (ctx.entity_ref) {
         // CC5 asset backlink: params land verbatim in generated_media.params,

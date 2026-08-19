@@ -1585,10 +1585,10 @@ body {
    untouched. */
 @keyframes mh-edge-flow {
   0% {
-    stroke-dashoffset: 0;
+    stroke-dashoffset: 13;
   }
   100% {
-    stroke-dashoffset: -13;
+    stroke-dashoffset: 0;
   }
 }
 

@@ -128,6 +128,7 @@ async def generate_canvas_media_step(
             # IC ⑨ quality pill — consumed by the codex adapter, ignored by
             # providers without a quality knob (ark/jimeng take **kwargs).
             quality=str(params.get("quality") or "") or None,
+            resolution=str(params.get("resolution") or "") or None,
         )
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None

@@ -167,6 +167,10 @@ export interface PromptGenSettings {
   /** Image: quality knob (IC ⑨) — 'low'|'medium'|'high'; absent = Auto
    *  (provider default). Consumed by the codex chain; others ignore it. */
   quality?: string;
+  /** Image: resolution ladder '1k'|'2k'|'4k' (IC 系统参数右列). Consumed
+   *  by providers with a resolution knob (jimeng resolution_type); codex
+   *  model sizes are fixed and ignore it. */
+  resolution?: string;
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';
