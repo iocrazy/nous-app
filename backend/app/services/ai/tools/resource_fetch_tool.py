@@ -21,6 +21,224 @@ from loguru import logger
 
 from app.services.ai.resource_ai_status import effective_ai_statuses
 
+# ── mode='frames' budget ─────────────────────────────────────────────
+# Every number here is a byte budget with a named source of truth, not a
+# "reasonable default". The frames ride into the request as base64 in a
+# promoted user message (see agent_runner's image promotion), so an
+# unbounded frame count or an unbounded per-frame size is an unbounded
+# request body.
+#
+# Default count mirrors chat_attachment_resolver.MAX_VIDEO_FRAMES_PER_ATTACHMENT:
+# @-mentioning a video and attaching one must show the model the same
+# number of frames, or the same question gets two different answers
+# depending on how the video arrived. The ceiling mirrors
+# cover_frames.MAX_COVER_FRAMES — the other place that samples a
+# user-chosen number of frames off one video.
+#
+# Both are pinned by tests/test_resource_fetch_frames.py (which imports
+# the two source modules and asserts equality) rather than imported here:
+# cover_frames drags in PIL plus the canvas persistence graph, and this
+# tool sits on the chat hot path. The test is what makes the coupling
+# falsifiable — drift turns it red instead of silently diverging.
+FRAMES_DEFAULT_COUNT = 6
+FRAMES_MAX_COUNT = 12
+
+# Per-frame ceiling for the inlined JPEG. Measured against real ffmpeg at
+# the extractor's defaults (640 px wide, -q:v 4), as RAW JPEG bytes:
+# ordinary footage 16-19 KB, SMPTE bars 18 KB, and a full-frame
+# random-noise source — the pathological worst case an encoder can hand
+# ffmpeg — 85 KB (110 KB once base64'd into the data URL). 200 KB is
+# therefore a backstop real content does not reach, and it turns the
+# worst case into a CONSTRUCTION guarantee rather than an expectation:
+# FRAMES_MAX_COUNT x this = 2.4 MB raw (~3.2 MB base64) for the largest
+# call a model can ask for. Observed end to end: 12 frames of ordinary
+# footage 0.25-0.29 MB, of pure noise 1.29 MB. For comparison, one chat
+# image attachment may inline up to MAX_INLINE_IMAGE_BYTES = 10 MB.
+# Frames over the cap are dropped AND counted into the result's
+# ``warning`` — never silently.
+FRAMES_MAX_BYTES_PER_FRAME = 200 * 1024
+# The data URL carries base64 (4 chars per 3 bytes) plus the
+# "data:image/jpeg;base64," header.
+_FRAMES_MAX_DATA_URL_CHARS = (FRAMES_MAX_BYTES_PER_FRAME * 4 + 2) // 3 + 32
+
+# Two bounds, same shape as cover_frames' pair but far tighter: this runs
+# inside a live chat turn with the user watching a stream, not in a
+# background workflow (cover_frames allows 180 s / 600 s). ffmpeg's own
+# budget is divided across the frames by extract_frames; the outer
+# deadline additionally covers materialize()'s download, which has no
+# timeout of its own.
+FRAMES_EXTRACT_TIMEOUT_SECONDS = 90.0
+FRAMES_TOTAL_DEADLINE_SECONDS = 180.0
+
+
+def _parse_frame_count(args: Optional[dict]) -> tuple[Optional[int], Optional[str]]:
+    """``args={"frames": N}`` → a clamped count, or a typed error string.
+
+    Out-of-range clamps rather than rejects: a model asking for 40 frames
+    is saying "as many as you can", and the budget above is the real
+    answer. A non-numeric value is rejected instead, because silently
+    substituting the default there would answer a question the model did
+    not ask and give it no way to notice.
+    """
+    raw = (args or {}).get("frames")
+    if raw is None:
+        return FRAMES_DEFAULT_COUNT, None
+    bad = f"frames must be a whole number, got {raw!r}"
+    if isinstance(raw, bool):
+        # bool is an int subclass; True would silently mean "1 frame".
+        return None, bad
+    if isinstance(raw, int):
+        n = raw
+    elif isinstance(raw, float):
+        if not raw.is_integer():
+            return None, bad
+        n = int(raw)
+    elif isinstance(raw, str):
+        try:
+            n = int(raw.strip())
+        except ValueError:
+            return None, bad
+    else:
+        return None, bad
+    return max(1, min(FRAMES_MAX_COUNT, n)), None
+
+
+async def _video_frames(
+    *, file_path: str, num_frames: int, name: str
+) -> dict[str, Any]:
+    """Sample ``num_frames`` frames off a video and return them as
+    ``image_url`` blocks in the same shape the image branch returns.
+
+    ffmpeg argv comes from ``seek_frame_cmd`` via ``extract_frames`` — the
+    single argv builder the cover-frame path is also pinned to — so the
+    uniform sampling rule (first/last 5% trimmed) is shared rather than
+    re-derived here.
+
+    Per-frame failures are NOT swallowed: ``extract_frames`` degrades a
+    failed frame to "one fewer attachment", which on its own is
+    indistinguishable from a short video. Whatever is missing is counted
+    and reported back in ``warning`` (partial success) or as a typed
+    ``error`` (nothing usable) — the agent must be able to tell the user
+    it is looking at 4 frames when it asked for 6.
+    """
+    import asyncio
+
+    from app.services.library.media_storage import materialize
+    from app.services.media.render.video_frame_extractor import (
+        DEFAULT_FRAME_WIDTH,
+        extract_frames,
+    )
+
+    try:
+        # One outer bound over both halves — the download inside
+        # materialize() and the ffmpeg run. Timeout surfaces as
+        # CancelledError inside the async with body, so materialize's
+        # finally (temp file) and extract_frames' TemporaryDirectory both
+        # still run; nothing is left behind.
+        async with asyncio.timeout(FRAMES_TOTAL_DEADLINE_SECONDS):
+            async with materialize(file_path) as local_path:
+                if not local_path.exists():
+                    return {
+                        "error": (
+                            f"video file not available for frame extraction: "
+                            f"{name!r} is not on disk"
+                        )
+                    }
+                result = await extract_frames(
+                    str(local_path),
+                    num_frames=num_frames,
+                    frame_width=DEFAULT_FRAME_WIDTH,
+                    timeout_seconds=FRAMES_EXTRACT_TIMEOUT_SECONDS,
+                )
+    except TimeoutError:
+        # asyncio.timeout raises the builtin TimeoutError (3.11+). Must be
+        # caught before the Exception arm below.
+        return {
+            "error": (
+                f"frame extraction timed out after "
+                f"{FRAMES_TOTAL_DEADLINE_SECONDS:.0f}s"
+            )
+        }
+    except ValueError as exc:
+        # materialize's containment guard (a file_path escaping DOWNLOAD_PATH).
+        logger.warning(f"[resource_fetch] frames path rejected for {name!r}: {exc}")
+        return {"error": "video file path is outside the allowed directory"}
+    except Exception as exc:
+        # Storage errors (missing object, S3 timeout). Naming the class
+        # keeps this distinguishable from "the video has no frames" — the
+        # caller's broad except would flatten both into "fetch failed".
+        logger.exception(f"[resource_fetch] frames unavailable for {name!r}: {exc!r}")
+        return {
+            "error": (
+                f"video file not available for frame extraction "
+                f"({exc.__class__.__name__})"
+            )
+        }
+
+    if result.error:
+        return {"error": f"frame extraction failed: {result.error}"}
+
+    sampled = list(result.sampled_at_seconds or [])
+    blocks: list[dict[str, Any]] = []
+    kept_at: list[Optional[float]] = []
+    oversize = 0
+    for idx, att in enumerate(result.attachments):
+        data_url = att.data_url or ""
+        if not data_url:
+            continue
+        if len(data_url) > _FRAMES_MAX_DATA_URL_CHARS:
+            oversize += 1
+            logger.warning(
+                f"[resource_fetch] frame {idx} of {name!r} is "
+                f"{len(data_url)} data-URL chars, over the per-frame budget; "
+                f"dropping"
+            )
+            continue
+        ts = sampled[idx] if idx < len(sampled) else None
+        blocks.append(
+            {
+                "type": "image_url",
+                "url": data_url,
+                "mime": att.mime or "image/jpeg",
+                # Survives _strip_image_urls (only the url is replaced), so
+                # the tool message still tells the model WHEN each frame is
+                # from and in what order — the promoted image parts carry
+                # the pixels in the same order but no labels.
+                "alt": att.alt_text or "",
+            }
+        )
+        kept_at.append(round(ts, 2) if ts is not None else None)
+
+    if not blocks:
+        if oversize:
+            return {
+                "error": (
+                    f"every frame extracted from {name!r} exceeded the "
+                    f"per-frame size budget; none could be inlined"
+                )
+            }
+        return {"error": f"no usable frames could be extracted from {name!r}"}
+
+    missing = max(0, num_frames - len(blocks))
+    out: dict[str, Any] = {
+        "content": blocks,
+        "meta": {
+            "name": name,
+            "mode": "frames",
+            "frames_requested": num_frames,
+            "frames_returned": len(blocks),
+            "duration_seconds": result.duration_seconds,
+            "sampled_at_seconds": kept_at,
+        },
+    }
+    if missing:
+        detail = f" ({oversize} exceeded the per-frame size budget)" if oversize else ""
+        out["warning"] = (
+            f"{missing} of {num_frames} frames could not be extracted{detail}; "
+            f"the frames returned are the ones that succeeded"
+        )
+    return out
+
 
 def _contained_doc_path(fp: str) -> Optional[Path]:
     """Resolve a resource ``file_path`` under DOWNLOAD_PATH, or None if it
@@ -51,7 +269,7 @@ async def _fetch_dispatch(
 
     v1 mode coverage:
       - image:   returns {content: [{type:'image_url', url, mime}]}
-      - video:   summary (default) / transcript / frames (frames=not yet)
+      - video:   summary (default) / transcript / frames
       - audio:   transcript (default)
       - doc:     excerpt (default; first 4000 chars) / full (64k char cap)
       - pdf:     not yet implemented in v1
@@ -76,7 +294,7 @@ async def _fetch_dispatch(
 
     # Original SQL (kept for reference — same JOIN/WHERE/LIMIT shape):
     #   SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
-    #          r.file_path, r.notes AS brief,
+    #          r.file_path, r.media_id, r.notes AS brief,
     #          r.transcript_status, r.summary_status
     #     FROM public.resources r
     #     JOIN public.resource_items ri ON ri.resource_id = r.id
@@ -98,6 +316,11 @@ async def _fetch_dispatch(
             Resources.mime_type.label("mime"),
             Resources.filename.label("name"),
             Resources.file_path,
+            # mode='frames' needs the PR-B ladder (resources.file_path is
+            # NULL by design for source_type='web' rows), and that ladder's
+            # second rung keys off media_id — read it alongside the access
+            # check rather than paying a second round trip for it.
+            Resources.media_id,
             Resources.notes.label("brief"),
             # Read alongside the access check (one round trip) so the
             # video/audio branch can tell "being generated" from "never
@@ -155,6 +378,10 @@ async def _fetch_dispatch(
     # three file_path shapes (sb:// object store / shared-volume relative /
     # public http) with the size cap and S3 timeout guards already proven
     # on the chat-attachment path.
+    # ``mode`` is deliberately not consulted here: an agent that asks an
+    # image for mode='frames' means "let me see it", and the image IS the
+    # frame. Returning the picture is the answer to that question; a typed
+    # "wrong mode" error would only cost the model another round trip.
     if mime.startswith("image/"):
         fp = row.get("file_path") or ""
         if not fp:
@@ -269,9 +496,50 @@ async def _fetch_dispatch(
                 "meta": {"name": row["name"], "mode": "transcript"},
             }
         if m == "frames":
-            return {
-                "error": "mode='frames' not yet implemented in v1; use summary or transcript"
-            }
+            if not mime.startswith("video/"):
+                return {
+                    "error": (
+                        "frames are only available for video resources; this "
+                        "one is audio — use mode='transcript'"
+                    )
+                }
+            count, count_error = _parse_frame_count(args)
+            if count_error or count is None:
+                return {"error": count_error or "invalid frames argument"}
+
+            from app.services.library.resource_file_path import (
+                resolve_resource_file_path,
+            )
+
+            # ⚠️ NOT row["file_path"]. That column is empty BY DESIGN for
+            # source_type='web' rows (platform downloads, over half the
+            # videos in production) — the shared download fields live on
+            # parsed_media (PR-B). Reading the column directly would report
+            # "no video file" for exactly the videos the user just
+            # downloaded and is asking about. Ladder + sources:
+            # services/library/resource_file_path.py's module docstring.
+            # The same function also returns None for photo albums, whose
+            # download_path is a DIRECTORY prefix — handing that to ffmpeg
+            # would trade a clean error for a confusing crash.
+            #
+            # No scope wrapper: the ladder's second rung reads ParsedMedia,
+            # which carries no scope mixin (same reason the summary /
+            # transcript reads above need none), and access to this row was
+            # already validated by the team-membership check.
+            file_path = await resolve_resource_file_path(dict(row))
+            if not file_path:
+                return {
+                    "error": (
+                        "video file not available for frame extraction; the "
+                        "download may still be in progress, or this resource "
+                        "is a photo album rather than a single video file"
+                    )
+                }
+            return await _video_frames(
+                file_path=str(file_path),
+                num_frames=count,
+                name=row["name"],
+            )
         return {"error": f"unknown mode {m!r} for video/audio resource"}
 
     # PDF / doc — read file content from disk via the resource path

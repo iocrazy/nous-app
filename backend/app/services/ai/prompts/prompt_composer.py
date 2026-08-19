@@ -656,6 +656,15 @@ def render_available_resources(refs: list[dict] | None) -> str:
     lines.append("Use the ResourceFetch tool to load any of these on demand:")
     lines.append("  ResourceFetch(resource_id, mode?, args?)")
     lines.append("  - mode for video: summary (default) | transcript | frames")
+    # frames returns still images sampled evenly across the video, so a
+    # vision model can answer questions about what is on screen. Say the
+    # count arg out loud: it lives in `args`, which the tool schema
+    # describes only with a PDF example, so a model that is not told about
+    # it here has no way to ask for more than the default.
+    lines.append(
+        "    frames returns evenly sampled still images from the video; "
+        "args.frames sets how many (default 6, max 12)"
+    )
     lines.append("  - mode for doc: excerpt (default) | full")
     lines.append("  - mode for pdf: excerpt (default) | page (args.page)")
     lines.append("  - mode for image: omit (returns image part)")
