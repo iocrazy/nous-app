@@ -12,6 +12,7 @@ import {
   Scan,
   SlidersHorizontal,
   Sparkles,
+Timer,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -44,6 +45,9 @@ export const RATIO_LABELS: Record<string, string> = {
 /** Resolution ladder (IC 系统参数 right column). Consumed by providers
  *  with a resolution knob (jimeng resolution_type); codex sizes are fixed
  *  by the model and ignore it. */
+/** Video clip lengths (IC 时长 pill). jimeng CLI snaps per model. */
+export const DURATIONS = [5, 10] as const;
+
 export const RESOLUTIONS: Array<{ value: string; label: string; hint: string }> = [
   { value: '1k', label: '1K', hint: '1024×1024' },
   { value: '2k', label: '2K', hint: '2048×2048' },
@@ -58,7 +62,7 @@ const QUALITIES: Array<{ label: string; value: string | undefined }> = [
   { label: 'High', value: 'high' },
 ];
 
-type PopKey = 'model' | 'size' | 'quality' | 'count';
+type PopKey = 'model' | 'size' | 'quality' | 'count' | 'duration';
 
 export function GenFooterControls({
   gen,
@@ -119,6 +123,17 @@ export function GenFooterControls({
           {isImage ? ` · ${(gen.resolution ?? '1k').toUpperCase()}` : ''}
         </span>
       </Pill>
+      {!isImage && (
+        <Pill
+          testid="pill-duration"
+          ariaLabel="Clip duration"
+          onClick={() => toggle('duration')}
+          disabled={disabled}
+        >
+          <Timer size={11} />
+          <span>{gen.duration ?? 5}s</span>
+        </Pill>
+      )}
       {isImage && (
         <Pill
           testid="pill-quality"
@@ -157,6 +172,30 @@ export function GenFooterControls({
                 active={gen.model === m.name}
                 onClick={() => pick({ model: m.name })}
               />
+            ))}
+          </div>
+        </Pop>
+      )}
+      {open === 'duration' && !isImage && (
+        <Pop title="Duration">
+          <div className="flex w-40 flex-col gap-1">
+            {DURATIONS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onMouseEnter={() => onChange({ duration: d })}
+                onClick={() => pick({ duration: d })}
+                className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${
+                  (gen.duration ?? 5) === d
+                    ? 'border-canvas-strong font-bold text-canvas-text'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                <span>{d}s</span>
+                <span className="text-[10px] text-canvas-muted">
+                  {d === 5 ? 'Standard' : 'Extended'}
+                </span>
+              </button>
             ))}
           </div>
         </Pop>

@@ -72,11 +72,13 @@ async def generate_canvas_media_step(
         async with generated_media_local_path(
             source_url, media_kind="image"
         ) as image_path:
+            raw_duration = params.get("duration")
             result = await provider.generate_video(
                 prompt=prompt,
                 aspect=str(params.get("aspect") or ""),
                 model_version=gen_model or None,
                 image_path=image_path,
+                duration=int(raw_duration) if raw_duration else None,
             )
         local_path = getattr(result, "local_path", None)
         if not local_path:

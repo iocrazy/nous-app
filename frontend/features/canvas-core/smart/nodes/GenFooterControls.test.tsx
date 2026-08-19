@@ -88,3 +88,17 @@ describe('GenFooterControls', () => {
     expect(screen.queryByText('Square')).toBeNull();
   });
 });
+
+it('video kind shows a Duration pill and picks 10s', () => {
+  const onChange = vi.fn();
+  render(
+    <GenFooterControls
+      gen={{ kind: 'video', model: '', aspect: '16:9' }}
+      onChange={onChange}
+      models={[]}
+    />,
+  );
+  fireEvent.click(screen.getByTestId('pill-duration'));
+  fireEvent.click(screen.getByText('10s'));
+  expect(onChange).toHaveBeenCalledWith({ duration: 10 });
+});
