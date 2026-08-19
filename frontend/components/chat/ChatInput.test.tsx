@@ -58,6 +58,51 @@ describe('ChatInput (tiptap)', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('refuses an empty send when nothing is attached anywhere', async () => {
+    const onSend = vi.fn();
+    render(<ChatInput onSend={onSend} />);
+    fireEvent.click(screen.getByTitle('Send message'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('sends an attachment-only turn (no text) when the composer holds one', async () => {
+    // Assets used to BE nodes in the doc, so "no text" implied "nothing to
+    // send". They now stage above the input, and this guard would swallow
+    // a perfectly good "here, look at this" turn.
+    const onSend = vi.fn();
+    render(<ChatInput onSend={onSend} hasAttachments />);
+    fireEvent.click(screen.getByTitle('Send message'));
+    expect(onSend).toHaveBeenCalledOnce();
+    const [text, attachments] = onSend.mock.calls[0] as [string, unknown[]];
+    expect(text).toBe('');
+    expect(attachments).toHaveLength(0);
+  });
+
+  it('stops tracking the @query at a comma, like the deleter does', async () => {
+    // The two scanners must agree on where a query ends. This pins the
+    // TRACKER half: if it kept going past "," it would search for
+    // "foo,bar" while removeMentionTrigger (which stops there) deletes
+    // only "@foo" — or, before they were unified, the reverse, where the
+    // deleter ate the user's ",bar".
+    const onMentionRequest = vi.fn();
+    const editorRef = { current: null } as React.MutableRefObject<import('@tiptap/core').Editor | null>;
+    render(<ChatInput onSend={() => {}} onMentionRequest={onMentionRequest} editorRef={editorRef} />);
+    await waitFor(() => { expect(editorRef.current).not.toBeNull(); }, { timeout: 300 });
+
+    editorRef.current!.commands.setContent('<p>a</p>');
+    editorRef.current!.commands.focus('end');
+    editorRef.current!.commands.insertContent('@foo');
+    await waitFor(() => {
+      expect(onMentionRequest).toHaveBeenCalledWith('foo');
+    });
+
+    editorRef.current!.commands.insertContent(',bar');
+
+    const queries = onMentionRequest.mock.calls.map((c) => String(c[0]));
+    expect(queries).not.toContain('foo,bar');
+    expect(queries.some((q) => q.includes(','))).toBe(false);
+  });
+
   it('renders send button', () => {
     render(<ChatInput onSend={() => {}} />);
     const btn = screen.getByTitle('Send message');

@@ -27,6 +27,26 @@ export interface ResourceRefInsertItem {
   summary_status?: string | null;
 }
 
+/** How far back we look for the "@" that opened the picker. Matches the
+ *  window ChatInput scans when it tracks the live query. */
+export const MENTION_SCAN_CHARS = 80;
+
+/**
+ * What ends an @query.
+ *
+ * Exported because TWO scanners have to agree on it: ChatInput's live query
+ * tracker (which decides what the picker searches for) and
+ * `removeMentionTrigger` below (which decides what to delete). When they
+ * disagreed — tracker `/[\s\n,;]/` vs deleter `/\s/` — typing "@foo" then
+ * ",bar" as prose left the tracker stopped at "foo" while the deleter still
+ * considered "foo,bar" one query and removed the user's own words with it.
+ * Silently: the text is simply gone.
+ *
+ * `\n` needs no entry of its own; `\s` already covers it, and the deleter
+ * never sees one anyway (its scan is confined to a single text block).
+ */
+export const MENTION_QUERY_TERMINATORS = /[\s,;]/;
+
 export function createResourceMentionExtension(opts: MentionOptions) {
   void opts; // reserved for future suggestion-trigger wiring
   return Extension.create({
@@ -36,6 +56,40 @@ export function createResourceMentionExtension(opts: MentionOptions) {
     },
     addCommands() {
       return {
+        /**
+         * Delete the "@query" the user typed to open the picker.
+         *
+         * Mandatory now that picking stages the asset above the composer
+         * instead of dropping a chip where the caret is: without this the
+         * literal text "@clip" stays behind and gets sent as message body.
+         *
+         * The scan is confined to the caret's own text block and uses
+         * `parentOffset`, so offsets map 1:1 onto document positions (inline
+         * atoms count as one either way). Scanning across blocks with
+         * `doc.textBetween` would not — a paragraph boundary is one
+         * character of text but two positions.
+         */
+        removeMentionTrigger:
+          () =>
+          ({ state, commands }: any) => {
+            const { $from, from, empty } = state.selection;
+            if (!empty) return false;
+            const start = Math.max(0, $from.parentOffset - MENTION_SCAN_CHARS);
+            const textBefore = $from.parent.textBetween(
+              start,
+              $from.parentOffset,
+              undefined,
+              '￼',
+            );
+            const atIdx = textBefore.lastIndexOf('@');
+            if (atIdx === -1) return false;
+            // A terminator after the "@" means the picker session is over and
+            // this is ordinary prose — leave it alone. Same set the tracker
+            // uses, so the picker and the deleter always see one query.
+            if (MENTION_QUERY_TERMINATORS.test(textBefore.slice(atIdx + 1))) return false;
+            const deleteFrom = from - (textBefore.length - atIdx);
+            return commands.deleteRange({ from: deleteFrom, to: from });
+          },
         insertResourceRef:
           (item: ResourceRefInsertItem) =>
           ({ commands }: any) => {

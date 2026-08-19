@@ -27,7 +27,11 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { Editor } from '@tiptap/core';
 import type { ClipboardEvent } from 'react';
-import { createResourceMentionExtension } from './ChatInputResourceMention';
+import {
+  createResourceMentionExtension,
+  MENTION_QUERY_TERMINATORS,
+  MENTION_SCAN_CHARS,
+} from './ChatInputResourceMention';
 import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
 
 export interface ChatInputProps {
@@ -44,6 +48,16 @@ export interface ChatInputProps {
   onMentionRequest?: (query: string) => void;
   /** Expose the editor instance so the parent can call insertResourceRef. */
   editorRef?: React.MutableRefObject<Editor | null>;
+  /**
+   * True when the composer is holding attachments that do NOT live in the
+   * editor doc — staged files and staged library resources both.
+   *
+   * Send is otherwise refused on an empty doc, which used to be harmless
+   * (a picked resource WAS a node in the doc) and no longer is: assets now
+   * stage above the input, so "one asset, no words" is a legitimate turn
+   * that the old guard silently swallowed.
+   */
+  hasAttachments?: boolean;
 }
 
 /** Walk the tiptap doc and collect all resourceRef nodes. */
@@ -71,6 +85,7 @@ export function ChatInput({
   onPaste,
   onMentionRequest,
   editorRef,
+  hasAttachments = false,
 }: ChatInputProps): React.ReactElement {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('chat.typeMessage');
@@ -78,8 +93,10 @@ export function ChatInput({
   // Keep stable refs so the editor key-handler closure doesn't re-bind
   const onSendRef = useRef(onSend);
   const disabledRef = useRef(disabled);
+  const hasAttachmentsRef = useRef(hasAttachments);
   useEffect(() => { onSendRef.current = onSend; }, [onSend]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { hasAttachmentsRef.current = hasAttachments; }, [hasAttachments]);
 
   // Dummy pick callback — the parent drives actual picker via onMentionRequest
   const dummyPick = useCallback(
@@ -132,7 +149,7 @@ export function ChatInput({
           if (!ed) return true;
           const text = ed.getText().trim();
           const refs = collectRefAttachments(ed);
-          if (!text && refs.length === 0) return true;
+          if (!text && refs.length === 0 && !hasAttachmentsRef.current) return true;
           onSendRef.current(text, refs);
           ed.commands.clearContent(true);
           return true;
@@ -170,13 +187,17 @@ export function ChatInput({
       const cb = onMentionRequestRef.current;
       if (!cb) return;
       const { from } = editor.state.selection;
-      // Inspect up to 80 chars before the caret to find the last '@'
-      const textBefore = editor.state.doc.textBetween(Math.max(0, from - 80), from);
+      // Inspect a fixed window before the caret to find the last '@'
+      const textBefore = editor.state.doc.textBetween(
+        Math.max(0, from - MENTION_SCAN_CHARS), from,
+      );
       const atIdx = textBefore.lastIndexOf('@');
       if (atIdx === -1) return;
       const queryCandidate = textBefore.slice(atIdx + 1);
-      // Stop tracking if the query contains whitespace or terminal punctuation
-      if (/[\s\n,;]/.test(queryCandidate)) return;
+      // Stop tracking once the query hits a terminator. Shared with
+      // removeMentionTrigger so the picker and the deleter never disagree
+      // about where the query ends.
+      if (MENTION_QUERY_TERMINATORS.test(queryCandidate)) return;
       // Only update if we already have a query (initial '@' open is handled by
       // the handleKeyDown '@' handler — this only updates the existing query)
       if (atIdx >= 0 && textBefore[atIdx] === '@') {
@@ -198,10 +219,10 @@ export function ChatInput({
     if (disabled || !editor) return;
     const text = editor.getText().trim();
     const refs = collectRefAttachments(editor);
-    if (!text && refs.length === 0) return;
+    if (!text && refs.length === 0 && !hasAttachments) return;
     onSend(text, refs);
     editor.commands.clearContent(true);
-  }, [disabled, editor, onSend]);
+  }, [disabled, editor, onSend, hasAttachments]);
 
   return (
     <div className="flex items-end gap-2 p-2 bg-ink-900 border-t border-ink-700/50">

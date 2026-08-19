@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # BIGINT Snowflake ids (ai_sessions.id, agent_runs.id, ai_messages.session_id)
 # arrive from the DB as JSON numbers / Python ints but are modelled as str.
@@ -170,7 +170,16 @@ class ChatRequest(BaseModel):
     """POST /sessions/:id/chat body. Only the user's new message; history
     comes from the server-side ai_messages rows."""
 
-    content: str = Field(..., min_length=1)
+    # NOT ``min_length=1``. A turn may legitimately carry no text at all —
+    # "here, look at this" with a library asset or an image attached and
+    # nothing typed. That used to be impossible by accident: library assets
+    # were inline editor nodes whose text rendering ("@pitch.mp4") made
+    # content non-empty, so the length floor never fired on a real turn.
+    # Once assets moved to the attachment row, the floor started rejecting
+    # the feature's main path with a 422 raised BEFORE the endpoint body,
+    # where the attachments are never even looked at.
+    # The real rule is "a turn must carry something", enforced below.
+    content: str = ""
 
     # §5.3: structured selection handle (scene_id / element_ids) alongside
     # the folded-text content — lets the agent target the exact scene/
@@ -190,6 +199,18 @@ class ChatRequest(BaseModel):
     # them as image parts; text-only models gracefully degrade to
     # placeholder text.
     attachments: list[AttachmentRequest] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _require_text_or_attachment(self) -> "ChatRequest":
+        """A turn must carry something the agent can act on.
+
+        Whitespace-only text counts as nothing — the previous
+        ``min_length=1`` accepted a lone space, so this is stricter there
+        and looser where it matters (attachments now speak for themselves).
+        """
+        if not self.content.strip() and not self.attachments:
+            raise ValueError("content or attachments required")
+        return self
 
 
 class ChatToolCall(BaseModel):
