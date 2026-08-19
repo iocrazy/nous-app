@@ -162,3 +162,69 @@ describe('@ picker input tab', () => {
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
   });
 });
+
+
+describe('manual references (⑨C)', () => {
+  it('upstream prompt text renders as a preview line', () => {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        {
+          id: 'u1', type: 'prompt', position: { x: 0, y: 0 },
+          data: { body: 'moody alley at dusk', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [] },
+        },
+        {
+          id: 'p1', type: 'prompt', position: { x: 0, y: 300 },
+          data: { body: '', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [], gen: { kind: 'image', model: '', ratio: '1:1', count: 1 } },
+        },
+      ] as never,
+      connections: [
+        { id: 'e1', source: 'u1', target: 'p1', sourceHandle: null, targetHandle: null },
+      ],
+      selection: [],
+    });
+    renderPrompt();
+    expect(
+      screen.getByTestId('prompt-upstream-preview').textContent,
+    ).toContain('moody alley at dusk');
+  });
+
+  it('manual ref chips carry a remove key that deletes them', () => {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      nodes: [
+        {
+          id: 'p1', type: 'prompt', position: { x: 0, y: 0 },
+          data: {
+            body: '', provider_slug: '', agent_id: null, run_status: 'idle',
+            resource_refs: [],
+            manual_refs: [{ url: '/api/v1/generated-media/9/file', kind: 'image' }],
+            gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+          },
+        },
+      ] as never,
+      connections: [],
+      selection: [],
+    });
+    renderPrompt();
+    // The manual ref shows as an input thumb with a remove key.
+    expect(screen.getAllByTestId('prompt-input-thumb')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('remove-reference'));
+    expect(promptData().body).toBe('');
+    const refs = (useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as { id: string }).id === 'p1') as {
+      data: { manual_refs?: unknown[] };
+    }).data.manual_refs;
+    expect(refs).toEqual([]);
+  });
+
+  it('Add reference key opens the picker', () => {
+    seed(false);
+    renderPrompt();
+    fireEvent.click(screen.getByTestId('add-reference'));
+    expect(screen.getByTestId('reference-picker')).toBeInTheDocument();
+  });
+});
