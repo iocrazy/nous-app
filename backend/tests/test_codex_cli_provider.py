@@ -409,9 +409,7 @@ class TestMultiRef:
         install_fake_exec(monkeypatch, _writes_out_and_succeeds, captured)
         provider = CodexCliProvider()
 
-        await provider.generate_image(
-            prompt="p", aspect="1:1", ref_image_paths=refs
-        )
+        await provider.generate_image(prompt="p", aspect="1:1", ref_image_paths=refs)
 
         argv = captured[0]
         assert "edit" in argv

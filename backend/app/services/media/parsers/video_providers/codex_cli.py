@@ -215,7 +215,11 @@ class CodexCliProvider:
         out_dir = tempfile.mkdtemp(prefix="codeximg_")
         out_path = os.path.join(out_dir, "gen.png")
         size = _ASPECT_TO_SIZE.get(aspect or "", _DEFAULT_SIZE)
-        refs = [r for r in (ref_image_paths or ([ref_image_path] if ref_image_path else [])) if r][:9]
+        refs = [
+            r
+            for r in (ref_image_paths or ([ref_image_path] if ref_image_path else []))
+            if r
+        ][:9]
         mode = "edit" if refs else "generate"
         args = [
             "images",
