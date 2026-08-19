@@ -10,12 +10,8 @@ import {
   type UnifiedTask,
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
-import {
-  taskAgentName,
-  taskAwaitingInput,
-  taskRowActions,
-  taskShowsCover,
-} from './taskRowPresentation';
+import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { AgentNameBadge } from './AgentNameBadge';
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
 
@@ -75,7 +71,6 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   const isActive = task.status === 'pending' || task.status === 'processing';
   const showCover = taskShowsCover(task) && !coverFailed;
   const awaiting = taskAwaitingInput(task);
-  const agentName = taskAgentName(task);
 
   const handleOpen = () => {
     if (actions.open && task.resource_id) onOpenResource(String(task.resource_id));
@@ -190,16 +185,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-[10px] text-ink-600">{taskTypeLabel(task.task_type)}</span>
-            {/* Which agent ran this — the badge answers "who", the title above
-                carries the user's request and the subtitle the result. */}
-            {agentName && (
-              <span
-                className="shrink-0 max-w-[96px] truncate rounded-full border border-agent-line bg-agent-soft px-1.5 text-[10px] leading-4 text-agent"
-                title={agentName}
-              >
-                {agentName}
-              </span>
-            )}
+            <AgentNameBadge task={task} />
             {task.subtitle && (
               <span className="text-[10px] text-ink-600 truncate">{task.subtitle}</span>
             )}

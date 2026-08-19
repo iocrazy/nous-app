@@ -7,6 +7,7 @@ import {
   type UnifiedTask,
 } from '../../contexts/TaskManagerContext';
 import { TaskTypeIcon } from './TaskTypeIcon';
+import { AgentNameBadge } from './AgentNameBadge';
 import { formatElapsed } from './taskElapsed';
 
 interface ActiveTaskCardProps {
@@ -51,6 +52,9 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
 
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-[10px] text-ink-500">{taskTypeLabel(task.task_type)}</span>
+            {/* A running agent run is drawn here rather than by TaskCenterRow,
+                so the badge has to exist on both or it vanishes mid-run. */}
+            <AgentNameBadge task={task} />
             {task.subtitle && (
               <span className="text-[10px] text-ink-500 truncate">{task.subtitle}</span>
             )}
