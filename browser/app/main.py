@@ -49,6 +49,7 @@ from .platforms import (
     supported_platforms,
     verify_platforms,
 )
+from .music_harvest import run_harvest
 from .probe import run_probe
 from .publish import run_publish
 from .redaction import scrub
@@ -63,6 +64,8 @@ from .schemas import (
     LoginStatusResponse,
     PhoneNumberRequest,
     PhoneNumberResponse,
+    MusicHarvestRequest,
+    MusicHarvestResponse,
     ProbeRequest,
     ProbeResponse,
     PublishRequest,
@@ -644,6 +647,84 @@ async def post_session_probe(request: ProbeRequest) -> Any:
     except Exception as exc:  # noqa: BLE001 - run_probe is total; this is a bug net
         logger.exception("typed probe raised for platform=%s", request.platform)
         return ProbeResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message=scrub(f"{type(exc).__name__}: {exc}"),
+            detail={"stage": "endpoint", "platform": request.platform},
+        )
+    finally:
+        slots.release()
+
+
+@app.post(
+    "/session/music/charts",
+    response_model=MusicHarvestResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_music_charts(request: MusicHarvestRequest) -> Any:
+    """Read the 「选择音乐」 panel's chart tabs for one account.
+
+    Shares the recon host allow-list rather than owning a copy: "which hosts
+    may we open for this platform" has one answer, and a second copy is how the
+    two eventually disagree.
+
+    ⚠️ This endpoint has a **side effect**: reaching the panel requires an
+    upload, so a run leaves one draft on the account. That is why it is a
+    scheduled harvest and not something a page view triggers — the cost per
+    call is a draft, and it is stated here rather than discovered.
+    """
+    spec = get_inspect_spec(request.platform)
+    if spec is None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"no music panel registered for platform '{request.platform}'",
+            reason="not_supported",
+            supported=inspect_platforms(),
+        )
+
+    refusal = url_refusal(request.url, spec.allowed_hosts)
+    if refusal is not None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            refusal,
+            reason="url_not_allowed",
+            platform=request.platform,
+            allowed_hosts=list(spec.allowed_hosts),
+        )
+
+    settings = get_settings()
+    slots = _slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=settings.browser_slot_wait_s)
+    except asyncio.TimeoutError:
+        return MusicHarvestResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message="browser pool saturated; no slot became available",
+            detail={
+                "error_kind": "pool_saturated",
+                "stage": "admission",
+                "platform": request.platform,
+            },
+        )
+
+    try:
+        return await asyncio.wait_for(
+            run_harvest(spec, request),
+            timeout=request.budget_s + INSPECT_HARD_TIMEOUT_SLACK_S,
+        )
+    except asyncio.TimeoutError:
+        return MusicHarvestResponse(
+            success=False,
+            status=SessionStatus.TIMEOUT,
+            message="music harvest exceeded its hard timeout and was abandoned",
+            detail={"stage": "hard_timeout", "platform": request.platform},
+        )
+    except Exception as exc:  # noqa: BLE001 - run_harvest is total; this is a bug net
+        logger.exception("music harvest raised for platform=%s", request.platform)
+        return MusicHarvestResponse(
             success=False,
             status=SessionStatus.FAILED,
             message=scrub(f"{type(exc).__name__}: {exc}"),

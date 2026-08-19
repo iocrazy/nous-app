@@ -835,3 +835,95 @@ class ProbeResponse(BaseModel):
 
     seeded_files: list[str] = Field(default_factory=list)
     updated_storage_state: dict[str, Any] | None = None
+
+
+# --- music chart harvest -----------------------------------------------------
+#
+# The 「选择音乐」 panel's chart tabs, read once and handed to the backend to
+# cache. Why a harvest instead of an on-demand fetch: the panel's two endpoints
+# refuse every mutated replay [实测 2026-08-19] — the signature is bound to the
+# whole query — so a chart can only be read by the platform's own page, which
+# only exists after an upload. That makes this a scheduled job with one side
+# effect, not something a page view can trigger.
+
+
+class MusicSongPayload(BaseModel):
+    """One track, in the vocabulary a picker renders.
+
+    `music_id` is a STRING and stays one all the way to the frontend. It is a
+    19-digit Snowflake-scale id, and JSON numbers lose precision above 2^53 —
+    the same trap `bigIntSafeFetch` exists for on the app's own ids.
+    """
+
+    music_id: str
+    music_name: str
+    music_author: str = ""
+    duration_s: int = 0
+    #: `null` = the platform did not say. **Not `0`** — zero is a real
+    #: catalogue value, and a track with exactly that produced a production
+    #: refusal on 2026-08-17.
+    user_count: int | None = None
+    cover_url: str = ""
+    play_url: str = ""
+
+
+class MusicChartPayload(BaseModel):
+    """One tab's worth of tracks, plus whether we managed to read it.
+
+    `ok=True, songs=[]` and `ok=False` are different and both happen: the first
+    is 收藏 on an account with no favourites (measured), the second is a tab
+    that answered nothing. A caller that merges them will either show a blank
+    tab as if the platform were empty, or keep retrying an account that simply
+    has no favourites.
+    """
+
+    category_id: str
+    category_name: str
+    #: `recommend` / `rank` / `fav` / `category`. Load-bearing: 推荐 and 收藏
+    #: both answer `category_id="1"` and differ only here, so a store keyed on
+    #: the id alone merges two charts into one.
+    category_kind: str
+    ok: bool = False
+    error: str = ""
+    cursor: str = ""
+    has_more: bool = False
+    songs: list[MusicSongPayload] = Field(default_factory=list)
+
+
+class MusicHarvestRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    # Plaintext, decrypted by the backend. Memory only (spec 7.6).
+    storage_state: dict[str, Any]
+    environment: EnvironmentConfig | None = None
+    url: str = Field(min_length=1, max_length=2048)
+
+    # The editor — and therefore the panel — does not exist before an upload.
+    # Required, not optional: a request without one cannot succeed, and taking
+    # it as optional would turn "you forgot the seed" into "the platform has no
+    # charts".
+    seed_file: MediaItem
+    seed_selector: str = Field(
+        default='input[type="file"][multiple]', min_length=1, max_length=200
+    )
+    seed_wait_ms: int = Field(default=60_000, ge=0, le=180_000)
+
+    settle_ms: int = Field(default=5_000, ge=0, le=60_000)
+    panel_settle_ms: int = Field(default=6_000, ge=0, le=60_000)
+    tab_settle_ms: int = Field(default=4_000, ge=0, le=30_000)
+    click_timeout_ms: int = Field(default=8_000, ge=1_000, le=60_000)
+    max_charts: int = Field(default=16, ge=1, le=32)
+    budget_s: int = Field(default=420, ge=60, le=900)
+
+
+class MusicHarvestResponse(BaseModel):
+    """Same four-field envelope as every other route, plus the charts."""
+
+    success: bool
+    status: SessionStatus
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    charts: list[MusicChartPayload] = Field(default_factory=list)
+    # Same reason as on the recon routes: an authenticated page load renews the
+    # session, and dropping the renewal would make this job a net drain on how
+    # long the account stays bound.
+    updated_storage_state: dict[str, Any] | None = None
