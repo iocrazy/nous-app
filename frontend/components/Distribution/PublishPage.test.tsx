@@ -1695,14 +1695,15 @@ describe('PublishPage cover from video frames', () => {
   });
 
   /**
-   * The cover section is a video-post section and is not drawn at all for a
-   * gallery — see the equivalent assertion in PublishPage.imagesMode.test.tsx,
-   * which owns the full section list. Here the point is narrower: the frame
-   * picker, the one control in the section that does real work, is not left
-   * standing (present-but-disabled) for a post type that can never use it.
+   * The cover section is a video-post section, and for a gallery it is not
+   * drawn at all — so the frame picker inside it is not left standing
+   * (present-but-disabled) for a post type that can never use it.
    *
-   * Asserted through the section list rather than as "the picker is absent":
-   * the absence form is also satisfied by a page that rendered nothing.
+   * Asserted as an equality on the whole list of form headings rather than as
+   * "the picker is absent": the absence form is satisfied just as happily by a
+   * page that rendered nothing. This file's sibling,
+   * PublishPage.imagesMode.test.tsx, makes the same statement under a real
+   * i18n instance and with a gallery actually selected.
    */
   it('draws no cover section for an image post', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
