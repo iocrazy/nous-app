@@ -8,6 +8,7 @@
 // generated-media import route. A group holding media is a generation
 // source: its right handle wires into prompts (promptInputs).
 
+import { mediaSrc } from '../mediaUrl';
 import { useCallback, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Plus } from 'lucide-react';
@@ -221,9 +222,9 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
               style={{ width: GRID_CELL, height: GRID_CELL }}
             >
               {item.kind === 'video' ? (
-                <video src={item.url} preload="metadata" muted className="h-full w-full object-cover" />
+                <video src={mediaSrc(item.url)} preload="metadata" muted className="h-full w-full object-cover" />
               ) : (
-                <img src={item.url} alt={item.name ?? ''} loading="lazy" className="h-full w-full object-cover" />
+                <img src={mediaSrc(item.url)} alt={item.name ?? ''} loading="lazy" className="h-full w-full object-cover" />
               )}
             </div>
           ))}

@@ -12,6 +12,7 @@
  * far the canvas has already grown.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import {
   useCallback,
   useEffect,
@@ -157,7 +158,7 @@ export function OutpaintTool({
       >
         {/* Blurred preview of the fill area. */}
         <img
-          src={src}
+          src={mediaSrc(src)}
           alt=""
           aria-hidden="true"
           draggable={false}
@@ -165,7 +166,7 @@ export function OutpaintTool({
         />
         <img
           ref={imageRef}
-          src={src}
+          src={mediaSrc(src)}
           alt={alt}
           draggable={false}
           onLoad={handleImageLoad}

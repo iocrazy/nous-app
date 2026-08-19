@@ -5,6 +5,8 @@
 // caller imports back as a generated-media item. Behavior replicated,
 // zero code ported (license).
 
+import { mediaSrc } from './mediaUrl';
+
 export const STITCH_CELL = 512;
 export const STITCH_MAX = 16;
 
@@ -15,7 +17,7 @@ export function stitchGridFor(count: number): { cols: number; rows: number } {
 }
 
 async function loadBitmap(url: string): Promise<ImageBitmap> {
-  const response = await fetch(url);
+  const response = await fetch(mediaSrc(url));
   if (!response.ok) throw new Error(`stitch: fetch failed for ${url}`);
   return createImageBitmap(await response.blob());
 }

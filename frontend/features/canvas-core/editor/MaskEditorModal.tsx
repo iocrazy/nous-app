@@ -14,6 +14,7 @@
  * eraser-only mask keeps nothing and the endpoint rejects it.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import { useCallback, useEffect, useState } from 'react';
 
 import { MaskBrushTool } from './MaskBrushTool';
@@ -198,7 +199,7 @@ export function MaskEditorModal({
 
         <div className="flex-1 overflow-auto">
           <MaskBrushTool
-            src={src}
+            src={mediaSrc(src)}
             alt={alt}
             value={strokes}
             onChange={setStrokes}

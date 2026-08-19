@@ -7,6 +7,7 @@
  * still useful; a bound card (character_id set) carries the library row's data.
  */
 
+import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { UserRound } from 'lucide-react';
 
@@ -56,7 +57,7 @@ export function CharacterNodeView({ id, data, selected }: NodeProps) {
           {portrait_url ? (
             <img
               data-testid="character-portrait"
-              src={portrait_url}
+              src={mediaSrc(portrait_url)}
               alt={name}
               className="h-full w-full object-cover"
             />

@@ -8,6 +8,7 @@
 // a Regenerate hook. Controlled + presentational — the node owns which item
 // is open; regeneration/state lives in smart/regenerate.ts.
 
+import { mediaSrc } from '../mediaUrl';
 import {
   ChevronLeft,
   ChevronRight,
@@ -489,7 +490,7 @@ export function OutputLightbox({
             <video
               ref={videoRef}
               data-testid="lightbox-video"
-              src={current.url}
+              src={mediaSrc(current.url)}
               controls
               // No autoplay (Infinite parity): frame scrubbing and playback
               // are mutually exclusive; the node's inline <video> already
@@ -513,14 +514,14 @@ export function OutputLightbox({
                   source sits underneath, letterboxed if aspects differ. */}
               <img
                 data-testid="compare-original"
-                src={compareUrl}
+                src={mediaSrc(compareUrl)}
                 alt="Compare source"
                 draggable={false}
                 className="absolute inset-0 block h-full w-full object-contain"
               />
               <img
                 data-testid="compare-result"
-                src={current.url}
+                src={mediaSrc(current.url)}
                 alt="Current version"
                 draggable={false}
                 className="relative block max-h-[80vh] max-w-full"
@@ -574,7 +575,7 @@ export function OutputLightbox({
                       }`}
                     >
                       <img
-                        src={s.url}
+                        src={mediaSrc(s.url)}
                         alt={s.name || `Source ${i + 1}`}
                         draggable={false}
                         className="h-full w-full object-cover"
@@ -611,7 +612,7 @@ export function OutputLightbox({
                 <img
                   key={`${current.url}#${retryNonce}`}
                   data-testid="lightbox-image"
-                  src={current.url}
+                  src={mediaSrc(current.url)}
                   alt={current.name || 'Output'}
                   draggable={false}
                   className={`block max-h-[80vh] max-w-full object-contain ${

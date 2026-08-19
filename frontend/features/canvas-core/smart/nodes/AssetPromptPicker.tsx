@@ -18,6 +18,7 @@
  * search + chips + a scrolling list, not just an inline dropdown.
  */
 
+import { mediaSrc } from '../mediaUrl';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -219,7 +220,7 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
                 >
                   <span className="w-9 h-9 shrink-0 rounded overflow-hidden bg-ink-800">
                     <img
-                      src={getResourceCoverUrl(asset.id)}
+                      src={mediaSrc(getResourceCoverUrl(asset.id))}
                       alt=""
                       className="w-full h-full object-cover"
                       onError={(e) => {

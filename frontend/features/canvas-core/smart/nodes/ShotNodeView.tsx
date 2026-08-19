@@ -57,6 +57,7 @@
  * orchestration layer also performs automatically at the next autosave
  * (`canvasCoreStore.ts`'s `doSave`).
  */
+import { mediaSrc } from '../mediaUrl';
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
@@ -454,7 +455,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             {image_url ? (
               <img
                 data-testid="shot-node-frame"
-                src={image_url}
+                src={mediaSrc(image_url)}
                 alt=""
                 className="h-full w-full object-cover"
               />

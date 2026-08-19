@@ -12,6 +12,7 @@
  * is wiring + DOM.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import {
   useCallback,
   useEffect,
@@ -120,7 +121,7 @@ export function CropTool({
       className="relative inline-block select-none"
     >
       <img
-        src={src}
+        src={mediaSrc(src)}
         alt={alt}
         draggable={false}
         className="block max-h-[70vh] max-w-[80vw] object-contain"

@@ -14,6 +14,7 @@
  * at the source's true pixel size, so the persisted cutout is exact.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import {
   useCallback,
   useEffect,
@@ -127,7 +128,7 @@ export function MaskBrushTool({
       style={{ touchAction: 'none', cursor: 'crosshair' }}
     >
       <img
-        src={src}
+        src={mediaSrc(src)}
         alt={alt}
         draggable={false}
         onLoad={handleImageLoad}

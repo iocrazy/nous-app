@@ -1,3 +1,4 @@
+import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useCallback, useState } from 'react';
 
@@ -484,7 +485,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             {(images ?? []).map((img, i) => (
               <img
                 key={`${img.url}-${i}`}
-                src={img.url}
+                src={mediaSrc(img.url)}
                 alt={img.name || `Generated ${i + 1}`}
                 draggable={false}
                 onDoubleClick={(e) => {
@@ -507,7 +508,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           </div>
         ) : kind === 'image' && (preview_url || images?.[0]?.url) ? (
           <img
-            src={preview_url || images?.[0]?.url}
+            src={mediaSrc(preview_url || images?.[0]?.url)}
             alt={preview_text || 'Output preview'}
             draggable={false}
             onDoubleClick={() => openLightbox(0)}
@@ -518,7 +519,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
              (G7 review #2: video slots previously rendered nothing). */
           <video
             data-testid="output-video-preview"
-            src={preview_url || images?.[0]?.url}
+            src={mediaSrc(preview_url || images?.[0]?.url)}
             muted
             preload="metadata"
             onDoubleClick={() => openLightbox(0)}
@@ -556,7 +557,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       {canCrop && preview_url && (
         <CropEditorModal
           open={editorOpen}
-          src={preview_url}
+          src={mediaSrc(preview_url)}
           alt={preview_text || 'Output preview'}
           initialRegion={crop_region ?? FULL_REGION}
           onCommit={handleCommit}
@@ -576,7 +577,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       {canSplit && preview_url && (
         <GridSplitEditorModal
           open={gridOpen}
-          src={preview_url}
+          src={mediaSrc(preview_url)}
           alt={preview_text || 'Output preview'}
           onCommit={handleGridCommit}
           onCancel={closeGridEditor}
@@ -595,7 +596,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       {canSplit && preview_url && (
         <MaskEditorModal
           open={maskOpen}
-          src={preview_url}
+          src={mediaSrc(preview_url)}
           alt={preview_text || 'Output preview'}
           onCommit={handleMaskCommit}
           onCancel={closeMaskEditor}
@@ -614,7 +615,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       {canSplit && preview_url && (
         <OutpaintEditorModal
           open={outpaintOpen}
-          src={preview_url}
+          src={mediaSrc(preview_url)}
           alt={preview_text || 'Output preview'}
           initialPrompt={preview_text}
           onCommit={handleOutpaintCommit}

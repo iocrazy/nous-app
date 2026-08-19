@@ -15,6 +15,7 @@
  * `onCancel`. Commit is the only escape hatch that ships lines.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import { useCallback, useEffect, useState } from 'react';
 
 import { GridSplitTool } from './GridSplitTool';
@@ -202,7 +203,7 @@ export function GridSplitEditorModal({
         </div>
 
         <div className="flex-1 overflow-auto">
-          <GridSplitTool src={src} alt={alt} value={lines} onChange={setLines} />
+          <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
         </div>
 
         <p className="text-xs text-slate-500 dark:text-slate-400">

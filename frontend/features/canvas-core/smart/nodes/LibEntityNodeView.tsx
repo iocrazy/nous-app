@@ -6,6 +6,7 @@
  * the preset workflow hangs its prompt branches off the right handle.
  */
 
+import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { MapPin, Package } from 'lucide-react';
 
@@ -53,7 +54,7 @@ export function LibEntityNodeView({ id, type, data, selected }: NodeProps) {
           {cover_url ? (
             <img
               data-testid="lib-entity-cover"
-              src={cover_url}
+              src={mediaSrc(cover_url)}
               alt={name}
               className="h-full w-full object-cover"
             />

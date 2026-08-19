@@ -13,6 +13,7 @@
  * `onCancel`. Commit is the only escape hatch that ships a region.
  */
 
+import { mediaSrc } from '../smart/mediaUrl';
 import { useCallback, useEffect, useState } from 'react';
 
 import { snapRegionToAspect } from './cropMath';
@@ -180,7 +181,7 @@ export function CropEditorModal({
         </div>
 
         <div className="flex-1 overflow-auto">
-          <CropTool src={src} alt={alt} value={region} onChange={setRegion} />
+          <CropTool src={mediaSrc(src)} alt={alt} value={region} onChange={setRegion} />
         </div>
 
         <div className="flex items-center justify-end gap-2">
