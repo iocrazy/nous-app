@@ -44,6 +44,7 @@ class _CodexImageAdapter(BaseImageProvider):
             prompt=prompt,
             aspect=kwargs.get("aspect_ratio") or "",
             model_version=model or None,
+            quality=kwargs.get("quality") or None,
             ref_image_path=str(ref) if ref else None,
         )
         return ImageGenResult(

@@ -96,23 +96,27 @@ describe('PromptNodeView generation settings', () => {
     const data = { ...TEXT_DATA, gen: { kind: 'image', model: '', ratio: '16:9', count: 1 } };
     seedAndRender(data);
 
-    const model = uiSelectMirror('Generation model');
-    expect(model.options.length).toBeGreaterThan(0);
-    changeUiSelect('Generation model', 'jimeng-cli-image');
+    // IC ⑨: the footer knobs are popover pills now.
+    fireEvent.click(screen.getByTestId('pill-model'));
+    fireEvent.click(screen.getByRole('button', { name: /Dreamina|jimeng/i }));
     expect((nodeData().gen as { model: string }).model).toBe('jimeng-cli-image');
 
-    changeUiSelect('Aspect ratio', '9:16');
+    fireEvent.click(screen.getByTestId('pill-size'));
+    fireEvent.click(
+      screen.getAllByTestId('ratio-option').find((b) => b.textContent?.includes('9:16'))!,
+    );
     expect((nodeData().gen as { ratio: string }).ratio).toBe('9:16');
 
-    fireEvent.change(screen.getByLabelText('Image count'), { target: { value: '4' } });
+    fireEvent.click(screen.getByTestId('pill-count'));
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
     expect((nodeData().gen as { count: number }).count).toBe(4);
   });
 
   it('video kind shows aspect control (no count)', () => {
     const data = { ...TEXT_DATA, gen: { kind: 'video', model: '', aspect: '16:9' } };
     seedAndRender(data);
-    expect(screen.getByLabelText('Video aspect')).toBeTruthy();
-    expect(screen.queryByLabelText('Image count')).toBeNull();
+    expect(screen.getByTestId('pill-size')).toBeTruthy();
+    expect(screen.queryByTestId('pill-count')).toBeNull();
   });
 
   it('switching back to Text clears gen', () => {

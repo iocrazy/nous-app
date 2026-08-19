@@ -61,7 +61,7 @@ describe('AttachedComposerPanel', () => {
       '2 inputs',
     );
     expect(screen.getByRole('textbox', { name: 'Attached prompt' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Model')).toBeTruthy();
+    expect(screen.getByTestId('pill-model')).toBeTruthy();
   });
 
   it('Run spawns a wired, seeded prompt and dispatches it', () => {

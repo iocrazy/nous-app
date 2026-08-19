@@ -11,13 +11,11 @@
 import { Image as ImageIcon, Play, Video } from 'lucide-react';
 import { useState } from 'react';
 
-import { ASPECT_RATIOS } from '../aspectPresets';
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
 import { rerunPrompt } from '../regenerate';
-import { CANVAS_PILL_TRIGGER } from './canvasPill';
+import { GenFooterControls } from './GenFooterControls';
 import { useGenerationModels } from './useGenerationModels';
-import { UiSelect } from '../../../../components/ui';
 
 export interface AttachedComposerPanelProps {
   nodeId: string;
@@ -39,6 +37,7 @@ export function AttachedComposerPanel({
   const [model, setModel] = useState('');
   const [ratio, setRatio] = useState('1:1');
   const [count, setCount] = useState(1);
+  const [quality, setQuality] = useState<string | undefined>(undefined);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
@@ -54,6 +53,7 @@ export function AttachedComposerPanel({
       kind === 'image'
         ? { kind: 'image' as const, model, ratio, count }
         : { kind: 'video' as const, model, aspect: ratio };
+    if (kind === 'image' && quality) (gen as { quality?: string }).quality = quality;
     const promptId = createPromptFromNode(nodeId, {
       body,
       gen,
@@ -114,7 +114,7 @@ export function AttachedComposerPanel({
               data-testid="composer-input-thumb"
               title={`Image ${i + 1}`}
               onClick={() => setSourceUrl(sourceUrl === url ? null : url)}
-              className={`nodrag h-7 w-7 shrink-0 overflow-hidden rounded border ${
+              className={`nodrag relative h-7 w-7 shrink-0 overflow-hidden rounded border ${
                 sourceUrl === url
                   ? 'border-canvas-strong ring-1 ring-canvas-strong'
                   : 'border-canvas-line/60'
@@ -125,6 +125,8 @@ export function AttachedComposerPanel({
                 alt={`Image ${i + 1}`}
                 className="h-full w-full object-cover"
               />
+              {/* IC 图N corner badge */}
+              <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
             </button>
           ))}
           <span className="text-[10px] font-semibold text-canvas-muted">
@@ -142,47 +144,22 @@ export function AttachedComposerPanel({
         rows={2}
       />
 
-      <div className="flex items-center gap-1">
-        <UiSelect
-          triggerClassName={CANVAS_PILL_TRIGGER}
-          className="min-w-0 flex-1 truncate"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          aria-label="Model"
-        >
-          <option value="">Catalog default</option>
-          {models.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.display_name || m.name}
-            </option>
-          ))}
-        </UiSelect>
-        <UiSelect
-          triggerClassName={CANVAS_PILL_TRIGGER}
-          className="shrink-0"
-          value={ratio}
-          onChange={(e) => setRatio(e.target.value)}
-          aria-label="Aspect ratio"
-        >
-          {ASPECT_RATIOS.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </UiSelect>
-        {kind === 'image' && (
-          <input
-            type="number"
-            min={1}
-            max={8}
-            className="nodrag w-9 shrink-0 rounded-full border border-canvas-line bg-transparent px-1.5 py-0.5 text-center text-xs text-canvas-text outline-none"
-            value={count}
-            onChange={(e) =>
-              setCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
-            }
-            aria-label="Image count"
-          />
-        )}
+      <div className="flex min-w-0 items-center gap-1">
+        <GenFooterControls
+          gen={
+            (kind === 'image'
+              ? { kind: 'image', model, ratio, count, quality }
+              : { kind: 'video', model, aspect: ratio }) as never
+          }
+          models={models}
+          onChange={(g) => {
+            if (g.model !== undefined) setModel(g.model);
+            if (g.ratio !== undefined) setRatio(g.ratio);
+            if (g.aspect !== undefined) setRatio(g.aspect);
+            if (g.count !== undefined) setCount(g.count);
+            if ('quality' in g) setQuality(g.quality);
+          }}
+        />
         <button
           type="button"
           data-testid="composer-run"
