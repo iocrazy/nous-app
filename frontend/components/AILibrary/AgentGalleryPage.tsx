@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Palette, PenLine, Plus, Search, Wrench } from 'lucide-react';
+import { AlertTriangle, Info, Palette, PenLine, Plus, Search, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
@@ -70,18 +70,25 @@ function StatusBadge({ status }: { status: AgentDerivedStatus }) {
       </span>
     );
   }
+  // 'interrupted' is intentionally ink, not danger: it reports a run that
+  // stopped, not an agent that needs fixing. Colouring it red is the exact
+  // bug this branch removes.
   const style =
     status.kind === 'running'
       ? 'border-agent-line bg-agent-soft text-agent'
       : status.kind === 'needs_reply'
         ? 'border-warn-line bg-warn-soft text-warn'
-        : 'border-danger-line bg-danger-soft text-danger';
+        : status.kind === 'interrupted'
+          ? 'border-ink-700 bg-ink-800/50 text-ink-300'
+          : 'border-danger-line bg-danger-soft text-danger';
   const label =
     status.kind === 'running'
       ? t('aiLibrary.status.running', 'Running')
       : status.kind === 'needs_reply'
         ? t('aiLibrary.status.needsReply', 'Waiting for reply')
-        : t('aiLibrary.status.fault', 'Fault');
+        : status.kind === 'interrupted'
+          ? t('aiLibrary.status.interrupted', 'Last run interrupted')
+          : t('aiLibrary.status.fault', 'Fault');
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${style}`}
@@ -204,6 +211,18 @@ function AgentCard({
             })
           : t('aiLibrary.weekMetaEmpty', 'No runs · 7d')}
       </div>
+
+      {/* Same one-line explanation as a fault, in neutral clothing — the
+          user still deserves to know why their run never finished. */}
+      {status.kind === 'interrupted' && (
+        <div
+          className="mt-2 flex items-start gap-1.5 rounded-md border border-ink-700 bg-ink-800/40 px-2 py-1 text-[11px] text-ink-400"
+          data-testid="interrupted-note"
+        >
+          <Info size={12} className="mt-0.5 shrink-0" />
+          <span>{t(status.detailKey, status.detail)}</span>
+        </div>
+      )}
 
       {/* A fault badge without a next step is what this redesign removed. */}
       {status.kind === 'fault' && (

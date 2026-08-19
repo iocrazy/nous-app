@@ -120,6 +120,13 @@ export interface AgentStatsItem {
   running_count: number;
   needs_input_count: number;
   fault: AgentFault | null;
+  /** The agent's last run was cut short by something that is not the agent's
+   *  fault (currently only a backend restart mid-run). Deliberately separate
+   *  from `fault`: everything keyed off `fault` — red badge, "Faults only"
+   *  filter, fault counter — means "this agent needs fixing", and a routine
+   *  deploy does not. The copy is written client-side so it can be
+   *  translated. */
+  interrupted_reason: 'restart' | null;
 }
 
 export const aiLibraryService = {

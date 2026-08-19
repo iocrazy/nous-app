@@ -3465,7 +3465,8 @@
       "idle": "Idle",
       "running": "Running",
       "needsReply": "Waiting for reply",
-      "fault": "Fault"
+      "fault": "Fault",
+      "interrupted": "Last run interrupted"
     },
     "action": {
       "chat": "Chat",
@@ -3491,6 +3492,9 @@
       "budget": "Monthly budget exceeded — raise the budget or resume the agent",
       "manual": "Paused by admin — resume from the agent’s Profile tab",
       "paused": "Agent is paused"
+    },
+    "interruption": {
+      "restart": "The last run stopped early because the service restarted. The agent is fine — run it again."
     }
   },
   "teamUsage": {

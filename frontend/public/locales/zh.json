@@ -3465,7 +3465,8 @@
       "idle": "空闲",
       "running": "运行中",
       "needsReply": "等你回复",
-      "fault": "故障"
+      "fault": "故障",
+      "interrupted": "上次运行中断"
     },
     "action": {
       "chat": "对话",
@@ -3491,6 +3492,9 @@
       "budget": "已超月度预算 — 请调高预算或恢复该智能体",
       "manual": "已被管理员暂停 — 可在该智能体的「档案」tab 恢复",
       "paused": "该智能体已暂停"
+    },
+    "interruption": {
+      "restart": "上次运行因服务重启而中断。智能体本身正常，重新运行即可。"
     }
   },
   "teamUsage": {

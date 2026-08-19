@@ -805,35 +805,61 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"[agent_runs] running_counts_by_agent failed: {e}")
             return {}
 
-    async def dead_run_reasons_by_agent(
+    async def latest_run_health_by_agent(
         self, agent_ids: List[UUID], since: datetime
-    ) -> Dict[str, str]:
-        """{agent_id: most recent error_message} over stuck/dead runs since
-        ``since``.
+    ) -> Dict[str, Dict[str, Optional[str]]]:
+        """{agent_id: {liveness_state, error_code, error_message}} for agents
+        whose MOST RECENT finished run ended badly.
 
-        DISTINCT ON picks the latest row per agent in one pass — the fault
-        badge only ever shows the newest reason, and pulling every dead run
-        just to take the first would scale with failure volume.
+        The window is anchored on the *latest* run rather than on "any dead
+        run in the window" — that is the whole point of this query. Selecting
+        dead rows directly (the pre-2026-08-19 shape) meant one bad run kept
+        the gallery's fault badge lit for the entire ``since`` window no
+        matter how many successful runs landed afterwards; the badge answered
+        "did anything break this week?" when the user reads it as "is this
+        agent broken right now". So: take the newest finished run per agent,
+        then keep it only if IT is the unhealthy one. A later success (or a
+        cancel) wins the DISTINCT ON and the agent drops out of the map.
+
+        ``status != 'running'`` rather than an explicit terminal allowlist —
+        an in-flight run must not mask the dead one behind it (``running_count``
+        already tells the gallery about live runs), and a future terminal
+        status stays covered without editing this filter.
+
+        DISTINCT ON picks that latest row per agent in one pass; pulling every
+        run just to take the first would scale with run volume.
         """
         if not agent_ids:
             return {}
         try:
             async with read_scope() as session:
                 result = await session.execute(
-                    select(AgentRuns.agent_id, AgentRuns.error_message)
+                    select(
+                        AgentRuns.agent_id,
+                        AgentRuns.liveness_state,
+                        AgentRuns.error_code,
+                        AgentRuns.error_message,
+                    )
                     .where(AgentRuns.agent_id.in_(agent_ids))
-                    .where(AgentRuns.liveness_state.in_(("stuck", "dead")))
+                    .where(AgentRuns.status != "running")
                     .where(AgentRuns.started_at >= since)
                     .distinct(AgentRuns.agent_id)
                     .order_by(AgentRuns.agent_id, AgentRuns.started_at.desc())
                 )
+                # The unhealthy-or-not decision lives here, not in the WHERE,
+                # so the DISTINCT ON winner is genuinely "the last run" and a
+                # healthy winner can clear the badge.
                 return {
-                    str(r.agent_id): r.error_message
+                    str(r.agent_id): {
+                        "liveness_state": r.liveness_state,
+                        "error_code": r.error_code,
+                        "error_message": r.error_message,
+                    }
                     for r in result.all()
-                    if r.error_message
+                    if r.liveness_state in ("stuck", "dead")
                 }
         except Exception as e:
-            logger.error(f"[agent_runs] dead_run_reasons_by_agent failed: {e}")
+            logger.error(f"[agent_runs] latest_run_health_by_agent failed: {e}")
             return {}
 
     # ------------------------------------------------------------------
