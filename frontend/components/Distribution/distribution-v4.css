@@ -363,12 +363,10 @@
    both themes instead of being a dark red on a black screen. */
 .dist-v4 .pv-tabs { display: flex; gap: 2px; background: var(--island-2); border: 1px solid var(--line); border-radius: 9px; padding: 2px; margin-bottom: 12px; }
 .dist-v4 .pv-tabs button { flex: 1; font: inherit; font-size: 11.5px; font-weight: 500; padding: 5px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--content-3); cursor: pointer; transition: color .12s; }
-.dist-v4 .pv-tabs button:hover:not(:disabled) { color: var(--content-2); }
+.dist-v4 .pv-tabs button:hover { color: var(--content-2); }
 .dist-v4 .pv-tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--t-indigo); font-weight: 550; }
-.dist-v4 .pv-tabs button:disabled { color: var(--content-4); cursor: not-allowed; opacity: .6; }
 .dist-v4 .pv-note { margin: 10px 0 0; font-size: 11px; line-height: 1.5; color: var(--content-4); }
 .dist-v4 .pv-screen { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; background: #0b0b0d; color: #fff; overflow: hidden; }
-.dist-v4 .pv-blocked { align-items: center; justify-content: center; gap: 8px; padding: 20px; text-align: center; font-size: 11px; line-height: 1.5; color: rgba(255, 255, 255, .8); }
 
 /* ── cover / title: the two-column feed ─────────────────────────────────── */
 /* Reproduces the platform's recommendation feed, not a profile grid. Every

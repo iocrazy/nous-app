@@ -1694,13 +1694,30 @@ describe('PublishPage cover from video frames', () => {
     expect(screen.getByText(/the platform picks a frame during publish/i)).toBeInTheDocument();
   });
 
-  it('explains that image posts have no video to sample', async () => {
+  /**
+   * The cover section is a video-post section and is not drawn at all for a
+   * gallery — see the equivalent assertion in PublishPage.imagesMode.test.tsx,
+   * which owns the full section list. Here the point is narrower: the frame
+   * picker, the one control in the section that does real work, is not left
+   * standing (present-but-disabled) for a post type that can never use it.
+   *
+   * Asserted through the section list rather than as "the picker is absent":
+   * the absence form is also satisfied by a page that rendered nothing.
+   */
+  it('draws no cover section for an image post', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
+    const sections = () => Array.from(document.querySelectorAll('.pub-form .fcard > h4'))
+      .map((h) => (h.firstChild?.textContent ?? '').trim());
+    // Video mode is the control: without it the equality below could be a fact
+    // about a query that finds nothing anywhere.
+    expect(sections()).toContain('Cover');
+
     fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
-    expect(await screen.findByText(/there is no video to sample/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Pick a frame from the video/i })).toBeNull();
+    await waitFor(() => expect(sections()).toEqual([
+      'Content', 'Title', 'Description', 'More options',
+    ]));
   });
 });
 

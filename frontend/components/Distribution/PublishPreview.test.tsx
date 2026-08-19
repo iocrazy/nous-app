@@ -125,6 +125,26 @@ const mine = (): HTMLElement => feed().querySelector('.pv-fcard.mine') as HTMLEl
 
 const tab = (name: string): HTMLElement => screen.getByRole('tab', { name });
 
+/**
+ * Every tab on the row, in order, by its label.
+ *
+ * ⚠️ ASSERTED AS AN EQUALITY ON THE WHOLE LIST, never as "X is not there".
+ * "The video tab is absent" is satisfied by a panel that failed to render at
+ * all — it is the exact shape of a test that guards nothing. `toEqual([...])`
+ * fails on an empty row as loudly as it fails on a row with one tab too many,
+ * and `getAllByRole` throws outright when there is no row, so a broken panel
+ * can never read as a passing "correctly hidden".
+ */
+const tabNames = (): string[] =>
+  screen.getAllByRole('tab').map((el) => el.textContent ?? '');
+
+/** The tabs currently marked selected — a list, so "none selected" and "two
+ *  selected" both fail as clearly as "the wrong one selected". */
+const selectedTabNames = (): string[] =>
+  screen.getAllByRole('tab')
+    .filter((el) => el.getAttribute('aria-selected') === 'true')
+    .map((el) => el.textContent ?? '');
+
 describe('the stylesheet under test is actually loaded', () => {
   it('resolves a rule that only this stylesheet defines', () => {
     renderPanel();
@@ -405,12 +425,6 @@ describe('where the first cell’s picture comes from is stated, never implied',
     expect(within(mine()).getByText('No cover yet')).toBeTruthy();
   });
 
-  it('uses the first image for an image post and says so', () => {
-    renderPanel({ kind: 'images', items: [IMAGE_A, IMAGE_B] });
-    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/a');
-    expect(screen.getByText('Image posts take their cover from the first image.')).toBeTruthy();
-  });
-
   it('signs the file URL with the session token when there is one', () => {
     renderPanel({ covers: { vertical: 'cover-v', horizontal: 'cover-h' }, mediaToken: 'jwt' });
     expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-v?token=jwt');
@@ -436,41 +450,67 @@ describe('a picture that fails to load says so', () => {
   });
 });
 
-describe('tab availability follows the post type', () => {
-  it('offers the gallery to image posts and refuses it to video posts', () => {
-    const { update } = renderPanel({ kind: 'video' });
-    expect(tab('Gallery preview')).toBeDisabled();
-    expect(tab('Gallery preview').title).toBe('This is a video post — there is no image gallery.');
-
-    update({ kind: 'images', items: [IMAGE_A] });
-    expect(tab('Gallery preview')).toBeEnabled();
+/**
+ * The row carries the views this post type HAS, and nothing else.
+ *
+ * These tabs used to be drawn for both types and greyed out for the one they
+ * did not apply to. The house rule that produced that — disable and say why,
+ * rather than hide — is about controls that SHOULD apply and happen not to
+ * yet; a greyed control teaches "this exists, here is what unlocks it". An
+ * image post has no video to play and no cover to attach, ever, so the greyed
+ * pair taught nothing and asked the reader to wonder what would enable them.
+ */
+describe('the tab row offers exactly the views the post type has', () => {
+  it('gives a video post the player and the cover view, opening on the cover', () => {
+    renderPanel({ kind: 'video', items: [CLIP] });
+    expect(tabNames()).toEqual(['Video preview', 'Cover & title']);
+    expect(selectedTabNames()).toEqual(['Cover & title']);
   });
 
-  it('refuses the video tab to image posts and offers it to video posts', () => {
+  it('gives an image post the gallery and nothing else, opening on it', () => {
+    renderPanel({ kind: 'images', items: [IMAGE_A] });
+    expect(tabNames()).toEqual(['Gallery preview']);
+    expect(selectedTabNames()).toEqual(['Gallery preview']);
+  });
+
+  it('swaps the row in both directions as the post type changes', () => {
+    const { update } = renderPanel({ kind: 'video', items: [CLIP] });
+    expect(tabNames()).toEqual(['Video preview', 'Cover & title']);
+
+    update({ kind: 'images', items: [IMAGE_A] });
+    expect(tabNames()).toEqual(['Gallery preview']);
+
+    update({ kind: 'video', items: [CLIP] });
+    expect(tabNames()).toEqual(['Video preview', 'Cover & title']);
+  });
+
+  /**
+   * ⚠️ THE STEP THAT IS EASIEST TO FORGET.
+   *
+   * Removing a tab the reader is standing on is how a panel ends up with no
+   * tab selected and a blank screen under it. Both halves are asserted: the
+   * row's one remaining tab is the selected one, AND the screen below shows
+   * the content that view is for.
+   */
+  it('lands the reader on a real view when the one they were on is removed', () => {
+    const { update } = renderPanel({ kind: 'video', items: [CLIP] });
+    fireEvent.click(tab('Video preview'));
+    expect(selectedTabNames()).toEqual(['Video preview']);
+
+    update({ kind: 'images', items: [IMAGE_A] });
+    expect(tabNames()).toEqual(['Gallery preview']);
+    expect(selectedTabNames()).toEqual(['Gallery preview']);
+    expect(document.querySelector('.pv-stage img')?.getAttribute('src')).toBe('/thumb/a');
+  });
+
+  it('lands on the cover view when an image post becomes a video post', () => {
     const { update } = renderPanel({ kind: 'images', items: [IMAGE_A] });
-    expect(tab('Video preview')).toBeDisabled();
-    expect(tab('Video preview').title).toBe('This is an image post — there is no video to play.');
+    expect(selectedTabNames()).toEqual(['Gallery preview']);
 
     update({ kind: 'video', items: [CLIP] });
-    expect(tab('Video preview')).toBeEnabled();
-  });
-
-  it('keeps the cover tab open for both, and starts there', () => {
-    const { update } = renderPanel({ kind: 'video' });
-    expect(tab('Cover & title')).toBeEnabled();
-    expect(tab('Cover & title').getAttribute('aria-selected')).toBe('true');
-
-    update({ kind: 'images', items: [IMAGE_A] });
-    expect(tab('Cover & title')).toBeEnabled();
-  });
-
-  it('moves the reader off a tab that stops applying', () => {
-    const { update } = renderPanel({ kind: 'images', items: [IMAGE_A, IMAGE_B] });
-    fireEvent.click(tab('Gallery preview'));
-    expect(tab('Gallery preview').getAttribute('aria-selected')).toBe('true');
-
-    update({ kind: 'video', items: [CLIP] });
-    expect(tab('Cover & title').getAttribute('aria-selected')).toBe('true');
+    expect(tabNames()).toEqual(['Video preview', 'Cover & title']);
+    expect(selectedTabNames()).toEqual(['Cover & title']);
+    expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/clip');
   });
 });
 
@@ -709,12 +749,30 @@ describe('playback stops when the user loses sight of it', () => {
     expect(pauseSpy.mock.calls.length).toBe(1);
   });
 
-  it('stops when the post turns into an image post', () => {
+  /**
+   * ⚠️ THE CASE THE HIDDEN VIDEO TAB CREATES.
+   *
+   * An image post has no video view at all, so the tab the player lived on
+   * disappears out from under the reader. Hiding a player is not stopping it:
+   * a `<video>` kept alive behind `display:none` goes on making noise from a
+   * control that is no longer on screen, which is the worst version of this
+   * defect because there is then nothing left to press.
+   *
+   * So three things are checked, not one: the element that was playing is the
+   * one that got paused, it is gone from the tree rather than merely hidden,
+   * and the gallery really did render in its place — without that last line a
+   * panel that rendered nothing at all would satisfy the middle one.
+   */
+  it('stops when the post turns into an image post, and the player is gone', () => {
     const { update } = openVideo();
+    const playing = document.querySelector('.pv-stage video');
     expect(pauseSpy.mock.calls.length).toBe(0);
 
     update({ kind: 'images', items: [IMAGE_A] });
     expect(pauseSpy.mock.calls.length).toBe(1);
+    expect(pauseSpy.mock.contexts[0]).toBe(playing);
+    expect(document.querySelectorAll('.pv-stage video').length).toBe(0);
+    expect(document.querySelector('.pv-stage img')?.getAttribute('src')).toBe('/thumb/a');
   });
 
   /**

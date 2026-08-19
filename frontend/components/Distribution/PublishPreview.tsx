@@ -121,8 +121,42 @@ export interface PublishPreviewProps {
   onOrientationChange: (next: CoverOrientation) => void;
 }
 
-/** Why a tab cannot be opened, or null when it can. */
-type TabBlock = 'wrongKind' | null;
+/**
+ * Which views exist for each post type, in the order they are offered.
+ *
+ * ⚠️ THESE TABS ARE ABSENT, NOT DISABLED, AND THE DISTINCTION IS THE POINT.
+ *
+ * The house rule elsewhere is to disable a control and say why, because a
+ * control the user cannot see is a control they cannot ask about. That rule
+ * governs things that SHOULD apply here and happen not to right now — a
+ * greyed-out button teaches "this exists, and here is what unlocks it".
+ *
+ * Neither of these is that. An image post has no video to play, ever, and it
+ * has no cover to attach: the platform takes its cover FROM the first image
+ * (`cover_not_supported_for_images` is a hard refusal on the backend, not a
+ * capability flag that could flip). A greyed "Video preview" sitting over a
+ * gallery does not teach the user anything true — it asks them to wonder what
+ * would enable it, and the answer is nothing. A post is one type or the other:
+ * `PublishPage` clears the whole selection when the type changes, so a batch
+ * can never hold both — no reachable view is lost by not drawing them.
+ */
+const TABS_BY_KIND = {
+  video: ['video', 'cover'],
+  images: ['gallery'],
+} as const satisfies Record<PublishPreviewProps['kind'], readonly PreviewTab[]>;
+
+/**
+ * Where the reader lands when the view they were on stops existing.
+ *
+ * ⚠️ Typed against the lists above rather than as a plain `PreviewTab`, so
+ * naming a view this post type does not have is a COMPILE error. It would
+ * otherwise be an infinite render: the correction below would replace the
+ * missing tab with another missing tab, for ever.
+ */
+const DEFAULT_TAB: { [K in keyof typeof TABS_BY_KIND]: (typeof TABS_BY_KIND)[K][number] } = {
+  video: 'cover',
+  images: 'gallery',
+};
 
 /**
  * Where the image in the first grid cell came from.
@@ -133,7 +167,7 @@ type TabBlock = 'wrongKind' | null;
  * will pick its own frame") than a cover they chose, and the difference has to
  * be stated, not left to be guessed from context.
  */
-type CoverProvenance = 'cover' | 'firstImage' | 'thumbnail' | 'none';
+type CoverProvenance = 'cover' | 'thumbnail' | 'none';
 
 /**
  * Enough cards to overflow the screen in either orientation, so the feed
@@ -205,7 +239,7 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
 }) => {
   const { t } = useTranslation();
 
-  const [tab, setTab] = useState<PreviewTab>('cover');
+  const [tab, setTab] = useState<PreviewTab>(DEFAULT_TAB[kind]);
   const [galleryIndex, setGalleryIndex] = useState(0);
   /**
    * URLs whose `<img>` fired `error`, so the cell can say so instead of
@@ -228,11 +262,23 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
   /** See DOUYIN_FEATURED_FEED_CHROME: only the platform we have seen. */
   const showsPlatformChrome = platform === 'douyin';
 
-  const blockFor = (which: PreviewTab): TabBlock => {
-    if (which === 'cover') return null;
-    if (which === 'video') return isImages ? 'wrongKind' : null;
-    return isImages ? null : 'wrongKind';
-  };
+  const availableTabs: readonly PreviewTab[] = TABS_BY_KIND[kind];
+
+  /**
+   * ⚠️ CORRECTED DURING RENDER, NOT IN AN EFFECT, AND THAT IS DELIBERATE.
+   *
+   * Changing the post type can strand the reader on a view that no longer
+   * exists — on an image post, `tab` may still read `'video'`. An effect would
+   * fix that one commit too late, and the render in between is not harmless:
+   * it would draw the video screen over a gallery selection, and the player's
+   * stop rule reads the committed `tab`, so a frame of "no tab is selected and
+   * a player is mounted for an image" is exactly the state this panel must
+   * never be in. React re-runs the render instead of committing this one, so
+   * the wrong frame never reaches the screen or the effects.
+   *
+   * Guarded by the same condition it fixes, so it settles in one extra pass.
+   */
+  if (!availableTabs.includes(tab)) setTab(DEFAULT_TAB[kind]);
 
   /**
    * ⚠️ A PRIMITIVE, and that is the whole point.
@@ -250,13 +296,6 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
 
   // A changed selection invalidates the page number; an identical one does not.
   useEffect(() => { setGalleryIndex(0); }, [itemsKey]);
-
-  // Switching post type can strand the reader on a tab that no longer applies.
-  useEffect(() => {
-    setTab((current) => (blockFor(current) === null ? current : 'cover'));
-    // `isImages` is the only input to `blockFor` that can change here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isImages]);
 
   /** Clamped rather than trusted: the selection can shrink under the reader. */
   const pageIndex = items.length === 0
@@ -319,16 +358,11 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
    */
   const videoUrl = (item: PreviewMedia): string => getResourceFileUrl(item.id, mediaToken);
 
-  /** What the first grid cell shows, and why. Both halves together. */
+  /** What the first grid cell shows, and why. Both halves together.
+   *
+   *  Only ever reached for a video post: `TABS_BY_KIND` does not offer the
+   *  cover view to an image post, whose cover is not a separate asset at all. */
   const coverSource: { url: string | null; provenance: CoverProvenance } = (() => {
-    if (isImages) {
-      // Not a fallback: an image post's cover IS its first image, which is
-      // what the form says a few centimetres to the left.
-      const first = items[0];
-      return first
-        ? { url: mediaUrl(first), provenance: 'firstImage' }
-        : { url: null, provenance: 'none' };
-    }
     const derived = covers?.[orientation];
     if (derived) {
       return { url: getResourceFileUrl(derived, mediaToken), provenance: 'cover' };
@@ -346,11 +380,6 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
         return orientation === 'vertical'
           ? t('distribution.publish.previewCoverVertical', 'Showing your vertical 3:4 cover.')
           : t('distribution.publish.previewCoverHorizontal', 'Showing your horizontal 4:3 cover.');
-      case 'firstImage':
-        return t(
-          'distribution.publish.previewCoverFirstImage',
-          'Image posts take their cover from the first image.',
-        );
       case 'thumbnail':
         return t(
           'distribution.publish.previewCoverThumbnail',
@@ -419,32 +448,17 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
     )
   );
 
-  const tabButton = (which: PreviewTab, label: string) => {
-    const block = blockFor(which);
-    const reason = block === null ? undefined
-      : which === 'video'
-        ? t('distribution.publish.previewTabVideoOnly', 'This is an image post — there is no video to play.')
-        : t('distribution.publish.previewTabGalleryOnly', 'This is a video post — there is no image gallery.');
-    return (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === which}
-        disabled={block !== null}
-        title={reason}
-        onClick={() => setTab(which)}
-      >
-        {label}
-      </button>
-    );
+  const tabLabel = (which: PreviewTab): string => {
+    switch (which) {
+      case 'video':
+        return t('distribution.publish.previewTabVideo', 'Video preview');
+      case 'gallery':
+        return t('distribution.publish.previewTabGallery', 'Gallery preview');
+      case 'cover':
+      default:
+        return t('distribution.publish.previewTabCover', 'Cover & title');
+    }
   };
-
-  const activeBlockReason = blockFor(tab) === null
-    ? null
-    : t(
-      'distribution.publish.previewTabUnavailable',
-      'This view does not apply to the selected post type.',
-    );
 
   return (
     <div className="phone-card pv-card">
@@ -453,19 +467,22 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
       </div>
 
       <div className="pv-tabs" role="tablist" aria-label={t('distribution.publish.previewHeading', 'Preview')}>
-        {tabButton('video', t('distribution.publish.previewTabVideo', 'Video preview'))}
-        {tabButton('gallery', t('distribution.publish.previewTabGallery', 'Gallery preview'))}
-        {tabButton('cover', t('distribution.publish.previewTabCover', 'Cover & title'))}
+        {availableTabs.map((which) => (
+          <button
+            key={which}
+            type="button"
+            role="tab"
+            aria-selected={tab === which}
+            onClick={() => setTab(which)}
+          >
+            {tabLabel(which)}
+          </button>
+        ))}
       </div>
 
       <div className="phone">
         <span className="notch" />
-        {activeBlockReason !== null ? (
-          <div className="pv-screen pv-blocked" role="status">
-            <AlertTriangle size={16} aria-hidden="true" />
-            {activeBlockReason}
-          </div>
-        ) : tab === 'cover' ? (
+        {tab === 'cover' ? (
           <div className="pv-screen">
             {/* Platform chrome. Drawn ONLY for the platform we have actually
                 been shown — see DOUYIN_FEATURED_FEED_CHROME. Decoration end to end:

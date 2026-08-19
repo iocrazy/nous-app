@@ -167,6 +167,17 @@ const renderPage = () => render(
 
 const imagesTab = () => screen.getByRole('tab', { name: /^Images$/ });
 
+/**
+ * Every heading in the form column, in order.
+ *
+ * Each `<h4>` reads "<name><status>" — the status span rides inside the
+ * heading — so only the leading text node is taken, which is the part that
+ * names the section rather than reporting on it.
+ */
+const formSections = (): string[] =>
+  Array.from(document.querySelectorAll('.pub-form .fcard > h4'))
+    .map((h) => (h.firstChild?.textContent ?? '').trim());
+
 /** Open the picker, click each named card in order, close it. Pick order IS
  *  gallery order, so the sequence matters. */
 const pickImages = async (names: string[]) => {
@@ -305,17 +316,38 @@ describe('PublishPage — image posts, once the backend declares support', () =>
       .toEqual(['img-1', 'img-3', 'img-2']);
   });
 
-  it('offers no separate cover in images mode, and says where the cover comes from', async () => {
+  /**
+   * The whole cover section belongs to video posts.
+   *
+   * An image post's cover is not a thing the user sets: the platform takes it
+   * from the first uploaded image, and a gallery carrying a separate cover
+   * asset is refused outright. What stood here before was a card whose entire
+   * content was a sentence explaining that the section did not apply — a
+   * section the reader has to read in order to learn it was not for them.
+   *
+   * ⚠️ ASSERTED AS AN EQUALITY ON THE WHOLE LIST OF SECTIONS, not as "Cover is
+   * not there". The negative form passes just as happily on a page that failed
+   * to render any section at all; the list form fails on that, fails if Cover
+   * comes back, and fails if a section goes missing that should be there.
+   */
+  it('drops the cover section entirely in images mode, keeping the rest', async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
 
+    // Video mode is the control: the section IS there, so the equality below
+    // is a statement about images mode and not about a query that finds
+    // nothing anywhere.
+    expect(formSections()).toEqual([
+      'Content', 'Cover', 'Title', 'Description', 'More options', 'Distribution mode',
+    ]);
+
     fireEvent.click(imagesTab());
-    expect(screen.getByText(/there is no video to sample/i)).toBeInTheDocument();
-    expect(screen.getByText('First image')).toBeInTheDocument();
-    // The frame picker is gone entirely — not present-but-disabled, which
-    // would still read as "a cover can be attached here".
-    expect(screen.queryByRole('button', { name: /Pick a frame from the video/i })).toBeNull();
-    expect(screen.queryByText('Vertical 3:4')).toBeNull();
+    expect(formSections()).toEqual(['Content', 'Title', 'Description', 'More options']);
+
+    // The fact the removed card carried is still stated — in the Summary,
+    // beside the rest of the post's facts.
+    expect(screen.getByText('The first image is used as the cover for image posts.'))
+      .toBeInTheDocument();
   });
 });
 
@@ -462,7 +494,7 @@ describe('image-post copy is translated in both locales', () => {
     const zh = (zhJson as Record<string, any>).distribution.publish;
     const added = [
       'imagesSelectedOfMax', 'imagesTooMany', 'imagesTooFew',
-      'moveImageEarlier', 'moveImageLater', 'coverFromFirstImage',
+      'moveImageEarlier', 'moveImageLater',
       'pickerSubtitleImages', 'pickerSearchImages', 'pickerNoMarkedImages',
       'pickerNoResultsImages', 'allowDownloadsDescImages',
       'rejected', 'rejectedHeading', 'gateProblemForAccount',
@@ -474,8 +506,8 @@ describe('image-post copy is translated in both locales', () => {
       expect(en[key], `en.json missing ${key}`).toBeTruthy();
       expect(zh[key], `zh.json missing ${key}`).toBeTruthy();
     }
-    // The whole namespace stays in lockstep — 174 keys each, zero untranslated,
-    // and this change must not be the one that breaks it.
+    // The whole namespace stays in lockstep — same keys on both sides, zero
+    // untranslated, and this change must not be the one that breaks it.
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
   });
 });
