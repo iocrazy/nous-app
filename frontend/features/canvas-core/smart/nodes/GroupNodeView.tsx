@@ -9,7 +9,7 @@
 // source: its right handle wires into prompts (promptInputs).
 
 import { mediaSrc } from '../mediaUrl';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +27,8 @@ import {
   GRID_MAX,
   arrangeGroupChildren,
   gridColsFor,
+  groupPreviewItems,
+  groupSummary,
   ungroupNode,
 } from '../grouping';
 import { stitchImageItems } from '../stitchImages';
@@ -43,6 +45,11 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const { label, items, uploading } = data as unknown as GroupNodeData;
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
+  const storeNodes = useCanvasCoreStore((s) => s.nodes);
+  const summary = useMemo(
+    () => groupSummary(storeNodes as never, id),
+    [storeNodes, id],
+  );
   const memberCount = useCanvasCoreStore(
     (s) =>
       s.nodes.filter((n) => (n as { parentId?: string }).parentId === id).length,
@@ -83,9 +90,11 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
     [canvasId, id, patch],
   );
 
-  const imageItems: LightboxItem[] = (items ?? [])
-    .filter((item) => item.kind !== 'video')
-    .map((item) => ({ url: item.url, name: item.name }));
+  // Whole-group preview (IC): grid items + member images, deduped.
+  const imageItems: LightboxItem[] = useMemo(
+    () => groupPreviewItems(storeNodes as never, id),
+    [storeNodes, id],
+  );
 
   const onArrange = useCallback(() => {
     const { nodes, setNodes } = useCanvasCoreStore.getState();
@@ -198,6 +207,20 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         aria-label="Group label"
         readOnly={readOnly}
       />
+      {(summary.prompts > 0 || summary.loops > 0 || summary.images > 0) && (
+        <div
+          data-testid="group-summary"
+          className="mb-1 text-[9px] font-semibold text-canvas-muted"
+        >
+          {[
+            summary.prompts > 0 ? `${summary.prompts} prompts` : null,
+            summary.images > 0 ? `${summary.images} images` : null,
+            summary.loops > 0 ? `${summary.loops} loops` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </div>
+      )}
       {isEmpty ? (
         // IC's smart-group-empty: dashed drop-zone + "拖入图片自动收进分组".
         <div

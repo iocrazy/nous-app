@@ -519,3 +519,68 @@ export function absorbImagesOnConnect(
       : n,
   );
 }
+
+
+// ---- Summary + whole-group preview (IC D — 分组摘要行 / 整组预览) --------
+
+/** Member/content counts for the group's summary line (IC's
+ *  smart-group-summary: `N 提示词 · N 图片 · N 循环`). Images = the
+ *  absorbed grid plus member media/output images. */
+export function groupSummary(
+  nodes: CanvasNode[],
+  groupId: string,
+): { prompts: number; loops: number; images: number } {
+  const group = nodes.find((n) => String(asObj(n).id) === groupId);
+  const grid = (((asObj(group ?? {}).data ?? {}) as {
+    items?: Array<{ kind?: string }>;
+  }).items ?? []).filter((i) => i.kind !== 'video');
+  let prompts = 0;
+  let loops = 0;
+  let memberImages = 0;
+  for (const n of nodes) {
+    if (asObj(n).parentId !== groupId) continue;
+    const type = asObj(n).type;
+    if (type === 'prompt') prompts += 1;
+    else if (type === 'loop') loops += 1;
+    else {
+      const data = (asObj(n).data ?? {}) as {
+        items?: Array<{ kind?: string }>;
+        images?: Array<{ kind?: string }>;
+      };
+      memberImages += [...(data.items ?? []), ...(data.images ?? [])].filter(
+        (i) => i.kind !== 'video',
+      ).length;
+    }
+  }
+  return { prompts, loops, images: grid.length + memberImages };
+}
+
+/** Every image in the group — grid items first, then member images in node
+ *  order, deduped by url (IC's cross-member group preview sequence). */
+export function groupPreviewItems(
+  nodes: CanvasNode[],
+  groupId: string,
+): Array<{ url: string; name?: string }> {
+  const out: Array<{ url: string; name?: string }> = [];
+  const seen = new Set<string>();
+  const push = (i: { url?: string; kind?: string; name?: string }) => {
+    if (!i.url || i.kind === 'video' || seen.has(i.url)) return;
+    seen.add(i.url);
+    out.push({ url: i.url, name: i.name });
+  };
+  const group = nodes.find((n) => String(asObj(n).id) === groupId);
+  for (const i of ((asObj(group ?? {}).data ?? {}) as {
+    items?: Array<{ url?: string; kind?: string; name?: string }>;
+  }).items ?? []) {
+    push(i);
+  }
+  for (const n of nodes) {
+    if (asObj(n).parentId !== groupId) continue;
+    const data = (asObj(n).data ?? {}) as {
+      items?: Array<{ url?: string; kind?: string; name?: string }>;
+      images?: Array<{ url?: string; kind?: string; name?: string }>;
+    };
+    for (const i of [...(data.items ?? []), ...(data.images ?? [])]) push(i);
+  }
+  return out;
+}
