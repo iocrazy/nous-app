@@ -92,6 +92,7 @@ const baseProps: PublishPreviewProps = {
   avatarUrl: null,
   platform: 'douyin',
   covers: null,
+  soundtrack: { kind: 'platformDefault' },
   mediaToken: undefined,
   orientation: 'vertical',
   onOrientationChange: () => {},
@@ -627,14 +628,19 @@ describe('the video tab', () => {
     expect(player().getAttribute('src')).toBe('/file/clip-1?token=jwt');
   });
 
-  it('gives the user a seek bar, and does not start on its own', () => {
+  it('keeps the seek bar native and reachable, and does not start on its own', () => {
     openVideo();
     const el = player();
     /* Native controls ARE the draggable progress bar. jsdom cannot drag one —
        no layout means no pointer geometry — so what is pinned here is that the
-       control surface is present and that playback is not automatic. Actual
-       dragging was exercised in a real browser; see the PR body. */
-    expect(el.hasAttribute('controls')).toBe(true);
+       control surface is the native one and that playback is not automatic.
+       Actual dragging was exercised in a real browser; see the PR body.
+
+       `tabIndex` is asserted because it is load-bearing rather than cosmetic:
+       a <video> WITHOUT `controls` is not focusable, so dropping it would take
+       the keyboard route to the (now hidden) bar away entirely. */
+    expect(el.tagName).toBe('VIDEO');
+    expect(el.getAttribute('tabindex')).toBe('0');
     expect(el.getAttribute('preload')).toBe('metadata');
     expect(el.autoplay).toBe(false);
   });
@@ -801,5 +807,312 @@ describe('playback stops when the user loses sight of it', () => {
     // zero above is a fact about the rule and not about a dead spy.
     fireEvent.click(screen.getByRole('button', { name: 'Next clip' }));
     expect(pauseSpy.mock.calls.length).toBe(1);
+  });
+});
+
+/**
+ * ══ THE IMMERSIVE (FULL-SCREEN) VIEW ════════════════════════════════════════
+ *
+ * The video and gallery views draw the content edge to edge with the app's
+ * interface floating over it. What they replaced centred a small player in an
+ * otherwise empty phone with the title printed underneath, which reads as a
+ * video embedded in a picture of a phone rather than as the post.
+ *
+ * ⚠️ WHAT THIS FILE CAN AND CANNOT SAY ABOUT "FILLS THE SCREEN".
+ *
+ * It cannot say it. jsdom has no layout engine, so every
+ * `getBoundingClientRect()` is zeroes and no assertion here can measure that
+ * anything covers anything. What IS asserted is the style RULES that produce
+ * it (`position`, `width`, `height`, `object-fit`, `z-index` — all literal
+ * values, which jsdom does resolve) plus the DOM the rules apply to. The
+ * geometry itself was measured in a real browser and written into the PR body;
+ * dressing a rule assertion up as a layout assertion would be the more
+ * dangerous of the two possible mistakes here.
+ *
+ * ⚠️ AND THE FALSE GREEN THIS SECTION IS MOST EXPOSED TO.
+ *
+ * The headline defect being guarded against is invented interface data — a
+ * like count, a fabricated sound line, a handle nobody owns. "The screen shows
+ * no numbers" is satisfied just as well by a screen that failed to render at
+ * all. So absence is never asserted on its own: the screen's whole text is
+ * pinned as an EQUALITY against the exact string it should have, which fails
+ * both when something is invented AND when the overlay stops rendering.
+ */
+describe('the immersive full-screen view', () => {
+  const CLIP_2 = { id: 'clip-2', filename: 'take-5.mp4', thumbnail_url: null };
+
+  const openVideo = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'video', items: [CLIP], ...props });
+    fireEvent.click(tab('Video preview'));
+    return utils;
+  };
+  const openGallery = (props: Partial<PublishPreviewProps> = {}) => {
+    const utils = renderPanel({ kind: 'images', items: [IMAGE_A], ...props });
+    fireEvent.click(tab('Gallery preview'));
+    return utils;
+  };
+
+  const immersive = (): HTMLElement =>
+    document.querySelector('.pv-screen.pv-im') as HTMLElement;
+  const stage = (): HTMLElement =>
+    document.querySelector('.pv-im .pv-stage') as HTMLElement;
+
+  /**
+   * The content is the background, not an object sitting on one.
+   *
+   * Both views are checked because they took the fix separately, and a gallery
+   * left on the old centred rules would look exactly as wrong as the player
+   * did — this is the pair that would have gone green on half a fix.
+   */
+  it('lays the clip out as the screen itself rather than as a box on it', () => {
+    openVideo();
+    expect(window.getComputedStyle(stage()).position).toBe('absolute');
+
+    const media = window.getComputedStyle(
+      document.querySelector('.pv-im .pv-stage .pv-video') as HTMLElement,
+    );
+    expect(media.width).toBe('100%');
+    expect(media.height).toBe('100%');
+    // `contain`, not `cover`: the platform letterboxes anything that is not
+    // the screen's own shape, and cropping the user's frame would misreport
+    // what actually gets posted.
+    expect(media.objectFit).toBe('contain');
+  });
+
+  it('lays a gallery image out the same way', () => {
+    openGallery();
+    expect(window.getComputedStyle(stage()).position).toBe('absolute');
+    const media = window.getComputedStyle(
+      document.querySelector('.pv-im .pv-stage img') as HTMLElement,
+    );
+    expect(media.width).toBe('100%');
+    expect(media.height).toBe('100%');
+    expect(media.objectFit).toBe('contain');
+  });
+
+  /** The interface floats over the content: strictly above it in the stack. */
+  it('floats the interface above the content instead of beside it', () => {
+    openVideo();
+    const z = (sel: string) =>
+      Number(window.getComputedStyle(document.querySelector(sel) as HTMLElement).zIndex);
+    expect(z('.pv-im .pv-stage')).toBe(1);
+    expect(z('.pv-im-top')).toBe(5);
+    expect(z('.pv-im-rail')).toBe(5);
+    expect(z('.pv-im .pv-caption')).toBe(5);
+    expect(z('.pv-im-nav')).toBe(5);
+    expect(z('.pv-im .pv-pager')).toBe(6);
+  });
+
+  /**
+   * ⚠️ THE ONE THAT CATCHES THE COPY-PASTE.
+   *
+   * The two-column feed's tab row is 精选 / 关注 / 推荐 with 精选 selected; this
+   * screen's is 同城 / 关注 / 推荐 with 推荐 selected. Two words out of three are
+   * shared, so reusing the wrong constant produces a screen that looks almost
+   * right — which is why the exact row AND the exact selection are pinned here
+   * rather than merely "some tabs are drawn".
+   */
+  it('draws this screen’s own tab row, not the two-column feed’s', () => {
+    openVideo();
+    const top = document.querySelector('.pv-im-top') as HTMLElement;
+    expect(Array.from(top.querySelectorAll('span')).map((n) => n.textContent))
+      .toEqual(['同城', '关注', '推荐']);
+    expect((top.querySelector('.cur') as HTMLElement).textContent).toBe('推荐');
+  });
+
+  it('draws the app’s bottom navigation', () => {
+    openVideo();
+    const nav = document.querySelector('.pv-im-nav') as HTMLElement;
+    expect(Array.from(nav.querySelectorAll('span')).map((n) => n.textContent))
+      .toEqual(['首页', '朋友', '＋', '消息', '我']);
+  });
+
+  /**
+   * ⚠️ THE FABRICATION GUARD.
+   *
+   * Douyin puts a like / comment / favourite count beside every rail icon.
+   * We do not have those numbers, and an unpublished post does not have them
+   * either — `0` reads as a measurement of something that was never measured.
+   *
+   * Asserted as an equality on the WHOLE screen's text rather than as "no
+   * digits in the rail", for two reasons: a `not.toContain` passes on a screen
+   * that renders nothing, and a count could grow back anywhere on the overlay,
+   * not only where it used to sit. Every character below is either the
+   * platform's own furniture, the user's own material, or our pager.
+   */
+  it('puts exactly the user’s own material on the screen and invents nothing', () => {
+    openVideo({ title: 'Studio tour', handle: 'realaccount' });
+    expect(immersive().textContent).toBe(
+      '同城关注推荐@realaccountStudio tour原声1 / 1首页朋友＋消息我',
+    );
+    // And the rail really did render, so the equality above is a statement
+    // about what its icons carry rather than about a rail that is missing.
+    const rail = document.querySelector('.pv-im-rail') as HTMLElement;
+    expect(rail.querySelectorAll('svg').length).toBe(5);
+  });
+
+  /** The avatar is the account's real one, or nothing at all. */
+  it('shows the account’s own avatar, and draws no stand-in when it has none', () => {
+    const { update } = openVideo({ handle: 'realaccount', avatarUrl: '/avatar/real' });
+    const rail = () => document.querySelector('.pv-im-rail') as HTMLElement;
+    expect(rail().querySelectorAll('img').length).toBe(1);
+    expect(rail().querySelector('img')?.getAttribute('src')).toBe('/avatar/real');
+
+    update({ avatarUrl: null });
+    // Paired with the glyph count so "no avatar" cannot be satisfied by a rail
+    // that stopped rendering altogether.
+    expect(rail().querySelectorAll('img').length).toBe(0);
+    expect(rail().querySelectorAll('svg').length).toBe(5);
+  });
+
+  /**
+   * The sound line, all four ways it can end.
+   *
+   * The unconditional "Original sound · @handle" this panel used to print is
+   * one of the fabrications the component exists to prevent: the page has a
+   * music panel, so the moment a track is picked that line is simply false.
+   */
+  describe('the sound line', () => {
+    const caption = (): HTMLElement =>
+      document.querySelector('.pv-im .pv-caption') as HTMLElement;
+
+    it('names the picked track, author and all', () => {
+      openVideo({
+        title: 'Studio tour',
+        handle: 'realaccount',
+        soundtrack: { kind: 'track', label: 'Sunset Drive - Kite Club' },
+      });
+      expect(caption().textContent).toBe('@realaccountStudio tourSunset Drive - Kite Club');
+    });
+
+    it('says the platform’s own word when the music control is left alone', () => {
+      openVideo({ title: 'Studio tour', handle: 'realaccount' });
+      expect(caption().textContent).toBe('@realaccountStudio tour原声');
+    });
+
+    /**
+     * A keyword with no track picked is the case nobody can answer: the
+     * browser types it into the platform's own dialog and whatever comes back
+     * gets attached, and one search really does return several
+     * character-identical titles under different ids. Printing the keyword
+     * would name a track we have not got.
+     */
+    it('says nothing when a keyword was typed but no track picked', () => {
+      openVideo({
+        title: 'Studio tour',
+        handle: 'realaccount',
+        soundtrack: { kind: 'unresolved' },
+      });
+      expect(caption().textContent).toBe('@realaccountStudio tour');
+    });
+
+    /**
+     * "Leave the music control alone" means a video keeps its own recorded
+     * audio. A gallery has no recorded audio to keep, so what ends up on one
+     * is not something this page knows.
+     */
+    it('says nothing on an image post with no track picked', () => {
+      openGallery({ title: 'Studio tour', handle: 'realaccount' });
+      expect(caption().textContent).toBe('@realaccountStudio tour');
+    });
+  });
+
+  /**
+   * ⚠️ The chrome is a depiction of ONE app. Drawing Douyin's furniture around
+   * a Xiaohongshu post would be a fabrication of a different app's interface —
+   * the same defect as an invented count, wearing a hat.
+   */
+  it('draws no platform furniture at all when the post is not going to Douyin', () => {
+    openVideo({ platform: 'xiaohongshu', title: 'Studio tour', handle: 'realaccount' });
+    // The user's own material still renders — asserted first, so the emptiness
+    // below is a statement about the chrome and not about a blank panel.
+    expect(immersive().textContent).toBe('@realaccountStudio tour1 / 1');
+    expect(document.querySelectorAll('.pv-im-top').length).toBe(0);
+    expect(document.querySelectorAll('.pv-im-rail').length).toBe(0);
+    expect(document.querySelectorAll('.pv-im-nav').length).toBe(0);
+  });
+
+  it('tells the reader which parts of the screen are a sketch', () => {
+    openVideo();
+    expect(screen.getByText(
+      'The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.',
+    )).toBeTruthy();
+  });
+
+  it('names the pager as ours rather than letting it pass for the platform’s', () => {
+    openVideo({ items: [CLIP, CLIP_2] });
+    const pagerGroup = screen.getByRole('group', {
+      name: 'Preview control (part of this page, not the platform)',
+    });
+    expect(within(pagerGroup).getByText('1 / 2')).toBeTruthy();
+  });
+
+  /**
+   * ══ THE CONTROL BAR APPEARS ON INTERACTION ════════════════════════════════
+   *
+   * The bar stays NATIVE — a hand-rolled scrubber is drag behaviour, and jsdom
+   * has no pointer geometry, so hand-rolling would move the most breakable
+   * part of this panel outside the gate entirely. But a bar that is always up
+   * (play button, volume slider, overflow menu) is most of what made the old
+   * preview read as a player rather than as the post, so it is revealed on
+   * interaction rather than removed.
+   *
+   * The reveal rule itself is plain DOM events, so it IS testable, and every
+   * case below asserts BOTH states — a rule that only ever turned the bar on
+   * would satisfy half of each pair.
+   */
+  describe('the player’s control bar', () => {
+    const hasBar = () =>
+      (document.querySelector('.pv-im .pv-video') as HTMLVideoElement).hasAttribute('controls');
+
+    it('is down until the reader points at the screen, and goes back down after', () => {
+      openVideo();
+      expect(hasBar()).toBe(false);
+
+      fireEvent.mouseOver(immersive());
+      expect(hasBar()).toBe(true);
+
+      fireEvent.mouseOut(immersive());
+      expect(hasBar()).toBe(false);
+    });
+
+    it('comes up for a tap, for readers with no pointer to hover with', () => {
+      openVideo();
+      expect(hasBar()).toBe(false);
+
+      fireEvent.click(immersive());
+      expect(hasBar()).toBe(true);
+    });
+
+    /** The keyboard route. `tabIndex` on the player is what makes it exist. */
+    it('comes up when the player takes keyboard focus, and goes down on blur', () => {
+      openVideo();
+      const el = document.querySelector('.pv-im .pv-video') as HTMLVideoElement;
+      expect(hasBar()).toBe(false);
+
+      fireEvent.focus(el);
+      expect(hasBar()).toBe(true);
+
+      fireEvent.blur(el);
+      expect(hasBar()).toBe(false);
+    });
+
+    /**
+     * The native bar is painted inside the player, i.e. under every overlay,
+     * and the bottom navigation is the only decoration low enough to cover it.
+     * A real control the reader asked for outranks a sketch of somebody
+     * else's, so the sketch steps aside while the bar is up.
+     */
+    it('gets the bottom navigation and the caption out of its way while it is up', () => {
+      openVideo();
+      const nav = () => document.querySelector('.pv-im-nav') as HTMLElement;
+      const caption = () => document.querySelector('.pv-im .pv-caption') as HTMLElement;
+      expect(window.getComputedStyle(nav()).opacity).toBe('1');
+      expect(window.getComputedStyle(caption()).bottom).toBe('44px');
+
+      fireEvent.mouseOver(immersive());
+      expect(window.getComputedStyle(nav()).opacity).toBe('0');
+      expect(window.getComputedStyle(caption()).bottom).toBe('56px');
+    });
   });
 });
