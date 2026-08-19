@@ -23,6 +23,7 @@ import {
 import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
+import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -44,6 +45,17 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  // W×H per cell, filled from the <img> natural size on load (IC's
+  // image-resolution-badge).
+  const [resBadges, setResBadges] = useState<Record<number, string>>({});
+  const removeItem = (idx: number) => {
+    const current = (useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as { id?: unknown }).id === id) as
+      | { data?: MediaNodeData }
+      | undefined)?.data;
+    patch({ items: (current?.items ?? []).filter((_, i) => i !== idx) });
+  };
   // Read-only: every upload path goes (Add, the empty-state click, the
   // file drop) — they POST an import AND patch the node. Thumbnails and
   // the lightbox are pure viewing and stay.
@@ -132,6 +144,19 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      {(items?.length ?? 0) > 0 && (
+        <OutputNodeToolbar
+          items={(items ?? []).map((it) => ({ url: it.url, name: it.name }))}
+          pinned={Boolean(selected)}
+          onPreview={() =>
+            setLightbox({
+              kind: (items ?? [])[0]?.kind === 'video' ? 'video' : 'image',
+              index: 0,
+            })
+          }
+          readOnly={readOnly}
+        />
+      )}
       <AttachedComposerPanel
         nodeId={id}
         inputUrls={(items ?? [])
@@ -185,7 +210,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
                 return (
                   <div
                     key={`${item.url}-${i}`}
-                    className="overflow-hidden rounded-md bg-canvas-card"
+                    className="group/cell relative overflow-hidden rounded-md bg-canvas-card"
                   >
                     <button
                       type="button"
@@ -209,9 +234,43 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
                           alt={item.name ?? ''}
                           loading="lazy"
                           className="aspect-square w-full object-cover"
+                          onLoad={(e) => {
+                            const el = e.currentTarget;
+                            if (el.naturalWidth) {
+                              setResBadges((b) => ({
+                                ...b,
+                                [i]: `${el.naturalWidth} x ${el.naturalHeight}`,
+                              }));
+                            }
+                          }}
                         />
                       )}
                     </button>
+                    {/* IC image-resolution-badge: W×H, hover-revealed. */}
+                    {resBadges[i] && (
+                      <span
+                        data-testid="media-res-badge"
+                        className="pointer-events-none absolute bottom-1 left-1 rounded bg-canvas-card/90 px-1 text-[8px] font-semibold text-canvas-muted opacity-0 transition-opacity group-hover/cell:opacity-100"
+                      >
+                        {resBadges[i]}
+                      </span>
+                    )}
+                    {/* IC mini-x image-delete: hover-revealed per-cell delete. */}
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        data-testid="media-item-delete"
+                        aria-label="Remove item"
+                        title="Remove item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeItem(i);
+                        }}
+                        className="nodrag absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-canvas-card/90 text-[9px] text-canvas-muted opacity-0 transition-opacity hover:text-canvas-text group-hover/cell:opacity-100"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 );
               });
