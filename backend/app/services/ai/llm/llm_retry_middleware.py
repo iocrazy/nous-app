@@ -30,16 +30,14 @@ after the middleware exhausts retries on each model). Order of escalation:
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from loguru import logger
+
 from app.schemas.ai_library import ComposedSystemPrompt
-
-logger = logging.getLogger(__name__)
-
 
 # ----------------------------------------------------------------------
 # Error classification
@@ -118,6 +116,59 @@ def _extract_status_code(exc: BaseException) -> Optional[int]:
         if isinstance(code, int):
             return code
     return None
+
+
+# How much of a provider error body to keep. Long enough for a JSON error
+# envelope's code+message, short enough that task_tracking.error_msg (500
+# chars, and it also carries the class name + model list) isn't crowded out.
+_BODY_SNIPPET_MAX = 220
+
+
+def _response_body(exc: BaseException) -> str:
+    """Provider response body off an httpx/requests-shaped exception, or ""."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return ""
+    try:
+        text = getattr(response, "text", "")
+    except Exception:  # noqa: BLE001 — a body that can't be read is not fatal
+        return ""
+    return text if isinstance(text, str) else ""
+
+
+def describe_llm_error(exc: BaseException) -> str:
+    """One self-contained line: exception type, HTTP status, provider body.
+
+    Load-bearing for post-mortems, for two independent reasons:
+
+    1. ``str(httpx.HTTPStatusError)`` stops at "Client error '429 Too Many
+       Requests' for url '…'" — which cannot tell an account-level spend cap
+       ("SetLimitExceeded", fatal until someone raises it in the provider
+       console) apart from a transient burst limit (clears by itself). Only
+       the response BODY carries that distinction, and acting on the two is
+       opposite.
+    2. DBOS pickles an exception's ``args`` and nothing else — no
+       ``__cause__``, no ``__context__``. Whatever is not inside this string
+       by the time :class:`AllModelsFailed` is constructed is unrecoverable
+       once the workflow row is all that's left.
+
+    Redacted before it is returned: the string ends up in a persisted DB row
+    (``task_tracking.error_msg``), and some providers echo request headers
+    back in error envelopes.
+    """
+    from app.boundary.log_redact import redact
+
+    status = _extract_status_code(exc)
+    head = type(exc).__name__ + (f" HTTP {status}" if status is not None else "")
+    detail = _response_body(exc) or str(exc)
+    # Redact BEFORE truncating, never after. Every pattern in log_redact
+    # requires a known prefix plus a minimum length ("sk-" + >=20 chars,
+    # "Bearer " + >=20), so a cut that lands mid-secret leaves a stub too
+    # short to match and the tail goes to task_tracking.error_msg in the
+    # clear. Redacting first replaces the whole secret with "***" while it is
+    # still intact, and the truncation afterwards can only shorten a mask.
+    detail = redact(" ".join(detail.split()))[:_BODY_SNIPPET_MAX]
+    return f"{head}: {detail}" if detail else head
 
 
 # ----------------------------------------------------------------------
@@ -205,9 +256,9 @@ class LLMRetryMiddleware:
             # AI-007: stop before a fresh attempt once the deadline is hit.
             if attempt > 0 and self._deadline_remaining(start) <= 0:
                 logger.warning(
-                    "[LLMRetry] global deadline (%.1fs) reached before attempt %d",
-                    self.total_deadline_seconds,
-                    attempt + 1,
+                    f"[LLMRetry] global deadline "
+                    f"({self.total_deadline_seconds:.1f}s) reached before "
+                    f"attempt {attempt + 1}"
                 )
                 break
             try:
@@ -215,10 +266,9 @@ class LLMRetryMiddleware:
             except Exception as exc:  # noqa: BLE001
                 classification = classify_error(exc)
                 logger.warning(
-                    "[LLMRetry] attempt %d failed: %s (%s)",
-                    attempt + 1,
-                    type(exc).__name__,
-                    classification,
+                    f"[LLMRetry] model={getattr(composed, 'model', '?')} "
+                    f"attempt {attempt + 1}/{self.max_retries + 1} failed "
+                    f"({classification}): {describe_llm_error(exc)}"
                 )
                 last_exc = exc
                 if classification == "non_retryable":
@@ -251,7 +301,8 @@ class LLMRetryMiddleware:
                 await self._sleep_with_cancel(delay)
 
         raise LLMRetryExhausted(
-            f"all {self.max_retries + 1} attempts exhausted; last={last_exc}"
+            f"all {self.max_retries + 1} attempts exhausted; last="
+            + (describe_llm_error(last_exc) if last_exc is not None else "unknown")
         ) from last_exc
 
     def _deadline_remaining(self, start: float) -> float:
@@ -290,4 +341,5 @@ __all__ = [
     "RunCancelled",
     "classify_error",
     "compute_backoff",
+    "describe_llm_error",
 ]

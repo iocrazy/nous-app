@@ -14,6 +14,9 @@ export type AgentDerivedStatus =
   /** `detailKey` is set only for frontend-authored fallbacks; a served
    *  `fault.detail` has no key and is rendered as-is. */
   | { kind: 'fault'; detail: string; detailKey?: string }
+  /** The last run was cut short by something that is not the agent's fault.
+   *  Informational, never red — see INTERRUPTION_DETAIL. */
+  | { kind: 'interrupted'; detail: string; detailKey: string }
   | { kind: 'idle' };
 
 export type AgentGroup = 'writing' | 'art' | 'tools';
@@ -60,12 +63,32 @@ const FALLBACK_FAULT_GENERIC = {
   text: 'Agent is paused',
 };
 
+// Copy for a run that ended through no fault of the agent's. Authored here
+// rather than served (unlike a `fault.detail`) precisely so it can be
+// translated — the endpoint sends a bare reason code.
+//
+// The wording has a job: the previous behaviour showed the raw backend
+// string "Backend restarted while this run was in flight; no heartbeat for
+// >2 minutes." under a red Fault badge, and users reasonably concluded their
+// agent was broken. It must read as "that one run stopped", not "this agent
+// is unwell", and must say the agent is still usable.
+const INTERRUPTION_DETAIL: Record<string, { key: string; text: string }> = {
+  restart: {
+    key: 'aiLibrary.interruption.restart',
+    text: 'The last run stopped early because the service restarted. The agent is fine — run it again.',
+  },
+};
+
 /**
- * Priority: fault > running > needs_reply > idle.
+ * Priority: fault > running > needs_reply > interrupted > idle.
  *
  * A paused agent shows its pause even while runs are still draining — the
  * user's next step is "resume it", not "watch it". Running beats a pending
  * reply for the same reason: the agent is not blocked on the human yet.
+ *
+ * ``interrupted`` sits second-to-last on purpose: it describes a run that is
+ * already over, so it must never mask a live run or a reply the agent is
+ * waiting on. It outranks only ``idle``, which it refines.
  *
  * ``runningIds`` is the realtime feed and ``stats.running_count`` is the
  * polled one; either counts, because the poll lags a freshly started run.
@@ -90,6 +113,16 @@ export function deriveAgentStatus(
   }
   const waiting = stats?.needs_input_count ?? 0;
   if (waiting > 0) return { kind: 'needs_reply', count: waiting };
+  const interruption = stats?.interrupted_reason
+    ? INTERRUPTION_DETAIL[stats.interrupted_reason]
+    : undefined;
+  if (interruption) {
+    return {
+      kind: 'interrupted',
+      detailKey: interruption.key,
+      detail: interruption.text,
+    };
+  }
   return { kind: 'idle' };
 }
 
@@ -104,6 +137,11 @@ export function primaryAction(status: AgentDerivedStatus): { key: PrimaryActionK
       return { key: 'goReply' };
     case 'fault':
       return { key: 'fixGuide' };
+    case 'interrupted':
+      // The interrupted run is the open question ("did my Analyze finish?"),
+      // and the runs list is where it gets answered. Not 'fixGuide' — there
+      // is nothing to fix.
+      return { key: 'viewRuns' };
     default:
       return { key: 'chat' };
   }

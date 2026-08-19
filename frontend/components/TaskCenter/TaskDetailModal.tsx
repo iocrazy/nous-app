@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
-import { humanizeTaskError } from '../../utils/humanizeTaskError';
+import { taskErrorCopy } from '../../utils/taskErrorCopy';
 import { useTaskResult } from './useTaskResult';
 import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
@@ -67,6 +67,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
+          {/* Above the loading / fetch-error branches: a failed task's reason
+              must not wait on (or be replaced by) a result fetch that is
+              looking for output the task never produced. */}
+          <TaskErrorBlock task={task} />
           {result.loading && (
             <div className="flex items-center justify-center py-12 text-ink-500">
               <div className="w-5 h-5 border-2 border-ink-600 border-t-indigo-400 rounded-full animate-spin" />
@@ -96,32 +100,47 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   );
 };
 
+/**
+ * Why this sits at the modal's body level and not inside a result body:
+ * `useTaskResult` routes an ai_summary task to `TextResultBody` whenever it
+ * has a `resource_id` (all four rows of the 2026-08-19 incident did), and
+ * none of the per-kind bodies read `error_msg`. So a failed task rendered
+ * either a fetch error for a summary that was never produced, or plain
+ * "No result detail" — the reason was in the row the whole time and no body
+ * was looking at it. Hoisting it here also means a body added later cannot
+ * silently reintroduce the gap.
+ */
+const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
+  const { t } = useTranslation();
+  if (!task.error_msg) return null;
+
+  const { message, hint } = taskErrorCopy(task.metadata, task.error_msg, t);
+  const raw = task.error_msg.trim();
+  const showRaw = raw.length > 0 && raw !== message;
+
+  return (
+    <div className="px-4 pt-4 text-xs text-red-400">
+      <div className="whitespace-pre-wrap break-words">{message}</div>
+      {hint && <p className="mt-0.5 text-red-300/70">{hint}</p>}
+      {showRaw && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
+            Details
+          </summary>
+          <pre className="mt-1 text-[10px] text-red-300/70 whitespace-pre-wrap break-words bg-red-500/5 border border-red-500/15 rounded p-2 max-h-40 overflow-y-auto">
+            {raw}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+};
+
 const GenericResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
   const hasMeta = task.metadata && Object.keys(task.metadata).length > 0;
   return (
     <div className="p-4 space-y-3">
-      {task.error_msg && (() => {
-        const { message, hint } = humanizeTaskError(task.error_msg);
-        const raw = task.error_msg.trim();
-        const showRaw = raw.length > 0 && raw !== message;
-        return (
-          <div className="text-xs text-red-400">
-            <div className="whitespace-pre-wrap break-words">{message}</div>
-            {hint && <p className="mt-0.5 text-red-300/70">{hint}</p>}
-            {showRaw && (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
-                  Details
-                </summary>
-                <pre className="mt-1 text-[10px] text-red-300/70 whitespace-pre-wrap break-words bg-red-500/5 border border-red-500/15 rounded p-2 max-h-40 overflow-y-auto">
-                  {raw}
-                </pre>
-              </details>
-            )}
-          </div>
-        );
-      })()}
       {hasMeta ? (
         <pre className="text-[11px] text-ink-400 font-mono whitespace-pre-wrap break-words bg-ink-950/50 rounded p-3">
           {JSON.stringify(task.metadata, null, 2)}

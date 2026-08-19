@@ -6,13 +6,14 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { RotateCcw, Ban, Trash2, ExternalLink } from 'lucide-react';
 import {
   taskTypeLabel, useTaskManager, type UnifiedTask,
 } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, statusVisual, relativeTime } from '../../utils/taskDisplay';
 import { classifyFailure } from '../../utils/taskFailure';
-import { humanizeTaskError } from '../../utils/humanizeTaskError';
+import { taskErrorCopy } from '../../utils/taskErrorCopy';
 
 interface TaskRowExpandedProps {
   task: UnifiedTask;
@@ -39,6 +40,7 @@ function formatRuntime(started?: string, completed?: string): string {
 }
 
 export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
+  const { t } = useTranslation();
   const { cancelTask, retryTask, deleteTask } = useTaskManager();
   const v = statusVisual(task.status);
   const md = (task.metadata ?? {}) as Record<string, unknown>;
@@ -117,7 +119,7 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
       )}
 
       {task.error_msg && (() => {
-        const { message, hint } = humanizeTaskError(task.error_msg);
+        const { message, hint, code } = taskErrorCopy(task.metadata, task.error_msg, t);
         const raw = task.error_msg.trim();
         const showRaw = raw.length > 0 && raw !== message;
         return (
@@ -125,9 +127,9 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
             <div>
               <span className="text-rose-400 font-medium">Error: </span>
               <span className="text-rose-300">{message}</span>
-              {task.error_code && (
+              {(code || task.error_code) && (
                 <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-200 text-[10px] ring-1 ring-rose-500/30 font-mono">
-                  {task.error_code}
+                  {code || task.error_code}
                 </span>
               )}
             </div>

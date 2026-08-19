@@ -31,6 +31,7 @@ const stats = (over: Partial<AgentStatsItem> = {}): AgentStatsItem => ({
   running_count: 0,
   needs_input_count: 0,
   fault: null,
+  interrupted_reason: null,
   ...over,
 });
 
@@ -86,6 +87,59 @@ describe('deriveAgentStatus', () => {
     expect(s.kind).toBe('running');
   });
 
+  it('reports a restart-interrupted last run as interrupted, never as a fault', () => {
+    // The 2026-08-19 report: a day of deploys left the Analyze card showing a
+    // red "Fault" badge, so users believed the agent itself was broken.
+    // Killing an in-flight run is routine ops, so it gets its own neutral
+    // status — and `fault` stays null, which is what the "Faults only"
+    // filter and the fault counter key off.
+    const s = deriveAgentStatus(agent(), stats({ interrupted_reason: 'restart' }), new Set());
+    expect(s.kind).toBe('interrupted');
+    expect(s.kind === 'interrupted' && s.detailKey).toBe('aiLibrary.interruption.restart');
+  });
+
+  it('still faults when the last run really died', () => {
+    // The other direction of the same rule — the guard against "fixing" the
+    // report by suppressing bad news. A run the liveness scanner killed while
+    // the backend was up is a genuine fault and must stay red.
+    const s = deriveAgentStatus(
+      agent(),
+      stats({ fault: { kind: 'dead_runs', detail: 'Marked dead by liveness scanner' } }),
+      new Set(),
+    );
+    expect(s.kind).toBe('fault');
+  });
+
+  it('ranks a live run and a pending reply above an interrupted past run', () => {
+    // `interrupted` describes a run that is already over, so it must never
+    // hide something the agent is doing now or waiting on.
+    expect(
+      deriveAgentStatus(
+        agent(),
+        stats({ running_count: 1, interrupted_reason: 'restart' }),
+        new Set(),
+      ).kind,
+    ).toBe('running');
+    expect(
+      deriveAgentStatus(
+        agent(),
+        stats({ needs_input_count: 1, interrupted_reason: 'restart' }),
+        new Set(),
+      ).kind,
+    ).toBe('needs_reply');
+  });
+
+  it('ranks interrupted above idle', () => {
+    // A contrast pair, because the earlier version of this test asserted only
+    // the idle half — which restated 'falls back to idle' and stayed green
+    // even with the whole interrupted branch deleted. The two calls differ in
+    // exactly one field, so the ordering is what's actually being pinned.
+    expect(
+      deriveAgentStatus(agent(), stats({ interrupted_reason: 'restart' }), new Set()).kind,
+    ).toBe('interrupted');
+    expect(deriveAgentStatus(agent(), stats(), new Set()).kind).toBe('idle');
+  });
+
   it('still faults when stats are missing but the row is paused', () => {
     // Fallback copy, because a fault badge with no reason is exactly what
     // the redesign set out to remove.
@@ -101,6 +155,11 @@ describe('primaryAction', () => {
     expect(primaryAction({ kind: 'running' }).key).toBe('viewRuns');
     expect(primaryAction({ kind: 'needs_reply', count: 1 }).key).toBe('goReply');
     expect(primaryAction({ kind: 'fault', detail: 'x' }).key).toBe('fixGuide');
+    // Not 'fixGuide' — there is nothing to fix; the runs list is where
+    // "did my run finish?" gets answered.
+    expect(
+      primaryAction({ kind: 'interrupted', detail: 'x', detailKey: 'k' }).key,
+    ).toBe('viewRuns');
   });
 });
 

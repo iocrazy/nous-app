@@ -338,6 +338,13 @@ class AgentStatsItem(BaseModel):
     running_count: int = 0
     needs_input_count: int = 0
     fault: Optional[AgentFault] = None
+    #: Set when the agent's most recent run was cut short by something that is
+    #: not the agent's fault (currently only a backend restart mid-run). Kept
+    #: OFF ``fault`` on purpose: everything reading ``fault`` — the red badge,
+    #: the "Faults only" filter, the fault counter — means "this agent needs
+    #: fixing", and a routine deploy does not. Carries a bare reason code so
+    #: the copy can be localized client-side.
+    interrupted_reason: Optional[Literal["restart"]] = None
 
 
 class AgentStatsResponse(BaseModel):

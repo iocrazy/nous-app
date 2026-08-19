@@ -92,6 +92,131 @@ def _format_duration_short(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
+# Task Center rows used to be titled with the raw platform_id
+# ("Transcribe: 7643786260724632866") — a Snowflake-shaped number that
+# says nothing about which video is being processed. Preference order,
+# most human-readable first:
+#   1. resources.filename  — what the library card shows the user
+#   2. parsed_media.title  — the platform's own video title
+#   3. platform_id         — last resort only; never the first choice
+# Row titles AND the flow name both go through here, so a step card's
+# header can never disagree with the steps inside it.
+_TASK_NAME_LIMIT = 200
+
+
+def _task_display_name(
+    platform_id: str,
+    resource: dict | None = None,
+    media: dict | None = None,
+) -> str:
+    """Human-readable name for a task row / flow, falling back to the id."""
+    for candidate in ((resource or {}).get("filename"), (media or {}).get("title")):
+        text = str(candidate).strip() if candidate else ""
+        if text:
+            return text[:_TASK_NAME_LIMIT]
+    return platform_id
+
+
+# How far back a manual/auto summary click looks for the transcription it
+# belongs to. A transcription that finished an hour ago is plausibly the
+# same submission ("send to agent" transcribes, then the frontend fires
+# the summary once the transcript lands); one from last week is a
+# different session and grouping them would misrepresent history.
+_FLOW_JOIN_WINDOW_HOURS = 24
+
+# Task types whose flow a follow-up ai_summary may join. Both are shapes
+# of the same "produce a transcript" step: extract_audio is the two-step
+# variant that chains ai_transcription onto the same flow.
+_TRANSCRIBE_TASK_TYPES = ("ai_transcription", "extract_audio")
+
+
+async def _find_joinable_flow_id(
+    resource_id: str,
+    user_id: str,
+    *,
+    window_hours: int = _FLOW_JOIN_WINDOW_HOURS,
+) -> str | None:
+    """flow_id of this user's recent transcription chain for this resource,
+    or None when the summary row should stand on its own.
+
+    Why: "send to agent" transcribes first and the frontend fires the
+    summary only once the transcript lands, so the two rows are created by
+    two separate requests. Without this lookup the user sees a 1/1 step
+    card plus an unrelated loose row for what is, to them, one job.
+
+    A candidate flow must satisfy ALL of these — each one rules out a way
+    of grouping rows that do not belong together:
+
+    * a ``task_tracking`` row for THIS ``resource_id`` — the summary is
+      about this asset, not a neighbouring one;
+    * ``task_type`` in :data:`_TRANSCRIBE_TASK_TYPES` — a download or
+      publish flow for the same resource is a different job;
+    * both the row and the ``task_flows`` parent belong to ``user_id`` —
+      flows are per-user (a teammate summarising the owner's resource
+      gets their own row rather than being spliced into the owner's card);
+    * created within ``window_hours``;
+    * the flow holds no row for a DIFFERENT non-null ``resource_id`` —
+      that is what a batch flow (Soda playlist, batch parse) looks like,
+      and hanging one summary inside a 185-track card is noise. Rows with
+      a NULL resource_id do NOT disqualify: that is the parse root of the
+      very submission this resource came from.
+
+    Best-effort like ``create_flow``: any failure returns None and the
+    summary dispatches un-grouped. Grouping is presentation and must
+    never break dispatch. The return is annotated ``str | None`` to match
+    ``create_flow``'s own signature — both actually hand back the raw
+    ``flow_id`` scalar, which is what ``create(flow_id=...)`` consumes.
+    """
+    # ``TaskTracking.resource_id == None`` compiles to ``IS NULL``, which
+    # matches parse roots — a missing resource must mean "no grouping",
+    # never "group with whatever has no resource". Enforced here rather
+    # than at each call site so the footgun has one owner.
+    if not resource_id:
+        return None
+
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import aliased
+
+    from app.db.session import read_scope
+    from app.models import TaskFlows, TaskTracking
+
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        sibling = aliased(TaskTracking)
+        holds_a_foreign_resource = (
+            select(sibling.dbos_workflow_id)
+            .where(sibling.flow_id == TaskTracking.flow_id)
+            .where(sibling.resource_id.is_not(None))
+            .where(sibling.resource_id != resource_id)
+            .exists()
+        )
+        stmt = (
+            select(TaskTracking.flow_id)
+            .join(TaskFlows, TaskFlows.id == TaskTracking.flow_id)
+            .where(TaskTracking.resource_id == resource_id)
+            .where(TaskTracking.user_id == user_id)
+            .where(TaskTracking.task_type.in_(_TRANSCRIBE_TASK_TYPES))
+            .where(TaskTracking.flow_id.is_not(None))
+            .where(TaskTracking.created_at >= cutoff)
+            .where(TaskFlows.user_id == user_id)
+            .where(~holds_a_foreign_resource)
+            .order_by(TaskTracking.created_at.desc())
+            .limit(1)
+        )
+        async with read_scope() as session:
+            # Returned as-is, not str()'d: this value goes straight into
+            # ``create(flow_id=...)``, and ``create_flow`` already hands that
+            # parameter the raw scalar of the same column type (a UUID under
+            # psycopg3). Same shape on both paths, one less coercion to be
+            # wrong about.
+            return (await session.execute(stmt)).scalars().first() or None
+    except Exception as e:
+        logger.warning(f"[ai] flow join lookup failed (non-fatal): {e}")
+        return None
+
+
 # Two ways a transcribe request can find the resource already occupied,
 # and they mean OPPOSITE things to the caller — collapsing them into one
 # "already in progress" is what made this endpoint answer 200 to requests
@@ -298,10 +423,16 @@ async def trigger_transcription_by_resource(
         # unrelated single rows. create_flow is best-effort and returns None
         # on failure; flow_id=None simply falls back to the old un-grouped
         # behaviour — grouping is presentation and must never fail dispatch.
-        _video_title = (media.get("title") or platform_id)[:50]
+        # One name for the whole card: the flow header, this row, and the
+        # ai_transcription row that extract_audio chains (via the
+        # video_title kwarg below) all read from _video_title.
+        _video_title = _task_display_name(platform_id, resource, media)
+        # "Process", not "Transcribe": the same flow also carries the
+        # extract_audio step and any summary the frontend fires once the
+        # transcript lands, matching the parse chain's "Process {url}".
         flow_id = await tracker.create_flow(
             user_id=auth.user_id,
-            name=f"Transcribe {_video_title}",
+            name=f"Process {_video_title}",
         )
 
         if _has_audio:
@@ -310,7 +441,7 @@ async def trigger_transcription_by_resource(
             _orphan_task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_transcription",
-                title=f"Transcribe: {platform_id}",
+                title=f"Transcribe {_video_title}",
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
@@ -549,13 +680,21 @@ async def trigger_summary_by_resource(
 
             tracker = get_task_manager()
             wf_id = str(_uuid.uuid4())
+            # "Send to agent" transcribes first and fires this summary from a
+            # separate request once the transcript lands. Hang it off that
+            # transcription's flow so the user sees one multi-step card
+            # instead of a 1/1 card plus a loose row. None (no recent
+            # transcription of ours, or the lookup failed) keeps the old
+            # un-grouped behaviour.
+            _flow_id = await _find_joinable_flow_id(resource_id, auth.user_id)
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
-                title=f"Summarize: {platform_id}",
+                title=f"Summarize {_task_display_name(platform_id, resource, media)}",
                 media_id=platform_id,
                 resource_id=resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=_flow_id,
             )
             _orphan_task_id = task_id
 
@@ -733,7 +872,7 @@ async def trigger_visual_analysis_by_resource(
         _orphan_task_id = await tracker.create(
             user_id=auth.user_id,
             task_type="ai_extract",
-            title=f"Analyze: {(media or {}).get('title') or platform_id}",
+            title=f"Analyze {_task_display_name(platform_id, resource, media)}",
             subtitle="L1 cover analysis",
             media_id=platform_id,
             resource_id=resource_id,
@@ -858,10 +997,10 @@ async def trigger_transcription(
         # button calls (frontend/components/MediaCard.tsx), so leaving it
         # flow-less would make the step card depend on which button was
         # clicked.
-        _video_title = (media_row.get("title") or platform_id)[:50]
+        _video_title = _task_display_name(platform_id, owner_resource, media_row)
         flow_id = await tracker.create_flow(
             user_id=auth.user_id,
-            name=f"Transcribe {_video_title}",
+            name=f"Process {_video_title}",
         )
 
         if _has_audio:
@@ -871,7 +1010,7 @@ async def trigger_transcription(
             _orphan_task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_transcription",
-                title=f"Transcribe: {platform_id}",
+                title=f"Transcribe {_video_title}",
                 media_id=platform_id,
                 resource_id=owner_resource_id,
                 dbos_workflow_id=wf_id,
@@ -1010,13 +1149,18 @@ async def trigger_summary(platform_id: str, auth: AuthDep, _scope: ScopedRequest
 
             tracker = get_task_manager()
             wf_id = str(_uuid.uuid4())
+            # Same grouping as the by-resource endpoint — which card the user
+            # gets must not depend on which button they clicked. A missing
+            # resource answers None (the helper's own guard).
+            _flow_id = await _find_joinable_flow_id(_resource_id, auth.user_id)
             task_id = await tracker.create(
                 user_id=auth.user_id,
                 task_type="ai_summary",
-                title=f"Summarize: {platform_id}",
+                title=f"Summarize {_task_display_name(platform_id, resource, media)}",
                 media_id=platform_id,
                 resource_id=_resource_id,
                 dbos_workflow_id=wf_id,
+                flow_id=_flow_id,
             )
             _orphan_task_id = task_id
 

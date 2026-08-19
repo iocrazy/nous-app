@@ -434,6 +434,20 @@ _FAULT_DETAIL = {
 }
 _FAULT_DETAIL_MAX = 120
 
+# error_code values that mean "our infrastructure stopped this run", not
+# "this agent is broken". Written by app/services/liveness/reconcile.py, whose
+# only caller is startup bootstrap — so it fires once per backend start, over
+# runs that were in flight when the process went away. A deploy is a routine
+# operation; letting it paint the gallery card red told users their agent had
+# failed when nothing about the agent was wrong (2026-08-19 report). These
+# surface as a neutral `interrupted_reason` instead.
+#
+# Deliberately NOT included: 'heartbeat_lost' / 'liveness_dead' from
+# liveness_scanner._mark_dead. Those fire while the backend is up and running,
+# so the process really did die under the agent — a genuine fault that must
+# keep lighting the badge.
+_INTERRUPTED_ERROR_CODES = {"stranded_on_restart": "restart"}
+
 
 # MUST stay above /agents/{slug} — FastAPI matches in declaration order and
 # the slug route would otherwise swallow "stats".
@@ -479,7 +493,7 @@ async def get_agents_stats(
     since = datetime.now(timezone.utc) - timedelta(days=window_days)
     usage = await runs_repo.usage_by_agent_since(agent_ids, since)
     running = await runs_repo.running_counts_by_agent(agent_ids)
-    dead_reasons = await runs_repo.dead_run_reasons_by_agent(agent_ids, since)
+    last_run_health = await runs_repo.latest_run_health_by_agent(agent_ids, since)
     needs_input = await issue_repo.count_needs_input_by_agent(
         str(user_uuid), [str(a) for a in agent_ids]
     )
@@ -491,13 +505,23 @@ async def get_agents_stats(
             continue
         paused = row.get("paused_reason")
         fault: Optional[Dict[str, Any]] = None
+        interrupted_reason: Optional[str] = None
+        health = last_run_health.get(agent_id)
         if paused in _FAULT_DETAIL:
             fault = {"kind": paused, "detail": _FAULT_DETAIL[paused]}
-        elif agent_id in dead_reasons:
-            fault = {
-                "kind": "dead_runs",
-                "detail": dead_reasons[agent_id][:_FAULT_DETAIL_MAX],
-            }
+        elif health:
+            code = health.get("error_code")
+            message = health.get("error_message")
+            if code in _INTERRUPTED_ERROR_CODES:
+                # Not a fault: the run was cut short by a restart. The card
+                # says so in neutral copy, worded frontend-side so it can be
+                # translated (unlike _FAULT_DETAIL, which ships English).
+                interrupted_reason = _INTERRUPTED_ERROR_CODES[code]
+            elif message:
+                # No message means the scanner flagged the run 'stuck' without
+                # ever writing a reason; a badge with no remedy is what spec
+                # §B1 set out to remove, so it stays silent.
+                fault = {"kind": "dead_runs", "detail": message[:_FAULT_DETAIL_MAX]}
         agent_usage = usage.get(agent_id) or {}
         items[agent_id] = {
             "runs_7d": int(agent_usage.get("runs", 0)),
@@ -506,6 +530,7 @@ async def get_agents_stats(
             "running_count": int(running.get(agent_id, 0)),
             "needs_input_count": int(needs_input.get(agent_id, 0)),
             "fault": fault,
+            "interrupted_reason": interrupted_reason,
         }
     return {"items": items}
 

@@ -26,10 +26,11 @@ failures don't get better with a different model. Surface them up.
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.llm.llm_retry_middleware import (
@@ -38,13 +39,31 @@ from app.services.ai.llm.llm_retry_middleware import (
     LLMRetryExhausted,
     LLMRetryMiddleware,
     RunCancelled,
+    describe_llm_error,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class AllModelsFailed(Exception):
-    """Primary + every fallback exhausted retries. Run must abort."""
+    """Primary + every fallback exhausted retries. Run must abort.
+
+    The message is deliberately SELF-CONTAINED — it names every model tried
+    and why each one gave up. It used to read only
+    ``"primary + 0 fallback(s) exhausted"`` and lean on ``__cause__`` for the
+    reason, which loses the reason completely on the path that matters most:
+    DBOS pickles an exception's ``args`` and drops ``__cause__``, so the
+    2026-08-19 ai_summary failures reached ``task_tracking`` carrying a model
+    count and nothing else, while the actual cause (a Volcengine
+    account-level ``SetLimitExceeded`` cap on doubao-seed-2-0-pro) survived
+    only in a container's stderr.
+
+    ``attempts`` keeps the same information structured for in-process callers
+    (classification, tests, future UI) — but never assume it survives a
+    workflow boundary; only the message string does.
+    """
+
+    def __init__(self, message: str, *, attempts: Optional[list[dict]] = None):
+        super().__init__(message)
+        self.attempts: list[dict] = list(attempts or [])
 
 
 # Adapter factory contract: given a model id, return a fresh adapter
@@ -121,17 +140,24 @@ class LLMFallbackChain:
         """
         models = [self.primary_model, *self.fallback_models]
         last_exc: Optional[BaseException] = None
+        # One row per model the chain touched, in order — the raw material for
+        # both the AllModelsFailed message and post-mortem log lines. Before
+        # this existed, a fully-exhausted chain left NOTHING queryable behind
+        # (application_logs had zero rows for this module: it logged through
+        # stdlib logging, which app/core/utils.py bridges into loguru only for
+        # an allowlist of third-party logger names).
+        attempts: list[dict] = []
         start = self.monotonic()
 
         for idx, model in enumerate(models):
             # AI-007: stop walking the chain once the global deadline passes.
             if idx > 0 and self._deadline_remaining(start) <= 0:
                 logger.warning(
-                    "[Fallback] global deadline (%.1fs) reached; "
-                    "not trying %s or later models",
-                    self.total_deadline_seconds,
-                    model,
+                    f"[Fallback] global deadline "
+                    f"({self.total_deadline_seconds}s) reached; not trying "
+                    f"{model} or later models"
                 )
+                attempts.append({"model": model, "outcome": "deadline_reached"})
                 break
             # Sprint 3: skip recently-failed models. The registry has
             # already discovered their cooldown via report_status from
@@ -140,10 +166,10 @@ class LLMFallbackChain:
                 self.health_registry is not None
                 and not self.health_registry.is_available(model)
             ):
-                logger.info(
-                    "[Fallback] %s skipped (cooled down by health registry)",
-                    model,
+                logger.warning(
+                    f"[Fallback] {model} skipped (cooled down by health registry)"
                 )
+                attempts.append({"model": model, "outcome": "cooled_down"})
                 if idx > 0:
                     self._switch_log.append(
                         _SwitchEvent(
@@ -158,9 +184,15 @@ class LLMFallbackChain:
                 adapter = self._build_adapter(model)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "[Fallback] adapter init failed for model=%s: %s",
-                    model,
-                    type(exc).__name__,
+                    f"[Fallback] adapter init failed for model={model}: "
+                    f"{describe_llm_error(exc)}"
+                )
+                attempts.append(
+                    {
+                        "model": model,
+                        "outcome": "adapter_init_failed",
+                        "error": describe_llm_error(exc),
+                    }
                 )
                 if idx > 0:
                     self._switch_log.append(
@@ -216,8 +248,26 @@ class LLMFallbackChain:
                 # Auth / bad-request failures don't recover via fallback.
                 raise
             except LLMRetryExhausted as exc:
+                # ``__cause__`` is the provider exception the middleware
+                # gave up on; it holds the status + body. ``exc`` itself only
+                # counts attempts. (Deliberately NOT named ``remaining`` —
+                # that name is the deadline budget a few lines up.)
+                reason = describe_llm_error(exc.__cause__ or exc)
+                models_left = len(models) - idx - 1
                 logger.warning(
-                    "[Fallback] %s exhausted retries; trying next model", model
+                    f"[Fallback] {model} exhausted retries ({reason}); "
+                    + (
+                        f"trying next model ({models_left} left)"
+                        if models_left
+                        else "no models left"
+                    )
+                )
+                attempts.append(
+                    {
+                        "model": model,
+                        "outcome": "retries_exhausted",
+                        "error": reason,
+                    }
                 )
                 last_exc = exc
                 # Sprint 3: report to health registry so subsequent
@@ -255,11 +305,30 @@ class LLMFallbackChain:
             response["_actual_model"] = model
             return response
 
-        # Every model exhausted. Surface the last exception's chain for
-        # observability.
+        # Every model exhausted. The message must stand alone — see the
+        # AllModelsFailed docstring for why ``from last_exc`` is not enough.
         raise AllModelsFailed(
-            f"primary + {len(self.fallback_models)} fallback(s) exhausted"
+            self._exhausted_message(attempts), attempts=attempts
         ) from last_exc
+
+    def _exhausted_message(self, attempts: list[dict]) -> str:
+        """Human-readable summary of an exhausted chain.
+
+        Shape: ``"all N model(s) failed: <model> (<reason>); <model> (…)"`` —
+        the model names first (they answer "which key/quota do I go fix?"),
+        then each model's own reason. Reasons are already truncated per
+        attempt by ``describe_llm_error``; the whole string is clipped again
+        so a long chain can't blow past ``task_tracking.error_msg``'s 500
+        chars and push the model names out of view.
+        """
+        total = 1 + len(self.fallback_models)
+        if not attempts:
+            # Only reachable if every model was skipped before being tried.
+            return f"all {total} model(s) failed (none was attempted)"
+        parts = [
+            f"{a['model']} ({a.get('error') or a.get('outcome')})" for a in attempts
+        ]
+        return f"all {total} model(s) failed: " + "; ".join(parts)[:400]
 
     def _deadline_remaining(self, start: float) -> float:
         """Seconds left before the chain-wide deadline; +inf when unset."""

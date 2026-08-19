@@ -383,3 +383,123 @@ async def test_retry_with_nonzero_backoff_uses_default_sleep():
 
     assert result["choices"][0]["message"]["content"] == "ok"
     assert adapter.call.await_count == 2
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# describe_llm_error — the only place the provider's actual reason survives
+# ──────────────────────────────────────────────────────────────────────────
+# 2026-08-19: four ai_summary runs died on Volcengine 429s. The reason the
+# 429 was fatal ("SetLimitExceeded" — an account cap, not a burst limit) sat
+# in the RESPONSE BODY; httpx's own str() stops at "Client error '429 Too
+# Many Requests' for url '…'". Since DBOS pickles only an exception's args,
+# anything not folded into the message string by the time AllModelsFailed is
+# raised is gone for good.
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, text: str) -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeHTTPStatusError(Exception):
+    def __init__(self, message: str, response: _FakeResponse) -> None:
+        super().__init__(message)
+        self.response = response
+
+
+@pytest.mark.unit
+def test_describe_llm_error_carries_status_and_response_body():
+    from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+    exc = _FakeHTTPStatusError(
+        "Client error '429 Too Many Requests' for url 'https://ark.example/v3'",
+        _FakeResponse(
+            429,
+            '{"error":{"code":"SetLimitExceeded","message":"Your account has '
+            "reached the set inference limit for the [doubao-seed-2-0-pro] "
+            'model"}}',
+        ),
+    )
+    described = describe_llm_error(exc)
+
+    assert "HTTP 429" in described
+    # The distinguishing detail: an account cap vs a transient burst limit.
+    assert "SetLimitExceeded" in described
+
+
+@pytest.mark.unit
+def test_describe_llm_error_falls_back_to_str_without_a_response():
+    from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+    described = describe_llm_error(ValueError("adapter blew up"))
+
+    assert "ValueError" in described
+    assert "adapter blew up" in described
+
+
+@pytest.mark.unit
+def test_describe_llm_error_redacts_secrets_echoed_by_the_provider():
+    """The string is persisted to task_tracking.error_msg — a provider that
+    echoes the request Authorization header back must not leave a key there."""
+    from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+    exc = _FakeHTTPStatusError(
+        "bad request",
+        _FakeResponse(
+            400, "rejected header Authorization: Bearer sk-abcdef0123456789abcdef"
+        ),
+    )
+    described = describe_llm_error(exc)
+
+    assert "sk-abcdef0123456789abcdef" not in described
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_retry_exhausted_message_names_the_provider_reason():
+    """LLMRetryExhausted is what the fallback chain reads to build its own
+    message. If it only counts attempts, the reason is already lost one layer
+    below AllModelsFailed."""
+    from app.services.ai.llm.llm_retry_middleware import (
+        LLMRetryExhausted,
+        LLMRetryMiddleware,
+    )
+
+    adapter = AsyncMock()
+    adapter.call.side_effect = _FakeHTTPStatusError(
+        "429",
+        _FakeResponse(429, '{"error":{"code":"SetLimitExceeded"}}'),
+    )
+    mw = LLMRetryMiddleware(adapter, max_retries=1, base_delay_s=0)
+    mw.sleep = AsyncMock()
+
+    with pytest.raises(LLMRetryExhausted) as excinfo:
+        await mw.call(_composed(), [])
+
+    assert "SetLimitExceeded" in str(excinfo.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pad", list(range(190, 235, 3)))
+def test_describe_llm_error_redacts_before_truncating(pad):
+    """A secret straddling the snippet boundary must not survive as a stub.
+
+    Truncating first left a cut-off key too short for log_redact's
+    prefix+length patterns to match, so up to ~22 plaintext characters landed
+    in task_tracking.error_msg. Sweeping the pad walks the key across the
+    220-char cut so no single lucky offset can pass for coverage.
+    """
+    from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+    secret = "sk-" + "a1b2c3d4" * 6  # 51 chars, well past every minimum
+    exc = _FakeHTTPStatusError(
+        "bad request",
+        _FakeResponse(400, "x" * pad + '{"key":"' + secret + '"}'),
+    )
+
+    described = describe_llm_error(exc)
+
+    # No run of the secret long enough to be useful may appear.
+    for start in range(0, len(secret) - 8):
+        assert secret[start : start + 9] not in described

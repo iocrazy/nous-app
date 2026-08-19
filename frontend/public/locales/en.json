@@ -3465,7 +3465,8 @@
       "idle": "Idle",
       "running": "Running",
       "needsReply": "Waiting for reply",
-      "fault": "Fault"
+      "fault": "Fault",
+      "interrupted": "Last run interrupted"
     },
     "action": {
       "chat": "Chat",
@@ -3491,6 +3492,9 @@
       "budget": "Monthly budget exceeded — raise the budget or resume the agent",
       "manual": "Paused by admin — resume from the agent’s Profile tab",
       "paused": "Agent is paused"
+    },
+    "interruption": {
+      "restart": "The last run stopped early because the service restarted. The agent is fine — run it again."
     }
   },
   "teamUsage": {
@@ -4323,6 +4327,10 @@
     "PROVIDER_RATE_LIMIT": {
       "title": "The AI provider is rate-limiting",
       "hint": "Wait a moment and retry, or switch this task to a different model in Settings → AI."
+    },
+    "PROVIDER_QUOTA_CAP": {
+      "title": "The provider account has hit its configured limit for this model",
+      "hint": "Raise the limit in the provider console, or point this task at another model in Settings → AI."
     },
     "PROVIDER_UNREACHABLE": {
       "title": "Couldn't reach the AI provider",

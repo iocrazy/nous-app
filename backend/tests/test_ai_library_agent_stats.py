@@ -56,6 +56,16 @@ def _agent(agent_id: str, slug: str, **extra):
     return {"id": agent_id, "slug": slug, "name": slug, **extra}
 
 
+def _health(error_code: str, error_message: str, liveness_state: str = "dead"):
+    """One row of what latest_run_health_by_agent returns: the agent's most
+    recent finished run, already filtered down to unhealthy ones."""
+    return {
+        "liveness_state": liveness_state,
+        "error_code": error_code,
+        "error_message": error_message,
+    }
+
+
 def _stub_stack(
     *,
     agents,
@@ -75,7 +85,7 @@ def _stub_stack(
     runs_repo = AsyncMock()
     runs_repo.usage_by_agent_since.return_value = usage or {}
     runs_repo.running_counts_by_agent.return_value = running or {}
-    runs_repo.dead_run_reasons_by_agent.return_value = dead or {}
+    runs_repo.latest_run_health_by_agent.return_value = dead or {}
 
     issue_repo = AsyncMock()
     issue_repo.count_needs_input_by_agent.return_value = needs_input or {}
@@ -159,6 +169,7 @@ async def test_agent_with_no_activity_is_all_zero(client: AsyncClient) -> None:
         "running_count": 0,
         "needs_input_count": 0,
         "fault": None,
+        "interrupted_reason": None,
     }
 
 
@@ -234,7 +245,7 @@ async def test_dead_runs_surface_as_fault_with_truncated_reason(
 ) -> None:
     repos = _stub_stack(
         agents=[_agent(AGENT_A, "script_ai")],
-        dead={AGENT_A: "x" * 400},
+        dead={AGENT_A: _health("liveness_dead", "x" * 400)},
     )
     with _patches(*repos):
         resp = await client.get(f"{BASE}/agents/stats")
@@ -250,12 +261,109 @@ async def test_pause_wins_over_dead_runs(client: AsyncClient) -> None:
     stale error from whatever died before the pause."""
     repos = _stub_stack(
         agents=[_agent(AGENT_A, "script_ai", paused_reason="budget")],
-        dead={AGENT_A: "boom"},
+        dead={AGENT_A: _health("liveness_dead", "boom")},
     )
     with _patches(*repos):
         resp = await client.get(f"{BASE}/agents/stats")
 
     assert resp.json()["items"][AGENT_A]["fault"]["kind"] == "budget"
+
+
+@pytest.mark.asyncio
+async def test_restart_stranded_run_is_interrupted_not_a_fault(
+    client: AsyncClient,
+) -> None:
+    """A deploy that killed an in-flight run must NOT paint the agent red.
+
+    2026-08-19: several deploys in one day left the Analyze card showing a
+    red "Fault" badge reading "Backend restarted while this run was in
+    flight" — users read that as "this agent is broken". It is an ops event,
+    so it comes back on its own neutral field and `fault` stays null.
+    """
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "analyze")],
+        dead={
+            AGENT_A: _health(
+                "stranded_on_restart",
+                "Backend restarted while this run was in flight; no "
+                "heartbeat for >2 minutes.",
+            )
+        },
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    item = resp.json()["items"][AGENT_A]
+    assert item["fault"] is None
+    assert item["interrupted_reason"] == "restart"
+
+
+@pytest.mark.asyncio
+async def test_scanner_killed_run_still_reports_a_fault(
+    client: AsyncClient,
+) -> None:
+    """The other direction of the same rule — the guard against 'fix' by
+    blanket suppression. liveness_scanner marks a run dead while the backend
+    is UP, so the process really did die under the agent: still a fault, and
+    NOT reported as a mere interruption."""
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "analyze")],
+        dead={
+            AGENT_A: _health(
+                "heartbeat_lost", "Marked dead by liveness scanner: heartbeat_lost"
+            )
+        },
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    item = resp.json()["items"][AGENT_A]
+    assert item["fault"]["kind"] == "dead_runs"
+    assert item["interrupted_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_row_without_an_error_code_still_reports_a_fault(
+    client: AsyncClient,
+) -> None:
+    """Backward compatibility with rows written before error_code was set.
+
+    The restart carve-out keys off error_code, so a dead run that predates it
+    (or any writer that left it NULL) has nothing to match on. Those must keep
+    their old behaviour — an unexplained NULL is not evidence of a restart, so
+    it stays a fault. Without this the carve-out could silently widen to
+    "anything we can't classify is fine".
+    """
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "analyze")],
+        dead={AGENT_A: _health(None, "boom")},
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    item = resp.json()["items"][AGENT_A]
+    assert item["fault"]["kind"] == "dead_runs"
+    assert item["fault"]["detail"] == "boom"
+    assert item["interrupted_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_stuck_run_without_a_reason_reports_nothing(
+    client: AsyncClient,
+) -> None:
+    """A 'stuck' row carries no error_message (the scanner writes only the
+    state). A badge with no remedy is what spec §B1 removed, so neither
+    field lights up."""
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "analyze")],
+        dead={AGENT_A: _health(None, None, liveness_state="stuck")},
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    item = resp.json()["items"][AGENT_A]
+    assert item["fault"] is None
+    assert item["interrupted_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -269,7 +377,7 @@ async def test_aggregates_are_batched_not_per_agent(client: AsyncClient) -> None
     assert resp.status_code == 200
     assert runs_repo.usage_by_agent_since.await_count == 1
     assert runs_repo.running_counts_by_agent.await_count == 1
-    assert runs_repo.dead_run_reasons_by_agent.await_count == 1
+    assert runs_repo.latest_run_health_by_agent.await_count == 1
     assert issue_repo.count_needs_input_by_agent.await_count == 1
 
 
@@ -292,7 +400,7 @@ def test_router_does_not_query_inside_a_loop() -> None:
     aggregates = {
         "usage_by_agent_since",
         "running_counts_by_agent",
-        "dead_run_reasons_by_agent",
+        "latest_run_health_by_agent",
         "count_needs_input_by_agent",
     }
     tree = ast.parse(textwrap.dedent(inspect.getsource(module.get_agents_stats)))

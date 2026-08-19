@@ -986,7 +986,10 @@ class TestManualTranscribeFlowGrouping:
         mgr.create_flow.assert_awaited_once()
         flow_kwargs = mgr.create_flow.await_args.kwargs
         assert flow_kwargs["user_id"] == "user-1"
-        assert flow_kwargs["name"] == "Transcribe Clip title"
+        # "Process", not "Transcribe": the same flow also carries the
+        # extract_audio step and the summary the frontend fires once the
+        # transcript lands, matching the parse chain's "Process {url}".
+        assert flow_kwargs["name"] == "Process Clip title"
         assert len(created) == 1
         assert created[0]["task_type"] == "ai_transcription"
         assert created[0]["flow_id"] == FLOW_ID
@@ -1050,7 +1053,7 @@ class TestManualTranscribeFlowGrouping:
         await ai_router.trigger_transcription("pf-legacy", _auth(), None)
 
         mgr.create_flow.assert_awaited_once()
-        assert mgr.create_flow.await_args.kwargs["name"] == "Transcribe Clip title"
+        assert mgr.create_flow.await_args.kwargs["name"] == "Process Clip title"
         assert created[0]["flow_id"] == FLOW_ID
         assert dispatched[0]["dbos_workflow_kwargs"]["flow_id"] == FLOW_ID
 

@@ -19,6 +19,7 @@ from app.services.ai.error_catalog import (
     OUTPUT_PARSE,
     PROVIDER_AUTH,
     PROVIDER_BAD_MODEL,
+    PROVIDER_QUOTA_CAP,
     PROVIDER_RATE_LIMIT,
     PROVIDER_UNREACHABLE,
     TASK_TIMEOUT,
@@ -87,6 +88,62 @@ def test_auth_from_status_code_without_matching_text():
 )
 def test_rate_limit_messages(message):
     assert classify_ai_error(message) == PROVIDER_RATE_LIMIT
+
+
+# ── PROVIDER_QUOTA_CAP ────────────────────────────────────────────────
+# An account-level cap the operator configured, not a burst limit. Volcengine
+# Ark ships it as HTTP 429 — the same status as a transient limit — so the
+# status code alone sends the user to wait out something that never clears.
+# doubao-seed-2-0-pro returned this on 126 consecutive hourly probes across
+# five days while every ai_summary run failed.
+
+_ARK_CAP_BODY = (
+    '{"error":{"code":"SetLimitExceeded","message":"Your account [2103081632] '
+    "has reached the set inference limit for the [doubao-seed-2-0-pro] model, "
+    'and the model is temporarily unavailable"}}'
+)
+
+
+def test_account_cap_beats_the_429_status_it_arrives_in():
+    """The regression this code exists for: `_STATUS_TO_CODE` short-circuits
+    on 429 before any text rule runs, so an exception that EXPOSES a status
+    would classify as PROVIDER_RATE_LIMIT no matter what its body said."""
+    exc = _StatusError(_ARK_CAP_BODY, 429)
+
+    assert classify_ai_error(exc) == PROVIDER_QUOTA_CAP
+
+
+def test_account_cap_survives_the_dbos_and_fallback_wrappers():
+    """The real production shape: the chain is
+    DBOSMaxStepRetriesExceeded → AllModelsFailed → the provider error."""
+    from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
+
+    inner = _StatusError(_ARK_CAP_BODY, 429)
+    exc = _FakeMaxRetries(
+        "run_summarize_agent",
+        1,
+        [
+            AllModelsFailed(
+                f"all 1 model(s) failed: doubao-seed-2-0-pro-260215 ({inner})"
+            )
+        ],
+    )
+
+    assert classify_ai_error(exc) == PROVIDER_QUOTA_CAP
+
+
+def test_account_cap_classifies_from_a_bare_message_too():
+    """`error_msg` re-classification path (no exception object left)."""
+    assert classify_ai_error(_ARK_CAP_BODY) == PROVIDER_QUOTA_CAP
+
+
+def test_a_plain_burst_limit_is_still_a_rate_limit():
+    """Negative control — widening must not swallow the generic 429 case."""
+    exc = _StatusError(
+        "Error code: 429 - {'error': {'code': 'rate_limit_exceeded'}}", 429
+    )
+
+    assert classify_ai_error(exc) == PROVIDER_RATE_LIMIT
 
 
 # ── PROVIDER_UNREACHABLE ──────────────────────────────────────────────

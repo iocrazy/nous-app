@@ -79,6 +79,7 @@ const stat = (over: Partial<AgentStatsItem> = {}): AgentStatsItem => ({
   running_count: 0,
   needs_input_count: 0,
   fault: null,
+  interrupted_reason: null,
   ...over,
 });
 
@@ -194,6 +195,46 @@ describe('AgentGalleryPage', () => {
     });
     renderGallery();
     await waitFor(() => expect(screen.getAllByTestId('agent-card')).toHaveLength(3));
+    fireEvent.click(screen.getByText(/Faults only/));
+    expect(screen.getAllByTestId('agent-card')).toHaveLength(1);
+    expect(screen.getByText('portrait')).toBeTruthy();
+  });
+
+  it('shows a restart-interrupted agent neutrally, not as a fault', async () => {
+    // 2026-08-19 report: a day of deploys left the Analyze card with a red
+    // "Fault" badge reading "Backend restarted while this run was in
+    // flight...", and users concluded the agent was broken. The whole point
+    // of the fix is that this renders as information, not alarm — so assert
+    // the badge is NOT the fault badge and the danger warn-line is absent.
+    getAgentStats.mockResolvedValue({
+      script_ai: stat({ interrupted_reason: 'restart' }),
+    });
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByTestId('agent-card')).toHaveLength(3));
+
+    const card = screen.getByText('script_ai').closest('[data-testid="agent-card"]')!;
+    const badge = card.querySelector('[data-testid="status-badge"]')!;
+    expect(badge.getAttribute('data-status')).toBe('interrupted');
+    expect(badge.textContent).toContain('Last run interrupted');
+    // "not red" is the actual promise to the user, and data-status alone
+    // would still pass if the badge were styled with the danger tokens.
+    expect(badge.className).not.toMatch(/danger/);
+    expect(card.querySelector('[data-testid="fault-warnline"]')).toBeNull();
+    expect(card.querySelector('[data-testid="interrupted-note"]')!.textContent).toContain(
+      'service restarted',
+    );
+  });
+
+  it('keeps an interrupted agent out of the faults-only filter', async () => {
+    // The filter and the counter are what a user checks to answer "how many
+    // of my agents are broken?" — a routine deploy must not inflate it.
+    getAgentStats.mockResolvedValue({
+      script_ai: stat({ interrupted_reason: 'restart' }),
+      portrait: stat({ fault: { kind: 'dead_runs', detail: 'Provider unreachable' } }),
+    });
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByTestId('agent-card')).toHaveLength(3));
+
     fireEvent.click(screen.getByText(/Faults only/));
     expect(screen.getAllByTestId('agent-card')).toHaveLength(1);
     expect(screen.getByText('portrait')).toBeTruthy();
