@@ -141,3 +141,21 @@ export function upstreamPromptText(
   }
   return parts.join(' · ');
 }
+
+
+/** All inputs with the @-selected one moved to the FRONT (multi-ref i2i —
+ *  IC 图1/图2: every input ships as a reference; the chosen one leads). */
+export function resolveEffectiveSourceUrls(
+  prompt: CanvasNode,
+  nodes: CanvasNode[],
+  connections: CanvasConnection[],
+): string[] {
+  const promptId = String(asObj(prompt).id);
+  const inputs = resolveSourceUrls(promptId, nodes, connections);
+  const ref = (asObj(prompt).data as { source_ref?: string } | undefined)
+    ?.source_ref;
+  if (ref && inputs.includes(ref)) {
+    return [ref, ...inputs.filter((u) => u !== ref)];
+  }
+  return inputs;
+}

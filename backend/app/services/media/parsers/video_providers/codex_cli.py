@@ -205,12 +205,22 @@ class CodexCliProvider:
         model_version: Optional[str] = None,
         quality: Optional[str] = None,
         ref_image_path: Optional[str] = None,
+        ref_image_paths: Optional[List[str]] = None,
     ) -> GenResult:
-        """``images generate`` (or ``edit`` with a local ref image) → local PNG."""
+        """``images generate`` (or ``edit`` with local ref images) → local PNG.
+
+        ``ref_image_paths`` supersedes the single ``ref_image_path`` (kept for
+        callers not yet migrated); the CLI takes multiple ``--ref-image``
+        flags (IC caps references at 9)."""
         out_dir = tempfile.mkdtemp(prefix="codeximg_")
         out_path = os.path.join(out_dir, "gen.png")
         size = _ASPECT_TO_SIZE.get(aspect or "", _DEFAULT_SIZE)
-        mode = "edit" if ref_image_path else "generate"
+        refs = [
+            r
+            for r in (ref_image_paths or ([ref_image_path] if ref_image_path else []))
+            if r
+        ][:9]
+        mode = "edit" if refs else "generate"
         args = [
             "images",
             mode,
@@ -227,8 +237,8 @@ class CodexCliProvider:
         ]
         if model_version:
             args += ["--model", model_version]
-        if ref_image_path:
-            args += ["--ref-image", ref_image_path]
+        for ref in refs:
+            args += ["--ref-image", ref]
 
         rc, out, err = await self._run_cli(args, self._timeout)
 

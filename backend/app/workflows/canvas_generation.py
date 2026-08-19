@@ -94,15 +94,41 @@ async def generate_canvas_media_step(
     )
     # Same row-name-vs-actual_model rule as the video branch above.
     gen_model = actual_model or model
-    result = await provider.generate(
-        prompt,
-        gen_model,
-        aspect_ratio=str(params.get("ratio") or ""),
-        reference_image_url=source_url,
-        # IC ⑨ quality pill — consumed by the codex adapter, ignored by
-        # providers without a quality knob (ark/jimeng take **kwargs).
-        quality=str(params.get("quality") or "") or None,
+    # Multi-reference i2i (IC 图1/图2 semantics): the prompt's full input
+    # set rides in params.source_urls; each durable url is materialized to
+    # a LOCAL file for providers whose CLI only eats files (codex). The
+    # original remote url still goes out as reference_image_url for
+    # URL-based providers (ark). IC caps references at 9.
+    from contextlib import AsyncExitStack
+
+    from app.services.library.generated_media_service import (
+        generated_media_local_path,
     )
+
+    raw_refs = params.get("source_urls")
+    ref_urls = [
+        u
+        for u in (raw_refs if isinstance(raw_refs, list) else [])
+        if isinstance(u, str) and u
+    ][:9] or ([source_url] if source_url else [])
+    async with AsyncExitStack() as stack:
+        local_refs: list[str] = []
+        for u in ref_urls:
+            local = await stack.enter_async_context(
+                generated_media_local_path(u, media_kind="image")
+            )
+            if local:
+                local_refs.append(local)
+        result = await provider.generate(
+            prompt,
+            gen_model,
+            aspect_ratio=str(params.get("ratio") or ""),
+            reference_image_url=source_url,
+            reference_image_paths=local_refs or None,
+            # IC ⑨ quality pill — consumed by the codex adapter, ignored by
+            # providers without a quality knob (ark/jimeng take **kwargs).
+            quality=str(params.get("quality") or "") or None,
+        )
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None
     if not remote_url and not local_path:

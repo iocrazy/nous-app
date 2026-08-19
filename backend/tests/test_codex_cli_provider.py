@@ -396,3 +396,34 @@ class TestHealth:
         provider = CodexCliProvider()
 
         assert await provider.health() == {"ok": False, "error": "cli_missing"}
+
+
+class TestMultiRef:
+    async def test_multiple_ref_images_all_reach_the_cli(self, monkeypatch, tmp_path):
+        refs = []
+        for name in ("r1.png", "r2.png"):
+            p = tmp_path / name
+            p.write_bytes(b"\x89PNG\r\n")
+            refs.append(str(p))
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, _writes_out_and_succeeds, captured)
+        provider = CodexCliProvider()
+
+        await provider.generate_image(prompt="p", aspect="1:1", ref_image_paths=refs)
+
+        argv = captured[0]
+        assert "edit" in argv
+        ref_positions = [i for i, a in enumerate(argv) if a == "--ref-image"]
+        assert [argv[i + 1] for i in ref_positions] == refs
+
+    async def test_single_legacy_ref_still_works(self, monkeypatch, tmp_path):
+        ref = tmp_path / "solo.png"
+        ref.write_bytes(b"\x89PNG\r\n")
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, _writes_out_and_succeeds, captured)
+        provider = CodexCliProvider()
+
+        await provider.generate_image(
+            prompt="p", aspect="1:1", ref_image_paths=[str(ref)]
+        )
+        assert "--ref-image" in captured[0]

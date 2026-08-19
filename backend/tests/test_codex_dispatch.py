@@ -86,7 +86,7 @@ async def test_adapter_maps_kwargs_onto_provider():
     assert stub.calls[0]["prompt"] == "a red apple"
     assert stub.calls[0]["aspect"] == "16:9"
     assert stub.calls[0]["model_version"] == "gpt-5.4"
-    assert stub.calls[0]["ref_image_path"] is None
+    assert stub.calls[0]["ref_image_paths"] is None
 
 
 async def test_adapter_passes_local_ref_path_through(tmp_path):
@@ -97,7 +97,7 @@ async def test_adapter_passes_local_ref_path_through(tmp_path):
 
     await adapter.generate("p", "", aspect_ratio="1:1", reference_image_url=str(ref))
 
-    assert stub.calls[0]["ref_image_path"] == str(ref)
+    assert stub.calls[0]["ref_image_paths"] == [str(ref)]
 
 
 async def test_adapter_drops_http_reference_url(tmp_path):
@@ -110,7 +110,7 @@ async def test_adapter_drops_http_reference_url(tmp_path):
         "p", "", aspect_ratio="1:1", reference_image_url="https://x/y.png"
     )
 
-    assert stub.calls[0]["ref_image_path"] is None
+    assert stub.calls[0]["ref_image_paths"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -208,3 +208,33 @@ async def test_image_service_threads_user_id_to_resolver(monkeypatch):
         user_id=_OWNER,
     )
     assert captured["user_id"] == _OWNER
+
+
+async def test_codex_adapter_forwards_reference_paths(tmp_path):
+    from app.services.ai.provider_protocols.codex import _CodexImageAdapter
+    from app.services.media.parsers.video_providers.codex_cli import GenResult
+
+    refs = []
+    for name in ("a.png", "b.png"):
+        f = tmp_path / name
+        f.write_bytes(b"x")
+        refs.append(str(f))
+
+    class _Stub(CodexCliProvider):
+        def __init__(self):
+            super().__init__(bin_path="stub")
+            self.calls = []
+
+        async def generate_image(self, **kwargs):
+            self.calls.append(kwargs)
+            return GenResult(local_path="/tmp/x.png", mime="image/png", raw={})
+
+    stub = _Stub()
+    adapter = _CodexImageAdapter(stub)
+    await adapter.generate(
+        "p",
+        "gpt-5.4",
+        aspect_ratio="1:1",
+        reference_image_paths=refs,
+    )
+    assert stub.calls[0]["ref_image_paths"] == refs

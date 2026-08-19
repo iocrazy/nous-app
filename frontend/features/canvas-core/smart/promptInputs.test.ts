@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveEffectiveSourceUrl, resolveSourceUrl, resolveSourceUrls, upstreamPromptText } from './promptInputs';
+import { resolveEffectiveSourceUrl, resolveEffectiveSourceUrls, resolveSourceUrl, resolveSourceUrls, upstreamPromptText } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';
 
 const NODES: CanvasNode[] = [
@@ -310,5 +310,28 @@ describe('upstreamPromptText', () => {
     ];
     expect(upstreamPromptText('p1', [up1, up2, p], conns)).toBe('a red apple');
     expect(upstreamPromptText('p1', [p], [])).toBe('');
+  });
+});
+
+
+describe('resolveEffectiveSourceUrls (multi-ref, source_ref first)', () => {
+  const media = {
+    id: 'm1', type: 'media', position: { x: 0, y: 0 },
+    data: { title: 'M', items: [
+      { url: '/api/v1/generated-media/a.png', kind: 'image' },
+      { url: '/api/v1/generated-media/b.png', kind: 'image' },
+    ] },
+  } as unknown as CanvasNode;
+  const conn = { id: 'e', source: 'm1', target: 'p1', sourceHandle: null, targetHandle: null };
+
+  it('source_ref moves to the front, order otherwise preserved', () => {
+    const p = {
+      id: 'p1', type: 'prompt', position: { x: 0, y: 0 },
+      data: { body: '', provider_slug: '', agent_id: null, run_status: 'idle', resource_refs: [], source_ref: '/api/v1/generated-media/b.png' },
+    } as unknown as CanvasNode;
+    expect(resolveEffectiveSourceUrls(p, [media, p], [conn])).toEqual([
+      '/api/v1/generated-media/b.png',
+      '/api/v1/generated-media/a.png',
+    ]);
   });
 });
