@@ -15,6 +15,7 @@ import {
   Grid3x3,
   Paintbrush,
   RefreshCw,
+  Theater,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -29,6 +30,8 @@ export interface OutputNodeToolbarProps {
   onCrop?: () => void;
   onExpand?: () => void;
   onMask?: () => void;
+  /** IC 画笔 — annotate with free/rect/ellipse/label/text shapes. */
+  onBrush?: () => void;
   onSplit?: () => void;
   /** Absent → no source prompt → the Rerun key is hidden. */
   onRerun?: () => void;
@@ -47,6 +50,7 @@ export function OutputNodeToolbar({
   onCrop,
   onExpand,
   onMask,
+  onBrush,
   onSplit,
   onRerun,
   rerunning,
@@ -90,6 +94,11 @@ export function OutputNodeToolbar({
       )}
       {onMask && (
         <ToolbarButton label="Mask" onClick={onMask} disabled={readOnly}>
+          <Theater size={13} />
+        </ToolbarButton>
+      )}
+      {onBrush && (
+        <ToolbarButton label="Brush" onClick={onBrush} disabled={readOnly}>
           <Paintbrush size={13} />
         </ToolbarButton>
       )}

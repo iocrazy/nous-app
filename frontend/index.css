@@ -1246,9 +1246,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  /* Chips wrap to a second row when crowded (elapsed pill + status badge
+     on a 280px prompt card) instead of spilling past the border. */
+  flex-wrap: wrap;
+  gap: 4px 10px;
   min-height: 42px;
-  padding: 0 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--canvas-line);
   border-radius: calc(var(--canvas-r-node) - 1px) calc(var(--canvas-r-node) - 1px) 0 0;
 }

@@ -426,3 +426,22 @@ async def test_health_swallows_cli_error(monkeypatch):
 
     monkeypatch.setattr(provider, "_run_cli", raising_run_cli)
     assert await provider.health() == {"ok": False, "error": "timeout"}
+
+
+async def test_generate_video_passes_duration_flag(monkeypatch):
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "text2video": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "v3"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("clip.mp4"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    await provider.generate_video(prompt="a cat", aspect="16:9", duration=10)
+    assert "--duration=10" in captured[0]

@@ -64,3 +64,16 @@ describe('OutputNodeToolbar', () => {
     buttons.forEach((b) => expect(b.className).toContain('nodrag'));
   });
 });
+
+it('renders a Brush key that opens the brush editor when wired', () => {
+  const onBrush = vi.fn();
+  render(
+    <OutputNodeToolbar
+      items={[{ url: '/gm/1/file', name: 'a.png' }]}
+      onPreview={() => {}}
+      onBrush={onBrush}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Brush' }));
+  expect(onBrush).toHaveBeenCalled();
+});

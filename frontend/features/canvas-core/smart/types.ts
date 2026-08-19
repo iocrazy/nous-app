@@ -171,6 +171,9 @@ export interface PromptGenSettings {
    *  by providers with a resolution knob (jimeng resolution_type); codex
    *  model sizes are fixed and ignore it. */
   resolution?: string;
+  /** Video: clip length in seconds (IC 时长 pill) — jimeng CLI --duration;
+   *  absent = provider default. */
+  duration?: number;
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';

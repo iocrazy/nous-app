@@ -449,6 +449,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onCrop={canCrop ? openEditor : undefined}
           onExpand={canSplit ? openOutpaintEditor : undefined}
           onMask={canSplit ? openMaskEditor : undefined}
+          onBrush={() => setEditorMode('brush')}
           onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}

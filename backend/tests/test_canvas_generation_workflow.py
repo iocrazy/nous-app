@@ -101,12 +101,13 @@ async def test_video_step_bridges_source_and_runs_i2v():
             kind="video",
             prompt="animate",
             model="",
-            params={"aspect": "16:9"},
+            params={"aspect": "16:9", "duration": 5},
             source_url="/api/v1/generated-media/9/cover",
         )
 
     call = provider.generate_video.await_args.kwargs
     assert call["image_path"] == "/data/gen/9/media.png"
+    assert call["duration"] == 5
     assert call["model_version"] == "seedance2.0fast"
     assert call["aspect"] == "16:9"
     assert out["local_path"] == "/tmp/jimeng_v/clip.mp4"

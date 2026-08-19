@@ -340,7 +340,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       />
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {/* Text stays the legacy LLM path; Image/Video route Run through
               the G4-B1 generation tasks (Infinite composer's kind toggle). */}
           <UiSelect

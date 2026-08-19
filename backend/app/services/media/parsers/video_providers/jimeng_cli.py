@@ -276,6 +276,7 @@ class JimengCliProvider:
         aspect: str,
         model_version: Optional[str] = None,
         image_path: Optional[str] = None,
+        duration: Optional[int] = None,
     ) -> GenResult:
         """text2video (or image2video when ``image_path`` is given) → local mp4."""
         if image_path:
@@ -284,6 +285,9 @@ class JimengCliProvider:
         else:
             ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
             args = ["text2video", f"--prompt={prompt}", f"--ratio={ratio}"]
+        if duration:
+            # IC parity: seconds knob, snapped by the CLI itself per model.
+            args.append(f"--duration={int(duration)}")
         if model_version:
             args.append(f"--model_version={model_version}")
         args.append(f"--poll={self._video_poll}")
