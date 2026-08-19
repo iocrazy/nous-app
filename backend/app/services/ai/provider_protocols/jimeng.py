@@ -31,6 +31,7 @@ class _JimengImageAdapter(BaseImageProvider):
             prompt=prompt,
             aspect=kwargs.get("aspect_ratio") or "",
             model_version=model or None,
+            resolution_type=kwargs.get("resolution") or None,
         )
         return ImageGenResult(
             image_url="",

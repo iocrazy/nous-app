@@ -38,7 +38,17 @@ export const RATIO_LABELS: Record<string, string> = {
   '4:3': 'Landscape',
   '9:16': 'Tall',
   '16:9': 'Wide',
+  '21:9': 'Ultrawide',
 };
+
+/** Resolution ladder (IC 系统参数 right column). Consumed by providers
+ *  with a resolution knob (jimeng resolution_type); codex sizes are fixed
+ *  by the model and ignore it. */
+export const RESOLUTIONS: Array<{ value: string; label: string; hint: string }> = [
+  { value: '1k', label: '1K', hint: '1024×1024' },
+  { value: '2k', label: '2K', hint: '2048×2048' },
+  { value: '4k', label: '4K', hint: '4096×4096' },
+];
 export const FOOTER_RATIOS = Object.keys(RATIO_LABELS);
 
 const QUALITIES: Array<{ label: string; value: string | undefined }> = [
@@ -104,7 +114,10 @@ export function GenFooterControls({
         disabled={disabled}
       >
         <Scan size={11} />
-        <span>{ratioValue}</span>
+        <span>
+          {ratioValue}
+          {isImage ? ` · ${(gen.resolution ?? '1k').toUpperCase()}` : ''}
+        </span>
       </Pill>
       {isImage && (
         <Pill
@@ -150,27 +163,57 @@ export function GenFooterControls({
       )}
       {open === 'size' && (
         <Pop title="Size">
-          <div className="grid w-56 grid-cols-2 gap-1">
-            {FOOTER_RATIOS.map((r) => (
-              <button
-                key={r}
-                type="button"
-                data-testid="ratio-option"
-                onClick={() =>
-                  pick(isImage ? { ratio: r } : { aspect: r })
-                }
-                className={`nodrag flex items-center justify-between rounded-lg border px-2 py-1 text-xs ${
-                  ratioValue === r
-                    ? 'border-canvas-strong font-bold text-canvas-text'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                <span>{r}</span>
-                <span className="text-[10px] text-canvas-muted">
-                  {RATIO_LABELS[r]}
-                </span>
-              </button>
-            ))}
+          {/* IC 尺寸选择: roomy two-column panel — ratios left, resolution
+              ladder right; HOVER selects (滑动到即选择), click closes. */}
+          <div className="flex w-[380px] gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {FOOTER_RATIOS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  data-testid="ratio-option"
+                  onMouseEnter={() =>
+                    onChange(isImage ? { ratio: r } : { aspect: r })
+                  }
+                  onClick={() =>
+                    pick(isImage ? { ratio: r } : { aspect: r })
+                  }
+                  className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${
+                    ratioValue === r
+                      ? 'border-canvas-strong font-bold text-canvas-text'
+                      : 'border-canvas-line text-canvas-text'
+                  }`}
+                >
+                  <span>{r}</span>
+                  <span className="text-[10px] text-canvas-muted">
+                    {RATIO_LABELS[r]}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {isImage && (
+              <div className="flex w-36 flex-col gap-1">
+                {RESOLUTIONS.map((res) => (
+                  <button
+                    key={res.value}
+                    type="button"
+                    data-testid="resolution-option"
+                    onMouseEnter={() => onChange({ resolution: res.value })}
+                    onClick={() => pick({ resolution: res.value })}
+                    className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${
+                      (gen.resolution ?? '1k') === res.value
+                        ? 'border-canvas-strong font-bold text-canvas-text'
+                        : 'border-canvas-line text-canvas-text'
+                    }`}
+                  >
+                    <span>{res.label}</span>
+                    <span className="text-[10px] text-canvas-muted">
+                      {res.hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </Pop>
       )}
