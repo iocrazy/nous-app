@@ -27,10 +27,11 @@ describe('canConnectSmart', () => {
     expect(canConnectSmart('llm', 'media')).toBe(false);
   });
 
-  it('media cards are sources: media → prompt/loop only, nothing → media', () => {
+  it('media cards are sources: media → prompt/loop/group, nothing → media', () => {
     expect(canConnectSmart('media', 'prompt')).toBe(true);
     expect(canConnectSmart('prompt', 'group')).toBe(false);
-    expect(canConnectSmart('media', 'group')).toBe(false);
+    // media → group collects (IC ⑦)
+    expect(canConnectSmart('media', 'group')).toBe(true);
     expect(canConnectSmart('media', 'loop')).toBe(true);
     expect(canConnectSmart('media', 'output')).toBe(false);
     expect(canConnectSmart('media', 'media')).toBe(false);
@@ -104,5 +105,21 @@ describe('RUN_STATUS_TONE', () => {
   it('accepts "blocked" as a run_status value', () => {
     const status: PromptNodeData['run_status'] = 'blocked';
     expect(RUN_STATUS_TONE[status]).toBe(RUN_STATUS_TONE.blocked);
+  });
+});
+
+describe('canConnectSmart — group as collector (IC parity ⑦)', () => {
+  it('image-bearing nodes wire INTO a group', () => {
+    expect(canConnectSmart('media', 'group')).toBe(true);
+    expect(canConnectSmart('output', 'group')).toBe(true);
+  });
+  it('non-image sources still cannot target a group', () => {
+    expect(canConnectSmart('prompt', 'group')).toBe(false);
+    expect(canConnectSmart('llm', 'group')).toBe(false);
+    expect(canConnectSmart('shot', 'group')).toBe(false);
+  });
+  it('output stays dead-end everywhere else', () => {
+    expect(canConnectSmart('output', 'prompt')).toBe(false);
+    expect(canConnectSmart('output', 'output')).toBe(false);
   });
 });

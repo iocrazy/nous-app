@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { absorbMediaIntoGroup, applyDropMembership, arrangeGroupChildren, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
+import { absorbImagesOnConnect, absorbMediaIntoGroup, applyDropMembership, arrangeGroupChildren, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
 import type { CanvasNode } from '../types';
 
 const n = (id: string, x: number, y: number, extra: Record<string, unknown> = {}): CanvasNode =>
@@ -347,5 +347,45 @@ describe('arrangeGroupChildren', () => {
       position: { x: number; y: number };
     };
     expect(z.position).toEqual({ x: 7, y: 8 });
+  });
+});
+
+
+// ---- absorbImagesOnConnect (IC parity ⑦ — wiring INTO a group collects) --
+
+describe('absorbImagesOnConnect', () => {
+  const groupNode = {
+    id: 'g1',
+    type: 'group',
+    position: { x: 0, y: 0 },
+    data: { label: '', items: [{ url: '/api/v1/generated-media/old.png', kind: 'image' }] },
+  } as unknown as CanvasNode;
+  const mediaNode = {
+    id: 'm1',
+    type: 'media',
+    position: { x: 0, y: 0 },
+    data: {
+      title: 'Media',
+      items: [
+        { url: '/api/v1/generated-media/a.png', kind: 'image', name: 'a' },
+        { url: '/api/v1/generated-media/old.png', kind: 'image', name: 'dup' },
+      ],
+    },
+  } as unknown as CanvasNode;
+
+  it('merges the source images into the group, deduped by url', () => {
+    const out = absorbImagesOnConnect([groupNode, mediaNode], 'm1', 'g1');
+    const g = out.find((n) => (n as { id: string }).id === 'g1') as {
+      data: { items: Array<{ url: string }> };
+    };
+    expect(g.data.items.map((i) => i.url)).toEqual([
+      '/api/v1/generated-media/old.png',
+      '/api/v1/generated-media/a.png',
+    ]);
+  });
+
+  it('non-group target → unchanged identity', () => {
+    const nodes = [groupNode, mediaNode];
+    expect(absorbImagesOnConnect(nodes, 'm1', 'm1')).toBe(nodes);
   });
 });

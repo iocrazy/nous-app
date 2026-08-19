@@ -35,8 +35,7 @@ type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
-const CANVAS_PILL_TRIGGER =
-  'nodrag rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text hover:border-canvas-strong/50 focus-visible:ring-1 focus-visible:ring-canvas-strong/40';
+import { CANVAS_PILL_TRIGGER } from './canvasPill';
 
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {

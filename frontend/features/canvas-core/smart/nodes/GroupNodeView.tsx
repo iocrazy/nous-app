@@ -252,6 +252,9 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           )}
         </div>
       )}
+      {/* Collector handle (IC ⑦): image-bearing cards wire IN and their
+          images absorb into the grid at connect time. */}
+      <Handle type="target" position={Position.Left} />
       {/* Media source handle (group v2): a group with absorbed media wires
           into prompts as an i2i source. Always present — an empty group can
           be wired first and filled after. */}

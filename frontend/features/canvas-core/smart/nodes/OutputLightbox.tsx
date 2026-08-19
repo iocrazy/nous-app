@@ -16,6 +16,10 @@ import {
   GitCompareArrows,
   RefreshCw,
   X,
+  Crop as CropIcon,
+  Expand,
+  Paintbrush,
+  Grid3x3,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -47,6 +51,15 @@ export interface OutputLightboxProps {
   compareSources?: LightboxItem[];
   onRegenerate?: () => void;
   regenerating?: boolean;
+  /** Editing tools (IC ⑧ 图片编辑系统): rendered as a tab bar in the
+   *  header; picking one closes the lightbox and opens that editor.
+   *  Absent → preview-only lightbox (media/group previews). */
+  editActions?: {
+    crop?: () => void;
+    expand?: () => void;
+    mask?: () => void;
+    split?: () => void;
+  };
 }
 
 // downloadUrl / downloadName live in smart/downloadMedia.ts (shared with
@@ -62,7 +75,13 @@ export function OutputLightbox({
   compareSources,
   onRegenerate,
   regenerating,
+  editActions,
 }: OutputLightboxProps) {
+  const pickTool = (fn?: () => void) => () => {
+    if (!fn) return;
+    onClose();
+    fn();
+  };
   const current = items[index];
   const [resolution, setResolution] = useState<string>('');
   const [compareOn, setCompareOn] = useState(false);
@@ -428,6 +447,33 @@ export function OutputLightbox({
             >
               <GitCompareArrows size={14} />
             </LightboxButton>
+          )}
+          {editActions && (
+            <div
+              data-testid="lightbox-edit-bar"
+              className="flex items-center gap-1"
+            >
+              {editActions.crop && (
+                <LightboxButton label="Crop" onClick={pickTool(editActions.crop)}>
+                  <CropIcon size={14} />
+                </LightboxButton>
+              )}
+              {editActions.expand && (
+                <LightboxButton label="Expand" onClick={pickTool(editActions.expand)}>
+                  <Expand size={14} />
+                </LightboxButton>
+              )}
+              {editActions.mask && (
+                <LightboxButton label="Mask" onClick={pickTool(editActions.mask)}>
+                  <Paintbrush size={14} />
+                </LightboxButton>
+              )}
+              {editActions.split && (
+                <LightboxButton label="Split" onClick={pickTool(editActions.split)}>
+                  <Grid3x3 size={14} />
+                </LightboxButton>
+              )}
+            </div>
           )}
           {onRegenerate && (
             <LightboxButton

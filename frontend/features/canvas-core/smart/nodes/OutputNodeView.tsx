@@ -644,6 +644,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           kind={kind === 'video' ? 'video' : 'image'}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
+          editActions={
+            readOnly
+              ? undefined
+              : {
+                  ...(canCrop ? { crop: openEditor } : {}),
+                  ...(canSplit
+                    ? {
+                        expand: openOutpaintEditor,
+                        mask: openMaskEditor,
+                        split: openGridEditor,
+                      }
+                    : {}),
+                }
+          }
           meta={(() => {
             // The generating prompt's body (P3-B meta line) — from the
             // source prompt node, snapshotted like compareSources below.

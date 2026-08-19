@@ -479,3 +479,43 @@ export function arrangeGroupChildren(
     } as CanvasNode;
   });
 }
+
+
+// ---- Connect-time absorb (IC parity ⑦ — wiring INTO a group collects) ----
+
+/** Merge the durable images of ``sourceId`` into group ``targetId``'s grid,
+ *  deduped by url. Returns the input array identity when the target is not
+ *  a group or nothing new lands. One-shot at connect time — images the
+ *  source gains later are not synced (wire again to re-collect). */
+export function absorbImagesOnConnect(
+  nodes: CanvasNode[],
+  sourceId: string,
+  targetId: string,
+): CanvasNode[] {
+  const target = nodes.find((n) => String(asObj(n).id) === targetId);
+  if (!target || asObj(target).type !== 'group') return nodes;
+  const source = nodes.find((n) => String(asObj(n).id) === sourceId);
+  if (!source) return nodes;
+  const src = (asObj(source).data ?? {}) as {
+    items?: Array<{ url: string; kind?: string; name?: string }>;
+    images?: Array<{ url: string; kind?: string; name?: string }>;
+  };
+  const incoming = [...(src.items ?? []), ...(src.images ?? [])].filter(
+    (i) => i?.url,
+  );
+  if (incoming.length === 0) return nodes;
+  const data = (asObj(target).data ?? {}) as {
+    items?: Array<{ url: string }>;
+  };
+  const existing = new Set((data.items ?? []).map((i) => i.url));
+  const fresh = incoming.filter((i) => !existing.has(i.url));
+  if (fresh.length === 0) return nodes;
+  return nodes.map((n) =>
+    String(asObj(n).id) === targetId
+      ? ({
+          ...(n as object),
+          data: { ...data, items: [...(data.items ?? []), ...fresh] },
+        } as CanvasNode)
+      : n,
+  );
+}
