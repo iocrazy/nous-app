@@ -103,6 +103,12 @@ from ..redaction import scrub
 from ..schemas import PublishIntent, SessionStatus
 from ..validation import ProbeKind, classify_playwright_error
 from . import douyin, register_intent_rules, register_publisher
+from .douyin_music_catalog import (
+    MusicCatalogRecorder,
+    align_catalog,
+    describe_catalog,
+    find_song_index,
+)
 
 logger = logging.getLogger("nous_browser.douyin_publish")
 
@@ -4055,29 +4061,78 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
             stage="music",
             requested_music=requested,
         )
-    await search.fill(requested, timeout=click_ms)
+    # Attached BEFORE a single keystroke, because the thing it listens for is a
+    # request: the platform's own track ids live in the search response
+    # [实测 2026-08-19] and nowhere on the rendered row, so a listener installed
+    # after the request has gone gets nothing and the id path silently degrades
+    # to the fingerprint one. Started here rather than at the top of the step so
+    # the window it is live for is the window the dialog is being searched in.
+    catalog = MusicCatalogRecorder()
+    catalog.attach(page)
+    try:
+        await search.fill(requested, timeout=click_ms)
 
-    # Taken **before Enter**, and it stamps: whatever the dialog is showing
-    # right now (the platform's own suggestions, a previous search, or nothing)
-    # is the list this search has to REPLACE. Without this reading, "there are
-    # rows on screen" cannot be told apart from "the search has answered", and
-    # the step would happily read the pre-search list.
-    before = await _music_probe(page, stamp=True)
-    await page.keyboard.press("Enter")
-    readiness = await wait_for_music_results(
-        page, before, timeout_ms=deadline.slice_ms(MUSIC_READY_TIMEOUT_MS)
-    )
+        # Taken **before Enter**, and it stamps: whatever the dialog is showing
+        # right now (the platform's own suggestions, a previous search, or
+        # nothing) is the list this search has to REPLACE. Without this reading,
+        # "there are rows on screen" cannot be told apart from "the search has
+        # answered", and the step would happily read the pre-search list.
+        before = await _music_probe(page, stamp=True)
+        await page.keyboard.press("Enter")
+        readiness = await wait_for_music_results(
+            page, before, timeout_ms=deadline.slice_ms(MUSIC_READY_TIMEOUT_MS)
+        )
 
-    read = await _music_rows(page)
-    rows = read.rows
+        read = await _music_rows(page)
+        rows = read.rows
+        # Bodies are read on their own tasks; without this the payload that
+        # arrived a millisecond ago would be reported as "never captured".
+        await catalog.settle()
+        # The alignment is PROVEN here, not assumed: `align_catalog` checks
+        # every rendered row's title against the payload entry at the same
+        # index and withdraws the whole pairing on one disagreement. Clicking
+        # the row *next to* the right one is indistinguishable from clicking the
+        # right one until the post is live, which is the entire reason this is a
+        # check and not a comment.
+        alignment = align_catalog(rows, catalog.songs(), canonical=canonical_music)
+    finally:
+        catalog.detach()
     # What the dialog showed, in one clause. Carried in the MESSAGE because on
     # this chain the message is the only thing that survives: the caller
     # (`publish_distribution._finish_account`) keeps `reason` and `message` and
     # writes `[reason] message` into the row — every other key of `detail` is
     # dropped, never logged, never stored. A diagnostic put only in `detail`
     # would look like it was working and be discarded every single time.
-    seen = describe_music_rows(read, readiness)
-    if reference is None:
+    # `ids=` rides in the same clause as `rows=` / `saw:` because it is a
+    # property of THIS READ rather than of the verdict — so it reaches all three
+    # refusals below, not only the ambiguous one. Its three states are the whole
+    # point: "the payload proved it addresses these rows", "we never captured
+    # one", and "we captured one and it does not line up" send a reader to three
+    # different places, and any single boolean would merge two of them.
+    seen = f"{describe_music_rows(read, readiness)} {describe_catalog(alignment)}"
+
+    # The identity path, tried first and only when a picked card supplied an id.
+    # `find_song_index` answers `None` on every uncertain outcome — no
+    # alignment, no such id, or an id that somehow appears twice — and the
+    # fingerprint judge below then runs exactly as it did before, including
+    # refusing. There is deliberately no looser fallback keyed on the id: a
+    # half-trusted identity is how a same-titled different upload gets
+    # published, which is the failure this whole path exists to refuse.
+    picked = None if reference is None else find_song_index(alignment, reference.music_id)
+    if picked is not None:
+        # Nothing here was inferred from what the row *looked* like. The
+        # platform said this id is that track, and the alignment proved which
+        # row the platform meant — so this is the one branch a same-titled
+        # different upload cannot survive. The fingerprint path can only ever
+        # *refuse* that case (`music_ambiguous`); this one resolves it.
+        by_index = {row.index: row.name for row in rows}
+        choice = MusicChoice(
+            by_index.get(picked) or reference.music_name,
+            picked,
+            "exact",
+            "the platform's own search response identified this row by id",
+        )
+    elif reference is None:
         # The typed-name path, unchanged: the user knows a name, and any upload
         # carrying it satisfies what he asked for.
         #
@@ -4289,7 +4344,12 @@ async def _set_music(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
         # `exact` on this row is indistinguishable from an `exact` the old
         # title-only match produced — and those are the two claims this whole
         # change exists to separate.
-        detail["music_match_by"] = "reference"
+        # Three values, not two. `id` means the platform's own search response
+        # named this row; `reference` means we matched a fingerprint scraped off
+        # the page. Both render as `exact`, and they are not the same claim —
+        # collapsing them would hide the day the id path stopped running, which
+        # would look exactly like nothing having changed.
+        detail["music_match_by"] = "id" if picked is not None else "reference"
         detail["music_id"] = reference.music_id
     return detail
 
