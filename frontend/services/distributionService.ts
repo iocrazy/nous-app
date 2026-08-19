@@ -602,14 +602,27 @@ export const extractCoverFrames = (body: {
   });
 
 /**
- * Turn one picked candidate frame into the vertical 3:4 + horizontal 4:3 pair
- * (synchronous — it only centre-crops an image that already exists).
+ * Turn the picked frame into the vertical 3:4 + horizontal 4:3 pair
+ * (synchronous).
+ *
+ * What travels is a COORDINATE, not an id: candidate frames are never
+ * persisted, so the server goes back to the source video and re-reads the
+ * frame at `timestamp_seconds` before cropping. That is the same ffmpeg seek
+ * that produced the preview the user clicked, so the picked frame and the
+ * cropped frame are the same one.
  *
  * `publish_task_id` is for editing a task that already exists; the compose
  * form picks a cover BEFORE the task is created and passes the two returned
  * ids into the create body instead.
  */
 export const selectCoverFrame = (body: {
+  source_resource_id: string;
+  timestamp_seconds: number;
+  publish_task_id?: string;
+} | {
+  /** DEPRECATED shape, for the deploy-skew window only — a backend that has
+   *  not shipped yet still persists candidate frames and only understands an
+   *  id. See `CoverCandidate.resource_id`. */
   frame_resource_id: string;
   publish_task_id?: string;
 }): Promise<CoverSelectResult> =>

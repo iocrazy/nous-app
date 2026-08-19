@@ -191,8 +191,8 @@ def test_extract_returns_400_for_a_non_video_source_before_creating_a_task(
 def test_extract_rejects_out_of_range_frame_counts(
     monkeypatch: pytest.MonkeyPatch, num_frames: int
 ) -> None:
-    """每帧都会在用户素材库里多留一行，所以上限在 schema 上就要挡住 ——
-    钳制是兜底，不是唯一的门。"""
+    """每帧都是一次 ffmpeg seek + 一份要走 Realtime 的预览，所以上限在 schema
+    上就要挡住 —— 钳制是兜底，不是唯一的门。"""
     spy = _install_dispatch_spy(monkeypatch)
     _stub_load(monkeypatch, _source())
 
@@ -244,7 +244,35 @@ def test_extract_truncates_an_absurdly_long_source_filename_in_the_title(
 # ============================================================
 
 
+# 当前形状：候选帧不落库，所以选帧回传的是"源视频 + 秒数"这个坐标。
+SELECT_BODY: Dict[str, Any] = {"source_resource_id": "500", "timestamp_seconds": 15.25}
+
+
 def _stub_derive(monkeypatch: pytest.MonkeyPatch, result) -> List[Dict[str, Any]]:
+    calls: List[Dict[str, Any]] = []
+
+    async def fake_derive(*, source_resource_id, timestamp_seconds, user_id, repo=None):
+        calls.append(
+            {
+                "source_resource_id": source_resource_id,
+                "timestamp_seconds": timestamp_seconds,
+                "user_id": user_id,
+            }
+        )
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(
+        "app.services.distribution.cover_frames.derive_cover_pair", fake_derive
+    )
+    return calls
+
+
+def _stub_derive_legacy(
+    monkeypatch: pytest.MonkeyPatch, result
+) -> List[Dict[str, Any]]:
+    """旧形状（frame_resource_id）走的是另一个函数 —— 部署错峰兼容路径。"""
     calls: List[Dict[str, Any]] = []
 
     async def fake_derive(*, frame_resource_id, user_id, repo=None):
@@ -254,7 +282,8 @@ def _stub_derive(monkeypatch: pytest.MonkeyPatch, result) -> List[Dict[str, Any]
         return result
 
     monkeypatch.setattr(
-        "app.services.distribution.cover_frames.derive_cover_pair", fake_derive
+        "app.services.distribution.cover_frames.derive_cover_pair_from_frame",
+        fake_derive,
     )
     return calls
 
@@ -269,9 +298,7 @@ def _pair() -> CoverPair:
 
 def test_select_is_404_when_the_distribution_module_is_off() -> None:
     client = TestClient(_make_app(module_on=False))
-    resp = client.post(
-        "/api/v1/distribution/covers/select", json={"frame_resource_id": "900"}
-    )
+    resp = client.post("/api/v1/distribution/covers/select", json=dict(SELECT_BODY))
     assert resp.status_code == 404
 
 
@@ -289,9 +316,7 @@ def test_select_without_a_publish_task_returns_both_covers_and_writes_nothing_ba
     monkeypatch.setattr(dr.publish_repo, "set_task_covers", fake_set_covers)
 
     client = TestClient(_make_app())
-    resp = client.post(
-        "/api/v1/distribution/covers/select", json={"frame_resource_id": "900"}
-    )
+    resp = client.post("/api/v1/distribution/covers/select", json=dict(SELECT_BODY))
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {
@@ -321,7 +346,7 @@ def test_select_writes_both_cover_ids_onto_the_named_task(
     client = TestClient(_make_app())
     resp = client.post(
         "/api/v1/distribution/covers/select",
-        json={"frame_resource_id": "900", "publish_task_id": "700"},
+        json={**SELECT_BODY, "publish_task_id": "700"},
     )
 
     assert resp.status_code == 200, resp.text
@@ -356,7 +381,7 @@ def test_select_on_someone_elses_task_is_404_and_crops_nothing(
     client = TestClient(_make_app())
     resp = client.post(
         "/api/v1/distribution/covers/select",
-        json={"frame_resource_id": "900", "publish_task_id": "700"},
+        json={**SELECT_BODY, "publish_task_id": "700"},
     )
 
     assert resp.status_code == 404
@@ -376,7 +401,7 @@ def test_select_on_a_missing_task_is_404_and_crops_nothing(
     client = TestClient(_make_app())
     resp = client.post(
         "/api/v1/distribution/covers/select",
-        json={"frame_resource_id": "900", "publish_task_id": "700"},
+        json={**SELECT_BODY, "publish_task_id": "700"},
     )
 
     assert resp.status_code == 404
@@ -388,9 +413,7 @@ def test_select_rejects_unauthenticated_callers_without_cropping(
 ) -> None:
     calls = _stub_derive(monkeypatch, _pair())
     client = TestClient(_make_app(authed=False))
-    resp = client.post(
-        "/api/v1/distribution/covers/select", json={"frame_resource_id": "900"}
-    )
+    resp = client.post("/api/v1/distribution/covers/select", json=dict(SELECT_BODY))
     assert resp.status_code in (401, 403, 422)
     assert calls == []
 
@@ -404,9 +427,7 @@ def test_select_passes_typed_failures_through_as_their_own_status(
     _stub_derive(monkeypatch, CoverFrameError(status_code=status, detail="bad frame"))
 
     client = TestClient(_make_app())
-    resp = client.post(
-        "/api/v1/distribution/covers/select", json={"frame_resource_id": "900"}
-    )
+    resp = client.post("/api/v1/distribution/covers/select", json=dict(SELECT_BODY))
 
     assert resp.status_code == status
     assert resp.json()["detail"] == "bad frame"
@@ -432,14 +453,72 @@ def test_select_treats_a_malformed_publish_task_id_as_not_found(
     client = TestClient(_make_app(), raise_server_exceptions=False)
     resp = client.post(
         "/api/v1/distribution/covers/select",
-        json={"frame_resource_id": "900", "publish_task_id": bad_id},
+        json={**SELECT_BODY, "publish_task_id": bad_id},
     )
 
     assert resp.status_code == 404
     assert calls == []
 
 
-def test_select_requires_a_frame_resource_id() -> None:
+def test_select_carries_the_picked_coordinate_through_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """时间点是"用户挑的那一帧"的唯一坐标 —— 端点丢掉它、取整它、或者传错资源
+    就是"挑 A 得到 B"，而那不会报任何错。"""
+    calls = _stub_derive(monkeypatch, _pair())
+
     client = TestClient(_make_app())
-    resp = client.post("/api/v1/distribution/covers/select", json={})
+    resp = client.post("/api/v1/distribution/covers/select", json=dict(SELECT_BODY))
+
+    assert resp.status_code == 200, resp.text
+    assert calls == [
+        {
+            "source_resource_id": "500",
+            "timestamp_seconds": 15.25,
+            "user_id": USER_ID,
+        }
+    ]
+
+
+def test_select_still_accepts_the_legacy_frame_id_during_the_deploy_skew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """前端与后端是两条独立发布链。窗口里的旧前端只有 resource id，那一次点击
+    必须仍然成功 —— 否则用户看到的是一个突然坏掉的按钮。"""
+    modern = _stub_derive(monkeypatch, _pair())
+    legacy = _stub_derive_legacy(monkeypatch, _pair())
+
+    client = TestClient(_make_app())
+    resp = client.post(
+        "/api/v1/distribution/covers/select", json={"frame_resource_id": "900"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert legacy == [{"frame_resource_id": "900", "user_id": USER_ID}]
+    assert modern == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"source_resource_id": "500"},  # 缺秒数
+        {"timestamp_seconds": 1.0},  # 缺源
+        {**SELECT_BODY, "frame_resource_id": "900"},  # 两种形状混着给
+        {"source_resource_id": "500", "timestamp_seconds": -1.0},  # 负秒数
+    ],
+)
+def test_select_rejects_an_incoherent_body_without_cropping(
+    monkeypatch: pytest.MonkeyPatch, body: Dict[str, Any]
+) -> None:
+    """形状校验在 schema 层，所以坏 body 是一个说得清的 422，不是 router 里
+    ``if`` 出来的 500，也不是"用一半参数猜着干"。"""
+    modern = _stub_derive(monkeypatch, _pair())
+    legacy = _stub_derive_legacy(monkeypatch, _pair())
+
+    client = TestClient(_make_app())
+    resp = client.post("/api/v1/distribution/covers/select", json=body)
+
     assert resp.status_code == 422
+    assert modern == []
+    assert legacy == []

@@ -123,7 +123,9 @@ async def test_select_endpoint_opens_user_scope(monkeypatch: pytest.MonkeyPatch)
     from app.schemas.distribution_cover import CoverSelectRequest
 
     resp = await dr.select_cover_frame(
-        CoverSelectRequest(frame_resource_id="338406805373877"),
+        CoverSelectRequest(
+            source_resource_id="338406805373877", timestamp_seconds=12.5
+        ),
         {"id": USER_ID},
     )
 

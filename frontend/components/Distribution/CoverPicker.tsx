@@ -19,8 +19,16 @@ import { UiSelect } from '../ui/primitives';
  *            seconds-to-minutes work, so it is a DBOS workflow and the
  *            candidate list arrives in `task_tracking.metadata.cover_frames`.
  *   select   POST /covers/select   → both cover ids in the response.
- *            Centre-cropping one already-stored image is fast; making the
- *            user wait on another Realtime round-trip would be a net loss.
+ *            Re-reading one frame out of a source that is almost certainly
+ *            still in the server's local media cache is fast; making the user
+ *            wait on another Realtime round-trip would be a net loss.
+ *
+ * Candidates are NOT resources. Each one used to be persisted as its own
+ * `derived` image row inheriting the source video's folder, so sampling a
+ * video littered the user's Library with frames indistinguishable from real
+ * material. Now the preview rides inline as a data URL and what gets sent back
+ * on pick is the frame's `timestamp_seconds` — the server re-reads that exact
+ * frame (same ffmpeg seek, proven to be deterministic) and crops it.
  *
  * Every terminal state is user-visible and says what to do next (spec §7.8:
  * a trigger path that fails silently is not acceptable). The three shapes that
@@ -67,9 +75,11 @@ export interface CoverPickerProps {
 
 type Status = 'idle' | 'starting' | 'sampling' | 'ready' | 'failed';
 
-/** `12.5` → `0:12`. Null timestamps come from the extractor's fps fallback. */
-const formatStamp = (seconds: number | null): string | null => {
-  if (seconds == null || !Number.isFinite(seconds)) return null;
+/** `12.5` → `0:12`. Nullable defensively: the value comes off a jsonb blob, and
+ *  a tile whose timestamp is unusable must not claim a time it cannot honour —
+ *  `onPickFrame` refuses the same shape rather than posting a bad coordinate. */
+const formatStamp = (seconds: number | null | undefined): string | null => {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 };
@@ -88,7 +98,7 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
   const [deadPhase, setDeadPhase] = useState<string | null>(null);
   const [startErrorStatus, setStartErrorStatus] = useState<number | null | undefined>(undefined);
   const [timedOut, setTimedOut] = useState(false);
-  const [pickedFrame, setPickedFrame] = useState<string | null>(null);
+  const [pickedFrame, setPickedFrame] = useState<number | null>(null);
   const [deriving, setDeriving] = useState(false);
   const [deriveError, setDeriveError] = useState<string | null>(null);
   // Signed URL transport for <img src> — headers are impossible there, and the
@@ -223,13 +233,38 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
   }, [status, taskId]);
 
   // ── select ───────────────────────────────────────────────────────────
-  const onPickFrame = async (frameId: string) => {
+  const onPickFrame = async (candidate: CoverCandidate) => {
     if (deriving) return;
+    // The source the frames were sampled from, as the workflow recorded it.
+    // Preferred over `activeSource` because the user can change the dropdown
+    // while a candidate strip from the previous video is still on screen; the
+    // covers must come from the video these frames belong to.
+    const from = meta?.source_resource_id ?? activeSource;
+    const byCoordinate = Boolean(from) && Number.isFinite(candidate.timestamp_seconds);
+    // Legacy candidates (see `CoverCandidate.resource_id`) carry an id instead
+    // of a preview, and the backend that produced them only understands ids.
+    const legacyId = candidate.preview_data_url ? undefined : candidate.resource_id;
+    if (!byCoordinate && !legacyId) {
+      // Never post a coordinate we cannot stand behind — a bad one would crop
+      // the wrong frame or 400, and both look like "the button did nothing".
+      console.error('distribution: candidate has no usable coordinate', candidate);
+      setDeriveError(
+        t('distribution.publish.coverFrameUnusable', 'That frame cannot be used — sample the video again.'),
+      );
+      return;
+    }
     setDeriving(true);
     setDeriveError(null);
-    setPickedFrame(frameId);
+    setPickedFrame(candidate.index);
     try {
-      const res = await selectCoverFrame({ frame_resource_id: frameId });
+      const res = await selectCoverFrame(
+        legacyId
+          ? { frame_resource_id: legacyId }
+          : {
+            source_resource_id: from as string,
+            timestamp_seconds: candidate.timestamp_seconds,
+          },
+      );
       onChange({
         vertical: res.cover_vertical_resource_id,
         horizontal: res.cover_horizontal_resource_id,
@@ -238,10 +273,17 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
       console.error('distribution: derive cover pair failed', err);
       setPickedFrame(null);
       onChange(null);
+      const status = (err as { status?: number } | null)?.status;
       setDeriveError(
-        (err as { status?: number } | null)?.status === 422
+        status === 422
           ? t('distribution.publish.coverCropUnusable', 'That frame could not be cropped — pick another one.')
-          : t('distribution.publish.coverCropFailed', 'Could not build the covers from that frame. Try again, or pick another frame.'),
+          // 504 is specific to re-reading the frame: the source had to be
+          // fetched again and that took too long. Saying "pick another frame"
+          // there would send the user chasing a problem that is not the
+          // frame's — the same attempt usually works once the fetch warms up.
+          : status === 504
+            ? t('distribution.publish.coverCropTimedOut', 'Reading that frame back took too long. Try the same frame again.')
+            : t('distribution.publish.coverCropFailed', 'Could not build the covers from that frame. Try again, or pick another frame.'),
       );
     } finally {
       setDeriving(false);
@@ -419,14 +461,14 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
                   aria-label={t('distribution.publish.coverCandidates', 'Candidate frames')}
                 >
                   {candidates.map((c) => {
-                    const on = pickedFrame === c.resource_id;
+                    const on = pickedFrame === c.index;
                     const stamp = formatStamp(c.timestamp_seconds);
                     const label = stamp
                       ? t('distribution.publish.coverFrameAt', 'Frame at {{time}}', { time: stamp })
-                      : t('distribution.publish.coverFrameNamed', 'Frame {{name}}', { name: c.filename });
+                      : t('distribution.publish.coverFrameNumbered', 'Frame {{n}}', { n: c.index + 1 });
                     return (
                       <button
-                        key={c.resource_id}
+                        key={c.index}
                         type="button"
                         role="radio"
                         aria-checked={on}
@@ -434,9 +476,19 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
                         title={label}
                         className={`cover-cand ${on ? 'sel' : ''}`}
                         disabled={deriving}
-                        onClick={() => void onPickFrame(c.resource_id)}
+                        onClick={() => void onPickFrame(c)}
                       >
-                        <img src={frameUrl(c.resource_id)} alt="" />
+                        {/* The preview is inline base64 — no fetch, no token,
+                            and nothing persisted to fetch it from. The
+                            `frameUrl` arm only fires for legacy candidates
+                            from a not-yet-shipped backend (see
+                            `CoverCandidate.resource_id`); without it the strip
+                            would render broken images for the few minutes the
+                            frontend is ahead of the backend. */}
+                        <img
+                          src={c.preview_data_url ?? frameUrl(String(c.resource_id))}
+                          alt=""
+                        />
                         {stamp && <span className="stamp">{stamp}</span>}
                         {on && !deriving && (
                           <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
