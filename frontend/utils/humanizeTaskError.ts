@@ -75,8 +75,19 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     message: "This model isn't enabled for the configured provider account.",
   },
   {
+    // Volcengine Ark "SetLimitExceeded" — an inference cap CONFIGURED on the
+    // account for that model, not a burst limit. It returns 429 like a burst
+    // limit does, but waiting never clears it: doubao-seed-2-0-pro failed this
+    // way on every single call for five days (2026-08-14 → 19) and took every
+    // ai_summary run down with it. MUST sit above the generic 429 row, whose
+    // "try again shortly" is actively wrong advice here.
+    test: /setlimitexceeded|reached the set inference limit/i,
+    message: 'The provider account has hit its configured limit for this model.',
+    hint: 'Raise the limit in the provider console, or point this task at another model in Settings → AI.',
+  },
+  {
     // Rate limited.
-    test: /\b429\b|setlimitexceeded|rate.?limit|too many requests/i,
+    test: /\b429\b|rate.?limit|too many requests/i,
     message: 'The AI provider is rate-limiting — try again shortly.',
   },
   {

@@ -46,13 +46,29 @@ describe('humanizeTaskError', () => {
     );
   });
 
-  it('maps rate limiting (429 / SetLimitExceeded)', () => {
+  it('maps a transient 429 to "try again shortly"', () => {
     expect(humanizeTaskError('HTTP 429 Too Many Requests').message).toBe(
       'The AI provider is rate-limiting — try again shortly.',
     );
-    expect(humanizeTaskError('SetLimitExceeded').message).toBe(
-      'The AI provider is rate-limiting — try again shortly.',
+  });
+
+  // Changed 2026-08-19: SetLimitExceeded used to share the generic 429 copy.
+  // It is NOT transient — it is an inference cap configured on the provider
+  // account, and "try again shortly" sent users to wait out something that
+  // never clears. doubao-seed-2-0-pro returned it on 126 consecutive hourly
+  // health probes across five days while every ai_summary run failed.
+  it('separates a configured account cap from a transient rate limit', () => {
+    const raw =
+      'DBOSMaxStepRetriesExceeded: all 1 model(s) failed: ' +
+      'doubao-seed-2-0-pro-260215 (HTTPStatusError HTTP 429: ' +
+      '{"error":{"code":"SetLimitExceeded","message":"Your account has reached ' +
+      'the set inference limit for the [doubao-seed-2-0-pro] model"}})';
+    const { message, hint } = humanizeTaskError(raw);
+
+    expect(message).toBe(
+      'The provider account has hit its configured limit for this model.',
     );
+    expect(hint).toMatch(/provider console|another model/i);
   });
 
   it('maps timeouts', () => {

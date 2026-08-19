@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
-import { humanizeTaskError } from '../../utils/humanizeTaskError';
+import { taskErrorCopy } from '../../utils/taskErrorCopy';
 import { useTaskResult } from './useTaskResult';
 import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
@@ -102,7 +102,7 @@ const GenericResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   return (
     <div className="p-4 space-y-3">
       {task.error_msg && (() => {
-        const { message, hint } = humanizeTaskError(task.error_msg);
+        const { message, hint } = taskErrorCopy(task.metadata, task.error_msg, t);
         const raw = task.error_msg.trim();
         const showRaw = raw.length > 0 && raw !== message;
         return (

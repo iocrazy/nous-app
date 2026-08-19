@@ -355,3 +355,138 @@ async def test_primary_success_keeps_composed_identity():
     await chain.call(composed, [])
 
     assert primary.call.await_args.args[0] is composed  # same object, no churn
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# AllModelsFailed must stand on its own message (2026-08-19 ai_summary)
+# ──────────────────────────────────────────────────────────────────────────
+# The message used to be "primary + N fallback(s) exhausted" and leaned on
+# __cause__ for the reason. DBOS pickles an exception's args and DROPS
+# __cause__, so four production failures reached task_tracking carrying a
+# model count and nothing else — the real cause (a Volcengine account-level
+# SetLimitExceeded cap) survived only in a container's stderr.
+
+
+class _BodyError(Exception):
+    """Adapter failure shaped like an httpx status error (status + body)."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+        self.response = type("_R", (), {"status_code": status_code, "text": body})()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_all_models_failed_message_names_each_model_and_its_reason():
+    primary = AsyncMock()
+    primary.call.side_effect = _BodyError(
+        429, '{"error":{"code":"SetLimitExceeded","message":"account cap"}}'
+    )
+    fb0 = AsyncMock()
+    fb0.call.side_effect = _BodyError(503, "upstream down")
+
+    chain = LLMFallbackChain(
+        primary_model="doubao-seed-2-0-pro-260215",
+        fallback_models=["qwen-plus"],
+        adapter_factory=_make_factory(
+            {"doubao-seed-2-0-pro-260215": primary, "qwen-plus": fb0}
+        ),
+        max_retries_per_model=0,
+        base_delay_s=0,
+    )
+
+    with pytest.raises(AllModelsFailed) as excinfo:
+        await chain.call(_composed(), [])
+
+    message = str(excinfo.value)
+    # Which models were burned — answers "whose quota/key do I go fix?".
+    assert "doubao-seed-2-0-pro-260215" in message
+    assert "qwen-plus" in message
+    # …and why each one gave up, from the provider's own body.
+    assert "SetLimitExceeded" in message
+    assert "upstream down" in message
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_all_models_failed_exposes_structured_attempts():
+    primary = AsyncMock()
+    primary.call.side_effect = _BodyError(429, "capped")
+
+    chain = LLMFallbackChain(
+        primary_model="doubao-seed-2-0-pro-260215",
+        fallback_models=[],
+        adapter_factory=_make_factory({"doubao-seed-2-0-pro-260215": primary}),
+        max_retries_per_model=0,
+        base_delay_s=0,
+    )
+
+    with pytest.raises(AllModelsFailed) as excinfo:
+        await chain.call(_composed(), [])
+
+    attempts = excinfo.value.attempts
+    assert [a["model"] for a in attempts] == ["doubao-seed-2-0-pro-260215"]
+    assert attempts[0]["outcome"] == "retries_exhausted"
+    assert "capped" in attempts[0]["error"]
+
+
+@pytest.mark.unit
+def test_all_models_failed_survives_a_pickle_round_trip():
+    """DBOS pickles the exception to dbos.workflow_status.error, and the
+    task_tracking trigger derives error_msg from those bytes. A custom
+    __init__ that broke unpickling would put the message back out of reach —
+    which is the entire failure this class was changed to prevent."""
+    import pickle
+
+    revived = pickle.loads(
+        pickle.dumps(AllModelsFailed("all 1 model(s) failed: m (why)"))
+    )
+
+    assert str(revived) == "all 1 model(s) failed: m (why)"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_every_attempt_is_logged_for_post_mortem(caplog):
+    """application_logs had ZERO rows for this module across seven days of
+    real failures: it logged through stdlib logging, which app/core/utils.py
+    bridges into loguru for an allowlist of third-party names only. Logging
+    through loguru is what makes a failed chain reconstructable after the
+    fact."""
+    from loguru import logger
+
+    records: list[str] = []
+    sink_id = logger.add(records.append, level="WARNING", format="{message}")
+    try:
+        primary = AsyncMock()
+        primary.call.side_effect = _BodyError(429, "capped")
+        fb0 = AsyncMock()
+        fb0.call.side_effect = _BodyError(503, "upstream down")
+
+        chain = LLMFallbackChain(
+            primary_model="model-a",
+            fallback_models=["model-b"],
+            adapter_factory=_make_factory({"model-a": primary, "model-b": fb0}),
+            max_retries_per_model=0,
+            base_delay_s=0,
+        )
+        with pytest.raises(AllModelsFailed):
+            await chain.call(_composed(), [])
+    finally:
+        logger.remove(sink_id)
+
+    joined = "\n".join(records)
+    # Assert per LAYER, not just "the text appears somewhere": the retry
+    # middleware and the fallback chain each have their own logger, and an
+    # earlier version of this test passed with the chain still on stdlib
+    # logging because the middleware's line happened to carry the same model
+    # name and reason. Pin both prefixes so either regression is caught.
+    retry_lines = [r for r in records if "[LLMRetry]" in r]
+    fallback_lines = [r for r in records if "[Fallback]" in r]
+
+    assert retry_lines, f"retry middleware logged nothing through loguru: {joined}"
+    assert fallback_lines, f"fallback chain logged nothing through loguru: {joined}"
+    assert any("model-a" in r and "capped" in r for r in retry_lines)
+    assert any("model-b" in r and "upstream down" in r for r in retry_lines)
+    assert any("model-a" in r and "capped" in r for r in fallback_lines)
