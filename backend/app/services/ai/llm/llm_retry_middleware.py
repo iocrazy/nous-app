@@ -39,7 +39,6 @@ from loguru import logger
 
 from app.schemas.ai_library import ComposedSystemPrompt
 
-
 # ----------------------------------------------------------------------
 # Error classification
 # ----------------------------------------------------------------------
