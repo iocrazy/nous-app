@@ -8,6 +8,10 @@ export interface TimelineSegment {
   id: string;
   prompt: string;
   seconds: number;
+  /** M1 MiniMax workbench: the clip's generated video url (durable). */
+  result_url?: string | null;
+  /** M1: manual i2v reference frame for THIS clip (durable image url). */
+  ref_url?: string | null;
 }
 
 export interface TimelineNodeData {
@@ -22,6 +26,8 @@ export interface TimelineNodeData {
   /** 0-based index of the segment that broke a failed run (P2-1) —
    *  `segments_done` from the task metadata IS the failing index. */
   failed_index?: number | null;
+  /** M1 workbench: the segment whose panel is open (click-to-select). */
+  selected_segment?: string | null;
   /** Per-segment tail-frame thumbnails (P2-1) — durable /cover URLs,
    *  index-aligned with segments (the last segment has no tail; reorder
    *  pads with nulls to keep alignment). */
@@ -135,4 +141,34 @@ export function segmentIndexAtX(
     if (targetSeconds < acc) return i;
   }
   return segments.length - 1;
+}
+
+
+// ── M1 MiniMax workbench: per-clip results ─────────────────────────────────
+
+export function setSegmentResult(
+  segments: TimelineSegment[],
+  id: string,
+  url: string | null,
+): TimelineSegment[] {
+  return segments.map((s) => (s.id === id ? { ...s, result_url: url } : s));
+}
+
+export function setSegmentRef(
+  segments: TimelineSegment[],
+  id: string,
+  url: string | null,
+): TimelineSegment[] {
+  return segments.map((s) => (s.id === id ? { ...s, ref_url: url } : s));
+}
+
+/** Ordered playable clips (segments with a result), for play-all. */
+export function playableClips(
+  segments: TimelineSegment[],
+): Array<{ id: string; url: string }> {
+  return segments
+    .filter((s): s is TimelineSegment & { result_url: string } =>
+      Boolean(s.result_url),
+    )
+    .map((s) => ({ id: s.id, url: s.result_url }));
 }
