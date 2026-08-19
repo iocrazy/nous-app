@@ -24,6 +24,8 @@ import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
+import { MediaItemEditor } from './MediaItemEditor';
+import type { EditorMode } from '../../editor/UnifiedImageEditor';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -48,6 +50,10 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   // W×H per cell, filled from the <img> natural size on load (IC's
   // image-resolution-badge).
   const [resBadges, setResBadges] = useState<Record<number, string>>({});
+  const [editState, setEditState] = useState<{
+    item: GeneratedImageRef;
+    mode: EditorMode;
+  } | null>(null);
   const removeItem = (idx: number) => {
     const current = (useCanvasCoreStore
       .getState()
@@ -120,6 +126,14 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
     .filter((item) => item.kind === 'video')
     .map((item) => ({ url: item.url, name: item.name }));
   const lightboxItems = lightbox?.kind === 'video' ? videoItems : imageItems;
+  // Image refs in imageItems order — maps a lightbox index back to the item.
+  const imageRefs = (items ?? []).filter((it) => it.kind !== 'video');
+  const openItemEditor = (imageIndex: number, mode: EditorMode) => {
+    const target = imageRefs[imageIndex];
+    if (!target) return;
+    setLightbox(null);
+    setEditState({ item: target, mode });
+  };
 
   return (
     <div
@@ -153,6 +167,26 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
               kind: (items ?? [])[0]?.kind === 'video' ? 'video' : 'image',
               index: 0,
             })
+          }
+          onCrop={
+            !readOnly && imageItems.length > 0
+              ? () => openItemEditor(0, 'crop')
+              : undefined
+          }
+          onExpand={
+            !readOnly && imageItems.length > 0
+              ? () => openItemEditor(0, 'outpaint')
+              : undefined
+          }
+          onMask={
+            !readOnly && imageItems.length > 0
+              ? () => openItemEditor(0, 'mask')
+              : undefined
+          }
+          onSplit={
+            !readOnly && imageItems.length > 0
+              ? () => openItemEditor(0, 'split')
+              : undefined
           }
           readOnly={readOnly}
         />
@@ -308,6 +342,33 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
           kind={lightbox.kind}
           onIndexChange={(next) => setLightbox({ kind: lightbox.kind, index: next })}
           onClose={() => setLightbox(null)}
+          editActions={
+            readOnly || lightbox.kind === 'video'
+              ? undefined
+              : {
+                  crop: () => openItemEditor(lightbox.index, 'crop'),
+                  expand: () => openItemEditor(lightbox.index, 'outpaint'),
+                  mask: () => openItemEditor(lightbox.index, 'mask'),
+                  split: () => openItemEditor(lightbox.index, 'split'),
+                }
+          }
+        />
+      )}
+      {editState && (
+        <MediaItemEditor
+          canvasId={canvasId}
+          nodeId={id}
+          item={editState.item}
+          mode={editState.mode}
+          onClose={() => setEditState(null)}
+          onAppend={(ref) => {
+            const current = (useCanvasCoreStore
+              .getState()
+              .nodes.find((n) => (n as { id?: unknown }).id === id) as
+              | { data?: MediaNodeData }
+              | undefined)?.data;
+            patch({ items: [...(current?.items ?? []), ref] });
+          }}
         />
       )}
     </div>
