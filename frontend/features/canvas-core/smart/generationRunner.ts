@@ -73,6 +73,7 @@ export function withGenerationRunner(
     try {
       const params: Record<string, unknown> = {};
       if (gen.kind === 'image' && gen.ratio) params.ratio = gen.ratio;
+      if (gen.kind === 'image' && gen.quality) params.quality = gen.quality;
       if (gen.kind === 'video' && gen.aspect) params.aspect = gen.aspect;
       if (ctx.entity_ref) {
         // CC5 asset backlink: params land verbatim in generated_media.params,
@@ -151,7 +152,7 @@ export function withGenerationRunner(
       );
       const urls = tasks
         .filter((t) => t.phase === 'completed')
-        .map((t) => t.metadata?.result_url)
+        .map((t) => ('metadata' in t ? t.metadata?.result_url : undefined))
         .filter((u): u is string => Boolean(u));
       const firstError = failed[0]
         ? failed[0].error_msg || `generation ${failed[0].phase}`

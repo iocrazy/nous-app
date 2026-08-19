@@ -21,6 +21,7 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
+import { GenFooterControls } from './GenFooterControls';
 import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
 import { importResourceAsCanvasMedia } from '../mediaImport';
@@ -360,13 +361,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 title={sourceRef === url ? 'Selected as source' : 'Use as source'}
                 onClick={() => toggleSourceRef(url)}
                 disabled={readOnly}
-                className={`nodrag h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
                   sourceRef === url
                     ? 'border-canvas-strong ring-1 ring-canvas-strong'
                     : 'border-canvas-line/60'
                 }`}
               >
                 <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
+                {/* IC 图N corner badge */}
+                <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
               </button>
             ))}
             <span className="text-[10px] font-semibold text-canvas-muted">
@@ -518,71 +521,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </div>
           )}
           {gen && (
-            <div className="flex flex-1 items-center gap-1.5">
-              <UiSelect
-                triggerClassName={CANVAS_PILL_TRIGGER}
-                className="min-w-0 flex-1 truncate"
-                value={gen.model}
-                onChange={(e) => patch({ gen: { ...gen, model: e.target.value } })}
-                aria-label="Generation model"
+            <div className="flex min-w-0 flex-1 items-center">
+              <GenFooterControls
+                gen={gen}
+                models={genModels}
+                onChange={(g) => patch({ gen: { ...gen, ...g } })}
                 disabled={readOnly}
-              >
-                <option value="">Catalog default</option>
-                {genModels.map((m) => (
-                  <option key={m.name} value={m.name} data-description={m.actual_provider}>
-                    {m.display_name || m.name}
-                  </option>
-                ))}
-              </UiSelect>
-              {gen.kind === 'image' && (
-                <>
-                  <UiSelect
-                    triggerClassName={CANVAS_PILL_TRIGGER}
-                    value={gen.ratio ?? '1:1'}
-                    onChange={(e) => patch({ gen: { ...gen, ratio: e.target.value } })}
-                    aria-label="Aspect ratio"
-                    disabled={readOnly}
-                  >
-                    {ASPECT_RATIOS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </UiSelect>
-                  <input
-                    type="number"
-                    min={1}
-                    max={8}
-                    className="nodrag w-12 rounded-full border border-canvas-line bg-transparent px-2.5 py-0.5 text-xs text-canvas-text outline-none focus:ring-1 focus:ring-canvas-strong/40"
-                    value={gen.count ?? 1}
-                    onChange={(e) =>
-                      patch({
-                        gen: {
-                          ...gen,
-                          count: Math.max(1, Math.min(8, Number(e.target.value) || 1)),
-                        },
-                      })
-                    }
-                    aria-label="Image count"
-                    disabled={readOnly}
-                  />
-                </>
-              )}
-              {gen.kind === 'video' && (
-                <UiSelect
-                  triggerClassName={CANVAS_PILL_TRIGGER}
-                  value={gen.aspect ?? '16:9'}
-                  onChange={(e) => patch({ gen: { ...gen, aspect: e.target.value } })}
-                  aria-label="Video aspect"
-                  disabled={readOnly}
-                >
-                  {ASPECT_RATIOS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </UiSelect>
-              )}
+              />
             </div>
           )}
           {/* In-node Run (Infinite parity: footer 右端的深色「运行」药丸) —

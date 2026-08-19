@@ -160,6 +160,9 @@ export interface PromptGenSettings {
   count?: number;
   /** Video: aspect ratio (e.g. '16:9'). */
   aspect?: string;
+  /** Image: quality knob (IC ⑨) — 'low'|'medium'|'high'; absent = Auto
+   *  (provider default). Consumed by the codex chain; others ignore it. */
+  quality?: string;
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';
