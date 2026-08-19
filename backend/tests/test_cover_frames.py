@@ -4,8 +4,9 @@
 
 1. **裁切几何**（``center_crop_region``）—— 纯函数，比例必须精确，极端源不能
    算出零/负尺寸的区域。
-2. **编排**（``extract_cover_candidates`` / ``derive_cover_pair``）—— 每帧落一
-   行、时间戳对齐、参数钳制、坏帧跳过。
+2. **编排**（``extract_cover_candidates`` / ``derive_cover_pair``）—— 抽帧
+   **一行库都不写**、时间戳对齐、预览预算、参数钳制、坏帧跳过；选帧按时间点
+   重抽同一帧再裁。
 3. **优雅降级** —— ``extract_frames`` 的契约是"失败返回空 attachments +
    error 而不抛"，封面这一层必须把那种软失败翻译成**类型化**的
    ``CoverFrameError``（带 status_code），而不是让它冒成 500。
@@ -336,13 +337,24 @@ async def test_source_without_scope_link_is_400() -> None:
 # ============================================================
 
 
-async def test_every_frame_becomes_a_resource_row_carrying_its_timestamp(
+async def test_sampling_a_video_writes_no_library_rows_at_all(
     local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """抽帧**一行 resources 都不写** —— 这是这次改动的全部要点。
+
+    候选帧原本每张落一行，继承源视频的 folder / library / scope，于是混进用户
+    放那个视频的文件夹里，跟正经素材没有任何结构化字段能区分。
+
+    ⚠️ 单看"没有新建 resources 行"是一条会假绿的断言：抽帧流程要是因为别的原因
+    压根没跑，它同样成立。所以先钉住**流程确实跑完了**（extractor 真被调用、
+    候选数与帧数一致、每张预览都能解成一张真图），再断言四张写表都是空的。
+    """
     repo = _video_repo()
     frames = [_jpeg_bytes(1080, 1920) for _ in range(3)]
+    calls: List[str] = []
 
     async def fake_extract(path, **kw):
+        calls.append(path)
         return _result(
             [_frame(b, ts) for b, ts in zip(frames, (1.5, 15.0, 28.5))],
             sampled_at=[1.5, 15.0, 28.5],
@@ -351,30 +363,35 @@ async def test_every_frame_becomes_a_resource_row_carrying_its_timestamp(
     _stub_extractor(monkeypatch, fake_extract)
 
     out = await cf.extract_cover_candidates(
-        source_resource_id="500", user_id="user-A", num_frames=3, repo=repo
+        source_resource_id="500", num_frames=3, repo=repo
     )
 
+    # ① 流程真的跑完了。
+    assert len(calls) == 1
     assert out.source_resource_id == "500"
     assert out.duration_seconds == 30.0
+    assert len(out.candidates) == 3
+    assert [c.index for c in out.candidates] == [0, 1, 2]
     assert [c.timestamp_seconds for c in out.candidates] == [1.5, 15.0, 28.5]
-    assert all(c.width == 1080 and c.height == 1920 for c in out.candidates)
-    # 每帧一行 resources，落在源视频同一个 scope / folder / library 下。
-    assert len(repo.created) == 3
-    assert all(r["source_type"] == "derived" for r in repo.created)
-    assert all(i["scope_id"] == "scope-1" for i in repo.items)
-    assert all(i["folder_id"] == "folder-9" for i in repo.items)
-    assert all(i["library_id"] == "lib-3" for i in repo.items)
-    # creator 是发起操作的人，不是源视频的作者。
-    assert all(r["creator_id"] == "user-A" for r in repo.created)
+    # ② 每个候选真的带着一张能显示的图（不是空串、不是坏 base64）。
+    for c in out.candidates:
+        assert c.preview_data_url.startswith("data:image/jpeg;base64,")
+        raw = base64.b64decode(c.preview_data_url.split(",", 1)[1])
+        assert Image.open(BytesIO(raw)).size == (c.preview_width, c.preview_height)
+    # ③ 只有在①②都成立的前提下，"库里什么都没多"才是有意义的断言。
+    assert repo.created == []
+    assert repo.updated == []
+    assert repo.versions == []
+    assert repo.items == []
 
 
-async def test_fps_fallback_without_timestamps_yields_null_not_index_error(
+async def test_untimestamped_frames_fail_with_a_reason_instead_of_dead_tiles(
     local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ffprobe 探不到时长时 ``extract_frames`` 只产帧、不产时间戳。
 
-    按下标硬取 ``sampled_at_seconds`` 会 IndexError，把"帧其实是好的"变成一次
-    500。候选的时间戳可空正是为此。
+    时间点现在是选帧的**唯一坐标**（候选帧不落库），所以那种输出没法用：展示
+    出来会是一排点了没反应的图。必须变成一条说得清原因的类型化失败。
     """
     repo = _video_repo()
 
@@ -387,16 +404,15 @@ async def test_fps_fallback_without_timestamps_yields_null_not_index_error(
 
     _stub_extractor(monkeypatch, fake_extract)
 
-    out = await cf.extract_cover_candidates(
-        source_resource_id="500", user_id="u", num_frames=2, repo=repo
-    )
-    assert out.duration_seconds is None
-    assert [c.timestamp_seconds for c in out.candidates] == [None, None]
-    # 时间戳缺席时文件名退回序号，仍然互不重名。
-    assert len({c.filename for c in out.candidates}) == 2
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.extract_cover_candidates(
+            source_resource_id="500", num_frames=2, repo=repo
+        )
+    assert exc.value.status_code == 422
+    assert "duration" in exc.value.detail
 
 
-async def test_one_undecodable_frame_is_skipped_and_the_rest_still_persist(
+async def test_one_undecodable_frame_is_skipped_and_the_rest_survive(
     local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """一帧坏掉不该毁掉整次抽帧 —— 用户挑封面只需要一张好的。"""
@@ -416,10 +432,11 @@ async def test_one_undecodable_frame_is_skipped_and_the_rest_still_persist(
     _stub_extractor(monkeypatch, fake_extract)
 
     out = await cf.extract_cover_candidates(
-        source_resource_id="500", user_id="u", num_frames=3, repo=repo
+        source_resource_id="500", num_frames=3, repo=repo
     )
     assert len(out.candidates) == 2
-    # 跳过的那一帧不会让后面的时间戳错位。
+    # 跳过的那一帧不会让后面的时间戳错位 —— 时间点现在是选帧的坐标，错位就是
+    # "挑 A 得到 B"。
     assert [c.timestamp_seconds for c in out.candidates] == [1.0, 3.0]
 
 
@@ -435,18 +452,71 @@ async def test_all_frames_undecodable_fails_422_rather_than_succeeding_empty(
     broken = Attachment(
         kind=AttachmentKind.VIDEO_THUMBNAIL, data_url="", mime="image/jpeg"
     )
+    calls: List[str] = []
 
     async def fake_extract(path, **kw):
+        calls.append(path)
         return _result([broken, broken], sampled_at=[1.0, 2.0])
 
     _stub_extractor(monkeypatch, fake_extract)
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=2, repo=repo
+            source_resource_id="500", num_frames=2, repo=repo
         )
     assert exc.value.status_code == 422
+    # extractor 确实被调用过 —— 否则"没建行"是废话。
+    assert len(calls) == 1
     assert repo.created == []
+
+
+async def test_preview_payload_stays_inside_the_realtime_budget(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """整份候选清单必须能塞进 Realtime 的行上限，**即使画面是最坏情况**。
+
+    预览走 ``task_tracking.metadata``，行超限会被整条丢弃 —— 表现是"任务完成了
+    但一张候选都没有"，跟"抽帧失败"完全不同却一样没有原因。所以这里喂纯噪声
+    （JPEG 最难压的输入，比任何真实画面都糟），按 MAX_COVER_FRAMES 满打满算，
+    断言 base64 总量仍远低于 1 MB。
+    """
+    import random
+
+    repo = _video_repo()
+    rnd = random.Random(7)
+    noise = Image.new("RGB", (cf.COVER_PREVIEW_WIDTH, 427))
+    noise.putdata(
+        [
+            (rnd.randrange(256), rnd.randrange(256), rnd.randrange(256))
+            for _ in range(cf.COVER_PREVIEW_WIDTH * 427)
+        ]
+    )
+    buf = BytesIO()
+    noise.save(buf, format="JPEG", quality=95)
+    worst = buf.getvalue()
+    # 前提：这张图**本来**是超预算的，否则下面的断言测不到收缩逻辑。
+    assert len(worst) > cf._PREVIEW_MAX_BYTES
+
+    n = cf.MAX_COVER_FRAMES
+
+    async def fake_extract(path, **kw):
+        return _result(
+            [_frame(worst, float(i)) for i in range(n)],
+            sampled_at=[float(i) for i in range(n)],
+        )
+
+    _stub_extractor(monkeypatch, fake_extract)
+
+    out = await cf.extract_cover_candidates(
+        source_resource_id="500", num_frames=n, repo=repo
+    )
+    assert len(out.candidates) == n
+    total = sum(len(c.preview_data_url) for c in out.candidates)
+    assert total < 400 * 1024
+    # 每一张仍然是一张能打开的图 —— 收缩不能把预览压成垃圾。
+    for c in out.candidates:
+        raw = base64.b64decode(c.preview_data_url.split(",", 1)[1])
+        assert Image.open(BytesIO(raw)).size[0] >= cf._PREVIEW_MIN_WIDTH
 
 
 @pytest.mark.parametrize(
@@ -459,8 +529,9 @@ async def test_frame_count_is_clamped_before_it_reaches_the_extractor(
     requested: int,
     expected: int,
 ) -> None:
-    """每帧都会在用户素材库里多留一行，所以封面这层的上限比 extractor 自己的
-    32 更严。钳制失效 = 一次点击往库里灌 99 张图。"""
+    """每帧都是一次 ffmpeg seek + 一份要走 Realtime 的预览，所以封面这层的上限
+    比 extractor 自己的 32 更严。钳制失效 = 一次点击跑 99 次 seek，并把
+    metadata 撑到 Realtime 丢行。"""
     repo = _video_repo()
     seen: Dict[str, Any] = {}
 
@@ -471,17 +542,20 @@ async def test_frame_count_is_clamped_before_it_reaches_the_extractor(
     _stub_extractor(monkeypatch, fake_extract)
 
     await cf.extract_cover_candidates(
-        source_resource_id="500", user_id="u", num_frames=requested, repo=repo
+        source_resource_id="500", num_frames=requested, repo=repo
     )
     assert seen["num_frames"] == expected
 
 
-async def test_sampling_width_stays_inside_the_extractor_clamp_window(
+async def test_sampling_uses_the_small_preview_width_not_the_crop_width(
     local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``extract_frames`` 会把宽度钳到 [120, 1920]。封面层传 1080 是为了让
-    9:16 源裁出 1080×1440 时一个像素都不放大 —— 这个常数要是漂到钳制窗口外，
-    钳制会静默改掉它，封面就得放大而没人会发现。"""
+    """抽帧只为给人挑，用 240；1080 留给选帧时的重抽。
+
+    两个常数都必须落在 ``extract_frames`` 的钳制窗口 [120, 1920] 内 —— 漂到窗口
+    外时钳制会**静默**改掉它，没人会发现。1080 那个尤其重要：9:16 源裁 3:4 正好
+    1080×1440，一个像素都不放大。
+    """
     repo = _video_repo()
     seen: Dict[str, Any] = {}
 
@@ -491,11 +565,11 @@ async def test_sampling_width_stays_inside_the_extractor_clamp_window(
 
     _stub_extractor(monkeypatch, fake_extract)
 
-    await cf.extract_cover_candidates(
-        source_resource_id="500", user_id="u", num_frames=1, repo=repo
-    )
+    await cf.extract_cover_candidates(source_resource_id="500", num_frames=1, repo=repo)
+    assert 120 <= cf.COVER_PREVIEW_WIDTH <= 1920
     assert 120 <= cf.COVER_FRAME_WIDTH <= 1920
-    assert seen["frame_width"] == cf.COVER_FRAME_WIDTH
+    assert cf.COVER_PREVIEW_WIDTH < cf.COVER_FRAME_WIDTH
+    assert seen["frame_width"] == cf.COVER_PREVIEW_WIDTH
     # ffmpeg 侧也必须有上界（§7.2：所有等待都有上界）。
     assert seen["timeout_seconds"] > 0
 
@@ -522,7 +596,7 @@ async def test_extractor_soft_failure_becomes_a_typed_422_not_a_500(
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 422
     # 原因要能透到用户面前，不能只留一句"失败了"。
@@ -541,7 +615,7 @@ async def test_extractor_producing_no_frames_without_an_error_is_still_422(
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 422
 
@@ -567,7 +641,7 @@ async def test_unreadable_video_degrades_to_422_instead_of_raising(
     with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
         with pytest.raises(cf.CoverFrameError) as exc:
             await cf.extract_cover_candidates(
-                source_resource_id="500", user_id="u", num_frames=3, repo=repo
+                source_resource_id="500", num_frames=3, repo=repo
             )
     assert exc.value.status_code == 422
 
@@ -579,7 +653,7 @@ async def test_video_file_missing_on_disk_is_404(local_download_root: Path) -> N
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 404
 
@@ -591,7 +665,7 @@ async def test_file_path_escaping_the_download_root_is_400(
     repo = _video_repo(file_path="../../../etc/passwd")
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 400
 
@@ -613,13 +687,199 @@ async def test_total_deadline_expiry_is_reported_as_504(
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 504
 
 
 # ============================================================
-# 5. 选帧 —— derive_cover_pair
+# 5a. 选帧（当前路径）—— derive_cover_pair，按时间点重抽
+# ============================================================
+
+
+def _stub_reextract(monkeypatch: pytest.MonkeyPatch, frame_bytes_or_none):
+    """打桩"按秒数重抽一帧"这一步，记录它收到的时间点。
+
+    打在 ``extract_frame_at`` 而不是更外层，是为了让被验证的仍然是本模块的编排
+    （materialize / 超时翻译 / 裁切 / 落库），只把 ffmpeg 换掉。
+    """
+    from app.services.media.render import video_frame_extractor as vfx
+
+    seen: List[Dict[str, Any]] = []
+
+    async def fake(path, **kw):
+        seen.append({"path": path, **kw})
+        return frame_bytes_or_none
+
+    monkeypatch.setattr(vfx, "extract_frame_at", fake)
+    return seen
+
+
+async def test_picking_a_timestamp_re_reads_that_exact_second_and_crops_it(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """用户挑的是一个时间点，服务端必须回到**源视频**、在**同一秒**重抽。
+
+    这条钉住的是"挑 A 得到 B"最可能的退化：时间点被丢掉、被取整、或者传给了
+    别的资源。所以断言的是重抽真的发生过、收到的秒数逐位相等、宽度是裁切宽度
+    （而不是预览宽度），以及产出的两张封面尺寸对得上。
+    """
+    repo = _video_repo()
+    seen = _stub_reextract(monkeypatch, _jpeg_bytes(1080, 1920))
+
+    pair = await cf.derive_cover_pair(
+        source_resource_id="500",
+        timestamp_seconds=15.25,
+        user_id="user-B",
+        repo=repo,
+    )
+
+    assert len(seen) == 1
+    assert seen[0]["timestamp_seconds"] == 15.25
+    assert seen[0]["frame_width"] == cf.COVER_FRAME_WIDTH
+    assert seen[0]["timeout_seconds"] > 0
+    assert pair.source_frame_resource_id == "500"
+    assert pair.vertical_resource_id != pair.horizontal_resource_id
+    # 只有两张成品封面落库 —— 候选帧一张都没有。
+    assert len(repo.created) == 2
+    sizes = [
+        Image.open(local_download_root / row["file_path"]).size for row in repo.updated
+    ]
+    assert sizes[0] == (1080, 1440)  # 3:4
+    assert sizes[1] == (1080, 810)  # 4:3
+    assert [r["filename"] for r in repo.created] == [
+        "cover-vertical-clip.jpg",
+        "cover-horizontal-clip.jpg",
+    ]
+    # 两张封面留在源视频所在的 scope / folder 里，不是孤儿。
+    assert all(i["scope_id"] == "scope-1" for i in repo.items)
+    assert all(i["folder_id"] == "folder-9" for i in repo.items)
+    assert all(r["creator_id"] == "user-B" for r in repo.created)
+
+
+async def test_a_frame_that_cannot_be_re_read_says_so_instead_of_blanking(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重抽拿不到画面（时间点越界、文件被换过、解码失败）必须是类型化 422。
+
+    静默产出一张空白封面、或者冒一个没有原因的 500，都是这条路径上最坏的结果：
+    用户会带着一个错的封面发出去。
+    """
+    repo = _video_repo()
+    seen = _stub_reextract(monkeypatch, None)
+
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=9.5, user_id="u", repo=repo
+        )
+    assert len(seen) == 1  # 确实试过了 —— 否则下面的断言是废话
+    assert exc.value.status_code == 422
+    assert "9.5" in exc.value.detail
+    assert repo.created == []
+
+
+@pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf")])
+async def test_a_malformed_timestamp_is_a_400_not_a_500(
+    local_download_root: Path, monkeypatch: pytest.MonkeyPatch, bad: float
+) -> None:
+    """时间点是用户可达的输入（前端原样回传），畸形值必须是说得清的 400。
+
+    NaN / inf 一路飘到 ffmpeg 的 ``-ss`` 会变成一次没有原因的服务端错误。
+    """
+    repo = _video_repo()
+    seen = _stub_reextract(monkeypatch, _jpeg_bytes(64, 64))
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=bad, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 400
+    # 坏输入在碰 ffmpeg 之前就被挡住了。
+    assert seen == []
+
+
+async def test_selecting_from_a_missing_source_video_is_404(
+    local_download_root: Path,
+) -> None:
+    repo = FakeRepo(source=None, item=None)
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="nope", timestamp_seconds=1.0, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 404
+
+
+async def test_selecting_from_an_image_source_is_400(local_download_root: Path) -> None:
+    """选帧的源必须是视频 —— 图片没有"第 N 秒"可言。"""
+    repo = FakeRepo(
+        source={
+            "id": "600",
+            "file_path": "teams/scope-1/uploads/600/v1/pic.jpg",
+            "file_type": "image",
+            "mime_type": "image/jpeg",
+            "filename": "pic.jpg",
+        },
+        item={"scope_id": "scope-1", "folder_id": None, "library_id": None},
+    )
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="600", timestamp_seconds=1.0, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_re_read_deadline_expiry_is_reported_as_504(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """选帧现在也要 materialize —— 缓存没命中就得重新拉源文件，而这条挂在同步
+    HTTP 请求上。等待必须有上界，且表现为 504（同一帧再试一次通常就好），不能
+    是 422（那会让用户去换一帧，换哪一帧都一样）。"""
+    from app.services.media.render import video_frame_extractor as vfx
+
+    repo = _video_repo()
+    monkeypatch.setattr(cf, "_SELECT_DEADLINE_SECONDS", 0.05)
+
+    async def slow(path, **kw):
+        await asyncio.sleep(5)
+        raise AssertionError("deadline should have fired first")
+
+    monkeypatch.setattr(vfx, "extract_frame_at", slow)
+
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=1.0, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 504
+
+
+async def test_degenerate_re_read_geometry_fails_422_naming_the_side(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1px 宽的帧上，4:3 区域在像素上会塌成零高度。``CropError`` 必须变成 422
+    并说清是哪一版塌了，而不是让一个裸 ValueError 冒成 500。"""
+    repo = _video_repo()
+    _stub_reextract(monkeypatch, _jpeg_bytes(1, 4000))
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=1.0, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 422
+    assert "horizontal" in exc.value.detail
+
+
+async def test_undecodable_re_read_bytes_map_to_422(
+    local_download_root: Path, object_store: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _video_repo()
+    _stub_reextract(monkeypatch, b"definitely not a jpeg")
+    with pytest.raises(cf.CoverFrameError) as exc:
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=1.0, user_id="u", repo=repo
+        )
+    assert exc.value.status_code == 422
+
+
+# ============================================================
+# 5b. 选帧（部署错峰兼容路径）—— derive_cover_pair_from_frame
 # ============================================================
 
 
@@ -642,14 +902,16 @@ def _frame_repo(rel: str, rid: str = "900") -> FakeRepo:
     )
 
 
-async def test_selected_frame_yields_one_3x4_and_one_4x3_cover(
+async def test_legacy_frame_resource_still_yields_one_3x4_and_one_4x3_cover(
     local_download_root: Path,
 ) -> None:
+    """错峰窗口里的旧前端手里只有 resource id。那一次点击必须仍然成功，否则
+    "候选已拿到、还没点"的用户会在发布链上线的瞬间吃一个 422。"""
     rel = "teams/scope-1/derived/900/v1/cover-frame-1.5s-clip.jpg"
     _stage_frame_image(local_download_root, rel, 1080, 1920)
     repo = _frame_repo(rel)
 
-    pair = await cf.derive_cover_pair(
+    pair = await cf.derive_cover_pair_from_frame(
         frame_resource_id="900", user_id="user-B", repo=repo
     )
 
@@ -676,7 +938,9 @@ async def test_landscape_frame_is_cropped_on_the_sides_for_the_vertical_cover(
     rel = "teams/scope-1/derived/901/v1/wide.jpg"
     _stage_frame_image(local_download_root, rel, 1920, 1080)
     repo = _frame_repo(rel, rid="901")
-    await cf.derive_cover_pair(frame_resource_id="901", user_id="u", repo=repo)
+    await cf.derive_cover_pair_from_frame(
+        frame_resource_id="901", user_id="u", repo=repo
+    )
     sizes = [
         Image.open(local_download_root / row["file_path"]).size for row in repo.updated
     ]
@@ -688,7 +952,9 @@ async def test_missing_frame_resource_maps_to_404(local_download_root: Path) -> 
     """``DeriveError`` 的状态码要原样透过来 —— router 只有一个 except 分支。"""
     repo = FakeRepo(source=None, item=None)
     with pytest.raises(cf.CoverFrameError) as exc:
-        await cf.derive_cover_pair(frame_resource_id="nope", user_id="u", repo=repo)
+        await cf.derive_cover_pair_from_frame(
+            frame_resource_id="nope", user_id="u", repo=repo
+        )
     assert exc.value.status_code == 404
 
 
@@ -697,7 +963,9 @@ async def test_selecting_a_video_as_the_frame_maps_to_400(
 ) -> None:
     repo = _video_repo()
     with pytest.raises(cf.CoverFrameError) as exc:
-        await cf.derive_cover_pair(frame_resource_id="500", user_id="u", repo=repo)
+        await cf.derive_cover_pair_from_frame(
+            frame_resource_id="500", user_id="u", repo=repo
+        )
     assert exc.value.status_code == 400
 
 
@@ -710,7 +978,9 @@ async def test_degenerate_frame_geometry_fails_422_with_the_failing_side_named(
     _stage_frame_image(local_download_root, rel, 1, 4000)
     repo = _frame_repo(rel, rid="902")
     with pytest.raises(cf.CoverFrameError) as exc:
-        await cf.derive_cover_pair(frame_resource_id="902", user_id="u", repo=repo)
+        await cf.derive_cover_pair_from_frame(
+            frame_resource_id="902", user_id="u", repo=repo
+        )
     assert exc.value.status_code == 422
     assert "horizontal" in exc.value.detail
 
@@ -722,7 +992,9 @@ async def test_unreadable_frame_bytes_map_to_422(local_download_root: Path) -> N
     path.write_bytes(b"definitely not a jpeg")
     repo = _frame_repo(rel, rid="903")
     with pytest.raises(cf.CoverFrameError) as exc:
-        await cf.derive_cover_pair(frame_resource_id="903", user_id="u", repo=repo)
+        await cf.derive_cover_pair_from_frame(
+            frame_resource_id="903", user_id="u", repo=repo
+        )
     assert exc.value.status_code == 422
 
 
@@ -754,7 +1026,7 @@ async def test_download_temp_file_is_removed_when_extraction_raises(
 
     with pytest.raises(RuntimeError):
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     # 先证明确实有东西被落到了我们盯着的目录里，否则"目录是空的"是废话。
     assert staged and staged[0].parent == isolated_tmpdir
@@ -783,29 +1055,35 @@ async def test_download_temp_file_is_removed_when_the_deadline_fires(
 
     with pytest.raises(cf.CoverFrameError) as exc:
         await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=3, repo=repo
+            source_resource_id="500", num_frames=3, repo=repo
         )
     assert exc.value.status_code == 504
     assert staged and staged[0].parent == isolated_tmpdir
     assert list(isolated_tmpdir.iterdir()) == []
 
 
-async def test_download_temp_file_is_removed_when_persistence_raises(
+async def test_select_download_temp_file_is_removed_when_persistence_raises(
     local_download_root: Path,
     isolated_tmpdir: Path,
     object_store: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """落库失败发生在 ``materialize`` 的 ``async with`` 已经退出之后 —— 两个
-    ``finally`` 互不依赖，下游炸了也不该让上游的清理欠账。"""
+    ``finally`` 互不依赖，下游炸了也不该让上游的清理欠账。
+
+    落库现在只在**选帧**这条路径上发生（抽帧不写库了），所以这条断言跟着搬到
+    ``derive_cover_pair``：它同样要 materialize 源视频，同样在之后写两行。
+    """
+    from app.services.media.render import video_frame_extractor as vfx
+
     repo = _video_repo()
     staged: List[Path] = []
 
-    async def fake_extract(path, **kw):
+    async def fake_frame_at(path, **kw):
         staged.append(Path(path))
-        return _result([_frame(_jpeg_bytes(640, 360), 1.0)], sampled_at=[1.0])
+        return _jpeg_bytes(640, 360)
 
-    _stub_extractor(monkeypatch, fake_extract)
+    monkeypatch.setattr(vfx, "extract_frame_at", fake_frame_at)
 
     async def exploding_create(data):
         raise RuntimeError("db down")
@@ -813,8 +1091,8 @@ async def test_download_temp_file_is_removed_when_persistence_raises(
     monkeypatch.setattr(repo, "create_resource", exploding_create)
 
     with pytest.raises(RuntimeError):
-        await cf.extract_cover_candidates(
-            source_resource_id="500", user_id="u", num_frames=1, repo=repo
+        await cf.derive_cover_pair(
+            source_resource_id="500", timestamp_seconds=1.0, user_id="u", repo=repo
         )
     assert staged and staged[0].parent == isolated_tmpdir
     assert list(isolated_tmpdir.iterdir()) == []

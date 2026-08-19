@@ -2,8 +2,8 @@
 
 一次 workflow run = 一个视频的一次抽帧。编排只有一步实活：
 
-    materialize 源视频 → ffmpeg 均匀取 N 帧 → 每帧落成 resources 行
-    → 候选清单写进 task_tracking.metadata，前端订阅 Realtime 取
+    materialize 源视频 → ffmpeg 均匀取 N 帧 → 候选清单（小预览图 + 时间点）
+    写进 task_tracking.metadata，前端订阅 Realtime 取
 
 为什么是 workflow 而不是同步端点
 ==============================
@@ -25,9 +25,10 @@
    ``complete(metadata_patch=...)`` 而不是 ``update_progress`` —— 后者对同一
    task 有 1 write/sec 节流且会**整条丢弃**（含 metadata_patch），而候选清单
    丢一次这次抽帧就白跑了。
-   ⚠️ metadata 里放的是 resource **id**，不是图片本身：候选帧已经是 resources
-   行，前端用普通 media URL 取。往 metadata 塞 base64 会经 Realtime 推给每个
-   订阅者，6 张 1080 宽 JPEG ≈ 1.5 MB，那是给实时通道灌洪水。
+   ⚠️ metadata 里带的是 base64 预览，但**只能是小图**：宽 240、每张 ≤14 KB，
+   按 12 张上限合起来 ≈224 KB base64，离 Realtime 的行上限有数倍余量 —— 而且
+   这个预算由 ``cover_frames._fit_preview`` 按构造保证，不是靠"通常不会很大"。
+   原始尺寸（1080 宽，6 张 ≈1.5 MB）才是给实时通道灌洪水，那个从不送。
 
 上界（§7.2）
 ===========
@@ -84,16 +85,20 @@ async def extract_cover_frames_step(
     user_id: str,
     num_frames: int,
 ) -> dict[str, Any]:
-    """下载 → 抽帧 → 候选帧落库，返回可直接进 metadata 的 dict。
+    """下载 → 抽帧 → 返回可直接进 metadata 的 dict（预览图 + 时间点）。
+
+    ⚠️ **这一步一行 resources 都不写。** 候选帧曾经每张落一行，继承源视频的
+    folder / library / scope，于是混进用户放那个视频的文件夹里；现在它们是纯
+    临时物，用户挑中之后由 ``/covers/select`` 按时间点重抽。落库只发生在那一
+    步，且只有两张成品封面。
 
     全程 heartbeat：这一步里最长的是 materialize 的下载，期间没有任何进度
     信号，stall detector 会把安静的任务判成 lost。
 
-    ⚠️ 必须自建 ambient scope。这一步既读 resources（源视频）又写 resources
-    （每个候选帧一行），而 workflow 跑在 DBOS 的执行任务里 —— HTTP 请求的
-    scope 早就随响应结束被 reset 了，contextvar 不会跨过来。没有它，选择点
-    fail-closed，抽帧在 workflow 侧同样失败。用 USER scope 而非 SYSTEM：候选
-    帧本来就归发起人所有（``persist_derived_image`` 的既有口径），比 SYSTEM
+    ⚠️ 仍然必须自建 ambient scope —— 这一步要**读** resources（源视频），而
+    workflow 跑在 DBOS 的执行任务里，HTTP 请求的 scope 早就随响应结束被 reset
+    了，contextvar 不会跨过来。没有它，选择点 fail-closed，抽帧在 workflow 侧
+    同样失败。用 USER scope 而非 SYSTEM：只读发起人自己看得到的素材，比 SYSTEM
     更紧。同款写法见 upload_postprocess / caption_asset / soda_download。
     """
     from app.db.scope import Scope, request_scope
@@ -104,7 +109,6 @@ async def extract_cover_frames_step(
         async with async_heartbeat_loop(workflow_id=workflow_id):
             result = await extract_cover_candidates(
                 source_resource_id=source_resource_id,
-                user_id=user_id,
                 num_frames=num_frames,
             )
     logger.info(

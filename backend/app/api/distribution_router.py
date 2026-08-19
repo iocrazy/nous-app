@@ -1549,10 +1549,12 @@ async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
     dependencies=[Depends(require_distribution)],
 )
 async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
-    """把选中的候选帧居中裁成竖版 3:4 + 横版 4:3（同步）。
+    """把选中的那一帧居中裁成竖版 3:4 + 横版 4:3（同步）。
 
-    同步是有意的：这一步只是裁一张已经存在的图片，与 canvas 的 crop-derive
-    同一条管线、同一个量级，让前端为它多绕一次 Realtime 是净损失。
+    用户挑的是一个**时间点**（候选帧不落库，见 cover_frames 的模块 docstring），
+    所以这一步要回到源视频、在同一秒重抽一帧再裁。仍然保持同步：抽帧刚跑完，
+    源视频通常还在 materialize 的本机读通缓存里，重抽一帧是一次 ffmpeg seek；
+    等待有 504 上界兜底，让前端多绕一次 Realtime 才是净损失。
 
     ``publish_task_id`` 可选，因为常见顺序是**封面在前**：撰写表单里先挑封面，
     再把两个 id 塞进 POST /distribution/tasks 的 body。已经建好的任务要换封面
@@ -1561,6 +1563,7 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
     from app.services.distribution.cover_frames import (
         CoverFrameError,
         derive_cover_pair,
+        derive_cover_pair_from_frame,
     )
 
     # 先鉴权再干活：写回的目标必须是调用者自己的任务（_authorize_task 用 404
@@ -1581,13 +1584,26 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
 
     try:
         # 与 /covers/extract 同一个入口边界。这一步同样读 + 写 resources
-        # （load_source_image → persist_derived_image），所以缺 scope 时的表现
-        # 与抽帧完全一致：404 "帧不存在"。用户没先撞上它，只是因为抽帧失败得更
-        # 早、他根本走不到选帧这一步。
+        # （读源视频 → persist_derived_image 落两张封面），所以缺 scope 时的
+        # 表现与抽帧完全一致：404 "源不存在"。用户没先撞上它，只是因为抽帧失败
+        # 得更早、他根本走不到选帧这一步。
         async with request_scope(Scope(user_id=user["id"])):
-            pair = await derive_cover_pair(
-                frame_resource_id=body.frame_resource_id, user_id=user["id"]
-            )
+            if body.frame_resource_id is not None:
+                # 部署错峰窗口里的旧前端（schema 保证两种形状只能给一种）。
+                pair = await derive_cover_pair_from_frame(
+                    frame_resource_id=body.frame_resource_id, user_id=user["id"]
+                )
+            else:
+                # 两个字段在这条分支上一定同时存在（schema 的 model_validator
+                # 保证），所以这里不该出现 ``or 0.0`` 之类的兜底 —— 那会把
+                # "缺时间点"悄悄变成"第 0 秒"，正是"挑 A 得到 B"的一种。
+                assert body.source_resource_id is not None
+                assert body.timestamp_seconds is not None
+                pair = await derive_cover_pair(
+                    source_resource_id=str(body.source_resource_id),
+                    timestamp_seconds=float(body.timestamp_seconds),
+                    user_id=user["id"],
+                )
     except CoverFrameError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     except UnscopedQueryError as e:

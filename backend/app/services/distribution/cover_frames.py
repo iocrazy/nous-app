@@ -7,9 +7,34 @@
 分两步，因为两步的代价差了两个数量级：
 
     抽帧（慢，DBOS workflow）   materialize 视频 → ffmpeg 均匀取 N 帧
-                               → 每帧落成一个 resources 行（候选）
-    选帧（快，同步 REST）       用户挑一帧 → 居中裁出 3:4 / 4:3 两张
-                               → 两个新 resources 行 → 写回 publish_tasks
+                               → **只**返回小预览图 + 各自的时间点（不落库）
+    选帧（快，同步 REST）       用户挑一个时间点 → 按秒数重抽那一帧（全尺寸）
+                               → 居中裁出 3:4 / 4:3 两张 → 两个 resources 行
+                               → 写回 publish_tasks
+
+候选帧为什么不落库（2026-08-18 改）
+==================================
+候选帧原本每一张都落成一个 ``source_type='derived'`` 的 resources 行，继承源
+视频的 ``folder_id`` / ``library_id`` / ``scope_id`` —— 于是它们出现在用户放那
+个视频的**同一个文件夹里**，跟正经素材混在一起。而 ``source_type`` 与画布派生
+图完全同值，前端没有任何字段能把两者分开，唯一痕迹是文件名前缀（按文件名猜身
+份是脆弱的：用户自己上传同前缀文件就会被误判）。
+
+现在候选帧是**纯临时物**：预览图以 base64 随 ``task_tracking.metadata`` 送达
+前端，用户挑中之后由 ``derive_cover_pair`` 按 ``timestamp_seconds`` 重抽那一
+帧。存储零负担，也没有任何需要回收的临时区。
+
+⚠️ 这条设计的前提是"同一秒数重抽出来的就是同一帧"，否则用户会**挑 A 得到 B**
+—— 比素材库污染严重得多。该前提已实测而不是推断：``-ss`` 在 ``-i`` 之前是
+ffmpeg 的精确输入 seek，跨 mp4 / mkv / mov / webm、稀疏关键帧 + B 帧、VFR 源，
+同一时间点三次抽帧产出**逐字节相同**的 JPEG，且 240 / 1080 / 原生三种宽度解出
+的是**同一源帧**（预览与最终裁切因此必然同帧）。命令由
+``video_frame_extractor.seek_frame_cmd`` 单点构造，两条路径共用同一个 builder，
+让"两边命令漂移"这一类失败从"不太可能"变成"不可能"。
+
+成品封面（``cover-vertical-*`` / ``cover-horizontal-*``）**仍然是真 resources
+行**，这是对的：``publish_tasks.cover_*_resource_id`` 按 id 引用它们，浏览器
+侧 ``_set_cover`` 要真去取那个文件。
 
 三层复用，本模块不自己实现任何一层
 ==================================
@@ -20,12 +45,14 @@
    那条路是给"对端 API 主动来拉"设计的（抖音发布、volcengine ASR），我们自己
    要读同一个进程能直接读到的文件，绕一圈签名 URL 只会多一次网关往返、丢掉
    磁盘缓存，还得自己管临时文件。
-2. ``video_frame_extractor.extract_frames()`` —— 均匀采样、参数钳制、
-   ffmpeg 失败时优雅降级成 ``result.error`` 而不是抛异常。原本是给多模态
-   聊天做视频理解的，能力正好，一行没改。
+2. ``video_frame_extractor.extract_frames()`` / ``.extract_frame_at()`` ——
+   前者均匀采样出候选预览，后者按秒数重抽单帧；两者共用
+   ``seek_frame_cmd`` 构造 ffmpeg 命令，所以"预览看到的那一帧"与"裁切用的
+   那一帧"同源。ffmpeg 失败时都优雅降级成 ``result.error`` / ``None``
+   而不是抛异常。
 3. ``canvas.image_crop.crop_normalized()`` + ``derive_persistence
-   .persist_derived_image()`` —— 裁切与"bytes → resources 行"落地。选帧那一步
-   因此完全不碰视频、不碰 ffmpeg，就是一次普通的图片 derive。
+   .persist_derived_image()`` —— 裁切与"bytes → resources 行"落地。只有成品
+   封面走这一层，候选帧不走。
 
 临时文件（§7.6：不该留在磁盘上的东西一件都不留）
 ==============================================
@@ -34,10 +61,10 @@
 
     materialize()            finally: Path(tmp).unlink(missing_ok=True)
     extract_frames()         with tempfile.TemporaryDirectory()（删目录而非
-                             逐个文件，部分失败也不留残留）
+    extract_frame_at()       逐个文件，部分失败也不留残留）
     persist_derived_image()  finally: Path(tmp_name).unlink(missing_ok=True)
 
-唯一要保证的是**异常/超时路径也能走到那三个 finally**：整段抽帧包在
+唯一要保证的是**异常/超时路径也能走到那三个 finally**：抽帧与重抽都包在
 ``asyncio.timeout`` 里而不是自己写循环等待，超时表现为 CancelledError 从
 ``async with`` 内部抛出，两个上下文管理器的 ``finally`` 照常执行。
 ``tests/test_cover_frames.py`` 对三条路径各有一条断言。
@@ -49,6 +76,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
@@ -74,9 +102,23 @@ COVER_HORIZONTAL_ASPECT = 4 / 3
 # 1080×1440，一个像素都不用放大。extract_frames 内部钳制区间是 [120, 1920]。
 COVER_FRAME_WIDTH = 1080
 
-# 候选帧数。每一帧都会落成一个 resources 行（见下方 persist 段的说明），所以
-# 上限比 extract_frames 自己的 32 更严 —— 12 张已经远超"挑一张封面"的需要，
-# 再多只是往用户素材库里灌垃圾。
+# 候选预览图的采样宽度。前端候选条里每张的 CSS 尺寸是 62×82（见
+# distribution-v4.css 的 ``.cover-cand``），240 宽在 3 倍屏上仍有富余。预览
+# **只**用来给人挑，真正的裁切走 COVER_FRAME_WIDTH 重抽，所以这里小是纯收益。
+COVER_PREVIEW_WIDTH = 240
+
+# 单张预览的字节上界。预览随 ``task_tracking.metadata`` 走 Supabase Realtime
+# 推给订阅者，整行超限会被丢弃（"完成了但一张候选都没有"），所以总量必须**由
+# 构造保证**而不是靠"通常不会很大"：MAX_COVER_FRAMES × 该上界 = 12 × 14 KB
+# ≈ 168 KB 原始 / ≈ 224 KB base64，离 1 MB 的行上限有数倍余量。
+# 实测：240 宽的普通画面 q75 约 8 KB，只有高噪点画面才需要 _fit_preview 降级。
+_PREVIEW_MAX_BYTES = 14 * 1024
+# _fit_preview 的收缩下界。低于它就不再缩，宁可略微超预算也要给出一张能看的
+# 图 —— 但实际到不了：64 宽的 JPEG 连纯噪声都远小于上界。
+_PREVIEW_MIN_WIDTH = 64
+
+# 候选帧数。抽帧要下载整个源视频并跑 N 次 ffmpeg seek，12 张已经远超"挑一张
+# 封面"的需要；上限同时也是上面那条 metadata 预算的乘数。
 DEFAULT_COVER_FRAMES = 6
 MAX_COVER_FRAMES = 12
 
@@ -86,6 +128,14 @@ _EXTRACT_TIMEOUT_SECONDS = 180.0
 # 外层总上界要把 materialize 的下载也罩进去 —— 那一步本身没有超时，几个 GB
 # 的源视频遇上存储抖动就是无限期挂起。10 分钟之后一律放弃。
 _TOTAL_DEADLINE_SECONDS = 600.0
+
+# 选帧（同步端点）的两道上界。这条路径现在也要 materialize + 一次 ffmpeg
+# seek，不再只是裁一张已存在的图片 —— 抽帧刚跑完时源视频通常还在 materialize
+# 的本机 NVMe 读通缓存里（命中即零下载），但缓存是 LRU 的，用户放着不动足够久
+# 就会被挤掉，那时这一步要重新拉一次源文件。挂在 HTTP 请求上的等待必须有上
+# 界，超时表现为 504 + "再试一次"，而不是网关替我们决定。
+_SELECT_DEADLINE_SECONDS = 240.0
+_SELECT_FFMPEG_TIMEOUT_SECONDS = 60.0
 
 _COVER_MIME = "image/jpeg"
 
@@ -108,24 +158,34 @@ class CoverFrameError(Exception):
 
 @dataclass(frozen=True)
 class CoverCandidate:
-    """一个候选帧：已经落库的 resource + 它在源视频里的时间点。"""
+    """一个候选帧：一张小预览图 + 它在源视频里的时间点。
 
-    resource_id: str
-    timestamp_seconds: Optional[float]
-    """采样时间点。``None`` 表示 ffprobe 拿不到时长、``extract_frames`` 走了
-    fps 兜底分支 —— 那条分支只产出帧、不产出时间戳，帧仍然可用，所以这里用
-    可空而不是编一个假时间。"""
-    width: int
-    height: int
-    filename: str
+    **没有 resource_id，因为候选帧不落库**（见模块 docstring）。选帧时回传的
+    是 ``timestamp_seconds``，服务端按它重抽同一帧。
+    """
+
+    index: int
+    """在本次采样里的序号。给前端当稳定 key 用（时间点也唯一，但序号对"两帧
+    恰好同秒"这种退化输入更稳）。"""
+    timestamp_seconds: float
+    """采样时间点，**必填**。它现在是选帧的唯一坐标，所以没有时间戳的帧根本
+    不能成为候选 —— ``extract_frames`` 的 fps 兜底分支（ffprobe 读不到时长）
+    只产帧不产时间戳，那种输出会被 ``extract_cover_candidates`` 判成类型化失
+    败，而不是给用户一排点了没反应的图。"""
+    preview_data_url: str
+    """``data:image/jpeg;base64,...``，直接进 ``<img src>``。"""
+    preview_width: int
+    preview_height: int
+    """预览图自身的像素尺寸 —— **不是**源视频的尺寸。真正参与裁切的是选帧时
+    按 COVER_FRAME_WIDTH 重抽的那一张，它的尺寸在那一步现算。"""
 
     def as_dict(self) -> dict:
         return {
-            "resource_id": self.resource_id,
+            "index": self.index,
             "timestamp_seconds": self.timestamp_seconds,
-            "width": self.width,
-            "height": self.height,
-            "filename": self.filename,
+            "preview_data_url": self.preview_data_url,
+            "preview_width": self.preview_width,
+            "preview_height": self.preview_height,
         }
 
 
@@ -150,11 +210,13 @@ class CoverPair:
     vertical_resource_id: str
     horizontal_resource_id: str
     source_frame_resource_id: str
+    """产出这两张封面的那一帧从哪来。走时间点路径时是**源视频**的 id（帧本身
+    没有 id），走旧的 frame-resource 路径时是那个帧 resource 的 id。"""
 
 
 @dataclass(frozen=True)
 class SourceVideo:
-    """校验通过的源视频 + 它所在的 scope（决定候选帧落到哪）。"""
+    """校验通过的源视频 + 它所在的 scope（决定成品封面落到哪）。"""
 
     resource: dict
     file_path: str
@@ -191,8 +253,8 @@ def center_crop_region(
 
     **真正的解法是显著性/人脸检测来定锚点**，那是这个函数的自然升级位：签名
     不用变，只是 anchor 从固定 0.5 变成检测出来的值。在那之前，用户想要别的
-    构图有现成出口 —— 候选帧本身就是普通 resources 行，canvas 已有的
-    crop-derive 链路（``/api/v1/canvas/derive/crop``）可以任意重裁。
+    构图有现成出口 —— 选出来的两张封面本身就是普通 resources 行，canvas 已有
+    的 crop-derive 链路（``/api/v1/canvas/derive/crop``）可以任意重裁。
 
     Raises:
         CoverFrameError: 源尺寸不合法（400）。
@@ -230,6 +292,55 @@ def _decode_data_url(data_url: str) -> Optional[bytes]:
     except (ValueError, TypeError) as exc:
         logger.warning(f"[cover_frames] could not decode frame data URL: {exc!r}")
         return None
+
+
+def _fit_preview(image_bytes: bytes, max_bytes: int = _PREVIEW_MAX_BYTES) -> bytes:
+    """把一张预览压到 ``max_bytes`` 以内，**保证终止**。
+
+    为什么需要它：预览要经 ``task_tracking.metadata`` 走 Realtime，而超大行会
+    被整条丢掉 —— 那种失败的样子是"任务完成了但一张候选都没有"，用户看不出发
+    生了什么。所以总量不能靠"通常不会很大"，得由构造保证。
+
+    先降 JPEG 质量再降分辨率（质量降级对 62×82 的缩略图几乎不可见，尺寸降级
+    才会真的糊）。两层都是有界循环，且宽度每轮乘 0.75、下界
+    ``_PREVIEW_MIN_WIDTH`` —— 一定会退出。
+
+    压不动时返回**当前最小**的那一版而不是抛错：一张略微超预算的预览仍然能让
+    用户挑封面，而抛错会把整次抽帧毁掉。实际到不了这一步（64 宽的纯噪声 JPEG
+    也就几 KB），这里只是不留未定义行为。
+    """
+    if len(image_bytes) <= max_bytes:
+        return image_bytes
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as opened:
+            full = opened.convert("RGB")
+        source_w, source_h = full.size
+        width = source_w
+        best = image_bytes
+        while True:
+            scaled = (
+                full
+                if width == source_w
+                else full.resize((width, max(1, round(source_h * width / source_w))))
+            )
+            for quality in (70, 55, 40, 28):
+                buf = BytesIO()
+                scaled.save(buf, format="JPEG", quality=quality, optimize=True)
+                candidate = buf.getvalue()
+                if len(candidate) < len(best):
+                    best = candidate
+                if len(candidate) <= max_bytes:
+                    return candidate
+            if width <= _PREVIEW_MIN_WIDTH:
+                return best
+            width = max(_PREVIEW_MIN_WIDTH, int(width * 0.75))
+    except Exception as exc:  # noqa: BLE001 — Pillow 的解码异常族很杂
+        # 压不了就用原图：一张偏大的预览好过没有预览。总量仍受帧数上限约束。
+        logger.warning(f"[cover_frames] preview shrink failed, using as-is: {exc!r}")
+        return image_bytes
 
 
 def _image_size(image_bytes: bytes) -> tuple[int, int]:
@@ -307,37 +418,24 @@ async def load_source_video(
     )
 
 
-def _candidate_filename(source_filename: str, index: int, ts: Optional[float]) -> str:
-    stem = (source_filename.rsplit(".", 1)[0] or "video")[:60]
-    marker = f"{ts:.1f}s" if ts is not None else f"{index:02d}"
-    return f"cover-frame-{marker}-{stem}.jpg"
-
-
 async def extract_cover_candidates(
     *,
     source_resource_id: str,
-    user_id: str,
     num_frames: int = DEFAULT_COVER_FRAMES,
     repo: Optional[ResourceRepoProtocol] = None,
 ) -> CoverCandidates:
-    """从源视频均匀抽 ``num_frames`` 帧，每帧落成一个 resources 行。
+    """从源视频均匀抽 ``num_frames`` 帧，产出**预览图 + 时间点**，不落库。
 
-    候选帧为什么要落库，而不是塞进 task_tracking 的 metadata：metadata 是
-    jsonb，且会经 Realtime 推给每个订阅者 —— 6 张 1080 宽的 JPEG 换成 base64
-    大约 1.5 MB，那是给实时通道灌洪水。落成 resources 行之后前端拿到的是普通
-    的 media URL，选帧那一步也因此变成一次普通的图片裁切（不必再碰视频）。
+    这个函数**一行 resources 都不写** —— 那正是它存在形态的重点（见模块
+    docstring）。它读源视频、跑 ffmpeg、把结果打包返回；持久化只发生在用户真
+    的挑中一帧之后，且只产出两张成品封面。
 
-    代价是一次抽帧会在素材库里多出 N 行 ``source_type='derived'`` 的图片，
-    与 canvas 的 crop/split/grid derive 完全同款，落在源视频同一个 scope /
-    folder 下，不是孤儿。
-
-    归属：scope / folder / library 跟随源视频，``creator_id`` 是**发起操作的
-    人**而不是源视频的作者 —— 这是 ``persist_derived_image`` 既有的口径（团队
-    成员基于同事的素材派生，产物归派生者、留在同一个团队 scope），这里没有
-    另立一套。
+    没有 ``user_id`` 参数，因为没有任何东西归属到人。读源视频靠调用方建立的
+    ambient tenant scope（HTTP 侧 request_scope，workflow 侧 request_scope）。
 
     Raises:
-        CoverFrameError: 404/400 源不合法，422 抽不出可用帧，504 超时。
+        CoverFrameError: 404/400 源不合法，422 抽不出可用帧 / 读不到时长，
+            504 超时。
     """
     from app.repositories.resources_repository import ResourcesRepository
 
@@ -346,6 +444,19 @@ async def extract_cover_candidates(
 
     source = await load_source_video(repo, source_resource_id)
     frames = await _extract_frames_from_storage(source.file_path, num_frames)
+
+    if not frames.sampled_at_seconds:
+        # ffprobe 读不到时长 → extract_frames 走 fps 兜底，只产帧不产时间戳。
+        # 那种输出对本链路没用：时间点是选帧的唯一坐标，没有它就无法重抽，
+        # 展示出来的会是一排点了没反应的候选。说清楚为什么，而不是静默给空。
+        raise CoverFrameError(
+            status_code=422,
+            detail=(
+                "could not read this video's duration, so frames cannot be "
+                "timestamped — pick a different video, or set the cover on "
+                "the platform"
+            ),
+        )
 
     candidates: list[CoverCandidate] = []
     for index, attachment in enumerate(frames.attachments):
@@ -358,32 +469,23 @@ async def extract_cover_candidates(
                 f"produced no bytes; skipping"
             )
             continue
-        # sampled_at_seconds 与 attachments 只在"时长已知"的主分支上是等长的；
-        # ffprobe 失败时 extract_frames 走 fps 兜底，只产帧不产时间戳。按下标
-        # 硬取会 IndexError，所以这里显式对齐。
-        ts = (
-            frames.sampled_at_seconds[index]
-            if index < len(frames.sampled_at_seconds)
-            else None
-        )
-        width, height = _image_size(image_bytes)
-        row = await persist_derived_image(
-            repo,
-            user_id=user_id,
-            scope_id=source.scope_id,
-            folder_id=source.folder_id,
-            library_id=source.library_id,
-            filename=_candidate_filename(source.filename, index, ts),
-            image_bytes=image_bytes,
-            mime_type=_COVER_MIME,
-        )
+        if index >= len(frames.sampled_at_seconds):
+            # 上面的守卫保证了主分支（两个列表等长）；真走到这里说明
+            # extract_frames 的契约变了，跳过比编一个时间点安全。
+            logger.warning(f"[cover_frames] frame {index} has no timestamp; skipping")
+            continue
+        preview = _fit_preview(image_bytes)
+        width, height = _image_size(preview)
         candidates.append(
             CoverCandidate(
-                resource_id=str(row["id"]),
-                timestamp_seconds=ts,
-                width=width,
-                height=height,
-                filename=str(row.get("filename") or ""),
+                index=index,
+                timestamp_seconds=float(frames.sampled_at_seconds[index]),
+                preview_data_url=(
+                    "data:image/jpeg;base64,"
+                    + base64.b64encode(preview).decode("ascii")
+                ),
+                preview_width=width,
+                preview_height=height,
             )
         )
 
@@ -421,7 +523,10 @@ async def _extract_frames_from_storage(file_path: str, num_frames: int):
                 result = await extract_frames(
                     str(local_path),
                     num_frames=num_frames,
-                    frame_width=COVER_FRAME_WIDTH,
+                    # 预览宽度，不是裁切宽度。真正参与裁切的那一张在选帧时
+                    # 按同一个时间点、按 COVER_FRAME_WIDTH 重抽 —— 实测两种
+                    # 宽度解出的是同一源帧，所以"看到的"就是"用到的"。
+                    frame_width=COVER_PREVIEW_WIDTH,
                     timeout_seconds=_EXTRACT_TIMEOUT_SECONDS,
                 )
     except TimeoutError as exc:
@@ -453,19 +558,181 @@ async def _extract_frames_from_storage(file_path: str, num_frames: int):
     return result
 
 
+async def _reextract_frame_from_storage(
+    file_path: str, timestamp_seconds: float
+) -> bytes:
+    """``materialize`` 出本地路径 → 在 ``timestamp_seconds`` 重抽一帧（全尺寸）。
+
+    与 ``_extract_frames_from_storage`` 同构（同样的存储适配、同样把软失败翻
+    译成类型化失败），区别只有三点：只抽一帧、用 COVER_FRAME_WIDTH、上界更短
+    （这条挂在同步 HTTP 请求上，不是 workflow）。
+
+    Raises:
+        CoverFrameError: 404 文件不在，400 路径越界，422 抽不出这一帧，
+            504 超时。
+    """
+    from app.services.library.media_storage import materialize
+    from app.services.media.render.video_frame_extractor import extract_frame_at
+
+    try:
+        async with asyncio.timeout(_SELECT_DEADLINE_SECONDS):
+            async with materialize(file_path) as local_path:
+                if not local_path.exists():
+                    raise CoverFrameError(
+                        status_code=404, detail="source video file is missing on disk"
+                    )
+                frame = await extract_frame_at(
+                    str(local_path),
+                    timestamp_seconds=timestamp_seconds,
+                    frame_width=COVER_FRAME_WIDTH,
+                    timeout_seconds=_SELECT_FFMPEG_TIMEOUT_SECONDS,
+                )
+    except TimeoutError as exc:
+        raise CoverFrameError(
+            status_code=504,
+            detail=(
+                f"re-reading the chosen frame timed out after "
+                f"{_SELECT_DEADLINE_SECONDS:.0f}s"
+            ),
+        ) from exc
+    except ValueError as exc:  # materialize 的 containment guard
+        raise CoverFrameError(
+            status_code=400, detail="resource file_path escapes the download root"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise CoverFrameError(
+            status_code=404, detail="source video file is missing on disk"
+        ) from exc
+
+    if not frame:
+        # extract_frame_at 的契约是"失败返回 None 而不抛"。到这里说明 ffmpeg
+        # 在那个时间点没能产出画面（时间点超出范围、文件被换过、解码失败）——
+        # 必须说出来，不能给用户一个空白封面。
+        raise CoverFrameError(
+            status_code=422,
+            detail=(
+                f"could not re-read the frame at {timestamp_seconds:.1f}s — "
+                "sample the video again and pick another frame"
+            ),
+        )
+    return frame
+
+
+async def _crop_and_persist_pair(
+    repo: ResourceRepoProtocol,
+    *,
+    frame_bytes: bytes,
+    user_id: str,
+    scope_id: str,
+    folder_id: Optional[str],
+    library_id: Optional[str],
+    stem: str,
+) -> dict[str, str]:
+    """一帧 → 竖版 3:4 + 横版 4:3，各落成一个 resources 行，返回两个 id。
+
+    这两行**是**真素材：``publish_tasks.cover_*_resource_id`` 按 id 引用它们，
+    浏览器侧发布时要真去取那个文件。归属跟随源视频的 scope / folder /
+    library，``creator_id`` 是发起操作的人 —— ``persist_derived_image`` 的既有
+    口径，这里没有另立一套。
+    """
+    width, height = _image_size(frame_bytes)
+    ids: dict[str, str] = {}
+    for label, aspect in (
+        ("vertical", COVER_VERTICAL_ASPECT),
+        ("horizontal", COVER_HORIZONTAL_ASPECT),
+    ):
+        region = center_crop_region(width, height, aspect)
+        try:
+            cropped = crop_normalized(frame_bytes, region, mime_type=_COVER_MIME)
+        except CropError as exc:
+            raise CoverFrameError(
+                status_code=422, detail=f"{label} cover crop failed: {exc}"
+            ) from exc
+        row = await persist_derived_image(
+            repo,
+            user_id=user_id,
+            scope_id=scope_id,
+            folder_id=folder_id,
+            library_id=library_id,
+            filename=f"cover-{label}-{stem}.jpg",
+            image_bytes=cropped,
+            mime_type=_COVER_MIME,
+        )
+        ids[label] = str(row["id"])
+    return ids
+
+
 async def derive_cover_pair(
+    *,
+    source_resource_id: str,
+    timestamp_seconds: float,
+    user_id: str,
+    repo: Optional[ResourceRepoProtocol] = None,
+) -> CoverPair:
+    """按时间点重抽那一帧，居中裁成 3:4 与 4:3 两张封面。
+
+    用户挑的是**一个时间点**，不是一个已存在的图片 —— 候选帧从不落库。所以这
+    一步要回到源视频、在同一秒重抽一次（这次按 COVER_FRAME_WIDTH，全尺寸）。
+
+    ⚠️ "看到的就是用到的"靠两件事保证，两件都不是推断：
+    1. 预览与这一次用的是**同一个 ffmpeg 命令构造器**
+       （``video_frame_extractor.seek_frame_cmd``），所以不存在参数漂移；
+    2. 同一时间点重抽产出同一源帧 —— 实测跨容器/编码/VFR 逐字节稳定，且
+       240 / 1080 / 原生三种宽度解出同一帧。
+
+    Raises:
+        CoverFrameError: 404/400 源视频不合法，422 重抽不出这一帧 / 裁切失败，
+            504 超时。
+    """
+    from app.repositories.resources_repository import ResourcesRepository
+
+    repo = repo or ResourcesRepository()
+
+    # 时间点是用户可达的输入（前端把候选里的数字原样回传），所以畸形值是一条
+    # **正常路径**而不是内部不变量：NaN / inf 会一路飘到 ffmpeg 的 -ss 变成一
+    # 个 500。给它一个说得清的 400。
+    if not math.isfinite(timestamp_seconds) or timestamp_seconds < 0:
+        raise CoverFrameError(
+            status_code=400,
+            detail=f"frame timestamp out of range: {timestamp_seconds}",
+        )
+
+    source = await load_source_video(repo, source_resource_id)
+    frame_bytes = await _reextract_frame_from_storage(
+        source.file_path, float(timestamp_seconds)
+    )
+    stem = (source.filename.rsplit(".", 1)[0] or "cover")[:60]
+    ids = await _crop_and_persist_pair(
+        repo,
+        frame_bytes=frame_bytes,
+        user_id=user_id,
+        scope_id=source.scope_id,
+        folder_id=source.folder_id,
+        library_id=source.library_id,
+        stem=stem,
+    )
+    return CoverPair(
+        vertical_resource_id=ids["vertical"],
+        horizontal_resource_id=ids["horizontal"],
+        source_frame_resource_id=str(source_resource_id),
+    )
+
+
+async def derive_cover_pair_from_frame(
     *,
     frame_resource_id: str,
     user_id: str,
     repo: Optional[ResourceRepoProtocol] = None,
 ) -> CoverPair:
-    """把选中的那一帧居中裁成 3:4 与 4:3 两张封面，各落成一个 resources 行。
+    """旧路径：从一个**已落库的**帧 resource 裁出两张封面。
 
-    整段不碰视频也不碰 ffmpeg —— 候选帧已经是一个普通的图片 resource，所以这
-    里直接走 canvas 既有的 derive 管线（``load_source_image`` →
-    ``crop_normalized`` → ``persist_derived_image``）。这也是为什么对应的
-    REST 端点是同步的：与 ``crop_derive_service`` 同理，单张图片裁切足够快，
-    不值得让前端多绕一次 Realtime。
+    ⚠️ 保留它只为一个理由：**部署错峰**。前端（Cloudflare Pages）与后端
+    （gpupc）是两条独立的发布链，同一次合并谁先上线不确定，而用户可能正好卡在
+    "候选帧已经拿到、还没点选"的中间。旧前端手里的候选是 resource id，新后端
+    如果只认时间点就会把那一次点击变成 422。这条分支让那个窗口不产生错误。
+
+    它本身**不写候选帧**，只是读一个已经存在的图片 resource 再裁，所以留着它
+    不会重新制造素材库污染。窗口过去（下一次前端发布之后）可以删。
 
     Raises:
         CoverFrameError: 404/400 源帧不合法，422 裁切失败。
@@ -482,33 +749,16 @@ async def derive_cover_pair(
         # 一个 except 分支而不是两个。
         raise CoverFrameError(status_code=exc.status_code, detail=exc.detail) from exc
 
-    width, height = _image_size(source.file_bytes)
     stem = (source.filename.rsplit(".", 1)[0] or "cover")[:60]
-
-    ids: dict[str, str] = {}
-    for label, aspect in (
-        ("vertical", COVER_VERTICAL_ASPECT),
-        ("horizontal", COVER_HORIZONTAL_ASPECT),
-    ):
-        region = center_crop_region(width, height, aspect)
-        try:
-            cropped = crop_normalized(source.file_bytes, region, mime_type=_COVER_MIME)
-        except CropError as exc:
-            raise CoverFrameError(
-                status_code=422, detail=f"{label} cover crop failed: {exc}"
-            ) from exc
-        row = await persist_derived_image(
-            repo,
-            user_id=user_id,
-            scope_id=source.scope_id,
-            folder_id=source.folder_id,
-            library_id=source.library_id,
-            filename=f"cover-{label}-{stem}.jpg",
-            image_bytes=cropped,
-            mime_type=_COVER_MIME,
-        )
-        ids[label] = str(row["id"])
-
+    ids = await _crop_and_persist_pair(
+        repo,
+        frame_bytes=source.file_bytes,
+        user_id=user_id,
+        scope_id=source.scope_id,
+        folder_id=source.folder_id,
+        library_id=source.library_id,
+        stem=stem,
+    )
     return CoverPair(
         vertical_resource_id=ids["vertical"],
         horizontal_resource_id=ids["horizontal"],
@@ -519,6 +769,7 @@ async def derive_cover_pair(
 __all__ = [
     "COVER_FRAME_WIDTH",
     "COVER_HORIZONTAL_ASPECT",
+    "COVER_PREVIEW_WIDTH",
     "COVER_VERTICAL_ASPECT",
     "DEFAULT_COVER_FRAMES",
     "MAX_COVER_FRAMES",
@@ -529,6 +780,7 @@ __all__ = [
     "SourceVideo",
     "center_crop_region",
     "derive_cover_pair",
+    "derive_cover_pair_from_frame",
     "extract_cover_candidates",
     "load_source_video",
 ]

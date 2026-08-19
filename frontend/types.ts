@@ -2786,18 +2786,28 @@ export interface PublishRequest {
  *
  * Mirrors the backend `CoverCandidateOut`. It is NOT an HTTP response shape:
  * the list travels through `task_tracking.metadata.cover_frames` over Supabase
- * Realtime (extraction is a DBOS workflow — download + ffmpeg). Each frame is
- * already a real image resource, so the id goes straight into a media URL.
+ * Realtime (extraction is a DBOS workflow — download + ffmpeg).
+ *
+ * A candidate is NOT a resource. Frames used to be persisted one row each,
+ * inheriting the source video's folder — which put them in the user's Library
+ * next to real material with nothing structural to tell them apart. They are
+ * now purely transient: the preview arrives inline, and picking one sends its
+ * `timestamp_seconds` back so the server re-reads that same frame full size.
  */
 export interface CoverCandidate {
-  resource_id: string;
-  /** Where in the source video this frame came from. Null when the extractor
-   *  could not probe the duration and fell back to fps sampling — the frame is
-   *  still usable, so this is nullable rather than a made-up number. */
-  timestamp_seconds: number | null;
-  width: number;
-  height: number;
-  filename: string;
+  /** Position within this sampling run — a stable React key. */
+  index: number;
+  /** Where in the source video this frame came from. Required: it is the only
+   *  coordinate `/covers/select` accepts, because candidate frames are never
+   *  persisted. Frames the extractor could not timestamp are rejected server
+   *  side with a typed error rather than shown as tiles that do nothing. */
+  timestamp_seconds: number;
+  /** `data:image/jpeg;base64,...` — the preview goes straight into <img src>.
+   *  Small on purpose (240px wide, ≤14KB) because it rides through
+   *  `task_tracking.metadata` over Realtime. */
+  preview_data_url: string;
+  preview_width: number;
+  preview_height: number;
 }
 
 /**

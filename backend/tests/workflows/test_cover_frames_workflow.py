@@ -8,15 +8,17 @@
    "任务完成了但一张候选帧都没有"。
 2. **候选清单走 ``complete(metadata_patch=...)``，不走 update_progress**。后者
    对同一 task 有 1 write/sec 节流且会**整条丢弃**（含 metadata_patch），清单丢
-   一次这次抽帧就白跑了。同时 metadata 里只能有 resource **id** —— 塞 base64
-   会经 Realtime 推给每个订阅者。
+   一次这次抽帧就白跑了。清单里带的是**小预览** base64（候选帧不落库，没有 URL
+   可取），所以总量必须留在 Realtime 的行上限之内。
 3. **失败也要有类型化回显**：``error_status`` 让前端能区分"这个视频读不了"
    （422/404）与"超时了，重试可能有用"（504）。silent no-op 不可接受。
 """
 
 from __future__ import annotations
 
+import base64
 import inspect
+import json
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -88,20 +90,31 @@ async def _run(
 
 
 def _payload(count: int = 3) -> Dict[str, Any]:
-    return {
-        "source_resource_id": "500",
-        "duration_seconds": 30.0,
-        "candidates": [
-            {
-                "resource_id": f"9999000000000{i:03d}",
-                "timestamp_seconds": float(i),
-                "width": 1080,
-                "height": 1920,
-                "filename": f"cover-frame-{i}.jpg",
-            }
+    """The metadata blob the step really returns.
+
+    Built by calling the production ``as_dict()`` rather than hand-writing the
+    JSON: a hand-written fixture would keep passing after the real shape moved
+    on (the boundary-mock discipline in CLAUDE.md — mock shapes must be the
+    真实 wire shape, not a tidied-up idea of one). It has already drifted once,
+    back when candidates carried a ``resource_id``.
+    """
+    from app.services.distribution.cover_frames import CoverCandidate, CoverCandidates
+
+    return CoverCandidates(
+        source_resource_id="500",
+        duration_seconds=30.0,
+        candidates=tuple(
+            CoverCandidate(
+                index=i,
+                timestamp_seconds=float(i),
+                preview_data_url="data:image/jpeg;base64,"
+                + base64.b64encode(b"\xff\xd8\xff" + b"x" * 6000).decode("ascii"),
+                preview_width=240,
+                preview_height=427,
+            )
             for i in range(count)
-        ],
-    }
+        ),
+    ).as_dict()
 
 
 # ============================================================
@@ -123,16 +136,25 @@ async def test_success_completes_the_task_with_the_candidate_list_in_metadata() 
     assert manager.failed == []
 
 
-async def test_candidate_metadata_carries_ids_only_never_image_bytes() -> None:
-    """metadata 经 Realtime 推给每个订阅者。6 张 1080 宽 JPEG 的 base64 约
-    1.5 MB —— 那是给实时通道灌洪水，所以清单里只能有 resource id。"""
+async def test_candidate_metadata_stays_small_enough_for_realtime() -> None:
+    """metadata 经 Realtime 推给每个订阅者，整行超限会被**丢掉** —— 表现是"任务
+    完成了但一张候选都没有"，跟"抽帧失败"完全不同却一样没有原因。
+
+    候选清单里确实带 base64 预览（候选帧不落库，没有 URL 可取），所以这条测的
+    不是"有没有 base64"而是"总量有没有失控"。上界的真正保证在
+    ``cover_frames._fit_preview``（按单张预算收缩）；这里守的是它别被绕过。
+    """
     _, _, manager, _ = await _run(step_result=_payload(6))
 
-    blob = repr(manager.completed[0]["metadata"])
-    assert "base64" not in blob
-    assert "data:image" not in blob
-    for candidate in manager.completed[0]["metadata"]["cover_frames"]["candidates"]:
-        assert candidate["resource_id"]
+    candidates = manager.completed[0]["metadata"]["cover_frames"]["candidates"]
+    assert len(candidates) == 6
+    for candidate in candidates:
+        # 每个候选都必须自带一张能显示的图 + 一个能重抽的坐标 —— 缺任何一个，
+        # 候选条要么空白要么点了没反应。
+        assert candidate["preview_data_url"].startswith("data:image/jpeg;base64,")
+        assert isinstance(candidate["timestamp_seconds"], float)
+    total = len(json.dumps(manager.completed[0]["metadata"]))
+    assert total < 400 * 1024
 
 
 async def test_candidate_list_goes_through_complete_not_update_progress() -> None:

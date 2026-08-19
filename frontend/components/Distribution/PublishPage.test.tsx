@@ -1527,9 +1527,24 @@ describe('PublishPage cover from video frames', () => {
    *  The timestamps ARE asserted — as the visible text they render as. */
   const frameTiles = () => screen.findAllByRole('radio');
 
+  /** The shape the workflow really writes: a preview data URL plus the offset
+   *  into the source video. Deliberately NOT a resource id — candidates are
+   *  never persisted, and the pick posts the coordinate back. */
   const CANDIDATES = [
-    { resource_id: 'f-1', timestamp_seconds: 0, width: 1080, height: 1920, filename: 'f1.jpg' },
-    { resource_id: 'f-2', timestamp_seconds: 72, width: 1080, height: 1920, filename: 'f2.jpg' },
+    {
+      index: 0,
+      timestamp_seconds: 0,
+      preview_data_url: 'data:image/jpeg;base64,AAAA',
+      preview_width: 240,
+      preview_height: 427,
+    },
+    {
+      index: 1,
+      timestamp_seconds: 72,
+      preview_data_url: 'data:image/jpeg;base64,BBBB',
+      preview_width: 240,
+      preview_height: 427,
+    },
   ];
 
   it('says a video is needed before offering to sample frames', async () => {
@@ -1601,10 +1616,15 @@ describe('PublishPage cover from video frames', () => {
     await pushFrames({ candidates: CANDIDATES }, 'completed');
 
     fireEvent.click((await frameTiles())[1]);
-    // No publish_task_id: the task does not exist yet, so the ids ride along
-    // in the create body instead.
+    // The pick posts a COORDINATE (source video + offset), not a frame id —
+    // that is the whole point of candidates no longer being resources. No
+    // publish_task_id: the task does not exist yet, so the ids ride along in
+    // the create body instead.
     await waitFor(() =>
-      expect(selectCoverFrame).toHaveBeenCalledWith({ frame_resource_id: 'f-2' }));
+      expect(selectCoverFrame).toHaveBeenCalledWith({
+        source_resource_id: '30',
+        timestamp_seconds: 72,
+      }));
     expect(await screen.findByText(/Cover set/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('HEYGO'));
