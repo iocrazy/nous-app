@@ -16,11 +16,60 @@ export interface GenerationItem {
   origin_kind: string;
   canvas_id?: string;
   created_at: string;
+  /**
+   * Set once the item has been promoted into the library (the `Keep` action).
+   * The backend has always returned this column — it is part of the repository
+   * projection — but until 2026-08 no frontend read it, so the UI could not
+   * tell a kept generation from an unkept one.
+   */
+  promoted_resource_id?: string | null;
 }
 
 export interface GenerationsPage {
   items: GenerationItem[];
   next_cursor: string | null;
+}
+
+// ─── Typed failures ───────────────────────────────────────────────────────────
+
+/**
+ * Why a mutation on a generated-media item failed, in the terms the user needs
+ * to hear. `not-found` deliberately covers BOTH "already deleted" and "not in
+ * this workspace": the backend answers both with the same shape so a delete
+ * cannot be used to probe for rows in someone else's scope.
+ */
+export type GeneratedMediaFailure =
+  | 'not-found'
+  | 'forbidden'
+  | 'unauthenticated'
+  | 'server'
+  | 'network';
+
+/**
+ * Thrown by the mutating calls (`promoteGeneration`, `deleteGeneration`) so the
+ * caller can render a reason instead of a shrug. Throwing — rather than
+ * returning a result union — is deliberate: a caller that forgets to branch
+ * gets a loud rejection, never a silent no-op.
+ */
+export class GeneratedMediaError extends Error {
+  constructor(
+    readonly reason: GeneratedMediaFailure,
+    readonly status?: number,
+  ) {
+    super(
+      `generated-media request failed: ${reason}` +
+        (status === undefined ? '' : ` (HTTP ${status})`),
+    );
+    this.name = 'GeneratedMediaError';
+  }
+}
+
+/** Map an HTTP status onto the failure vocabulary above. */
+export function failureFromStatus(status: number): GeneratedMediaFailure {
+  if (status === 401) return 'unauthenticated';
+  if (status === 403) return 'forbidden';
+  if (status === 404) return 'not-found';
+  return 'server';
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,10 +161,56 @@ export function generatedMediaCoverUrl(id: string): string {
  * Idempotent — re-calling returns the existing resource.
  */
 export async function promoteGeneration(genId: string): Promise<{ promoted_resource_id: string }> {
-  const res = await fetch(`${getApiUrl()}/api/v1/generated-media/${genId}/promote`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(`${getApiUrl()}/api/v1/generated-media/${genId}/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+    });
+  } catch (err) {
+    console.error('[generatedMedia] promote request never reached the server:', err);
+    throw new GeneratedMediaError('network');
+  }
+  if (!res.ok) throw new GeneratedMediaError(failureFromStatus(res.status), res.status);
   return (await res.json()).data;
+}
+
+/**
+ * Permanently deletes a generated-media item: the row, plus its backing object
+ * when no other generation still points at the same content-addressed key.
+ *
+ * Lifecycle note (verified before this was wired up): a generation that has
+ * already been `Keep`-ed owns a SEPARATE copy of the bytes — `promote` writes
+ * into the `library` bucket (or `teams/<scope>/uploads/...` on the filesystem
+ * track), whereas a generation lives in the `chat-media` bucket (or
+ * `teams/<scope>/generations/...`). Deleting a generation therefore never
+ * disturbs the library asset, and the backend's object cleanup is refcounted
+ * across generations only — see
+ * `GeneratedMediaRepository._maybe_remove_object`.
+ *
+ * Rejects with {@link GeneratedMediaError}. A 200 carrying `deleted: false`
+ * (row already gone, or outside the caller's scope) becomes `not-found`.
+ */
+export async function deleteGeneration(genId: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${getApiUrl()}/api/v1/generated-media/${genId}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(),
+    });
+  } catch (err) {
+    console.error('[generatedMedia] delete request never reached the server:', err);
+    throw new GeneratedMediaError('network');
+  }
+  if (!res.ok) throw new GeneratedMediaError(failureFromStatus(res.status), res.status);
+
+  let deleted = false;
+  try {
+    const body = (await res.json()) as { data?: { deleted?: boolean } } | null;
+    deleted = Boolean(body?.data?.deleted);
+  } catch (err) {
+    console.error('[generatedMedia] delete returned an unreadable body:', err);
+    throw new GeneratedMediaError('server', res.status);
+  }
+  if (!deleted) throw new GeneratedMediaError('not-found', res.status);
 }
