@@ -27,7 +27,9 @@ import {
 
 /** Fallback raster size when the image never reported natural
  *  dimensions (e.g. load event lost) — backend rescales anyway. */
-export const FALLBACK_MASK_SIZE = { width: 1024, height: 1024 };
+import { FALLBACK_MASK_SIZE } from './maskMath';
+
+export { FALLBACK_MASK_SIZE };
 
 interface MaskEditorModalProps {
   open: boolean;

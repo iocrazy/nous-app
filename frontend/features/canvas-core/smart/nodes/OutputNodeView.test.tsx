@@ -94,9 +94,9 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('crop-open'));
-    expect(screen.getByTestId('crop-editor-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
   });
 
   it('clicking Commit patches crop_region back into the store', () => {
@@ -109,7 +109,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByTestId('crop-open'));
-    fireEvent.click(screen.getByTestId('crop-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>
@@ -121,7 +121,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       height: 0.3,
     });
     // modal closes after commit
-    expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
   });
 
   it('Cancel closes the modal without touching crop_region', () => {
@@ -134,7 +134,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       </Wrap>,
     );
     fireEvent.click(screen.getByTestId('crop-open'));
-    fireEvent.click(screen.getByTestId('crop-editor-cancel'));
+    fireEvent.click(screen.getByTestId('editor-cancel'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
       Record<string, unknown>
@@ -145,7 +145,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       width: 0.4,
       height: 0.4,
     });
-    expect(screen.queryByTestId('crop-editor-modal')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
   });
 
   it('text-kind output never opens the modal (no preview_url either)', () => {

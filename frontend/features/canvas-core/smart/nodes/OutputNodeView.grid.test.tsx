@@ -150,7 +150,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     );
     fireEvent.click(screen.getByTestId('grid-split-open'));
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
-    fireEvent.click(screen.getByTestId('grid-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
       expect(deriveGrid).toHaveBeenCalledTimes(1);
@@ -196,7 +196,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     // Modal closed.
     await waitFor(() => {
       expect(
-        screen.queryByTestId('grid-editor-modal'),
+        screen.queryByTestId('unified-image-editor'),
       ).not.toBeInTheDocument();
     });
   });
@@ -214,12 +214,12 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
     );
     fireEvent.click(screen.getByTestId('grid-split-open'));
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
-    fireEvent.click(screen.getByTestId('grid-editor-commit'));
+    fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
       expect(deriveGrid).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByTestId('grid-editor-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('grid-commit-error');
     expect(banner.textContent).toMatch(/split line/i);
     // No tile nodes were added.

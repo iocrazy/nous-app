@@ -122,7 +122,7 @@ function paintAndCommit() {
   const surface = screen.getByTestId('mask-brush-tool');
   fireEvent.pointerDown(surface, { pointerId: 1, clientX: 100, clientY: 100 });
   fireEvent.pointerUp(surface, { pointerId: 1 });
-  fireEvent.click(screen.getByTestId('mask-editor-commit'));
+  fireEvent.click(screen.getByTestId('editor-apply'));
 }
 
 describe('OutputNodeView — Mask button', () => {
@@ -202,7 +202,7 @@ describe('OutputNodeView — mask commit derives a cutout node', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByTestId('mask-editor-modal'),
+        screen.queryByTestId('unified-image-editor'),
       ).not.toBeInTheDocument();
     });
   });
@@ -223,7 +223,7 @@ describe('OutputNodeView — mask commit derives a cutout node', () => {
     await waitFor(() => {
       expect(deriveMaskCutout).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByTestId('mask-editor-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('mask-commit-error');
     expect(banner.textContent).toMatch(/mask is empty/i);
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);

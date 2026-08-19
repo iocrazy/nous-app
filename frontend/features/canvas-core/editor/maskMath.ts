@@ -107,3 +107,7 @@ export function strokePath(
     .map((p) => `L ${fmt(p)}`)
     .join(' ')}`;
 }
+
+/** Raster size when the image never reported natural dimensions
+ *  (jsdom, or a broken load) — mask export still needs a canvas. */
+export const FALLBACK_MASK_SIZE = { width: 1024, height: 1024 };

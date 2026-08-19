@@ -4,13 +4,13 @@ import { useCallback, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
 import { getSupabaseClient } from '../../../../supabaseClient';
-import { CropEditorModal } from '../../editor/CropEditorModal';
-import { GridSplitEditorModal } from '../../editor/GridSplitEditorModal';
+import { UnifiedImageEditor, type EditorMode } from '../../editor/UnifiedImageEditor';
+import { bakeAnnotations, bakeResize } from '../../editor/imageBake';
+import { importCanvasMedia } from '../mediaImport';
+import type { PaintShape } from '../../editor/PaintTool';
 import { type GridLines } from '../../editor/gridMath';
-import { MaskEditorModal } from '../../editor/MaskEditorModal';
 import { strokesToMaskPngBase64 } from '../../editor/maskExport';
 import { type MaskStroke } from '../../editor/maskMath';
-import { OutpaintEditorModal } from '../../editor/OutpaintEditorModal';
 import { type OutpaintPadding } from '../../editor/outpaintMath';
 import { FULL_REGION, type CropRegion } from '../../editor/types';
 import {
@@ -78,6 +78,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   } = data as unknown as OutputNodeData;
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
+  const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [gridOpen, setGridOpen] = useState(false);
@@ -119,6 +121,61 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     [lightboxItems.length],
   );
 
+  // Brush / Resize (unified editor's client-side modes): bake → import as
+  // a NEW generated-media item appended to this node (non-destructive).
+  const handleBrushCommit = useCallback(
+    (shapes: PaintShape[]) => {
+      if (!preview_url) return;
+      void (async () => {
+        try {
+          setPixCommitting(true);
+          const blob = await bakeAnnotations(preview_url, shapes);
+          const file = new File([blob], 'brush.png', { type: 'image/png' });
+          const item = await importCanvasMedia(file, canvasId, id);
+          patchData({
+            images: [
+              ...((images as Array<{ url: string }>) ?? []),
+              { url: item.url, kind: 'image', name: 'brush.png' },
+            ],
+          });
+          setEditorMode(null);
+        } catch (err) {
+          console.error('[OutputNodeView] brush bake failed:', err);
+          setCommitError(err instanceof Error ? err.message : 'Brush failed');
+        } finally {
+          setPixCommitting(false);
+        }
+      })();
+    },
+    [preview_url, canvasId, id, images, patchData],
+  );
+  const handleResizeCommit = useCallback(
+    (scale: number) => {
+      if (!preview_url) return;
+      void (async () => {
+        try {
+          setPixCommitting(true);
+          const blob = await bakeResize(preview_url, scale);
+          const file = new File([blob], 'resized.png', { type: 'image/png' });
+          const item = await importCanvasMedia(file, canvasId, id);
+          patchData({
+            images: [
+              ...((images as Array<{ url: string }>) ?? []),
+              { url: item.url, kind: 'image', name: 'resized.png' },
+            ],
+          });
+          setEditorMode(null);
+        } catch (err) {
+          console.error('[OutputNodeView] resize bake failed:', err);
+          setCommitError(err instanceof Error ? err.message : 'Resize failed');
+        } finally {
+          setPixCommitting(false);
+        }
+      })();
+    },
+    [preview_url, canvasId, id, images, patchData],
+  );
+
   const canRegenerate = !!promptIdForOutput(id);
   const onRegenerate = useCallback(() => {
     void regenerateForOutput(id);
@@ -132,11 +189,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const openEditor = useCallback(() => {
     if (!canCrop) return;
     setCommitError(null);
-    setEditorOpen(true);
+    setEditorMode('crop');
   }, [canCrop]);
 
   const closeEditor = useCallback(() => {
     setEditorOpen(false);
+        setEditorMode(null);
     setCommitError(null);
   }, []);
 
@@ -148,6 +206,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       if (!resource_id) {
         patchData({ crop_region: region });
         setEditorOpen(false);
+        setEditorMode(null);
         return;
       }
       try {
@@ -164,6 +223,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           crop_region: null,
         });
         setEditorOpen(false);
+        setEditorMode(null);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to derive crop';
@@ -179,11 +239,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const openOutpaintEditor = useCallback(() => {
     if (!canSplit) return;
     setOutpaintError(null);
-    setOutpaintOpen(true);
+    setEditorMode('outpaint');
   }, [canSplit]);
 
   const closeOutpaintEditor = useCallback(() => {
     setOutpaintOpen(false);
+        setEditorMode(null);
     setOutpaintError(null);
   }, []);
 
@@ -221,6 +282,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         );
         store.setNodes([...store.nodes, extendedNode]);
         setOutpaintOpen(false);
+        setEditorMode(null);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to extend canvas';
@@ -236,11 +298,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const openMaskEditor = useCallback(() => {
     if (!canSplit) return;
     setMaskError(null);
-    setMaskOpen(true);
+    setEditorMode('mask');
   }, [canSplit]);
 
   const closeMaskEditor = useCallback(() => {
     setMaskOpen(false);
+        setEditorMode(null);
     setMaskError(null);
   }, []);
 
@@ -281,6 +344,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         );
         store.setNodes([...store.nodes, cutoutNode]);
         setMaskOpen(false);
+        setEditorMode(null);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to cut out region';
@@ -296,11 +360,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const openGridEditor = useCallback(() => {
     if (!canSplit) return;
     setGridError(null);
-    setGridOpen(true);
+    setEditorMode('split');
   }, [canSplit]);
 
   const closeGridEditor = useCallback(() => {
     setGridOpen(false);
+        setEditorMode(null);
     setGridError(null);
   }, []);
 
@@ -345,6 +410,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         );
         store.setNodes([...store.nodes, ...tileNodes]);
         setGridOpen(false);
+        setEditorMode(null);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to split image';
@@ -559,18 +625,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           </div>
         )}
       </div>
-      {canCrop && preview_url && (
-        <CropEditorModal
-          open={editorOpen}
-          src={mediaSrc(preview_url)}
-          alt={preview_text || 'Output preview'}
-          initialRegion={crop_region ?? FULL_REGION}
-          onCommit={handleCommit}
-          onCancel={closeEditor}
-          committing={committing}
-        />
-      )}
-      {commitError && editorOpen && (
+      {commitError && (editorMode !== null || editorOpen) && (
         <div
           data-testid="crop-commit-error"
           role="alert"
@@ -579,17 +634,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {commitError}
         </div>
       )}
-      {canSplit && preview_url && (
-        <GridSplitEditorModal
-          open={gridOpen}
-          src={mediaSrc(preview_url)}
-          alt={preview_text || 'Output preview'}
-          onCommit={handleGridCommit}
-          onCancel={closeGridEditor}
-          committing={gridCommitting}
-        />
-      )}
-      {gridError && gridOpen && (
+      {gridError && editorMode === 'split' && (
         <div
           data-testid="grid-commit-error"
           role="alert"
@@ -598,17 +643,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {gridError}
         </div>
       )}
-      {canSplit && preview_url && (
-        <MaskEditorModal
-          open={maskOpen}
-          src={mediaSrc(preview_url)}
-          alt={preview_text || 'Output preview'}
-          onCommit={handleMaskCommit}
-          onCancel={closeMaskEditor}
-          committing={maskCommitting}
-        />
-      )}
-      {maskError && maskOpen && (
+      {maskError && editorMode === 'mask' && (
         <div
           data-testid="mask-commit-error"
           role="alert"
@@ -617,18 +652,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {maskError}
         </div>
       )}
-      {canSplit && preview_url && (
-        <OutpaintEditorModal
-          open={outpaintOpen}
-          src={mediaSrc(preview_url)}
-          alt={preview_text || 'Output preview'}
-          initialPrompt={preview_text}
-          onCommit={handleOutpaintCommit}
-          onCancel={closeOutpaintEditor}
-          committing={outpaintCommitting}
-        />
-      )}
-      {outpaintError && outpaintOpen && (
+      {outpaintError && editorMode === 'outpaint' && (
         <div
           data-testid="outpaint-commit-error"
           role="alert"
@@ -636,6 +660,30 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         >
           {outpaintError}
         </div>
+      )}
+      {preview_url && (
+        <UnifiedImageEditor
+          open={editorMode !== null}
+          src={preview_url}
+          alt={preview_text || 'Output preview'}
+          initialMode={editorMode ?? 'preview'}
+          cropInitialRegion={crop_region ?? undefined}
+          outpaintInitialPrompt={preview_text}
+          onClose={() => setEditorMode(null)}
+          onCropCommit={canCrop ? handleCommit : undefined}
+          onOutpaintCommit={canSplit ? handleOutpaintCommit : undefined}
+          onMaskCommit={canSplit ? handleMaskCommit : undefined}
+          onSplitCommit={canSplit ? handleGridCommit : undefined}
+          onBrushCommit={handleBrushCommit}
+          onResizeCommit={handleResizeCommit}
+          committing={
+            committing ||
+            gridCommitting ||
+            maskCommitting ||
+            outpaintCommitting ||
+            pixCommitting
+          }
+        />
       )}
       {lightboxIndex !== null && lightboxItems.length > 0 && (
         <OutputLightbox
