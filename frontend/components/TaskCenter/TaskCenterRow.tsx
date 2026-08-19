@@ -10,7 +10,12 @@ import {
   type UnifiedTask,
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
-import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
+import {
+  taskAgentName,
+  taskAwaitingInput,
+  taskRowActions,
+  taskShowsCover,
+} from './taskRowPresentation';
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
 
@@ -25,6 +30,7 @@ function taskTypeBg(type: string): string {
     case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
     case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
     case 'agent_routine':       return 'bg-emerald-500/20 text-emerald-400';
+    case 'agent':               return 'bg-agent-soft text-agent';
     default:                    return 'bg-ink-700/50 text-ink-400';
   }
 }
@@ -69,6 +75,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   const isActive = task.status === 'pending' || task.status === 'processing';
   const showCover = taskShowsCover(task) && !coverFailed;
   const awaiting = taskAwaitingInput(task);
+  const agentName = taskAgentName(task);
 
   const handleOpen = () => {
     if (actions.open && task.resource_id) onOpenResource(String(task.resource_id));
@@ -183,6 +190,16 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-[10px] text-ink-600">{taskTypeLabel(task.task_type)}</span>
+            {/* Which agent ran this — the badge answers "who", the title above
+                carries the user's request and the subtitle the result. */}
+            {agentName && (
+              <span
+                className="shrink-0 max-w-[96px] truncate rounded-full border border-agent-line bg-agent-soft px-1.5 text-[10px] leading-4 text-agent"
+                title={agentName}
+              >
+                {agentName}
+              </span>
+            )}
             {task.subtitle && (
               <span className="text-[10px] text-ink-600 truncate">{task.subtitle}</span>
             )}

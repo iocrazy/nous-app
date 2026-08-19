@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
+import {
+  taskAgentName,
+  taskAwaitingInput,
+  taskRowActions,
+  taskShowsCover,
+} from './taskRowPresentation';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
 // Minimal task factory — only the fields the presentation helpers read.
@@ -95,5 +100,29 @@ describe('taskAwaitingInput', () => {
   it('returns null for a malformed marker', () => {
     const t = makeTask({ status: 'processing', metadata: { awaiting_input: 'yes' } });
     expect(taskAwaitingInput(t)).toBeNull();
+  });
+});
+
+
+describe('taskAgentName', () => {
+  const agentTask = (metadata: Record<string, unknown>) =>
+    makeTask({ task_type: 'agent', metadata });
+
+  it('returns the agent name an agent row was attributed to', () => {
+    expect(taskAgentName(agentTask({ agent_name: 'Analyze' }))).toBe('Analyze');
+  });
+
+  it('has no badge when the agent could not be named', () => {
+    // Realtime row before the name lookup lands, or an agent ai_agents RLS
+    // hides — no badge beats a made-up one.
+    expect(taskAgentName(agentTask({ agent_name: null }))).toBeUndefined();
+    expect(taskAgentName(agentTask({ agent_name: '   ' }))).toBeUndefined();
+    expect(taskAgentName(agentTask({}))).toBeUndefined();
+  });
+
+  it('never badges a non-agent row, even if metadata carries a name', () => {
+    expect(
+      taskAgentName(makeTask({ task_type: 'download', metadata: { agent_name: 'Analyze' } })),
+    ).toBeUndefined();
   });
 });
