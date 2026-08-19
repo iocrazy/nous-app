@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { absorbImagesOnConnect, absorbMediaIntoGroup, applyDropMembership, arrangeGroupChildren, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
+import { absorbImagesOnConnect, groupPreviewItems, groupSummary, absorbMediaIntoGroup, applyDropMembership, arrangeGroupChildren, createEmptyGroup, groupSelection, hitGroupIdFor, ungroupNode, releaseChildrenOf } from './grouping';
 import type { CanvasNode } from '../types';
 
 const n = (id: string, x: number, y: number, extra: Record<string, unknown> = {}): CanvasNode =>
@@ -387,5 +387,36 @@ describe('absorbImagesOnConnect', () => {
   it('non-group target → unchanged identity', () => {
     const nodes = [groupNode, mediaNode];
     expect(absorbImagesOnConnect(nodes, 'm1', 'm1')).toBe(nodes);
+  });
+});
+
+
+// ---- groupSummary + groupPreviewItems (IC D — 分组摘要与整组预览) --------
+
+describe('groupSummary', () => {
+  it('counts member prompts/loops and images (items + member images)', () => {
+    const nodes = [
+      { id: 'g1', type: 'group', position: { x: 0, y: 0 }, data: { items: [{ url: '/api/v1/generated-media/1/file', kind: 'image' }] } },
+      { id: 'p1', type: 'prompt', parentId: 'g1', position: { x: 0, y: 0 }, data: {} },
+      { id: 'l1', type: 'loop', parentId: 'g1', position: { x: 0, y: 0 }, data: {} },
+      { id: 'm1', type: 'media', parentId: 'g1', position: { x: 0, y: 0 }, data: { items: [{ url: '/api/v1/generated-media/2/file', kind: 'image' }, { url: '/api/v1/generated-media/3/file', kind: 'video' }] } },
+      { id: 'z', type: 'media', position: { x: 0, y: 0 }, data: { items: [] } },
+    ] as unknown as CanvasNode[];
+    expect(groupSummary(nodes, 'g1')).toEqual({ prompts: 1, loops: 1, images: 2 });
+  });
+});
+
+describe('groupPreviewItems', () => {
+  it('collects the group grid plus member images, deduped', () => {
+    const nodes = [
+      { id: 'g1', type: 'group', position: { x: 0, y: 0 }, data: { items: [{ url: '/api/v1/generated-media/1/file', kind: 'image', name: 'a' }] } },
+      { id: 'm1', type: 'media', parentId: 'g1', position: { x: 0, y: 0 }, data: { items: [{ url: '/api/v1/generated-media/1/file', kind: 'image' }, { url: '/api/v1/generated-media/2/file', kind: 'image', name: 'b' }] } },
+      { id: 'o1', type: 'output', parentId: 'g1', position: { x: 0, y: 0 }, data: { images: [{ url: '/api/v1/generated-media/3/file', kind: 'image' }] } },
+    ] as unknown as CanvasNode[];
+    expect(groupPreviewItems(nodes, 'g1').map((i) => i.url)).toEqual([
+      '/api/v1/generated-media/1/file',
+      '/api/v1/generated-media/2/file',
+      '/api/v1/generated-media/3/file',
+    ]);
   });
 });
