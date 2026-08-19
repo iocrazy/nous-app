@@ -15,6 +15,7 @@ import { ASPECT_RATIOS } from '../aspectPresets';
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
 import { rerunPrompt } from '../regenerate';
+import { CANVAS_PILL_TRIGGER } from './canvasPill';
 import { useGenerationModels } from './useGenerationModels';
 import { UiSelect } from '../../../../components/ui';
 
@@ -67,7 +68,7 @@ export function AttachedComposerPanel({
   return (
     <div
       data-testid="attached-composer"
-      className="canvas-island absolute left-1/2 top-full z-10 mt-2 w-72 -translate-x-1/2 rounded-xl p-2"
+      className="canvas-island absolute left-1/2 top-full z-10 mt-2 w-80 -translate-x-1/2 rounded-xl p-2"
     >
       {/* Image | Video pills (IC 图片/视频 tabs). */}
       <div className="mb-1.5 flex items-center gap-1">
@@ -141,8 +142,9 @@ export function AttachedComposerPanel({
         rows={2}
       />
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1">
         <UiSelect
+          triggerClassName={CANVAS_PILL_TRIGGER}
           className="min-w-0 flex-1 truncate"
           value={model}
           onChange={(e) => setModel(e.target.value)}
@@ -156,6 +158,8 @@ export function AttachedComposerPanel({
           ))}
         </UiSelect>
         <UiSelect
+          triggerClassName={CANVAS_PILL_TRIGGER}
+          className="shrink-0"
           value={ratio}
           onChange={(e) => setRatio(e.target.value)}
           aria-label="Aspect ratio"
@@ -171,7 +175,7 @@ export function AttachedComposerPanel({
             type="number"
             min={1}
             max={8}
-            className="nodrag w-11 rounded-full border border-canvas-line bg-transparent px-2 py-0.5 text-xs text-canvas-text outline-none"
+            className="nodrag w-9 shrink-0 rounded-full border border-canvas-line bg-transparent px-1.5 py-0.5 text-center text-xs text-canvas-text outline-none"
             value={count}
             onChange={(e) =>
               setCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
@@ -184,7 +188,7 @@ export function AttachedComposerPanel({
           data-testid="composer-run"
           aria-label="Run"
           onClick={run}
-          className="nodrag ml-auto flex shrink-0 items-center gap-1 rounded-full border border-transparent bg-canvas-strong px-3 py-1 text-xs font-bold text-canvas-card hover:opacity-90"
+          className="nodrag ml-auto flex shrink-0 items-center gap-1 rounded-full border border-transparent bg-canvas-strong px-2.5 py-1 text-xs font-bold text-canvas-card hover:opacity-90"
         >
           <Play size={11} />
           Run

@@ -29,6 +29,7 @@ import {
   createMediaNodeFromFiles,
   pasteFilesToCanvas,
 } from '../smart/dropCreate';
+import { absorbImagesOnConnect } from '../smart/grouping';
 import { stripRfInternals, useCanvasCoreStore } from '../store/canvasCoreStore';
 import { SMART_NODE_TYPES } from '../smart/nodes/registry';
 import { SMART_EDGE_TYPES } from '../smart/edges/registry';
@@ -463,8 +464,16 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
         targetHandle,
       };
       setConnections([...connections, newEdge]);
+      // IC ⑦: wiring an image-bearing card into a group collects its images.
+      const current = useCanvasCoreStore.getState().nodes as CanvasNode[];
+      const absorbed = absorbImagesOnConnect(
+        current,
+        String(connection.source),
+        String(connection.target),
+      );
+      if (absorbed !== current) setNodes(absorbed);
     },
-    [readOnly, kind, nodeTypeById, connections, setConnections],
+    [readOnly, kind, nodeTypeById, connections, setConnections, setNodes],
   );
 
   // Drag-snap-connect (Infinite-Canvas parity G1, smart only): a ctrl-dropped

@@ -349,13 +349,17 @@ export function canConnectSmart(
   targetType: string | undefined,
 ): boolean {
   if (!sourceType || !targetType) return true;
-  if (sourceType === 'output') return false;
+  // Output stays a dead-end EXCEPT into a group — wiring a result into a
+  // group collects its images (IC parity ⑦).
+  if (sourceType === 'output') return targetType === 'group';
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;
-  // Group containers hold members via parentId, never via wires — but a
-  // group WITH absorbed media is a source like a media card (group v2).
-  if (targetType === 'group') return false;
+  // Group containers hold members via parentId — but as a COLLECTOR a
+  // group accepts wires from image-bearing cards (media/output, IC ⑦):
+  // connecting absorbs the source's images into the grid.
+  if (targetType === 'group')
+    return sourceType === 'media' || sourceType === 'output';
   if (
     sourceType === 'group' &&
     targetType !== 'prompt' &&
