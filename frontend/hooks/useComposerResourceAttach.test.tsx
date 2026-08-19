@@ -24,6 +24,7 @@ import { useComposerResourceAttach } from './useComposerResourceAttach';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 
 const stageResource = vi.fn();
+const focusComposer = vi.fn();
 const notify = vi.fn();
 const t = (_k: string, def: string, opts?: Record<string, unknown>) =>
   def.replace(/\{\{(\w+)\}\}/g, (_m, n) => String(opts?.[n] ?? ''));
@@ -32,6 +33,7 @@ function setup(over: Record<string, unknown> = {}) {
   const setSelectedAgentSlug = vi.fn();
   const opts = {
     stageResource,
+    focusComposer,
     selectedAgentSlug: 'script_ai',
     setSelectedAgentSlug,
     lockedAgent: null,
@@ -60,6 +62,7 @@ function pending(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   stageResource.mockClear();
+  focusComposer.mockClear();
   notify.mockClear();
   ensureMock.mockReset().mockResolvedValue({ action: 'skipped' });
   useGlobalChatStore.setState({ pendingResource: null, pendingQuote: null, chatRequest: null });
@@ -128,6 +131,17 @@ describe('pendingResource consumption', () => {
     expect(stageResource).toHaveBeenCalledTimes(1);
   });
 
+  it('hands the caret back to the composer', () => {
+    // The user was in the library when they hit "Send to Agent". Without
+    // this they watch the chip appear and then have to click into the
+    // input before they can say anything about it.
+    setup();
+
+    act(() => { useGlobalChatStore.getState().sendResourceToChat(pending()); });
+
+    expect(focusComposer).toHaveBeenCalledTimes(1);
+  });
+
   it('fires again for a repeat send of the same resource', () => {
     // The CHANNEL must not swallow the second send — whether that ends up
     // as one chip or two is the staging reducer's call (see
@@ -178,6 +192,18 @@ describe('attachResource (@ picker path)', () => {
       expect.stringContaining('Insufficient points'),
       'error',
     );
+  });
+
+  it('does not steal focus — the caret is already in the composer', async () => {
+    // Entry A runs mid-typing. Re-focusing would move the caret to the end
+    // of whatever the user is in the middle of writing.
+    const { view } = setup();
+
+    await act(async () => {
+      view.result.current.attachResource({ id: 'r-12', name: 'a.png', kind: 'image' });
+    });
+
+    expect(focusComposer).not.toHaveBeenCalled();
   });
 
   it('stays quiet when there was nothing to do', async () => {

@@ -354,6 +354,37 @@ export function AIChatPanel({
   // --- Resource @-mention picker state ---
   // Editor ref so we can call insertResourceRef when user picks an item.
   const chatEditorRef = useRef<Editor | null>(null);
+
+  // Put the caret in the composer. Used by the "Send to Agent" channel,
+  // where the user was over in the library and has no caret here yet.
+  //
+  // Still needs the frame retry the staging path no longer does: the panel
+  // and the tiptap editor mount a beat apart (RECON#20), and this is the
+  // one action that genuinely needs the editor to exist. Frames are only
+  // cancelled on unmount — a second Send to Agent must not cancel the
+  // first one's pending focus.
+  const focusFrames = useRef<Set<number>>(new Set());
+  useEffect(() => () => {
+    focusFrames.current.forEach((h) => cancelAnimationFrame(h));
+    focusFrames.current.clear();
+  }, []);
+  const focusComposer = useCallback(() => {
+    let tries = 0;
+    const attempt = () => {
+      const editor = chatEditorRef.current;
+      if (!editor) {
+        if (tries++ > 30) return; // give up quietly rather than loop forever
+        const handle = requestAnimationFrame(() => {
+          focusFrames.current.delete(handle);
+          attempt();
+        });
+        focusFrames.current.add(handle);
+        return;
+      }
+      editor.chain().focus('end').run();
+    };
+    attempt();
+  }, []);
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionActiveKind, setMentionActiveKind] = useState<
@@ -401,6 +432,7 @@ export function AIChatPanel({
   );
   const { attachResource } = useComposerResourceAttach({
     stageResource,
+    focusComposer,
     selectedAgentSlug,
     setSelectedAgentSlug,
     lockedAgent,

@@ -27,7 +27,11 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { Editor } from '@tiptap/core';
 import type { ClipboardEvent } from 'react';
-import { createResourceMentionExtension } from './ChatInputResourceMention';
+import {
+  createResourceMentionExtension,
+  MENTION_QUERY_TERMINATORS,
+  MENTION_SCAN_CHARS,
+} from './ChatInputResourceMention';
 import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
 
 export interface ChatInputProps {
@@ -183,13 +187,17 @@ export function ChatInput({
       const cb = onMentionRequestRef.current;
       if (!cb) return;
       const { from } = editor.state.selection;
-      // Inspect up to 80 chars before the caret to find the last '@'
-      const textBefore = editor.state.doc.textBetween(Math.max(0, from - 80), from);
+      // Inspect a fixed window before the caret to find the last '@'
+      const textBefore = editor.state.doc.textBetween(
+        Math.max(0, from - MENTION_SCAN_CHARS), from,
+      );
       const atIdx = textBefore.lastIndexOf('@');
       if (atIdx === -1) return;
       const queryCandidate = textBefore.slice(atIdx + 1);
-      // Stop tracking if the query contains whitespace or terminal punctuation
-      if (/[\s\n,;]/.test(queryCandidate)) return;
+      // Stop tracking once the query hits a terminator. Shared with
+      // removeMentionTrigger so the picker and the deleter never disagree
+      // about where the query ends.
+      if (MENTION_QUERY_TERMINATORS.test(queryCandidate)) return;
       // Only update if we already have a query (initial '@' open is handled by
       // the handleKeyDown '@' handler — this only updates the existing query)
       if (atIdx >= 0 && textBefore[atIdx] === '@') {

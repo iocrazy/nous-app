@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import { createResourceMentionExtension } from './ChatInputResourceMention';
+import {
+  createResourceMentionExtension,
+  MENTION_QUERY_TERMINATORS,
+} from './ChatInputResourceMention';
 import type { ResourceSearchResult } from '../../types';
 
 // Real `/resources/search` row shape (Task 1 contract) — including the
@@ -126,6 +129,35 @@ describe('ChatInputResourceMention', () => {
 
       expect(ed.getText()).toBe('start@pitch.mp4 then ');
       expect(JSON.stringify(ed.getJSON())).toContain('"resourceRef"');
+    });
+
+    it('leaves prose typed after a comma alone', () => {
+      // The picker's query tracker stops at "," (MENTION_QUERY_TERMINATORS),
+      // so by this point the picker is showing results for "foo" while the
+      // user has moved on to writing ",bar". A deleter using a different
+      // terminator set would take ",bar" — the user's own words — with it,
+      // and silently: nothing on screen says text was removed.
+      const ed = typed('a @foo,bar');
+      expect((ed as any).commands.removeMentionTrigger()).toBe(false);
+      expect(ed.getText()).toBe('a @foo,bar');
+    });
+
+    it('leaves prose typed after a semicolon alone', () => {
+      const ed = typed('a @foo;bar');
+      expect((ed as any).commands.removeMentionTrigger()).toBe(false);
+      expect(ed.getText()).toBe('a @foo;bar');
+    });
+
+    it('agrees with the query tracker on where a query ends', () => {
+      // The two scanners must share one definition. Asserting the shared
+      // constant directly is what stops them drifting apart again —
+      // exercising only one side would let the other one rot.
+      for (const ch of [' ', '\t', '\n', ',', ';']) {
+        expect(MENTION_QUERY_TERMINATORS.test(ch)).toBe(true);
+      }
+      for (const ch of ['a', '_', '-', '.', '@', '中']) {
+        expect(MENTION_QUERY_TERMINATORS.test(ch)).toBe(false);
+      }
     });
 
     it('does not reach into an earlier paragraph for its @', () => {

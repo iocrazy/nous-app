@@ -158,6 +158,24 @@ describe('a picked asset lands in the attachment row, not in the sentence', () =
     expect(screen.queryByTestId('resource-chip')).toBeNull();
   });
 
+  it('leaves the caret in the composer after Send to Agent', async () => {
+    // The user came from the library context menu, so nothing has put a
+    // caret here. Without it they must click the input before typing —
+    // the old inline-insert path focused as a side effect of inserting.
+    const { container } = await renderPanel();
+    await waitFor(() => {
+      useGlobalChatStore.getState().sendResourceToChat(PENDING);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('staged-resource-chip')).toBeVisible();
+    });
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(editable);
+    });
+  });
+
   it('stages an @-picked asset and clears the "@query" the user typed', async () => {
     await renderPanel();
     await waitFor(() => {

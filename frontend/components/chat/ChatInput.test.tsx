@@ -78,6 +78,31 @@ describe('ChatInput (tiptap)', () => {
     expect(attachments).toHaveLength(0);
   });
 
+  it('stops tracking the @query at a comma, like the deleter does', async () => {
+    // The two scanners must agree on where a query ends. This pins the
+    // TRACKER half: if it kept going past "," it would search for
+    // "foo,bar" while removeMentionTrigger (which stops there) deletes
+    // only "@foo" — or, before they were unified, the reverse, where the
+    // deleter ate the user's ",bar".
+    const onMentionRequest = vi.fn();
+    const editorRef = { current: null } as React.MutableRefObject<import('@tiptap/core').Editor | null>;
+    render(<ChatInput onSend={() => {}} onMentionRequest={onMentionRequest} editorRef={editorRef} />);
+    await waitFor(() => { expect(editorRef.current).not.toBeNull(); }, { timeout: 300 });
+
+    editorRef.current!.commands.setContent('<p>a</p>');
+    editorRef.current!.commands.focus('end');
+    editorRef.current!.commands.insertContent('@foo');
+    await waitFor(() => {
+      expect(onMentionRequest).toHaveBeenCalledWith('foo');
+    });
+
+    editorRef.current!.commands.insertContent(',bar');
+
+    const queries = onMentionRequest.mock.calls.map((c) => String(c[0]));
+    expect(queries).not.toContain('foo,bar');
+    expect(queries.some((q) => q.includes(','))).toBe(false);
+  });
+
   it('renders send button', () => {
     render(<ChatInput onSend={() => {}} />);
     const btn = screen.getByTitle('Send message');

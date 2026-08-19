@@ -29,7 +29,23 @@ export interface ResourceRefInsertItem {
 
 /** How far back we look for the "@" that opened the picker. Matches the
  *  window ChatInput scans when it tracks the live query. */
-const MENTION_SCAN_CHARS = 80;
+export const MENTION_SCAN_CHARS = 80;
+
+/**
+ * What ends an @query.
+ *
+ * Exported because TWO scanners have to agree on it: ChatInput's live query
+ * tracker (which decides what the picker searches for) and
+ * `removeMentionTrigger` below (which decides what to delete). When they
+ * disagreed — tracker `/[\s\n,;]/` vs deleter `/\s/` — typing "@foo" then
+ * ",bar" as prose left the tracker stopped at "foo" while the deleter still
+ * considered "foo,bar" one query and removed the user's own words with it.
+ * Silently: the text is simply gone.
+ *
+ * `\n` needs no entry of its own; `\s` already covers it, and the deleter
+ * never sees one anyway (its scan is confined to a single text block).
+ */
+export const MENTION_QUERY_TERMINATORS = /[\s,;]/;
 
 export function createResourceMentionExtension(opts: MentionOptions) {
   void opts; // reserved for future suggestion-trigger wiring
@@ -67,9 +83,10 @@ export function createResourceMentionExtension(opts: MentionOptions) {
             );
             const atIdx = textBefore.lastIndexOf('@');
             if (atIdx === -1) return false;
-            // Whitespace after the "@" means the picker session is over and
-            // this is ordinary prose — leave it alone.
-            if (/\s/.test(textBefore.slice(atIdx + 1))) return false;
+            // A terminator after the "@" means the picker session is over and
+            // this is ordinary prose — leave it alone. Same set the tracker
+            // uses, so the picker and the deleter always see one query.
+            if (MENTION_QUERY_TERMINATORS.test(textBefore.slice(atIdx + 1))) return false;
             const deleteFrom = from - (textBefore.length - atIdx);
             return commands.deleteRange({ from: deleteFrom, to: from });
           },

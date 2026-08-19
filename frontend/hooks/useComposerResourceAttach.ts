@@ -14,11 +14,17 @@
  *
  * Both entries now stage the asset in the attachment row above the composer
  * rather than inserting a chip into the sentence. That also retires the
- * frame-by-frame retry this hook used to carry: it existed because the
- * tiptap editor mounts a frame or two after the panel (RECON#20), and
- * staging writes React state owned by the panel this hook already lives in.
- * A resource that arrives before the panel mounts is still safe — it waits
- * in the store until the first effect pass consumes it.
+ * frame-by-frame retry this hook used to carry for INSERTION: it existed
+ * because the tiptap editor mounts a frame or two after the panel
+ * (RECON#20), and staging writes React state owned by the panel this hook
+ * already lives in. A resource that arrives before the panel mounts is
+ * still safe — it waits in the store until the first effect pass consumes it.
+ *
+ * Focus is the one thing that still needs the editor, and only on entry B:
+ * the user was in the library, not the composer, and the point of "Send to
+ * Agent" is to leave them able to type. Entry A never lost focus in the
+ * first place. The panel owns that retry (it already runs the same one for
+ * the quote channel).
  */
 
 import { useCallback, useEffect } from 'react';
@@ -41,6 +47,13 @@ type Translate = (
 export interface UseComposerResourceAttachOptions {
   /** Put the asset in the composer's attachment row. */
   stageResource: (item: ResourceRefInsertItem) => void;
+  /**
+   * Called only for the context-menu channel, after staging. The user came
+   * from the library with no caret in the composer, so without this they
+   * have to click into it before they can say anything about the asset
+   * they just sent.
+   */
+  focusComposer?: () => void;
   selectedAgentSlug: string | null;
   setSelectedAgentSlug: (slug: string) => void;
   /** Non-null when the host panel is locked to one agent (no selector). */
@@ -56,6 +69,7 @@ export interface UseComposerResourceAttachResult {
 
 export function useComposerResourceAttach({
   stageResource,
+  focusComposer,
   selectedAgentSlug,
   setSelectedAgentSlug,
   lockedAgent = null,
@@ -92,6 +106,7 @@ export function useComposerResourceAttach({
     // Consume after staging (as the quote channel does) so a re-render
     // cannot stage the same asset twice.
     useGlobalChatStore.getState().consumePendingResource();
+    focusComposer?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingResource]);
 
