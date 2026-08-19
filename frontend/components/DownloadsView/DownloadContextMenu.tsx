@@ -47,10 +47,8 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
   onCopyLink,
   onDelete,
 }) => {
-  // Only the Send to Agent label is translated: it has to read the same as
-  // the resource library's identical item, which uses this key. The rest of
-  // this menu predates the i18n pass and stays as-is rather than being
-  // half-migrated in a bugfix.
+  // Labels reuse the resource library's `resources.*` keys wherever the item
+  // is the same action, so both context menus stay worded identically.
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -78,14 +76,14 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Eye size={14} className="text-ink-500" />
-        View Details
+        {t('resources.viewDetails', 'View Details')}
       </button>
       <button
         onClick={onOpenNewTab}
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <ExternalLink size={14} className="text-ink-500" />
-        Open in New Tab
+        {t('resources.openInNewTab', 'Open in New Tab')}
       </button>
       <div className="border-t border-ink-800 my-1" />
       <button
@@ -93,7 +91,7 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Download size={14} className="text-ink-500" />
-        Download Original
+        {t('resources.downloadOriginal', 'Download Original')}
       </button>
       {contextMenu.video.music_download_path && (
         <button
@@ -101,7 +99,7 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
           className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
         >
           <Music size={14} className="text-ink-500" />
-          Download Audio
+          {t('resources.downloadAudio', 'Download Audio')}
         </button>
       )}
       <div className="border-t border-ink-800 my-1" />
@@ -122,21 +120,21 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Pencil size={14} className="text-ink-500" />
-        Rename
+        {t('resources.rename', 'Rename')}
       </button>
       <button
         onClick={onShare}
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Share2 size={14} className="text-ink-500" />
-        Share
+        {t('resources.share', 'Share')}
       </button>
       <button
         onClick={onCopyLink}
         className="w-full px-3 py-2 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-2.5 transition-colors"
       >
         <Link size={14} className="text-ink-500" />
-        Copy Link
+        {t('resources.copyLink', 'Copy Link')}
       </button>
       <div className="border-t border-ink-800 my-1" />
       <button
@@ -144,7 +142,7 @@ export const DownloadContextMenu: React.FC<DownloadContextMenuProps> = ({
         className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-900/20 hover:text-red-300 flex items-center gap-2.5 transition-colors"
       >
         <Trash2 size={14} />
-        Delete
+        {t('resources.delete', 'Delete')}
       </button>
     </div>
   );
