@@ -103,3 +103,25 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
   });
 });
+
+
+describe('IC editing keys on the toolbar (⑥)', () => {
+  it('exposes Crop/Expand/Mask/Split alongside Preview/Download', async () => {
+    const { OutputNodeToolbar } = await import('./OutputNodeToolbar');
+    const { render: r, screen: s } = await import('@testing-library/react');
+    r(
+      <OutputNodeToolbar
+        items={[{ url: '/api/v1/generated-media/1/cover' }]}
+        onPreview={() => {}}
+        onCrop={() => {}}
+        onExpand={() => {}}
+        onMask={() => {}}
+        onSplit={() => {}}
+        pinned
+      />,
+    );
+    for (const label of ['Preview', 'Crop', 'Expand', 'Mask', 'Split', 'Download']) {
+      expect(s.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+  });
+});

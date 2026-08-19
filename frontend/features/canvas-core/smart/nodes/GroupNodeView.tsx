@@ -32,7 +32,7 @@ import {
 import { stitchImageItems } from '../stitchImages';
 import type { GeneratedImageRef, GroupNodeData } from '../types';
 import type { CanvasNode } from '../../types';
-import { CreateFromNodeBar } from './CreateFromNodeBar';
+import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { GroupNodeToolbar } from './GroupNodeToolbar';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
@@ -173,7 +173,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
-      <CreateFromNodeBar nodeId={id} pinned={Boolean(selected)} readOnly={readOnly} />
+      <AttachedComposerPanel
+        nodeId={id}
+        inputUrls={imageItems.map((it) => it.url)}
+        pinned={Boolean(selected)}
+        readOnly={readOnly}
+      />
       <GroupNodeToolbar
         imageCount={imageItems.length}
         memberCount={memberCount}

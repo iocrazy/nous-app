@@ -7,7 +7,15 @@
 // Positioned absolute above the node — NEVER position:fixed here (RF's
 // transformed ancestors collapse fixed into the node, known trap).
 
-import { Download, Eye, RefreshCw } from 'lucide-react';
+import {
+  Crop,
+  Download,
+  Expand,
+  Eye,
+  Grid3x3,
+  Paintbrush,
+  RefreshCw,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { downloadUrl, type DownloadableItem } from '../downloadMedia';
@@ -15,6 +23,13 @@ import { downloadUrl, type DownloadableItem } from '../downloadMedia';
 export interface OutputNodeToolbarProps {
   items: DownloadableItem[];
   onPreview: () => void;
+  /** Editing keys (IC 裁剪/扩图/遮罩/宫格切分) — absent → key hidden.
+   *  IC's 画笔 shares the Mask editor (brush tool inside), and 放大 has no
+   *  backend derive yet, so those two collapse into Mask / stay out. */
+  onCrop?: () => void;
+  onExpand?: () => void;
+  onMask?: () => void;
+  onSplit?: () => void;
   /** Absent → no source prompt → the Rerun key is hidden. */
   onRerun?: () => void;
   rerunning?: boolean;
@@ -29,6 +44,10 @@ export interface OutputNodeToolbarProps {
 export function OutputNodeToolbar({
   items,
   onPreview,
+  onCrop,
+  onExpand,
+  onMask,
+  onSplit,
   onRerun,
   rerunning,
   readOnly,
@@ -59,6 +78,26 @@ export function OutputNodeToolbar({
       <ToolbarButton label="Preview" onClick={onPreview}>
         <Eye size={13} />
       </ToolbarButton>
+      {onCrop && (
+        <ToolbarButton label="Crop" onClick={onCrop} disabled={readOnly}>
+          <Crop size={13} />
+        </ToolbarButton>
+      )}
+      {onExpand && (
+        <ToolbarButton label="Expand" onClick={onExpand} disabled={readOnly}>
+          <Expand size={13} />
+        </ToolbarButton>
+      )}
+      {onMask && (
+        <ToolbarButton label="Mask" onClick={onMask} disabled={readOnly}>
+          <Paintbrush size={13} />
+        </ToolbarButton>
+      )}
+      {onSplit && (
+        <ToolbarButton label="Split" onClick={onSplit} disabled={readOnly}>
+          <Grid3x3 size={13} />
+        </ToolbarButton>
+      )}
       <ToolbarButton
         label="Download"
         onClick={onDownload}

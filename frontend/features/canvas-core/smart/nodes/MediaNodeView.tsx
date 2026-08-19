@@ -22,7 +22,7 @@ import {
 } from '../mediaImport';
 import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
-import { CreateFromNodeBar } from './CreateFromNodeBar';
+import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -132,7 +132,14 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
-      <CreateFromNodeBar nodeId={id} pinned={Boolean(selected)} readOnly={readOnly} />
+      <AttachedComposerPanel
+        nodeId={id}
+        inputUrls={(items ?? [])
+          .filter((it) => it.kind !== 'video')
+          .map((it) => it.url)}
+        pinned={Boolean(selected)}
+        readOnly={readOnly}
+      />
       <div className="mh-node-head">
         <div className="mh-node-title">
           {title || t('canvas.mediaNode.title', 'Media')}

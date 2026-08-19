@@ -66,3 +66,28 @@ describe('createPromptFromNode', () => {
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
 });
+
+
+describe('createPromptFromNode with init', () => {
+  it('seeds body / gen / source_ref onto the spawned prompt', () => {
+    seed([MEDIA]);
+    const promptId = createPromptFromNode('m1', {
+      body: 'a red apple',
+      gen: { kind: 'video', model: 'jimeng-cli-seedance', aspect: '16:9' },
+      source_ref: '/api/v1/generated-media/a.png',
+    });
+    const prompt = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as { id: string }).id === promptId) as {
+      data: {
+        body: string;
+        gen?: { kind: string; model: string };
+        source_ref?: string;
+      };
+    };
+    expect(prompt.data.body).toBe('a red apple');
+    expect(prompt.data.gen?.kind).toBe('video');
+    expect(prompt.data.gen?.model).toBe('jimeng-cli-seedance');
+    expect(prompt.data.source_ref).toBe('/api/v1/generated-media/a.png');
+  });
+});
