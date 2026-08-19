@@ -46,6 +46,12 @@ import { AttachmentFailureBanner } from './chat/AttachmentFailureBanner';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
+import {
+  mergeRefAttachments,
+  stageResource as stageResourceInto,
+  type StagedResourceRef,
+} from './chat/stagedResources';
+import type { ResourceRefInsertItem } from './chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from './chat/ResourcePickerSuggestion';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
@@ -334,6 +340,16 @@ export function AIChatPanel({
 
   // B: staged attachments (uploaded but not yet sent). Cleared on send.
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+  // Library assets picked from the @ menu or "Send to Agent". They share the
+  // attachment row with the uploaded files above rather than sitting inside
+  // the sentence, and are cleared on send just the same.
+  const [stagedResources, setStagedResources] = useState<StagedResourceRef[]>([]);
+  // Functional update so the identity stays stable — the pendingResource
+  // effect in useComposerResourceAttach must not re-fire because the list
+  // it just wrote to changed.
+  const stageResource = useCallback((item: ResourceRefInsertItem) => {
+    setStagedResources((prev) => stageResourceInto(prev, item));
+  }, []);
 
   // --- Resource @-mention picker state ---
   // Editor ref so we can call insertResourceRef when user picks an item.
@@ -384,7 +400,7 @@ export function AIChatPanel({
     [addToast],
   );
   const { attachResource } = useComposerResourceAttach({
-    editorRef: chatEditorRef,
+    stageResource,
     selectedAgentSlug,
     setSelectedAgentSlug,
     lockedAgent,
@@ -401,6 +417,12 @@ export function AIChatPanel({
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {
       attachResource(item);
+      // The asset now lives above the composer, so the "@query" the user
+      // typed to get here is no longer a placeholder for anything — leaving
+      // it behind would send "@clip.mp4" as message text.
+      (chatEditorRef.current?.commands as unknown as {
+        removeMentionTrigger?: () => boolean;
+      } | undefined)?.removeMentionTrigger?.();
       setMentionPickerOpen(false);
       setMentionQuery('');
     },
@@ -636,6 +658,10 @@ export function AIChatPanel({
       // the server responds and we reload the message list. Staged image
       // attachments render immediately via their local preview data URL.
       const sentAttachments = stagedAttachments;
+      // Union of both sources, deduped by resource id: chips still sitting
+      // in a restored draft AND everything staged in the attachment row.
+      const sentResources = stagedResources;
+      const sentRefs = mergeRefAttachments(refAttachments, sentResources);
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
@@ -656,6 +682,7 @@ export function AIChatPanel({
       // Clear the composer chips optimistically — the attachments now live
       // in the message bubble. Restored on failure so the user can retry.
       setStagedAttachments([]);
+      setStagedResources([]);
 
       // Streaming assistant bubble — created on the first delta, grown in
       // place, then replaced by the authoritative row on history reload.
@@ -675,7 +702,7 @@ export function AIChatPanel({
             alt_text: a.filename,
             resource_id: a.resource_id,
           })),
-          ...refAttachments.map((r) => ({
+          ...sentRefs.map((r) => ({
             kind: r.kind,
             url: '',            // resource_ref resolves by id, not URL
             resource_id: r.resource_id,
@@ -755,11 +782,15 @@ export function AIChatPanel({
             (m) => m.id !== tempUser.id && m.id !== tempAssistantId,
           ));
           setStagedAttachments(sentAttachments);
+          setStagedResources(sentResources);
         } else {
           const landed = serverMsgs
             .slice(-3)
             .some((m) => m.role === 'user' && m.content === text);
-          if (!landed) setStagedAttachments(sentAttachments);
+          if (!landed) {
+            setStagedAttachments(sentAttachments);
+            setStagedResources(sentResources);
+          }
         }
       } finally {
         setSending(false);
@@ -777,7 +808,7 @@ export function AIChatPanel({
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
-     addToast, planMode, stagedAttachments, contextCapsule, t],
+     addToast, planMode, stagedAttachments, stagedResources, contextCapsule, t],
   );
 
   const handleSuggest = useCallback(
@@ -1116,13 +1147,17 @@ export function AIChatPanel({
           Wrapped in a single relative div so the drag-drop overlay can
           cover the whole composer region. */}
       <div {...dropzoneRootProps} className="relative">
-        {/* B: Attachment chip strip — only render when staged or actively
-            uploading. The picker button itself lives next to ChatInput. */}
-        {activeSessionId && effectiveAgentSlug && stagedAttachments.length > 0 && (
+        {/* B: Attachment chip strip — files and library assets share one
+            wrapping row. Only rendered when something is staged; the picker
+            button itself lives next to ChatInput. */}
+        {activeSessionId && effectiveAgentSlug
+          && (stagedAttachments.length > 0 || stagedResources.length > 0) && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 bg-ink-900/30">
             <ChatAttachmentPicker
               attachments={stagedAttachments}
               onChange={setStagedAttachments}
+              resources={stagedResources}
+              onResourcesChange={setStagedResources}
               disabled={sending}
             />
           </div>
@@ -1191,7 +1226,8 @@ export function AIChatPanel({
 
         {/* Chat input + B: attachment picker (when no staged chips above) */}
         <div className="flex items-end gap-1 bg-ink-900 border-t border-ink-700/50">
-          {activeSessionId && effectiveAgentSlug && stagedAttachments.length === 0 && (
+          {activeSessionId && effectiveAgentSlug
+            && stagedAttachments.length === 0 && stagedResources.length === 0 && (
             <div className="pl-2 pb-2">
               <ChatAttachmentPicker
                 attachments={[]}
@@ -1214,6 +1250,9 @@ export function AIChatPanel({
               }
               onMentionRequest={handleMentionRequest}
               editorRef={chatEditorRef}
+              hasAttachments={
+                stagedAttachments.length > 0 || stagedResources.length > 0
+              }
             />
           </div>
         </div>

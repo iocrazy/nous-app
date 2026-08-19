@@ -8,6 +8,12 @@
  * Files are uploaded eagerly on pick (24h TTL on server). Removing a
  * chip drops it from the staged list (no server-side cleanup — the TTL
  * sweeper handles that).
+ *
+ * Library resources (@ picker / "Send to Agent") stage in the SAME wrapping
+ * row rather than as chips inside the sentence, so one glance answers "what
+ * is going with this message?". They are optional props: the other consumer
+ * of this component (Todolist/IssueReplyBox) keeps its own inline chips and
+ * passes neither.
  */
 import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +23,8 @@ import {
   formatBytes as _formatBytes,
 } from './ChatAttachmentPicker.helpers';
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
+import { ResourceChipBody } from './chat/ResourceChipBody';
+import { removeStagedResource, type StagedResourceRef } from './chat/stagedResources';
 
 export interface StagedAttachment {
   kind: 'image' | 'video' | 'pdf';
@@ -35,6 +43,9 @@ interface ChatAttachmentPickerProps {
   attachments: StagedAttachment[];
   onChange: (next: StagedAttachment[]) => void;
   disabled?: boolean;
+  /** Library assets waiting to be sent with this turn. */
+  resources?: StagedResourceRef[];
+  onResourcesChange?: (next: StagedResourceRef[]) => void;
 }
 
 function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
@@ -47,6 +58,8 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   attachments,
   onChange,
   disabled = false,
+  resources = [],
+  onResourcesChange,
 }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,10 +92,19 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     [attachments, onChange],
   );
 
+  const removeResource = useCallback(
+    (resourceId: string) => {
+      onResourcesChange?.(removeStagedResource(resources, resourceId));
+    },
+    [resources, onResourcesChange],
+  );
+
   const isDisabled = disabled || uploading;
 
-  // Empty + no upload → just the picker button (anchored to ChatInput layout)
-  if (attachments.length === 0 && !uploading) {
+  // Nothing staged at all + no upload → just the picker button (anchored to
+  // ChatInput layout). Staged resources alone must keep the row: they are
+  // the only thing telling the user the asset was picked up.
+  if (attachments.length === 0 && resources.length === 0 && !uploading) {
     return (
       <button
         type="button"
@@ -104,9 +126,26 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     );
   }
 
-  // With staged attachments → chip strip + add-more button
+  // With anything staged → chip strip + add-more button. Resources and
+  // files share one wrapping row, so a long list flows onto a second line
+  // instead of pushing the composer around.
   return (
-    <div className="flex items-center gap-1 flex-wrap min-h-[28px]">
+    <div data-testid="composer-attachment-row" className="flex items-center gap-1 flex-wrap min-h-[28px]">
+      {resources.map((r) => (
+        <ResourceChipBody
+          key={r.resource_id}
+          variant="staged"
+          resourceId={r.resource_id}
+          name={r.name}
+          kind={r.kind}
+          mime={r.mime}
+          thumbnailUrl={r.thumbnail_url}
+          transcriptStatus={r.transcript_status}
+          summaryStatus={r.summary_status}
+          onRemove={() => removeResource(r.resource_id)}
+        />
+      ))}
+
       {attachments.map((a, idx) => (
         <div
           key={`${a.url}-${idx}`}

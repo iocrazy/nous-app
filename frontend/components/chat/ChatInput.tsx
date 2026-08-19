@@ -44,6 +44,16 @@ export interface ChatInputProps {
   onMentionRequest?: (query: string) => void;
   /** Expose the editor instance so the parent can call insertResourceRef. */
   editorRef?: React.MutableRefObject<Editor | null>;
+  /**
+   * True when the composer is holding attachments that do NOT live in the
+   * editor doc — staged files and staged library resources both.
+   *
+   * Send is otherwise refused on an empty doc, which used to be harmless
+   * (a picked resource WAS a node in the doc) and no longer is: assets now
+   * stage above the input, so "one asset, no words" is a legitimate turn
+   * that the old guard silently swallowed.
+   */
+  hasAttachments?: boolean;
 }
 
 /** Walk the tiptap doc and collect all resourceRef nodes. */
@@ -71,6 +81,7 @@ export function ChatInput({
   onPaste,
   onMentionRequest,
   editorRef,
+  hasAttachments = false,
 }: ChatInputProps): React.ReactElement {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('chat.typeMessage');
@@ -78,8 +89,10 @@ export function ChatInput({
   // Keep stable refs so the editor key-handler closure doesn't re-bind
   const onSendRef = useRef(onSend);
   const disabledRef = useRef(disabled);
+  const hasAttachmentsRef = useRef(hasAttachments);
   useEffect(() => { onSendRef.current = onSend; }, [onSend]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
+  useEffect(() => { hasAttachmentsRef.current = hasAttachments; }, [hasAttachments]);
 
   // Dummy pick callback — the parent drives actual picker via onMentionRequest
   const dummyPick = useCallback(
@@ -132,7 +145,7 @@ export function ChatInput({
           if (!ed) return true;
           const text = ed.getText().trim();
           const refs = collectRefAttachments(ed);
-          if (!text && refs.length === 0) return true;
+          if (!text && refs.length === 0 && !hasAttachmentsRef.current) return true;
           onSendRef.current(text, refs);
           ed.commands.clearContent(true);
           return true;
@@ -198,10 +211,10 @@ export function ChatInput({
     if (disabled || !editor) return;
     const text = editor.getText().trim();
     const refs = collectRefAttachments(editor);
-    if (!text && refs.length === 0) return;
+    if (!text && refs.length === 0 && !hasAttachments) return;
     onSend(text, refs);
     editor.commands.clearContent(true);
-  }, [disabled, editor, onSend]);
+  }, [disabled, editor, onSend, hasAttachments]);
 
   return (
     <div className="flex items-end gap-2 p-2 bg-ink-900 border-t border-ink-700/50">

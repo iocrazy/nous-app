@@ -58,6 +58,26 @@ describe('ChatInput (tiptap)', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('refuses an empty send when nothing is attached anywhere', async () => {
+    const onSend = vi.fn();
+    render(<ChatInput onSend={onSend} />);
+    fireEvent.click(screen.getByTitle('Send message'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('sends an attachment-only turn (no text) when the composer holds one', async () => {
+    // Assets used to BE nodes in the doc, so "no text" implied "nothing to
+    // send". They now stage above the input, and this guard would swallow
+    // a perfectly good "here, look at this" turn.
+    const onSend = vi.fn();
+    render(<ChatInput onSend={onSend} hasAttachments />);
+    fireEvent.click(screen.getByTitle('Send message'));
+    expect(onSend).toHaveBeenCalledOnce();
+    const [text, attachments] = onSend.mock.calls[0] as [string, unknown[]];
+    expect(text).toBe('');
+    expect(attachments).toHaveLength(0);
+  });
+
   it('renders send button', () => {
     render(<ChatInput onSend={() => {}} />);
     const btn = screen.getByTitle('Send message');
