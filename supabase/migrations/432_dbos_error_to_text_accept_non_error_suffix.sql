@@ -58,6 +58,14 @@ DECLARE
   c TEXT;
   classname TEXT := NULL;
   message TEXT := NULL;
+  -- Shared by both passes: pass 1 selects on it, pass 2 EXCLUDES on it (see
+  -- the note there). Declared once so the two can never drift apart.
+  _classname_re CONSTANT TEXT :=
+    '^[A-Z][A-Za-z0-9_]*('
+    || 'Error|Exception|Failed|Failure|Exceeded|Cancelled|Canceled'
+    || '|Timeout|TimedOut|Invalid|Denied|Refused|Unavailable'
+    || '|NotFound|Abort|Aborted|Rejected|Unsupported'
+    || ')$';
 BEGIN
   IF err IS NULL OR length(err) = 0 THEN
     RETURN NULL;
@@ -82,20 +90,32 @@ BEGIN
       chr(1)
     );
 
-    -- Pass 1: classname = first CamelCase chunk with an exception-ish suffix
+    -- Pass 1: classname = the most SPECIFIC exception-ish CamelCase chunk
     -- (len >= 5). mig 432 widened the suffix set beyond Error/Exception —
     -- AllModelsFailed and DBOSMaxStepRetriesExceeded are real class names
     -- that the old pattern rejected, which cost the row its whole message.
+    --
+    -- Strong vs weak candidates: a pickled DBOS failure lays out as
+    --   [dbos._error, DBOSMaxStepRetriesExceeded, <step>, <module>,
+    --    <inner class>, <message>]
+    -- so the engine's own wrapper always comes FIRST. Taking the first match
+    -- and exiting would therefore report every retried failure as
+    -- "DBOSMaxStepRetriesExceeded" and discard the class that actually says
+    -- what broke — measured at 32 of 239 production rows losing names like
+    -- JimengCliError / CodexCliError / KeyError. So a DBOS* name is recorded
+    -- as a fallback and the scan keeps going; the first non-DBOS name wins
+    -- outright.
     FOREACH c IN ARRAY chunks LOOP
       c := trim(c);
-      IF c ~ ('^[A-Z][A-Za-z0-9_]*('
-              || 'Error|Exception|Failed|Failure|Exceeded|Cancelled|Canceled'
-              || '|Timeout|TimedOut|Invalid|Denied|Refused|Unavailable'
-              || '|NotFound|Abort|Aborted|Rejected|Unsupported'
-              || ')$')
-         AND length(c) >= 5 THEN
-        classname := c;
-        EXIT;
+      IF c ~ _classname_re AND length(c) >= 5 THEN
+        IF c LIKE 'DBOS%' THEN
+          IF classname IS NULL THEN
+            classname := c;   -- weak: keep looking for the real cause
+          END IF;
+        ELSE
+          classname := c;     -- strong: the innermost named failure
+          EXIT;
+        END IF;
       END IF;
     END LOOP;
 
@@ -107,6 +127,13 @@ BEGIN
       c := trim(c);
       IF length(c) >= 8
          AND c <> classname
+         -- Exclude EVERY class-name-shaped chunk, not just the one pass 1
+         -- picked. 'DBOSMaxStepRetriesExceeded' is 26 chars with no spaces,
+         -- so it clears the "looks like human text" bar on length alone and
+         -- would outrank a short real message once pass 1 stops choosing it.
+         -- (The same hole existed before mig 432 whenever pass 1 picked an
+         -- inner class — it was just never measured.)
+         AND c !~ _classname_re
          AND (position(' ' IN c) > 0 OR length(c) >= 20)
          AND c !~ '^[a-z_][a-z0-9_]*$'
          AND c !~ '^.?[a-z_][a-z0-9_]*([.][a-z_][a-z0-9_]*)+$'

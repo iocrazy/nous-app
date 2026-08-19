@@ -48,6 +48,7 @@ from loguru import logger
 
 PROVIDER_AUTH: Final = "PROVIDER_AUTH"
 PROVIDER_RATE_LIMIT: Final = "PROVIDER_RATE_LIMIT"
+PROVIDER_QUOTA_CAP: Final = "PROVIDER_QUOTA_CAP"
 PROVIDER_UNREACHABLE: Final = "PROVIDER_UNREACHABLE"
 PROVIDER_BAD_MODEL: Final = "PROVIDER_BAD_MODEL"
 OUTPUT_PARSE: Final = "OUTPUT_PARSE"
@@ -57,11 +58,26 @@ INTERNAL: Final = "INTERNAL"
 ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     PROVIDER_AUTH,
     PROVIDER_RATE_LIMIT,
+    PROVIDER_QUOTA_CAP,
     PROVIDER_UNREACHABLE,
     PROVIDER_BAD_MODEL,
     OUTPUT_PARSE,
     TASK_TIMEOUT,
     INTERNAL,
+)
+
+# ── Provider error codes that outrank the HTTP status carrying them ───
+# Normally a status code beats prose (see below). This one pattern is the
+# exception, and it earns it: Volcengine Ark ships an account-level inference
+# cap as HTTP 429 — the same status as a transient burst limit — so reading
+# the status alone gives "wait a moment and retry" for something that does not
+# clear on its own. doubao-seed-2-0-pro returned it on 126 consecutive hourly
+# health probes across five days (2026-08-14 → 19) while every ai_summary run
+# failed. The body's own error code is strictly more specific than the
+# transport status it arrived in, so it is checked first.
+_QUOTA_CAP_PATTERN: Final["re.Pattern[str]"] = re.compile(
+    r"setlimitexceeded|reached the set inference limit",
+    re.IGNORECASE,
 )
 
 # ── Structured signal: HTTP status ────────────────────────────────────
@@ -79,7 +95,9 @@ _STATUS_TO_CODE: Final[dict[int, str]] = {
 
 # ── Text rules ────────────────────────────────────────────────────────
 # Order matters: the first match wins, so the specific rows sit above the
-# broad ones. Two orderings are load-bearing:
+# broad ones. Three orderings are load-bearing:
+#   - QUOTA_CAP before RATE_LIMIT, so a configured account cap isn't read as
+#     a transient burst limit the user should wait out.
 #   - BAD_MODEL before UNREACHABLE, so a 404 "model does not exist" isn't
 #     read as a dead endpoint.
 #   - UNREACHABLE before TASK_TIMEOUT, so a *connect* timeout is reported
@@ -99,6 +117,9 @@ _RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = (
             re.IGNORECASE,
         ),
     ),
+    # Same pattern the pre-status check uses — declared once above so the
+    # two paths can never drift apart.
+    (PROVIDER_QUOTA_CAP, _QUOTA_CAP_PATTERN),
     (
         PROVIDER_RATE_LIMIT,
         re.compile(
@@ -212,14 +233,20 @@ def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Option
 
     if isinstance(exc_or_message, BaseException):
         chain = _walk(exc_or_message)
-        for member in chain:
-            status = _status_code(member)
-            if status is not None and status in _STATUS_TO_CODE:
-                return _STATUS_TO_CODE[status]
         # The DBOS wrapper's own message ("… exceeded its maximum of N
         # retries") never classifies; joining the whole chain means the
         # underlying provider text still gets its shot at the rules.
         text = "\n".join(f"{type(m).__name__}: {m}" for m in chain)
+        # Built BEFORE the status scan on purpose: a provider error code in
+        # the body outranks the status class it was transported in. Without
+        # this, a 429 short-circuits to PROVIDER_RATE_LIMIT and an account
+        # cap is reported as something that clears on its own.
+        if _QUOTA_CAP_PATTERN.search(text):
+            return PROVIDER_QUOTA_CAP
+        for member in chain:
+            status = _status_code(member)
+            if status is not None and status in _STATUS_TO_CODE:
+                return _STATUS_TO_CODE[status]
     else:
         text = str(exc_or_message)
 
@@ -270,6 +297,7 @@ __all__ = [
     "OUTPUT_PARSE",
     "PROVIDER_AUTH",
     "PROVIDER_BAD_MODEL",
+    "PROVIDER_QUOTA_CAP",
     "PROVIDER_RATE_LIMIT",
     "PROVIDER_UNREACHABLE",
     "TASK_TIMEOUT",

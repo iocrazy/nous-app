@@ -162,8 +162,14 @@ def describe_llm_error(exc: BaseException) -> str:
     status = _extract_status_code(exc)
     head = type(exc).__name__ + (f" HTTP {status}" if status is not None else "")
     detail = _response_body(exc) or str(exc)
-    detail = " ".join(detail.split())[:_BODY_SNIPPET_MAX]
-    return redact(f"{head}: {detail}" if detail else head)
+    # Redact BEFORE truncating, never after. Every pattern in log_redact
+    # requires a known prefix plus a minimum length ("sk-" + >=20 chars,
+    # "Bearer " + >=20), so a cut that lands mid-secret leaves a stub too
+    # short to match and the tail goes to task_tracking.error_msg in the
+    # clear. Redacting first replaces the whole secret with "***" while it is
+    # still intact, and the truncation afterwards can only shorten a mask.
+    detail = redact(" ".join(detail.split()))[:_BODY_SNIPPET_MAX]
+    return f"{head}: {detail}" if detail else head
 
 
 # ----------------------------------------------------------------------

@@ -4328,6 +4328,10 @@
       "title": "The AI provider is rate-limiting",
       "hint": "Wait a moment and retry, or switch this task to a different model in Settings → AI."
     },
+    "PROVIDER_QUOTA_CAP": {
+      "title": "The provider account has hit its configured limit for this model",
+      "hint": "Raise the limit in the provider console, or point this task at another model in Settings → AI."
+    },
     "PROVIDER_UNREACHABLE": {
       "title": "Couldn't reach the AI provider",
       "hint": "Check the provider endpoint in Settings → AI — if it is self-hosted, make sure it is running."

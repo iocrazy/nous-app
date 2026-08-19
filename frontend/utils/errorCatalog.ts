@@ -27,6 +27,7 @@
 export const AI_ERROR_CODES = [
   'PROVIDER_AUTH',
   'PROVIDER_RATE_LIMIT',
+  'PROVIDER_QUOTA_CAP',
   'PROVIDER_UNREACHABLE',
   'PROVIDER_BAD_MODEL',
   'OUTPUT_PARSE',
@@ -45,6 +46,13 @@ const DEFAULTS: Record<AiErrorCode, { title: string; hint: string }> = {
   PROVIDER_RATE_LIMIT: {
     title: 'The AI provider is rate-limiting',
     hint: 'Wait a moment and retry, or switch this task to a different model in Settings → AI.',
+  },
+  // Distinct from RATE_LIMIT on purpose: this is a cap configured on the
+  // provider account, so "wait a moment" is wrong advice — it never clears
+  // by itself. Backend keeps this ordered above the generic 429 rule.
+  PROVIDER_QUOTA_CAP: {
+    title: 'The provider account has hit its configured limit for this model',
+    hint: 'Raise the limit in the provider console, or point this task at another model in Settings → AI.',
   },
   PROVIDER_UNREACHABLE: {
     title: "Couldn't reach the AI provider",

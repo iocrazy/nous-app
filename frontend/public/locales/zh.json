@@ -4328,6 +4328,10 @@
       "title": "AI 服务商限流了",
       "hint": "稍后重试，或到 Settings → AI 把该任务换成另一个模型。"
     },
+    "PROVIDER_QUOTA_CAP": {
+      "title": "服务商账号已达到该模型的配置上限",
+      "hint": "请在服务商控制台调高上限，或在 Settings → AI 将该任务改用其他模型。"
+    },
     "PROVIDER_UNREACHABLE": {
       "title": "连不上 AI 服务商",
       "hint": "请到 Settings → AI 核对服务地址；如果是自托管模型，确认服务已启动。"

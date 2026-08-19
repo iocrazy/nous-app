@@ -478,3 +478,28 @@ async def test_retry_exhausted_message_names_the_provider_reason():
         await mw.call(_composed(), [])
 
     assert "SetLimitExceeded" in str(excinfo.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pad", list(range(190, 235, 3)))
+def test_describe_llm_error_redacts_before_truncating(pad):
+    """A secret straddling the snippet boundary must not survive as a stub.
+
+    Truncating first left a cut-off key too short for log_redact's
+    prefix+length patterns to match, so up to ~22 plaintext characters landed
+    in task_tracking.error_msg. Sweeping the pad walks the key across the
+    220-char cut so no single lucky offset can pass for coverage.
+    """
+    from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+    secret = "sk-" + "a1b2c3d4" * 6  # 51 chars, well past every minimum
+    exc = _FakeHTTPStatusError(
+        "bad request",
+        _FakeResponse(400, "x" * pad + '{"key":"' + secret + '"}'),
+    )
+
+    described = describe_llm_error(exc)
+
+    # No run of the secret long enough to be useful may appear.
+    for start in range(0, len(secret) - 8):
+        assert secret[start : start + 9] not in described
