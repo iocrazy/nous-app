@@ -45,6 +45,19 @@ export function taskRowActions(
   };
 }
 
+/** The agent-name badge text for an agent row — the "who ran this" half of the
+ * row's attribution (title carries the user's request, subtitle the result).
+ * Only agent rows have one; a run whose agent could not be named (a realtime
+ * row before the name lookup lands, or an agent the ai_agents read policy
+ * hides) renders no badge rather than a placeholder. */
+export function taskAgentName(
+  task: Pick<UnifiedTask, 'task_type' | 'metadata'>,
+): string | undefined {
+  if (task.task_type !== 'agent') return undefined;
+  const name = task.metadata?.agent_name;
+  return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+}
+
 function isTerminalSuccessLike(status: UnifiedTask['status']): boolean {
   return status === 'completed';
 }

@@ -11,6 +11,7 @@ import {
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
 import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { AgentNameBadge } from './AgentNameBadge';
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
 
@@ -25,6 +26,7 @@ function taskTypeBg(type: string): string {
     case 'ai_transcription':    return 'bg-fuchsia-500/20 text-fuchsia-400';
     case 'ai_summary':          return 'bg-cyan-500/20 text-cyan-400';
     case 'agent_routine':       return 'bg-emerald-500/20 text-emerald-400';
+    case 'agent':               return 'bg-agent-soft text-agent';
     default:                    return 'bg-ink-700/50 text-ink-400';
   }
 }
@@ -183,6 +185,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
 
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-[10px] text-ink-600">{taskTypeLabel(task.task_type)}</span>
+            <AgentNameBadge task={task} />
             {task.subtitle && (
               <span className="text-[10px] text-ink-600 truncate">{task.subtitle}</span>
             )}
