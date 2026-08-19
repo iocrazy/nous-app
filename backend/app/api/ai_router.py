@@ -872,7 +872,7 @@ async def trigger_visual_analysis_by_resource(
         _orphan_task_id = await tracker.create(
             user_id=auth.user_id,
             task_type="ai_extract",
-            title=f"Analyze: {(media or {}).get('title') or platform_id}",
+            title=f"Analyze {_task_display_name(platform_id, resource, media)}",
             subtitle="L1 cover analysis",
             media_id=platform_id,
             resource_id=resource_id,

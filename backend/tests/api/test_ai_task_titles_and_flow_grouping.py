@@ -602,3 +602,89 @@ class TestTranscribeRowTitles:
         kwargs = orch.start_workflow_routed.await_args.kwargs["dbos_workflow_kwargs"]
         assert kwargs["video_title"] == "Morning briefing.mp4"
         assert created[0]["title"] == "Audio Morning briefing.mp4"
+
+
+# ─── endpoint wiring: /analyze/resource/{id} ──────────────────────
+
+
+class TestVisualAnalysisRowTitle:
+    """The last building point in this router that could still render a
+    bare Snowflake. Left alone it would put "Analyze: 7643786…" on the
+    same screen as "Transcribe {filename}" — half the point of a single
+    naming rule is that the user never sees the two side by side."""
+
+    @staticmethod
+    def _patch(monkeypatch, created: list, *, resource: dict):
+        media = {
+            "id": "111",
+            "platform_id": "7643786260724632866",
+            "title": "Plat T",
+            "cover_urls": ["https://cdn/cover.jpg"],
+        }
+
+        async def _resolve(_rid, _uid):
+            return resource, media["platform_id"], media
+
+        monkeypatch.setattr(ai_router, "_resolve_resource_to_platform_id", _resolve)
+
+        class _NoActive:
+            async def execute(self, *_a, **_k):
+                result = MagicMock()
+                result.first.return_value = None
+                return result
+
+        @asynccontextmanager
+        async def _scope():
+            yield _NoActive()
+
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "read_scope", _scope)
+
+        async def _create(**kwargs):
+            created.append(kwargs)
+            return "task-row-id"
+
+        mgr = MagicMock()
+        mgr.create = AsyncMock(side_effect=_create)
+        mgr.fail = AsyncMock()
+        import app.services.infra.unified_task_manager as utm
+
+        monkeypatch.setattr(utm, "get_task_manager", lambda: mgr)
+        import app.services.infra.dbos_orchestrator as orch
+
+        monkeypatch.setattr(orch, "start_workflow_routed", AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_row_title_is_the_filename_not_the_id(self, monkeypatch) -> None:
+        created: list = []
+        self._patch(
+            monkeypatch,
+            created,
+            resource={
+                "id": "res-1",
+                "media_id": "111",
+                "creator_id": "caller-uuid",
+                "filename": "Morning briefing.mp4",
+            },
+        )
+
+        await ai_router.trigger_visual_analysis_by_resource("res-1", _auth(), None)
+
+        assert created[0]["title"] == "Analyze Morning briefing.mp4"
+        assert "7643786260724632866" not in created[0]["title"]
+
+    @pytest.mark.asyncio
+    async def test_falls_back_through_the_same_ladder(self, monkeypatch) -> None:
+        """Same helper, same order — a resource with no filename lands on
+        the media title, not on the id."""
+        created: list = []
+        self._patch(
+            monkeypatch,
+            created,
+            resource={"id": "res-1", "media_id": "111", "creator_id": "caller-uuid"},
+        )
+
+        await ai_router.trigger_visual_analysis_by_resource("res-1", _auth(), None)
+
+        assert created[0]["title"] == "Analyze Plat T"
