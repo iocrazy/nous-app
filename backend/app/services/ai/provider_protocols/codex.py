@@ -30,22 +30,31 @@ class _CodexImageAdapter(BaseImageProvider):
         self._provider = provider
 
     async def generate(self, prompt: str, model: str, **kwargs) -> ImageGenResult:
-        # `images edit --ref-image` takes a LOCAL file; a remote reference URL
-        # can't feed it, so we degrade to plain generate — loudly, not silently.
-        ref = kwargs.get("reference_image_url") or None
-        if ref and not os.path.isfile(str(ref)):
-            logger.warning(
-                "[codex] reference image {} is not a local file — generating "
-                "without it",
-                str(ref)[:200],
-            )
-            ref = None
+        # Preferred channel: LOCAL reference paths the workflow already
+        # materialized (multi-ref, IC 图1/图2 semantics). Fallback: a single
+        # reference_image_url that happens to be a local file; remote urls
+        # degrade to plain generate — loudly, not silently.
+        paths = [
+            str(p)
+            for p in (kwargs.get("reference_image_paths") or [])
+            if p and os.path.isfile(str(p))
+        ]
+        if not paths:
+            ref = kwargs.get("reference_image_url") or None
+            if ref and os.path.isfile(str(ref)):
+                paths = [str(ref)]
+            elif ref:
+                logger.warning(
+                    "[codex] reference image {} is not a local file — "
+                    "generating without it",
+                    str(ref)[:200],
+                )
         result = await self._provider.generate_image(
             prompt=prompt,
             aspect=kwargs.get("aspect_ratio") or "",
             model_version=model or None,
             quality=kwargs.get("quality") or None,
-            ref_image_path=str(ref) if ref else None,
+            ref_image_paths=paths or None,
         )
         return ImageGenResult(
             image_url="",

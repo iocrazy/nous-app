@@ -21,7 +21,11 @@
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { resolveEntityRef } from './entityRef';
-import { resolveEffectiveSourceUrl, resolveSourceUrls } from './promptInputs';
+import {
+  resolveEffectiveSourceUrl,
+  resolveEffectiveSourceUrls,
+  resolveSourceUrls,
+} from './promptInputs';
 import {
   clampBatchSize,
   injectLoopVariables,
@@ -109,6 +113,11 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
       // path — loop-driven image prompts silently ran as LLM calls (F3 fix).
       gen: d.gen ?? null,
       source_url: resolveEffectiveSourceUrl(
+        byId.get(id)!,
+        opts.nodes,
+        opts.connections,
+      ),
+      source_urls: resolveEffectiveSourceUrls(
         byId.get(id)!,
         opts.nodes,
         opts.connections,

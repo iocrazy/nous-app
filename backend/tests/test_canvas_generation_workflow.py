@@ -256,3 +256,42 @@ async def test_video_step_never_sends_catalog_row_name_upstream():
         provider.generate_video.await_args.kwargs["model_version"] == "seedance2.0fast"
     )
     assert out["model"] == "seedance2.0fast"
+
+
+@pytest.mark.asyncio
+async def test_image_step_materializes_source_urls_for_local_ref_providers():
+    """params.source_urls (the prompt's full input set) are bridged to LOCAL
+    paths and passed as reference_image_paths — the codex CLI only eats
+    files; ark keeps the original remote reference_image_url."""
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="", image_path="/tmp/c/x.png")
+        )
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "gpt-5.4")),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+    ):
+        await generate_canvas_media_step(
+            kind="image",
+            prompt="use both refs",
+            model="codex-image",
+            params={
+                "ratio": "1:1",
+                "source_urls": [
+                    "/api/v1/generated-media/1/file",
+                    "/api/v1/generated-media/2/file",
+                ],
+            },
+            source_url="/api/v1/generated-media/1/file",
+        )
+
+    kwargs = provider.generate.await_args.kwargs
+    assert kwargs["reference_image_paths"] == ["/data/gen/ref.png", "/data/gen/ref.png"]
+    assert kwargs["reference_image_url"] == "/api/v1/generated-media/1/file"

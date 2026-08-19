@@ -27,6 +27,10 @@ export interface RunnerContext {
   gen?: PromptGenSettings | null;
   /** Durable upstream image (G4-F3) — the i2i/i2v generation source. */
   source_url?: string | null;
+  /** ALL durable inputs, @-selected first (multi-ref i2i — IC 图1/图2).
+   *  Ships as params.source_urls; providers that can eat several
+   *  references use the whole set, others take source_url. */
+  source_urls?: string[];
   /** Owning library card (CC5) — stamped into generation params so the
    *  produced media backlinks to its character/location/prop. */
   entity_ref?: EntityRef | null;
