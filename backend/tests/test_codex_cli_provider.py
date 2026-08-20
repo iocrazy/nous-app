@@ -427,3 +427,16 @@ class TestMultiRef:
             prompt="p", aspect="1:1", ref_image_paths=[str(ref)]
         )
         assert "--ref-image" in captured[0]
+
+
+async def test_generate_image_forces_opaque_background(monkeypatch):
+    """--background auto lets the codex chain pick transparent, which renders
+    on a pure-green (#00ff00) matte and leaks green spill into the output —
+    the 2026-08-20 "all codex images look green" incident. Canvas images are
+    full frames: force opaque."""
+    captured: list = []
+    install_fake_exec(monkeypatch, _writes_out_and_succeeds, captured)
+    provider = CodexCliProvider()
+    await provider.generate_image(prompt="a red apple", aspect="1:1")
+    assert "--background" in captured[0]
+    assert captured[0][captured[0].index("--background") + 1] == "opaque"

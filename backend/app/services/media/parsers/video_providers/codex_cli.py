@@ -234,6 +234,13 @@ class CodexCliProvider:
             "png",
             "--quality",
             quality or "high",
+            # --background defaults to "auto", which lets the codex chain
+            # pick transparent — and the codex transparent path renders on a
+            # pure-green #00ff00 matte whose spill leaks into the output
+            # (2026-08-20 "all codex images look green"). Canvas images are
+            # full frames; force opaque.
+            "--background",
+            "opaque",
         ]
         if model_version:
             args += ["--model", model_version]
