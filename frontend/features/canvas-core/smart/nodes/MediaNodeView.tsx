@@ -41,7 +41,7 @@ interface LightboxState {
   index: number;
 }
 
-export function MediaNodeView({ id, data, selected }: NodeProps) {
+export function MediaNodeView({ id, data, selected, width }: NodeProps) {
   const { t } = useTranslation();
   const { title, items, uploading } = data as unknown as MediaNodeData;
   const patch = useNodeDataPatch(id);
@@ -144,7 +144,13 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       className={`group relative mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
         dragOver ? 'ring-2 ring-indigo-500/50' : ''
       }`}
-      style={{ width: '100%', minWidth: SMART_NODE_DEFAULT_WIDTH.media }}
+      style={{
+        // Fixed default width; RF writes node.width after a resize and the
+        // card follows it. width:'100%' here was the 2026-08-20 giant-node
+        // regression — an unconstrained wrapper let the raw image dictate
+        // the card size.
+        width: width ?? SMART_NODE_DEFAULT_WIDTH.media,
+      }}
       onDragOver={(e) => {
         if (!readOnly && e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
