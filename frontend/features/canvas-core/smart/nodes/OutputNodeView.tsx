@@ -2,7 +2,7 @@ import { mediaSrc } from '../mediaUrl';
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
 import { getSupabaseClient } from '../../../../supabaseClient';
@@ -31,6 +31,7 @@ import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { createMediaNodeFromFiles } from '../dropCreate';
+import { ensureResourceId } from '../mediaEditBridge';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
@@ -66,7 +67,7 @@ async function buildPreviewUrl(resourceId: string): Promise<string> {
   }
 }
 
-export function OutputNodeView({ id, data, selected }: NodeProps) {
+export function OutputNodeView({ id, data, selected, width }: NodeProps) {
   const {
     kind,
     resource_id,
@@ -188,6 +189,21 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // Grid split has no local fallback — every tile is derived
   // server-side, so a persisted source resource is required.
   const canSplit = canCrop && !!resource_id;
+  // Editor opened on a generated image that has no resources row yet —
+  // promote it in the background (same bridge the media card uses); the
+  // outpaint/mask/split tabs appear as soon as resource_id lands. Without
+  // this, generated outputs only ever showed Preview/Crop/Brush/Resize
+  // (the 2026-08-20 "编辑器内容不多" report).
+  useEffect(() => {
+    if (editorMode === null || resource_id || !preview_url) return;
+    let stale = false;
+    void ensureResourceId(preview_url).then((rid) => {
+      if (rid && !stale) patchData({ resource_id: rid });
+    });
+    return () => {
+      stale = true;
+    };
+  }, [editorMode, resource_id, preview_url, patchData]);
 
   const openEditor = useCallback(() => {
     if (!canCrop) return;
@@ -430,7 +446,13 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     <div
       data-testid="smart-output-node"
       className={`group mh-node relative border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
-      style={{ width: '100%', minWidth: SMART_NODE_DEFAULT_WIDTH.output }}
+      style={{
+        // Fixed default width; RF writes node.width after a resize and the
+        // card follows it. width:'100%' here was the 2026-08-20 giant-node
+        // regression — an unconstrained wrapper let the raw image dictate
+        // the card size.
+        width: width ?? SMART_NODE_DEFAULT_WIDTH.output,
+      }}
     >
       {/* IC node-resize-handle: drag the right edge to widen the card
           (media grids reflow; height stays content-driven). RF applies the
