@@ -1633,3 +1633,95 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
         cover_horizontal_resource_id=pair.horizontal_resource_id,
         publish_task_id=body.publish_task_id,
     )
+
+
+# --- 「选择音乐」 charts ------------------------------------------------------
+#
+# The picker reads a CACHE. Reading a chart for real costs a browser run and
+# leaves a draft on the account (the panel only exists inside the gallery
+# editor, which only exists after an upload — measured 2026-08-19), so the read
+# path and the refresh path are deliberately different endpoints with different
+# costs, and the UI can tell the user which one it is doing.
+
+
+@router.get(
+    "/music/seed.png",
+    dependencies=[Depends(require_distribution)],
+)
+async def get_music_harvest_seed():
+    """The blank square the harvest uploads to reach the music panel.
+
+    **Unauthenticated on purpose, and safe to be**: the bytes are drawn in code
+    (a solid colour, fixed size) and carry no user data whatsoever. It exists
+    precisely so the harvest does NOT have to borrow one of the user's own
+    images — doing that would put their content into a draft on a real platform
+    account, daily, for a reason unrelated to that content.
+
+    The consumer is the browser container over the docker network; it mounts no
+    storage volume by design, so everything it uploads arrives over HTTP.
+    """
+    from fastapi.responses import Response
+
+    from app.services.distribution.music_charts import seed_png
+
+    return Response(
+        content=seed_png(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get(
+    "/accounts/{account_id}/music/charts",
+    dependencies=[Depends(require_distribution)],
+)
+async def list_music_charts(account_id: int, user: CurrentUserDep):
+    """This account's cached chart tabs. Cheap; never opens a browser.
+
+    Charts whose last refresh FAILED are still returned, carrying whatever
+    tracks survived from before — with `ok=false` and their own `fetched_at` so
+    the UI can say "this one is stale" instead of showing an empty tab that
+    looks like a platform with nothing on it.
+    """
+    from app.repositories.music_charts_repository import MusicChartsRepository
+    from app.services.distribution.music_charts import DEFAULT_TTL_HOURS, is_stale
+
+    await _authorize_account(account_id, user)
+    repo = MusicChartsRepository()
+    charts = await repo.list_charts(account_id)
+    newest = await repo.newest_fetch(account_id)
+    return {
+        "charts": charts,
+        # Three distinct things, not one "fresh" boolean: when we last managed
+        # a successful read, whether that is past the TTL, and whether anything
+        # has EVER been read. The last one is what separates "the cache is
+        # cold" from "the cache is stale", and only one of those is worth a
+        # user-visible warning.
+        "last_success_at": newest.isoformat() if newest else None,
+        "stale": is_stale(newest),
+        "never_harvested": newest is None,
+        "ttl_hours": DEFAULT_TTL_HOURS,
+    }
+
+
+@router.post(
+    "/accounts/{account_id}/music/charts/refresh",
+    dependencies=[Depends(require_distribution)],
+)
+async def refresh_music_charts(account_id: int, user: CurrentUserDep):
+    """Harvest this account's charts now. **Expensive, and it leaves a draft.**
+
+    Stated in the docstring because it is stated in the UI: ~40-70 seconds, one
+    browser run, one draft on the platform account. A user who asks for this
+    should know what it costs; a user who never asks gets the scheduled run.
+
+    Returns the typed envelope from the service rather than raising, so a busy
+    account (`account_busy`) reads as "try again in a minute" rather than as a
+    server error.
+    """
+    from app.core.config import settings
+    from app.services.distribution.music_charts import harvest_account_charts
+
+    await _authorize_account(account_id, user)
+    base_url = getattr(settings, "INTERNAL_BASE_URL", "") or "http://nous-backend:8080"
+    return await harvest_account_charts(account_id, base_url=base_url)
