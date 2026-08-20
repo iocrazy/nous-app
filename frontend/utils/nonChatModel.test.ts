@@ -54,6 +54,25 @@ describe('suspectedNonChatKind', () => {
     expect(suspectedNonChatKind('gpt-4o-realtime-preview')).toBeNull();
   });
 
+  it('does not flag chat models whose id carries a modality word', () => {
+    // Both of these got caught by the first version of the vocabulary, and both
+    // are chat models: `glm-4-voice` is an end-to-end speech CHAT model, and
+    // the video-understanding families are commonly served over a vLLM
+    // OpenAI-compatible endpoint — i.e. exactly what a BYOK base_url points at.
+    // `voice` and `video` were dropped for this; these pin the removal.
+    expect(suspectedNonChatKind('glm-4-voice')).toBeNull();
+    expect(suspectedNonChatKind('video-llava-7b')).toBeNull();
+    expect(suspectedNonChatKind('Video-LLaMA-2-7B')).toBeNull();
+  });
+
+  it('still catches the text-to-video families by their own names', () => {
+    // Dropping the bare `video` token cost nothing: the mainstream naming is
+    // covered by the model family instead.
+    expect(suspectedNonChatKind('doubao-seedance-1-0-pro-250528')).toBe('video');
+    expect(suspectedNonChatKind('sora-2')).toBe('video');
+    expect(suspectedNonChatKind('wan-2-2-t2v-plus')).toBe('video');
+  });
+
   it('matches whole tokens, not substrings', () => {
     // Substring matching would make `tts` fire on "attsu" and `embed` on
     // "unembedded" — the kind of false positive this guard cannot afford.

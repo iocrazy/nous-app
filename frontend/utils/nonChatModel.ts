@@ -39,12 +39,29 @@ export type NonChatKind = 'embedding' | 'rerank' | 'image' | 'video' | 'speech';
 /**
  * Whole-token vocabulary per kind, in match precedence order.
  *
- * Every entry must be a token that no chat model legitimately carries. When in
- * doubt, leave it out — see the module header. Notable exclusions and why:
+ * The bar for an entry is AMBIGUITY, not length: `bge` / `asr` / `t2i` are
+ * three characters and mean exactly one thing, so they are in; `sd` and `gte`
+ * are the same length and mean several things, so they are out. Notable
+ * exclusions, each with a real counter-example:
  *   `vision`  — doubao/qwen ship vision-capable CHAT models (`doubao-vision-pro`).
  *   `audio`   — `gpt-4o-audio-preview` is a chat-completions model.
- *   `sd`/`gte`/`veo` — too short to be safely distinctive across providers.
+ *   `realtime`— `gpt-4o-realtime-preview` likewise.
+ *   `voice`   — `glm-4-voice` is an end-to-end speech CHAT model, and the real
+ *               speech models spell it as one word (`cosyvoice`, `sensevoice`),
+ *               which never yields a bare `voice` token. It caught only the
+ *               wrong thing, so it is gone.
+ *   `video`   — `video-llava-7b` / `Video-LLaMA-2-7B` are video-UNDERSTANDING
+ *               chat models, routinely served over a vLLM OpenAI-compatible
+ *               endpoint, i.e. exactly what a BYOK `base_url` points at.
+ *               `seedance` / `sora` / `t2v` / `i2v` already cover the
+ *               mainstream text-to-video naming, so the bare word was pure
+ *               downside.
  *   `ocr`     — several providers expose OCR through chat-completions.
+ *
+ * `image` is kept, with one known wrinkle: the platform catalog has a row named
+ * `codex-image` whose `actual_model` is the chat model `gpt-5.4` (migration
+ * 430). That is a platform ALIAS though — a BYOK catalog carries the upstream
+ * id, where `image` remains a reliable tell.
  */
 const KIND_TOKENS: ReadonlyArray<readonly [NonChatKind, readonly string[]]> = [
   ['embedding', ['embedding', 'embeddings', 'embed', 'bge']],
@@ -53,11 +70,8 @@ const KIND_TOKENS: ReadonlyArray<readonly [NonChatKind, readonly string[]]> = [
     'image',
     ['seedream', 'dalle', 'dall', 't2i', 'i2i', 'imagen', 'image', 'flux', 'sdxl'],
   ],
-  ['video', ['seedance', 'sora', 'video', 't2v', 'i2v']],
-  [
-    'speech',
-    ['tts', 'asr', 'whisper', 'speech', 'transcribe', 'transcription', 'voice'],
-  ],
+  ['video', ['seedance', 'sora', 't2v', 'i2v']],
+  ['speech', ['tts', 'asr', 'whisper', 'speech', 'transcribe', 'transcription']],
 ];
 
 /**

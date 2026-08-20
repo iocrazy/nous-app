@@ -114,6 +114,9 @@ describe('AISettings — BYOK non-chat model guard', () => {
     expect(warn.textContent).toMatch(/summarization/i);
     // danger semantic token, not a raw hue class (frontend/index.css @theme).
     expect(warn.className).toContain('text-danger');
+    // Announced, not just colored — red text alone reaches nobody using a
+    // screen reader, and this is the one thing on the card they must act on.
+    expect(warn).toHaveAttribute('role', 'alert');
   });
 
   it('says nothing when the selected model is an ordinary chat model', async () => {
