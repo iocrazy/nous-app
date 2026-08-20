@@ -16,6 +16,7 @@ import { useNodeDataPatch } from './useNodeDataPatch';
 import { isChainTail, startChainRun, useChainRunStore } from '../chainRun';
 import { rerunPrompt } from '../regenerate';
 import { resolveSourceUrls, upstreamPromptText } from '../promptInputs';
+import { MAX_REFERENCE_IMAGES, reorderRefs } from '../refOrder';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
   elapsedSeconds,
@@ -241,6 +242,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [id, patch],
   );
+
+  // IC reorderManualInputRefs — drag one manual thumb onto another; the
+  // left/right half of the drop target picks before/after.
+  const reorderManualRefs = useCallback(
+    (fromUrl: string, toUrl: string, before: boolean) => {
+      const current = ((useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as { id?: unknown }).id === id) as
+        | { data?: PromptNodeData }
+        | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
+      const next = reorderRefs(current, fromUrl, toUrl, before);
+      if (next !== current) patch({ manual_refs: next });
+    },
+    [id, patch],
+  );
   const sourceRef = useCanvasCoreStore(
     (s) =>
       ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as
@@ -422,15 +438,32 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         {inputUrls.length > 0 && (
           <div
             data-testid="prompt-input-row"
-            className="mb-1.5 flex items-center gap-1.5"
+            className="mb-1.5 flex flex-wrap items-center gap-1.5"
           >
-            {inputUrls.slice(0, 8).map((url, i) => (
+            {inputUrls.map((url, i) => (
               <span key={url} className="relative inline-flex">
                 <button
                   type="button"
                   data-testid="prompt-input-thumb"
                   title={sourceRef === url ? 'Selected as source' : 'Use as source'}
                   onClick={() => toggleSourceRef(url)}
+                  draggable={!readOnly && manualUrlSet.has(url)}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/x-nous-ref', url);
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes('application/x-nous-ref'))
+                      e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    const from = e.dataTransfer.getData('application/x-nous-ref');
+                    if (!from || from === url) return;
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const before = e.clientX < rect.left + rect.width / 2;
+                    reorderManualRefs(from, url, before);
+                  }}
                   disabled={readOnly}
                   className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
                     sourceRef === url
@@ -464,9 +497,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
-                title="Add reference image"
                 onClick={() => setRefPickerOpen((v) => !v)}
-                className="nodrag ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
+                disabled={inputUrls.length >= MAX_REFERENCE_IMAGES}
+                title={
+                  inputUrls.length >= MAX_REFERENCE_IMAGES
+                    ? `Reference limit reached (${MAX_REFERENCE_IMAGES})`
+                    : 'Add reference image'
+                }
+                className="nodrag ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ImagePlus size={12} />
               </button>
