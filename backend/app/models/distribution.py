@@ -10,7 +10,7 @@
   * ``PublishTaskAccounts``  — publish_task_accounts (mig 356; per-account
     business status, layered apart from the DBOS phase per route C)
   * ``MusicCharts`` / ``MusicChartTracks`` — music_charts, music_chart_tracks
-    (mig 428; the 「选择音乐」 panel's chart tabs, cached per account because
+    (mig 433; the 「选择音乐」 panel's chart tabs, cached per account because
     reading them costs a browser run and leaves a draft)
 
 No scope mixin — scope checks live in the routers/services; the tables are
@@ -330,7 +330,7 @@ class DistributionOauthStates(Base):
 
 
 class MusicCharts(Base):
-    """One tab of the 「选择音乐」 panel, cached for one account (mig 428).
+    """One tab of the 「选择音乐」 panel, cached for one account (mig 433).
 
     Per ACCOUNT, not global: 「收藏」 is plainly account-private and 「推荐」 is
     personalised too — showing one account's favourites under another is a
@@ -403,7 +403,7 @@ class MusicCharts(Base):
 
 
 class MusicChartTracks(Base):
-    """One track on one chart, at one position (mig 428).
+    """One track on one chart, at one position (mig 433).
 
     ⚠️ ``music_id`` is TEXT. It is Douyin's 19-digit catalogue id and the list
     endpoint ships it as a JSON string; putting it through a number loses

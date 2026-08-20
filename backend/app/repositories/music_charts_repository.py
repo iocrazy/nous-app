@@ -1,4 +1,4 @@
-"""The cached 「选择音乐」 charts (mig 428).
+"""The cached 「选择音乐」 charts (mig 433).
 
 ORM-model style (``read_scope`` / ``write_scope`` + ``MusicCharts`` /
 ``MusicChartTracks``); no raw SQL, per the 2026-08-04 全量 ORM 化 约定.
