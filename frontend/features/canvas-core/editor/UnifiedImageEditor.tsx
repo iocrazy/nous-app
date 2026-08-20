@@ -28,6 +28,7 @@ import { GridSplitTool } from './GridSplitTool';
 import { MaskBrushTool } from './MaskBrushTool';
 import { OutpaintTool } from './OutpaintTool';
 import { PaintTool, type PaintShape, type PaintShapeTool } from './PaintTool';
+import { snapRegionToAspect } from './cropMath';
 import { FULL_REGION, type CropRegion } from './types';
 import { EMPTY_GRID, presetGrid, type GridLines } from './gridMath';
 import {
@@ -111,9 +112,15 @@ export function UnifiedImageEditor({
   const [padding, setPadding] = useState<OutpaintPadding>(ZERO_PADDING);
   const [outpaintPrompt, setOutpaintPrompt] = useState('');
   const [strokes, setStrokes] = useState<MaskStroke[]>([]);
+  // IC edit-draw history: undo pops into the redo stack; a new stroke
+  // clears redo (standard editor semantics, EDIT_DRAW_HISTORY_MAX-ish).
+  const [strokeRedo, setStrokeRedo] = useState<MaskStroke[][]>([]);
   const [maskTool] = useState<MaskTool>('brush');
   const [maskSize, setMaskSize] = useState<number>(BRUSH_SIZES[1].value);
   const [shapes, setShapes] = useState<PaintShape[]>([]);
+  const [shapeRedo, setShapeRedo] = useState<PaintShape[][]>([]);
+  // IC crop aspect presets — null = free.
+  const [cropAspect, setCropAspect] = useState<number | null>(null);
   const [paintTool, setPaintTool] = useState<PaintShapeTool>('free');
   const [paintColor, setPaintColor] = useState('#ff2d55');
   const [paintSize, setPaintSize] = useState(14);
@@ -230,6 +237,42 @@ export function UnifiedImageEditor({
       </div>
 
       {/* Mode toolbars. */}
+      {mode === 'crop' && (
+        <div className="mb-2 flex items-center gap-1.5 text-xs text-canvas-muted">
+          <span>Aspect</span>
+          {[
+            { label: 'Free', value: null },
+            { label: '1:1', value: 1 },
+            { label: '4:3', value: 4 / 3 },
+            { label: '16:9', value: 16 / 9 },
+            { label: '3:4', value: 3 / 4 },
+            { label: '9:16', value: 9 / 16 },
+            { label: '3:2', value: 3 / 2 },
+            { label: '2:3', value: 2 / 3 },
+          ].map((preset) => {
+            const active = preset.value === cropAspect;
+            return (
+              <button
+                key={preset.label}
+                type="button"
+                data-testid={`editor-crop-aspect-${preset.label.toLowerCase().replace(':', '-')}`}
+                onClick={() => {
+                  setCropAspect(preset.value);
+                  if (preset.value !== null)
+                    setRegion(snapRegionToAspect(region, preset.value));
+                }}
+                className={`nodrag rounded-lg px-2 py-0.5 ${
+                  active
+                    ? 'bg-canvas-strong text-canvas-card'
+                    : 'border border-canvas-line text-canvas-text'
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {mode === 'mask' && (
         <div className="mb-2 flex items-center gap-2 text-xs text-canvas-muted">
           <span>Brush</span>
@@ -249,7 +292,35 @@ export function UnifiedImageEditor({
           ))}
           <button
             type="button"
-            onClick={() => setStrokes([])}
+            data-testid="mask-undo"
+            disabled={strokes.length === 0}
+            onClick={() => {
+              setStrokeRedo((r) => [...r, strokes]);
+              setStrokes(strokes.slice(0, -1));
+            }}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            data-testid="mask-redo"
+            disabled={strokeRedo.length === 0}
+            onClick={() => {
+              const prev = strokeRedo[strokeRedo.length - 1];
+              setStrokeRedo(strokeRedo.slice(0, -1));
+              setStrokes(prev);
+            }}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
+          >
+            Redo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStrokeRedo((r) => [...r, strokes]);
+              setStrokes([]);
+            }}
             className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text"
           >
             Clear
@@ -297,11 +368,27 @@ export function UnifiedImageEditor({
           </label>
           <button
             type="button"
-            onClick={() => setShapes(shapes.slice(0, -1))}
+            onClick={() => {
+              setShapeRedo((r) => [...r, shapes]);
+              setShapes(shapes.slice(0, -1));
+            }}
             disabled={shapes.length === 0}
             className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
           >
             Undo
+          </button>
+          <button
+            type="button"
+            data-testid="brush-redo"
+            disabled={shapeRedo.length === 0}
+            onClick={() => {
+              const prev = shapeRedo[shapeRedo.length - 1];
+              setShapeRedo(shapeRedo.slice(0, -1));
+              setShapes(prev);
+            }}
+            className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
+          >
+            Redo
           </button>
           <button
             type="button"
@@ -369,8 +456,9 @@ export function UnifiedImageEditor({
       <div
         data-testid="editor-stage"
         onWheel={(e) => {
-          if (mode !== 'preview') return;
-          // IC lightbox wheel-zoom, clamped 20%–400%.
+          // IC image-edit zoom: every mode scales (crop boxes and brushes
+          // keep working — pointer math follows getBoundingClientRect, which
+          // tracks the transform). Clamped 20%–400%.
           setZoom((z) =>
             Math.min(400, Math.max(20, Math.round(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))),
           );
@@ -392,7 +480,9 @@ export function UnifiedImageEditor({
           />
         )}
         {mode === 'crop' && (
-          <CropTool src={mediaSrc(src)} alt={alt} value={region} onChange={setRegion} />
+          <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
+            <CropTool src={mediaSrc(src)} alt={alt} value={region} onChange={setRegion} />
+          </div>
         )}
         {mode === 'outpaint' && (
           <div className="flex flex-col items-center gap-2">
@@ -414,6 +504,7 @@ export function UnifiedImageEditor({
           </div>
         )}
         {mode === 'mask' && (
+          <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
           <MaskBrushTool
             src={mediaSrc(src)}
             alt={alt}
@@ -423,8 +514,10 @@ export function UnifiedImageEditor({
             brushSize={maskSize}
             onNaturalSize={setNaturalSize}
           />
+          </div>
         )}
         {mode === 'brush' && (
+          <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
           <PaintTool
             src={src}
             alt={alt}
@@ -434,6 +527,7 @@ export function UnifiedImageEditor({
             color={paintColor}
             size={paintSize}
           />
+          </div>
         )}
         {mode === 'resize' && (
           <img
@@ -450,16 +544,18 @@ export function UnifiedImageEditor({
           />
         )}
         {mode === 'split' && (
+          <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
           <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
+          </div>
         )}
-        {mode === 'preview' && (
-          <span
-            data-testid="editor-zoom"
-            className="absolute bottom-2 left-2 rounded-md bg-canvas-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-canvas-muted"
-          >
-            {zoom}%
-          </span>
-        )}
+        <span
+          data-testid="editor-zoom"
+          title="Double-click to reset"
+          onDoubleClick={() => setZoom(100)}
+          className="absolute bottom-2 left-2 cursor-pointer rounded-md bg-canvas-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-canvas-muted"
+        >
+          {zoom}%
+        </span>
       </div>
 
       {/* Footer. */}
