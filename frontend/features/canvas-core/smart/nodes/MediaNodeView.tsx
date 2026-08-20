@@ -9,7 +9,9 @@
 
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useRef, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
 import { Loader2, UploadCloud } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -141,7 +143,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       className={`group relative mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
         dragOver ? 'ring-2 ring-indigo-500/50' : ''
       }`}
-      style={{ width: SMART_NODE_DEFAULT_WIDTH.media }}
+      style={{ width: '100%', minWidth: SMART_NODE_DEFAULT_WIDTH.media }}
       onDragOver={(e) => {
         if (!readOnly && e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
@@ -199,6 +201,15 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         pinned={Boolean(selected)}
         readOnly={readOnly}
       />
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
+      {!readOnly && (
+        <NodeResizeControl
+          position="right"
+          minWidth={SMART_NODE_DEFAULT_WIDTH.media}
+          maxWidth={900}
+          style={{ background: 'transparent', border: 'none', width: 8, cursor: 'ew-resize' }}
+        />
+      )}
       <div className="mh-node-head">
         <div className="mh-node-title">
           {title || t('canvas.mediaNode.title', 'Media')}

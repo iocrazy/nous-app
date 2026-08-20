@@ -11,6 +11,8 @@
 
 import { useCallback, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
 import { Copy, Play } from 'lucide-react';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
@@ -104,9 +106,10 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-llm-node"
-      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
+      className={`group relative mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.llm }}
     >
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       <div className="mh-node-head">
         <div className="mh-node-title">LLM</div>
         <RunStatusBadge status={d.run_status} />

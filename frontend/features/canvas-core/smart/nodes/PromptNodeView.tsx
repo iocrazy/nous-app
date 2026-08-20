@@ -1,7 +1,9 @@
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { ImagePlus, Library, Play } from 'lucide-react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
+import { ImagePlus, Library, Play, Square, Zap } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
 import type { GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
@@ -11,6 +13,7 @@ import { useTextModels } from './useTextModels';
 import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { isChainTail, startChainRun, useChainRunStore } from '../chainRun';
 import { rerunPrompt } from '../regenerate';
 import { resolveSourceUrls, upstreamPromptText } from '../promptInputs';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -173,6 +176,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // rewiring upstream nodes updates the row immediately.
   const storeNodes = useCanvasCoreStore((s) => s.nodes);
   const storeConnections = useCanvasCoreStore((s) => s.connections);
+  const storeNodes2 = useCanvasCoreStore((s) => s.nodes);
+  // IC 一键运行 (canRunSmartCascade): only the cascade tail carries the
+  // Run-chain button.
+  const chainTail = useMemo(
+    () => isChainTail(id, storeNodes2, storeConnections),
+    [id, storeNodes2, storeConnections],
+  );
+  const chainRunning = useChainRunStore((s) => s.runningTail === id);
+  const requestChainStop = useChainRunStore((s) => s.requestStop);
   const inputUrls = useMemo(
     () =>
       resolveSourceUrls(
@@ -331,13 +343,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-prompt-node"
-      className={`mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
+      className={`group relative mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
     >
       <Handle
         type="target"
         position={Position.Left}
       />
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
@@ -660,6 +673,30 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <Play size={11} />
             Run
           </button>
+          {chainTail && (
+            <button
+              type="button"
+              onClick={() =>
+                chainRunning ? requestChainStop() : void startChainRun(id)
+              }
+              disabled={readOnly}
+              data-testid="prompt-node-run-chain"
+              aria-label={chainRunning ? 'Stop chain' : 'Run chain'}
+              title={
+                chainRunning
+                  ? 'Stop after the current prompt'
+                  : 'Run the whole upstream chain'
+              }
+              className={`nodrag flex shrink-0 items-center gap-1 rounded-full border px-3 py-0.5 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
+                chainRunning
+                  ? 'border-rose-400/60 text-rose-500'
+                  : 'border-canvas-strong text-canvas-text hover:opacity-80'
+              }`}
+            >
+              {chainRunning ? <Square size={11} /> : <Zap size={11} />}
+              {chainRunning ? 'Stop' : 'Chain'}
+            </button>
+          )}
         </div>
 
         {/* Ref chips: show attached resources below the textarea */}

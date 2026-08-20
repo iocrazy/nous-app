@@ -12,6 +12,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
+  NodeResizeControl: () => null,
   Position: { Left: 'left', Right: 'right' },
 }));
 vi.mock('react-i18next', () => ({

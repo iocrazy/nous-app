@@ -1,4 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
 import { Image as ImageIcon, Plus, Square, TextCursorInput, Workflow, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -48,9 +50,10 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-loop-node"
-      className={`mh-node mh-loop-node ${tone} ${selected ? 'mh-node-selected' : ''}`}
+      className={`group relative mh-node mh-loop-node ${tone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.loop }}
     >
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       <Handle type="target" position={Position.Left} />
 
       <div className="mh-loop-card">

@@ -30,7 +30,7 @@ import {
   preparePaste,
   readClipboard,
 } from '../store/clipboard';
-import { releaseChildrenOf } from '../smart/grouping';
+import { deleteNodesById } from '../smart/deleteNodes';
 import { groupSelection, ungroupNode } from '../smart/grouping';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
@@ -229,25 +229,7 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         if (readOnly) return;
         if (store.selection.length === 0) return;
         event.preventDefault();
-        const selected = new Set(store.selection);
-        // Children of deleted groups return to absolute coords instead of
-        // dangling on a missing parentId (React Flow would drop them).
-        const freed = releaseChildrenOf(store.nodes, selected);
-        const remaining = freed.filter((n) => {
-          const id = idOf(n);
-          return id !== null && !selected.has(id);
-        });
-        // Also strip dangling connections that referenced the deleted nodes.
-        const remainingConnections = store.connections.filter((c) => {
-          const obj = c as Record<string, unknown>;
-          const source = typeof obj.source === 'string' ? obj.source : null;
-          const target = typeof obj.target === 'string' ? obj.target : null;
-          if (source && selected.has(source)) return false;
-          if (target && selected.has(target)) return false;
-          return true;
-        });
-        store.setNodes(remaining);
-        store.setConnections(remainingConnections);
+        deleteNodesById(store.selection);
         store.clearSelection();
       }
     };
