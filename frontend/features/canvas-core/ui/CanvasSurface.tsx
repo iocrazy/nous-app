@@ -46,6 +46,7 @@ import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
 import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
+import { extractDropUrls, fetchUrlAsFile } from '../smart/dropUrl';
 import { setPointerWorld } from './pointerWorld';
 import { setRfInstance } from './rfInstance';
 
@@ -586,6 +587,23 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       // alignment snap on drop keeps things tidy without the "sticky" feel.
       snapToGrid={false}
       onFileDrop={canTakeFiles ? onFileDrop : undefined}
+      onUrlDrop={
+        canTakeFiles
+          ? (dt, flowPos) => {
+              const urls = extractDropUrls(dt);
+              if (urls.length === 0) return;
+              void (async () => {
+                const files = (
+                  await Promise.all(urls.slice(0, 9).map(fetchUrlAsFile))
+                ).filter((f): f is File => f !== null);
+                if (files.length > 0)
+                  await createMediaNodeFromFiles(files, flowPos);
+                else
+                  console.error('[canvas] URL drop: none of the urls were fetchable (CORS?)', urls);
+              })();
+            }
+          : undefined
+      }
       // Infinite chrome corners (P1-11): glass minimap bottom-RIGHT, zoom
       // controls swap to bottom-left so the two clusters don't stack.
       minimap={{ position: 'bottom-right' }}
