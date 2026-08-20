@@ -149,3 +149,23 @@ describe('parentId hygiene on clone (②-3 groups)', () => {
     expect(orphan.parentId).toBeUndefined();
   });
 });
+
+describe('preparePaste at a pointer position (IC lastMouseWorld)', () => {
+  afterEach(() => clearClipboard());
+
+  it('centres the pasted subgraph bounding box on the given point', () => {
+    copyToClipboard(
+      'smart',
+      [
+        { id: 'a', type: 'prompt', position: { x: 0, y: 0 }, data: {} },
+        { id: 'b', type: 'output', position: { x: 100, y: 200 }, data: {} },
+      ] as never,
+      [] as never,
+    );
+    const prepared = preparePaste(new Set(['a', 'b']), { at: { x: 500, y: 500 } });
+    // bbox centre of originals is (50, 100) → shift +450/+400.
+    const pos = prepared!.nodes.map((n) => (n as { position: { x: number; y: number } }).position);
+    expect(pos[0]).toEqual({ x: 450, y: 400 });
+    expect(pos[1]).toEqual({ x: 550, y: 600 });
+  });
+});

@@ -46,6 +46,8 @@ import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
 import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
+import { setPointerWorld } from './pointerWorld';
+import { setRfInstance } from './rfInstance';
 
 type AnyNode = Node;
 
@@ -219,9 +221,10 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   // the adjacent prompt's run_status as a class so a cascade run visibly
   // flows wait → active → done along the wires (index.css § Canvas chrome).
   const rfEdges = useMemo(() => {
-    const edges = toReactFlowEdges(connections).map((edge) =>
-      selectedEdgeIds.has(edge.id) ? { ...edge, selected: true } : edge,
-    );
+    const edges = toReactFlowEdges(connections).map((edge) => {
+      const out = readOnly ? edge : { ...edge, reconnectable: true };
+      return selectedEdgeIds.has(out.id) ? { ...out, selected: true } : out;
+    });
     if (!isSmartFamily(kind) || !promptStatusSig) return edges;
     const statusById = new Map(JSON.parse(promptStatusSig) as Array<[string, string]>);
     return edges.map((edge) => {
@@ -231,7 +234,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       });
       return cls ? { ...edge, className: cls } : edge;
     });
-  }, [connections, kind, promptStatusSig, selectedEdgeIds]);
+  }, [connections, kind, promptStatusSig, selectedEdgeIds, readOnly]);
 
   // Fix 3 (6e-2c) — O(1) node-type lookup for connection validation.
   // `nodeTypeById` is called twice per connection event (source + target).
@@ -547,8 +550,31 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   return (
     <CanvasEngine
       themedChrome
+      onPointerWorld={setPointerWorld}
+      onReconnect={
+        readOnly
+          ? undefined
+          : (oldEdge, next) => {
+              // Drag an edge endpoint onto another handle (RF reconnect):
+              // same validity rule as fresh connections, then rewrite the
+              // stored connection in place (same id → undo-friendly).
+              if (!validateCanvasConnection(next as never, kind, nodeTypeById)) return;
+              const { connections: live, setConnections } =
+                useCanvasCoreStore.getState();
+              setConnections(
+                live.map((c) =>
+                  (c as { id?: string }).id === oldEdge.id
+                    ? { ...c, source: next.source, target: next.target,
+                        sourceHandle: next.sourceHandle ?? undefined,
+                        targetHandle: next.targetHandle ?? undefined }
+                    : c,
+                ) as never,
+              );
+            }
+      }
       onInit={(instance) => {
         rfRef.current = instance;
+        setRfInstance(instance);
         onInit?.(instance);
       }}
       // Infinite-parity zoom range (P0-6): RF's default 0.5–2 clamp feels
