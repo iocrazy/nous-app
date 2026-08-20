@@ -39,6 +39,7 @@ import {
   rememberPendingAudioRetry,
   rememberTranscriptionFollowUp,
   resetTranscriptionFollowUps,
+  transcriptionFollowUp,
   transcriptionFollowUps,
 } from '../utils/transcriptionFollowUp';
 
@@ -291,6 +292,30 @@ describe('useResourceProcessingFollowUps — blocked behind an audio extraction'
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
       expect.stringContaining('5'), 'info',
     ));
+    // Dispatched, not adopted: this retry is what started the run, so the
+    // watcher must judge it by the ordinary floor.
+    expect(transcriptionFollowUp('339710259795355')?.adopted).toBe(false);
+  });
+
+  it('arms an ADOPTED wait when the retry lands on a run already going', () => {
+    // The slot freed up and somebody else's transcription got there first,
+    // so the retry is deduped: nothing dispatched, 0 points. The run it
+    // returns for started BEFORE this moment, which is the whole reason the
+    // wait has to know which shape it is — armed as "dispatched" here, its
+    // completion falls outside the floor and the summary never comes.
+    transcribeMock.mockResolvedValue({
+      message: 'Transcription already in progress',
+      resource_id: '339710259795355',
+      points_charged: 0,
+      transcription_pending_audio: false,
+    });
+    rememberPendingAudioRetry('339710259795355', BLOCKER);
+    taskManagerMock.mockReturnValue({ tasks: [blocker()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    return vi.waitFor(() =>
+      expect(transcriptionFollowUp('339710259795355')?.adopted).toBe(true));
   });
 
   it('waits while the blocker is still running', () => {
@@ -400,5 +425,136 @@ describe('useResourceProcessingFollowUps — blocked behind an audio extraction'
     rerender();
 
     expect(transcribeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The production shape this file previously had no case for: the user
+ * attached a video whose transcription was ALREADY running, so the trigger
+ * deduped ("already in progress", 0 points) and nothing new was dispatched.
+ * The run therefore started BEFORE the wait was registered — which is
+ * exactly what the staleness floor above rejects. Result in production: the
+ * transcript landed a minute later and the resource ended with zero summary
+ * rows, because the completion was read as somebody else's work.
+ */
+describe('useResourceProcessingFollowUps — a run we attached to, not started', () => {
+  /** The in-flight run: created minutes ago, finishing now. */
+  const adoptedTask = (over: Record<string, unknown> = {}) =>
+    task({
+      created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+      completed_at: new Date().toISOString(),
+      ...over,
+    });
+
+  it('summarises when the transcription it attached to completes', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({ tasks: [adoptedTask()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).toHaveBeenCalledTimes(1);
+    expect(summaryMock).toHaveBeenCalledWith('339710259795355');
+    expect(transcriptionFollowUps()).toHaveLength(0);
+  });
+
+  /**
+   * Production rarely shows ONE row: a resource being transcribed again
+   * usually still carries the previous run's completed row, so the list the
+   * hook reads has both. `latestTaskFor` picks by `created_at` descending
+   * and the run in flight is the newer one — these two pin that selection,
+   * because a single-row fixture cannot tell a correct pick from a lucky
+   * one.
+   */
+  /** The previous run: finished long before any of this. */
+  const previousRun = () =>
+    task({
+      id: 'wf-previous',
+      created_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+      completed_at: new Date(Date.now() - 25 * 60_000).toISOString(),
+    });
+
+  it('keeps waiting while the newer run is going, old completed row present', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({
+      tasks: [previousRun(), adoptedTask({ status: 'in_progress', completed_at: null })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    // Reading the older row here would summarise a transcript the run in
+    // flight is about to replace.
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('summarises once the newer run completes, old completed row present', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({ tasks: [previousRun(), adoptedTask()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).toHaveBeenCalledTimes(1);
+    expect(summaryMock).toHaveBeenCalledWith('339710259795355');
+  });
+
+  it('still waits while that run is in progress', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({
+      tasks: [adoptedTask({ status: 'in_progress', completed_at: null })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('ignores a run that had already finished before we attached', () => {
+    // Not the run the backend told us about — that one is still going and
+    // its transcript will overwrite this one's. Summarising here spends the
+    // user's points on output that is about to be stale.
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({
+      tasks: [adoptedTask({ completed_at: new Date(Date.now() - 4 * 60_000).toISOString() })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('falls back to updated_at when the row reached us without completed_at', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({
+      tasks: [adoptedTask({ completed_at: null, updated_at: new Date().toISOString() })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).toHaveBeenCalledWith('339710259795355');
+  });
+
+  it('does not relax the floor for a run this session dispatched', () => {
+    // Same task row, dispatched entry: here an older run really is somebody
+    // else's, and the one we started has yet to appear in the Task Center.
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [adoptedTask()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('summarises once even as the task list re-renders', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({ tasks: [adoptedTask()] });
+
+    const { rerender } = renderHook(useFollowUpWithNotify);
+    taskManagerMock.mockReturnValue({ tasks: [adoptedTask(), adoptedTask({ id: 'wf-2' })] });
+    rerender();
+
+    expect(summaryMock).toHaveBeenCalledTimes(1);
   });
 });
