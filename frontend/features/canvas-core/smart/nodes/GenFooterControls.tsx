@@ -45,8 +45,8 @@ export const RATIO_LABELS: Record<string, string> = {
 /** Resolution ladder (IC 系统参数 right column). Consumed by providers
  *  with a resolution knob (jimeng resolution_type); codex sizes are fixed
  *  by the model and ignore it. */
-/** Video clip lengths (IC 时长 pill). jimeng CLI snaps per model. */
-export const DURATIONS = [5, 10] as const;
+/** Video clip lengths (IC 时长 pill: 8 quick picks; CLI snaps per model). */
+export const DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15] as const;
 
 export const RESOLUTIONS: Array<{ value: string; label: string; hint: string }> = [
   { value: '1k', label: '1K', hint: '1024×1024' },
@@ -178,25 +178,42 @@ export function GenFooterControls({
       )}
       {open === 'duration' && !isImage && (
         <Pop title="Duration">
-          <div className="flex w-40 flex-col gap-1">
-            {DURATIONS.map((d) => (
-              <button
-                key={d}
-                type="button"
-                onMouseEnter={() => onChange({ duration: d })}
-                onClick={() => pick({ duration: d })}
-                className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${
-                  (gen.duration ?? 5) === d
-                    ? 'border-canvas-strong font-bold text-canvas-text'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                <span>{d}s</span>
-                <span className="text-[10px] text-canvas-muted">
-                  {d === 5 ? 'Standard' : 'Extended'}
-                </span>
-              </button>
-            ))}
+          <div className="w-44">
+            <div className="grid grid-cols-4 gap-1">
+              {DURATIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  data-testid="duration-option"
+                  onMouseEnter={() => onChange({ duration: d })}
+                  onClick={() => pick({ duration: d })}
+                  className={`nodrag rounded-lg border px-1.5 py-1 text-xs ${
+                    (gen.duration ?? 5) === d
+                      ? 'border-canvas-strong font-bold text-canvas-text'
+                      : 'border-canvas-line text-canvas-text'
+                  }`}
+                >
+                  {d}s
+                </button>
+              ))}
+            </div>
+            {/* IC custom seconds field (1–60, clamped). */}
+            <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-canvas-muted">
+              Custom
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={gen.duration ?? 5}
+                aria-label="Custom duration seconds"
+                onChange={(e) => {
+                  const v = Math.min(60, Math.max(1, Math.round(Number(e.target.value) || 5)));
+                  onChange({ duration: v });
+                }}
+                className="nodrag w-14 rounded border border-canvas-line bg-transparent px-1.5 py-0.5 text-xs text-canvas-text outline-none"
+              />
+              s
+            </label>
           </div>
         </Pop>
       )}

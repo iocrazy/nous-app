@@ -38,6 +38,9 @@ export interface LightboxItem {
 }
 
 export interface OutputLightboxProps {
+  /** IC 导出到画布: when set, exported video frames land here (the caller
+   *  drops them onto the canvas as a media node) instead of downloading. */
+  onFrameExported?: (blob: Blob, name: string) => void;
   items: LightboxItem[];
   index: number;
   kind: 'image' | 'video';
@@ -76,6 +79,7 @@ export function OutputLightbox({
   onRegenerate,
   regenerating,
   editActions,
+  onFrameExported,
 }: OutputLightboxProps) {
   const pickTool = (fn?: () => void) => () => {
     if (!fn) return;
@@ -147,7 +151,9 @@ export function OutputLightbox({
           canvas.toBlob((blob) => {
             if (blob) {
               const base = (current?.name ?? 'frame').replace(/\.[^./]+$/, '');
-              downloadBlob(blob, `${base}-${which}-frame.png`);
+              const name = `${base}-${which}-frame.png`;
+              if (onFrameExported) onFrameExported(blob, name);
+              else downloadBlob(blob, name);
             } else {
               setExportError('Export failed');
             }

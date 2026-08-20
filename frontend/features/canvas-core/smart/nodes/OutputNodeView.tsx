@@ -30,6 +30,7 @@ import { promptIdForOutput, regenerateForOutput } from '../regenerate';
 import { regenKey, useRegenStore } from '../regenStore';
 import type { OutputNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { createMediaNodeFromFiles } from '../dropCreate';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
@@ -712,6 +713,27 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       )}
       {lightboxIndex !== null && lightboxItems.length > 0 && (
         <OutputLightbox
+          onFrameExported={
+            readOnly
+              ? undefined
+              : (blob, name) => {
+                  // IC 导出到画布: the frame lands as a media node beside
+                  // this node instead of a silent download.
+                  const me = useCanvasCoreStore
+                    .getState()
+                    .nodes.find((n) => (n as { id?: unknown }).id === id) as
+                    | { position?: { x: number; y: number } }
+                    | undefined;
+                  const at = {
+                    x: (me?.position?.x ?? 0) + 460,
+                    y: (me?.position?.y ?? 0) + 60,
+                  };
+                  void createMediaNodeFromFiles(
+                    [new File([blob], name, { type: 'image/png' })],
+                    at,
+                  );
+                }
+          }
           items={lightboxItems}
           index={Math.min(lightboxIndex, lightboxItems.length - 1)}
           kind={kind === 'video' ? 'video' : 'image'}
