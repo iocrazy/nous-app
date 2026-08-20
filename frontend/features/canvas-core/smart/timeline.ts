@@ -70,7 +70,7 @@ export function removeSegment(
 export function updateSegment(
   segments: TimelineSegment[],
   id: string,
-  patch: Partial<Pick<TimelineSegment, 'prompt' | 'seconds'>>,
+  patch: Partial<Pick<TimelineSegment, 'prompt' | 'seconds' | 'trim_in' | 'trim_out'>>,
 ): TimelineSegment[] {
   return segments.map((s) => {
     if (s.id !== id) return s;
