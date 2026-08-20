@@ -183,6 +183,11 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
               ? () => openItemEditor(0, 'mask')
               : undefined
           }
+          onBrush={
+            !readOnly && imageItems.length > 0
+              ? () => openItemEditor(0, 'brush')
+              : undefined
+          }
           onSplit={
             !readOnly && imageItems.length > 0
               ? () => openItemEditor(0, 'split')
@@ -253,6 +258,15 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
                       onClick={() =>
                         setLightbox({ kind: isVideo ? 'video' : 'image', index: kindIndex })
                       }
+                      onDoubleClick={() => {
+                        // IC dblclick → imageEditModal: images jump straight
+                        // into the rich editor (all tabs); videos keep the
+                        // lightbox (no image-edit modes apply).
+                        if (!isVideo && !readOnly) {
+                          setLightbox(null);
+                          openItemEditor(kindIndex, 'preview');
+                        }
+                      }}
                     >
                       {isVideo ? (
                         <video
