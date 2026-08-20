@@ -163,8 +163,26 @@ function remapSmartTags(
  * Clone the clipboard for insertion with a cascading offset so a second
  * paste lands further out than the first. Null when the clipboard is empty.
  */
-export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
+export function preparePaste(
+  existingIds: Set<string>,
+  options: { at?: { x: number; y: number } } = {},
+): PreparedPaste | null {
   if (!payload) return null;
+  if (options.at) {
+    // IC pasteNodes: the subgraph's bounding-box centre lands on the
+    // pointer's world position, so repeat pastes follow the mouse instead
+    // of stacking on a cascading offset.
+    const centre = bboxCentre(payload.nodes);
+    const cloned = cloneSubgraph(payload.nodes, payload.connections, existingIds, 0);
+    const dx = options.at.x - centre.x;
+    const dy = options.at.y - centre.y;
+    for (const node of cloned.nodes) {
+      const obj = node as Record<string, unknown>;
+      const pos = obj.position as { x: number; y: number } | undefined;
+      if (pos) obj.position = { x: pos.x + dx, y: pos.y + dy };
+    }
+    return cloned;
+  }
   pasteGeneration += 1;
   return cloneSubgraph(
     payload.nodes,
@@ -172,6 +190,20 @@ export function preparePaste(existingIds: Set<string>): PreparedPaste | null {
     existingIds,
     PASTE_OFFSET * pasteGeneration,
   );
+}
+
+function bboxCentre(nodes: CanvasNode[]): { x: number; y: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const pos = (n as Record<string, unknown>).position as
+      | { x: number; y: number }
+      | undefined;
+    if (!pos) continue;
+    minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x); maxY = Math.max(maxY, pos.y);
+  }
+  if (minX === Infinity) return { x: 0, y: 0 };
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 }
 
 /**

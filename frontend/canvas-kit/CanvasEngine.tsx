@@ -197,6 +197,11 @@ export interface CanvasEngineProps {
    *  create an upload node). Position is the drop point in flow coords.
    *  Node-level drop handlers (media/group) win via stopPropagation. */
   onFileDrop?: (files: File[], flowPosition: { x: number; y: number }) => void;
+  /** Fires with FLOW coords as the pointer moves over the canvas (null on
+   *  leave) — consumers track it for paste-at-pointer (IC lastMouseWorld). */
+  onPointerWorld?: (pos: { x: number; y: number } | null) => void;
+  /** Edge endpoint re-drag (RF reconnect). Absent → edges stay fixed. */
+  onReconnect?: (oldEdge: { id: string }, next: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) => void;
 
   /** Raw React Flow node changes (caller applies + routes to its persist channel). */
   onNodesChange: (changes: NodeChange[]) => void;
@@ -325,6 +330,8 @@ export function CanvasEngine({
   renderCreateMenu,
   paneCreateMenu = false,
   onFileDrop,
+  onPointerWorld,
+  onReconnect,
   minimap,
   controls,
   onInit,
@@ -709,6 +716,19 @@ export function CanvasEngine({
       onDragOver={onFileDrop ? onContainerDragOver : undefined}
       onDrop={onFileDrop ? onContainerDrop : undefined}
       onContextMenu={paneCreateMenu ? onContainerContextMenu : undefined}
+    
+      onPointerMove={
+        onPointerWorld
+          ? (e) => {
+              const pos = instanceRef.current?.screenToFlowPosition({
+                x: e.clientX,
+                y: e.clientY,
+              });
+              if (pos) onPointerWorld(pos);
+            }
+          : undefined
+      }
+      onPointerLeave={onPointerWorld ? () => onPointerWorld(null) : undefined}
     >
       <ReactFlow
         nodes={displayNodes}
@@ -754,6 +774,10 @@ export function CanvasEngine({
         selectionKeyCode="Shift"
         multiSelectionKeyCode={MULTI_SELECT_KEY}
         deleteKeyCode={null}
+        // IC parity: the middle button pans from anywhere (left keeps its
+        // pane-drag default).
+        panOnDrag={[0, 1]}
+        onReconnect={onReconnect ? (oldEdge, next) => onReconnect(oldEdge, next) : undefined}
       >
         {/* 24px dot lattice per Infinite-Canvas (`radial-gradient … 24px`)
             when the parity chrome is on; dot color comes from --canvas-grid

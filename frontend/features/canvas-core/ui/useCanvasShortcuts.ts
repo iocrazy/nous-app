@@ -33,6 +33,9 @@ import {
 import { releaseChildrenOf } from '../smart/grouping';
 import { groupSelection, ungroupNode } from '../smart/grouping';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { getPointerWorld } from './pointerWorld';
+import { getRfInstance } from './rfInstance';
+import { toggleZoomPreview } from './zoomPreview';
 import type { CanvasNode } from '../types';
 
 interface UseCanvasShortcutsOptions {
@@ -161,7 +164,10 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
         if (buf.kind !== store.kind) return;
         event.preventDefault();
         const existing = collectIds(store.nodes);
-        const prepared = preparePaste(existing);
+        // IC pasteNodes: land on the pointer when it's over the canvas,
+        // else fall back to the cascading offset.
+        const at = getPointerWorld();
+        const prepared = preparePaste(existing, at ? { at } : {});
         if (!prepared) return;
         store.setNodes([...store.nodes, ...prepared.nodes]);
         // Re-map internal edges onto the pasted nodes so the pasted subgraph
@@ -223,6 +229,15 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
             .map((n) => idOf(n))
             .filter((v): v is string => v !== null),
         );
+        return;
+      }
+      if ((key === 'z' || key === 'Z') && !meta && !event.shiftKey) {
+        // IC Z-overview: fit everything / glide back. View-only — allowed
+        // in read-only sessions too.
+        const inst = getRfInstance();
+        if (!inst) return;
+        event.preventDefault();
+        toggleZoomPreview(inst);
         return;
       }
       if (key === 'Delete' || key === 'Backspace') {
