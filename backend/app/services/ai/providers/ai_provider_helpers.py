@@ -382,6 +382,50 @@ def _byok_origin(provider_config: Dict[str, Any]) -> str:
     return "byok" if (provider_config.get("api_key") or "").strip() else "env"
 
 
+def _summary_model_from_provider(
+    provider_key: str, provider_cfg: Dict[str, Any]
+) -> str:
+    """The provider-card field that actually holds a SUMMARY model.
+
+    Every provider except ``openai`` exposes ONE model chip list in Settings →
+    AI, and it writes ``selected_model`` — so for those the summary model and
+    ``selected_model`` are the same field by construction.
+
+    ``openai`` is the exception: its card renders THREE dropdowns writing three
+    different keys (Whisper Model → ``selected_model``, Summary Model →
+    ``summary_model``, Analysis Model → ``analysis_model``, see
+    ``frontend/components/AISettings.tsx``). Reading ``selected_model`` for
+    openai therefore hands summarization whatever the user last picked in the
+    *Whisper* dropdown — a ``whisper-1``-class id posted to
+    ``/v1/chat/completions``, which fails every time. So openai reads
+    ``summary_model`` first.
+
+    It still falls back to ``selected_model`` afterwards, because rows written
+    before that dropdown existed keep a CHAT model there — but only when the
+    value is not itself an ASR pick. Note the openai card never writes
+    ``summary_model`` unless the user opens that dropdown (it *displays*
+    ``gpt-4o-mini`` as a placeholder without storing it), so "whisper in
+    ``selected_model``, no ``summary_model`` at all" is the ordinary shape of a
+    user who only ever touched the Whisper dropdown — an unguarded fallback
+    would resolve straight back to the broken model. The ASR test is the same
+    one the card itself uses to decide whether ``selected_model`` belongs to its
+    Whisper dropdown (``selected_model?.startsWith('whisper')``), deliberately
+    narrower than the frontend's general non-chat heuristic
+    (``frontend/utils/nonChatModel.ts``): this is one provider's known field
+    collision, not a capability judgement about arbitrary model ids.
+
+    Returns ``""`` when the provider names no usable model of its own; the
+    caller then falls back to ``ai_settings.default_summary_model``.
+    """
+    if provider_key == "openai":
+        summary = (provider_cfg.get("summary_model") or "").strip()
+        if summary:
+            return summary
+        legacy = (provider_cfg.get("selected_model") or "").strip()
+        return "" if legacy.lower().startswith("whisper") else legacy
+    return provider_cfg.get("selected_model") or ""
+
+
 def _extract_transcription_hotwords(settings_json: Optional[dict]) -> str:
     """Pull the user's ASR hotwords string out of a raw ``settings_json`` value.
 
@@ -728,8 +772,12 @@ async def resolve_summarization_config(
     Unlike the agent-driven tasks, summarization has NO agent slug and honors
     NO user nous-pick: its user path scans a HARDCODED provider priority
     (``doubao`` → ``qwen`` → ``openai`` → ``deepseek``) for the first provider
-    the user has both keyed and enabled, and uses that provider's
-    ``selected_model`` (falling back to ``ai_settings.default_summary_model``).
+    the user has both keyed and enabled, and uses that provider's summary model
+    (falling back to ``ai_settings.default_summary_model``).  Which FIELD holds
+    that model is per-provider and is decided by
+    :func:`_summary_model_from_provider`: ``selected_model`` everywhere except
+    ``openai``, whose card writes ``selected_model`` from its *Whisper*
+    dropdown and keeps the summary pick in ``summary_model``.
     ``agent_slug`` is therefore always ``""`` — summarization composes no agent
     prompt.
 
@@ -746,8 +794,9 @@ async def resolve_summarization_config(
        carries its api_key (``origin="byok"``); when NONE is enabled the loop
        leaves ``provider_key=""`` with an empty (keyless) config
        (``origin="env"``) — the exact fall-through the workflow preserved (no
-       raise). ``model`` is the chosen provider's ``selected_model`` else
-       ``default_summary_model`` else ``""``.
+       raise). ``model`` is the chosen provider's summary model (see
+       :func:`_summary_model_from_provider`) else ``default_summary_model``
+       else ``""``.
 
     ``settings_json`` is the user_settings ``settings_json`` value (dict or JSON
     string); pass it to avoid a second DB read. When ``None`` (and the module
@@ -808,7 +857,7 @@ async def resolve_summarization_config(
             break
 
     model = (
-        chosen_cfg.get("selected_model")
+        _summary_model_from_provider(chosen_key or "", chosen_cfg)
         or ai_settings.get("default_summary_model")
         or ""
     )

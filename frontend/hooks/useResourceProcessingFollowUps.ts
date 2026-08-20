@@ -122,8 +122,35 @@ function taskAnswersFollowUp(task: TaskLike, entry: TranscriptionFollowUp): bool
   if (!entry.adopted) return false;
   // `completed_at` is written by the DBOS→task_tracking mirror trigger;
   // `updated_at` is the fallback for a row that reached us without it.
+  // The fallback only ever ADMITS a task (see `hasTerminalStamp` for the one
+  // decision that refuses to rely on it).
   const ended = new Date(task.completed_at ?? task.updated_at ?? 0).getTime();
   return Number.isFinite(ended) && ended > 0 && ended >= floor;
+}
+
+/**
+ * Did this row REALLY reach a terminal state, or does it only claim to?
+ *
+ * `completed_at` is stamped by the DBOS→task_tracking mirror trigger when the
+ * workflow itself ends, so its presence is the only evidence that the run is
+ * actually over. `UnifiedTaskManager.cancel()` is the counter-example that
+ * makes this matter: it writes `phase`/`status` DIRECTLY and stamps NO
+ * `completed_at`, and it does not stop the DBOS workflow either (it kills
+ * registered subprocesses best-effort; cancelling the workflow is still a
+ * TODO in that method). A cancelled row can therefore sit in front of a run
+ * that is still going and may yet flip to `completed`.
+ *
+ * Which is why `updated_at` must not stand in here. It moves on ANY write,
+ * including that status-only flip, so a row whose transcription is still in
+ * flight would date-match the wait and be read as "this is over" — dropping a
+ * follow-up the user paid for with nothing said. Admitting a task on the
+ * fallback is safe (the worst case is asking for a summary that the backend
+ * dedupes); FORGETTING one on it is not, so the two decisions read different
+ * fields on purpose.
+ */
+function hasTerminalStamp(task: TaskLike): boolean {
+  const ended = new Date(task.completed_at ?? 0).getTime();
+  return Number.isFinite(ended) && ended > 0;
 }
 
 export function useResourceProcessingFollowUps(
@@ -185,9 +212,15 @@ export function useResourceProcessingFollowUps(
               error: err instanceof Error ? err.message : String(err),
             });
           });
-      } else if (DEAD_STATUSES.has(String(latest.status))) {
+      } else if (DEAD_STATUSES.has(String(latest.status)) && hasTerminalStamp(latest)) {
         // No transcript is coming — stop waiting rather than holding the
         // entry forever and re-checking on every task update.
+        //
+        // Only on a row that carries the mirror trigger's `completed_at`.
+        // A dead status with no terminal stamp is the shape `cancel()`
+        // writes, and the run behind it may still finish; keeping the entry
+        // costs a re-check per task update, dropping it costs the user a
+        // summary they asked for and never hear about again.
         forgetTranscriptionFollowUp(resourceId);
       }
     }

@@ -127,7 +127,14 @@ describe('useResourceProcessingFollowUps', () => {
 
   it('drops the follow-up when the transcription failed — no summary to make', () => {
     rememberTranscriptionFollowUp('339710259795355');
-    taskManagerMock.mockReturnValue({ tasks: [task({ status: 'failed' })] });
+    // A real failed row carries `completed_at`: UnifiedTaskManager.fail()
+    // writes it alongside the status (backend/app/services/infra/
+    // unified_task_manager.py), as does mark_lost(). Omitting it here would
+    // make this fixture the CANCEL shape instead — a different row and a
+    // different verdict (see the "dead status with no terminal stamp" block).
+    taskManagerMock.mockReturnValue({
+      tasks: [task({ status: 'failed', completed_at: new Date().toISOString() })],
+    });
 
     renderHook(() => useResourceProcessingFollowUps());
 
@@ -556,5 +563,110 @@ describe('useResourceProcessingFollowUps — a run we attached to, not started',
     rerender();
 
     expect(summaryMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * PROBE-D: a dead status is not always the end of the run.
+ *
+ * `UnifiedTaskManager.cancel()` writes `phase`/`status` DIRECTLY and stamps NO
+ * `completed_at`, and it does not stop the DBOS workflow — it kills registered
+ * subprocesses best-effort and leaves cancelling the workflow itself as a TODO
+ * (backend/app/services/infra/unified_task_manager.py). So `status:'cancelled'`
+ * with a null `completed_at` sits in front of a run that may still be going and
+ * may still flip to `completed`.
+ *
+ * The adopted shape already accepts `updated_at` as a stand-in for
+ * `completed_at`, and that fallback matched such a row: the wait was dropped
+ * while its transcription was still in flight, and the summary the user paid a
+ * trigger for never came — silently, with nothing left to re-check. Hence the
+ * asymmetry these cases pin: the fallback may ADMIT a task (worst case, a
+ * summary request the backend dedupes) but may not be the evidence that
+ * FORGETS one.
+ */
+describe('useResourceProcessingFollowUps — dead status with no terminal stamp', () => {
+  it('keeps waiting on a cancel that only flipped the status (adopted)', () => {
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    taskManagerMock.mockReturnValue({
+      tasks: [
+        task({
+          status: 'cancelled',
+          created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+          completed_at: null,
+          // Moves on ANY write, the status-only flip included — which is why
+          // it cannot stand in for the mirror trigger's terminal stamp here.
+          updated_at: new Date().toISOString(),
+        }),
+      ],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    // The run behind that row may still finish; dropping the entry now is the
+    // silent discard this case exists to prevent.
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('keeps waiting on the same shape for a run this session dispatched', () => {
+    // cancel() stamps nothing either way, so the dispatched shape needs the
+    // same guard — its row simply matches on `created_at` instead.
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({
+      tasks: [task({ status: 'cancelled', completed_at: null, updated_at: new Date().toISOString() })],
+    });
+
+    renderHook(useFollowUpWithNotify);
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(transcriptionFollowUps()).toContain('339710259795355');
+  });
+
+  it('summarises if that cancelled run turns out to have completed after all', () => {
+    // The point of keeping the entry: the mirror trigger later reports the
+    // workflow's real outcome and the chain finishes as the user asked.
+    rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+    const stale = {
+      status: 'cancelled',
+      created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+      completed_at: null,
+      updated_at: new Date().toISOString(),
+    };
+    taskManagerMock.mockReturnValue({ tasks: [task(stale)] });
+    const { rerender } = renderHook(useFollowUpWithNotify);
+    expect(summaryMock).not.toHaveBeenCalled();
+
+    taskManagerMock.mockReturnValue({
+      tasks: [task({ ...stale, status: 'completed', completed_at: new Date().toISOString() })],
+    });
+    rerender();
+
+    expect(summaryMock).toHaveBeenCalledWith('339710259795355');
+    expect(transcriptionFollowUps()).toHaveLength(0);
+  });
+
+  it('still drops the wait on a stamped cancel / failure / loss', () => {
+    // The other half of the rule: `completed_at` present means the workflow
+    // really ended, so waiting on is pointless. Without these, "keep waiting
+    // on a dead status" could be implemented as "never forget at all".
+    for (const status of ['cancelled', 'failed', 'lost']) {
+      resetTranscriptionFollowUps();
+      rememberTranscriptionFollowUp('339710259795355', { adopted: true });
+      taskManagerMock.mockReturnValue({
+        tasks: [
+          task({
+            status,
+            created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+            completed_at: new Date().toISOString(),
+          }),
+        ],
+      });
+
+      const { unmount } = renderHook(useFollowUpWithNotify);
+
+      expect(summaryMock).not.toHaveBeenCalled();
+      expect(transcriptionFollowUps()).toHaveLength(0);
+      unmount();
+    }
   });
 });

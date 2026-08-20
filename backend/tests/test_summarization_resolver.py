@@ -308,3 +308,197 @@ async def test_governance_short_circuits_before_user_settings():
 
     assert cfg.origin == "governance"
     read_scope_mock.assert_not_called()
+
+
+# ── openai: the Whisper dropdown must not decide the summary model ─────────
+#
+# Ground truth (frontend/components/AISettings.tsx): the openai card is the
+# only provider card with THREE model dropdowns, and they write three
+# different keys —
+#     Whisper Model  → selected_model
+#     Summary Model  → summary_model
+#     Analysis Model → analysis_model
+# Reading selected_model for openai therefore summarised with whatever the
+# user last picked for ASR (whisper-1 posted to /v1/chat/completions → every
+# summary fails). Only the openai branch changes; every other provider keeps
+# reading selected_model, which is the single chip list its card writes.
+
+
+async def test_openai_summary_uses_summary_model_not_whisper_pick():
+    """openai enabled+keyed with BOTH dropdowns set → the Summary Model wins.
+
+    Mutation guard: read selected_model first for openai and this goes red
+    with model == 'whisper-1'.
+    """
+    settings = _settings(
+        {
+            "default_summary_model": "gpt-4o-mini",
+            "ai_providers": {
+                "openai": {
+                    "api_key": "sk-user",
+                    "enabled": True,
+                    # what the Whisper Model dropdown wrote
+                    "selected_model": "whisper-1",
+                    # what the Summary Model dropdown wrote
+                    "summary_model": "gpt-4o",
+                    "analysis_model": "gpt-4o",
+                }
+            },
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.provider_key == "openai"
+    assert cfg.model == "gpt-4o"
+    assert cfg.provider_config["model"] == "gpt-4o"
+    assert cfg.origin == "byok"
+
+
+async def test_openai_never_resolves_to_a_whisper_model():
+    """The defect's exact shape: user touched ONLY the Whisper dropdown, so
+    summary_model was never written. selected_model holds an ASR id, which is
+    not a chat model — fall through to default_summary_model rather than
+    posting whisper-1 to chat-completions."""
+    settings = _settings(
+        {
+            "default_summary_model": "gpt-4o-mini",
+            "ai_providers": {
+                "openai": {
+                    "api_key": "sk-user",
+                    "enabled": True,
+                    "selected_model": "whisper-1",
+                }
+            },
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.provider_key == "openai"
+    assert not cfg.model.startswith("whisper")
+    assert cfg.model == "gpt-4o-mini"
+
+
+async def test_openai_legacy_row_without_summary_model_keeps_selected_model():
+    """Rows written before the Summary Model dropdown existed carry only
+    selected_model, and for those it IS the summary pick — the openai branch
+    falls back to it rather than skipping straight to the global default."""
+    settings = _settings(
+        {
+            "default_summary_model": "gpt-4o-mini",
+            "ai_providers": {
+                "openai": {
+                    "api_key": "sk-user",
+                    "enabled": True,
+                    "selected_model": "gpt-4-turbo",  # legacy: chat model here
+                }
+            },
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.model == "gpt-4-turbo"
+
+
+async def test_openai_blank_summary_model_falls_back_to_selected_model():
+    """A blank string in summary_model must not swallow the legacy fallback
+    (`or` semantics, not a `"summary_model" in cfg` presence check)."""
+    settings = _settings(
+        {
+            "default_summary_model": "gpt-4o-mini",
+            "ai_providers": {
+                "openai": {
+                    "api_key": "sk-user",
+                    "enabled": True,
+                    "selected_model": "gpt-4-turbo",
+                    "summary_model": "",
+                }
+            },
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.model == "gpt-4-turbo"
+
+
+@pytest.mark.parametrize(
+    "provider_key,selected,expected",
+    [
+        ("doubao", "doubao-pro", "doubao-pro"),
+        ("qwen", "qwen-plus", "qwen-plus"),
+        ("deepseek", "deepseek-chat", "deepseek-chat"),
+    ],
+)
+async def test_non_openai_providers_still_read_selected_model(
+    provider_key: str, selected: str, expected: str
+):
+    """Behaviour conservation: only the openai branch changed. Every other
+    provider keeps taking selected_model EVEN IF a stray summary_model is
+    present in the row (their cards never write one — a value there would be
+    hand-edited settings_json, and honouring it would be new behaviour)."""
+    settings = _settings(
+        {
+            "default_summary_model": "fallback-model",
+            "ai_providers": {
+                provider_key: {
+                    "api_key": "k",
+                    "enabled": True,
+                    "selected_model": selected,
+                    "summary_model": "should-be-ignored",
+                }
+            },
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.provider_key == provider_key
+    assert cfg.model == expected
+
+
+async def test_openai_summary_model_ignored_when_openai_is_not_chosen():
+    """Priority is unchanged: doubao outranks openai, so openai's
+    summary_model must not leak into a doubao run."""
+    settings = _settings(
+        {
+            "ai_providers": {
+                "doubao": {
+                    "api_key": "db-key",
+                    "enabled": True,
+                    "selected_model": "doubao-pro",
+                },
+                "openai": {
+                    "api_key": "sk-user",
+                    "enabled": True,
+                    "selected_model": "whisper-1",
+                    "summary_model": "gpt-4o",
+                },
+            }
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+
+    assert cfg.provider_key == "doubao"
+    assert cfg.model == "doubao-pro"
