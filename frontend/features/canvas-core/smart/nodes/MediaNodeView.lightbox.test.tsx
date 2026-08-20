@@ -90,3 +90,10 @@ describe('MediaNodeView lightbox wiring (spec §7.1)', () => {
     expect(trigger.className).toContain('nodrag');
   });
 });
+
+it('double-clicking an image thumbnail opens the rich editor, not the lightbox', () => {
+  renderView([{ url: '/api/v1/generated-media/1/cover', kind: 'image' }]);
+  fireEvent.doubleClick(screen.getByTestId('media-node-thumb-0'));
+  expect(screen.queryByTestId('output-lightbox')).toBeNull();
+  expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+});

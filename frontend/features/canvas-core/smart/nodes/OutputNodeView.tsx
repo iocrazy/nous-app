@@ -558,9 +558,14 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       </div>
       <div
         data-testid="smart-output-body"
-        // Double-click the body opens the lightbox at the first item (P2-5);
-        // single click falls through to React Flow node selection.
-        onDoubleClick={() => openLightbox(0)}
+        // Double-click: images jump straight into the rich editor (IC
+        // dblclick → imageEditModal); video/text keep the lightbox. Single
+        // click falls through to React Flow node selection.
+        onDoubleClick={() =>
+          kind === 'image' && preview_url && !readOnly
+            ? setEditorMode('preview')
+            : openLightbox(0)
+        }
         className={`p-3 ${lightboxItems.length > 0 ? 'cursor-zoom-in' : ''}`}
         title={lightboxItems.length > 0 ? 'Double-click to preview' : undefined}
       >
@@ -598,7 +603,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
             src={mediaSrc(preview_url || images?.[0]?.url)}
             alt={preview_text || 'Output preview'}
             draggable={false}
-            onDoubleClick={() => openLightbox(0)}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              if (!readOnly) setEditorMode('preview');
+              else openLightbox(0);
+            }}
             className="block w-full cursor-zoom-in rounded object-contain"
           />
         ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
