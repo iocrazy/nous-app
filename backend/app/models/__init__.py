@@ -86,8 +86,8 @@ from app.models.chat import (  # noqa: F401
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
     DistributionOauthStates,
-    MusicChartTracks,
     MusicCharts,
+    MusicChartTracks,
     PublishTaskAccounts,
     PublishTasks,
     SocialAccounts,
