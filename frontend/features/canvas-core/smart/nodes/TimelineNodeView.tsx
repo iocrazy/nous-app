@@ -30,7 +30,7 @@ import {
 } from '../timeline';
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { runSegmentClip } from '../clipRun';
-import { playableClips, setSegmentRef } from '../timeline';
+import { activeSegmentAt, ensureSegment, playableClips, segmentStarts, setSegmentRef, updateSegment as updateSeg2 } from '../timeline';
 import { resolveSourceUrls } from '../promptInputs';
 import { downloadUrl } from '../downloadMedia';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
@@ -60,6 +60,9 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const readOnly = useCanvasReadOnly();
   const [clipRunning, setClipRunning] = useState<string | null>(null);
   const [playAllIndex, setPlayAllIndex] = useState<number | null>(null);
+  // η2 (IC playhead): timeline position in seconds; the ruler seeks it and
+  // the strip renders a red caret at the matching percent.
+  const [playheadS, setPlayheadS] = useState(0);
   const clips = playableClips(segments);
   const [clipError, setClipError] = useState<string | null>(null);
   const storeNodes = useCanvasCoreStore((st) => st.nodes);
@@ -121,6 +124,62 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const onResizeEnd = (e: React.PointerEvent) => {
     if (resizeDrag.current) e.stopPropagation();
     resizeDrag.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+
+  // ── η2 trim handles (IC trimIn/trimOut): drag the inner edges of the
+  // SELECTED block to set the playback window inside its clip. ────────────
+  const trimDrag = useRef<{
+    segId: string;
+    side: 'in' | 'out';
+    startX: number;
+    startVal: number;
+    pxPerSecond: number;
+  } | null>(null);
+
+  const onTrimDown = (seg: TimelineSegment, side: 'in' | 'out') => (e: React.PointerEvent) => {
+    if (readOnly) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const stripWidth = stripRef.current?.getBoundingClientRect().width ?? 0;
+    trimDrag.current = {
+      segId: seg.id,
+      side,
+      startX: e.clientX,
+      startVal: side === 'in' ? (seg.trim_in ?? 0) : (seg.trim_out ?? seg.seconds),
+      pxPerSecond: total > 0 ? stripWidth / total : 0,
+    };
+  };
+
+  const onTrimMove = (e: React.PointerEvent) => {
+    const d = trimDrag.current;
+    if (!d || d.pxPerSecond <= 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const seg = segments.find((sg) => sg.id === d.segId);
+    if (!seg) return;
+    const delta = (e.clientX - d.startX) / d.pxPerSecond;
+    const raw = d.startVal + delta;
+    const patchSeg =
+      d.side === 'in'
+        ? { trim_in: raw, trim_out: seg.trim_out ?? seg.seconds }
+        : { trim_in: seg.trim_in ?? 0, trim_out: raw };
+    const ensured = ensureSegment({ ...seg, ...patchSeg });
+    if (ensured.trim_in !== seg.trim_in || ensured.trim_out !== seg.trim_out) {
+      patch({
+        segments: updateSeg2(segments, d.segId, {
+          trim_in: ensured.trim_in,
+          trim_out: ensured.trim_out,
+        }),
+      });
+    }
+  };
+
+  const onTrimEnd = (e: React.PointerEvent) => {
+    if (trimDrag.current) e.stopPropagation();
+    trimDrag.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   };
 
@@ -220,6 +279,42 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
       </div>
 
       <div className="p-3">
+        {/* η2 ruler (IC 8-tick scale) — click to seek the playhead; the
+            active clip under it drives the player. */}
+        {total > 0 && (
+          <div
+            data-testid="timeline-ruler"
+            className="nodrag relative mb-1 h-4 cursor-pointer select-none"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const t = ((e.clientX - rect.left) / rect.width) * total;
+              setPlayheadS(Math.max(0, Math.min(total, t)));
+              const seg = activeSegmentAt(segments, Math.min(t, total - 0.001));
+              if (seg) {
+                setActiveId(seg.id);
+                const clipIdx = clips.findIndex((c) => c.id === seg.id);
+                if (clipIdx >= 0) setPlayAllIndex(clipIdx);
+              }
+            }}
+          >
+            {Array.from({ length: 9 }, (_, i) => (
+              <span
+                key={i}
+                className="absolute top-0 h-2 w-px bg-canvas-line"
+                style={{ left: `${(i / 8) * 100}%` }}
+              />
+            ))}
+            <span className="absolute bottom-0 left-0 text-[8px] text-canvas-muted">0s</span>
+            <span className="absolute bottom-0 right-0 text-[8px] text-canvas-muted">
+              {total}s
+            </span>
+            <span
+              data-testid="timeline-playhead"
+              className="absolute top-0 h-4 w-0.5 rounded bg-rose-500"
+              style={{ left: `${Math.min(100, (playheadS / total) * 100)}%` }}
+            />
+          </div>
+        )}
         {/* Segment strip — block width ∝ seconds. */}
         <div className="flex h-14 w-full gap-1" data-testid="timeline-strip" ref={stripRef}>
           {segments.map((seg, i) => (
@@ -283,6 +378,47 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
                   onPointerCancel={onResizeEnd}
                   className="absolute inset-y-0 right-0 w-2 cursor-ew-resize touch-none rounded-r-lg hover:bg-canvas-strong/30"
                 />
+              )}
+              {/* η2 trim window (IC trimIn/trimOut): shaded outside the
+                  window; the SELECTED block gets amber drag handles on the
+                  window edges. Only meaningful once the clip exists. */}
+              {seg.result_url && (seg.trim_in ?? 0) > 0 && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 left-0 bg-black/35"
+                  style={{ width: `${((seg.trim_in ?? 0) / seg.seconds) * 100}%` }}
+                />
+              )}
+              {seg.result_url && (seg.trim_out ?? seg.seconds) < seg.seconds && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 right-0 bg-black/35"
+                  style={{ width: `${((seg.seconds - (seg.trim_out ?? seg.seconds)) / seg.seconds) * 100}%` }}
+                />
+              )}
+              {!readOnly && seg.id === activeId && seg.result_url && (
+                <>
+                  <span
+                    data-testid={`timeline-trim-in-${seg.id}`}
+                    role="presentation"
+                    onPointerDown={onTrimDown(seg, 'in')}
+                    onPointerMove={onTrimMove}
+                    onPointerUp={onTrimEnd}
+                    onPointerCancel={onTrimEnd}
+                    style={{ left: `calc(${((seg.trim_in ?? 0) / seg.seconds) * 100}% - 3px)` }}
+                    className="absolute inset-y-0 z-[2] w-1.5 cursor-col-resize touch-none rounded bg-amber-400/90"
+                  />
+                  <span
+                    data-testid={`timeline-trim-out-${seg.id}`}
+                    role="presentation"
+                    onPointerDown={onTrimDown(seg, 'out')}
+                    onPointerMove={onTrimMove}
+                    onPointerUp={onTrimEnd}
+                    onPointerCancel={onTrimEnd}
+                    style={{ left: `calc(${((seg.trim_out ?? seg.seconds) / seg.seconds) * 100}% - 3px)` }}
+                    className="absolute inset-y-0 z-[2] w-1.5 cursor-col-resize touch-none rounded bg-amber-400/90"
+                  />
+                </>
               )}
             </button>
           ))}

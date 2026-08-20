@@ -14,7 +14,9 @@ import {
   playableClips,
   setSegmentRef,
   setSegmentResult,
-  reorderSegments,
+  ensureSegment,
+  segmentStarts,
+  activeSegmentAt,
 } from './timeline';
 
 const SEGS = [
@@ -147,5 +149,44 @@ describe('per-clip results (M1)', () => {
   it('playableClips lists result urls in order, skipping empties', () => {
     const withRes = setSegmentResult(segs, 'b', '/r2');
     expect(playableClips(withRes)).toEqual([{ id: 'b', url: '/r2' }]);
+  });
+});
+
+// ── IC smartMinimaxEnsureSegment parity (η2) ────────────────────────────────
+describe('ensureSegment / segmentStarts / activeSegmentAt', () => {
+  it('clamps trim to [0, seconds] keeping at least 0.1s of clip', () => {
+    const seg = ensureSegment({
+      id: 's1', prompt: '', seconds: 5, trim_in: -2, trim_out: 99,
+    });
+    expect(seg.trim_in).toBe(0);
+    expect(seg.trim_out).toBe(5);
+    const tight = ensureSegment({
+      id: 's2', prompt: '', seconds: 5, trim_in: 4.99, trim_out: 5,
+    });
+    expect(tight.trim_out! - (tight.trim_in ?? 0)).toBeCloseTo(0.1, 3);
+  });
+
+  it('migrates legacy ref_url into ref_items', () => {
+    const seg = ensureSegment({ id: 's1', prompt: '', seconds: 5, ref_url: '/r.png' });
+    expect(seg.ref_items).toEqual([{ url: '/r.png', kind: 'image' }]);
+  });
+
+  it('segmentStarts packs clips back to back (IC start = prev end)', () => {
+    const starts = segmentStarts([
+      { id: 'a', prompt: '', seconds: 5 },
+      { id: 'b', prompt: '', seconds: 3 },
+      { id: 'c', prompt: '', seconds: 4 },
+    ]);
+    expect(starts).toEqual([0, 5, 8]);
+  });
+
+  it('activeSegmentAt finds the clip under the playhead', () => {
+    const segs = [
+      { id: 'a', prompt: '', seconds: 5 },
+      { id: 'b', prompt: '', seconds: 3 },
+    ];
+    expect(activeSegmentAt(segs, 0)?.id).toBe('a');
+    expect(activeSegmentAt(segs, 5.5)?.id).toBe('b');
+    expect(activeSegmentAt(segs, 99)).toBeNull();
   });
 });
