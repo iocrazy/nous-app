@@ -197,6 +197,9 @@ export interface CanvasEngineProps {
    *  create an upload node). Position is the drop point in flow coords.
    *  Node-level drop handlers (media/group) win via stopPropagation. */
   onFileDrop?: (files: File[], flowPosition: { x: number; y: number }) => void;
+  /** URL drags (from other tabs / asset managers): text/uri-list, text/html
+   *  or plain http(s) text dropped on the blank pane. */
+  onUrlDrop?: (dataTransfer: DataTransfer, flowPosition: { x: number; y: number }) => void;
   /** Fires with FLOW coords as the pointer moves over the canvas (null on
    *  leave) — consumers track it for paste-at-pointer (IC lastMouseWorld). */
   onPointerWorld?: (pos: { x: number; y: number } | null) => void;
@@ -330,6 +333,7 @@ export function CanvasEngine({
   renderCreateMenu,
   paneCreateMenu = false,
   onFileDrop,
+  onUrlDrop,
   onPointerWorld,
   onReconnect,
   minimap,
@@ -608,18 +612,34 @@ export function CanvasEngine({
   // this only fires for the empty pane/backdrop.
   const onContainerDragOver = useCallback(
     (e: React.DragEvent) => {
-      if (!onFileDrop) return;
-      if (!e.dataTransfer.types.includes('Files')) return;
+      const types = e.dataTransfer.types;
+      const fileDrag = onFileDrop && types.includes('Files');
+      const urlDrag =
+        onUrlDrop &&
+        (types.includes('text/uri-list') || types.includes('text/html') || types.includes('text/plain'));
+      if (!fileDrag && !urlDrag) return;
       e.preventDefault();
     },
-    [onFileDrop],
+    [onFileDrop, onUrlDrop],
   );
   const onContainerDrop = useCallback(
     (e: React.DragEvent) => {
-      if (!onFileDrop) return;
+      if (!onFileDrop && !onUrlDrop) return;
       const files = Array.from(e.dataTransfer.files ?? []);
-      if (files.length === 0) return;
       if ((e.target as Element).closest?.('.react-flow__node')) return;
+      if (files.length === 0) {
+        // No File payload — this may still be a URL drag from another tab.
+        if (!onUrlDrop) return;
+        e.preventDefault();
+        const flowPos =
+          instanceRef.current?.screenToFlowPosition({
+            x: e.clientX,
+            y: e.clientY,
+          }) ?? { x: e.clientX, y: e.clientY };
+        onUrlDrop(e.dataTransfer, flowPos);
+        return;
+      }
+      if (!onFileDrop) return;
       e.preventDefault();
       const flowPosition =
         instanceRef.current?.screenToFlowPosition({
