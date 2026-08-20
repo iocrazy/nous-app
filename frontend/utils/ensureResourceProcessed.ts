@@ -162,12 +162,19 @@ export async function ensureResourceProcessed(
       }
       // Only now is there a transcript worth waiting for; the summary half
       // of the chain is picked up by useResourceProcessingFollowUps.
-      rememberTranscriptionFollowUp(input.id);
+      //
+      // Registered on the dedup arm too — the user attached this resource to
+      // get it READ, and "somebody already started the transcription" does
+      // not make the summary any less needed. The flag tells the watcher
+      // that the run it is waiting on started before this instant, which is
+      // the difference between finishing the chain and waiting forever.
+      const deduped = isDedupedResponse(res);
+      rememberTranscriptionFollowUp(input.id, { adopted: deduped });
       return {
         action: 'triggered_transcribe',
         message: res?.message,
         pointsCharged: res?.points_charged,
-        alreadyInProgress: isDedupedResponse(res),
+        alreadyInProgress: deduped,
       };
     } catch (err) {
       console.error('ensureResourceProcessed: transcribe trigger failed', err);

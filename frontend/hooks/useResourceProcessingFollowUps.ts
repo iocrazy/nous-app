@@ -35,9 +35,10 @@ import {
   forgetTranscriptionFollowUp,
   pendingAudioRetries,
   rememberTranscriptionFollowUp,
+  transcriptionFollowUp,
   transcriptionFollowUps,
-  transcriptionFollowUpSince,
 } from '../utils/transcriptionFollowUp';
+import type { TranscriptionFollowUp } from '../utils/transcriptionFollowUp';
 import { triggerTranscriptionByResource } from '../services/aiService';
 
 interface TaskLike {
@@ -47,6 +48,8 @@ interface TaskLike {
   resource_id?: string | number | null;
   status?: string | null;
   created_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
   error_msg?: string | null;
 }
 
@@ -93,6 +96,36 @@ function latestTaskFor(
     .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())[0];
 }
 
+/**
+ * Is `task` the run this follow-up is waiting on?
+ *
+ * DISPATCHED entry (`adopted === false`): the run began when we asked, so a
+ * task stamped before that instant is a PREVIOUS run for the same resource,
+ * and reading its completion would summarise a transcript that the run we
+ * actually started is about to overwrite.
+ *
+ * ADOPTED entry: nothing was dispatched — the trigger deduped onto a run
+ * that was already in flight, so `created_at` BEFORE the registration
+ * instant is the expected shape, not evidence of staleness. What still has
+ * to be excluded is a predecessor that had already finished before we
+ * attached, so for this shape the floor moves from "when it started" to
+ * "when it ended": a run that reached its terminal state after we attached
+ * is the one the backend told us was in progress; one that ended before we
+ * attached cannot be. While it is still running there is no terminal stamp
+ * and nothing to answer with — but there is also nothing to act on yet, so
+ * waiting is correct either way.
+ */
+function taskAnswersFollowUp(task: TaskLike, entry: TranscriptionFollowUp): boolean {
+  const floor = entry.since - CLOCK_SKEW_TOLERANCE_MS;
+  const started = new Date(task.created_at ?? 0).getTime();
+  if (!Number.isFinite(started) || started >= floor) return true;
+  if (!entry.adopted) return false;
+  // `completed_at` is written by the DBOS→task_tracking mirror trigger;
+  // `updated_at` is the fallback for a row that reached us without it.
+  const ended = new Date(task.completed_at ?? task.updated_at ?? 0).getTime();
+  return Number.isFinite(ended) && ended > 0 && ended >= floor;
+}
+
 export function useResourceProcessingFollowUps(
   options: UseResourceProcessingFollowUpsOptions = {},
 ): void {
@@ -128,11 +161,8 @@ export function useResourceProcessingFollowUps(
       const latest = latestTaskFor(tasks, resourceId, 'ai_transcription');
       if (!latest) continue;
       // Only tasks from this trigger onward may be read as its outcome.
-      const since = transcriptionFollowUpSince(resourceId);
-      if (since !== null) {
-        const stamped = new Date(latest.created_at ?? 0).getTime();
-        if (Number.isFinite(stamped) && stamped < since - CLOCK_SKEW_TOLERANCE_MS) continue;
-      }
+      const entry = transcriptionFollowUp(resourceId);
+      if (entry && !taskAnswersFollowUp(latest, entry)) continue;
       if (latest.status === 'completed') {
         firing.current.add(resourceId);
         forgetTranscriptionFollowUp(resourceId);
@@ -214,7 +244,9 @@ export function useResourceProcessingFollowUps(
             announceRef.current({ action: 'pending_audio', pointsCharged: 0 });
             return;
           }
-          rememberTranscriptionFollowUp(entry.resourceId);
+          rememberTranscriptionFollowUp(entry.resourceId, {
+            adopted: isDedupedResponse(res),
+          });
           announceRef.current({
             action: 'triggered_transcribe',
             message: res?.message,

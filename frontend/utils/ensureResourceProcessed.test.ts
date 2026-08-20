@@ -27,6 +27,7 @@ import { ensureResourceProcessed } from './ensureResourceProcessed';
 import {
   pendingAudioRetries,
   resetTranscriptionFollowUps,
+  transcriptionFollowUp,
   transcriptionFollowUps,
 } from './transcriptionFollowUp';
 
@@ -399,6 +400,35 @@ describe('ensureResourceProcessed — transcript → summary follow-up', () => {
     await ensureResourceProcessed({ id: 'r-33', kind: 'image', mime: 'image/png' });
 
     expect(transcriptionFollowUps()).toHaveLength(0);
+  });
+
+  it('records a follow-up when the transcription was ALREADY running', async () => {
+    // The dedup arm: the user attached a video whose transcription somebody
+    // (or an earlier click) already started. Nothing was queued and nothing
+    // was charged — but the summary is still owed, and without this entry
+    // the transcript lands and the chain stops there. Observed in
+    // production as a resource with a transcript and zero summary rows.
+    transcribeMock.mockResolvedValue({
+      message: 'Transcription already in progress',
+      resource_id: 'r-35',
+      points_charged: 0,
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-35', kind: 'video', transcript_status: 'processing',
+    });
+
+    expect(result.alreadyInProgress).toBe(true);
+    expect(transcriptionFollowUps()).toContain('r-35');
+    // Marked as adopted: the run it waits on started BEFORE this call, so
+    // the watcher must not judge it by when the wait was registered.
+    expect(transcriptionFollowUp('r-35')?.adopted).toBe(true);
+  });
+
+  it('marks a freshly dispatched transcription as not adopted', async () => {
+    await ensureResourceProcessed({ id: 'r-36', kind: 'video', transcript_status: 'none' });
+
+    expect(transcriptionFollowUp('r-36')?.adopted).toBe(false);
   });
 
   it('records nothing when the transcription trigger failed', async () => {

@@ -16,17 +16,50 @@
  * outcome nobody watched.
  */
 
-/** resourceId → epoch ms when the transcription was triggered. The instant
- *  matters: the Task Center may still be holding an OLDER completed
- *  transcription for the same resource, and reading that as "the one we
- *  just started has finished" would fire the summary against a transcript
- *  that is about to be overwritten. */
-const waiting = new Map<string, number>();
+export interface TranscriptionFollowUp {
+  resourceId: string;
+  /** Epoch ms when the wait was registered. The instant matters: the Task
+   *  Center may still be holding an OLDER completed transcription for the
+   *  same resource, and reading that as "the one we are waiting on has
+   *  finished" would fire the summary against a transcript that is about
+   *  to be overwritten. */
+  since: number;
+  /**
+   * True when we ATTACHED to a run that was already in flight (the trigger
+   * endpoint deduped: 200 "already in progress", 0 points) instead of
+   * dispatching one.
+   *
+   * The two shapes have to be told apart because the adopted run started
+   * BEFORE `since` — its `created_at` sits on the wrong side of the
+   * staleness floor above, so a rule written for the dispatched shape
+   * rejects the only task that can ever satisfy the entry. Which is the
+   * production defect this flag exists for: attaching a video whose
+   * transcription was already running left the resource with a transcript
+   * and no summary, because the completion was read as somebody else's.
+   */
+  adopted: boolean;
+}
 
-/** Called by `ensureResourceProcessed` right after it starts a transcription. */
-export function rememberTranscriptionFollowUp(resourceId: string): void {
+const waiting = new Map<string, TranscriptionFollowUp>();
+
+export interface RememberTranscriptionOptions {
+  /** Set when the trigger deduped — see `TranscriptionFollowUp.adopted`. */
+  adopted?: boolean;
+}
+
+/** Called right after a transcription is triggered, whether the call
+ *  dispatched a run or was deduped onto one already in flight: the user's
+ *  intent (make this resource readable) is the same either way. */
+export function rememberTranscriptionFollowUp(
+  resourceId: string,
+  options: RememberTranscriptionOptions = {},
+): void {
   if (!resourceId) return;
-  waiting.set(String(resourceId), Date.now());
+  waiting.set(String(resourceId), {
+    resourceId: String(resourceId),
+    since: Date.now(),
+    adopted: options.adopted === true,
+  });
 }
 
 /** Resource ids still waiting for their transcript to land. */
@@ -34,8 +67,8 @@ export function transcriptionFollowUps(): string[] {
   return [...waiting.keys()];
 }
 
-/** When the wait for `resourceId` started, or null if it is not waiting. */
-export function transcriptionFollowUpSince(resourceId: string): number | null {
+/** The pending wait for `resourceId`, or null if it is not waiting. */
+export function transcriptionFollowUp(resourceId: string): TranscriptionFollowUp | null {
   return waiting.get(String(resourceId)) ?? null;
 }
 
