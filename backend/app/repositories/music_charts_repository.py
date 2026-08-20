@@ -24,7 +24,7 @@ through a three-day outage.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from sqlalchemy import delete, select
 
