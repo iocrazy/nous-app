@@ -1,6 +1,8 @@
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
 import { ImagePlus, Library, Play } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
@@ -331,13 +333,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-prompt-node"
-      className={`mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
+      className={`group relative mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
     >
       <Handle
         type="target"
         position={Position.Left}
       />
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       <div className="mh-node-head">
         <div className="mh-node-title">Prompt</div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">

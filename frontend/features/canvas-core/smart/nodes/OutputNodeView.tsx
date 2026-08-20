@@ -1,5 +1,7 @@
 import { mediaSrc } from '../mediaUrl';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
+
+import { NodeDeleteButton } from './NodeDeleteButton';
 import { useCallback, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
@@ -427,12 +429,25 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     <div
       data-testid="smart-output-node"
       className={`group mh-node relative border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
-      style={{ width: SMART_NODE_DEFAULT_WIDTH.output }}
+      style={{ width: '100%', minWidth: SMART_NODE_DEFAULT_WIDTH.output }}
     >
+      {/* IC node-resize-handle: drag the right edge to widen the card
+          (media grids reflow; height stays content-driven). RF applies the
+          resized width to the node wrapper — the root div tracks it via
+          width:100% with the legacy default as its floor. */}
+      {!readOnly && (
+        <NodeResizeControl
+          position="right"
+          minWidth={SMART_NODE_DEFAULT_WIDTH.output}
+          maxWidth={900}
+          style={{ background: 'transparent', border: 'none', width: 8, cursor: 'ew-resize' }}
+        />
+      )}
       <Handle
         type="target"
         position={Position.Left}
       />
+      <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       {/* Floating toolbar (P2-3): pinned while selected, hover-revealed
           otherwise. Preview bypasses the 250ms crop-disambiguation delay. */}
       <AttachedComposerPanel
