@@ -2981,6 +2981,14 @@
       "upstream_error": "Provider error",
       "bad_response": "Unexpected response",
       "other": "Unknown reason"
+    },
+    "nonChatSelected": "\"{{model}}\" looks like {{kind}}, not a chat model. Chat, summarization and other text tasks that use this provider will fail. Enable a chat model instead.",
+    "nonChatKind": {
+      "embedding": "an embedding model",
+      "rerank": "a reranking model",
+      "image": "an image-generation model",
+      "video": "a video-generation model",
+      "speech": "a speech model"
     }
   },
   "aiLibrary": {

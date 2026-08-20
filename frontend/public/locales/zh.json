@@ -2981,6 +2981,14 @@
       "upstream_error": "服务商报错",
       "bad_response": "响应异常",
       "other": "原因未知"
+    },
+    "nonChatSelected": "「{{model}}」看起来是{{kind}}，不是对话模型。使用该服务商的聊天、摘要等文本任务会直接失败，请改选一个对话模型。",
+    "nonChatKind": {
+      "embedding": "向量（embedding）模型",
+      "rerank": "重排（rerank）模型",
+      "image": "文生图模型",
+      "video": "文生视频模型",
+      "speech": "语音模型"
     }
   },
   "aiLibrary": {
