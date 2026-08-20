@@ -25,7 +25,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { downloadCanvasAssetsZip } from '../../services/canvasGenerationService';
+import { lazy, Suspense } from 'react';
+
 import { downloadBlob, downloadName, downloadUrl } from '../downloadMedia';
+import { isLikelyPanorama } from './panoramaDetect';
+
+const PanoramaViewer = lazy(() =>
+  import('./PanoramaViewer').then((m) => ({ default: m.PanoramaViewer })),
+);
 import {
   exportFrameTime,
   nextFrameTime,
@@ -89,6 +96,14 @@ export function OutputLightbox({
   const current = items[index];
   const [resolution, setResolution] = useState<string>('');
   const [compareOn, setCompareOn] = useState(false);
+  // IC 360 panorama: offered for keyword names or ~2:1 equirect images;
+  // mutually exclusive with compare (both own the stage).
+  const [panoramaOn, setPanoramaOn] = useState(false);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    setPanoramaOn(false);
+    setNaturalSize(null);
+  }, [index]);
   const [sliderPct, setSliderPct] = useState(50);
   const [compareIndex, setCompareIndex] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -445,6 +460,25 @@ export function OutputLightbox({
               </LightboxButton>
             </>
           )}
+          {kind === 'image' &&
+            isLikelyPanorama(current?.name ?? '', naturalSize?.w, naturalSize?.h) && (
+              <button
+                type="button"
+                data-testid="lightbox-panorama-toggle"
+                aria-pressed={panoramaOn}
+                onClick={() => {
+                  setPanoramaOn((v) => !v);
+                  setCompareOn(false);
+                }}
+                className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
+                  panoramaOn
+                    ? 'bg-canvas-strong text-canvas-card'
+                    : 'text-canvas-muted hover:text-canvas-text'
+                }`}
+              >
+                360°
+              </button>
+            )}
           {compareUrl && kind === 'image' && (
             <LightboxButton
               label="Compare"
@@ -555,6 +589,26 @@ export function OutputLightbox({
                 if (v.videoWidth) setResolution(`${v.videoWidth} × ${v.videoHeight}`);
               }}
             />
+          ) : panoramaOn ? (
+            <div className="h-[80vh] w-[min(90vw,1400px)]">
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-xs text-canvas-muted">
+                    Loading 360° viewer…
+                  </div>
+                }
+              >
+                <PanoramaViewer
+                  src={mediaSrc(current.url)}
+                  exportName={`${(current?.name ?? 'panorama').replace(/\.[^./]+$/, '')}-view.png`}
+                  onExport={
+                    onFrameExported
+                      ? (blob, name) => onFrameExported(blob, name)
+                      : undefined
+                  }
+                />
+              </Suspense>
+            </div>
           ) : compareOn && compareUrl ? (
             <div
               ref={compareStageRef}
@@ -675,6 +729,7 @@ export function OutputLightbox({
                     const img = e.currentTarget;
                     if (img.naturalWidth) {
                       setResolution(`${img.naturalWidth} × ${img.naturalHeight}`);
+                      setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
                     }
                   }}
                   onError={() => setLoadState('error')}
