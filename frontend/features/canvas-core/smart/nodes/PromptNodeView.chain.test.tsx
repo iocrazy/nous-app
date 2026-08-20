@@ -26,10 +26,14 @@ function seed(withChain: boolean) {
   });
 }
 
-const props = (id: string) =>
-  ({ id, data: useCanvasCoreStore.getState().nodes.find((n) => (n as { id: string }).id === id)!
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .data, selected: false } as any);
+const props = (id: string) => {
+  const node = useCanvasCoreStore.getState().nodes.find(
+    (n) => (n as { id: string }).id === id,
+  ) as { data: unknown };
+  return { id, data: node.data, selected: false } as unknown as Parameters<
+    typeof PromptNodeView
+  >[0];
+};
 
 describe('PromptNodeView chain button', () => {
   beforeEach(() => seed(true));
