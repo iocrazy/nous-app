@@ -43,6 +43,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
+import { suspectedNonChatKind, nonChatKindKey } from '../utils/nonChatModel';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MCPServersPanel } from './MCPServersPanel';
 import { HotwordChipInput } from './settings/HotwordChipInput';
@@ -284,7 +285,27 @@ const EnabledModelsField: React.FC<{
   catalog: string[];
   onAdd: (modelId: string) => void;
   onRemove: (modelId: string) => void;
-}> = ({ providerKey, enabledModels, catalog, onAdd, onRemove }) => {
+  /**
+   * The model this provider's legacy single-model paths actually use —
+   * ``selected_model``. Summarization resolves exactly this value (backend
+   * ai_provider_helpers.resolve_summarization_config), which is how an
+   * embedding model ended up being POSTed to /chat/completions in production.
+   */
+  selectedModel?: string;
+  /**
+   * Already-localized warning for a model whose NAME suggests it cannot chat,
+   * or null. A guess, so it marks and never blocks — see utils/nonChatModel.
+   */
+  nonChatWarning?: (modelId: string) => string | null;
+}> = ({
+  providerKey,
+  enabledModels,
+  catalog,
+  onAdd,
+  onRemove,
+  selectedModel,
+  nonChatWarning,
+}) => {
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -300,22 +321,34 @@ const EnabledModelsField: React.FC<{
     <div className="space-y-1.5">
       <label className="text-xs font-medium text-ink-400">Enabled Models</label>
       <div className="flex flex-wrap items-center gap-2">
-        {enabledModels.map((m) => (
+        {enabledModels.map((m) => {
+          const suspect = nonChatWarning?.(m) ?? null;
+          return (
           <span
             key={m}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] border border-[var(--accent-border)] px-3 py-1 text-xs font-mono text-[var(--accent-text)]"
+            data-testid={suspect ? 'non-chat-chip' : undefined}
+            title={suspect ?? undefined}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-mono ${
+              suspect
+                ? 'bg-danger-soft border border-danger-line text-danger'
+                : 'bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)]'
+            }`}
           >
+            {suspect && <AlertTriangle size={11} className="shrink-0" aria-hidden />}
             {m}
             <button
               type="button"
               onClick={() => onRemove(m)}
-              className="text-[var(--accent-text)] hover:opacity-70 transition-opacity"
+              className={`transition-opacity hover:opacity-70 ${
+                suspect ? 'text-danger' : 'text-[var(--accent-text)]'
+              }`}
               aria-label={`Remove ${m}`}
             >
               <X size={12} />
             </button>
           </span>
-        ))}
+          );
+        })}
         {!picking && (
           <button
             type="button"
@@ -378,6 +411,27 @@ const EnabledModelsField: React.FC<{
           )}
         </div>
       )}
+
+      {/* The model the provider's single-model paths (summarization, legacy
+          task_assignment) will actually call. ``selected_model`` is what the
+          backend reads; the [0] fallback mirrors this page's own seeding rule
+          (addEnabledModel / removeEnabledModel keep it pointing at the first
+          chip) so a legacy account without it still gets warned. */}
+      {(() => {
+        const effective = selectedModel || enabledModels[0] || '';
+        const warning = effective ? nonChatWarning?.(effective) ?? null : null;
+        if (!warning) return null;
+        return (
+          <div
+            data-testid="non-chat-warnline"
+            role="alert"
+            className="flex items-start gap-1.5 rounded-md border border-danger-line bg-danger-soft px-2 py-1.5 text-[11px] text-danger"
+          >
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
+            <span>{warning}</span>
+          </div>
+        );
+      })()}
 
       <p className="text-[11px] text-ink-500">
         Only enabled models are shown to agents in the AI Library — provider:{' '}
@@ -662,6 +716,29 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     return checked
       ? t('aiSettings.modelHealthFailedReasonAgo', { reason, ago: checked })
       : t('aiSettings.modelHealthFailedReason', { reason });
+  };
+
+  // BYOK model guard (2026-08-16 incident). A user pruned doubao's enabled
+  // models down to `doubao-embedding-vision-251215`; summarization takes that
+  // provider's selected_model, so every summary afterwards sent an embedding
+  // model to /chat/completions and failed — with nothing on this page saying so.
+  //
+  // Unlike the platform card above there is no health signal to read here: a
+  // BYOK catalog is the provider's own /models output, raw upstream ids with no
+  // type field, and the platform catalog's health is keyed by its own alias
+  // (`name`), not by the upstream id — matching the two would attach one key's
+  // verdict to a different key's model. So this warns from the NAME only, and
+  // says nothing whenever the name doesn't clearly say (utils/nonChatModel).
+  //
+  // Marks, never blocks — same call as the health line: it is a guess, and the
+  // user may know better.
+  const nonChatWarning = (modelId: string): string | null => {
+    const kind = suspectedNonChatKind(modelId);
+    if (!kind) return null;
+    return t('aiSettings.nonChatSelected', {
+      model: modelId,
+      kind: t(nonChatKindKey(kind)),
+    });
   };
 
   const nousConfig = localSettings.providers.nous;
@@ -1517,6 +1594,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                         catalog={config.models ?? meta.models}
                         onAdd={(model) => addEnabledModel(providerKey, model)}
                         onRemove={(model) => removeEnabledModel(providerKey, model)}
+                        selectedModel={config.selected_model}
+                        nonChatWarning={nonChatWarning}
                       />
                     )}
 
