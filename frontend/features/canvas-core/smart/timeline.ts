@@ -12,6 +12,13 @@ export interface TimelineSegment {
   result_url?: string | null;
   /** M1: manual i2v reference frame for THIS clip (durable image url). */
   ref_url?: string | null;
+  /** η2 (IC refItems): ordered multi-reference set — images now, video /
+   *  audio kinds arrive with the ComfyUI engine. Supersedes ref_url. */
+  ref_items?: Array<{ url: string; kind: string }>;
+  /** η2 (IC trimIn/trimOut): playback window inside the generated clip,
+   *  seconds from clip start. Clamped to [0, seconds], ≥0.1s span. */
+  trim_in?: number;
+  trim_out?: number;
 }
 
 export interface TimelineNodeData {
@@ -171,4 +178,52 @@ export function playableClips(
       Boolean(s.result_url),
     )
     .map((s) => ({ id: s.id, url: s.result_url }));
+}
+
+// ── η2: IC smartMinimaxEnsureSegment parity ─────────────────────────────────
+
+const MIN_TRIM_SPAN = 0.1;
+
+/** Normalize a segment: clamp trims into [0, seconds] with a ≥0.1s span and
+ *  migrate the legacy single ref_url into ref_items (IC :7318-7357). */
+export function ensureSegment(seg: TimelineSegment): TimelineSegment {
+  const out: TimelineSegment = { ...seg };
+  if (out.ref_url && !out.ref_items?.length) {
+    out.ref_items = [{ url: out.ref_url, kind: 'image' }];
+  }
+  if (out.trim_in !== undefined || out.trim_out !== undefined) {
+    let tin = Math.max(0, Math.min(out.trim_in ?? 0, out.seconds));
+    let tout = Math.max(0, Math.min(out.trim_out ?? out.seconds, out.seconds));
+    if (tout - tin < MIN_TRIM_SPAN) {
+      tout = Math.min(out.seconds, tin + MIN_TRIM_SPAN);
+      tin = Math.max(0, tout - MIN_TRIM_SPAN);
+    }
+    // Round to centiseconds — float subtraction otherwise yields 0.0999….
+    out.trim_in = Math.round(tin * 100) / 100;
+    out.trim_out = Math.round(tout * 100) / 100;
+  }
+  return out;
+}
+
+/** Back-to-back clip start times (IC start = prev start + duration). */
+export function segmentStarts(segments: TimelineSegment[]): number[] {
+  const starts: number[] = [];
+  let acc = 0;
+  for (const seg of segments) {
+    starts.push(acc);
+    acc += Math.max(0, seg.seconds);
+  }
+  return starts;
+}
+
+/** The clip under the playhead at `t` seconds (IC :7502); null past the end. */
+export function activeSegmentAt(
+  segments: TimelineSegment[],
+  t: number,
+): TimelineSegment | null {
+  const starts = segmentStarts(segments);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (t >= starts[i] && t < starts[i] + segments[i].seconds) return segments[i];
+  }
+  return null;
 }
