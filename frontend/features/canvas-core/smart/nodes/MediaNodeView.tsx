@@ -28,6 +28,7 @@ import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
 import { MediaItemEditor } from './MediaItemEditor';
 import type { EditorMode } from '../../editor/UnifiedImageEditor';
+import { createMediaNodeFromFiles } from '../dropCreate';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -362,6 +363,27 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       <Handle type="source" position={Position.Right} />
       {lightbox !== null && lightboxItems.length > 0 && (
         <OutputLightbox
+          onFrameExported={
+            readOnly
+              ? undefined
+              : (blob, name) => {
+                  // IC 导出到画布: the frame lands as a media node beside
+                  // this node instead of a silent download.
+                  const me = useCanvasCoreStore
+                    .getState()
+                    .nodes.find((n) => (n as { id?: unknown }).id === id) as
+                    | { position?: { x: number; y: number } }
+                    | undefined;
+                  const at = {
+                    x: (me?.position?.x ?? 0) + 460,
+                    y: (me?.position?.y ?? 0) + 60,
+                  };
+                  void createMediaNodeFromFiles(
+                    [new File([blob], name, { type: 'image/png' })],
+                    at,
+                  );
+                }
+          }
           items={lightboxItems}
           index={Math.min(lightbox.index, lightboxItems.length - 1)}
           kind={lightbox.kind}
