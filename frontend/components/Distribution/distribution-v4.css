@@ -561,6 +561,17 @@
 .dist-v4 .music-note { display: flex; align-items: center; gap: 7px; padding: 10px 12px; font-size: 12px; color: var(--content-4); }
 .dist-v4 .music-note svg { width: 13px; height: 13px; flex-shrink: 0; }
 .dist-v4 .music-error { color: var(--t-danger, var(--content-3)); }
+/* The chart tab row. Horizontally scrollable BY DESIGN: the live panel
+   returned 12 tabs (推荐/热门榜/收藏/飙升榜/原创榜 + 7 categories) and the
+   panel is a narrow inline block, so they cannot all fit. Wrapping instead
+   would push the track list below the fold on the first open, which is the
+   one thing the tabs exist to prevent. `scrollbar-width: none` hides the bar,
+   not the scrolling — the fade on the right edge is what says there is more. */
+.dist-v4 .music-tabs { display: flex; gap: 4px; padding: 8px 12px 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.dist-v4 .music-tabs::-webkit-scrollbar { display: none; }
+.dist-v4 .music-tab { flex: 0 0 auto; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; background: none; font: inherit; font-size: 12px; color: var(--content-4); cursor: pointer; white-space: nowrap; }
+.dist-v4 .music-tab:hover, .dist-v4 .music-tab:focus-visible { color: var(--content); outline: none; }
+.dist-v4 .music-tab.on { color: var(--content); background: var(--island-3, rgba(99, 102, 241, .12)); border-color: var(--line-strong); font-weight: 550; }
 .dist-v4 .music-results { max-height: 260px; overflow-y: auto; }
 .dist-v4 .music-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--content); cursor: pointer; text-align: left; }
 .dist-v4 .music-row + .music-row { border-top: 1px solid var(--line); }

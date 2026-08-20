@@ -59,6 +59,16 @@ const { retryPublishTask, isScheduleUnreachable, TRACK, MUSIC_FAILURE } = vi.hoi
 }));
 
 vi.mock('../../services/distributionService', () => ({
+  // 榜单缓存：面板打开时读。默认给"从没采过"——那是一个真实且常见的状态
+  // （新账号、刚上线），而且它必须与"读失败"分得开，所以这里不是空数组。
+  fetchMusicCharts: vi.fn().mockResolvedValue({
+    charts: [], last_success_at: null, stale: true, never_harvested: true, ttl_hours: 24,
+  }),
+  refreshMusicCharts: vi.fn().mockResolvedValue({ success: true }),
+  // 真实实现，不是 stub：页面拿它的返回值当 React key，而「推荐」和「收藏」
+  // 在真实面板上共用 category_id='1'——给个只返回 id 的 stub 会让两个 tab 撞 key。
+  musicChartKey: (c: { category_kind: string; category_id: string }) =>
+    `${c.category_kind}:${c.category_id}`,
   listPublishTasks: vi.fn().mockResolvedValue([
     {
       // Picked from the catalogue panel → the name is not in question.

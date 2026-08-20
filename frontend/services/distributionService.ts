@@ -414,13 +414,19 @@ export const suggestTopics = (
  *
  * `duration` is seconds and `user_count` is the raw integer: formatting
  * (`5:25`, `3万人使用`) is the UI's job, never the API's.
+ *
+ * ⚠️ `user_count` is `number | null`. The SEARCH endpoint always fills it, but
+ * the CHART cache carries the platform's own three-state answer: `0` is a real
+ * catalogue value (a track used by nobody — one such track produced the
+ * 2026-08-17 publish refusal) and `null` means the payload did not say. A UI
+ * that renders `null` as `0` invents a measurement.
  */
 export interface MusicTrack {
   music_id: string;
   title: string;
   author: string;
   duration: number;
-  user_count: number;
+  user_count: number | null;
   cover_url: string;
   play_url: string;
 }
@@ -508,6 +514,82 @@ export const searchMusic = (
     + `&cursor=${cursor}`,
     { signal },
   );
+
+/**
+ * One cached chart tab of the platform's 「选择音乐」 panel.
+ *
+ * ⚠️ `category_id` alone is NOT the identity. Measured on the live panel:
+ * 推荐 and 收藏 both answer `"1"` and differ only by `kind`, so anything that
+ * keys a tab (React list keys included) must use both.
+ *
+ * ⚠️ `ok === true` with `tracks: []` is a real, common state — an account with
+ * no saved tracks. `ok === false` is "we failed to read this tab", and it
+ * still carries whatever tracks survived from the previous harvest. Rendering
+ * the two the same way either shows an empty tab as if the platform had
+ * nothing, or shows a stale tab as if it were fresh.
+ */
+export interface MusicChart {
+  id: string;
+  category_id: string;
+  category_kind: string;
+  category_name: string;
+  position: number;
+  ok: boolean;
+  error: string;
+  cursor: string;
+  has_more: boolean;
+  /** When the tracks below were read. Advances on SUCCESS only. */
+  fetched_at: string | null;
+  /** When we last tried. Advances every attempt — including failures. */
+  checked_at: string | null;
+  tracks: MusicTrack[];
+}
+
+/**
+ * The cached charts, plus three separate facts about freshness.
+ *
+ * `never_harvested` is NOT `stale` with a different name: a cold cache needs
+ * "nothing has been read yet, want to read it now?", a stale one needs
+ * "this is from yesterday". Only one of them is worth a warning, and merging
+ * them would make the empty first-run look like a fault.
+ */
+export interface MusicChartsPage {
+  charts: MusicChart[];
+  last_success_at: string | null;
+  stale: boolean;
+  never_harvested: boolean;
+  ttl_hours: number;
+}
+
+/** The tab identity. Both halves, always — see `MusicChart`. */
+export const musicChartKey = (chart: {
+  category_kind: string;
+  category_id: string;
+}): string => `${chart.category_kind}:${chart.category_id}`;
+
+/**
+ * Read this account's cached chart tabs. **Cheap** — never opens a browser.
+ */
+export const fetchMusicCharts = (
+  accountId: string,
+  signal?: AbortSignal,
+): Promise<MusicChartsPage> =>
+  request<MusicChartsPage>(`/accounts/${encodeURIComponent(accountId)}/music/charts`, {
+    signal,
+  });
+
+/**
+ * Harvest this account's charts from the platform now.
+ *
+ * ⚠️ **Expensive, and it leaves a draft.** Reaching the platform's music panel
+ * requires an upload, so a refresh costs ~2 minutes of browser time and one
+ * draft on the account. Any caller must say so before the user clicks; this is
+ * not a button to fire on mount.
+ */
+export const refreshMusicCharts = (accountId: string): Promise<unknown> =>
+  request<unknown>(`/accounts/${encodeURIComponent(accountId)}/music/charts/refresh`, {
+    method: 'POST',
+  });
 
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
