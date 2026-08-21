@@ -66,7 +66,17 @@ export function PaintTool({
         onChange([...value, { tool, color, size, points: [p], value: 'Double-click to edit' }]);
         return;
       }
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      try {
+        // Capture keeps the stroke alive outside the box — but on real
+        // browsers this THROWS NotFoundError for non-capturable pointers
+        // (observed on prod: the throw killed the handler BEFORE the shape
+        // was added, so the brush never painted anything — 2026-08-21
+        // "画笔画不出来". The stroke works without capture; onPointerLeave
+        // already ends it at the edge.)
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch {
+        // non-capturable pointer — stroke continues uncaptured
+      }
       setDrafting(true);
       onChange([...value, { tool, color, size, points: [p, p] }]);
     },
