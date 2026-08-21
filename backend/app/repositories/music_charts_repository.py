@@ -26,7 +26,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Mapping, Optional, Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.db.session import read_scope, write_scope
 from app.models import MusicCharts, MusicChartTracks
@@ -287,6 +287,50 @@ class MusicChartsRepository:
                 stored += 1
 
         return {"stored": stored, "kept": kept, "tracks": written}
+
+    async def list_stale_accounts(
+        self, *, ttl_hours: int, limit: int, now: datetime.datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Accounts whose cached charts are older than the TTL, oldest first.
+
+        ⚠️ Only accounts that **already have chart rows**. An account nobody has
+        ever browsed music for is not returned, and that is the whole policy:
+        a harvest costs one draft on a real platform account, so it is opt-in
+        per account — the first manual "read charts" is what subscribes it. A
+        sweeper that swept every bound account would leave a draft a day on
+        accounts the user never uses for music.
+
+        `fetched_at` (not `checked_at`) is the clock, so a run that failed does
+        not push the account to the back of the queue — the one moment it most
+        needs retrying.
+        """
+        moment = now or datetime.datetime.now(datetime.timezone.utc)
+        cutoff = moment - datetime.timedelta(hours=max(1, ttl_hours))
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        MusicCharts.account_id,
+                        MusicCharts.platform,
+                        func.max(MusicCharts.fetched_at).label("newest"),
+                    )
+                    .group_by(MusicCharts.account_id, MusicCharts.platform)
+                    .having(func.max(MusicCharts.fetched_at) < cutoff)
+                    .order_by(func.max(MusicCharts.fetched_at))
+                    .limit(max(1, limit))
+                )
+            ).all()
+        return [
+            {
+                # A string, like every other id crossing this boundary: these
+                # are Snowflake-scale and a JSON number would already be a
+                # different value by the time anything read it.
+                "account_id": str(row.account_id),
+                "platform": str(row.platform or "douyin"),
+                "fetched_at": row.newest.isoformat() if row.newest else None,
+            }
+            for row in rows
+        ]
 
     async def find_track(
         self, account_id: int, music_id: str
