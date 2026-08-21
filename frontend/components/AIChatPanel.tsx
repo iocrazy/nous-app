@@ -24,6 +24,7 @@ import type { ChatScriptContextInput } from '../services/aiLibraryService';
 import type {
   AILibraryAgent,
   AIChatMessage,
+  AIChatMessageAttachment,
   ChatSession,
   ChatToolCall,
   ResourceRefAttachment,
@@ -694,20 +695,32 @@ export function AIChatPanel({
       // in a restored draft AND everything staged in the attachment row.
       const sentResources = stagedResources;
       const sentRefs = mergeRefAttachments(refAttachments, sentResources);
+      // Both halves, in the shape the reducer will persist. The refs used to
+      // be left out here, so a just-sent turn showed no chip until the
+      // history reload put one there — the optimistic bubble and the
+      // authoritative one have to agree, or the chips visibly pop in.
+      const optimisticAttachments: AIChatMessageAttachment[] = [
+        ...sentAttachments.map((a) => ({
+          kind: a.kind,
+          resource_id: a.resource_id,
+          mime: a.mime,
+          alt_text: a.filename,
+          preview_data_url: a.preview_data_url,
+        })),
+        ...sentRefs.map((r) => ({
+          kind: r.kind,
+          resource_id: r.resource_id,
+          mime: r.mime,
+          alt_text: r.name,
+        })),
+      ];
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
         session_id: activeSessionId,
         role: 'user',
         content: text,
-        attachments: sentAttachments.length > 0
-          ? sentAttachments.map((a) => ({
-              kind: a.kind,
-              resource_id: a.resource_id,
-              mime: a.mime,
-              alt_text: a.filename,
-              preview_data_url: a.preview_data_url,
-            }))
-          : undefined,
+        attachments:
+          optimisticAttachments.length > 0 ? optimisticAttachments : undefined,
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, tempUser]);

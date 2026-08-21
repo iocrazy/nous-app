@@ -2698,7 +2698,8 @@
       "tooLarge": "{{name}} is too large ({{size}} > 50MB)",
       "tooMany": "Too many files ({{count}} > {{max}})",
       "uploadFailed": "Upload \"{{name}}\" failed: {{message}}",
-      "dropToUpload": "Drop files to attach"
+      "dropToUpload": "Drop files to attach",
+      "resourceRef": "Attached resource"
     },
     "followups": {
       "title": "Followups",

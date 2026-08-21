@@ -7,6 +7,7 @@ import { Copy, Check, FileText } from 'lucide-react';
 
 import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
+import { ResourceThumb } from './ResourceThumb';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
 import { SubTaskList } from './SubTaskCard';
 import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
@@ -28,9 +29,10 @@ export interface MessageBubbleProps {
   onCopy?: () => void;
   timestamp?: string;
   /**
-   * Attachments sent with this turn (images render inline; other kinds
-   * render as a filename chip). Persisted server-side so history reloads
-   * keep them; the optimistic bubble uses the local preview data URL.
+   * Attachments sent with this turn: images render inline, library
+   * references as a cover+name chip, anything else as a filename chip.
+   * Persisted server-side so history reloads keep them; the optimistic
+   * bubble adds a local preview data URL for the images it just uploaded.
    */
   attachments?: AIChatMessageAttachment[];
   /**
@@ -147,18 +149,94 @@ const MARKDOWN_COMPONENTS: Components = {
   hr: () => <hr className="my-3 border-ink-700" />,
 };
 
-/** Image strip + file chips shown above the message text. resource_ref
-    attachments are skipped — the @-mention is already part of the text. */
+/**
+ * The icon family for a library reference.
+ *
+ * The persisted attachment keeps only `kind: 'resource_ref'` plus `mime`
+ * (the reducer's key whitelist in `conversations_ai_store.py` drops
+ * everything else), so the asset's own kind — the thing the picker chip
+ * reads straight off the row — has to be derived here instead.
+ */
+function refKindFromMime(mime: string | null | undefined): string {
+  if (!mime) return 'doc';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf') return 'pdf';
+  return 'doc';
+}
+
+/**
+ * Cover URL for a reference, or null when there is no id worth asking about.
+ *
+ * `'None'` is not defensive padding: a script path wrote Python's
+ * `str(None)` into the column, and those rows are still in history. Asking
+ * for `/resources/None/cover` would 404 on every render of that bubble.
+ */
+function refCoverUrl(resourceId: string | number | null | undefined): string | null {
+  const id = resourceId === null || resourceId === undefined ? '' : String(resourceId);
+  if (!id || id === 'None' || id === 'null' || id === 'undefined') return null;
+  return getResourceCoverUrl(id);
+}
+
+/**
+ * A library asset the user attached, as it appears in their own bubble.
+ *
+ * Same family as the composer's staged chip (agent tokens, cover + name),
+ * one notch tighter and with no × — history is not editable. The cover has
+ * to come from the id because the wire shape carries no `thumbnail_url`:
+ * the composer's snapshot fields die at the boundary, so a reloaded bubble
+ * knows the asset only by id and mime.
+ */
+function ResourceRefChip({
+  attachment,
+}: {
+  attachment: AIChatMessageAttachment;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  // Both keys are live: this panel sends `alt_text`, the issue reply box
+  // sends `name`, and both land in the same column.
+  const label =
+    attachment.alt_text ?? attachment.name ?? t('chat.attachments.resourceRef');
+  return (
+    <span
+      data-testid="bubble-resource-chip"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-agent-line bg-agent-soft text-agent text-[11px] max-w-full"
+    >
+      <ResourceThumb
+        thumbnailUrl={refCoverUrl(attachment.resource_id)}
+        kind={refKindFromMime(attachment.mime)}
+        iconSize={11}
+        imgClassName="w-4 h-4 rounded object-cover shrink-0"
+        iconClassName="inline-flex shrink-0"
+        imgTestId="bubble-resource-chip-thumb"
+        iconTestId="bubble-resource-chip-icon"
+      />
+      <span className="truncate max-w-[160px]">{label}</span>
+    </span>
+  );
+}
+
+/** Images, file chips, and library references shown above the message text.
+    References used to be dropped here on the grounds that the @-mention was
+    already in the text; it no longer is — the picker moved chips out of the
+    sentence into a staging row, and the send path strips the `@query`
+    trigger — so dropping them left a bubble that said nothing about which
+    asset the turn was actually about, or an empty bubble when the asset was
+    the whole message. */
 function AttachmentStrip({
   attachments,
 }: {
   attachments: AIChatMessageAttachment[];
 }): React.ReactElement | null {
-  const visible = attachments.filter((a) => a.kind !== 'resource_ref');
-  if (visible.length === 0) return null;
+  if (attachments.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1.5 mb-1.5">
-      {visible.map((att, i) => {
+    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+      {attachments.map((att, i) => {
+        const key = `${att.resource_id ?? att.alt_text ?? 'att'}-${i}`;
+        if (att.kind === 'resource_ref') {
+          return <ResourceRefChip key={key} attachment={att} />;
+        }
         const src =
           att.preview_data_url ??
           (att.kind === 'image' && att.resource_id
@@ -167,7 +245,7 @@ function AttachmentStrip({
         if (src) {
           return (
             <img
-              key={`${att.resource_id ?? att.alt_text ?? 'att'}-${i}`}
+              key={key}
               src={src}
               alt={att.alt_text ?? 'attachment'}
               loading="lazy"
@@ -177,7 +255,7 @@ function AttachmentStrip({
         }
         return (
           <span
-            key={`${att.resource_id ?? att.alt_text ?? 'att'}-${i}`}
+            key={key}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-ink-800/60 text-[11px] text-ink-300"
           >
             <FileText size={12} className="shrink-0" />
@@ -244,7 +322,12 @@ export function MessageBubble({
           {attachments && attachments.length > 0 && (
             <AttachmentStrip attachments={attachments} />
           )}
-          <p className="whitespace-pre-wrap break-words">{content}</p>
+          {/* An asset-only turn has no text at all. Rendering the empty
+              paragraph anyway is what produced the blank bubble — the chips
+              above ARE the message in that case. */}
+          {content.trim().length > 0 && (
+            <p className="whitespace-pre-wrap break-words">{content}</p>
+          )}
           {timestamp && (
             <p className="mt-1 text-[10px] text-ink-500 text-right">{timestamp}</p>
           )}
