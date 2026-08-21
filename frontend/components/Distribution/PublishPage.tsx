@@ -9,8 +9,9 @@ import {
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
   listLibraryMedia, musicSearchFailure, promoteGeneratedVideo, publishGateProblems,
+  fetchMusicCharts, musicChartKey, refreshMusicCharts,
   searchMusic, suggestTopics, topicSuggestReason, GeneratedVideo, MusicBrowseIdentity,
-  MusicSearchReason, MusicTrack, PlatformCapability, PublishGateProblem,
+  MusicChart, MusicSearchReason, MusicTrack, PlatformCapability, PublishGateProblem,
   TopicSuggestion, TopicSuggestReason,
 } from '../../services/distributionService';
 import {
@@ -629,6 +630,27 @@ export const PublishPage: React.FC = () => {
   /** Whose session the catalogue was read with — shown, never inferred. */
   const [musicIdentity, setMusicIdentity] = useState<MusicBrowseIdentity | null>(null);
   const musicSeq = useRef(0);
+  /**
+   * The platform's chart tabs, out of OUR cache.
+   *
+   * Reading a chart for real costs a browser run and leaves a draft on the
+   * account (the panel only exists inside the platform's gallery editor, which
+   * only exists after an upload), so this list is whatever the last harvest
+   * stored — never a live fetch. `chartsMeta` carries the three freshness
+   * facts the backend keeps apart, because "nothing has ever been read" and
+   * "this is from yesterday" need different sentences and only one of them is
+   * a warning.
+   */
+  const [musicCharts, setMusicCharts] = useState<MusicChart[]>([]);
+  const [musicChartsMeta, setMusicChartsMeta] = useState<
+    { stale: boolean; neverHarvested: boolean; lastSuccessAt: string | null } | null
+  >(null);
+  const [musicChartsState, setMusicChartsState] =
+    useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  /** `kind:id` — BOTH halves. 推荐 and 收藏 share `category_id === '1'`. */
+  const [activeChartKey, setActiveChartKey] = useState('');
+  const [musicRefreshing, setMusicRefreshing] = useState(false);
+  const musicChartsSeq = useRef(0);
   /**
    * Audition state. `musicPlayingId` is the ONE track sounding right now — a
    * single <audio> element enforces that structurally: starting a second row
@@ -1417,6 +1439,86 @@ export const PublishPage: React.FC = () => {
     }, MUSIC_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [musicQuery, musicPanelOpen, targetAccounts]);
+
+  /**
+   * The cached charts. Cheap — reads our own table, opens no browser — so
+   * unlike the search above this needs no debounce and no keyword.
+   *
+   * Keyed on the browse account: 收藏 is account-scoped on the platform and
+   * 推荐 is personalised, so switching target accounts really does change this
+   * list. That is also why the panel names whose library it is showing.
+   */
+  useEffect(() => {
+    const browseAccount = targetAccounts[0];
+    if (!musicPanelOpen || !browseAccount) return;
+    const seq = ++musicChartsSeq.current;
+    setMusicChartsState('loading');
+    fetchMusicCharts(browseAccount.id)
+      .then((page) => {
+        if (seq !== musicChartsSeq.current) return;
+        setMusicCharts(page.charts);
+        setMusicChartsMeta({
+          stale: page.stale,
+          neverHarvested: page.never_harvested,
+          lastSuccessAt: page.last_success_at,
+        });
+        // Only default the tab when nothing is chosen: re-running this effect
+        // (a refresh, a re-open) must not yank the user back to the first tab.
+        setActiveChartKey((current) =>
+          current || (page.charts[0] ? musicChartKey(page.charts[0]) : ''),
+        );
+        setMusicChartsState('ready');
+      })
+      .catch((err) => {
+        if (seq !== musicChartsSeq.current) return;
+        // Not silent: an unreadable cache must not look like a platform with
+        // no charts (CLAUDE.md「触发路径必须类型化失败回显」).
+        console.error('distribution: music charts failed', err);
+        setMusicChartsState('error');
+      });
+  }, [musicPanelOpen, targetAccounts]);
+
+  /** Harvest now. Expensive and it leaves a draft — the copy says so. */
+  const runMusicChartRefresh = async () => {
+    const browseAccount = targetAccounts[0];
+    if (!browseAccount || musicRefreshing) return;
+    setMusicRefreshing(true);
+    try {
+      await refreshMusicCharts(browseAccount.id);
+      const page = await fetchMusicCharts(browseAccount.id);
+      setMusicCharts(page.charts);
+      setMusicChartsMeta({
+        stale: page.stale,
+        neverHarvested: page.never_harvested,
+        lastSuccessAt: page.last_success_at,
+      });
+      setActiveChartKey((current) =>
+        current || (page.charts[0] ? musicChartKey(page.charts[0]) : ''),
+      );
+      setMusicChartsState('ready');
+    } catch (err) {
+      console.error('distribution: music chart refresh failed', err);
+      setMusicChartsState('error');
+    } finally {
+      setMusicRefreshing(false);
+    }
+  };
+
+  /** The chart the tab row is pointing at, or null. */
+  const activeChart = musicCharts.find((c) => musicChartKey(c) === activeChartKey) ?? null;
+
+  /**
+   * What the list shows. **A typed keyword wins.**
+   *
+   * The two sources are never merged: a search answers "songs called this",
+   * a chart answers "what the platform is pushing today", and a list stitched
+   * from both would be neither — while every row still looked legitimate.
+   * Emptying the box returns to the chart rather than to a blank panel, which
+   * is the whole reason the tabs exist.
+   */
+  const visibleTracks: MusicTrack[] = musicQuery.trim()
+    ? musicResults
+    : (activeChart?.tracks ?? []);
 
   /** Human sentence for a typed catalogue failure. Branches on the code,
    *  never on the backend's English prose. */
@@ -3047,7 +3149,94 @@ export const PublishPage: React.FC = () => {
                         )}
                       </div>
                     )}
-                    {musicState === 'idle' && (
+                    {/* The tab row. Only when nothing is typed: a search
+                        REPLACES the chart, and leaving the tabs highlighted
+                        under a result list would claim the results came from
+                        the highlighted chart. */}
+                    {!musicQuery.trim() && musicCharts.length > 0 && (
+                      <div className="music-tabs" role="tablist" data-testid="music-tabs">
+                        {musicCharts.map((chart) => {
+                          const key = musicChartKey(chart);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              role="tab"
+                              aria-selected={key === activeChartKey}
+                              className={`music-tab ${key === activeChartKey ? 'on' : ''}`}
+                              data-testid={`music-tab-${key}`}
+                              onClick={() => setActiveChartKey(key)}
+                            >
+                              {chart.category_name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Four notes about the CACHE, kept apart because they
+                        call for different actions. A cold cache is not a
+                        fault; a stale one is not an error; an unreadable one
+                        is ours, not the platform's. */}
+                    {!musicQuery.trim() && musicChartsState === 'loading' && (
+                      <div className="music-note">
+                        <Loader2 className="spin" />
+                        {t('distribution.publish.musicChartsLoading', 'Loading charts…')}
+                      </div>
+                    )}
+                    {!musicQuery.trim() && musicChartsState === 'error' && (
+                      <div className="music-note music-error" role="alert">
+                        <AlertCircle />
+                        {t(
+                          'distribution.publish.musicChartsError',
+                          'Could not read the cached charts — search still works.',
+                        )}
+                      </div>
+                    )}
+                    {!musicQuery.trim()
+                      && musicChartsState === 'ready'
+                      && musicChartsMeta?.neverHarvested && (
+                      <div className="music-note" data-testid="music-charts-cold">
+                        {t(
+                          'distribution.publish.musicChartsCold',
+                          'No charts read yet. Reading them takes about two minutes and leaves one draft on the account.',
+                        )}
+                        {' '}
+                        <button
+                          type="button"
+                          className="oa oa-btn"
+                          disabled={musicRefreshing}
+                          data-testid="music-charts-refresh"
+                          onClick={runMusicChartRefresh}
+                        >
+                          {musicRefreshing
+                            ? t('distribution.publish.musicChartsReading', 'Reading…')
+                            : t('distribution.publish.musicChartsRead', 'Read charts')}
+                        </button>
+                      </div>
+                    )}
+                    {/* An empty chart that was READ is a fact about the
+                        account (no saved tracks), not a failure — measured on
+                        a real account whose favourites tab is genuinely
+                        empty. It must not read as "loading" or "broken". */}
+                    {!musicQuery.trim()
+                      && musicChartsState === 'ready'
+                      && !musicChartsMeta?.neverHarvested
+                      && activeChart
+                      && activeChart.tracks.length === 0 && (
+                      <div className="music-note" data-testid="music-chart-empty">
+                        {activeChart.ok
+                          ? t(
+                            'distribution.publish.musicChartEmpty',
+                            'This list is empty on the platform.',
+                          )
+                          : t(
+                            'distribution.publish.musicChartUnread',
+                            'This list could not be read last time.',
+                          )}
+                      </div>
+                    )}
+                    {musicQuery.trim() && musicState === 'idle' && (
                       <div className="music-note">
                         {t(
                           'distribution.publish.musicPrompt',
@@ -3055,9 +3244,9 @@ export const PublishPage: React.FC = () => {
                         )}
                       </div>
                     )}
-                    {musicState === 'ready' && musicResults.length > 0 && (
+                    {visibleTracks.length > 0 && (
                       <div className="music-results" role="listbox">
-                        {musicResults.map((track) => {
+                        {visibleTracks.map((track) => {
                           const previewUrl = musicPreviewUrl(track);
                           const playing = musicPlayingId === track.music_id;
                           const loadingPreview = musicPreviewLoading === track.music_id;
@@ -3109,10 +3298,26 @@ export const PublishPage: React.FC = () => {
                                   {formatDuration(track.duration)}
                                 </span>
                               </span>
+                              {/* ⚠️ `null` is NOT zero. Zero is a real
+                                  catalogue value — a track nobody uses — and
+                                  `null` means the platform did not say. This
+                                  has to be an explicit branch because the
+                                  type system does not enforce it here:
+                                  `tsconfig.json` sets no `strictNullChecks`,
+                                  so `formatViewCount(n: number)` accepts a
+                                  null without complaint and would render an
+                                  invented "0 uses". Pinned by a test, since
+                                  the compiler cannot be. */}
                               <span className="mr-uses">
-                                <b>{formatViewCount(track.user_count, i18n.language)}</b>
-                                {' '}
-                                {t('distribution.publish.musicUses', 'uses')}
+                                {track.user_count === null ? (
+                                  <b>{NO_VALUE}</b>
+                                ) : (
+                                  <>
+                                    <b>{formatViewCount(track.user_count, i18n.language)}</b>
+                                    {' '}
+                                    {t('distribution.publish.musicUses', 'uses')}
+                                  </>
+                                )}
                               </span>
                               {/* Two outcomes, never one dead button. A row the
                                   catalogue gave no playable file for says so
