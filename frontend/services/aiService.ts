@@ -57,6 +57,13 @@ export interface ResourceAITriggerResponse {
   transcription_pending_audio?: boolean;
   /** The task to wait on when `transcription_pending_audio` is set. */
   blocking_task_id?: string | null;
+  /** Transcribe only. The resource ALREADY has a readable transcript, so
+   *  nothing was dispatched and nothing was charged — distinct from the
+   *  in-flight dedup, which means "wait for a run that is happening now".
+   *  Present on every 200 from that endpoint; `?` is for older builds. */
+  already_transcribed?: boolean;
+  /** Summarize only. Same answer for the summary half. */
+  already_summarized?: boolean;
 }
 
 // --- Transcription ---

@@ -2863,6 +2863,8 @@
       "transcribingWithCost": "Transcribing this asset ({{points}} points)",
       "transcribing": "Transcribing this asset — the agent can read it shortly",
       "summarizing": "Summarising this asset — the agent can read it shortly",
+      "alreadyTranscribedSummarizing": "Already transcribed — summarising now, no extra points spent",
+      "alreadyProcessed": "Already processed — nothing new was started, no points spent",
       "failedWithReason": "Could not start processing this asset: {{error}}",
       "failed": "Could not start processing this asset",
       "statusUnknown": "Could not check this asset's processing state — sent without new processing",

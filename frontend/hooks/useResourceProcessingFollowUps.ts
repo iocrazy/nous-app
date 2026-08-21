@@ -12,7 +12,10 @@
  *    no transcription intent holds migration 121's unique slot, so the 200
  *    says "retry once it finishes" and nothing was queued. This hook waits
  *    for that blocker to reach a terminal state and makes the request again
- *    — by then the audio exists, so the retry dispatches for real.
+ *    — by then the audio exists, so the retry dispatches for real. That
+ *    blocker chains a transcription of its own, so the retry can also find
+ *    the work already DONE (200 `already_transcribed`); the wait then has
+ *    nothing to watch and the chain continues straight to the summary.
  *
  * Mounted by AIChatPanel — the chat is where the freshly-processed resource
  * is about to be read. Where there is no TaskManagerProvider (fullscreen
@@ -26,6 +29,7 @@
 
 import { useEffect, useRef } from 'react';
 import { triggerSummaryByResource } from '../services/aiService';
+import type { ResourceAITriggerResponse } from '../services/aiService';
 import { useOptionalTaskManager } from './useOptionalTaskManager';
 import { isDedupedResponse } from '../utils/ensureResourceProcessed';
 import type { EnsureResourceProcessedResult } from '../utils/ensureResourceProcessed';
@@ -54,6 +58,39 @@ interface TaskLike {
 }
 
 const DEAD_STATUSES = new Set(['failed', 'cancelled', 'lost']);
+
+/**
+ * One reading of the summarize endpoint's 200, shared by both places here
+ * that call it.
+ *
+ * `already_summarized` MUST be checked before `isDedupedResponse`: a
+ * short-circuit reports `points_charged: 0` exactly like an in-flight dedup
+ * does, so cost cannot separate them — and they mean opposite things ("the
+ * summary is already there" vs "wait for the run that is happening now").
+ * Reading the first as the second is how this hook would tell a user their
+ * asset is "already being processed" when nothing at all is running.
+ */
+function summaryOutcome(
+  res: ResourceAITriggerResponse | undefined,
+  extra: Partial<EnsureResourceProcessedResult> = {},
+): EnsureResourceProcessedResult {
+  if (res?.already_summarized) {
+    return {
+      action: 'ready',
+      message: res.message,
+      pointsCharged: 0,
+      alreadySummarized: true,
+      ...extra,
+    };
+  }
+  return {
+    action: 'triggered_summary',
+    message: res?.message,
+    pointsCharged: res?.points_charged,
+    alreadyInProgress: isDedupedResponse(res),
+    ...extra,
+  };
+}
 
 /**
  * How far before the trigger instant a task may be stamped and still count
@@ -153,6 +190,30 @@ function hasTerminalStamp(task: TaskLike): boolean {
   return Number.isFinite(ended) && ended > 0;
 }
 
+/**
+ * Ask for the summary now, because the transcript this wait was for turns
+ * out to already exist. The summarize endpoint short-circuits an existing
+ * summary too, so the worst case of asking is a free 200 — while NOT asking
+ * loses the step the user was waiting on.
+ */
+async function summariseAfterTranscript(
+  resourceId: string,
+  announce: (result: EnsureResourceProcessedResult) => void,
+): Promise<void> {
+  try {
+    const res = await triggerSummaryByResource(resourceId);
+    announce(summaryOutcome(res, { alreadyTranscribed: true }));
+  } catch (err) {
+    console.error('useResourceProcessingFollowUps: summary after short-circuit failed', err);
+    announce({
+      action: 'failed',
+      attempted: 'summary',
+      alreadyTranscribed: true,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export function useResourceProcessingFollowUps(
   options: UseResourceProcessingFollowUpsOptions = {},
 ): void {
@@ -195,14 +256,10 @@ export function useResourceProcessingFollowUps(
         forgetTranscriptionFollowUp(resourceId);
         void triggerSummaryByResource(resourceId)
           .then((res) => {
-            // Phrased by the same mapper the entry points use, so "queued"
-            // and "already running" read identically everywhere.
-            announceRef.current({
-              action: 'triggered_summary',
-              message: res?.message,
-              pointsCharged: res?.points_charged,
-              alreadyInProgress: isDedupedResponse(res),
-            });
+            // Phrased by the same mapper the entry points use, so "queued",
+            // "already running" and "already there" read identically
+            // everywhere.
+            announceRef.current(summaryOutcome(res));
           })
           .catch((err) => {
             console.error('useResourceProcessingFollowUps: summary trigger failed', err);
@@ -275,6 +332,20 @@ export function useResourceProcessingFollowUps(
             // is how an automatic retry turns into an unbounded loop. Tell
             // the user, who can click again.
             announceRef.current({ action: 'pending_audio', pointsCharged: 0 });
+            return;
+          }
+          if (res?.already_transcribed) {
+            // The blocker we waited on was an extract_audio that DOES chain
+            // a transcription, so by the time the slot freed the transcript
+            // could already be there. Nothing was dispatched and nothing was
+            // charged — and taking the dedup branch here would be worse than
+            // a wrong sentence: an ADOPTED wait only accepts a run that ENDS
+            // after it was armed, this one ended before, and the waiting
+            // list has no TTL — so the entry would sit there forever and the
+            // summary the user has been waiting for would never be asked
+            // for. Continue the chain instead, the way
+            // `ensureResourceProcessed` does with the same answer.
+            void summariseAfterTranscript(entry.resourceId, announceRef.current);
             return;
           }
           rememberTranscriptionFollowUp(entry.resourceId, {

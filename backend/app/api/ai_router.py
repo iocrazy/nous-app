@@ -236,6 +236,7 @@ def _transcription_in_progress_response(resource_id: str, platform_id: str) -> d
         "platform_id": platform_id,
         "points_charged": 0,
         "transcription_pending_audio": False,
+        "already_transcribed": False,
     }
 
 
@@ -259,6 +260,103 @@ def _audio_extraction_blocks_response(
         "points_charged": 0,
         "transcription_pending_audio": True,
         "blocking_task_id": blocking_task_id,
+        "already_transcribed": False,
+    }
+
+
+# ------------------------------------------------------------------
+# Already-finished short-circuit
+# ------------------------------------------------------------------
+# "What you are asking for already exists" is the third answer these two
+# endpoints owe their callers, next to "queued" and "already in progress" —
+# and the only one that was missing.
+#
+# Both frontend trigger paths (the @ picker and the resource context menu's
+# "Send to Agent") decide from a resource row cached earlier, so a resource
+# that finished transcribing AFTER that snapshot was taken still looks
+# untranscribed to them. The dedup below cannot catch it: by then nothing is
+# in flight. 2026-08-20 production — resource 340888655925500 completed a
+# transcription at 12:29 and was billed for a second full one at 12:31.
+#
+# The predicate is a CONJUNCTION (status column completed AND readable
+# content present) on purpose:
+#   * the status column alone would promise content that is not there —
+#     `completed` with the row missing would short-circuit forever and no
+#     run would ever be dispatched to fix it;
+#   * the content row alone would hijack the retry paths — both tables
+#     upsert by resource_id, so a run that FAILS after an earlier success
+#     leaves the old row in place while the column reads `failed`, and the
+#     detail panel's Retry button must still dispatch.
+# Only "finished AND readable" means the caller can have what they asked for
+# without paying again.
+#
+# A probe that ERRORS answers "not available" and the request continues to
+# the normal dispatch path: that degrades to the behaviour we had before this
+# short-circuit existed (at worst one duplicate run), while short-circuiting
+# on a failed probe would hand back content nobody verified. The guard is
+# HERE and not left to the repo getters' own `except -> None`: that is
+# somebody else's property, and this file's sibling repository has already
+# started re-raising deliberately (``get_resource_by_id_for_caller`` re-raises
+# ``UnscopedQueryError`` — "no scope is a caller bug, don't swallow it"). If
+# ``ai_repository`` ever follows, an unguarded probe would turn "runs twice"
+# into "500 on a resource that is perfectly fine".
+
+
+async def _content_probe(coro) -> dict | None:
+    """Await a content lookup, turning any failure into "nothing found"."""
+    try:
+        return await coro
+    except Exception as e:  # noqa: BLE001 — see the note above
+        logger.warning(f"[ai_router] AI content probe failed (non-fatal): {e}")
+        return None
+
+
+async def _transcript_already_available(
+    resource: dict | None, resource_id: str
+) -> bool:
+    """True when this resource already holds a readable transcript."""
+    from app.services.ai.resource_ai_status import TRANSCRIPT_STATUS_FIELD
+    from app.utils.ai_status import ai_status_str
+
+    if ai_status_str((resource or {}).get(TRANSCRIPT_STATUS_FIELD)) != "completed":
+        return False
+    row = await _content_probe(get_ai_repository().get_transcript(resource_id))
+    return bool((row or {}).get("full_text"))
+
+
+async def _summary_already_available(resource: dict | None, resource_id: str) -> bool:
+    """True when this resource already holds a readable summary."""
+    from app.services.ai.resource_ai_status import SUMMARY_STATUS_FIELD
+    from app.utils.ai_status import ai_status_str
+
+    if ai_status_str((resource or {}).get(SUMMARY_STATUS_FIELD)) != "completed":
+        return False
+    row = await _content_probe(get_ai_repository().get_summary(resource_id))
+    return bool((row or {}).get("summary_text"))
+
+
+def _transcript_already_exists_response(resource_id: str, platform_id: str) -> dict:
+    """Nothing dispatched, nothing charged — the transcript is already there
+    to read."""
+    return {
+        "message": "Transcript already exists",
+        "resource_id": resource_id,
+        "platform_id": platform_id,
+        "points_charged": 0,
+        "transcription_pending_audio": False,
+        "already_transcribed": True,
+    }
+
+
+def _summary_already_exists_response(resource_id: str, platform_id: str) -> dict:
+    """Nothing dispatched, nothing charged — the summary is already there to
+    read."""
+    return {
+        "message": "Summary already exists",
+        "resource_id": resource_id,
+        "platform_id": platform_id,
+        "points_charged": 0,
+        "already_summarized": True,
     }
 
 
@@ -269,12 +367,35 @@ def _audio_extraction_blocks_response(
 
 @router.post("/transcribe/resource/{resource_id}")
 async def trigger_transcription_by_resource(
-    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    force: bool = False,
 ):
-    """Trigger AI transcription by resource_id."""
+    """Trigger AI transcription by resource_id.
+
+    ``force=true`` skips the already-transcribed short-circuit below and
+    dispatches a fresh (billed) run. Nothing in the app sends it today —
+    the Task Center's Retry goes through ``POST /tasks/{id}/retry``, which
+    re-keys the existing task row and never reaches this endpoint — it
+    exists so that "re-transcribe this on purpose" has an explicit way in
+    rather than riding on a stale snapshot.
+    """
     resource, platform_id, media = await _resolve_resource_to_platform_id(
         resource_id, auth.user_id
     )
+
+    # === Already-transcribed short-circuit (BEFORE everything else) ===
+    # Ahead of the audio-readiness gate on purpose: an existing transcript
+    # is readable whether or not the audio file survived, so answering 409
+    # "no audio track available" would deny content we are holding.
+    if not force and await _transcript_already_available(resource, resource_id):
+        logger.info(
+            f"[ai_router] transcript for resource {resource_id} already exists — "
+            "short-circuit, nothing dispatched, nothing charged"
+        )
+        return _transcript_already_exists_response(resource_id, platform_id)
+    # === End short-circuit ===
 
     # === Audio-readiness classification (BEFORE billing) ===
     # Three cases, decided up-front so a dead-end never leaves points
@@ -591,17 +712,41 @@ async def trigger_transcription_by_resource(
         # False on both success paths: this dispatch either transcribes
         # directly or extracts with chain_transcription=True.
         "transcription_pending_audio": False,
+        # Present on EVERY 200 of this endpoint, like the discriminator
+        # above: a client must never have to read "field absent" as "no".
+        "already_transcribed": False,
     }
 
 
 @router.post("/summarize/resource/{resource_id}")
 async def trigger_summary_by_resource(
-    resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
+    resource_id: str,
+    auth: AuthDep,
+    _scope: ScopedRequestDep,
+    force: bool = False,
 ):
-    """Trigger AI summary by resource_id."""
+    """Trigger AI summary by resource_id.
+
+    ``force=true`` skips the already-summarized short-circuit — the same
+    explicit way in as the transcribe endpoint, with the same (currently
+    empty) caller set.
+    """
     resource, platform_id, media = await _resolve_resource_to_platform_id(
         resource_id, auth.user_id
     )
+
+    # === Already-summarized short-circuit ===
+    # Before the dedup, and it wins over it: a run that is in flight ends up
+    # completed too, so "the content is already here" is the more useful of
+    # the two true answers — and the only one that stops a stale snapshot
+    # from buying a second summary.
+    if not force and await _summary_already_available(resource, resource_id):
+        logger.info(
+            f"[ai_router] summary for resource {resource_id} already exists — "
+            "short-circuit, nothing dispatched, nothing charged"
+        )
+        return _summary_already_exists_response(resource_id, platform_id)
+    # === End short-circuit ===
 
     # === Dedup: reject if already processing ===
     # Only one task_type to look for here (summary never chains through a
@@ -634,6 +779,7 @@ async def trigger_summary_by_resource(
             "message": "Summary already in progress",
             "resource_id": resource_id,
             "points_charged": 0,
+            "already_summarized": False,
         }
     # === End dedup ===
 
@@ -721,6 +867,7 @@ async def trigger_summary_by_resource(
                 # absent" as "not charged" — the two already-in-progress
                 # branches report 0 for the same reason.
                 "points_charged": _points_cost,
+                "already_summarized": False,
             }
         else:
             # No transcript yet — dispatch transcription. PR-D7 phase
@@ -748,6 +895,7 @@ async def trigger_summary_by_resource(
                 "resource_id": resource_id,
                 "platform_id": platform_id,
                 "points_charged": _points_cost,
+                "already_summarized": False,
             }
     except Exception as e:
         # Same race as the transcribe endpoint: another request created the
@@ -781,6 +929,7 @@ async def trigger_summary_by_resource(
                 "resource_id": resource_id,
                 "platform_id": platform_id,
                 "points_charged": 0,
+                "already_summarized": False,
             }
         if _orphan_task_id:
             try:

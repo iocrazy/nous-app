@@ -525,3 +525,111 @@ describe('ensureResourceProcessed — blocked behind an audio extraction', () =>
     expect(transcriptionFollowUps()).not.toContain('r-41');
   });
 });
+
+/**
+ * The production incident of 2026-08-20, from the frontend side.
+ *
+ * The row this helper decides from is a snapshot taken before the resource
+ * finished transcribing, so it says `transcript_status: 'none'` about an
+ * asset that has a transcript. The old code read that at face value and
+ * asked for a second, paid transcription; the endpoint's in-flight dedup
+ * could not stop it, because by then nothing was in flight.
+ *
+ * The backend now answers `already_transcribed` instead of dispatching, and
+ * the contract this file pins is what the helper does WITH that answer: the
+ * transcription is not re-reported as started, no follow-up watcher is left
+ * waiting on a task nobody created, and the chain moves on to the summary —
+ * which is what the user attached the asset for.
+ */
+describe('ensureResourceProcessed — stale snapshot, finished work', () => {
+  /** Real wire body of the transcribe endpoint's short-circuit arm. */
+  const TRANSCRIBE_ALREADY = {
+    message: 'Transcript already exists',
+    resource_id: 'r-1',
+    platform_id: 'p-1',
+    points_charged: 0,
+    transcription_pending_audio: false,
+    already_transcribed: true,
+  };
+  /** Real wire body of the summarize endpoint's short-circuit arm. */
+  const SUMMARY_ALREADY = {
+    message: 'Summary already exists',
+    resource_id: 'r-1',
+    platform_id: 'p-1',
+    points_charged: 0,
+    already_summarized: true,
+  };
+
+  it('continues to the summary instead of reporting a transcription', async () => {
+    resetTranscriptionFollowUps();
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+
+    const result = await ensureResourceProcessed({
+      id: 'r-50', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(summaryMock).toHaveBeenCalledWith('r-50');
+    expect(result.action).toBe('triggered_summary');
+    expect(result.alreadyTranscribed).toBe(true);
+    // Nothing is running, so nothing may be waited on: a watcher registered
+    // here would poll for a task that was never created.
+    expect(transcriptionFollowUps()).not.toContain('r-50');
+  });
+
+  it('does not present a short-circuit as an in-flight dedup', async () => {
+    // `points_charged: 0` makes isDedupedResponse true, so the two answers
+    // are indistinguishable by cost alone — and they mean opposite things
+    // to the user ("wait for the run" vs "it is already there").
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+
+    const result = await ensureResourceProcessed({
+      id: 'r-51', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(result.action).not.toBe('triggered_transcribe');
+    expect(result.alreadyInProgress).toBeFalsy();
+  });
+
+  it('ends ready when the summary turns out to exist too', async () => {
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+    summaryMock.mockResolvedValue(SUMMARY_ALREADY);
+
+    const result = await ensureResourceProcessed({
+      id: 'r-52', kind: 'video', transcript_status: 'none', summary_status: 'none',
+    });
+
+    expect(result.action).toBe('ready');
+    expect(result.pointsCharged).toBe(0);
+    expect(result.alreadyTranscribed).toBe(true);
+  });
+
+  it('looks the summary up when the stale row never carried one', async () => {
+    // The snapshot was wrong about the transcript, so its silence about the
+    // summary is worth nothing either — and returning `status_unknown` on
+    // an asset we just proved is processed would strand it.
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+    fetchResourceByIdMock.mockResolvedValue({
+      id: 'r-53', transcript_status: 'completed', summary_status: 'none',
+    });
+
+    const result = await ensureResourceProcessed({
+      id: 'r-53', kind: 'video', transcript_status: 'none',
+    });
+
+    expect(fetchResourceByIdMock).toHaveBeenCalledWith('r-53');
+    expect(summaryMock).toHaveBeenCalledWith('r-53');
+    expect(result.action).toBe('triggered_summary');
+  });
+
+  it('still trusts a known-completed summary without a second call', async () => {
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+
+    const result = await ensureResourceProcessed({
+      id: 'r-54', kind: 'video', transcript_status: 'none', summary_status: 'completed',
+    });
+
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(result.action).toBe('ready');
+    expect(result.alreadyTranscribed).toBe(true);
+  });
+});
