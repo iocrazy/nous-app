@@ -58,9 +58,16 @@ class SummarizeService:
         self,
         provider_key: str = "",
         provider_config: Optional[Dict[str, Any]] = None,
+        agent_slug: str = AGENT_SLUG,
     ) -> None:
         self._provider_key = (provider_key or "").strip()
         self._provider_config: Dict[str, Any] = dict(provider_config or {})
+        # ``agent_slug`` is the user's assigned summarization agent (resolved by
+        # resolve_task_ai_config from task_assignment.summarization). Mirrors
+        # CaptionService / VisualAnalysisService: the caller must compose the
+        # SAME agent whose model it resolved (#622/#623). Empty / unset → the
+        # built-in ``summarize`` preset.
+        self.AGENT_SLUG = (agent_slug or AGENT_SLUG).strip() or AGENT_SLUG
         self.model = self._provider_config.get("model") or ""
 
     @staticmethod
@@ -152,21 +159,18 @@ class SummarizeService:
             )
         )
 
-        # Model-assignment fix (2026-07 audit): summarization's model is
-        # resolved PER-USER by resolve_summarization_config (the provider
-        # scan's selected_model, else default_summary_model) and threaded in
-        # through provider_config["model"] -> self.model. The composed
-        # ``summarize`` agent row carries no per-user model, so the composer
-        # falls back to its hardcoded "qwen-max" default -- a non-empty value
-        # that would win ``composed.model or self.model`` and SILENTLY DROP
-        # the user's assigned summary model (the last-mile-hardcode class:
-        # cf. visual-analysis, whisper). Mirrors the rule the deleted
-        # llm_analysis_service._run_agent used to codify: the caller's
-        # per-request model takes precedence over the agent row's, because
-        # summarize's model routing is set per-user in the task-assignment
-        # UI, not in the agent row. Only override when a resolved model
-        # exists, so the no-assignment path still degrades to the agent
-        # row / composer default.
+        # The resolved model wins over the composed agent row's own model.
+        # Both now come from the SAME agent (2026-08-20 收口:
+        # resolve_task_ai_config reads task_assignment.summarization → that
+        # agent row → its model), but they are not always the same STRING: a
+        # platform-catalog hit resolves the row's catalog name (e.g.
+        # ``mediahub-doubao-seed-2-0-lite``) down to the provider's real
+        # ``actual_model``, and governance / ``nous:<model>`` picks bypass the
+        # row entirely. self.model is the value that matches the api_key and
+        # base_url in ``provider_config``, so it must be the one dialed —
+        # otherwise the composer's raw row value would be POSTed against
+        # credentials resolved for a different id. Only override when a
+        # resolved model exists (the bare / smoke path keeps the row value).
         if self.model:
             composed = composed.model_copy(update={"model": self.model})
 
@@ -181,9 +185,10 @@ class SummarizeService:
             # shape ({"model","api_key","base_url"}), not the provider-keyed
             # dict get_adapter_for_user expects — provider_key tells
             # build_fallback_llm to wrap it per-attempt (final-review C1).
-            # "summarization" matches resolve_summarization_config's own
-            # governance module key (final-review I1) so the pre-resolved
-            # platform-catalog gate agrees with the primary model's resolver.
+            # "summarization" is this module's task_key in
+            # resolve_task_ai_config (governance module key + catalog module
+            # gate) so the pre-resolved platform-catalog gate agrees with the
+            # primary model's resolver.
             provider_key=self._provider_key,
             module="summarization",
         )

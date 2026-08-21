@@ -401,8 +401,11 @@ def test_run_summarize_agent_step_max_attempts_is_one() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7: load_summary_inputs surfaces fallback_models from the summarize agent
-# row (spec §1 — platform-preset fallbacks, per-user primary).
+# 7: load_summary_inputs surfaces fallback_models from the agent row the model
+# was resolved FROM (spec §1 — platform-preset fallbacks, per-user primary).
+# 2026-08-20 收口: the row is now read by resolve_task_ai_config itself, so the
+# governance-locked branch — which bypasses the agent entirely — carries an
+# EMPTY pool (same contract as caption / analyze / classify / translate).
 # ---------------------------------------------------------------------------
 
 
@@ -454,6 +457,57 @@ def _governance_locked() -> Any:
 
 @pytest.mark.asyncio
 async def test_load_summary_inputs_returns_fallback_models_from_agent_row() -> None:
+    """Unlocked (agent) path: the pool comes from the resolved agent row."""
+    import app.workflows.ai_summary as summary_mod
+    from app.services.ai.governance.ai_governance import AIModuleGovernance
+    from app.services.ai.providers import ai_provider_helpers as helpers_mod
+
+    fake_row = {
+        "transcript": "Hello world transcript.",
+        "pm_id": 1,
+        "title": "Test Video",
+        "resource_id": 99,
+    }
+    fake_agent_repo = MagicMock()
+    fake_agent_repo.get_by_slug = AsyncMock(
+        return_value={
+            "slug": "summarize",
+            "model": "doubao-seed-2-0-lite-260428",
+            "fallback_models": ["doubao-lite"],
+        }
+    )
+
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=AIModuleGovernance(allowed=True)),
+        ),
+        patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch.object(
+            helpers_mod,
+            "get_ai_settings",
+            new=AsyncMock(return_value={"task_assignment": {}, "ai_providers": {}}),
+        ),
+        patch.object(
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+        ),
+    ):
+        result = await summary_mod.load_summary_inputs(1, "user-1")
+
+    assert result["fallback_models"] == ["doubao-lite"]
+    assert result["agent_slug"] == "summarize"
+
+
+@pytest.mark.asyncio
+async def test_load_summary_inputs_governance_lock_carries_empty_pool() -> None:
+    """Locked branch never reads an agent row → empty pool, and the admin's
+    model/key are what ride out (contract shared with every other module)."""
     import app.workflows.ai_summary as summary_mod
 
     fake_row = {
@@ -482,7 +536,9 @@ async def test_load_summary_inputs_returns_fallback_models_from_agent_row() -> N
     ):
         result = await summary_mod.load_summary_inputs(1, "user-1")
 
-    assert result["fallback_models"] == ["doubao-lite"]
+    assert result["fallback_models"] == []
+    assert result["provider_config"]["api_key"] == "admin-sum-key"
+    fake_agent_repo.get_by_slug.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,8 @@
 """T6 — Governance gate in the ai_summary workflow (load_summary_inputs).
 
 Tests that:
-- Summarization locked → load_summary_inputs returns admin config; user
-  BYOK loop is NOT consulted.
+- Summarization locked → load_summary_inputs returns admin config; neither
+  the user's BYOK cards nor the agent row are consulted.
 - Locked + no admin api_key → fail-closed (RuntimeError matching
   "admin-locked").
 - Summarization present in TASK_MODULES and ALL_MODULES.
@@ -11,7 +11,7 @@ Tests that:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -42,9 +42,10 @@ class _SettingsJsonSession:
     """Fake ORM session. Supports BOTH ``execute()`` (the
     parsed_media+resources+resource_transcripts JOIN read — migrated off raw
     ``db_engine.fetch_one`` onto the ORM in Phase C task 1) and ``scalar()``
-    (the user_settings.settings_json read used by
-    ``resolve_summarization_config``, Phase B2 Task 1) — both flow through
-    the SAME patched ``read_scope`` seam now."""
+    (the user_settings.settings_json read — Phase B2 Task 1; since the
+    2026-08-20 收口 that read belongs to ``resolve_task_ai_config`` →
+    ``get_ai_settings``, which the user-path test patches directly) — both flow
+    through the SAME patched ``read_scope`` seam."""
 
     def __init__(self, settings_json: Any = None, execute_row: Any = None) -> None:
         self._settings_json = settings_json
@@ -298,22 +299,48 @@ async def test_summarization_allowed_user_path_executes():
         }
     }
 
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        new=AsyncMock(return_value=governance),
-    ):
-        with patch.object(
+    # 收口后 model 来自 summarize agent 行;用户的 provider 卡只提供该模型
+    # 对应 provider 的 key(BYOK)。
+    from app.services.ai.providers import ai_provider_helpers as helpers_mod
+
+    fake_agent_repo = MagicMock()
+    fake_agent_repo.get_by_slug = AsyncMock(
+        return_value={"slug": "summarize", "model": "qwen-plus"}
+    )
+
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=governance),
+        ),
+        patch.object(
             db_session,
             "read_scope",
             lambda: _SettingsJsonScope(
                 fake_settings_row["settings_json"], execute_row=fake_row
             ),
-        ):
-            result = await summary_mod.load_summary_inputs(1, "user-1")
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=fake_agent_repo,
+        ),
+        patch.object(
+            helpers_mod,
+            "get_ai_settings",
+            new=AsyncMock(
+                return_value=fake_settings_row["settings_json"]["ai_settings"]
+            ),
+        ),
+        patch.object(
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+        ),
+    ):
+        result = await summary_mod.load_summary_inputs(1, "user-1")
 
-    # User's provider must be used.
+    # User's provider must be used, with the AGENT's model.
     assert result["provider_key"] == "qwen"
     assert result["provider_config"]["api_key"] == "user-qwen-key"
+    assert result["provider_config"]["model"] == "qwen-plus"
 
 
 @pytest.mark.asyncio

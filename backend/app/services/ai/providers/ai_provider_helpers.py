@@ -192,8 +192,8 @@ async def resolve_scorer_config() -> ResolvedAIConfig:
          AND key) → ``origin="governance"``
       2. first enabled platform ``llm`` catalog model with base_url+key
          (nous gate honored) → ``origin="platform"``
-      3. nothing configured → empty config, ``origin="env"`` (the no-provider
-         fall-through convention shared with resolve_summarization_config).
+      3. nothing configured → empty config, ``origin="env"`` (the shared
+         no-provider fall-through convention).
 
     Never raises — resolution failures degrade to the not-configured shape.
     ``agent_slug`` is the scorer's fixed prompt agent (``topic-scorer``).
@@ -373,6 +373,7 @@ DEFAULT_TRANSLATE_AGENT_SLUG = "translate"
 DEFAULT_CAPTION_AGENT_SLUG = "caption"
 DEFAULT_CLASSIFY_AGENT_SLUG = "classify"
 DEFAULT_SCRIPT_AGENT_SLUG = "script_ai"
+DEFAULT_SUMMARIZE_AGENT_SLUG = "summarize"
 
 
 def _byok_origin(provider_config: Dict[str, Any]) -> str:
@@ -380,50 +381,6 @@ def _byok_origin(provider_config: Dict[str, Any]) -> str:
     non-empty ``api_key``, else ``"env"`` (the adapter factory falls back to
     env credentials when no user key is present)."""
     return "byok" if (provider_config.get("api_key") or "").strip() else "env"
-
-
-def _summary_model_from_provider(
-    provider_key: str, provider_cfg: Dict[str, Any]
-) -> str:
-    """The provider-card field that actually holds a SUMMARY model.
-
-    Every provider except ``openai`` exposes ONE model chip list in Settings →
-    AI, and it writes ``selected_model`` — so for those the summary model and
-    ``selected_model`` are the same field by construction.
-
-    ``openai`` is the exception: its card renders THREE dropdowns writing three
-    different keys (Whisper Model → ``selected_model``, Summary Model →
-    ``summary_model``, Analysis Model → ``analysis_model``, see
-    ``frontend/components/AISettings.tsx``). Reading ``selected_model`` for
-    openai therefore hands summarization whatever the user last picked in the
-    *Whisper* dropdown — a ``whisper-1``-class id posted to
-    ``/v1/chat/completions``, which fails every time. So openai reads
-    ``summary_model`` first.
-
-    It still falls back to ``selected_model`` afterwards, because rows written
-    before that dropdown existed keep a CHAT model there — but only when the
-    value is not itself an ASR pick. Note the openai card never writes
-    ``summary_model`` unless the user opens that dropdown (it *displays*
-    ``gpt-4o-mini`` as a placeholder without storing it), so "whisper in
-    ``selected_model``, no ``summary_model`` at all" is the ordinary shape of a
-    user who only ever touched the Whisper dropdown — an unguarded fallback
-    would resolve straight back to the broken model. The ASR test is the same
-    one the card itself uses to decide whether ``selected_model`` belongs to its
-    Whisper dropdown (``selected_model?.startsWith('whisper')``), deliberately
-    narrower than the frontend's general non-chat heuristic
-    (``frontend/utils/nonChatModel.ts``): this is one provider's known field
-    collision, not a capability judgement about arbitrary model ids.
-
-    Returns ``""`` when the provider names no usable model of its own; the
-    caller then falls back to ``ai_settings.default_summary_model``.
-    """
-    if provider_key == "openai":
-        summary = (provider_cfg.get("summary_model") or "").strip()
-        if summary:
-            return summary
-        legacy = (provider_cfg.get("selected_model") or "").strip()
-        return "" if legacy.lower().startswith("whisper") else legacy
-    return provider_cfg.get("selected_model") or ""
 
 
 def _extract_transcription_hotwords(settings_json: Optional[dict]) -> str:
@@ -756,123 +713,6 @@ async def resolve_transcription_config(
         # with hotwords is still env, not byok).
         agent_slug="",
         origin=_byok_origin(provider_cfg),
-    )
-
-
-async def resolve_summarization_config(
-    user_id: str, settings_json: Optional[dict] = None
-) -> ResolvedAIConfig:
-    """Resolve the summarization provider config for a user run.
-
-    Behaviour-preserving lift of the resolution section that lived inline in
-    ``app.workflows.ai_summary.load_summary_inputs`` — moved here so the
-    summarization user path resolves through the SAME typed
-    :class:`ResolvedAIConfig` as the other resolvers (the unification point).
-
-    Unlike the agent-driven tasks, summarization has NO agent slug and honors
-    NO user nous-pick: its user path scans a HARDCODED provider priority
-    (``doubao`` → ``qwen`` → ``openai`` → ``deepseek``) for the first provider
-    the user has both keyed and enabled, and uses that provider's summary model
-    (falling back to ``ai_settings.default_summary_model``).  Which FIELD holds
-    that model is per-provider and is decided by
-    :func:`_summary_model_from_provider`: ``selected_model`` everywhere except
-    ``openai``, whose card writes ``selected_model`` from its *Whisper*
-    dropdown and keeps the summary pick in ``summary_model``.
-    ``agent_slug`` is therefore always ``""`` — summarization composes no agent
-    prompt.
-
-    Resolution order (identical to the pre-lift workflow):
-
-    1. Governance gate — ``resolve_locked_module_config("summarization")``.
-       Locked → ``origin="governance"``; the user path is bypassed (user
-       settings are not consulted) and provider/config/model come from the
-       admin's locked config (``provider_config`` keeps the ``app_id`` shape the
-       workflow's dict carried).
-    2. User path — requires ``user_settings``; missing → ``RuntimeError("no
-       user_settings for ...")``. Scans the hardcoded provider priority for the
-       first ``{api_key, enabled}`` provider. When one is found the config
-       carries its api_key (``origin="byok"``); when NONE is enabled the loop
-       leaves ``provider_key=""`` with an empty (keyless) config
-       (``origin="env"``) — the exact fall-through the workflow preserved (no
-       raise). ``model`` is the chosen provider's summary model (see
-       :func:`_summary_model_from_provider`) else ``default_summary_model``
-       else ``""``.
-
-    ``settings_json`` is the user_settings ``settings_json`` value (dict or JSON
-    string); pass it to avoid a second DB read. When ``None`` (and the module
-    isn't governance-locked) the same SQL the workflow used is issued here.
-    """
-    from app.services.ai.governance.ai_governance import resolve_locked_module_config
-
-    # ── Governance gate (shared helper — platform-catalog first) ──────────
-    # Check BEFORE consulting user settings so a locked module short-circuits
-    # without depending on the user having settings configured.
-    locked = await resolve_locked_module_config("summarization")
-    if locked is not None:
-        return ResolvedAIConfig(
-            provider_key=locked.provider_key,
-            provider_config=locked.provider_config,
-            model=locked.model,
-            agent_slug="",
-            origin="governance",
-        )
-
-    # ── User path — user_settings required from here on ───────────────────
-    if settings_json is None:
-        from sqlalchemy import select
-
-        from app.db.session import read_scope
-        from app.models import UserSettings
-
-        async with read_scope() as session:
-            settings_json = await session.scalar(
-                select(UserSettings.settings_json).where(
-                    UserSettings.user_id == user_id
-                )
-            )
-    if not settings_json:
-        raise RuntimeError(f"no user_settings for {user_id}")
-
-    settings = settings_json
-    if isinstance(settings, str):
-        settings = json.loads(settings)
-    ai_settings = settings.get("ai_settings", {})
-    # This reads raw settings_json directly (not via get_ai_settings) — reveal
-    # here so the chosen provider's config carries the plaintext api_key.
-    # user_id is the row owner (SELECT WHERE user_id = :uid, or the caller
-    # passed this same user's settings_json) — required for the
-    # ownership-binding check.
-    from app.core.secure_settings import reveal_byok_providers
-
-    providers = reveal_byok_providers(
-        ai_settings.get("ai_providers", {}) or {}, user_id=str(user_id)
-    )
-
-    chosen_key: Optional[str] = None
-    chosen_cfg: Dict[str, Any] = {}
-    for key in ("doubao", "qwen", "openai", "deepseek"):
-        cfg = providers.get(key)
-        if cfg and cfg.get("api_key") and cfg.get("enabled"):
-            chosen_key, chosen_cfg = key, cfg
-            break
-
-    model = (
-        _summary_model_from_provider(chosen_key or "", chosen_cfg)
-        or ai_settings.get("default_summary_model")
-        or ""
-    )
-    provider_config: Dict[str, Any] = {
-        "api_key": chosen_cfg.get("api_key", ""),
-        "base_url": chosen_cfg.get("base_url", ""),
-        "app_id": chosen_cfg.get("app_id", ""),
-        "model": model,
-    }
-    return ResolvedAIConfig(
-        provider_key=chosen_key or "",
-        provider_config=provider_config,
-        model=model,
-        agent_slug="",
-        origin=_byok_origin(provider_config),
     )
 
 

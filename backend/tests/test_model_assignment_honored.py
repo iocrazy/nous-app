@@ -29,14 +29,15 @@ _ASSIGNED = "doubao-seed-1-6-250615"
 
 @pytest.mark.asyncio
 async def test_summarize_honors_assigned_model() -> None:
-    """Regression: summarization is NOT agent-driven — its model is resolved
-    per-user (selected_model / default_summary_model) into
-    provider_config["model"] -> self.model, while the composed ``summarize``
-    agent row carries no per-user model so the composer falls back to its
-    hardcoded "qwen-max" default. Pre-fix, ``composed.model or self.model``
-    let "qwen-max" win and silently dropped the user's assigned model. The
-    adapter (and the composed handed to the runner) must carry the assigned
-    model instead.
+    """Regression: the RESOLVED model (provider_config["model"] -> self.model)
+    must reach the wire, not the composed agent row's own value. Since the
+    2026-08-20 收口 both come from the same agent, but they still differ
+    whenever the resolver mapped the row's catalog name down to the provider's
+    ``actual_model`` (or governance / a ``nous:`` pick bypassed the row) — and
+    only the resolved one matches the api_key/base_url alongside it. Pre-fix,
+    ``composed.model or self.model`` let the row value win and silently dropped
+    the resolved model; "qwen-max" below is the composer's hardcoded fallback,
+    the shape that made the drop visible.
 
     Post-fallback-chain wiring (spec §3): the adapter is now built by
     ``build_fallback_llm`` rather than ``svc._build_adapter`` directly — the
@@ -112,6 +113,77 @@ async def test_summarize_honors_assigned_model() -> None:
     # And the composed handed to the runner carries the assigned wire model.
     ran_composed = runner.run_turn.await_args.args[0]
     assert ran_composed.model == _ASSIGNED
+
+
+@pytest.mark.asyncio
+async def test_summarize_composes_the_agent_it_was_given() -> None:
+    """The prompt agent must be the one the resolver took the model FROM
+    (#622/#623). ``load_summary_inputs`` threads ``cfg.agent_slug`` in; a
+    user who assigned a custom summarization agent must get that agent's
+    prompt, not the built-in ``summarize`` preset."""
+    svc = SummarizeService(
+        provider_key="qwen",
+        provider_config={"model": "qwen-max", "api_key": "k"},
+        agent_slug="my-summarizer",
+    )
+    assert svc.AGENT_SLUG == "my-summarizer"
+    # Empty / unset falls back to the built-in preset (replay of pre-收口
+    # cached DBOS step inputs).
+    assert (
+        SummarizeService(
+            provider_key="qwen", provider_config={}, agent_slug=""
+        ).AGENT_SLUG
+        == "summarize"
+    )
+    assert SummarizeService().AGENT_SLUG == "summarize"
+
+    composed = ComposedSystemPrompt(
+        agent_id=UUID(int=1),
+        agent_slug="my-summarizer",
+        model="qwen-max",
+        temperature=0.0,
+        max_tokens=512,
+        system_message="x",
+        tools=[],
+        skill_manifest=[],
+        cache_fingerprint="x",
+    )
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={
+            "content": '{"summary":"s","key_points":[],"topics":[]}',
+            "raw": {},
+        }
+    )
+
+    async def _build(*, primary_model, **_kw):
+        return MagicMock()
+
+    with (
+        patch(
+            "app.services.ai.summarize.summarize_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.summarize.summarize_service.AgentRunner",
+            return_value=runner,
+        ),
+        patch(
+            "app.services.ai.summarize.summarize_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            side_effect=_build,
+        ),
+    ):
+        await svc.summarize(
+            transcript="hello world", user_id=None, parsed_media_id=1, title="T"
+        )
+
+    assert composer.compose.await_args.args[0].agent_slug == "my-summarizer"
 
 
 @pytest.mark.asyncio
