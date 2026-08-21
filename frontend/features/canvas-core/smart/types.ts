@@ -363,9 +363,12 @@ export function canConnectSmart(
   targetType: string | undefined,
 ): boolean {
   if (!sourceType || !targetType) return true;
-  // Output stays a dead-end EXCEPT into a group — wiring a result into a
-  // group collects its images (IC parity ⑦).
-  if (sourceType === 'output') return targetType === 'group';
+  // IC parity: a generated output is a full IMAGE SOURCE — it feeds
+  // downstream prompts/loops (i2i chains) and groups (collection, IC ⑦).
+  if (sourceType === 'output')
+    return (
+      targetType === 'group' || targetType === 'prompt' || targetType === 'loop'
+    );
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;

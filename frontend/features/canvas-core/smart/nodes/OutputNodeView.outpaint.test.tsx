@@ -110,7 +110,7 @@ function seedImageOutput(resourceId: string | null) {
 }
 
 function openDragAndCommit() {
-  fireEvent.click(screen.getByTestId('outpaint-open'));
+  fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
   const handle = screen.getByTestId('outpaint-handle-right');
   fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500, clientY: 250 });
   window.dispatchEvent(
@@ -138,7 +138,7 @@ describe('OutputNodeView — Expand button', () => {
         />
       </Wrap>,
     );
-    expect(screen.getByTestId('outpaint-open')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument();
     unmount();
 
     const without = seedImageOutput(null);
@@ -147,7 +147,7 @@ describe('OutputNodeView — Expand button', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={without} />
       </Wrap>,
     );
-    expect(screen.queryByTestId('outpaint-open')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument();
   });
 });
 

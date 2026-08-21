@@ -331,49 +331,37 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       strokes: MaskStroke[],
       size: { width: number; height: number },
     ) => {
-      if (!resource_id) return;
       try {
         setMaskCommitting(true);
         setMaskError(null);
+        // IC 生成遮罩节点: the commit product is the BLACK/WHITE mask
+        // image itself, dropped beside the source as a media node ready to
+        // wire into an inpaint prompt — NOT a cutout extraction (the
+        // 2026-08-21 "遮罩变成提取了" report).
         const maskB64 = strokesToMaskPngBase64(strokes, size.width, size.height);
-        const result = await deriveMaskCutout(resource_id, maskB64);
-        const newId = String(result.id);
-        const newUrl = await buildPreviewUrl(newId);
-        // Spawn the cutout as a fresh node beside the source (the
-        // source stays — unlike crop, a cutout is a new artifact, not
-        // a replacement).
+        const bin = atob(maskB64.split(',').pop() ?? maskB64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const file = new File([bytes], 'mask.png', { type: 'image/png' });
         const store = useCanvasCoreStore.getState();
         const self = store.nodes.find(
           (node) => (node as { id?: string }).id === id,
         ) as { position?: { x: number; y: number } } | undefined;
         const base = self?.position ?? { x: 0, y: 0 };
-        const cutoutNode = createOutputNode(
-          {
-            kind: 'image',
-            resource_id: newId,
-            preview_text: String(result.filename ?? ''),
-            preview_url: newUrl,
-          },
-          {
-            position: {
-              x: base.x + SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X,
-              y: base.y,
-            },
-          },
-        );
-        store.setNodes([...store.nodes, cutoutNode]);
+        await createMediaNodeFromFiles([file], {
+          x: base.x + 460,
+          y: base.y + 60,
+        });
         setMaskOpen(false);
         setEditorMode(null);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to cut out region';
-        setMaskError(message);
-        // Leave the modal open so the user can retry or cancel.
+        console.error('mask node failed:', err);
+        setMaskError(err instanceof Error ? err.message : 'Mask failed');
       } finally {
         setMaskCommitting(false);
       }
     },
-    [resource_id, id],
+    [id],
   );
 
   const openGridEditor = useCallback(() => {
@@ -469,6 +457,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         type="target"
         position={Position.Left}
       />
+      {/* IC parity: results are image SOURCES — the right port wires the
+          generated image into downstream prompts / loops / groups. */}
+      <Handle type="source" position={Position.Right} />
       <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       {/* Floating toolbar (P2-3): pinned while selected, hover-revealed
           otherwise. Preview bypasses the 250ms crop-disambiguation delay. */}
@@ -485,7 +476,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onPreview={() => openLightbox(0)}
           onCrop={canCrop ? openEditor : undefined}
           onExpand={canSplit ? openOutpaintEditor : undefined}
-          onMask={canSplit ? openMaskEditor : undefined}
+          onMask={canCrop ? openMaskEditor : undefined}
           onBrush={() => setEditorMode('brush')}
           onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
@@ -499,69 +490,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           Output · {KIND_LABEL[kind]}
         </div>
         <div className="flex items-center gap-2">
-          {canRegenerate && (
-            <button
-              type="button"
-              data-testid="regenerate-open"
-              onClick={onRegenerate}
-              disabled={regenerating || readOnly}
-              title="Re-run the source prompt"
-              className="mh-chip"
-            >
-              {regenerating ? 'Rerunning…' : 'Rerun'}
-            </button>
-          )}
-          {canCrop && (
-            /* Crop moved to a header chip (P2-5): double-click now opens the
-               lightbox, so crop joins Expand/Mask/Split as an explicit
-               editing affordance instead of the old double-click gesture. */
-            <button
-              type="button"
-              data-testid="crop-open"
-              onClick={openEditor}
-              disabled={readOnly}
-              title="Crop the image"
-              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Crop
-            </button>
-          )}
-          {canSplit && (
-            <button
-              type="button"
-              data-testid="outpaint-open"
-              onClick={openOutpaintEditor}
-              disabled={readOnly}
-              title="Extend the canvas beyond the image"
-              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Expand
-            </button>
-          )}
-          {canSplit && (
-            <button
-              type="button"
-              data-testid="mask-cutout-open"
-              onClick={openMaskEditor}
-              disabled={readOnly}
-              title="Paint a region to cut out"
-              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Mask
-            </button>
-          )}
-          {canSplit && (
-            <button
-              type="button"
-              data-testid="grid-split-open"
-              onClick={openGridEditor}
-              disabled={readOnly}
-              title="Split into a grid of tiles"
-              className="mh-chip disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Split
-            </button>
-          )}
+          {/* Editing actions live ONLY on the floating toolbar (IC single
+              toolbar — the old header chip row duplicated it, 2026-08-21
+              "怎么有两排"). Status badges stay. */}
           {crop_region && (
             <div
               data-testid="crop-region-badge"
@@ -719,7 +650,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onClose={() => setEditorMode(null)}
           onCropCommit={canCrop ? handleCommit : undefined}
           onOutpaintCommit={canSplit ? handleOutpaintCommit : undefined}
-          onMaskCommit={canSplit ? handleMaskCommit : undefined}
+          onMaskCommit={canCrop ? handleMaskCommit : undefined}
           onSplitCommit={canSplit ? handleGridCommit : undefined}
           onBrushCommit={handleBrushCommit}
           onResizeCommit={handleResizeCommit}

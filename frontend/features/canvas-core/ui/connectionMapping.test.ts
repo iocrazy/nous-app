@@ -93,14 +93,15 @@ describe('validateCanvasConnection', () => {
         types,
       ),
     ).toBe(true);
-    // output -> anything is terminal; handles ignored, node type wins.
+    // output -> prompt is a legal i2i chain (IC image source); handles
+    // ignored, node type wins.
     expect(
       validateCanvasConnection(
         { source: 'o1', target: 'p1', sourceHandle: 'x', targetHandle: 'y' },
         'smart',
         types,
       ),
-    ).toBe(false);
+    ).toBe(true);
     // shot -> output must go through a prompt.
     expect(
       validateCanvasConnection(

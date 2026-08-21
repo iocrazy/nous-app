@@ -95,7 +95,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       </Wrap>,
     );
     expect(screen.queryByTestId('unified-image-editor')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
   });
 
@@ -108,7 +108,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     fireEvent.click(screen.getByTestId('editor-apply'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
@@ -133,7 +133,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     fireEvent.click(screen.getByTestId('editor-cancel'));
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
       string,
@@ -182,7 +182,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       </Wrap>,
     );
     // No Crop chip when the node can't be cropped (canCrop=false).
-    expect(screen.queryByTestId('crop-open')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Crop' })).not.toBeInTheDocument();
   });
 
   it('image-kind WITHOUT preview_url does NOT open the modal', () => {
@@ -219,7 +219,7 @@ describe('OutputNodeView — crop editor via header chip (P2-5)', () => {
       </Wrap>,
     );
     // No Crop chip when the node can't be cropped (canCrop=false).
-    expect(screen.queryByTestId('crop-open')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Crop' })).not.toBeInTheDocument();
   });
 
   it('shows a "Cropped" badge when crop_region is set', () => {

@@ -81,7 +81,7 @@ const MODE_META: Array<{
   { mode: 'preview', label: 'Preview', icon: <Eye size={13} />, hint: 'Scroll to zoom, drag to pan' },
   { mode: 'crop', label: 'Crop', icon: <CropIcon size={13} />, apply: 'Apply Crop' },
   { mode: 'outpaint', label: 'Expand', icon: <Expand size={13} />, apply: 'Apply Expand' },
-  { mode: 'mask', label: 'Mask', icon: <BrushIcon size={13} />, apply: 'Cut Out', hint: 'Paint the area to edit — white becomes the mask' },
+  { mode: 'mask', label: 'Mask', icon: <BrushIcon size={13} />, apply: 'Create Mask Node', hint: 'Paint the area to edit — white becomes the mask' },
   { mode: 'brush', label: 'Brush', icon: <Paintbrush size={13} />, apply: 'Apply Brush', hint: 'Draw annotations or sketches directly on the image' },
   { mode: 'resize', label: 'Resize', icon: <Minimize2 size={13} />, apply: 'Apply Resize' },
   { mode: 'split', label: 'Split', icon: <Grid3x3 size={13} />, apply: 'Split' },
