@@ -20,7 +20,7 @@ import {
   Paintbrush,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { mediaSrc } from '../smart/mediaUrl';
@@ -28,7 +28,8 @@ import { CropTool } from './CropTool';
 import { GridSplitTool } from './GridSplitTool';
 import { MaskBrushTool } from './MaskBrushTool';
 import { OutpaintTool } from './OutpaintTool';
-import { PaintTool, type PaintShape, type PaintShapeTool } from './PaintTool';
+import { PaintCanvas, type PaintCanvasHandle } from './PaintCanvas';
+import { type PaintShapeTool } from './PaintTool';
 import { snapRegionToAspect } from './cropMath';
 import { FULL_REGION, type CropRegion } from './types';
 import { EMPTY_GRID, presetGrid, type GridLines } from './gridMath';
@@ -64,7 +65,8 @@ export interface UnifiedImageEditorProps {
   onOutpaintCommit?(padding: OutpaintPadding, prompt: string): void;
   onMaskCommit?(strokes: MaskStroke[], size: { width: number; height: number }): void;
   onSplitCommit?(lines: GridLines): void;
-  onBrushCommit?(shapes: PaintShape[]): void;
+  /** IC applyImageBrush: receives the base+overlay composite PNG. */
+  onBrushCommit?(composite: Blob): void;
   onResizeCommit?(scale: number): void;
   committing?: boolean;
 }
@@ -119,8 +121,8 @@ export function UnifiedImageEditor({
   const [strokeRedo, setStrokeRedo] = useState<MaskStroke[][]>([]);
   const [maskTool] = useState<MaskTool>('brush');
   const [maskSize, setMaskSize] = useState<number>(BRUSH_SIZES[1].value);
-  const [shapes, setShapes] = useState<PaintShape[]>([]);
-  const [shapeRedo, setShapeRedo] = useState<PaintShape[][]>([]);
+  const paintRef = useRef<PaintCanvasHandle | null>(null);
+  const [paintHistory, setPaintHistory] = useState({ canUndo: false, canRedo: false });
   // IC crop aspect presets — null = free.
   const [cropAspect, setCropAspect] = useState<number | null>(null);
   const [paintTool, setPaintTool] = useState<PaintShapeTool>('free');
@@ -140,7 +142,6 @@ export function UnifiedImageEditor({
       setPadding(ZERO_PADDING);
       setOutpaintPrompt(outpaintInitialPrompt);
       setStrokes([]);
-      setShapes([]);
       setLines(EMPTY_GRID);
       setScale(0.5);
     }
@@ -171,7 +172,7 @@ export function UnifiedImageEditor({
     if (committing) return true;
     if (mode === 'mask') return !hasMaskContent(strokes);
     if (mode === 'outpaint') return !hasExtension(padding);
-    if (mode === 'brush') return shapes.length === 0;
+    if (mode === 'brush') return !paintHistory.canUndo && !paintHistory.canRedo;
     if (mode === 'split') return lines.xs.length === 0 && lines.ys.length === 0;
     return false;
   };
@@ -181,7 +182,11 @@ export function UnifiedImageEditor({
     else if (mode === 'outpaint') onOutpaintCommit?.(padding, outpaintPrompt);
     else if (mode === 'mask')
       onMaskCommit?.(strokes, naturalSize ?? FALLBACK_MASK_SIZE);
-    else if (mode === 'brush') onBrushCommit?.(shapes);
+    else if (mode === 'brush') {
+      void paintRef.current?.exportComposite().then((blob) => {
+        if (blob) onBrushCommit?.(blob);
+      });
+    }
     else if (mode === 'resize') onResizeCommit?.(scale);
     else if (mode === 'split') onSplitCommit?.(lines);
   };
@@ -384,11 +389,9 @@ export function UnifiedImageEditor({
           </label>
           <button
             type="button"
-            onClick={() => {
-              setShapeRedo((r) => [...r, shapes]);
-              setShapes(shapes.slice(0, -1));
-            }}
-            disabled={shapes.length === 0}
+            data-testid="brush-undo"
+            onClick={() => paintRef.current?.undo()}
+            disabled={!paintHistory.canUndo}
             className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
           >
             Undo
@@ -396,20 +399,16 @@ export function UnifiedImageEditor({
           <button
             type="button"
             data-testid="brush-redo"
-            disabled={shapeRedo.length === 0}
-            onClick={() => {
-              const prev = shapeRedo[shapeRedo.length - 1];
-              setShapeRedo(shapeRedo.slice(0, -1));
-              setShapes(prev);
-            }}
+            disabled={!paintHistory.canRedo}
+            onClick={() => paintRef.current?.redo()}
             className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
           >
             Redo
           </button>
           <button
             type="button"
-            onClick={() => setShapes([])}
-            disabled={shapes.length === 0}
+            onClick={() => paintRef.current?.clear()}
+            disabled={!paintHistory.canUndo && !paintHistory.canRedo}
             className="nodrag rounded-lg border border-canvas-line px-2 py-0.5 text-canvas-text disabled:opacity-40"
           >
             Clear
@@ -534,14 +533,14 @@ export function UnifiedImageEditor({
         )}
         {mode === 'brush' && (
           <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
-          <PaintTool
+          <PaintCanvas
+            ref={paintRef}
             src={src}
             alt={alt}
-            value={shapes}
-            onChange={setShapes}
             tool={paintTool}
             color={paintColor}
             size={paintSize}
+            onHistoryChange={(canUndo, canRedo) => setPaintHistory({ canUndo, canRedo })}
           />
           </div>
         )}
