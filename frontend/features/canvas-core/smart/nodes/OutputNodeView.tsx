@@ -129,13 +129,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // Brush / Resize (unified editor's client-side modes): bake → import as
   // a NEW generated-media item appended to this node (non-destructive).
   const handleBrushCommit = useCallback(
-    (shapes: PaintShape[]) => {
+    (composite: Blob) => {
       if (!preview_url) return;
       void (async () => {
         try {
           setPixCommitting(true);
-          const blob = await bakeAnnotations(preview_url, shapes);
-          const file = new File([blob], 'brush.png', { type: 'image/png' });
+          const file = new File([composite], 'brush.png', { type: 'image/png' });
           const item = await importCanvasMedia(file, canvasId, id);
           patchData({
             images: [

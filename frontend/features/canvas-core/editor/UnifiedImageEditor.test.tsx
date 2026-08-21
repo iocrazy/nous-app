@@ -56,7 +56,7 @@ describe('UnifiedImageEditor', () => {
       />,
     );
     fireEvent.click(screen.getByTestId('editor-tab-brush'));
-    expect(screen.getByTestId('paint-tool')).toBeInTheDocument();
+    expect(screen.getByTestId('paint-canvas')).toBeInTheDocument();
     expect(screen.getByTestId('paint-tool-free')).toBeInTheDocument();
   });
 

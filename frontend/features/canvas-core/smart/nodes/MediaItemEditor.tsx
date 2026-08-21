@@ -147,10 +147,9 @@ export function MediaItemEditor({
               })
           : undefined
       }
-      onBrushCommit={(shapes: PaintShape[]) =>
+      onBrushCommit={(composite: Blob) =>
         run(async () => {
-          const blob = await bakeAnnotations(item.url, shapes);
-          await appendBlob(blob, 'brush.png');
+          await appendBlob(composite, 'brush.png');
         })
       }
       onResizeCommit={(scale: number) =>
