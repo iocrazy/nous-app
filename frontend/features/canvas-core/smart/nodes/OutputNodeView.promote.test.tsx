@@ -64,3 +64,10 @@ describe('OutputNodeView width + promote', () => {
     });
   });
 });
+
+it('a stored node_w wins over the default (user dragged the handle)', () => {
+  const node = useCanvasCoreStore.getState().nodes[0] as { data: Record<string, unknown> };
+  node.data = { ...node.data, node_w: 640 };
+  render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
+  expect(screen.getByTestId('smart-output-node').style.width).toBe('640px');
+});
