@@ -471,8 +471,13 @@ export const saveAISettings = async (
     ai_providers: stripReadOnlyProviderFields(settings.providers),
     whisper_provider: settings.task_assignment?.transcription?.startsWith('volcengine') ? 'volcengine'
       : settings.task_assignment?.transcription?.includes('openai') ? 'openai_api' : 'local',
-    default_summary_model: settings.task_assignment?.summarization || 'gpt-4o-mini',
-    default_analysis_model: settings.task_assignment?.visual_analysis || 'gpt-4o',
+    // `default_summary_model` / `default_analysis_model` are deliberately NOT
+    // sent: task_assignment.summarization / .visual_analysis hold AGENT SLUGS,
+    // so this mapping was writing e.g. "summarize" into a field named for a
+    // model. Nothing resolves either field any more (summarization was the
+    // last reader and moved to the agent path on 2026-08-20), and posting a
+    // slug as a model id would only re-create the confusion that cleanup
+    // removed.
     // Include frontend-specific fields as extra data for persistence
     ai_enabled: settings.ai_enabled,
     auto_transcribe: settings.auto_transcribe,

@@ -133,24 +133,37 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
 
-    # Resolve the provider config through the shared typed resolver (A3 lift).
-    # It owns the governance gate (platform-catalog first), the "no
-    # user_settings" raise, the hardcoded provider-priority scan, and the
-    # default_summary_model fallback. Passing settings_json=None lets the
-    # resolver issue the same user_settings SELECT the workflow used to run —
-    # and skip it entirely when the module is governance-locked.
+    # Resolve through the SAME agent-config resolver every other agent-driven
+    # task uses (caption / visual_analysis / classification / translation).
+    # 2026-08-20 收口:摘要此前走一条独有的"provider 优先级扫描"
+    # (doubao→qwen→openai→deepseek 取 selected_model),**从头到尾没读过
+    # summarize agent 行**——于是 ai_agents.summarize.model 配得再对也不生效,
+    # 而用户在 doubao 卡里把 selected_model 选成 embedding 模型后,每次摘要都拿
+    # embedding id 去打 /chat/completions,必败。模型来源现在只有一个:agent 配置。
+    # resolve_task_ai_config 同时负责 governance 短路(platform-catalog 优先)、
+    # task_assignment.summarization 指派的 agent slug(Settings → AI 的
+    # Summarization 下拉早就在写这个值,后端过去从不读)、nous:<model> 直选,
+    # 以及 agent 行的 fallback_models。
     from app.services.ai.providers.ai_provider_helpers import (
-        resolve_summarization_config,
+        DEFAULT_SUMMARIZE_AGENT_SLUG,
+        resolve_task_ai_config,
     )
 
-    cfg = await resolve_summarization_config(user_id)
+    cfg = await resolve_task_ai_config(
+        user_id, "summarization", DEFAULT_SUMMARIZE_AGENT_SLUG
+    )
 
-    # fallback 链来源:summarize 预设行的 fallback_models(spec §1 拍板——与
-    # chat 同源;per-user primary + 平台预设 fallbacks)。行缺失/空 → 空链。
-    from app.repositories.agent_repository import get_agent_repository
-
-    agent_row = await get_agent_repository().get_by_slug("summarize")
-    fallback_models = list((agent_row or {}).get("fallback_models") or [])
+    # 无 fallback 契约(用户拍板 2026-08-20:"agent 中间不要 fallback,出现问题就
+    # 提示出来")。model 为空意味着 agent 行没配模型 / governance 锁了却没给模型
+    # ——若放行,SummarizeService 的 composer 会退到硬编码 "qwen-max"(一个 DB 里
+    # 未必存在的模型),摘要要么静默换模型要么失败在下游、真因不可见。这里直接
+    # raise,workflow tail 会 classify_ai_error + record_workflow_failure。
+    if not cfg.model:
+        raise RuntimeError(
+            f"summarization agent '{cfg.agent_slug or DEFAULT_SUMMARIZE_AGENT_SLUG}' "
+            "has no model configured — set it in Settings → AI Library, or pick a "
+            "different agent in Settings → AI → Summarization"
+        )
 
     return {
         "transcript": row["transcript"],
@@ -158,7 +171,12 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
         "resource_id": str(row["resource_id"]),
         "provider_key": cfg.provider_key,
         "provider_config": cfg.provider_config,
-        "fallback_models": fallback_models,
+        # 复合 prompt 的 agent 必须与解析出 model 的那个 agent 是同一个(#622/#623):
+        # 否则 composer 会用它自己那行的 model 覆盖解析结果。
+        "agent_slug": cfg.agent_slug,
+        # fallback 池只来自解析所依据的那一行 agent(governance / nous: 直选分支
+        # 不读 agent 行 → 空池,与 resolve_task_ai_config 的契约一致)。
+        "fallback_models": list(cfg.fallback_models),
     }
 
 
@@ -171,10 +189,11 @@ async def run_summarize_agent(
     parsed_media_id: int,
     provider_key: str,
     provider_config: dict[str, Any],
+    agent_slug: str = "",
     wf_id: Optional[str] = None,
     fallback_models: Optional[list[str]] = None,
 ) -> dict[str, Any]:
-    """Invoke the `summarize` agent via SummarizeService → AgentRunner.
+    """Invoke the resolved summarization agent via SummarizeService → AgentRunner.
     Returns {summary, key_points, topics}. Each retry is a fresh agent
     call (token cost + agent_runs row each time).
 
@@ -184,10 +203,20 @@ async def run_summarize_agent(
     ``max_attempts=1`` (spec §1): retry + fallback now live entirely in
     LLMFallbackChain (build_fallback_llm, threaded via ``fallback_models``
     below) — a step-level retry on top would multiply attempts (this
-    step's retries × the chain's own per-model retries)."""
+    step's retries × the chain's own per-model retries).
+
+    ``agent_slug`` is the slug ``load_summary_inputs`` resolved the model
+    FROM (default ``""`` keeps replay of pre-收口 cached step inputs working
+    — SummarizeService then composes its built-in ``summarize`` agent, the
+    old behaviour). Threading it is load-bearing: the composed agent and the
+    resolved model must come from the same row (#622/#623)."""
     from app.services.ai.summarize.summarize_service import SummarizeService
 
-    svc = SummarizeService(provider_key=provider_key, provider_config=provider_config)
+    svc = SummarizeService(
+        provider_key=provider_key,
+        provider_config=provider_config,
+        agent_slug=agent_slug,
+    )
     result = await svc.summarize(
         transcript=transcript,
         user_id=user_id,
@@ -345,6 +374,7 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             parsed_media_id=parsed_media_id,
             provider_key=inputs.get("provider_key", ""),
             provider_config=inputs.get("provider_config", {}),
+            agent_slug=inputs.get("agent_slug", ""),
             wf_id=wf_id,
             fallback_models=inputs.get("fallback_models", []),
         )

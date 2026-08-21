@@ -1,504 +1,358 @@
-"""A3 — resolve_summarization_config origin-tag + provider-priority parity.
+"""摘要模型解析收口 —— 模型来源只有 agent 配置(2026-08-20)。
 
-Pins the resolution branches of the summarization user-path resolver (lifted
-out of ai_summary.load_summary_inputs) and the ResolvedAIConfig each produces.
-Mocks the SAME governance seam the workflow SQL tests mock
-(``get_module_governance`` / ``resolve_platform_model``). No DB.
+背景(生产地面真值):`ai_agents.summarize.model` 早就配着一个好模型
+(`doubao-seed-2-0-lite-260428`、探针绿),但摘要走的是一条它自己的
+"provider 优先级扫描"(doubao → qwen → openai → deepseek,取各卡的
+`selected_model`),**从头到尾没读过 agent 行**。用户在 doubao 卡里把
+`selected_model` 选成 embedding 模型之后,每次摘要都拿 embedding id 去打
+`/v1/chat/completions`,必败 —— 而 agent 里配的那个好模型一次都没被用过。
 
-Summarization is unlike the agent-driven resolvers: NO agent slug, NO user
-nous-pick — its user path scans a HARDCODED provider priority
-(doubao → qwen → openai → deepseek) and uses default_summary_model.
+收口后摘要与 caption / visual_analysis / classification / translation 共用
+``resolve_task_ai_config``:governance 锁定优先 → ``task_assignment.summarization``
+指派的 agent slug(Settings → AI 的 Summarization 下拉,后端过去从不读) →
+``nous:<model>`` 直选 → agent 行的 model / fallback_models。
+
+这些用例是可证伪的:改 agent 行的 model,解析结果必须跟着变;把用户的
+provider `selected_model` 设成 embedding 模型,解析结果必须不受影响。
 """
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, patch
+from typing import Any, Optional
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.db import session as db_session
 from app.services.ai.governance.ai_governance import AIModuleGovernance
 from app.services.ai.providers import ai_provider_helpers as helpers
 
-
-class _NoUserSettingsSession:
-    """Fake ORM session whose scalar() reads always miss (no user_settings row)."""
-
-    async def scalar(self, _stmt: Any) -> None:
-        return None
-
-
-class _NoUserSettingsScope:
-    async def __aenter__(self) -> _NoUserSettingsSession:
-        return _NoUserSettingsSession()
-
-    async def __aexit__(self, *exc: Any) -> bool:
-        return False
-
-
 pytestmark = pytest.mark.asyncio
 
+TASK_KEY = "summarization"
+DEFAULT_SLUG = helpers.DEFAULT_SUMMARIZE_AGENT_SLUG
 
-def _locked(model: str = "mediahub-summary", api_key: str = "") -> AIModuleGovernance:
-    # allowed=False → module is admin-locked (governance branch).
+# 生产 ai_agents.summarize.model 的真值(探针绿的那个模型)。
+PROD_AGENT_MODEL = "doubao-seed-2-0-lite-260428"
+# 用户事故的真值形态:doubao 卡的 selected_model 被选成了 embedding 模型。
+EMBEDDING_MODEL = "doubao-embedding-vision-251215"
+
+
+def _allowed() -> AIModuleGovernance:
+    return AIModuleGovernance(allowed=True)
+
+
+def _locked(model: str = "mediahub-summary", api_key: str = "admin-key"):
     return AIModuleGovernance(
         allowed=False, base_url="https://admin/v1", model=model, api_key=api_key
     )
 
 
-def _unlocked() -> AIModuleGovernance:
-    # allowed=True → not locked; resolve_locked_module_config returns None.
-    return AIModuleGovernance(allowed=True)
+def _repo(agent: Optional[dict]) -> MagicMock:
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(return_value=agent)
+    return repo
 
 
-def _settings(ai_settings: dict) -> dict:
-    return {"ai_settings": ai_settings}
-
-
-async def test_origin_governance_from_catalog():
-    """Locked module resolving to a platform-catalog model → origin=governance;
-    provider/config/model come from the catalog, agent_slug is ''."""
-    catalog = (
-        "doubao",
-        {
-            "api_key": "cat-key",
-            "base_url": "https://ark/v3",
-            "model": "doubao-x",
-            "app_id": "",
-        },
-        "doubao-x",
-    )
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_locked()),
-        ),
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
-            AsyncMock(return_value=catalog),
-        ),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=None)
-
-    assert cfg.origin == "governance"
-    assert cfg.provider_key == "doubao"
-    assert cfg.provider_config["api_key"] == "cat-key"
-    assert cfg.model == "doubao-x"
-    assert cfg.agent_slug == ""
-
-
-async def test_origin_governance_from_manual_admin_config():
-    """Locked with a manual admin key (not a catalog model) → origin=governance;
-    provider_key derived from the model prefix, provider_config keeps app_id=''."""
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_locked(model="qwen-max", api_key="admin-key")),
-        ),
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
-            AsyncMock(return_value=None),  # not a catalog model → manual path
-        ),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=None)
-
-    assert cfg.origin == "governance"
-    assert cfg.provider_key == "qwen"  # derived from "qwen-max" prefix
-    assert cfg.provider_config["api_key"] == "admin-key"
-    assert cfg.provider_config["app_id"] == ""
-    assert cfg.model == "qwen-max"
-    assert cfg.agent_slug == ""
-
-
-async def test_origin_byok_when_provider_enabled_and_keyed():
-    """User has an enabled+keyed provider → origin=byok; selected_model used."""
-    settings = _settings(
-        {
-            "ai_providers": {
-                "doubao": {
-                    "api_key": "user-doubao",
-                    "enabled": True,
-                    "base_url": "https://ark/v3",
-                    "selected_model": "doubao-pro",
-                }
-            }
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.origin == "byok"
-    assert cfg.provider_key == "doubao"
-    assert cfg.provider_config["api_key"] == "user-doubao"
-    assert cfg.model == "doubao-pro"
-    assert cfg.provider_config["model"] == "doubao-pro"
-    assert cfg.agent_slug == ""
-
-
-async def test_byok_reveals_encrypted_api_key(monkeypatch):
-    """secret-at-rest Phase 2: an enc:v1: api_key stored in ai_providers is
-    decrypted before it reaches provider_config — this resolver reads raw
-    settings_json directly (not via get_ai_settings), so it needs its own
-    reveal chokepoint."""
-    from cryptography.fernet import Fernet
-
-    monkeypatch.setenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("MEDIAHUB_TOKEN_ENCRYPTION_KEY_OLD", raising=False)
-    from app.core.secure_settings import encrypt_byok
-
-    # Owner-bound to "u" (the user the resolver is called for).
-    ciphertext = encrypt_byok("user-doubao-plain", "u")
-    settings = _settings(
-        {
-            "ai_providers": {
-                "doubao": {
-                    "api_key": ciphertext,
-                    "enabled": True,
-                    "selected_model": "doubao-pro",
-                }
-            }
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.origin == "byok"
-    assert cfg.provider_config["api_key"] == "user-doubao-plain"
-
-
-async def test_provider_priority_doubao_wins_over_deepseek():
-    """Both doubao and deepseek enabled+keyed → doubao wins (priority order)."""
-    settings = _settings(
-        {
-            "ai_providers": {
-                "deepseek": {
-                    "api_key": "ds-key",
-                    "enabled": True,
-                    "selected_model": "deepseek-chat",
-                },
-                "doubao": {
-                    "api_key": "db-key",
-                    "enabled": True,
-                    "selected_model": "doubao-pro",
-                },
-            }
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == "doubao"
-    assert cfg.model == "doubao-pro"
-
-
-async def test_provider_priority_skips_disabled_provider():
-    """A higher-priority provider that is keyed but DISABLED is skipped; the
-    next enabled+keyed provider (qwen) is chosen."""
-    settings = _settings(
-        {
-            "ai_providers": {
-                "doubao": {
-                    "api_key": "db-key",
-                    "enabled": False,  # keyed but disabled → skipped
-                    "selected_model": "doubao-pro",
-                },
-                "qwen": {
-                    "api_key": "qw-key",
-                    "enabled": True,
-                    "selected_model": "qwen-plus",
-                },
-            }
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == "qwen"
-    assert cfg.model == "qwen-plus"
-
-
-async def test_default_summary_model_used_when_no_selected_model():
-    """Chosen provider without selected_model → default_summary_model is used."""
-    settings = _settings(
-        {
-            "default_summary_model": "doubao-lite",
-            "ai_providers": {
-                "doubao": {"api_key": "db-key", "enabled": True},  # no selected_model
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == "doubao"
-    assert cfg.model == "doubao-lite"
-    assert cfg.provider_config["model"] == "doubao-lite"
-
-
-async def test_no_provider_enabled_preserves_empty_fallthrough():
-    """No enabled+keyed provider → provider_key='' with a keyless config and
-    origin=env — the exact non-raising fall-through the workflow preserved."""
-    settings = _settings(
-        {
-            "default_summary_model": "some-model",
-            "ai_providers": {
-                # keyed but disabled → not chosen; no enabled provider at all
-                "openai": {"api_key": "sk", "enabled": False},
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.origin == "env"
-    assert cfg.provider_key == ""
-    assert cfg.provider_config["api_key"] == ""
-    # default_summary_model still surfaces even with no provider chosen.
-    assert cfg.model == "some-model"
-
-
-async def test_raises_when_no_user_settings():
-    """Not locked + no settings row anywhere → RuntimeError('no user_settings'),
-    preserving the workflow's raise."""
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_unlocked()),
-        ),
-        patch.object(db_session, "read_scope", lambda: _NoUserSettingsScope()),
-    ):
-        with pytest.raises(RuntimeError, match="no user_settings"):
-            await helpers.resolve_summarization_config("u", settings_json=None)
-
-
-async def test_governance_short_circuits_before_user_settings():
-    """Locked module must NOT consult user settings — read_scope() is never hit."""
-    read_scope_mock = AsyncMock()
-    with (
-        patch(
-            "app.services.ai.governance.ai_governance.get_module_governance",
-            AsyncMock(return_value=_locked(model="qwen-max", api_key="admin-key")),
-        ),
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
-            AsyncMock(return_value=None),
-        ),
-        patch.object(db_session, "read_scope", read_scope_mock),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=None)
-
-    assert cfg.origin == "governance"
-    read_scope_mock.assert_not_called()
-
-
-# ── openai: the Whisper dropdown must not decide the summary model ─────────
-#
-# Ground truth (frontend/components/AISettings.tsx): the openai card is the
-# only provider card with THREE model dropdowns, and they write three
-# different keys —
-#     Whisper Model  → selected_model
-#     Summary Model  → summary_model
-#     Analysis Model → analysis_model
-# Reading selected_model for openai therefore summarised with whatever the
-# user last picked for ASR (whisper-1 posted to /v1/chat/completions → every
-# summary fails). Only the openai branch changes; every other provider keeps
-# reading selected_model, which is the single chip list its card writes.
-
-
-async def test_openai_summary_uses_summary_model_not_whisper_pick():
-    """openai enabled+keyed with BOTH dropdowns set → the Summary Model wins.
-
-    Mutation guard: read selected_model first for openai and this goes red
-    with model == 'whisper-1'.
-    """
-    settings = _settings(
-        {
-            "default_summary_model": "gpt-4o-mini",
-            "ai_providers": {
-                "openai": {
-                    "api_key": "sk-user",
-                    "enabled": True,
-                    # what the Whisper Model dropdown wrote
-                    "selected_model": "whisper-1",
-                    # what the Summary Model dropdown wrote
-                    "summary_model": "gpt-4o",
-                    "analysis_model": "gpt-4o",
-                }
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == "openai"
-    assert cfg.model == "gpt-4o"
-    assert cfg.provider_config["model"] == "gpt-4o"
-    assert cfg.origin == "byok"
-
-
-async def test_openai_never_resolves_to_a_whisper_model():
-    """The defect's exact shape: user touched ONLY the Whisper dropdown, so
-    summary_model was never written. selected_model holds an ASR id, which is
-    not a chat model — fall through to default_summary_model rather than
-    posting whisper-1 to chat-completions."""
-    settings = _settings(
-        {
-            "default_summary_model": "gpt-4o-mini",
-            "ai_providers": {
-                "openai": {
-                    "api_key": "sk-user",
-                    "enabled": True,
-                    "selected_model": "whisper-1",
-                }
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == "openai"
-    assert not cfg.model.startswith("whisper")
-    assert cfg.model == "gpt-4o-mini"
-
-
-async def test_openai_legacy_row_without_summary_model_keeps_selected_model():
-    """Rows written before the Summary Model dropdown existed carry only
-    selected_model, and for those it IS the summary pick — the openai branch
-    falls back to it rather than skipping straight to the global default."""
-    settings = _settings(
-        {
-            "default_summary_model": "gpt-4o-mini",
-            "ai_providers": {
-                "openai": {
-                    "api_key": "sk-user",
-                    "enabled": True,
-                    "selected_model": "gpt-4-turbo",  # legacy: chat model here
-                }
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.model == "gpt-4-turbo"
-
-
-async def test_openai_blank_summary_model_falls_back_to_selected_model():
-    """A blank string in summary_model must not swallow the legacy fallback
-    (`or` semantics, not a `"summary_model" in cfg` presence check)."""
-    settings = _settings(
-        {
-            "default_summary_model": "gpt-4o-mini",
-            "ai_providers": {
-                "openai": {
-                    "api_key": "sk-user",
-                    "enabled": True,
-                    "selected_model": "gpt-4-turbo",
-                    "summary_model": "",
-                }
-            },
-        }
-    )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.model == "gpt-4-turbo"
-
-
-@pytest.mark.parametrize(
-    "provider_key,selected,expected",
-    [
-        ("doubao", "doubao-pro", "doubao-pro"),
-        ("qwen", "qwen-plus", "qwen-plus"),
-        ("deepseek", "deepseek-chat", "deepseek-chat"),
-    ],
-)
-async def test_non_openai_providers_still_read_selected_model(
-    provider_key: str, selected: str, expected: str
+async def _resolve(
+    *,
+    agent: Optional[dict],
+    ai_settings: dict,
+    governance: AIModuleGovernance | None = None,
+    mediahub: Any = None,
+    repo: MagicMock | None = None,
 ):
-    """Behaviour conservation: only the openai branch changed. Every other
-    provider keeps taking selected_model EVEN IF a stray summary_model is
-    present in the row (their cards never write one — a value there would be
-    hand-edited settings_json, and honouring it would be new behaviour)."""
-    settings = _settings(
-        {
-            "default_summary_model": "fallback-model",
+    """Run the real resolver with the DB seams faked (no DB)."""
+    repo = repo if repo is not None else _repo(agent)
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=governance or _allowed()),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=repo,
+        ),
+        patch.object(
+            helpers, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
+        ),
+        patch.object(
+            helpers, "resolve_mediahub_model", new=AsyncMock(return_value=mediahub)
+        ),
+        patch.object(
+            helpers, "resolve_platform_model", new=AsyncMock(return_value=None)
+        ),
+    ):
+        return await helpers.resolve_task_ai_config("user-1", TASK_KEY, DEFAULT_SLUG)
+
+
+# ── agent 行的 model 就是解析结果(可证伪:改一个,另一个必须跟着改) ──────
+
+
+@pytest.mark.parametrize("agent_model", [PROD_AGENT_MODEL, "qwen-max", "deepseek-chat"])
+async def test_model_comes_from_the_agent_row(agent_model: str) -> None:
+    cfg = await _resolve(
+        agent={"slug": DEFAULT_SLUG, "model": agent_model},
+        ai_settings={
+            "task_assignment": {},
             "ai_providers": {
-                provider_key: {
+                "doubao": {"api_key": "k", "enabled": True},
+                "qwen": {"api_key": "k", "enabled": True},
+                "deepseek": {"api_key": "k", "enabled": True},
+            },
+        },
+    )
+    assert cfg.model == agent_model
+    assert cfg.provider_config["model"] == agent_model
+    assert cfg.agent_slug == DEFAULT_SLUG
+
+
+async def test_default_slug_is_read_when_no_assignment() -> None:
+    repo = _repo({"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL})
+    await _resolve(
+        agent=None,
+        repo=repo,
+        ai_settings={"task_assignment": {}, "ai_providers": {}},
+    )
+    repo.get_by_slug.assert_awaited_once_with("summarize")
+
+
+# ── 用户事故的正向用例 ────────────────────────────────────────────────
+
+
+async def test_provider_selected_model_no_longer_steers_summarization() -> None:
+    """用户事故形态:doubao 卡 selected_model = embedding 模型且 enabled。
+
+    旧解析器扫 provider 优先级,doubao 第一个命中 → 摘要拿 embedding id 打
+    /chat/completions,必败。收口后 provider 卡上的 selected_model 与摘要无关。
+    """
+    cfg = await _resolve(
+        agent={"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL},
+        ai_settings={
+            "task_assignment": {},
+            "ai_providers": {
+                "doubao": {
+                    "api_key": "user-doubao-key",
+                    "enabled": True,
+                    "selected_model": EMBEDDING_MODEL,
+                }
+            },
+        },
+    )
+    assert cfg.model == PROD_AGENT_MODEL
+    assert EMBEDDING_MODEL not in (cfg.model, cfg.provider_config.get("model"))
+    # agent 的模型是 doubao 前缀,所以仍然配到用户那张 doubao 卡的 key。
+    assert cfg.provider_key == "doubao"
+    assert cfg.provider_config["api_key"] == "user-doubao-key"
+    assert cfg.origin == "byok"
+
+
+async def test_openai_summary_model_field_is_no_longer_consulted() -> None:
+    """上一轮为旧扫描加的 openai ``summary_model`` / whisper 守卫连同扫描一起
+    删除:openai 卡的三个下拉都不再参与摘要模型解析。"""
+    cfg = await _resolve(
+        agent={"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL},
+        ai_settings={
+            "task_assignment": {},
+            "ai_providers": {
+                "openai": {
                     "api_key": "k",
                     "enabled": True,
-                    "selected_model": selected,
-                    "summary_model": "should-be-ignored",
+                    "selected_model": "whisper-1",
+                    "summary_model": "gpt-4o-mini",
                 }
             },
-        }
+            "default_summary_model": "gpt-3.5-turbo",
+        },
     )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
-
-    assert cfg.provider_key == provider_key
-    assert cfg.model == expected
+    assert cfg.model == PROD_AGENT_MODEL
+    assert not hasattr(helpers, "_summary_model_from_provider")
+    assert not hasattr(helpers, "resolve_summarization_config")
 
 
-async def test_openai_summary_model_ignored_when_openai_is_not_chosen():
-    """Priority is unchanged: doubao outranks openai, so openai's
-    summary_model must not leak into a doubao run."""
-    settings = _settings(
-        {
-            "ai_providers": {
-                "doubao": {
-                    "api_key": "db-key",
-                    "enabled": True,
-                    "selected_model": "doubao-pro",
-                },
-                "openai": {
-                    "api_key": "sk-user",
-                    "enabled": True,
-                    "selected_model": "whisper-1",
-                    "summary_model": "gpt-4o",
-                },
-            }
-        }
+# ── task_assignment.summarization(UI 下拉)现在真的生效 ────────────────
+
+
+async def test_assigned_agent_slug_is_honored() -> None:
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(
+        return_value={"slug": "my-summarizer", "model": "qwen-max"}
     )
-    with patch(
-        "app.services.ai.governance.ai_governance.get_module_governance",
-        AsyncMock(return_value=_unlocked()),
-    ):
-        cfg = await helpers.resolve_summarization_config("u", settings_json=settings)
+    cfg = await _resolve(
+        agent=None,
+        repo=repo,
+        ai_settings={
+            "task_assignment": {"summarization": "my-summarizer"},
+            "ai_providers": {"qwen": {"api_key": "k", "enabled": True}},
+        },
+    )
+    repo.get_by_slug.assert_awaited_once_with("my-summarizer")
+    assert cfg.agent_slug == "my-summarizer"
+    assert cfg.model == "qwen-max"
 
-    assert cfg.provider_key == "doubao"
-    assert cfg.model == "doubao-pro"
+
+async def test_nous_direct_pick_resolves_platform_config() -> None:
+    cfg = await _resolve(
+        agent={"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL},
+        ai_settings={
+            "task_assignment": {"summarization": "nous:mediahub-doubao-seed-2-0-lite"},
+            "ai_providers": {},
+        },
+        mediahub=(
+            "doubao",
+            {"api_key": "platform-key", "base_url": "https://ark", "model": "actual"},
+            "actual",
+        ),
+    )
+    assert cfg.origin == "platform"
+    assert cfg.model == "actual"
+    assert cfg.provider_config["api_key"] == "platform-key"
+    # 平台直选不读 agent 行 → 空 fallback 池(resolve_task_ai_config 的契约)。
+    assert cfg.fallback_models == ()
+
+
+# ── 生产真实走的分支:agent 行的裸 model 命中平台目录 ──────────────────
+
+
+async def test_agent_model_hitting_the_catalog_resolves_platform_config() -> None:
+    """**这是生产真实走的那条分支**(2026-08-20 审查 F3)。
+
+    agent 行存的是裸 provider id(`doubao-seed-2-0-lite-260428`),而
+    `mediahub_models` 有一行 `actual_model` 与之逐字相同 → `resolve_mediahub_model`
+    的 actual_model 兜底查找命中 → 用**平台** key/base_url,`origin="platform"`,
+    同时**保留 agent_slug**(提示词仍是这个 agent 的)。
+
+    两个后果值得钉住:摘要的付费主体从用户 BYOK 变成平台 key;以及摘要从此
+    依赖目录行可用(命中但 disabled 会 raise,不降级)。
+    """
+    cfg = await _resolve(
+        agent={
+            "slug": DEFAULT_SLUG,
+            "model": PROD_AGENT_MODEL,
+            "fallback_models": ["qwen-max"],
+        },
+        ai_settings={
+            "task_assignment": {},
+            # 用户自己也配了 doubao BYOK —— 平台目录命中后它不参与。
+            "ai_providers": {"doubao": {"api_key": "user-byok-key", "enabled": True}},
+        },
+        mediahub=(
+            "doubao",
+            {
+                "api_key": "platform-key",
+                "base_url": "https://ark.example/v1",
+                "model": PROD_AGENT_MODEL,
+                "app_id": "",
+            },
+            PROD_AGENT_MODEL,
+        ),
+    )
+    assert cfg.origin == "platform"
+    assert cfg.model == PROD_AGENT_MODEL
+    assert cfg.provider_config["api_key"] == "platform-key"
+    assert cfg.provider_config["api_key"] != "user-byok-key"
+    # 提示词仍来自这个 agent —— 平台目录只换凭证,不换 agent(#622/#623)。
+    assert cfg.agent_slug == DEFAULT_SLUG
+    # 读了 agent 行的分支才带 fallback 池。
+    assert cfg.fallback_models == ("qwen-max",)
+
+
+async def test_catalog_hit_but_disabled_fails_closed_no_byok_fallback() -> None:
+    """目录行被管理员禁用(或 nous 全局开关关掉)→ `resolve_mediahub_model`
+    raise,agent 行分支**不吞**这个异常(与 `nous:` 直选分支不同,那条有
+    try/except)。收口把这条 fail-closed 依赖引入了摘要:即便用户自己有健康的
+    BYOK key,也不会静默降级过去 —— 这是"不许静默降级"的代价,必须可见。
+    """
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    repo = _repo({"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=_allowed()),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=repo,
+        ),
+        patch.object(
+            helpers,
+            "get_ai_settings",
+            new=AsyncMock(
+                return_value={
+                    "task_assignment": {},
+                    "ai_providers": {
+                        "doubao": {"api_key": "user-byok", "enabled": True}
+                    },
+                }
+            ),
+        ),
+        patch.object(
+            helpers,
+            "resolve_mediahub_model",
+            new=_AsyncMock(
+                side_effect=RuntimeError(
+                    f"Platform model '{PROD_AGENT_MODEL}' is no longer available."
+                )
+            ),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="no longer available"):
+            await helpers.resolve_task_ai_config("user-1", TASK_KEY, DEFAULT_SLUG)
+
+
+# ── governance 锁定仍然最优先 ─────────────────────────────────────────
+
+
+async def test_governance_lock_short_circuits_before_the_agent_row() -> None:
+    repo = _repo({"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL})
+    cfg = await _resolve(
+        agent=None,
+        repo=repo,
+        governance=_locked(model="admin-model", api_key="admin-key"),
+        ai_settings={"task_assignment": {}, "ai_providers": {}},
+    )
+    assert cfg.origin == "governance"
+    assert cfg.model == "admin-model"
+    assert cfg.provider_config["api_key"] == "admin-key"
+    # 锁定分支不该读 agent 行 —— 用户/agent 配置一律被绕过。
+    repo.get_by_slug.assert_not_awaited()
+
+
+async def test_governance_locked_without_admin_key_fails_closed() -> None:
+    with pytest.raises(RuntimeError):
+        await _resolve(
+            agent={"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL},
+            governance=_locked(model="admin-model", api_key=""),
+            ai_settings={"task_assignment": {}, "ai_providers": {}},
+        )
+
+
+# ── fallback 池只从解析所依据的那一行 agent 带出 ──────────────────────
+
+
+async def test_fallback_models_come_from_the_resolved_agent_row() -> None:
+    cfg = await _resolve(
+        agent={
+            "slug": DEFAULT_SLUG,
+            "model": PROD_AGENT_MODEL,
+            "fallback_models": ["qwen-max", "deepseek-chat"],
+        },
+        ai_settings={
+            "task_assignment": {},
+            "ai_providers": {"doubao": {"api_key": "k", "enabled": True}},
+        },
+    )
+    assert cfg.fallback_models == ("qwen-max", "deepseek-chat")
+
+
+async def test_agent_without_model_resolves_to_empty_no_silent_default() -> None:
+    """无 fallback 契约:解析器不替 agent 编一个模型出来(工作流据此 raise)。"""
+    cfg = await _resolve(
+        agent={"slug": DEFAULT_SLUG, "model": ""},
+        ai_settings={
+            "task_assignment": {},
+            "ai_providers": {"doubao": {"api_key": "k", "enabled": True}},
+        },
+    )
+    assert cfg.model == ""
+    assert cfg.provider_config == {}

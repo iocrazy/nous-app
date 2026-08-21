@@ -39,6 +39,7 @@ vi.mock('../services/aiLibraryService', () => ({
       { id: '1', slug: 'analyze', name: 'Analyze', model: 'doubao', temperature: 0.7, max_tokens: 4096, is_system_preset: true },
       { id: '2', slug: 'caption', name: 'Caption', model: 'doubao', temperature: 0.7, max_tokens: 4096, is_system_preset: true },
       { id: '3', slug: 'classify', name: 'Classify', model: 'doubao', temperature: 0.7, max_tokens: 4096, is_system_preset: true },
+      { id: '4', slug: 'summarize', name: 'Summarize', model: 'doubao', temperature: 0.7, max_tokens: 4096, is_system_preset: true },
     ]),
   },
 }));
@@ -99,6 +100,20 @@ describe('AISettings task assignment — unset shows a Default option', () => {
     await waitFor(() => {
       expect(triggerForRow('Classification (Auto Tag)')).toHaveTextContent(
         'Default — [System] Classify'
+      );
+    });
+  });
+
+  it('labels the summarization default after the backend `summarize` agent', async () => {
+    // 2026-08-20 收口:摘要此前不解析任何 agent(工作流扫 provider 优先级),
+    // 所以这一行刻意不在 TASK_DEFAULT_AGENT_SLUG 里、显示的是泛化的
+    // "Default (system)"。现在它走 resolve_task_ai_config,后端兜底就是
+    // `summarize` 预设,标签必须如实说出来。
+    render(<AISettings settings={baseSettings} onSave={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(triggerForRow('Summarization')).toHaveTextContent(
+        'Default — [System] Summarize'
       );
     });
   });

@@ -34,6 +34,21 @@ from app.services.ai.skills.skill_tool_service import SkillToolService
 AGENT_SLUG = "summarize"
 
 
+class EmptySummaryError(RuntimeError):
+    """The agent answered, but its output carries no ``summary``.
+
+    F1 (2026-08-20 审查):摘要的模型来源收口到 agent 配置之后,
+    ``task_assignment.summarization`` 可以指向**任何**合法 agent —— 包括一个
+    输出契约完全不同的 agent(生产存量值就是 ``test-analyze``,一个视觉分析
+    agent)。它返回的 ``{"category":…,"objects":…}`` 是合法 JSON,``_parse_json``
+    解析成功,``summary`` 字段却不存在 → 旧代码会把空摘要写库并把任务标成
+    completed。**绿着成功、内容为空**比现在红着失败更糟:用户不会再报障,
+    缺陷从此不可见。
+
+    与"DBOS 失败必须 raise"同族:产出不满足契约就是失败,必须可见。
+    """
+
+
 @dataclass
 class SummarizeResult:
     """Parsed JSON output from the summarize agent."""
@@ -58,9 +73,16 @@ class SummarizeService:
         self,
         provider_key: str = "",
         provider_config: Optional[Dict[str, Any]] = None,
+        agent_slug: str = AGENT_SLUG,
     ) -> None:
         self._provider_key = (provider_key or "").strip()
         self._provider_config: Dict[str, Any] = dict(provider_config or {})
+        # ``agent_slug`` is the user's assigned summarization agent (resolved by
+        # resolve_task_ai_config from task_assignment.summarization). Mirrors
+        # CaptionService / VisualAnalysisService: the caller must compose the
+        # SAME agent whose model it resolved (#622/#623). Empty / unset → the
+        # built-in ``summarize`` preset.
+        self.AGENT_SLUG = (agent_slug or AGENT_SLUG).strip() or AGENT_SLUG
         self.model = self._provider_config.get("model") or ""
 
     @staticmethod
@@ -92,6 +114,24 @@ class SummarizeService:
             topics=[str(x) for x in tp if x],
             cost=cost,
             llm_model=llm_model,
+        )
+
+    def _require_summary(self, data: Dict[str, Any]) -> None:
+        """无产出即失败 —— 绝不把空摘要写进库并标 completed(F1)。
+
+        只校验 ``summary``:``key_points`` / ``topics`` 允许为空(模型给了正文
+        但没拆要点是可用结果),而没有正文的"摘要"不是。报错里带上 agent slug
+        与**键名**(不带值,避免把转写内容漏进日志),这样用户一眼能看出是指派
+        了一个输出契约不匹配的 agent,而不是模型坏了。
+        """
+        if str(data.get("summary") or "").strip():
+            return
+        keys = ", ".join(sorted(str(k) for k in data)) or "(none)"
+        raise EmptySummaryError(
+            f"agent '{self.AGENT_SLUG}' produced no summary field; check the "
+            f"assigned agent's prompt contract — it returned keys [{keys}] "
+            "instead of {summary, key_points, topics}. Pick a summarization "
+            "agent in Settings → AI → Summarization."
         )
 
     @staticmethod
@@ -152,21 +192,18 @@ class SummarizeService:
             )
         )
 
-        # Model-assignment fix (2026-07 audit): summarization's model is
-        # resolved PER-USER by resolve_summarization_config (the provider
-        # scan's selected_model, else default_summary_model) and threaded in
-        # through provider_config["model"] -> self.model. The composed
-        # ``summarize`` agent row carries no per-user model, so the composer
-        # falls back to its hardcoded "qwen-max" default -- a non-empty value
-        # that would win ``composed.model or self.model`` and SILENTLY DROP
-        # the user's assigned summary model (the last-mile-hardcode class:
-        # cf. visual-analysis, whisper). Mirrors the rule the deleted
-        # llm_analysis_service._run_agent used to codify: the caller's
-        # per-request model takes precedence over the agent row's, because
-        # summarize's model routing is set per-user in the task-assignment
-        # UI, not in the agent row. Only override when a resolved model
-        # exists, so the no-assignment path still degrades to the agent
-        # row / composer default.
+        # The resolved model wins over the composed agent row's own model.
+        # Both now come from the SAME agent (2026-08-20 收口:
+        # resolve_task_ai_config reads task_assignment.summarization → that
+        # agent row → its model), but they are not always the same STRING: a
+        # platform-catalog hit resolves the row's catalog name (e.g.
+        # ``mediahub-doubao-seed-2-0-lite``) down to the provider's real
+        # ``actual_model``, and governance / ``nous:<model>`` picks bypass the
+        # row entirely. self.model is the value that matches the api_key and
+        # base_url in ``provider_config``, so it must be the one dialed —
+        # otherwise the composer's raw row value would be POSTed against
+        # credentials resolved for a different id. Only override when a
+        # resolved model exists (the bare / smoke path keeps the row value).
         if self.model:
             composed = composed.model_copy(update={"model": self.model})
 
@@ -181,9 +218,10 @@ class SummarizeService:
             # shape ({"model","api_key","base_url"}), not the provider-keyed
             # dict get_adapter_for_user expects — provider_key tells
             # build_fallback_llm to wrap it per-attempt (final-review C1).
-            # "summarization" matches resolve_summarization_config's own
-            # governance module key (final-review I1) so the pre-resolved
-            # platform-catalog gate agrees with the primary model's resolver.
+            # "summarization" is this module's task_key in
+            # resolve_task_ai_config (governance module key + catalog module
+            # gate) so the pre-resolved platform-catalog gate agrees with the
+            # primary model's resolver.
             provider_key=self._provider_key,
             module="summarization",
         )
@@ -225,11 +263,15 @@ class SummarizeService:
                 if result.get("error"):
                     logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
+                data = self._parse_json(result.get("content") or "")
+                self._require_summary(data)
                 return self._to_result(
-                    self._parse_json(result.get("content") or ""),
-                    0.0,
-                    llm_model=self._actual_model(result, model),
+                    data, 0.0, llm_model=self._actual_model(result, model)
                 )
+            except EmptySummaryError:
+                # 契约违约必须可见,连 smoke 路径也不吞 —— 吞成 None 就退回
+                # 了"任务成功但内容为空"那条静默路径。
+                raise
             except Exception as e:
                 logger.error(f"[Summarize] bare run failed: {e}")
                 return None
@@ -264,10 +306,12 @@ class SummarizeService:
                 if result.get("error"):
                     logger.warning(f"[Summarize] runner error: {result.get('error')}")
                     return None
+                data = self._parse_json(content)
+                # RunRecorder 的 __aexit__ 会把这次 run 记成失败 —— 契约违约
+                # 在 agent_runs 里也该是红的,不是一次"成功但空"的调用。
+                self._require_summary(data)
                 return self._to_result(
-                    self._parse_json(content),
-                    0.0,
-                    llm_model=self._actual_model(result, model),
+                    data, 0.0, llm_model=self._actual_model(result, model)
                 )
         except AgentPausedError as err:
             logger.warning(f"[Summarize] agent paused: {err}")

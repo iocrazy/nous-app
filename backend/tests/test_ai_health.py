@@ -1,12 +1,11 @@
 """AI capability health — surfaces the invisible capability→agent→model
 →provider→key mapping so users can see (and fix) what each feature uses.
 
-Reuses the SAME resolvers the runtime uses so the panel can't drift from
-reality: resolve_task_ai_config for the agent-driven capabilities, and
-resolve_summarization_config for summarization (whose real workflow scans a
-hardcoded provider priority with no agent — audit finding D). The board is now
-honest about that path rather than reporting the agent-slug resolution the
-feature never runs.
+Reuses the SAME resolver the runtime uses so the panel can't drift from
+reality: resolve_task_ai_config for every capability in the board, including
+summarization since the 2026-08-20 收口 (its workflow used to scan a hardcoded
+provider priority with no agent, which is why the board needed a second
+resolver — audit finding D).
 """
 
 from __future__ import annotations
@@ -32,22 +31,12 @@ def _patch(monkeypatch, *, settings, resolver, runtime=None):
         # isolated from them.
         return []
 
-    async def _resolve_summ(uid, settings_json=None):
-        # Summarization resolves through its own path; echo the same tuple the
-        # agent resolver would return so the shared _evaluate assertions still
-        # exercise summarization, but with agent_slug="" (no agent) as the real
-        # resolver produces.
-        pk, cfg, model, _slug = resolver("summarization", "summarize")
-        origin = "byok" if (cfg.get("api_key") or "").strip() else "env"
-        return ResolvedAIConfig(pk, cfg, model, "", origin)
-
     async def _runtime(uid, task_types):
         return runtime or {}
 
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
     monkeypatch.setattr(ai_health, "resolve_task_ai_config", _resolve)
     monkeypatch.setattr(ai_health, "_system_capability_rows", _no_system_rows)
-    monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
     monkeypatch.setattr(ai_health, "fetch_runtime_summary", _runtime)
 
 
@@ -71,10 +60,11 @@ async def test_ok_when_model_and_key_present(monkeypatch):
     assert summ["status"] == "ok"
     assert summ["model"] == "qwen-max"
     assert summ["provider"] == "qwen"
-    # The board is now honest: summarization has no agent (it scans a hardcoded
-    # provider priority), so agent_slug is "" — not the agent-slug the old
-    # (never-run) resolution path reported.
-    assert summ["agent_slug"] == ""
+    # Summarization now resolves an agent like every other capability, so the
+    # board reports the slug whose model actually ran (2026-08-20 收口). The
+    # old expectation here was "" — the honest answer while the feature read
+    # no agent row at all.
+    assert summ["agent_slug"] == "summarize"
     assert summ["assigned"] is True
 
 
@@ -171,11 +161,14 @@ async def test_all_capabilities_present(monkeypatch):
     )
     rows = await ai_health.get_capability_health("u1")
     caps = {r["capability"] for r in rows}
+    # 每个 capability 的 key 必须是 workflow 真正传给 resolve_task_ai_config 的
+    # task_key(也是 task_assignment / TASK_MODULES 的键),否则板子读的指派与
+    # governance 都不是真实生效的那个 —— F4。
     assert caps == {
         "summarization",
         "visual_analysis",
         "caption",
-        "classify",
+        "classification",
         "translation",
     }
 
@@ -311,14 +304,8 @@ async def test_resolver_failure_is_isolated(monkeypatch):
     async def _no_system_rows(uid, ai_settings):
         return []
 
-    async def _resolve_summ(uid, settings_json=None):
-        return ResolvedAIConfig(
-            "qwen", {"model": "qwen-max", "api_key": "sk"}, "qwen-max", "", "byok"
-        )
-
     monkeypatch.setattr(ai_health, "get_ai_settings", _get_ai_settings)
     monkeypatch.setattr(ai_health, "resolve_task_ai_config", _resolve)
-    monkeypatch.setattr(ai_health, "resolve_summarization_config", _resolve_summ)
     monkeypatch.setattr(ai_health, "_system_capability_rows", _no_system_rows)
 
     rows = await ai_health.get_capability_health("u1")
@@ -326,3 +313,26 @@ async def test_resolver_failure_is_isolated(monkeypatch):
     caption = next(r for r in rows if r["capability"] == "caption")
     assert caption["status"] == "error"
     assert all(r["status"] != "error" for r in rows if r["capability"] != "caption")
+
+
+@pytest.mark.asyncio
+async def test_capability_task_keys_match_the_real_workflow_task_keys():
+    """板子的诚实性靠"跟真实路径用同一个 task_key"保证 —— 逐条对齐,漂一个就红。
+
+    右边这些字符串是各 workflow 调用 resolve_task_ai_config 时真正传的
+    task_key(见 ai_summary / analyze_l1 / caption_asset / classify_asset /
+    resources_ai_router),也是 ai_governance.TASK_MODULES 的键。
+    """
+    from app.services.ai.governance.ai_governance import TASK_MODULES
+
+    keys = {task_key for task_key, *_ in ai_health._CAPABILITIES}
+    assert keys == {
+        "summarization",
+        "visual_analysis",
+        "caption",
+        "classification",
+        "translation",
+    }
+    # 每个 key 都必须是一个真正被 governance 认识的任务模块,否则
+    # get_module_governance 会静默落到 chat 分支。
+    assert keys <= set(TASK_MODULES)

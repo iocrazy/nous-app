@@ -3,8 +3,8 @@
 Case groups:
   1. ResolvedAIConfig.fallback_models 默认 (),老式五参构造仍成立(向后兼容)。
   2. resolve_task_ai_config 在 agent 行分支把行上的 fallback_models 带出
-     (行无该键/None → ())。非 agent 行分支(governance / nous: 直连 /
-     resolve_summarization_config 的 byok 直连,均不读 agent 行) → ()。
+     (行无该键/None → ())。非 agent 行分支(governance / nous: 直连,均不读
+     agent 行) → ()。摘要 2026-08-20 收口后也走这个 agent 行分支。
   3. VisualAnalysisService:链替换裸 adapter;AllModelsFailed propagate;
      AgentPausedError → None 维持;error-dict → None 维持;bare
      user_id=None 路径未改动。
@@ -245,27 +245,46 @@ async def test_resolve_task_ai_config_nous_direct_pick_fallback_models_empty() -
 
 
 @pytest.mark.asyncio
-async def test_resolve_summarization_config_byok_direct_fallback_models_empty() -> None:
-    """resolve_summarization_config never reads an agent row (hardcoded
-    provider-priority scan) — its byok origin must stay at the default ()."""
+async def test_summarization_byok_carries_the_agent_rows_fallback_models() -> None:
+    """摘要自 2026-08-20 起走同一个 agent 解析器,所以 byok 分支也带得出 agent
+    行的 fallback 池(旧的 provider-priority 扫描永远是空的)。"""
     from app.services.ai.providers import ai_provider_helpers as helpers_mod
 
-    settings_json = {
-        "ai_settings": {
-            "ai_providers": {"doubao": {"api_key": "k", "enabled": True}},
+    mock_repo = MagicMock()
+    mock_repo.get_by_slug = AsyncMock(
+        return_value={
+            "slug": "summarize",
+            "model": "doubao-seed-2-0-lite-260428",
+            "fallback_models": ["qwen-max"],
         }
+    )
+    ai_settings = {
+        "task_assignment": {},
+        "ai_providers": {"doubao": {"api_key": "k", "enabled": True}},
     }
 
-    with patch(
-        "app.services.ai.governance.ai_governance.resolve_locked_module_config",
-        new=AsyncMock(return_value=None),
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=_allowed_governance()),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=mock_repo,
+        ),
+        patch.object(
+            helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
+        ),
+        patch.object(
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+        ),
     ):
-        cfg = await helpers_mod.resolve_summarization_config(
-            "user-1", settings_json=settings_json
+        cfg = await helpers_mod.resolve_task_ai_config(
+            user_id="user-1", task_key="summarization", default_slug="summarize"
         )
 
     assert cfg.origin == "byok"
-    assert cfg.fallback_models == ()
+    assert cfg.fallback_models == ("qwen-max",)
 
 
 # ---------------------------------------------------------------------------

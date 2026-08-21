@@ -287,9 +287,11 @@ const EnabledModelsField: React.FC<{
   onRemove: (modelId: string) => void;
   /**
    * The model this provider's legacy single-model paths actually use —
-   * ``selected_model``. Summarization resolves exactly this value (backend
-   * ai_provider_helpers.resolve_summarization_config), which is how an
-   * embedding model ended up being POSTed to /chat/completions in production.
+   * ``selected_model``. Summarization USED to resolve exactly this value,
+   * which is how an embedding model ended up being POSTed to
+   * /chat/completions in production; as of the 2026-08-20 收口 it reads the
+   * assigned agent's model instead (backend resolve_task_ai_config), so this
+   * field no longer steers summarization.
    */
   selectedModel?: string;
   /**
@@ -981,12 +983,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   // DEFAULT_*_AGENT_SLUG constants (L368-372) and the resolve_*_provider_config
   // wrappers that pass them (L974-1030). Both sides must be kept in sync — a
   // wrong entry here mislabels what actually runs.
-  // `summarization` is absent on purpose: it resolves no agent at all (its
-  // workflow scans a hardcoded provider priority — resolve_summarization_config,
-  // same file L703), so it degrades to the generic "Default (system)" label.
+  // `summarization` joined this table on 2026-08-20: its workflow used to scan
+  // a hardcoded provider priority and read no agent row at all (so the picker
+  // above wrote a value nothing consumed); it now resolves through the same
+  // resolve_task_ai_config path as the others, defaulting to `summarize`.
   const TASK_DEFAULT_AGENT_SLUG: Partial<
     Record<keyof AISettingsType['task_assignment'], string>
   > = {
+    summarization: 'summarize',
     visual_analysis: 'analyze',
     translation: 'translate',
     caption: 'caption',

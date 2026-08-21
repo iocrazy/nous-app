@@ -2,8 +2,10 @@
 statements/params after the Phase C task 1 raw-SQL-to-ORM migration.
 
 Phase B2 Task 1 (2026-08-04) had already moved the SECOND read
-(user_settings.settings_json, consulted by ``resolve_summarization_config``)
-onto ``read_scope()``. Phase C task 1 moved the FIRST read (the
+(user_settings.settings_json — since the 2026-08-20 收口 it is
+``resolve_task_ai_config`` → ``get_ai_settings`` that owns it, which is why the
+resolver seam is patched rather than fed through ``read_scope``) onto
+``read_scope()``. Phase C task 1 moved the FIRST read (the
 parsed_media+resources+resource_transcripts JOIN, previously raw
 ``db_engine.fetch_one``) onto the SAME ``read_scope()`` seam, and
 ``persist_summary``'s raw ``engine.begin()`` three-statement transaction onto
@@ -14,7 +16,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -70,48 +72,106 @@ async def test_load_summary_inputs_raises_when_no_transcript():
             await m.load_summary_inputs(1, "u")
 
 
-async def test_load_summary_inputs_raises_when_no_user_settings():
+def _fake_resolver(ai_settings: dict, agent: Any):
+    """Patch the two DB seams resolve_task_ai_config owns (user settings +
+    agent row) plus the catalog lookup, leaving the real resolver running."""
+    from app.services.ai.governance.ai_governance import AIModuleGovernance
+    from app.services.ai.providers import ai_provider_helpers as helpers_mod
+
+    repo = MagicMock()
+    repo.get_by_slug = AsyncMock(return_value=agent)
+    return (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=AIModuleGovernance(allowed=True)),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository", return_value=repo
+        ),
+        patch.object(
+            helpers_mod, "get_ai_settings", new=AsyncMock(return_value=ai_settings)
+        ),
+        patch.object(
+            helpers_mod, "resolve_mediahub_model", new=AsyncMock(return_value=None)
+        ),
+    )
+
+
+async def test_load_summary_inputs_uses_the_agent_model_without_user_settings():
+    """收口后没有 user_settings 也能解析:模型来自 summarize agent 行。
+
+    旧路径在这里 raise("no user_settings") —— 因为它只会从用户的 provider 卡
+    里找模型。现在模型是 agent 配置,用户没配 BYOK 不影响它被解析出来。
+    """
     import app.workflows.ai_summary as m
 
     row = {"transcript": "t", "pm_id": 1, "title": "x", "resource_id": 123}
+    gov, repo, settings, catalog = _fake_resolver(
+        {}, {"slug": "summarize", "model": "doubao-seed-2-0-lite-260428"}
+    )
 
-    with patch.object(
-        db_session,
-        "read_scope",
-        _fake_read_scope(execute_row=row, settings_json=None),
+    with (
+        patch.object(db_session, "read_scope", _fake_read_scope(execute_row=row)),
+        gov,
+        repo,
+        settings,
+        catalog,
     ):
-        with pytest.raises(RuntimeError, match="no user_settings"):
+        out = await m.load_summary_inputs(1, "u")
+
+    assert out["provider_config"]["model"] == "doubao-seed-2-0-lite-260428"
+    assert out["agent_slug"] == "summarize"
+
+
+async def test_load_summary_inputs_raises_when_the_agent_has_no_model():
+    """无 fallback 契约:没有可用模型就直接失败,不静默退到 composer 的
+    硬编码 "qwen-max"。"""
+    import app.workflows.ai_summary as m
+
+    row = {"transcript": "t", "pm_id": 1, "title": "x", "resource_id": 123}
+    gov, repo, settings, catalog = _fake_resolver(
+        {}, {"slug": "summarize", "model": ""}
+    )
+
+    with (
+        patch.object(db_session, "read_scope", _fake_read_scope(execute_row=row)),
+        gov,
+        repo,
+        settings,
+        catalog,
+    ):
+        with pytest.raises(RuntimeError, match="no model configured"):
             await m.load_summary_inputs(1, "u")
 
 
-async def test_load_summary_inputs_picks_first_enabled_provider():
+async def test_load_summary_inputs_pairs_agent_model_with_the_users_key():
     import app.workflows.ai_summary as m
 
     row = {"transcript": "t", "pm_id": 1, "title": "Title", "resource_id": 999}
-
-    settings_json = {
-        "ai_settings": {
-            "ai_providers": {
-                # doubao absent → qwen is the first enabled match
-                "qwen": {
-                    "api_key": "k",
-                    "enabled": True,
-                    "selected_model": "qwen-x",
-                }
-            }
-        }
+    ai_settings = {
+        "task_assignment": {},
+        # 事故形态:用户的 qwen 卡 selected_model 是个非聊天模型,与摘要无关。
+        "ai_providers": {
+            "qwen": {"api_key": "k", "enabled": True, "selected_model": "text-embed"}
+        },
     }
+    gov, repo, settings, catalog = _fake_resolver(
+        ai_settings, {"slug": "summarize", "model": "qwen-x"}
+    )
 
-    with patch.object(
-        db_session,
-        "read_scope",
-        _fake_read_scope(execute_row=row, settings_json=settings_json),
+    with (
+        patch.object(db_session, "read_scope", _fake_read_scope(execute_row=row)),
+        gov,
+        repo,
+        settings,
+        catalog,
     ):
         out = await m.load_summary_inputs(1, "u")
 
     assert out["provider_key"] == "qwen"
     assert out["resource_id"] == "999"  # bigint id surfaced as str for DBOS memo
     assert out["provider_config"]["model"] == "qwen-x"
+    assert out["provider_config"]["api_key"] == "k"
 
 
 # ── persist_summary: 3 writes in ONE write_scope() transaction, bigint rid ──

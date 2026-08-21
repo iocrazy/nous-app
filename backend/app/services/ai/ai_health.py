@@ -5,7 +5,7 @@ The mapping that decides which model+key each AI feature uses is spread
 across task_assignment, ai_agents.model, and ai_providers — invisible in
 the UI, and a broken key fails silently (the ark-key visual-analysis
 outage that motivated this). This module resolves each capability through
-the EXACT runtime resolver (resolve_task_provider_config) and reports an
+the EXACT runtime resolver (resolve_task_ai_config) and reports an
 actionable status so the Settings panel can show a status board.
 """
 
@@ -19,7 +19,6 @@ from app.services.ai.providers.ai_provider_helpers import (
     get_ai_settings,
     resolve_embedding_ai_config,
     resolve_scorer_config,
-    resolve_summarization_config,
     resolve_task_ai_config,
     resolve_transcription_config,
 )
@@ -38,7 +37,12 @@ _CAPABILITIES: list[tuple[str, str, str, bool, str | None]] = [
     ("summarization", "summarize", "Rewrite (summary)", False, None),
     ("visual_analysis", "analyze", "Analyze (visual)", True, "ai_extract"),
     ("caption", "caption", "Image → Prompt", True, None),
-    ("classify", "classify", "Auto Tag", True, None),
+    # ⚠️ task_assignment key 是 "classification"(与 workflow / TASK_MODULES /
+    # 前端 types.ts 一致),default agent slug 才是 "classify" —— 两个命名空间。
+    # 2026-08-20 审查 F4:这里此前两个都写成 "classify",于是板子读不到用户真正
+    # 指派的分类 agent(显示默认那个),而 get_module_governance("classify") 不在
+    # TASK_MODULES 里会落到 chat 分支,分类的 governance 锁定在板子上不可见。
+    ("classification", "classify", "Auto Tag", True, None),
     ("translation", "translate", "Translation", False, None),
 ]
 
@@ -156,27 +160,18 @@ async def get_capability_health(user_id: str) -> list[dict[str, Any]]:
     for task_key, default_slug, label, needs_vision, task_type in _CAPABILITIES:
         assigned = bool((assignments.get(task_key) or "").strip())
         try:
-            if task_key == "summarization":
-                # Summarization does NOT run through the agent-slug resolver:
-                # its real workflow (ai_summary.load_summary_inputs) scans a
-                # hardcoded provider priority + default_summary_model, with no
-                # agent and no user nous-pick. Reporting it via
-                # resolve_task_provider_config (audit finding D) showed a
-                # model/provider the feature never uses. Resolve through the
-                # TRUE path so the board is honest. Pass the already-loaded
-                # settings (avoids a second read + the resolver's no-settings
-                # raise); agent_slug is always "" here.
-                cfg = await resolve_summarization_config(
-                    user_id, settings_json={"ai_settings": ai_settings}
-                )
-                provider_key, model, slug = cfg.provider_key, cfg.model, cfg.agent_slug
-                origin = cfg.origin
-                resolved_config = cfg.provider_config
-            else:
-                cfg = await resolve_task_ai_config(user_id, task_key, default_slug)
-                provider_key, model, slug = cfg.provider_key, cfg.model, cfg.agent_slug
-                origin = cfg.origin
-                resolved_config = cfg.provider_config
+            # EVERY capability in this table — summarization included as of the
+            # 2026-08-20 收口 — resolves through the one agent-config resolver
+            # the real workflows call. Summarization used to need a special
+            # case here because its workflow scanned a hardcoded provider
+            # priority instead of reading an agent row; that path is gone, and
+            # with it the risk that the board reports a chain the feature
+            # doesn't use (the "Resolve through the TRUE path" rule that
+            # motivated the special case is now satisfied by uniformity).
+            cfg = await resolve_task_ai_config(user_id, task_key, default_slug)
+            provider_key, model, slug = cfg.provider_key, cfg.model, cfg.agent_slug
+            origin = cfg.origin
+            resolved_config = cfg.provider_config
             status, hint = _evaluate(
                 provider_key=provider_key,
                 model=model,

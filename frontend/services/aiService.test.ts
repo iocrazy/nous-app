@@ -274,6 +274,34 @@ describe('saveAISettings', () => {
     expect(body.whisper_provider).toBe('local');
   });
 
+  it('never posts an agent slug as a model — default_summary_model/default_analysis_model are not sent at all', async () => {
+    // task_assignment.summarization / .visual_analysis 存的是 AGENT SLUG。
+    // 旧映射把它们写进两个名字叫"模型"的字段(default_summary_model 一度还是
+    // 摘要解析的末级兜底),于是 "summarize" 这种 slug 会被当模型名存下来。
+    // 2026-08-20 收口后已无任何读取方 —— 干脆不发,省得再造同一个混淆。
+    // 后端是 `if body.default_summary_model is not None`,省略不会覆盖存量值。
+    const spy = stubJson({ success: true });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {},
+      task_assignment: {
+        transcription: '',
+        summarization: 'summarize',
+        visual_analysis: 'analyze',
+        image_generation: '',
+        script_generation: '',
+      },
+    });
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body).not.toHaveProperty('default_summary_model');
+    expect(body).not.toHaveProperty('default_analysis_model');
+    // 指派本身照常送出 —— 后端就是从这里读 agent slug 的。
+    expect(body.task_assignment.summarization).toBe('summarize');
+  });
+
   it('strips read-only masking fields (api_key_set/hint/count) before sending — they are GET-only metadata, never a write payload', async () => {
     const spy = stubJson({ success: true });
     await saveAISettings({
