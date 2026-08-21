@@ -59,6 +59,30 @@ def _track_payload(track: MusicChartTracks) -> dict[str, Any]:
     }
 
 
+#: The one chart kind that must never be cached.
+#:
+#: ⚠️ 「推荐」 is computed by the platform FROM THE UPLOADED MATERIAL — it is not
+#: a chart, it is an analysis of your post. Measured 2026-08-21 with a
+#: controlled experiment (two harvests back to back, only the seed image
+#: changed):
+#:
+#:     热门榜  identical, 20/20      ← control: rules out time rotation
+#:     飙升榜  identical, 19/19      ← control
+#:     推荐    7 of 20 different     ← same account, same minute, different seed
+#:
+#: And a harvest seeds a blank grey square, because borrowing the user's own
+#: media for a background job is not something a background job may decide. So
+#: a cached 「推荐」 is *the platform's recommendation for a blank grey square* —
+#: it would sit in the panel's first tab claiming to be tailored to a post it
+#: has never seen.
+#:
+#: Dropped at the STORAGE boundary rather than hidden in the UI: a row that
+#: exists but must never be rendered is a row that eventually gets rendered.
+#: A genuinely tailored recommendation is still possible — it just has to be
+#: fetched with the real material, which costs a browser run, and that is a
+#: decision for the user to make in the moment, not for a sweeper to fake.
+UNCACHEABLE_KINDS = frozenset({"recommend"})
+
 #: What `replace_charts` does with one harvested chart.
 WRITE_REPLACE = "replace"
 WRITE_KEEP = "keep"
@@ -86,6 +110,10 @@ def plan_chart_write(chart: Mapping[str, Any]) -> str:
     kind = str(chart.get("category_kind") or "").strip()
     category_id = str(chart.get("category_id") or "").strip()
     if not kind or not category_id:
+        return WRITE_SKIP
+    if kind in UNCACHEABLE_KINDS:
+        # Not "we failed to read it" — we read it fine and it is not ours to
+        # keep. See `UNCACHEABLE_KINDS`.
         return WRITE_SKIP
     return WRITE_REPLACE if bool(chart.get("ok")) else WRITE_KEEP
 
@@ -436,6 +464,7 @@ class MusicChartsRepository:
 
 __all__ = [
     "MusicChartsRepository",
+    "UNCACHEABLE_KINDS",
     "read_incoming_tracks",
     "WRITE_KEEP",
     "WRITE_REPLACE",

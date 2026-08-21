@@ -14,6 +14,7 @@ import datetime
 import pytest
 
 from app.repositories.music_charts_repository import (
+    UNCACHEABLE_KINDS,
     WRITE_KEEP,
     WRITE_REPLACE,
     WRITE_SKIP,
@@ -275,3 +276,42 @@ def test_a_track_missing_its_id_or_name_is_dropped_not_filled_in():
 def test_a_chart_with_no_songs_key_reads_as_no_tracks_without_raising():
     """空收藏夹的真实形状：连 `songs` 键都没有（实测 137 字节）。"""
     assert read_incoming_tracks({"ok": True, "status_code": 0}) == []
+
+
+# ── 「推荐」不进缓存 ────────────────────────────────────────────────────
+#
+# 2026-08-21 受控实验(背靠背两次采集,只换种子图):
+#
+#     热门榜  逐首相同 20/20     ← 对照组,排除时间轮换
+#     飙升榜  逐首相同 19/19     ← 对照组
+#     推荐    20 首里 7 首不同   ← 同账号、同一分钟、只换了上传的图
+#
+# 「推荐」是平台**针对上传素材**算出来的,不是榜单。而采集用的是一块灰色方块
+# ——后台任务不该擅自拿用户自己的素材去传。所以缓存里的「推荐」= 平台针对一块
+# 灰方块的推荐,而它本来还占着面板第一个 tab。
+
+
+def test_the_recommended_chart_is_never_cached():
+    """**本组的守卫。** 它是"读到了但不该留",不是"没读到"。"""
+    assert (
+        plan_chart_write({"category_kind": "recommend", "category_id": "1", "ok": True})
+        == WRITE_SKIP
+    )
+
+
+def test_every_other_chart_is_still_cached():
+    """正向对照。少了它,一个"什么都 skip"的实现也能让上面那条过。"""
+    for kind in ("rank", "fav", "category"):
+        assert (
+            plan_chart_write({"category_kind": kind, "category_id": "9", "ok": True})
+            == WRITE_REPLACE
+        ), kind
+
+
+def test_only_the_content_derived_kind_is_on_the_list():
+    """名单要留得住 —— 往里加一项等于宣布"这个也测出来是按内容算的"。
+
+    实测的三个对照组(rank 两次逐首相同)说明它们与素材无关,所以名单**只有**
+    recommend 一个;把它扩大会静默砍掉真实可缓存的榜单。
+    """
+    assert UNCACHEABLE_KINDS == frozenset({"recommend"})
