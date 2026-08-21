@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { mediaSrc } from '../smart/mediaUrl';
 import { CropTool } from './CropTool';
@@ -73,12 +74,13 @@ const MODE_META: Array<{
   label: string;
   icon: React.ReactNode;
   apply?: string;
+  hint?: string;
 }> = [
-  { mode: 'preview', label: 'Preview', icon: <Eye size={13} /> },
+  { mode: 'preview', label: 'Preview', icon: <Eye size={13} />, hint: 'Scroll to zoom, drag to pan' },
   { mode: 'crop', label: 'Crop', icon: <CropIcon size={13} />, apply: 'Apply Crop' },
   { mode: 'outpaint', label: 'Expand', icon: <Expand size={13} />, apply: 'Apply Expand' },
-  { mode: 'mask', label: 'Mask', icon: <BrushIcon size={13} />, apply: 'Cut Out' },
-  { mode: 'brush', label: 'Brush', icon: <Paintbrush size={13} />, apply: 'Apply Brush' },
+  { mode: 'mask', label: 'Mask', icon: <BrushIcon size={13} />, apply: 'Cut Out', hint: 'Paint the area to edit — white becomes the mask' },
+  { mode: 'brush', label: 'Brush', icon: <Paintbrush size={13} />, apply: 'Apply Brush', hint: 'Draw annotations or sketches directly on the image' },
   { mode: 'resize', label: 'Resize', icon: <Minimize2 size={13} />, apply: 'Apply Resize' },
   { mode: 'split', label: 'Split', icon: <Grid3x3 size={13} />, apply: 'Split' },
 ];
@@ -186,15 +188,29 @@ export function UnifiedImageEditor({
 
   const meta = MODE_META.find((m) => m.mode === mode)!;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+  // PORTAL to body: the editor mounts inside a React Flow node's DOM —
+  // without the portal RF treats every pointer-drag on the modal as a NODE
+  // DRAG (2026-08-21: brush strokes didn't paint and dragging moved the
+  // node under the modal). The scrim also carries nodrag/nopan for any
+  // event that still bubbles.
+  return createPortal(
+    <div className="nodrag nopan fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div
         data-testid="unified-image-editor"
         className="flex h-[92vh] w-[94vw] max-w-6xl flex-col rounded-2xl bg-canvas-card p-4 shadow-2xl"
       >
       {/* Header: centered mode tab bar (IC image-edit-mode) + download/close
-          floated right — the IC card puts tabs top-center. */}
+          floated right; mode title + usage hint pinned top-left (IC 左上角
+          「遮罩编辑 / 在要重绘的位置涂白…」说明). */}
       <div className="relative mb-3 flex items-center justify-center gap-2">
+        <div className="absolute left-0 max-w-[26%]">
+          <div className="text-sm font-bold text-canvas-text">{meta.label}</div>
+          {meta.hint && (
+            <div className="truncate text-[11px] text-canvas-muted" title={meta.hint}>
+              {meta.hint}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-1 rounded-xl border border-canvas-line bg-canvas-bg p-1">
           {MODE_META.filter((m) => enabled(m.mode)).map((m) => (
             <button
@@ -582,6 +598,7 @@ export function UnifiedImageEditor({
         )}
       </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

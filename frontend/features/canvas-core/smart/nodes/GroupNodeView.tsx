@@ -329,8 +329,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           min={200}
           max={2000}
           minHeight={140}
-          onChange={(w) => resizeGroup(w)}
-          onHeightChange={(h) => resizeGroup(groupW, h)}
+          onChange={(w, h) => resizeGroup(w, h)}
         />
       )}
     </div>

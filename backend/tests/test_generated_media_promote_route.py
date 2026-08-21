@@ -85,3 +85,28 @@ async def test_promote_route_404_when_not_in_scope(monkeypatch, client):
 
     resp = await client.post("/api/v1/generated-media/999/promote")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_promote_route_establishes_ambient_scope(monkeypatch, client):
+    """Prod 2026-08-21: promote 500ed with UnscopedQueryError — the route
+    called the service with no ambient Scope, so the Resources INSERT hit
+    the scoped-ORM guard. The route must wrap the call in request_scope."""
+    from app.db.scope import current_scope
+
+    seen: dict = {}
+
+    async def _fake_scope(auth):
+        return 42
+
+    class _FakeSvc:
+        async def promote(self, *, gen_id, user_id, target_scope_id):
+            seen["scope"] = current_scope()
+            return {"id": 777}
+
+    monkeypatch.setattr(r, "_scope", _fake_scope)
+    monkeypatch.setattr(r, "PromoteGeneratedMediaService", lambda: _FakeSvc())
+    resp = await client.post("/api/v1/generated-media/1/promote")
+    assert resp.status_code == 200, resp.text
+    assert seen.get("scope") is not None, "service ran without an ambient scope"
+    assert str(seen["scope"].user_id) == FAKE_USER_ID
