@@ -18,6 +18,9 @@ vi.mock('react-i18next', () => ({
 }));
 
 const streamChatMessage = vi.fn();
+/** See getChatSession below — lets a test freeze the history refetch. */
+let holdHistoryReload = false;
+let releaseHistoryReload: (() => void) | null = null;
 const SESSION = { id: 'sess-1', title: 'New conversation', agent_slug: 'analyze' };
 
 vi.mock('../services/aiLibraryService', () => ({
@@ -27,7 +30,17 @@ vi.mock('../services/aiLibraryService', () => ({
     ]),
     listChatSessions: vi.fn(async () => [SESSION]),
     listAllChatSessions: vi.fn(async () => []),
-    getChatSession: vi.fn(async () => ({ ...SESSION, messages: [] })),
+    getChatSession: vi.fn(async () => {
+      // The post-send history refetch can be held open, so a test can look
+      // at the panel during the window where only the OPTIMISTIC bubble
+      // exists. Off by default; the initial mount never waits.
+      if (holdHistoryReload) {
+        await new Promise<void>((resolve) => {
+          releaseHistoryReload = resolve;
+        });
+      }
+      return { ...SESSION, messages: [] };
+    }),
     createChatSession: vi.fn(async () => SESSION),
     updateChatSession: vi.fn(async () => SESSION),
     deleteChatSession: vi.fn(async () => undefined),
@@ -120,6 +133,8 @@ function attachmentRow(): HTMLElement {
 beforeEach(() => {
   vi.clearAllMocks();
   composerEditor = null;
+  holdHistoryReload = false;
+  releaseHistoryReload = null;
   // jsdom has no layout. Both the message list's autoscroll and
   // prosemirror's scroll-caret-into-view walk the DOM for geometry, and a
   // throw there surfaces as an UNHANDLED error — vitest exits non-zero
@@ -267,6 +282,39 @@ describe('sending', () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId('staged-resource-chip')).toBeNull();
+    });
+  });
+
+  it('shows the asset chip in the user bubble before history is refetched', async () => {
+    // The optimistic bubble used to map only uploaded files, dropping the
+    // resource_refs — so the chip appeared only once the authoritative
+    // reload landed, popping in visibly after the turn. Holding the refetch
+    // open is what makes "before" a real, non-racy moment: while it is
+    // frozen, anything on screen can ONLY have come from the local append.
+    await renderPanel();
+    await waitFor(() => {
+      useGlobalChatStore.getState().sendResourceToChat(PENDING);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('staged-resource-chip')).toBeVisible();
+    });
+
+    holdHistoryReload = true;
+    fireEvent.click(screen.getByTitle('Send message'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bubble-resource-chip')).toBeVisible();
+    });
+    expect(screen.getByTestId('bubble-resource-chip')).toHaveTextContent('pitch.mp4');
+    // Still genuinely pre-reload: the refetch is parked inside handleSend.
+    expect(releaseHistoryReload).not.toBeNull();
+
+    // Control: this session's history is empty, so letting the refetch
+    // finish clears the bubble. The chip asserted above therefore came from
+    // the optimistic append and nowhere else.
+    releaseHistoryReload!();
+    await waitFor(() => {
+      expect(screen.queryByTestId('bubble-resource-chip')).toBeNull();
     });
   });
 
