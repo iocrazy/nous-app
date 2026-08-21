@@ -18,12 +18,12 @@ import os
 import tempfile
 from typing import Optional
 
-from app.db.scope import Scope, request_scope
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
+from app.db.scope import Scope, request_scope
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.services.library.media_serving import (
     filesystem_response,
