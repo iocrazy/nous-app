@@ -23,6 +23,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
+from app.db.scope import Scope, request_scope
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.services.library.media_serving import (
     filesystem_response,
@@ -375,12 +376,18 @@ async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
 @router.post("/{gen_id}/promote")
 async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
     target_scope_id = await _scope(auth)
-    try:
-        resource = await PromoteGeneratedMediaService().promote(
-            gen_id=gen_id, user_id=str(auth.user_id), target_scope_id=target_scope_id
-        )
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    # The service INSERTs a scoped model (Resources) — the scoped-ORM guard
+    # requires an ambient Scope at the request boundary (2026-08-21 prod
+    # UnscopedQueryError: promote 500ed for every upload).
+    async with request_scope(Scope(user_id=str(auth.user_id))):
+        try:
+            resource = await PromoteGeneratedMediaService().promote(
+                gen_id=gen_id,
+                user_id=str(auth.user_id),
+                target_scope_id=target_scope_id,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
     return {"data": {"promoted_resource_id": str(resource["id"])}}

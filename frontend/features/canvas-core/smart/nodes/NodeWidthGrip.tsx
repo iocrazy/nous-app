@@ -13,7 +13,6 @@ export function NodeWidthGrip({
   min,
   max = 1200,
   onChange,
-  onHeightChange,
   heightValue,
   minHeight = 80,
 }: {
@@ -21,9 +20,11 @@ export function NodeWidthGrip({
   value: number;
   min: number;
   max?: number;
-  onChange: (w: number) => void;
-  /** When set, the grip also drags height (group nodes). */
-  onHeightChange?: (h: number) => void;
+  /** Single callback — width always, height only when heightValue given.
+   *  Two separate callbacks stomped each other via stale closures (the
+   *  2026-08-21 "只能上下缩放" bug: the height call rewrote width with an
+   *  old value on every move). */
+  onChange: (w: number, h?: number) => void;
   heightValue?: number;
   minHeight?: number;
 }) {
@@ -44,9 +45,12 @@ export function NodeWidthGrip({
         if (!d) return;
         e.preventDefault();
         e.stopPropagation();
-        onChange(Math.min(max, Math.max(min, Math.round(d.w + e.clientX - d.x))));
-        if (onHeightChange)
-          onHeightChange(Math.max(minHeight, Math.round(d.h + e.clientY - d.y)));
+        const w = Math.min(max, Math.max(min, Math.round(d.w + e.clientX - d.x)));
+        if (heightValue !== undefined) {
+          onChange(w, Math.max(minHeight, Math.round(d.h + e.clientY - d.y)));
+        } else {
+          onChange(w);
+        }
       }}
       onPointerUp={(e) => {
         drag.current = null;
