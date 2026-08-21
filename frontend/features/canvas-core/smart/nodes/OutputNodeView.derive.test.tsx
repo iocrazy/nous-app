@@ -125,7 +125,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
@@ -170,7 +170,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => {
@@ -196,7 +196,7 @@ describe('OutputNodeView — Commit derives and swaps the resource', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('crop-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
     // deriveCrop must NOT be called when there's no source resource.

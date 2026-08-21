@@ -4,18 +4,14 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import { createMediaNodeFromFiles } from '../dropCreate';
 import { OutputNodeView } from './OutputNodeView';
 
 // ----- Module mocks ---------------------------------------------------
 
-vi.mock('../../services/canvasService', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../services/canvasService')>();
-  return {
-    ...actual,
-    deriveMaskCutout: vi.fn(),
-  };
-});
+vi.mock('../dropCreate', () => ({
+  createMediaNodeFromFiles: vi.fn(() => Promise.resolve('mask-node-1')),
+}));
 
 vi.mock('../../editor/maskExport', () => ({
   strokesToMaskPngBase64: vi.fn(() => 'MASKB64'),
@@ -36,7 +32,6 @@ vi.mock('../../../../supabaseClient', () => ({
   }),
 }));
 
-const { deriveMaskCutout } = await import('../../services/canvasService');
 const { strokesToMaskPngBase64 } = await import('../../editor/maskExport');
 
 const ORIGINAL_GET_BOUNDING = HTMLElement.prototype.getBoundingClientRect;
@@ -64,7 +59,9 @@ beforeEach(() => {
     } as DOMRect;
   };
   HTMLElement.prototype.setPointerCapture = () => {};
-  (deriveMaskCutout as ReturnType<typeof vi.fn>).mockReset();
+  (createMediaNodeFromFiles as ReturnType<typeof vi.fn>)
+    .mockReset()
+    .mockResolvedValue('mask-node-1');
   (strokesToMaskPngBase64 as ReturnType<typeof vi.fn>)
     .mockReset()
     .mockReturnValue('MASKB64');
@@ -118,7 +115,7 @@ function seedImageOutput(resourceId: string | null) {
 }
 
 function paintAndCommit() {
-  fireEvent.click(screen.getByTestId('mask-cutout-open'));
+  fireEvent.click(screen.getByRole('button', { name: 'Mask' }));
   const surface = screen.getByTestId('mask-brush-tool');
   fireEvent.pointerDown(surface, { pointerId: 1, clientX: 100, clientY: 100 });
   fireEvent.pointerUp(surface, { pointerId: 1 });
@@ -126,7 +123,7 @@ function paintAndCommit() {
 }
 
 describe('OutputNodeView — Mask button', () => {
-  it('shows for a persisted image output, hides without resource_id', () => {
+  it('shows for any image output — no resource_id needed (mask is client-side)', () => {
     const withResource = seedImageOutput('source-123');
     const { unmount } = render(
       <Wrap>
@@ -138,7 +135,7 @@ describe('OutputNodeView — Mask button', () => {
         />
       </Wrap>,
     );
-    expect(screen.getByTestId('mask-cutout-open')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mask' })).toBeInTheDocument();
     unmount();
 
     const without = seedImageOutput(null);
@@ -147,21 +144,13 @@ describe('OutputNodeView — Mask button', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={without} />
       </Wrap>,
     );
-    expect(screen.queryByTestId('mask-cutout-open')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mask' })).toBeInTheDocument();
   });
 });
 
-describe('OutputNodeView — mask commit derives a cutout node', () => {
-  it('exports the mask, calls deriveMaskCutout and spawns one node', async () => {
+describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节点)', () => {
+  it('exports the black/white mask and drops it beside the source as a media node', async () => {
     const fullData = seedImageOutput('source-123');
-    (deriveMaskCutout as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      id: 'cutout-1',
-      filename: 'cutout-orig.png',
-      file_path: 'teams/s/derived/cutout-1/v1/cutout-orig.png',
-      mime_type: 'image/png',
-      file_size_bytes: 999,
-    });
-
     render(
       <Wrap>
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
@@ -170,36 +159,18 @@ describe('OutputNodeView — mask commit derives a cutout node', () => {
     paintAndCommit();
 
     await waitFor(() => {
-      expect(deriveMaskCutout).toHaveBeenCalledTimes(1);
+      expect(createMediaNodeFromFiles).toHaveBeenCalledTimes(1);
     });
-    expect(deriveMaskCutout).toHaveBeenCalledWith('source-123', 'MASKB64');
+    const [files, at] = (createMediaNodeFromFiles as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(files[0].name).toBe('mask.png');
+    expect(files[0].type).toBe('image/png');
+    expect(at.x).toBeGreaterThan(0);
     // Export used the fallback raster size (jsdom images never load).
     expect(strokesToMaskPngBase64).toHaveBeenCalledWith(
       expect.any(Array),
       1024,
       1024,
     );
-
-    await waitFor(() => {
-      expect(useCanvasCoreStore.getState().nodes).toHaveLength(2);
-    });
-    const nodes = useCanvasCoreStore.getState().nodes as Array<{
-      id: string;
-      type: string;
-      position: { x: number; y: number };
-      data: Record<string, unknown>;
-    }>;
-    expect(nodes[0].id).toBe('o1');
-    expect(nodes[0].data.resource_id).toBe('source-123');
-    const cutout = nodes[1];
-    expect(cutout.type).toBe('output');
-    expect(cutout.data.resource_id).toBe('cutout-1');
-    expect(cutout.data.preview_url).toBe(
-      'https://example.test/api/v1/resources/cutout-1/file?token=fake-token',
-    );
-    expect(cutout.position.x).toBeGreaterThan(nodes[0].position.x);
-    expect(cutout.position.y).toBe(nodes[0].position.y);
-
     await waitFor(() => {
       expect(
         screen.queryByTestId('unified-image-editor'),
@@ -207,12 +178,11 @@ describe('OutputNodeView — mask commit derives a cutout node', () => {
     });
   });
 
-  it('shows an error banner + keeps the modal open when the derive rejects', async () => {
+  it('shows an error banner + keeps the modal open when the node drop fails', async () => {
     const fullData = seedImageOutput('source-123');
-    (deriveMaskCutout as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('HTTP 400: mask is empty'),
+    (createMediaNodeFromFiles as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('upload exploded'),
     );
-
     render(
       <Wrap>
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
@@ -221,31 +191,11 @@ describe('OutputNodeView — mask commit derives a cutout node', () => {
     paintAndCommit();
 
     await waitFor(() => {
-      expect(deriveMaskCutout).toHaveBeenCalledTimes(1);
+      expect(createMediaNodeFromFiles).toHaveBeenCalled();
     });
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('mask-commit-error');
-    expect(banner.textContent).toMatch(/mask is empty/i);
-    expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
-  });
-
-  it('surfaces a local export failure without calling the API', async () => {
-    const fullData = seedImageOutput('source-123');
-    (strokesToMaskPngBase64 as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('2D canvas context unavailable');
-      },
-    );
-
-    render(
-      <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
-      </Wrap>,
-    );
-    paintAndCommit();
-
-    const banner = await screen.findByTestId('mask-commit-error');
-    expect(banner.textContent).toMatch(/canvas context/i);
-    expect(deriveMaskCutout).not.toHaveBeenCalled();
+    expect(banner.textContent).toMatch(/upload exploded/i);
   });
 });
+

@@ -109,14 +109,14 @@ describe('CanvasSurface onConnect — smart-mode validation', () => {
     expect(edge.target).toBe('p1');
   });
 
-  it('drops an invalid smart connection (output is terminal → cannot be a source)', () => {
+  it('drops an invalid smart connection (output → media stays illegal)', () => {
     seedStore('smart', [
       { id: 'o1', type: 'output', position: { x: 0, y: 0 }, data: {} },
-      { id: 'p1', type: 'prompt', position: { x: 300, y: 0 }, data: {} },
+      { id: 'm1', type: 'media', position: { x: 300, y: 0 }, data: {} },
     ]);
     render(<CanvasSurface />);
 
-    onConnect({ source: 'o1', target: 'p1', sourceHandle: null, targetHandle: null });
+    onConnect({ source: 'o1', target: 'm1', sourceHandle: null, targetHandle: null });
 
     expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
   });

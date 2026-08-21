@@ -364,11 +364,12 @@ const CASES: NodeCase[] = [
     type: 'output',
     data: OUTPUT_DATA,
     writes: [
-      { what: 'Rerun', testId: 'regenerate-open' },
-      { what: 'Crop', testId: 'crop-open' },
-      { what: 'Expand', testId: 'outpaint-open' },
-      { what: 'Mask', testId: 'mask-cutout-open' },
-      { what: 'Split', testId: 'grid-split-open' },
+      // Editing actions live only on the floating toolbar now (the header
+      // chip row was removed — IC single-toolbar look, 2026-08-21).
+      { what: 'toolbar Crop', label: 'Crop' },
+      { what: 'toolbar Expand', label: 'Expand' },
+      { what: 'toolbar Mask', label: 'Mask' },
+      { what: 'toolbar Split', label: 'Split' },
       { what: 'toolbar Rerun', label: 'Rerun' },
       { what: 'recover re-query', testId: 'output-recover-query' },
     ],

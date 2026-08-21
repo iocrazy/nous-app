@@ -43,9 +43,10 @@ describe('canConnectSmart', () => {
     expect(canConnectSmart('shot', 'output')).toBe(false);
   });
 
-  it('rejects output → anything (terminal)', () => {
+  it('output feeds prompts/loops/groups but not shot/output (IC image source)', () => {
     expect(canConnectSmart('output', 'shot')).toBe(false);
-    expect(canConnectSmart('output', 'prompt')).toBe(false);
+    expect(canConnectSmart('output', 'prompt')).toBe(true);
+    expect(canConnectSmart('output', 'loop')).toBe(true);
     expect(canConnectSmart('output', 'output')).toBe(false);
   });
 
@@ -118,8 +119,8 @@ describe('canConnectSmart — group as collector (IC parity ⑦)', () => {
     expect(canConnectSmart('llm', 'group')).toBe(false);
     expect(canConnectSmart('shot', 'group')).toBe(false);
   });
-  it('output stays dead-end everywhere else', () => {
-    expect(canConnectSmart('output', 'prompt')).toBe(false);
+  it('output cannot wire into media or another output', () => {
+    expect(canConnectSmart('output', 'media')).toBe(false);
     expect(canConnectSmart('output', 'output')).toBe(false);
   });
 });

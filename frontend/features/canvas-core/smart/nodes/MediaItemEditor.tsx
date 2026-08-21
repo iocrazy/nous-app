@@ -122,19 +122,16 @@ export function MediaItemEditor({
               })
           : undefined
       }
-      onMaskCommit={
-        canDerive
-          ? (strokes, size) =>
-              run(async () => {
-                const b64 = strokesToMaskPngBase64(
-                  strokes,
-                  size.width,
-                  size.height,
-                );
-                const out = await deriveMaskCutout(resourceId!, b64);
-                await appendResource(String(out.id));
-              })
-          : undefined
+      onMaskCommit={(strokes, size) =>
+        run(async () => {
+          // IC 生成遮罩节点: commit the black/white mask itself as a new
+          // canvas image (no derive, no promote needed).
+          const b64 = strokesToMaskPngBase64(strokes, size.width, size.height);
+          const bin = atob(b64.split(',').pop() ?? b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          await appendBlob(new Blob([bytes], { type: 'image/png' }), 'mask.png');
+        })
       }
       onSplitCommit={
         canDerive

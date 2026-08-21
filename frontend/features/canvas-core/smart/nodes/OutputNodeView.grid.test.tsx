@@ -116,7 +116,7 @@ describe('OutputNodeView — Split button', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    expect(screen.getByTestId('grid-split-open')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Split' })).toBeInTheDocument();
   });
 
   it('hides the Split button when there is no resource_id', () => {
@@ -126,7 +126,7 @@ describe('OutputNodeView — Split button', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    expect(screen.queryByTestId('grid-split-open')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument();
   });
 });
 
@@ -148,7 +148,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('grid-split-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }));
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
@@ -212,7 +212,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
         <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
       </Wrap>,
     );
-    fireEvent.click(screen.getByTestId('grid-split-open'));
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }));
     fireEvent.click(screen.getByTestId('grid-preset-2x2'));
     fireEvent.click(screen.getByTestId('editor-apply'));
 
