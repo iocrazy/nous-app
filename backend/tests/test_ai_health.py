@@ -161,11 +161,14 @@ async def test_all_capabilities_present(monkeypatch):
     )
     rows = await ai_health.get_capability_health("u1")
     caps = {r["capability"] for r in rows}
+    # 每个 capability 的 key 必须是 workflow 真正传给 resolve_task_ai_config 的
+    # task_key(也是 task_assignment / TASK_MODULES 的键),否则板子读的指派与
+    # governance 都不是真实生效的那个 —— F4。
     assert caps == {
         "summarization",
         "visual_analysis",
         "caption",
-        "classify",
+        "classification",
         "translation",
     }
 
@@ -310,3 +313,26 @@ async def test_resolver_failure_is_isolated(monkeypatch):
     caption = next(r for r in rows if r["capability"] == "caption")
     assert caption["status"] == "error"
     assert all(r["status"] != "error" for r in rows if r["capability"] != "caption")
+
+
+@pytest.mark.asyncio
+async def test_capability_task_keys_match_the_real_workflow_task_keys():
+    """板子的诚实性靠"跟真实路径用同一个 task_key"保证 —— 逐条对齐,漂一个就红。
+
+    右边这些字符串是各 workflow 调用 resolve_task_ai_config 时真正传的
+    task_key(见 ai_summary / analyze_l1 / caption_asset / classify_asset /
+    resources_ai_router),也是 ai_governance.TASK_MODULES 的键。
+    """
+    from app.services.ai.governance.ai_governance import TASK_MODULES
+
+    keys = {task_key for task_key, *_ in ai_health._CAPABILITIES}
+    assert keys == {
+        "summarization",
+        "visual_analysis",
+        "caption",
+        "classification",
+        "translation",
+    }
+    # 每个 key 都必须是一个真正被 governance 认识的任务模块,否则
+    # get_module_governance 会静默落到 chat 分支。
+    assert keys <= set(TASK_MODULES)

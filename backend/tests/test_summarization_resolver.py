@@ -210,6 +210,96 @@ async def test_nous_direct_pick_resolves_platform_config() -> None:
     assert cfg.fallback_models == ()
 
 
+# ── 生产真实走的分支:agent 行的裸 model 命中平台目录 ──────────────────
+
+
+async def test_agent_model_hitting_the_catalog_resolves_platform_config() -> None:
+    """**这是生产真实走的那条分支**(2026-08-20 审查 F3)。
+
+    agent 行存的是裸 provider id(`doubao-seed-2-0-lite-260428`),而
+    `mediahub_models` 有一行 `actual_model` 与之逐字相同 → `resolve_mediahub_model`
+    的 actual_model 兜底查找命中 → 用**平台** key/base_url,`origin="platform"`,
+    同时**保留 agent_slug**(提示词仍是这个 agent 的)。
+
+    两个后果值得钉住:摘要的付费主体从用户 BYOK 变成平台 key;以及摘要从此
+    依赖目录行可用(命中但 disabled 会 raise,不降级)。
+    """
+    cfg = await _resolve(
+        agent={
+            "slug": DEFAULT_SLUG,
+            "model": PROD_AGENT_MODEL,
+            "fallback_models": ["qwen-max"],
+        },
+        ai_settings={
+            "task_assignment": {},
+            # 用户自己也配了 doubao BYOK —— 平台目录命中后它不参与。
+            "ai_providers": {"doubao": {"api_key": "user-byok-key", "enabled": True}},
+        },
+        mediahub=(
+            "doubao",
+            {
+                "api_key": "platform-key",
+                "base_url": "https://ark.example/v1",
+                "model": PROD_AGENT_MODEL,
+                "app_id": "",
+            },
+            PROD_AGENT_MODEL,
+        ),
+    )
+    assert cfg.origin == "platform"
+    assert cfg.model == PROD_AGENT_MODEL
+    assert cfg.provider_config["api_key"] == "platform-key"
+    assert cfg.provider_config["api_key"] != "user-byok-key"
+    # 提示词仍来自这个 agent —— 平台目录只换凭证,不换 agent(#622/#623)。
+    assert cfg.agent_slug == DEFAULT_SLUG
+    # 读了 agent 行的分支才带 fallback 池。
+    assert cfg.fallback_models == ("qwen-max",)
+
+
+async def test_catalog_hit_but_disabled_fails_closed_no_byok_fallback() -> None:
+    """目录行被管理员禁用(或 nous 全局开关关掉)→ `resolve_mediahub_model`
+    raise,agent 行分支**不吞**这个异常(与 `nous:` 直选分支不同,那条有
+    try/except)。收口把这条 fail-closed 依赖引入了摘要:即便用户自己有健康的
+    BYOK key,也不会静默降级过去 —— 这是"不许静默降级"的代价,必须可见。
+    """
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    repo = _repo({"slug": DEFAULT_SLUG, "model": PROD_AGENT_MODEL})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            new=AsyncMock(return_value=_allowed()),
+        ),
+        patch(
+            "app.repositories.agent_repository.get_agent_repository",
+            return_value=repo,
+        ),
+        patch.object(
+            helpers,
+            "get_ai_settings",
+            new=AsyncMock(
+                return_value={
+                    "task_assignment": {},
+                    "ai_providers": {
+                        "doubao": {"api_key": "user-byok", "enabled": True}
+                    },
+                }
+            ),
+        ),
+        patch.object(
+            helpers,
+            "resolve_mediahub_model",
+            new=_AsyncMock(
+                side_effect=RuntimeError(
+                    f"Platform model '{PROD_AGENT_MODEL}' is no longer available."
+                )
+            ),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="no longer available"):
+            await helpers.resolve_task_ai_config("user-1", TASK_KEY, DEFAULT_SLUG)
+
+
 # ── governance 锁定仍然最优先 ─────────────────────────────────────────
 
 

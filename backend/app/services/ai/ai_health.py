@@ -37,7 +37,12 @@ _CAPABILITIES: list[tuple[str, str, str, bool, str | None]] = [
     ("summarization", "summarize", "Rewrite (summary)", False, None),
     ("visual_analysis", "analyze", "Analyze (visual)", True, "ai_extract"),
     ("caption", "caption", "Image → Prompt", True, None),
-    ("classify", "classify", "Auto Tag", True, None),
+    # ⚠️ task_assignment key 是 "classification"(与 workflow / TASK_MODULES /
+    # 前端 types.ts 一致),default agent slug 才是 "classify" —— 两个命名空间。
+    # 2026-08-20 审查 F4:这里此前两个都写成 "classify",于是板子读不到用户真正
+    # 指派的分类 agent(显示默认那个),而 get_module_governance("classify") 不在
+    # TASK_MODULES 里会落到 chat 分支,分类的 governance 锁定在板子上不可见。
+    ("classification", "classify", "Auto Tag", True, None),
     ("translation", "translate", "Translation", False, None),
 ]
 
