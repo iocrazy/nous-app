@@ -41,7 +41,7 @@ interface LightboxState {
   index: number;
 }
 
-export function MediaNodeView({ id, data, selected, width }: NodeProps) {
+export function MediaNodeView({ id, data, selected }: NodeProps) {
   const { t } = useTranslation();
   const { title, items, uploading } = data as unknown as MediaNodeData;
   const patch = useNodeDataPatch(id);
@@ -145,11 +145,10 @@ export function MediaNodeView({ id, data, selected, width }: NodeProps) {
         dragOver ? 'ring-2 ring-indigo-500/50' : ''
       }`}
       style={{
-        // Fixed default width; RF writes node.width after a resize and the
-        // card follows it. width:'100%' here was the 2026-08-20 giant-node
-        // regression — an unconstrained wrapper let the raw image dictate
-        // the card size.
-        width: width ?? SMART_NODE_DEFAULT_WIDTH.media,
+        // Width lives in node DATA (persisted), never in RF's measured
+        // width — reading props.width created a measurement feedback loop
+        // (2026-08-20: cards locked tiny/huge at whatever RF measured).
+        width: (data as { node_w?: number }).node_w ?? SMART_NODE_DEFAULT_WIDTH.media,
       }}
       onDragOver={(e) => {
         if (!readOnly && e.dataTransfer.types.includes('Files')) {
@@ -219,6 +218,23 @@ export function MediaNodeView({ id, data, selected, width }: NodeProps) {
           position="right"
           minWidth={SMART_NODE_DEFAULT_WIDTH.media}
           maxWidth={900}
+          onResize={(_e, params) => {
+            patch({ node_w: Math.round(params.width) } as never);
+          }}
+          onResizeEnd={() => {
+            // RF stamped explicit width/height onto the node during the
+            // drag; height especially must not stick (content-driven).
+            const { nodes, setNodes } = useCanvasCoreStore.getState();
+            setNodes(
+              nodes.map((n) => {
+                if ((n as { id?: unknown }).id !== id) return n;
+                const clone = { ...(n as Record<string, unknown>) };
+                delete clone.width;
+                delete clone.height;
+                return clone as never;
+              }),
+            );
+          }}
           style={{ background: 'transparent', border: 'none', width: 8, cursor: 'ew-resize' }}
         />
       )}
