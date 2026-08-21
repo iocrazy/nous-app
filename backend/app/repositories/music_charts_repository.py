@@ -90,6 +90,58 @@ def plan_chart_write(chart: Mapping[str, Any]) -> str:
     return WRITE_REPLACE if bool(chart.get("ok")) else WRITE_KEEP
 
 
+def read_incoming_tracks(chart: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One harvested chart → the track rows to write. Pure.
+
+    ⚠️ Reads ``songs`` — the BROWSER's wire key (``MusicChartPayload.songs``).
+    This module *emits* ``tracks`` because the frontend's long-standing
+    ``MusicTrack`` vocabulary uses that word. Two real contracts meet here, and
+    this function is the translation.
+
+    Extracted so the translation is testable against a **real** captured
+    payload rather than only inside a DB write. For one release both sides said
+    ``tracks`` and every counter stayed green — ``success: true``,
+    ``charts_read: 12``, ``stored: 12`` — with ``tracks: 0`` the single tell,
+    and twelve empty tabs in the UI. The unit tests passed because their
+    fixtures used the invented key on *both* sides.
+
+    Entries without an id or a name are dropped rather than filled in: both are
+    load-bearing (the id is what gets published, the name is what the user
+    reads), and a half-track is worse than a missing one because it looks
+    pickable.
+    """
+    out: list[dict[str, Any]] = []
+    for track in chart.get("songs") or ():
+        if not isinstance(track, Mapping):
+            continue
+        music_id = str(track.get("music_id") or "").strip()
+        name = str(track.get("music_name") or "").strip()
+        if not music_id or not name:
+            continue
+        raw_count = track.get("user_count")
+        try:
+            duration_s = max(0, int(track.get("duration_s") or 0))
+        except (TypeError, ValueError):
+            duration_s = 0
+        try:
+            # `None` survives. Zero is a real catalogue value.
+            user_count = None if raw_count is None else max(0, int(raw_count))
+        except (TypeError, ValueError):
+            user_count = None
+        out.append(
+            {
+                "music_id": music_id,
+                "music_name": name,
+                "music_author": str(track.get("music_author") or ""),
+                "duration_s": duration_s,
+                "user_count": user_count,
+                "cover_url": str(track.get("cover_url") or ""),
+                "play_url": str(track.get("play_url") or ""),
+            }
+        )
+    return out
+
+
 class MusicChartsRepository:
     """Read and replace one account's cached chart tabs."""
 
@@ -264,23 +316,21 @@ class MusicChartsRepository:
                 await session.execute(
                     delete(MusicChartTracks).where(MusicChartTracks.chart_id == row.id)
                 )
-                for index, track in enumerate(chart.get("tracks") or ()):
-                    music_id = str(track.get("music_id") or "").strip()
-                    name = str(track.get("music_name") or "").strip()
-                    if not music_id or not name:
-                        continue
-                    raw_count = track.get("user_count")
+                # The translation lives in `read_incoming_tracks` so it can be
+                # tested against a real captured payload — see its docstring for
+                # the release this cost.
+                for index, track in enumerate(read_incoming_tracks(chart)):
                     session.add(
                         MusicChartTracks(
                             chart_id=row.id,
                             position=index,
-                            music_id=music_id,
-                            music_name=name,
-                            music_author=str(track.get("music_author") or ""),
-                            duration_s=int(track.get("duration_s") or 0),
-                            user_count=None if raw_count is None else int(raw_count),
-                            cover_url=str(track.get("cover_url") or ""),
-                            play_url=str(track.get("play_url") or ""),
+                            music_id=track["music_id"],
+                            music_name=track["music_name"],
+                            music_author=track["music_author"],
+                            duration_s=track["duration_s"],
+                            user_count=track["user_count"],
+                            cover_url=track["cover_url"],
+                            play_url=track["play_url"],
                         )
                     )
                     written += 1
@@ -356,6 +406,7 @@ class MusicChartsRepository:
 
 __all__ = [
     "MusicChartsRepository",
+    "read_incoming_tracks",
     "WRITE_KEEP",
     "WRITE_REPLACE",
     "WRITE_SKIP",
