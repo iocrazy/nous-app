@@ -290,9 +290,25 @@ def _audio_extraction_blocks_response(
 # Only "finished AND readable" means the caller can have what they asked for
 # without paying again.
 #
-# A probe that ERRORS falls through to the normal dispatch path (the repo
-# getters log and return None): that degrades to today's behaviour, while
-# short-circuiting on a failed probe would promise content nobody verified.
+# A probe that ERRORS answers "not available" and the request continues to
+# the normal dispatch path: that degrades to the behaviour we had before this
+# short-circuit existed (at worst one duplicate run), while short-circuiting
+# on a failed probe would hand back content nobody verified. The guard is
+# HERE and not left to the repo getters' own `except -> None`: that is
+# somebody else's property, and this file's sibling repository has already
+# started re-raising deliberately (``get_resource_by_id_for_caller`` re-raises
+# ``UnscopedQueryError`` — "no scope is a caller bug, don't swallow it"). If
+# ``ai_repository`` ever follows, an unguarded probe would turn "runs twice"
+# into "500 on a resource that is perfectly fine".
+
+
+async def _content_probe(coro) -> dict | None:
+    """Await a content lookup, turning any failure into "nothing found"."""
+    try:
+        return await coro
+    except Exception as e:  # noqa: BLE001 — see the note above
+        logger.warning(f"[ai_router] AI content probe failed (non-fatal): {e}")
+        return None
 
 
 async def _transcript_already_available(
@@ -304,7 +320,7 @@ async def _transcript_already_available(
 
     if ai_status_str((resource or {}).get(TRANSCRIPT_STATUS_FIELD)) != "completed":
         return False
-    row = await get_ai_repository().get_transcript(resource_id)
+    row = await _content_probe(get_ai_repository().get_transcript(resource_id))
     return bool((row or {}).get("full_text"))
 
 
@@ -315,7 +331,7 @@ async def _summary_already_available(resource: dict | None, resource_id: str) ->
 
     if ai_status_str((resource or {}).get(SUMMARY_STATUS_FIELD)) != "completed":
         return False
-    row = await get_ai_repository().get_summary(resource_id)
+    row = await _content_probe(get_ai_repository().get_summary(resource_id))
     return bool((row or {}).get("summary_text"))
 
 

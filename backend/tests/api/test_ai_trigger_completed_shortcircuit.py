@@ -496,3 +496,146 @@ class TestSummarizeDedupUnchanged:
         assert res["already_summarized"] is False
         assert dispatched == []
         points.check_and_consume.assert_not_awaited()
+
+
+class TestShortCircuitOutranksDedup:
+    """The short-circuit sits BEFORE the in-flight dedup, and that ordering is
+    a decision, not an accident: a run that is in flight ends up completed
+    too, so "the content is already here" is the more useful of the two true
+    answers — and the only one that stops a stale snapshot from buying a
+    second run.
+
+    Every other case in this file probes a resource with nothing in flight,
+    so it would pass with the short-circuit on either side of the dedup.
+    These two are the only ones that can tell the difference: content
+    present AND a task running.
+    """
+
+    @pytest.mark.asyncio
+    async def test_transcribe_answers_already_transcribed_not_in_progress(
+        self, monkeypatch
+    ) -> None:
+        _patch_resource(monkeypatch, transcript_status="completed")
+        _patch_ai_repo(monkeypatch, transcript={"full_text": "hello"})
+        _patch_billing_spy(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        class _RunningTranscription:
+            async def execute(self, *_a, **_k):
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = [
+                    {
+                        "dbos_workflow_id": "wf-running",
+                        "resource_id": "res-1",
+                        "task_type": "ai_transcription",
+                        "status": "processing",
+                        "phase": "in_progress",
+                        "task_metadata": None,
+                    }
+                ]
+                return result
+
+        @asynccontextmanager
+        async def _scope():
+            yield _RunningTranscription()
+
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "read_scope", _scope)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["already_transcribed"] is True
+        assert res["message"] == "Transcript already exists"
+        assert dispatched == []
+
+    @pytest.mark.asyncio
+    async def test_summarize_answers_already_summarized_not_in_progress(
+        self, monkeypatch
+    ) -> None:
+        _patch_resource(
+            monkeypatch, transcript_status="completed", summary_status="completed"
+        )
+        _patch_ai_repo(
+            monkeypatch,
+            transcript={"full_text": "hello"},
+            summary={"summary_text": "a summary"},
+        )
+        _patch_billing_spy(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        class _RunningSummary:
+            async def execute(self, *_a, **_k):
+                result = MagicMock()
+                result.first.return_value = ("wf-running",)
+                return result
+
+        @asynccontextmanager
+        async def _scope():
+            yield _RunningSummary()
+
+        import app.db.session as dbs
+
+        monkeypatch.setattr(dbs, "read_scope", _scope)
+
+        res = await ai_router.trigger_summary_by_resource("res-1", _auth(), None)
+
+        assert res["already_summarized"] is True
+        assert res["message"] == "Summary already exists"
+        assert dispatched == []
+
+
+class TestProbeFailureFallsThrough:
+    """A content probe that RAISES must not reach the caller.
+
+    Today the repo getters swallow their own exceptions, so this holds by
+    accident — but that is somebody else's property: the sibling
+    ``resources_repository.get_resource_by_id_for_caller`` already re-raises
+    ``UnscopedQueryError`` deliberately ("no scope is a caller bug"). If
+    ``ai_repository`` ever follows, an unguarded probe turns "this resource
+    runs twice" into "this resource 500s".
+
+    Falling through to dispatch is the chosen direction: at worst it costs
+    what the old code cost, whereas short-circuiting on a failed probe would
+    hand back content nobody verified.
+    """
+
+    @pytest.mark.asyncio
+    async def test_transcribe_dispatches_when_the_probe_raises(
+        self, monkeypatch
+    ) -> None:
+        _patch_resource(monkeypatch, transcript_status="completed")
+        repo = _patch_ai_repo(monkeypatch)
+        repo.get_transcript = AsyncMock(side_effect=RuntimeError("db down"))
+        _patch_billing_spy(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert res["already_transcribed"] is False
+        assert [d["name"] for d in dispatched] == ["ai_transcription"]
+
+    @pytest.mark.asyncio
+    async def test_summarize_dispatches_when_the_probe_raises(
+        self, monkeypatch
+    ) -> None:
+        _patch_resource(
+            monkeypatch, transcript_status="completed", summary_status="completed"
+        )
+        repo = _patch_ai_repo(monkeypatch, transcript={"full_text": "hello"})
+        repo.get_summary = AsyncMock(side_effect=RuntimeError("db down"))
+        _patch_billing_spy(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        res = await ai_router.trigger_summary_by_resource("res-1", _auth(), None)
+
+        assert res["already_summarized"] is False
+        assert [d["name"] for d in dispatched] == ["ai_summary"]

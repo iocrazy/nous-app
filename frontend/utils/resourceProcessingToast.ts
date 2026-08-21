@@ -29,6 +29,21 @@ export function resourceProcessingNotice(
   result: EnsureResourceProcessedResult,
   t: Translate,
 ): ResourceProcessingNotice | null {
+  // 'ready' is normally the silent case — the asset was already processed
+  // and the caller knew it, so there is nothing to report. These two flags
+  // mean we only found out by ASKING: the user was told to come back (the
+  // pending-audio retry) or watched an attach do nothing visible, and
+  // silence there reads as the request having been dropped.
+  if (result.action === 'ready' && (result.alreadyTranscribed || result.alreadySummarized)) {
+    return {
+      type: 'info',
+      message: t(
+        'chat.resourceProcessing.alreadyProcessed',
+        'Already processed — nothing new was started, no points spent',
+      ),
+    };
+  }
+
   if (result.action === 'ready' || result.action === 'skipped') return null;
 
   // Doing LESS still has to be visible. This arm means "we could not find

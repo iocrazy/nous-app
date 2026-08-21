@@ -68,6 +68,10 @@ export interface EnsureResourceProcessedResult {
    *  status snapshot was stale, no run was started and no points were
    *  spent, and the result below is about the step AFTER transcription. */
   alreadyTranscribed?: boolean;
+  /** Same answer for the summary half: the summary was already there, so
+   *  `action` is 'ready' without anything having been started or charged.
+   *  Distinct from `alreadyInProgress`, which means a run IS happening. */
+  alreadySummarized?: boolean;
 }
 
 export interface EnsureResourceProcessedInput {
@@ -245,7 +249,12 @@ export async function ensureResourceProcessed(
     // already exists means the agent can read this asset now — 'ready', not
     // a trigger, and definitely not a charge.
     if (res?.already_summarized) {
-      return done({ action: 'ready', message: res.message, pointsCharged: 0 });
+      return done({
+        action: 'ready',
+        message: res.message,
+        pointsCharged: 0,
+        alreadySummarized: true,
+      });
     }
     return done({
       action: 'triggered_summary',

@@ -670,3 +670,107 @@ describe('useResourceProcessingFollowUps — dead status with no terminal stamp'
     }
   });
 });
+
+/**
+ * Both endpoints answer "this is already done" (200 `already_transcribed` /
+ * `already_summarized`, nothing queued, nothing charged) — and this hook is
+ * their THIRD caller, after the @ picker and the context menu.
+ *
+ * The answer is indistinguishable from an in-flight dedup by cost alone
+ * (`points_charged: 0` on both), and `isDedupedResponse` therefore says yes
+ * to it. Reading it that way here is not merely a wrong sentence: an ADOPTED
+ * wait only accepts a run that ENDS after it was armed, a short-circuit
+ * created no run at all, and the waiting list has no TTL — so the entry
+ * would sit there forever and the summary the user is waiting on would never
+ * be requested. The chain has to continue instead.
+ */
+describe('useResourceProcessingFollowUps — the work turns out to be done', () => {
+  const BLOCKER = 'wf-audio-1';
+  /** Real wire body of the transcribe endpoint's short-circuit arm. */
+  const TRANSCRIBE_ALREADY = {
+    message: 'Transcript already exists',
+    resource_id: '339710259795355',
+    platform_id: 'p-1',
+    points_charged: 0,
+    transcription_pending_audio: false,
+    already_transcribed: true,
+  };
+  /** Real wire body of the summarize endpoint's short-circuit arm. */
+  const SUMMARY_ALREADY = {
+    message: 'Summary already exists',
+    resource_id: '339710259795355',
+    platform_id: 'p-1',
+    points_charged: 0,
+    already_summarized: true,
+  };
+
+  function blocker(over: Record<string, unknown> = {}) {
+    return {
+      id: BLOCKER,
+      dbos_workflow_id: BLOCKER,
+      task_type: 'extract_audio',
+      status: 'completed',
+      resource_id: '339710259795355',
+      created_at: new Date().toISOString(),
+      ...over,
+    };
+  }
+
+  it('asks for the summary when the retry finds the transcript already there', async () => {
+    // The blocker was an extract_audio that chains a transcription, so by the
+    // time the slot freed the transcript had landed.
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+    rememberPendingAudioRetry('339710259795355', BLOCKER);
+    taskManagerMock.mockReturnValue({ tasks: [blocker()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(summaryMock).toHaveBeenCalledWith('339710259795355'));
+    // No run exists to watch, so nothing may be left waiting on one.
+    expect(transcriptionFollowUps()).toHaveLength(0);
+    expect(pendingAudioRetries()).toHaveLength(0);
+  });
+
+  it('does not tell the user it is "already being processed"', async () => {
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+    rememberPendingAudioRetry('339710259795355', BLOCKER);
+    taskManagerMock.mockReturnValue({ tasks: [blocker()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    const messages = notify.mock.calls.map(([message]) => String(message));
+    expect(messages.join(' | ')).not.toMatch(/already being processed/i);
+    expect(messages.join(' | ')).toMatch(/already transcribed/i);
+  });
+
+  it('reports "already processed" when the summary exists too', async () => {
+    transcribeMock.mockResolvedValue(TRANSCRIBE_ALREADY);
+    summaryMock.mockResolvedValue(SUMMARY_ALREADY);
+    rememberPendingAudioRetry('339710259795355', BLOCKER);
+    taskManagerMock.mockReturnValue({ tasks: [blocker()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    // Nothing was started and nothing charged — but the user was told to come
+    // back, so silence here reads as the request having been dropped.
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      expect.stringMatching(/already processed/i), 'info',
+    ));
+  });
+
+  it('does not call a finished summary "already in progress" on the watch path', async () => {
+    // Second call site of the same endpoint: the transcription this session
+    // started completed, and the summary turns out to exist already.
+    summaryMock.mockResolvedValue(SUMMARY_ALREADY);
+    rememberTranscriptionFollowUp('339710259795355');
+    taskManagerMock.mockReturnValue({ tasks: [task()] });
+
+    renderHook(useFollowUpWithNotify);
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    const messages = notify.mock.calls.map(([message]) => String(message));
+    expect(messages.join(' | ')).not.toMatch(/already being processed|summarising/i);
+    expect(messages.join(' | ')).toMatch(/already processed/i);
+  });
+});
