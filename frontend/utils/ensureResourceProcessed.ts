@@ -12,6 +12,14 @@
  * to be clever about `pending` / `processing` — a stale status column that
  * claims "processing" for a dead task would otherwise strand the resource
  * forever.
+ *
+ * They also short-circuit work that has already FINISHED (200
+ * `already_transcribed` / `already_summarized`, nothing queued, nothing
+ * charged). That arm is the backstop for the row this helper decides from
+ * being a stale snapshot — which is exactly how a resource transcribed at
+ * 12:29 got billed for a second transcription at 12:31 in production. It
+ * is not a failure and not a dedup: the content is there, so the chain
+ * moves straight on to whatever step is still missing.
  */
 
 import {
@@ -56,6 +64,10 @@ export interface EnsureResourceProcessedResult {
    *  status code — and the difference is the difference between "we are
    *  spending your points" and "we are not". */
   alreadyInProgress?: boolean;
+  /** True when the transcribe trigger answered "already transcribed": our
+   *  status snapshot was stale, no run was started and no points were
+   *  spent, and the result below is about the step AFTER transcription. */
+  alreadyTranscribed?: boolean;
 }
 
 export interface EnsureResourceProcessedInput {
@@ -70,9 +82,10 @@ export interface EnsureResourceProcessedInput {
    * Absent / empty means UNKNOWN, which is NOT the same as `'none'`: some
    * callers hand over a row synthesised for the grid that never carried
    * these columns (Project Assets' canvas adapter is one). Reading unknown
-   * as "never processed" re-triggers a PAID transcription on an
-   * already-transcribed asset, because the endpoint dedups in-flight work
-   * only, never finished work. Unknown is resolved by a lookup below.
+   * as "never processed" asks for a PAID transcription on an
+   * already-transcribed asset; the endpoint's finished-work short-circuit
+   * now refuses to charge for that, but a lookup here still spares the
+   * round trip and keeps the answer honest when the column IS available.
    */
   transcript_status?: string | null;
   summary_status?: string | null;
@@ -117,6 +130,10 @@ export async function ensureResourceProcessed(
 
   let transcript = input.transcript_status;
   let summary = input.summary_status;
+  // Set when the transcribe call answers "already transcribed": the row we
+  // were handed lags the server, the transcript is there to read, and the
+  // chain carries on to the summary inside this same call.
+  let transcriptAlreadyDone = false;
 
   // Resolve unknown status before deciding anything that costs money. Only
   // when the step we are about to act on is the unknown one — a known
@@ -160,22 +177,44 @@ export async function ensureResourceProcessed(
           blockingTaskId: res.blocking_task_id ?? null,
         };
       }
-      // Only now is there a transcript worth waiting for; the summary half
-      // of the chain is picked up by useResourceProcessingFollowUps.
-      //
-      // Registered on the dedup arm too — the user attached this resource to
-      // get it READ, and "somebody already started the transcription" does
-      // not make the summary any less needed. The flag tells the watcher
-      // that the run it is waiting on started before this instant, which is
-      // the difference between finishing the chain and waiting forever.
-      const deduped = isDedupedResponse(res);
-      rememberTranscriptionFollowUp(input.id, { adopted: deduped });
-      return {
-        action: 'triggered_transcribe',
-        message: res?.message,
-        pointsCharged: res?.points_charged,
-        alreadyInProgress: deduped,
-      };
+      // Nothing is running and nothing needs to: the transcript already
+      // exists. Registering a follow-up watcher here would wait forever for
+      // a task nobody started, so the chain continues inline instead — the
+      // stale-snapshot case ends with the summary getting triggered rather
+      // than a duplicate transcription getting billed.
+      if (res?.already_transcribed) {
+        transcriptAlreadyDone = true;
+        // Our snapshot was demonstrably behind the server on the transcript
+        // half, so it may be behind on the summary half too. Look it up only
+        // when nobody told us, so the fall-through cannot dead-end in
+        // `status_unknown` on an asset we just proved is processed.
+        if (!isKnown(summary)) {
+          try {
+            const row = await fetchResourceById(input.id);
+            summary = row?.summary_status ?? summary;
+          } catch (err) {
+            console.error('ensureResourceProcessed: summary lookup failed', err);
+          }
+        }
+      } else {
+        // Only now is there a transcript worth waiting for; the summary half
+        // of the chain is picked up by useResourceProcessingFollowUps.
+        //
+        // Registered on the dedup arm too — the user attached this resource
+        // to get it READ, and "somebody already started the transcription"
+        // does not make the summary any less needed. The flag tells the
+        // watcher that the run it is waiting on started before this instant,
+        // which is the difference between finishing the chain and waiting
+        // forever.
+        const deduped = isDedupedResponse(res);
+        rememberTranscriptionFollowUp(input.id, { adopted: deduped });
+        return {
+          action: 'triggered_transcribe',
+          message: res?.message,
+          pointsCharged: res?.points_charged,
+          alreadyInProgress: deduped,
+        };
+      }
     } catch (err) {
       console.error('ensureResourceProcessed: transcribe trigger failed', err);
       return {
@@ -186,26 +225,40 @@ export async function ensureResourceProcessed(
     }
   }
 
-  if (summary === 'skipped') return { action: 'skipped' };
-  if (summary === 'completed') return { action: 'ready' };
+  /** Carries the transcribe short-circuit onto whatever the summary step
+   *  decides, so the notice can say "already transcribed" instead of
+   *  implying this call spent points on one. */
+  const done = (
+    result: EnsureResourceProcessedResult,
+  ): EnsureResourceProcessedResult =>
+    transcriptAlreadyDone ? { ...result, alreadyTranscribed: true } : result;
+
+  if (summary === 'skipped') return done({ action: 'skipped' });
+  if (summary === 'completed') return done({ action: 'ready' });
   // Reached only when the lookup above filled it in or the caller told us;
   // an unknown summary on a transcribed asset never falls through here.
-  if (!isKnown(summary)) return { action: 'status_unknown' };
+  if (!isKnown(summary)) return done({ action: 'status_unknown' });
 
   try {
     const res = await triggerSummaryByResource(input.id);
-    return {
+    // The stale-snapshot answer one step down the ladder: a summary that
+    // already exists means the agent can read this asset now — 'ready', not
+    // a trigger, and definitely not a charge.
+    if (res?.already_summarized) {
+      return done({ action: 'ready', message: res.message, pointsCharged: 0 });
+    }
+    return done({
       action: 'triggered_summary',
       message: res?.message,
       pointsCharged: res?.points_charged,
       alreadyInProgress: isDedupedResponse(res),
-    };
+    });
   } catch (err) {
     console.error('ensureResourceProcessed: summary trigger failed', err);
-    return {
+    return done({
       action: 'failed',
       attempted: 'summary',
       error: err instanceof Error ? err.message : String(err),
-    };
+    });
   }
 }

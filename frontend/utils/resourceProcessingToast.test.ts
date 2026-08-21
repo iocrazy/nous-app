@@ -101,3 +101,22 @@ describe('resourceProcessingNotice — blocked behind an audio extraction', () =
     expect(notice?.message.toLowerCase()).not.toContain('already being processed');
   });
 });
+
+describe('resourceProcessingNotice — finished work, stale snapshot', () => {
+  it('says the transcript was already there rather than implying a charge', () => {
+    const notice = resourceProcessingNotice(
+      { action: 'triggered_summary', alreadyTranscribed: true },
+      t,
+    );
+
+    expect(notice?.type).toBe('info');
+    expect(notice?.message.toLowerCase()).toContain('already transcribed');
+    expect(notice?.message.toLowerCase()).toContain('no extra points');
+  });
+
+  it('keeps the plain summarising sentence when nothing was short-circuited', () => {
+    const notice = resourceProcessingNotice({ action: 'triggered_summary' }, t);
+
+    expect(notice?.message.toLowerCase()).not.toContain('already transcribed');
+  });
+});
