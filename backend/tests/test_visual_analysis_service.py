@@ -14,9 +14,11 @@ just like every other AI service. These tests validate:
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 
+from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.ai.visual.visual_analysis_service import (
     AGENT_SLUG,
     VisualAnalysisResult,
@@ -77,6 +79,32 @@ def test_extract_json_empty_returns_empty() -> None:
     assert VisualAnalysisService._extract_json(None) == {}  # type: ignore[arg-type]
 
 
+def _composed(model: str, *, agent_slug: str = "analyze") -> ComposedSystemPrompt:
+    """A REAL ``ComposedSystemPrompt``, not a MagicMock.
+
+    These used to be bare MagicMocks. Since 2026-08-21 the service pins the
+    resolved model onto ``composed`` via ``model_copy``, and a MagicMock cannot
+    carry that method's semantics: it answers with another MagicMock whose
+    ``.model`` is itself a MagicMock — truthy (so it wins the ``or`` below it)
+    but equal to no string, which makes the "which model got dialed" assertion
+    fail every time. Same family as CLAUDE.md's「边界 mock 必须用真实 JSON 形状」:
+    the fake has to carry the real shape. Using the real pydantic model both
+    fixes that red and keeps the assertion falsifiable — corrupt the pinned
+    value and it goes red again.
+    """
+    return ComposedSystemPrompt(
+        agent_id=UUID("00000000-0000-0000-0000-000000000001"),
+        agent_slug=agent_slug,
+        model=model,
+        temperature=0.0,
+        max_tokens=512,
+        system_message="x",
+        tools=[],
+        skill_manifest=[],
+        cache_fingerprint="x",
+    )
+
+
 @pytest.mark.asyncio
 async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
     """Happy path: service composes via PromptComposer (L1 instruction),
@@ -85,10 +113,7 @@ async def test_analyze_l1_routes_through_runner_with_l1_instruction() -> None:
     """
     svc = VisualAnalysisService()
 
-    composed = MagicMock()
-    composed.agent_id = "00000000-0000-0000-0000-000000000001"
-    composed.agent_slug = "analyze"
-    composed.model = "gpt-4o"
+    composed = _composed("gpt-4o")
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)
 
@@ -153,9 +178,7 @@ async def test_analyze_l2_sends_cover_plus_keyframes() -> None:
     """L2 path: cover + 3 keyframes → 4 image content blocks, L2 instruction."""
     svc = VisualAnalysisService()
 
-    composed = MagicMock()
-    composed.agent_id = "00000000-0000-0000-0000-000000000001"
-    composed.model = "gpt-4o"
+    composed = _composed("gpt-4o")
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)
 
@@ -248,10 +271,7 @@ async def test_run_composes_the_constructor_agent_slug() -> None:
     provider config the caller passed."""
     svc = VisualAnalysisService(agent_slug="test-analyze")
 
-    composed = MagicMock()
-    composed.agent_id = "00000000-0000-0000-0000-000000000001"
-    composed.agent_slug = "test-analyze"
-    composed.model = "doubao-seed-2-0-pro-260215"
+    composed = _composed("doubao-seed-2-0-pro-260215", agent_slug="test-analyze")
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)
 
@@ -317,10 +337,7 @@ async def test_analyze_l1_passes_byo_config_into_adapter() -> None:
         },
     )
 
-    composed = MagicMock()
-    composed.agent_id = "00000000-0000-0000-0000-000000000001"
-    composed.agent_slug = "analyze"
-    composed.model = "doubao-seed-2-0-pro-260215"
+    composed = _composed("doubao-seed-2-0-pro-260215")
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)
 

@@ -72,6 +72,42 @@ class ComposerInput:
     override_team_id: Optional[int] = None
 
 
+def background_composer_input(
+    *,
+    agent_slug: str,
+    request_instructions: str,
+    resolved_model: str,
+) -> ComposerInput:
+    """Build the ``ComposerInput`` for a BACKGROUND task (口径 A, 2026-08-21).
+
+    The five background modules (summarization / caption / visual analysis /
+    classification / translation) all go through this constructor so their
+    two halves of the口径 are stated once instead of five times:
+
+    - ``model_override=resolved_model`` — ``resolve_task_ai_config`` is the
+      SINGLE source of the model. It has already applied governance, the
+      ``nous:`` direct pick, the user's ``agent_overrides.model`` and the
+      platform-catalog ``name → actual_model`` step, and the credentials it
+      returned alongside match THAT string. A service that let the composer
+      supply its own model would dial one provider's id with another's key —
+      the #622/#623 defect. Empty (bare / smoke paths that resolved nothing)
+      leaves the composer on the agent row's value, as before.
+    - NO ``override_user_id`` / ``override_team_id`` — the prompt stays at
+      factory. These modules parse the agent's output against a fixed
+      contract; a user's ``identity_md`` / ``soul_md`` / ``agent_md`` edit
+      would break the parser rather than restyle the persona. Only the model
+      follows the user's customization.
+
+    Chat is deliberately NOT a caller: it *does* want prompt overrides and
+    builds its ``ComposerInput`` with the override ids set.
+    """
+    return ComposerInput(
+        agent_slug=agent_slug,
+        request_instructions=request_instructions,
+        model_override=resolved_model or None,
+    )
+
+
 class PromptComposer:
     """Assemble system message + tools for a single agent call."""
 

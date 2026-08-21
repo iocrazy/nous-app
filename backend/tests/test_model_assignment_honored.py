@@ -27,6 +27,29 @@ from app.services.chat import conversation_memory_service as conv_mem
 _ASSIGNED = "doubao-seed-1-6-250615"
 
 
+def _composed(model: str, *, agent_slug: str = "analyze") -> ComposedSystemPrompt:
+    """A REAL ``ComposedSystemPrompt``, not a MagicMock.
+
+    The visual cases below used to fake it with a MagicMock. Since 2026-08-21
+    the service pins the resolved model onto ``composed`` via ``model_copy``,
+    which a MagicMock cannot carry: it answers with another MagicMock whose
+    ``.model`` is itself a MagicMock — truthy, but equal to no string, so the
+    dialed-model assertion fails every time. The real pydantic model restores
+    the copy semantics AND keeps the assertion falsifiable.
+    """
+    return ComposedSystemPrompt(
+        agent_id=UUID("00000000-0000-0000-0000-000000000001"),
+        agent_slug=agent_slug,
+        model=model,
+        temperature=0.0,
+        max_tokens=512,
+        system_message="x",
+        tools=[],
+        skill_manifest=[],
+        cache_fingerprint="x",
+    )
+
+
 @pytest.mark.asyncio
 async def test_summarize_honors_assigned_model() -> None:
     """Regression: the RESOLVED model (provider_config["model"] -> self.model)
@@ -188,31 +211,37 @@ async def test_summarize_composes_the_agent_it_was_given() -> None:
 
 @pytest.mark.asyncio
 async def test_visual_analysis_honors_assigned_model() -> None:
-    """Guard: visual-analysis IS agent-driven — the caller resolves the user's
-    assigned agent slug (task_assignment.visual_analysis) whose composed.model
-    is the user's model. That composed model must drive the adapter, NOT the
-    ``self.model = provider_config["model"] or "gpt-4o"`` cost-estimate field.
-    Locks in the second-half fix of the historical visual-analysis bug.
+    """Guard: the RESOLVED model reaches the wire, not the composer's own value.
 
-    Post-fallback-chain wiring (spec §4): the adapter is now built by
-    ``build_fallback_llm`` rather than ``svc._build_adapter`` directly — the
-    seam this test pins moves to ``build_fallback_llm``'s ``primary_model``
-    kwarg, but the guarantee (assigned model reaches the wire, not the
-    "gpt-4o" cost-estimate field) is unchanged.
+    Locks in the second-half fix of the historical visual-analysis bug (the
+    resolver picked the user's doubao model, this composed 'analyze' whose row
+    said qwen-max, and the composed model won).
+
+    ⚠️ The premise flipped on 2026-08-20 (#1945) and this test was rewritten to
+    match. It used to feed ``provider_config["model"] = "gpt-4o"`` as an
+    "informational cost field that must not win" and assert that
+    ``composed.model`` won instead. That shape is no longer constructible:
+    ``resolve_task_ai_config`` — the only producer of this service's
+    ``provider_config`` — now writes the RESOLVED model into that key, next to
+    the api_key/base_url resolved FOR it. So a non-empty
+    ``provider_config["model"]`` is by definition the model to dial, and the
+    "gpt-4o" string only survives as the ``self.model`` DEFAULT when the
+    resolver produced nothing (covered by the companion test below).
     """
     svc = VisualAnalysisService(
         agent_slug="analyze",
         provider_config={
-            "model": "gpt-4o",  # informational cost field — must NOT win
+            # What resolve_task_ai_config hands over: the resolved model, and
+            # the credentials that match THAT model.
+            "model": _ASSIGNED,
             "api_key": "k",
             "base_url": "http://host/v1",
         },
     )
 
-    composed = MagicMock()
-    composed.agent_id = "00000000-0000-0000-0000-000000000001"
-    composed.agent_slug = "analyze"
-    composed.model = _ASSIGNED  # the assigned agent's model
+    # The composer's own value — a stand-in for its "qwen-max" agent-row
+    # fallback. It must NOT win over the resolved model.
+    composed = _composed("qwen-max")
     composer = MagicMock()
     composer.compose = AsyncMock(return_value=composed)
 
@@ -250,7 +279,64 @@ async def test_visual_analysis_honors_assigned_model() -> None:
     ):
         await svc.analyze_l1("https://example.com/cover.jpg")
 
-    # The composed (assigned) model drives the adapter, not "gpt-4o".
+    # The resolved model drives the adapter, not the composer's "qwen-max".
+    assert captured["adapter_model"] == _ASSIGNED
+    # ...and the composed object handed to AgentRunner carries it too, so the
+    # runner and the fallback chain cannot dial different models.
+    assert runner.run_turn.await_args.args[0].model == _ASSIGNED
+
+
+@pytest.mark.asyncio
+async def test_visual_analysis_never_dials_the_gpt4o_cost_placeholder() -> None:
+    """``VisualAnalysisService.self.model`` defaults to ``"gpt-4o"`` — a cost
+    -estimate coefficient, not a model anyone configured. When the resolver
+    produced NO model (empty provider_config), that placeholder must not be
+    dialed; the composed agent row's model is the only real candidate left.
+
+    This is the companion trap to the test above: the two together pin both
+    directions of "which of the two strings is the real model".
+    """
+    svc = VisualAnalysisService(agent_slug="analyze", provider_config={})
+    assert svc.model == "gpt-4o", "前提变了:这个占位默认没了,本用例要重写"
+
+    composed = _composed(_ASSIGNED)
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+    runner.run_turn = AsyncMock(
+        return_value={"content": '{"category":"Food"}', "raw": {}}
+    )
+
+    captured: dict = {}
+
+    async def _capture_build(*, primary_model, **_kw):
+        captured["adapter_model"] = primary_model
+        return MagicMock()
+
+    with (
+        patch.object(
+            svc, "_encode_image_from_url", new=AsyncMock(return_value="B64DATA")
+        ),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.AgentRunner",
+            return_value=runner,
+        ),
+        patch(
+            "app.services.ai.visual.visual_analysis_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.ai.llm.fallback_wiring.build_fallback_llm",
+            side_effect=_capture_build,
+        ),
+    ):
+        await svc.analyze_l1("https://example.com/cover.jpg")
+
     assert captured["adapter_model"] == _ASSIGNED
 
 

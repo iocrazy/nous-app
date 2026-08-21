@@ -29,7 +29,10 @@ from app.boundary import URLBlockedError, safe_async_client
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
-from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.prompts.prompt_composer import (
+    PromptComposer,
+    background_composer_input,
+)
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
@@ -103,6 +106,14 @@ class VisualAnalysisService:
         # columns). Kept as GPT-4o pricing historically; deliberately not
         # per-provider, since this field decays once telemetry takes over.
         self.model = self._provider_config.get("model") or "gpt-4o"
+        # The RESOLVED model — ``resolve_task_ai_config`` writes it into
+        # ``provider_config["model"]`` next to the api_key/base_url it resolved
+        # FOR that model, so this is the one string that may be dialed. Empty
+        # when the resolver produced nothing (bare / smoke path). It gets its
+        # own attribute rather than reusing ``self.model`` because that one is
+        # per-service: VisualAnalysisService defaults it to a ``"gpt-4o"``
+        # cost-estimate placeholder that must never reach the wire.
+        self._resolved_model = (self._provider_config.get("model") or "").strip()
 
     # ── Image encoding helpers ────────────────────────────────────────
 
@@ -204,11 +215,20 @@ class VisualAnalysisService:
         # Compose system prompt from the analyze agent's IDENTITY/SOUL/AGENT.
         composer = PromptComposer(get_agent_repository(), get_skill_repository())
         composed = await composer.compose(
-            ComposerInput(
+            background_composer_input(
                 agent_slug=self.AGENT_SLUG,
                 request_instructions=instruction,
+                resolved_model=self._resolved_model,
             )
         )
+
+        # 单源收口:解析器给的模型即最终模型。``background_composer_input`` 已经
+        # 把它交给 composer 了,这里再把它钉回 ``composed`` —— AgentRunner 从
+        # ``composed.model`` 读要拨的号,下面的 fallback 链从这里取
+        # ``primary_model``,两条路因此不可能各走各的(#622/#623)。空值(裸 /
+        # smoke 路径什么都没解析出来)保留 agent 行自己的模型。
+        if self._resolved_model:
+            composed = composed.model_copy(update={"model": self._resolved_model})
 
         from app.services.ai.llm.fallback_wiring import build_fallback_llm
 
