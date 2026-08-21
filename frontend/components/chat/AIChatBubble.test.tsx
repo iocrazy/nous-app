@@ -259,6 +259,37 @@ describe('AIChatBubble — user bubble resource references', () => {
     expect(container.querySelector('img[alt="shot.png"]')).not.toBeNull();
   });
 
+  // The wire's `kind` is always the literal 'resource_ref', so the asset's
+  // own family can only come from mime. Without these the mapping could be
+  // wired to any single icon and every other test would still pass.
+  it.each([
+    ['video/mp4', 'lucide-video'],
+    ['audio/mpeg', 'lucide-music'],
+    ['image/png', 'lucide-image'],
+    ['application/pdf', 'lucide-file-type2'],
+    [undefined, 'lucide-file-text'],
+  ])('picks the icon family from mime %s', (mime, iconClass) => {
+    // No resource_id, so the chip takes the icon branch and the icon is
+    // the only thing under test.
+    const { container } = renderUser({
+      content: 'x',
+      attachments: [{ kind: 'resource_ref', mime, alt_text: 'asset' }],
+    });
+
+    const icon = container.querySelector('[data-testid="bubble-resource-chip-icon"] svg');
+    expect(icon?.getAttribute('class')).toContain(iconClass);
+  });
+
+  it('treats a whitespace-only turn as having no text', () => {
+    // The composer can hand over a doc that serialises to spaces/newlines.
+    // `content.length` would call that "has text" and paint the blank
+    // paragraph again — the very bubble this fix removed.
+    const { container } = renderUser({ content: '   \n  ', attachments: [refAttachment] });
+
+    expect(screen.getByTestId('bubble-resource-chip')).toBeInTheDocument();
+    expect(container.querySelector('p.whitespace-pre-wrap')).toBeNull();
+  });
+
   it('renders no strip when the turn had no attachments', () => {
     renderUser({ content: 'plain text turn' });
 
