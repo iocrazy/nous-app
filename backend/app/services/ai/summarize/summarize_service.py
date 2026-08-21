@@ -26,7 +26,10 @@ from loguru import logger
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
-from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
+from app.services.ai.prompts.prompt_composer import (
+    PromptComposer,
+    background_composer_input,
+)
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService
@@ -84,6 +87,14 @@ class SummarizeService:
         # built-in ``summarize`` preset.
         self.AGENT_SLUG = (agent_slug or AGENT_SLUG).strip() or AGENT_SLUG
         self.model = self._provider_config.get("model") or ""
+        # The RESOLVED model — ``resolve_task_ai_config`` writes it into
+        # ``provider_config["model"]`` next to the api_key/base_url it resolved
+        # FOR that model, so this is the one string that may be dialed. Empty
+        # when the resolver produced nothing (bare / smoke path). It gets its
+        # own attribute rather than reusing ``self.model`` because that one is
+        # per-service: VisualAnalysisService defaults it to a ``"gpt-4o"``
+        # cost-estimate placeholder that must never reach the wire.
+        self._resolved_model = (self._provider_config.get("model") or "").strip()
 
     @staticmethod
     def _parse_json(content: str) -> Dict[str, Any]:
@@ -186,26 +197,31 @@ class SummarizeService:
             request_instructions += f" Video title: {title}"
 
         composed = await composer.compose(
-            ComposerInput(
+            background_composer_input(
                 agent_slug=self.AGENT_SLUG,
                 request_instructions=request_instructions,
+                # The resolved model wins over the composed agent row's own
+                # model. Both come from the SAME agent (2026-08-20 收口), but
+                # not always as the same STRING: a platform-catalog hit
+                # resolves the row's catalog name (e.g.
+                # ``mediahub-doubao-seed-2-0-lite``) down to the provider's
+                # real ``actual_model``, governance / ``nous:<model>`` picks
+                # bypass the row entirely, and 口径 A applies the user's
+                # ``agent_overrides.model`` on top. self.model is the value
+                # that matches the api_key + base_url in ``provider_config``,
+                # so it must be the one dialed. Empty (bare / smoke path)
+                # keeps the row value.
+                resolved_model=self._resolved_model,
             )
         )
 
-        # The resolved model wins over the composed agent row's own model.
-        # Both now come from the SAME agent (2026-08-20 收口:
-        # resolve_task_ai_config reads task_assignment.summarization → that
-        # agent row → its model), but they are not always the same STRING: a
-        # platform-catalog hit resolves the row's catalog name (e.g.
-        # ``mediahub-doubao-seed-2-0-lite``) down to the provider's real
-        # ``actual_model``, and governance / ``nous:<model>`` picks bypass the
-        # row entirely. self.model is the value that matches the api_key and
-        # base_url in ``provider_config``, so it must be the one dialed —
-        # otherwise the composer's raw row value would be POSTed against
-        # credentials resolved for a different id. Only override when a
-        # resolved model exists (the bare / smoke path keeps the row value).
-        if self.model:
-            composed = composed.model_copy(update={"model": self.model})
+        # 单源收口:解析器给的模型即最终模型。``background_composer_input`` 已经
+        # 把它交给 composer 了,这里再把它钉回 ``composed`` —— AgentRunner 从
+        # ``composed.model`` 读要拨的号,下面的 fallback 链从这里取
+        # ``primary_model``,两条路因此不可能各走各的(#622/#623)。空值(裸 /
+        # smoke 路径什么都没解析出来)保留 agent 行自己的模型。
+        if self._resolved_model:
+            composed = composed.model_copy(update={"model": self._resolved_model})
 
         from app.services.ai.llm.fallback_wiring import build_fallback_llm
 

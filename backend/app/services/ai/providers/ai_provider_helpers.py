@@ -418,6 +418,68 @@ def _with_hotwords(provider_config: Dict[str, Any], hotwords: str) -> Dict[str, 
     return {**provider_config, "hotwords": hotwords}
 
 
+async def resolve_agent_model_override(
+    agent: Optional[Dict[str, Any]],
+    user_id: Optional[str],
+    agent_repo: Any = None,
+) -> Optional[str]:
+    """The user's ``agent_overrides.model`` for this agent, or ``None``.
+
+    口径 A (用户拍板 2026-08-21) — a background run follows the user's MODEL
+    customization and nothing else:
+
+      - ``agent_overrides`` (mig 341) can replace seven columns
+        (``AGENT_OVERRIDE_FIELDS``). A background run reads exactly ONE of
+        them: ``model``.
+      - Prompts (``identity_md`` / ``soul_md`` / ``agent_md``) stay at factory
+        values because these five modules parse the agent's OUTPUT against a
+        fixed contract (strict JSON for summarize / caption / classify,
+        ...). A user prompt edit would break the parser, not the persona —
+        so the composer is deliberately called WITHOUT override kwargs.
+      - ``temperature`` / ``max_tokens`` / ``fallback_models`` likewise stay
+        factory: they are not "the model I want to use", they are tuning of
+        the shipped pipeline.
+
+    Only SYSTEM PRESETS have override rows (mig 341 + ``_apply_overrides``'s
+    own gate), so a non-preset agent short-circuits without a DB read.
+
+    Team layer is deliberately NOT consulted — and that is an ASYMMETRY, not
+    dead code. Team-scoped overrides ARE user-writable (a team owner stores one
+    via ``ai_library_router``) and the CHAT path DOES read them
+    (``ai_library_chat_service`` / ``conversation_agent_turn`` both pass
+    ``override_team_id``). Background tasks read only the user layer because
+    every ``resolve_task_ai_config`` caller — the five workflows, the translate
+    router, the health probe — carries a bare ``user_id`` and no team context.
+    Consequence to know before "fixing" this: a team-level model customization
+    takes effect in chat and silently does NOT in background tasks, while the
+    editor shows the same "customized" badge either way. Closing the gap means
+    deciding whose team a background run belongs to (the triggering user's? the
+    resource's?) and giving the UI a way to say so — not just adding a kwarg.
+
+    Never raises — an override-lookup failure degrades to the factory model,
+    matching ``AgentRepository._apply_overrides``' own fail-soft contract.
+    """
+    if not agent or not user_id or not agent.get("is_system_preset"):
+        return None
+    try:
+        from uuid import UUID as _UUID
+
+        from app.repositories.agent_repository import get_agent_repository
+
+        repo = agent_repo if agent_repo is not None else get_agent_repository()
+        row = await repo.get_override(
+            _UUID(str(agent["id"])), user_id=_UUID(str(user_id))
+        )
+        model = (row or {}).get("model")
+        return model.strip() or None if isinstance(model, str) else None
+    except Exception as e:  # noqa: BLE001 — never break task resolution
+        logger.warning(
+            f"[agent-overrides] model override lookup failed for "
+            f"'{agent.get('slug')}': {e}"
+        )
+        return None
+
+
 async def resolve_task_ai_config(
     user_id: Optional[str],
     task_key: str,
@@ -449,6 +511,27 @@ async def resolve_task_ai_config(
     would silently fail; we surface the error early.  ``agent_slug`` is
     ``default_slug`` so the caller composes the module's built-in default agent
     prompt (not a user-assigned one).
+
+    Model customization (口径 A, 2026-08-21)
+    ---------------------------------------
+    Between "which agent row" and "which model", the user's
+    ``agent_overrides.model`` is applied (see
+    :func:`resolve_agent_model_override`) — and NOTHING else from that table.
+    Precedence, highest first:
+
+      1. governance lock — short-circuits above, before any user input is read.
+      2. ``nous:<model>`` direct pick — a model the user chose explicitly in
+         this same Settings → AI dropdown. It bypasses the agent row entirely
+         (returns above), so it also bypasses that row's override: the more
+         specific, more recent choice wins over a stored customization of a
+         different object.
+      3. ``agent_overrides.model`` for the resolved agent row.
+      4. the agent row's own ``model``.
+
+    Because the override is applied BEFORE provider derivation, the returned
+    ``provider_key`` / ``provider_config`` (api_key, base_url) always match the
+    returned ``model``. Callers must not re-derive a model of their own — that
+    split is exactly the #622/#623 defect ("A 的 key,B 的 model id").
     """
     from app.repositories.agent_repository import get_agent_repository
     from app.services.ai.adapters.factory import provider_key_for_model
@@ -504,7 +587,16 @@ async def resolve_task_ai_config(
         agent = await agent_repo.get_by_slug(default_slug)
         resolved_slug = default_slug
 
-    model = ((agent or {}).get("model") or "").strip()
+    # 口径 A: the user's model customization (agent_overrides.model) is the
+    # ONLY override a background run honours — see
+    # :func:`resolve_agent_model_override`. Applied HERE, before the model
+    # drives provider/credential resolution below, so the key we hand out and
+    # the id we dial always come from the same string (单源).
+    model = (
+        await resolve_agent_model_override(agent, user_id)
+        or (agent or {}).get("model")
+        or ""
+    ).strip()
     if not model:
         logger.warning(
             f"[AI] {task_key} agent '{assigned_slug}' missing or has no "
