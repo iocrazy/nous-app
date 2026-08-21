@@ -4,8 +4,8 @@
  * lightbox, video items open the video lightbox. Harness copied from
  * MediaNodeView.test.tsx.
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MediaNodeView } from './MediaNodeView';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
@@ -49,7 +49,12 @@ function renderView(items: Array<{ url: string; kind: string; name?: string }> =
   return render(<MediaNodeView {...props} />);
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.clearAllMocks();
   useCanvasCoreStore.getState().reset();
@@ -62,6 +67,7 @@ describe('MediaNodeView lightbox wiring (spec §7.1)', () => {
       { url: '/api/v1/generated-media/2/cover', kind: 'image' },
     ]);
     fireEvent.click(screen.getByTestId('media-node-thumb-1'));
+    act(() => vi.advanceTimersByTime(300));
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
     expect(screen.getByTestId('lightbox-counter')).toHaveTextContent('2 / 2');
   });
@@ -72,6 +78,7 @@ describe('MediaNodeView lightbox wiring (spec §7.1)', () => {
       { url: '/api/v1/generated-media/9/stream', kind: 'video' },
     ]);
     fireEvent.click(screen.getByTestId('media-node-video-1'));
+    act(() => vi.advanceTimersByTime(300));
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
     expect(screen.getByTestId('lightbox-video')).toBeTruthy();
   });
@@ -79,6 +86,7 @@ describe('MediaNodeView lightbox wiring (spec §7.1)', () => {
   it('close callback dismisses the lightbox', () => {
     renderView([{ url: '/api/v1/generated-media/1/cover', kind: 'image' }]);
     fireEvent.click(screen.getByTestId('media-node-thumb-0'));
+    act(() => vi.advanceTimersByTime(300));
     expect(screen.getByTestId('output-lightbox')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /close/i }));
     expect(screen.queryByTestId('output-lightbox')).toBeNull();

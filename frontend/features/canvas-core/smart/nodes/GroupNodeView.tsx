@@ -39,6 +39,7 @@ import { GroupNodeToolbar } from './GroupNodeToolbar';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { NodeWidthGrip } from './NodeWidthGrip';
 
 export function GroupNodeView({ id, data, selected }: NodeProps) {
   const { t } = useTranslation();
@@ -55,6 +56,36 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       s.nodes.filter((n) => (n as { parentId?: string }).parentId === id).length,
   );
   const [dragOver, setDragOver] = useState(false);
+  // η3 grip: group size lives on node.style (persisted). The oversized
+  // groups minted during the giant-node era are stuck at their baked-in
+  // style — the grip lets the user drag them back down directly.
+  // Primitive selectors — an object-returning selector re-renders forever
+  // (zustand identity check), the same trap as the groupSummary incident.
+  const groupW = useCanvasCoreStore(
+    (s) =>
+      ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as
+        | { style?: { width?: number } }
+        | undefined)?.style?.width ?? 260),
+  );
+  const groupH = useCanvasCoreStore(
+    (s) =>
+      ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as
+        | { style?: { height?: number } }
+        | undefined)?.style?.height ?? 180),
+  );
+  const resizeGroup = (w: number, h?: number) => {
+    const { nodes, setNodes } = useCanvasCoreStore.getState();
+    setNodes(
+      nodes.map((n) => {
+        if ((n as { id?: unknown }).id !== id) return n;
+        const obj = n as Record<string, unknown>;
+        const style = { ...((obj.style as object) ?? {}) } as Record<string, unknown>;
+        style.width = w;
+        if (h !== undefined) style.height = h;
+        return { ...obj, style } as never;
+      }),
+    );
+  };
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   // Read-only: the label edit and the file drop both write (the drop also
   // POSTs an import), so both go. The thumbnail grid stays fully visible.
@@ -161,7 +192,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       data-testid="smart-group-node"
       // IC's group-node: a frosted-glass card (solid hairline, not dashed) —
       // the dashed affordance moves INTO the empty drop-zone below.
-      className={`group mh-group-node flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
+      className={`group mh-group-node relative flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
       onDragOver={(e) => {
@@ -289,6 +320,17 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           kind="image"
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
+        />
+      )}
+      {!readOnly && (
+        <NodeWidthGrip
+          value={groupW}
+          heightValue={groupH}
+          min={200}
+          max={2000}
+          minHeight={140}
+          onChange={(w) => resizeGroup(w)}
+          onHeightChange={(h) => resizeGroup(groupW, h)}
         />
       )}
     </div>

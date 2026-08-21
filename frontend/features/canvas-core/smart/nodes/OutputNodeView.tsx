@@ -1,7 +1,8 @@
 import { mediaSrc } from '../mediaUrl';
-import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
+import { NodeWidthGrip } from './NodeWidthGrip';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
@@ -458,28 +459,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           resized width to the node wrapper — the root div tracks it via
           width:100% with the legacy default as its floor. */}
       {!readOnly && (
-        <NodeResizeControl
-          position="right"
-          minWidth={SMART_NODE_DEFAULT_WIDTH.output}
-          maxWidth={900}
-          onResize={(_e, params) => {
-            patchData({ node_w: Math.round(params.width) } as never);
-          }}
-          onResizeEnd={() => {
-            // RF stamped explicit width/height onto the node during the
-            // drag; height especially must not stick (content-driven).
-            const { nodes, setNodes } = useCanvasCoreStore.getState();
-            setNodes(
-              nodes.map((n) => {
-                if ((n as { id?: unknown }).id !== id) return n;
-                const clone = { ...(n as Record<string, unknown>) };
-                delete clone.width;
-                delete clone.height;
-                return clone as never;
-              }),
-            );
-          }}
-          style={{ background: 'transparent', border: 'none', width: 8, cursor: 'ew-resize' }}
+        <NodeWidthGrip
+          value={(data as { node_w?: number }).node_w ?? SMART_NODE_DEFAULT_WIDTH.output}
+          min={SMART_NODE_DEFAULT_WIDTH.output}
+          max={900}
+          onChange={(w) => patchData({ node_w: w } as never)}
         />
       )}
       <Handle

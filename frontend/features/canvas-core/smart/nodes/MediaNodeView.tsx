@@ -9,9 +9,10 @@
 
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useRef, useState } from 'react';
-import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
+import { NodeWidthGrip } from './NodeWidthGrip';
 import { Loader2, UploadCloud } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -50,6 +51,11 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  // IC's 250ms click-vs-dblclick disambiguation: a bare click opens the
+  // lightbox only after the dblclick window passes — otherwise the first
+  // click of a double-click threw the lightbox overlay over the thumb and
+  // the dblclick never reached it (2026-08-20 "无法双击进入编辑").
+  const clickTimer = useRef<number | null>(null);
   // W×H per cell, filled from the <img> natural size on load (IC's
   // image-resolution-badge).
   const [resBadges, setResBadges] = useState<Record<number, string>>({});
@@ -214,28 +220,11 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       />
       <NodeDeleteButton nodeId={id} readOnly={readOnly} />
       {!readOnly && (
-        <NodeResizeControl
-          position="right"
-          minWidth={SMART_NODE_DEFAULT_WIDTH.media}
-          maxWidth={900}
-          onResize={(_e, params) => {
-            patch({ node_w: Math.round(params.width) } as never);
-          }}
-          onResizeEnd={() => {
-            // RF stamped explicit width/height onto the node during the
-            // drag; height especially must not stick (content-driven).
-            const { nodes, setNodes } = useCanvasCoreStore.getState();
-            setNodes(
-              nodes.map((n) => {
-                if ((n as { id?: unknown }).id !== id) return n;
-                const clone = { ...(n as Record<string, unknown>) };
-                delete clone.width;
-                delete clone.height;
-                return clone as never;
-              }),
-            );
-          }}
-          style={{ background: 'transparent', border: 'none', width: 8, cursor: 'ew-resize' }}
+        <NodeWidthGrip
+          value={(data as { node_w?: number }).node_w ?? SMART_NODE_DEFAULT_WIDTH.media}
+          min={SMART_NODE_DEFAULT_WIDTH.media}
+          max={900}
+          onChange={(w) => patch({ node_w: w } as never)}
         />
       )}
       <div className="mh-node-head">
@@ -289,14 +278,23 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
                       type="button"
                       data-testid={`media-node-thumb-${i}`}
                       className="nodrag block w-full cursor-zoom-in"
-                      onClick={() =>
-                        setLightbox({ kind: isVideo ? 'video' : 'image', index: kindIndex })
-                      }
+                      onClick={() => {
+                        if (clickTimer.current !== null) return;
+                        clickTimer.current = window.setTimeout(() => {
+                          clickTimer.current = null;
+                          setLightbox({ kind: isVideo ? 'video' : 'image', index: kindIndex });
+                        }, 250);
+                      }}
                       onDoubleClick={() => {
+                        if (clickTimer.current !== null) {
+                          window.clearTimeout(clickTimer.current);
+                          clickTimer.current = null;
+                        }
                         // IC dblclick → imageEditModal: images jump straight
-                        // into the rich editor (all tabs); videos keep the
-                        // lightbox (no image-edit modes apply).
-                        if (!isVideo && !readOnly) {
+                        // into the rich editor; videos open the lightbox.
+                        if (isVideo || readOnly) {
+                          setLightbox({ kind: isVideo ? 'video' : 'image', index: kindIndex });
+                        } else {
                           setLightbox(null);
                           openItemEditor(kindIndex, 'preview');
                         }
