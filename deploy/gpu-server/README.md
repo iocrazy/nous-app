@@ -207,8 +207,14 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -Atc \
 
 # 2) 当前用量与余量
 docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
-  "SELECT count(*) FILTER (WHERE backend_type IN ('client backend','walsender')) AS used,
-          current_setting('max_connections')::int AS max FROM pg_stat_activity;"
+  "SELECT count(*) FILTER (WHERE backend_type = 'client backend') AS used,
+          current_setting('max_connections')::int AS max,
+          count(*) = count(backend_type) AS readings_trustworthy
+   FROM pg_stat_activity;"
+# 只数 client backend：PG 12 起 walsender / bgworker / autovacuum worker 各有
+# 独立预算，不吃 max_connections。与后端 SLOT_BACKEND_TYPES 同一口径。
+# readings_trustworthy=f 表示当前角色看不到别人的列(缺 pg_monitor)，此时 used
+# 会塌到 1 左右 —— 是假读数，不是"很空闲"。
 
 # 3) 全栈重新连上了（重启会断连，别只看 db 自己）
 docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz

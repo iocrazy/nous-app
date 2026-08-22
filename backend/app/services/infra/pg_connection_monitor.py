@@ -55,19 +55,33 @@ CRITICAL_PCT = 95.0
 # denylist's numbers and manufacture a false alarm, whereas an allowlist
 # under-counts visibly instead.
 #
-# Excluded on purpose: checkpointer / background writer / walwriter /
-# autovacuum launcher / logical replication launcher / pg_cron launcher /
-# pg_net worker. Those are auxiliary or background-worker processes covered
-# by ``max_worker_processes``; counting them against ``max_connections``
-# would have reported 67/100 on a cluster actually using 60 slots.
-# ``walsender`` IS counted — PG's own docs require max_wal_senders to be
-# less than max_connections precisely because WAL senders consume slots.
-SLOT_BACKEND_TYPES = (
-    "client backend",
-    "walsender",
-    "parallel worker",
-    "autovacuum worker",
-)
+# ONLY ``client backend``. Since PG 12 the budget is
+#
+#   MaxBackends = max_connections
+#               + autovacuum_max_workers + 1
+#               + max_worker_processes
+#               + max_wal_senders
+#
+# — four INDEPENDENT free lists, so walsenders, parallel/background workers
+# and autovacuum workers do NOT draw from ``max_connections``.
+#
+# ⚠️ An earlier version of this list also counted ``walsender``, citing the
+# old rule that ``max_wal_senders`` must be < ``max_connections``. That rule
+# was removed in PG 12 and production is 17.6. Verified in a throwaway
+# container, both directions:
+#   * ``-c max_connections=5 -c max_wal_senders=20`` starts fine (PG 11 would
+#     have refused — that is the constraint the old comment quoted);
+#   * with all 5 slots held by client backends, a 6th normal connection gets
+#     ``FATAL: sorry, too many clients already`` while a REPLICATION
+#     connection still succeeds, and a parallel worker appears as a 6th row.
+# Counting those three inflated the reading (56 reported vs 54 real on
+# production) in the direction of MANUFACTURING FALSE ALARMS — precisely what
+# the allowlist above claims to prevent. The allowlist idea was right; the
+# membership was wrong.
+#
+# The same definition is used by the acceptance SQL in
+# ``deploy/gpu-server/README.md`` — "what counts as a slot" has one source.
+SLOT_BACKEND_TYPES = ("client backend",)
 
 # Redis hand-off: the scheduled sampler writes, /readyz reads. TTL is
 # deliberately ~3x the sampling cadence so a dead sampler surfaces as a
@@ -125,6 +139,56 @@ def unknown_sample(reason: str) -> dict[str, Any]:
     }
 
 
+def _masked_reason(row: dict[str, Any]) -> str | None:
+    """Detect a column-masked ``pg_stat_activity``; return why, or ``None``.
+
+    **This is the guard against the worst failure this module can have.**
+
+    ``pg_stat_activity`` is readable by everyone, but a role without
+    ``pg_monitor`` / ``pg_read_all_stats`` sees other sessions' columns as
+    NULL — the ROWS are still there, only the fields are blanked. Production
+    reads it as ``postgres``, which is NOT a superuser (``rolsuper = f``) and
+    is only privileged because it has been granted ``pg_monitor``. That is a
+    grant someone can revoke, not an intrinsic property of the role.
+
+    Without this check, losing that grant produces:
+
+        used=1, max_connections=100, percent=1.0, status="ok"
+
+    — no exception, no ``unknown``, no reason: a perfectly healthy-looking
+    green reading, produced by a probe that can no longer see anything. That
+    is the failure family this repo keeps paying for (``not_probed``,
+    ``xvfb_ready``): **the broken output is the same shape as a correct one,
+    so nothing downstream can tell them apart.** Every other seam in this
+    module already refuses to do that; this was the one left open.
+
+    The detector is behavioural rather than a privilege lookup: two counts
+    over the same rows, where ``count(*)`` counts everything and
+    ``count(backend_type)`` skips NULLs. They are equal exactly when the view
+    is unmasked. Verified in a throwaway container — privileged role
+    ``7 total / 7 typed``, plain role ``6 total / 1 typed`` (it sees only its
+    own session's columns), and equal on production (``62 / 62``).
+
+    Checking the behaviour beats checking ``pg_has_role(..., 'pg_monitor')``:
+    visibility can also come from ``pg_read_all_stats`` granted directly, or
+    from being a superuser, so a grant lookup would raise false alarms on
+    setups that are in fact fine. This asks the only question that matters —
+    *can we actually see the rows we are about to count?*
+    """
+    total = row.get("total_backends")
+    typed = row.get("typed_backends")
+    if total is None or typed is None:
+        # Older/unknown row shape — treat as unusable rather than assume good.
+        return "pg_stat_activity visibility could not be verified"
+    if int(total) != int(typed):
+        return (
+            f"pg_stat_activity is column-masked ({typed}/{total} rows readable)"
+            " — the connecting role lacks pg_monitor/pg_read_all_stats, so any"
+            " count here would silently undercount to near zero"
+        )
+    return None
+
+
 async def sample_connection_usage() -> dict[str, Any]:
     """One cheap aggregate row: slots used, the ceiling, and the verdict.
 
@@ -144,6 +208,11 @@ async def sample_connection_usage() -> dict[str, Any]:
         "SELECT "
         f"  count(*) FILTER (WHERE {predicate})::int AS used, "
         "  current_setting('max_connections')::int AS max_connections, "
+        # Visibility self-check — see _assert_visible() for why. Two counts of
+        # the same rows: count(*) counts every row, count(backend_type) skips
+        # NULLs. They diverge exactly when the view is column-masked.
+        "  count(*)::int AS total_backends, "
+        "  count(backend_type)::int AS typed_backends, "
         "  count(*) FILTER (WHERE state = 'idle in transaction')::int "
         "    AS idle_in_transaction, "
         "  coalesce(max(extract(epoch FROM (now() - state_change))) "
@@ -168,6 +237,10 @@ async def sample_connection_usage() -> dict[str, Any]:
 
     if not row:
         return unknown_sample("pg_stat_activity returned no row")
+
+    masked = _masked_reason(row)
+    if masked:
+        return unknown_sample(masked)
 
     used = int(row["used"] or 0)
     max_conns = int(row["max_connections"] or 0)

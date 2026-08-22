@@ -79,6 +79,30 @@ def _capture(monkeypatch):
     return warnings, errors
 
 
+def _row(
+    used: int = 1,
+    max_connections: int = 200,
+    total_backends: int = 62,
+    typed_backends: int = 62,
+    idle_in_transaction: int = 0,
+    oldest_idle_in_transaction_seconds: int = 0,
+) -> dict:
+    """A ``pg_stat_activity`` aggregate row as the real query returns it.
+
+    ``total_backends``/``typed_backends`` default to EQUAL — an unmasked
+    view, which is what production reads (62/62). Tests that want the
+    masked case pass them explicitly.
+    """
+    return {
+        "used": used,
+        "max_connections": max_connections,
+        "total_backends": total_backends,
+        "typed_backends": typed_backends,
+        "idle_in_transaction": idle_in_transaction,
+        "oldest_idle_in_transaction_seconds": oldest_idle_in_transaction_seconds,
+    }
+
+
 def _sample(percent: float) -> dict:
     return {
         "status": mon.classify(percent),
@@ -192,15 +216,15 @@ async def test_sample_reports_unknown_when_the_query_raises(monkeypatch):
 async def test_sample_computes_percent_and_status_from_the_row(monkeypatch):
     monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
 
-    async def _row(*_a, **_k):
-        return {
-            "used": 170,
-            "max_connections": 200,
-            "idle_in_transaction": 3,
-            "oldest_idle_in_transaction_seconds": 42,
-        }
+    async def _stub(*_a, **_k):
+        return _row(
+            used=170,
+            max_connections=200,
+            idle_in_transaction=3,
+            oldest_idle_in_transaction_seconds=42,
+        )
 
-    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _row)
+    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _stub)
 
     sample = await mon.sample_connection_usage()
 
@@ -244,25 +268,41 @@ async def test_sample_declares_itself_a_system_read(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_slot_types_exclude_auxiliary_background_processes(monkeypatch):
-    """The count must be an allowlist of slot-consuming backends.
+async def test_only_client_backends_count_against_max_connections(monkeypatch):
+    """Since PG 12 the four backend classes have INDEPENDENT budgets.
 
-    Counting checkpointer / bgwriter / autovacuum launcher would have read
-    67/100 on a cluster actually using 60 slots — a 7-point inflation that
-    manufactures false alarms near the threshold. ``walsender`` IS included:
-    PG requires max_wal_senders < max_connections precisely because WAL
-    senders consume slots.
+        MaxBackends = max_connections
+                    + autovacuum_max_workers + 1
+                    + max_worker_processes
+                    + max_wal_senders
+
+    so only ``client backend`` draws from ``max_connections``. An earlier
+    version of this list also counted walsender / parallel worker /
+    autovacuum worker, citing the pre-PG-12 rule that ``max_wal_senders``
+    must be < ``max_connections``. Verified in a throwaway PG 17 container
+    that the rule is gone: ``-c max_connections=5 -c max_wal_senders=20``
+    starts, and with all 5 slots held a REPLICATION connection still gets in
+    while a 6th normal one gets "too many clients already".
+
+    On production that mistake read 56 when the truth was 54 — inflation, in
+    the direction of MANUFACTURING FALSE ALARMS, which is the exact thing the
+    allowlist exists to prevent. The allowlist idea was right; the membership
+    was wrong.
     """
-    assert "client backend" in mon.SLOT_BACKEND_TYPES
-    assert "walsender" in mon.SLOT_BACKEND_TYPES
-    for auxiliary in (
+    assert mon.SLOT_BACKEND_TYPES == ("client backend",)
+    for not_a_slot in (
+        # own budgets since PG 12 — counting them inflates the reading
+        "walsender",
+        "parallel worker",
+        "autovacuum worker",
+        # auxiliary processes — never took a max_connections slot
         "checkpointer",
         "background writer",
         "walwriter",
         "autovacuum launcher",
         "logical replication launcher",
     ):
-        assert auxiliary not in mon.SLOT_BACKEND_TYPES
+        assert not_a_slot not in mon.SLOT_BACKEND_TYPES
 
     monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
     captured: dict = {}
@@ -270,6 +310,84 @@ async def test_slot_types_exclude_auxiliary_background_processes(monkeypatch):
     async def _spy(sql, params=None, **_k):
         captured["sql"] = sql
         captured["params"] = params or {}
+        return _row()
+
+    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _spy)
+    await mon.sample_connection_usage()
+
+    # The allowlist is actually bound as a parameter — a predicate built but
+    # never wired would otherwise count every backend silently.
+    bound = {v for k, v in captured["params"].items() if k.startswith("bt")}
+    assert bound == set(mon.SLOT_BACKEND_TYPES)
+    assert "backend_type IN (" in captured["sql"]
+
+
+# ── Visibility self-check (the "silent green" guard) ──────────────────────
+
+
+async def test_a_column_masked_view_reports_unknown_not_a_healthy_zero(monkeypatch):
+    """Losing ``pg_monitor`` must be loud, not a green light.
+
+    ``pg_stat_activity`` is readable by everyone, but a role without
+    ``pg_monitor`` / ``pg_read_all_stats`` sees other sessions' COLUMNS as
+    NULL while the rows remain. Production reads it as ``postgres``, which is
+    not a superuser — it only works because that grant is in place, and a
+    grant can be revoked.
+
+    Verified in a throwaway container: privileged role saw ``7 total / 7
+    typed``; a plain role saw ``6 total / 1 typed`` — only its own session.
+    Fed through the old code that produced ``used=1, percent=1.0,
+    status="ok"``: no exception, no reason, a perfectly healthy-looking
+    reading from a probe that could no longer see anything.
+
+    This is the failure family the repo keeps paying for (``not_probed``,
+    ``xvfb_ready``): the broken output has the same shape as a correct one.
+    """
+    monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
+
+    async def _masked(*_a, **_k):
+        # Exactly the shape the container reproduced: rows present, columns
+        # blanked, so the FILTER count collapses to this session alone.
+        return _row(used=1, total_backends=62, typed_backends=1)
+
+    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _masked)
+
+    sample = await mon.sample_connection_usage()
+
+    assert sample["status"] == "unknown"
+    assert sample["used"] is None
+    assert sample["percent"] is None
+    assert "pg_monitor" in sample["reason"]
+
+
+async def test_an_unmasked_view_is_not_flagged(monkeypatch):
+    """The other direction — otherwise the guard could just always fire.
+
+    Production reads 62/62, so equality is the normal case; a check that
+    flagged everything would take the whole monitor offline.
+    """
+    monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
+
+    async def _clean(*_a, **_k):
+        return _row(used=53, total_backends=62, typed_backends=62)
+
+    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _clean)
+
+    sample = await mon.sample_connection_usage()
+
+    assert sample["status"] == "ok"
+    assert sample["used"] == 53
+
+
+async def test_a_row_without_the_visibility_columns_is_unusable(monkeypatch):
+    """Fail closed if the self-check columns are missing.
+
+    Assuming "good" when the check itself did not run would reintroduce the
+    silent-green path through the back door.
+    """
+    monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
+
+    async def _legacy(*_a, **_k):
         return {
             "used": 1,
             "max_connections": 200,
@@ -277,14 +395,18 @@ async def test_slot_types_exclude_auxiliary_background_processes(monkeypatch):
             "oldest_idle_in_transaction_seconds": 0,
         }
 
-    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _spy)
-    await mon.sample_connection_usage()
+    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_one", _legacy)
 
-    # Every allowlisted type is actually bound as a parameter — a predicate
-    # built but never wired would otherwise count every backend silently.
-    bound = {v for k, v in captured["params"].items() if k.startswith("bt")}
-    assert bound == set(mon.SLOT_BACKEND_TYPES)
-    assert "backend_type IN (" in captured["sql"]
+    sample = await mon.sample_connection_usage()
+
+    assert sample["status"] == "unknown"
+
+
+def test_masked_reason_is_a_pure_predicate():
+    """Both directions on the detector itself, no DB and no async."""
+    assert mon._masked_reason({"total_backends": 62, "typed_backends": 62}) is None
+    assert mon._masked_reason({"total_backends": 62, "typed_backends": 1})
+    assert mon._masked_reason({"total_backends": None, "typed_backends": None})
 
 
 # ── Cache hand-off ────────────────────────────────────────────────────────
