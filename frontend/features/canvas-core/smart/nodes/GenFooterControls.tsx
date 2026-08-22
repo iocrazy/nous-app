@@ -45,6 +45,16 @@ export const RATIO_LABELS: Record<string, string> = {
 /** Resolution ladder (IC 系统参数 right column). Consumed by providers
  *  with a resolution knob (jimeng resolution_type); codex sizes are fixed
  *  by the model and ignore it. */
+/** Video resolutions (IC 分辨率: 720p everywhere; 1080p/4k vip models). */
+export const VIDEO_RESOLUTIONS = ['720p', '1080p', '4k'] as const;
+
+/** Video reference modes (IC 全能参考/首尾帧). */
+export const VIDEO_MODES: Array<{ value: 'multimodal' | 'frames' | undefined; label: string; hint: string }> = [
+  { value: undefined, label: 'Auto', hint: 'Single ref i2v / t2v' },
+  { value: 'multimodal', label: 'Omni Ref', hint: 'All refs guide the clip' },
+  { value: 'frames', label: 'First & Last', hint: 'Refs 1+2 become the end frames' },
+];
+
 /** Video clip lengths (IC 时长 pill: 8 quick picks; CLI snaps per model). */
 export const DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15] as const;
 
@@ -131,7 +141,10 @@ export function GenFooterControls({
           disabled={disabled}
         >
           <Timer size={11} />
-          <span>{gen.duration ?? 5}s</span>
+          <span>
+            {gen.duration ?? 5}s
+            {gen.video_mode === 'multimodal' ? ' · Omni' : gen.video_mode === 'frames' ? ' · F&L' : ''}
+          </span>
         </Pill>
       )}
       {isImage && (
@@ -194,6 +207,44 @@ export function GenFooterControls({
                   }`}
                 >
                   {d}s
+                </button>
+              ))}
+            </div>
+            {/* IC 分辨率 (multimodal/vip 模型支持更高档). */}
+            <div className="mt-1.5 grid grid-cols-3 gap-1">
+              {VIDEO_RESOLUTIONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  data-testid="video-resolution-option"
+                  onMouseEnter={() => onChange({ resolution: r })}
+                  onClick={() => pick({ resolution: r })}
+                  className={`nodrag rounded-lg border px-1.5 py-1 text-xs ${
+                    (gen.resolution ?? '720p') === r
+                      ? 'border-canvas-strong font-bold text-canvas-text'
+                      : 'border-canvas-line text-canvas-text'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            {/* IC 全能参考 / 首尾帧 mode. */}
+            <div className="mt-1.5 flex flex-col gap-1">
+              {VIDEO_MODES.map((m) => (
+                <button
+                  key={m.label}
+                  type="button"
+                  data-testid="video-mode-option"
+                  onClick={() => pick({ video_mode: m.value } as never)}
+                  className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1 text-xs ${
+                    gen.video_mode === m.value
+                      ? 'border-canvas-strong font-bold text-canvas-text'
+                      : 'border-canvas-line text-canvas-text'
+                  }`}
+                >
+                  <span>{m.label}</span>
+                  <span className="text-[10px] text-canvas-muted">{m.hint}</span>
                 </button>
               ))}
             </div>

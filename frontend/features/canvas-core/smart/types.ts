@@ -174,6 +174,10 @@ export interface PromptGenSettings {
   /** Video: clip length in seconds (IC 时长 pill) — jimeng CLI --duration;
    *  absent = provider default. */
   duration?: number;
+  /** Video: reference mode (IC 全能参考/首尾帧) — 'multimodal' hands all
+   *  wired refs to multimodal2video, 'frames' maps the first two refs to
+   *  first/last (frames2video); absent = auto (single-ref i2v / t2v). */
+  video_mode?: 'multimodal' | 'frames';
 }
 
 export type OutputKind = 'text' | 'image' | 'video' | 'audio';

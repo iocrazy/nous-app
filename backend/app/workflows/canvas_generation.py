@@ -69,17 +69,43 @@ async def generate_canvas_media_step(
         # matched on); upstream must get the row's actual_model. Sending the
         # row name upstream was the 2026-08-18 codex HTTP-400 incident.
         gen_model = actual_model or model
-        async with generated_media_local_path(
-            source_url, media_kind="image"
-        ) as image_path:
-            raw_duration = params.get("duration")
-            result = await provider.generate_video(
-                prompt=prompt,
-                aspect=str(params.get("aspect") or ""),
-                model_version=gen_model or None,
-                image_path=image_path,
-                duration=int(raw_duration) if raw_duration else None,
-            )
+        # IC video modes: params.video_mode picks the CLI command family —
+        # 'frames' maps the first two refs to first/last (frames2video),
+        # 'multimodal' hands ALL refs over (multimodal2video 全能参考);
+        # otherwise the single source drives image2video / text2video.
+        from contextlib import AsyncExitStack
+
+        raw_refs = params.get("source_urls")
+        ref_urls = [
+            u
+            for u in (raw_refs if isinstance(raw_refs, list) else [])
+            if isinstance(u, str) and u
+        ][:9] or ([source_url] if source_url else [])
+        video_mode = str(params.get("video_mode") or "")
+        raw_duration = params.get("duration")
+        async with AsyncExitStack() as stack:
+            local_refs: list[str] = []
+            for u in ref_urls:
+                local = await stack.enter_async_context(
+                    generated_media_local_path(u, media_kind="image")
+                )
+                if local:
+                    local_refs.append(local)
+            kwargs: dict = {
+                "prompt": prompt,
+                "aspect": str(params.get("aspect") or ""),
+                "model_version": gen_model or None,
+                "duration": int(raw_duration) if raw_duration else None,
+                "resolution": str(params.get("resolution") or "") or None,
+            }
+            if video_mode == "frames" and len(local_refs) >= 2:
+                kwargs["first_frame"] = local_refs[0]
+                kwargs["last_frame"] = local_refs[1]
+            elif video_mode == "multimodal" and local_refs:
+                kwargs["image_paths"] = local_refs
+            else:
+                kwargs["image_path"] = local_refs[0] if local_refs else None
+            result = await provider.generate_video(**kwargs)
         local_path = getattr(result, "local_path", None)
         if not local_path:
             raise RuntimeError("video provider returned no file")

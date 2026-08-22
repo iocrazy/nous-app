@@ -81,6 +81,12 @@ export function withGenerationRunner(
       if (gen.kind === 'video' && gen.aspect) params.aspect = gen.aspect;
       if (gen.kind === 'video' && gen.duration)
         params.duration = gen.duration;
+      if (gen.kind === 'video' && gen.resolution)
+        params.resolution = gen.resolution;
+      if (gen.kind === 'video' && gen.video_mode)
+        params.video_mode = gen.video_mode;
+      if (gen.kind === 'video' && ctx.source_urls?.length)
+        params.source_urls = ctx.source_urls;
       if (ctx.entity_ref) {
         // CC5 asset backlink: params land verbatim in generated_media.params,
         // which the library asset strips query by entity.

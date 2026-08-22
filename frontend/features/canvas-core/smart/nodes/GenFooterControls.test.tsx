@@ -102,3 +102,20 @@ it('video kind shows a Duration pill and picks 10s', () => {
   fireEvent.click(screen.getByText('10s'));
   expect(onChange).toHaveBeenCalledWith({ duration: 10 });
 });
+
+it('video duration panel offers resolution and reference-mode picks', () => {
+  const onChange = vi.fn();
+  render(
+    <GenFooterControls
+      gen={{ kind: 'video', model: '', aspect: '16:9' }}
+      onChange={onChange}
+      models={[]}
+    />,
+  );
+  fireEvent.click(screen.getByTestId('pill-duration'));
+  fireEvent.click(screen.getAllByTestId('video-resolution-option')[1]);
+  expect(onChange).toHaveBeenCalledWith({ resolution: '1080p' });
+  fireEvent.click(screen.getByTestId('pill-duration'));
+  fireEvent.click(screen.getByText('Omni Ref'));
+  expect(onChange).toHaveBeenCalledWith({ video_mode: 'multimodal' });
+});
