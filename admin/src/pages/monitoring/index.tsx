@@ -29,6 +29,7 @@ import { TimeRangeSelector } from '../../components/TimeRangeSelector'
 import { PageHeader } from '../../components/PageHeader'
 import { EmptyState } from '../../components/EmptyState'
 import { BackendHealthCard } from '../../components/BackendHealthCard'
+import { DbConnectionsCard } from '../../components/DbConnectionsCard'
 import { formatDateTime } from '../../utils/format'
 
 const { Row, Col } = Grid
@@ -179,6 +180,15 @@ export function MonitoringDashboard() {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={24}>
           <BackendHealthCard />
+        </Col>
+      </Row>
+
+      {/* Postgres connection-slot pressure. Sits next to the service health
+          card because it answers the question that card cannot: the services
+          can all be up while the cluster has no connection slots left. */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={24}>
+          <DbConnectionsCard />
         </Col>
       </Row>
 
