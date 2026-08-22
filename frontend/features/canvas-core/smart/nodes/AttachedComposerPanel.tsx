@@ -8,13 +8,15 @@
 // dispatches it — the prompt node then owns the record (retry, status,
 // output slots), exactly like a panel-born run in Infinite.
 
-import { Image as ImageIcon, Play, Video } from 'lucide-react';
+import { Image as ImageIcon, Library, Play, Video } from 'lucide-react';
 import { useState } from 'react';
 
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
 import { rerunPrompt } from '../regenerate';
+import { AssetPromptPicker } from './AssetPromptPicker';
 import { GenFooterControls } from './GenFooterControls';
+import { UiSelect } from '../../../../components/ui';
 import { useGenerationModels } from './useGenerationModels';
 
 export interface AttachedComposerPanelProps {
@@ -41,10 +43,16 @@ export function AttachedComposerPanel({
   const [resolution, setResolution] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [videoMode, setVideoMode] = useState<'multimodal' | 'frames' | undefined>(undefined);
+  const [engine, setEngine] = useState('');
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
-  const models = useGenerationModels(kind);
+  const allModels = useGenerationModels(kind);
+  const engines = Array.from(new Set(allModels.map((m) => m.actual_provider))).sort();
+  const models = engine
+    ? allModels.filter((m) => m.actual_provider === engine)
+    : allModels;
 
   // Unlike the small hover toolbars, the FULL panel renders only while the
   // node is selected (IC behaviour) — a large panel popping in on hover is
@@ -81,8 +89,24 @@ export function AttachedComposerPanel({
       data-testid="attached-composer"
       className="canvas-island absolute left-1/2 top-full z-10 mt-2 w-[26rem] -translate-x-1/2 rounded-xl p-2.5"
     >
-      {/* Image | Video pills (IC 图片/视频 tabs). */}
+      {/* IC top row: engine dropdown (API生成/GPT CLI/即梦 CLI…) + tabs. */}
       <div className="mb-1.5 flex items-center gap-1">
+        <UiSelect
+          triggerClassName="nodrag mh-chip max-w-28 focus-visible:ring-1 focus-visible:ring-canvas-strong/40"
+          value={engine}
+          onChange={(e) => {
+            setEngine(e.target.value);
+            setModel('');
+          }}
+          aria-label="Engine"
+        >
+          <option value="">All engines</option>
+          {engines.map((eng) => (
+            <option key={eng} value={eng}>
+              {eng}
+            </option>
+          ))}
+        </UiSelect>
         <button
           type="button"
           data-testid="composer-kind-image"
@@ -154,6 +178,26 @@ export function AttachedComposerPanel({
         onChange={(e) => setBody(e.target.value)}
         rows={3}
       />
+      {!libraryOpen ? (
+        <button
+          type="button"
+          data-testid="composer-library"
+          aria-label="Load from library"
+          onClick={() => setLibraryOpen(true)}
+          className="nodrag absolute right-3 top-16 flex h-6 w-6 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
+        >
+          <Library size={12} />
+        </button>
+      ) : (
+        <AssetPromptPicker
+          onPick={(asset, lang) => {
+            const text = lang === 'zh' ? asset.gen_prompt_zh : asset.gen_prompt;
+            if (text) setBody(text);
+            setLibraryOpen(false);
+          }}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
 
       <div className="flex min-w-0 items-center gap-1">
         <GenFooterControls
@@ -206,34 +250,29 @@ export function AttachedComposerPanel({
             </button>
           ))}
           <span className="mx-0.5 h-3 w-px bg-canvas-line" />
-          <button
-            type="button"
-            data-testid="composer-mode-multimodal"
-            onClick={() =>
-              setVideoMode(videoMode === 'multimodal' ? undefined : 'multimodal')
-            }
-            title="All wired refs guide the clip (multimodal2video)"
-            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-              videoMode === 'multimodal'
-                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                : 'border-canvas-line text-canvas-text'
-            }`}
-          >
-            Omni Ref
-          </button>
-          <button
-            type="button"
-            data-testid="composer-mode-frames"
-            onClick={() => setVideoMode(videoMode === 'frames' ? undefined : 'frames')}
-            title="Refs 1+2 become first/last frames (frames2video)"
-            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-              videoMode === 'frames'
-                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                : 'border-canvas-line text-canvas-text'
-            }`}
-          >
-            First & Last
-          </button>
+          {([
+            ['multimodal', 'Omni Ref', 'All wired refs guide the clip'],
+            ['frames', 'First & Last', 'Refs 1+2 become the end frames'],
+          ] as const).map(([mode, label, hint]) => (
+            <label
+              key={mode}
+              data-testid={`composer-mode-${mode}`}
+              title={hint}
+              className={`nodrag flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                videoMode === mode
+                  ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                  : 'border-canvas-line text-canvas-text'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={videoMode === mode}
+                onChange={() => setVideoMode(videoMode === mode ? undefined : mode)}
+                className="nodrag h-3 w-3 accent-current"
+              />
+              {label}
+            </label>
+          ))}
         </div>
       )}
     </div>
