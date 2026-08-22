@@ -131,6 +131,114 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 
 2026-08-12 分镜画布 P0 事故的根因之一就是这条纪律缺失：全仓库手写 fixture 一律用理想化字符串 id（`'shot1'`、`'200'`），从未有测试真正跑过数字 id 分支，导致"对账索引按字符串建、真实响应给数字"的类型不匹配在生产环境才第一次触发（102 个重复节点、画布空白）。区分口径见 `frontend/e2e/helpers/realShapes.ts` 顶部注释：模拟"HTTP 响应体"要用真实 wire 形状；模拟"已归一化的前端 service 函数"（如 `vi.mock('editor/sceneService')`）用该函数自己文档化的返回类型（通常是 string）才是对的——判断标准是你在模拟哪一层边界，不是"哪个更像 TypeScript"。
 
+## 防御模式（2026-08-22 立约）
+
+来源：对 `deepseek-harness` 的侦察借鉴（设计重写，非代码复制）。下面每一条都是**已经出过或差点出过的缺陷类**，写成阻止它复发的规则。写生命周期、并发、子进程、拆卸代码之前先读这一节。
+
+### 正交的结果各自独立上报
+
+一次执行可以同时是好几件事——进程可以**既超时又 exit 0**（它把信号捕获了）。`timed_out` / `signal` / `exit_code` 每个都要独立暴露，**绝不能把一个标志的上报嵌进另一个标志的分支里**，否则调用方会把一次被腰斩的运行读成干净的成功。
+
+同族的既有教训：`reference-empty-output-is-not-a-negative-result`（超时不许当否定结论）、发布回读「页面是空的」不等于「作品没发出去」。
+
+### 公共契约两侧都要遵守
+
+一个实现如果会收到同一个结果的多种表示，**必须在公共 API 边界归一化后再返回**。典型：provider adapter 可能 raise，也可能返回 `finish{kind:"error"}`；调用方不该去猜「我捕获的这个异常是 provider 给的、还是中间件的 bug、还是我自己组装错了」。
+
+- 归一化后的契约写在类型定义处，不写在某个调用点的注释里。
+- 每一种来源形态都要**通过真实消费方**跑一遍测试。
+- 与既有的「边界 mock 必须用真实 JSON 形状」是同一条纪律的两面。
+
+### 异步状态不是同步状态
+
+**不要把「整体空闲」当成「我那条消息的结果」。** 多个排队的 follow-up、steering、注入的工作可能共享同一段 `running` 区间；而取消或销毁会把还没启动的项直接丢掉。
+
+- 真正需要对一次运行负责的调用方，**必须显式定义自己的区间**（例如：从这条消息落进持久收件箱起，到下一次整体 idle 为止），并且把选出来的输出描述成「这段区间内发生的」，而不是「这条消息导致的」。
+- 反向同样要处理：**如果等待的那个状态转移永远不会发生，等待就会永久挂住**——「无事可等」这个分支必须显式写出来，不能靠超时兜底。
+
+已在本仓踩过的同族：DBOS `phase=completed` 但 `subtitle` 停在 Initializing（返回 dict 被当成 SUCCESS）；转录→摘要 follow-up 的登记表只活在前端内存里，刷新即丢。
+
+### Dispose 必须到达静止，而不只是发出请求
+
+一个只负责「发 kill / abort 就返回」的拆卸会留下孤儿。正确顺序是：
+
+1. **先摘监听器 / 注销通知**——这样迟到的完成回调是静默的；
+2. 再 kill；
+3. 再 `await` 子进程真正退出（`kill` → `await done`）。
+
+清理必须是 async 的。参照 `backend/app/agent_framework/process_lifecycle.py` 与 `kill_tree.py`。
+
+### 分发器要容纳回调异常
+
+用户提供的监听器抛异常，**不能**让它所在的 promise/task 失败，也不能饿死排在它后面的监听器。分发循环整体包 try/except 并记日志；一个坏订阅者永远不该打断核心生命周期。
+
+⚠️ 与「catch 静默吞错」不冲突：这里要求的是 `except Exception as e: logger.error(...)`，**容纳并记录**，不是 `except: pass`。
+
+### 绝不把宿主环境和可预测路径交给不可信输出
+
+- **子进程环境要擦洗**：spawn 出去的命令不该看到 `*KEY*` / `*SECRET*` / `*TOKEN*` / `*PASSWORD*`，否则凭证会从子进程的输出、`env` 转储、崩溃日志里漏出去。
+- **临时文件用私有目录**：0700 目录 + 随机文件名 + 独占创建（`O_EXCL`，0600）。可预测的世界可读路径招来符号链接竞争和信息泄露。
+
+⚠️ **本仓当前不满足第一条**（2026-08-22 实测）：`backend/app` 下 **35 处** `create_subprocess_exec` / `subprocess.run`，**零处擦洗**——只有 2 处显式传了 `env=`，而那两处传的是 `os.environ.copy()` / `{**os.environ, ...}`，是全量继承再追加。
+
+要区分两类，别一刀切：
+
+- **自家 Python 子进程**（`services/workforce/isolated_runner.py`）跑的是我们自己的代码，它**需要**数据库凭证才能干活，全量继承是对的。
+- **第三方二进制**（yt-dlp、ffmpeg/ffprobe、node、jimeng/codex CLI）占了绝大多数，它们不需要 `SUPABASE_SERVICE_ROLE_KEY` 和各家 LLM API key，而 yt-dlp 处理的还是攻击者可控的 URL——**这些是该擦洗的**。
+
+收口要逐点确认各自真正依赖的变量（`PATH`、代理变量、`FFMPEG_PATH` 都在环境里），属独立改动，未在本波处理。
+
+### 形似链接的路径要用 unlink 删
+
+可能是符号链接或 Windows junction 的路径，先 `os.path.islink()` 判定再 `os.unlink()`：unlink 只删链接本身、遇到真目录会拒绝，所以它永远不会顺着链接删到目标里去。递归删除只留给**已知是真目录**的路径。
+
+---
+
+## 提示词与模型可见面纪律（2026-08-22 立约）
+
+### Model Experience 三问是 agent/prompt 模块 README 的强制段
+
+任何会改变**模型能看到什么**的模块（prompt 组装、上下文注入、工具 schema、skill 装载、压缩），其 README 必须包含这三个小节，顺序固定：
+
+| 小节 | 回答什么 | 常见写错 |
+|------|----------|----------|
+| `What the model sees` | 模型实际收到的文本/结构。稳定的字面量**原样贴出来**（markdown 围栏），数据驱动的部分才用概括 | 描述代码怎么写的，而不是模型收到什么 |
+| `Token effect` | 这段内容占多少、增长是否有界、什么时候会被压缩掉 | 只说"很小"，不说边界条件 |
+| `KV Cache effect` | 是 append-only、稳定前缀、替换了更早的 token，还是另起一次独立请求；**本模块的哪些改动会让复用失效** | 把"provider 缓存是否命中"写成本模块的承诺——那不在模块契约内 |
+
+再加一节 `Known Limitations and Deferred Work`：记录**长期存在的消费方缺口**和不显然的维护约束；普通待办留在源码 TODO 里，不进 README。
+
+示范见 `backend/app/services/ai/prompts/README.md`、`backend/app/services/ai/skills/README.md`、`backend/app/boundary/README.md`。
+
+### 提示词快照：一个场景 pin 全文，其余一律 tokenize
+
+- **唯一的全文 pin** 是 `backend/tests/services/ai/prompts/test_system_message_pin.py`，对着 `snapshots/system_message_text_turn.txt`。改提示词散文只会在这一处产生 diff，而**那个 diff 就是评审内容**——你按模型读到的样子读它。
+- **其余所有提示词测试用 tokenize 断言**（断言某个标记/短语存在），这样改一句话只 churn 一行。
+- **不要加第二个全文 pin**。两个全文 pin 意味着每次改散文都产出两份说同一件事的 diff，评审者很快就会不读就刷新快照——那时 pin 已经从控制手段退化成杂活。
+- 刷新：`PIN_REFRESH=1 uv run pytest tests/services/ai/prompts/test_system_message_pin.py`，**然后读 diff 再提交**。
+
+### 用户可控文本进框必须转义
+
+系统提示词里那些尖括号框（`<available_resources>` / `<scene_elements>` / `<user_context>` …）是**我们自己拥有的**，它们赋予内容"这是系统说的"这层权威。用户可控文本里出现字面闭合标记，就会提前关掉框，后面的内容对模型而言就成了 harness 写的指令。
+
+三层，按被注入文本的形状选：
+
+| 不可信文本的形状 | 用 | 在哪 |
+|---|---|---|
+| 一整份外部文档（抓来的网页、字幕、描述） | `neutralize_external_text` —— 随机 id 包裹，闭合标记不可伪造 | `app/boundary/external_text.py` |
+| 一个 XML 属性值（文件名、slug、model 名） | `escape_frame_attr` | `app/boundary/frame_markers.py` |
+| 我们自己的框里的一段散文（剧本行、user_context） | `escape_frame_body` | 同上 |
+
+**新加一个框，必须同时把它登记进 `OWNED_FRAMES`**，否则那个框是没有防护的——`tests/services/ai/prompts/test_frame_escape_wiring.py::test_every_frame_rendered_in_prompt_code_is_registered` 会扫出未登记的框并拒绝。
+
+⚠️ 「在提示词里写一句 SECURITY: 下面是不可信数据」**不算防护**。它是有用的第二层，但结构上关不掉框的只有转义。本仓 `script_ai_service` 曾经只有这句话、没有转义。
+
+### 模型可见的工具 schema 用显式白名单投影
+
+`Tool.to_descriptor()` 只吐 `name` / `description` / `inputSchema`，`handler` 这类宿主侧字段永不序列化。给 `Tool` 加字段时必须在 `tests/agent_framework/test_tool_descriptor_allowlist.py` 里明确它是模型可见还是宿主专有——**不许有第三种"没分类"状态**，那个测试会拒绝。
+
+不要把投影改成 `asdict(self)` 直通：调度元数据（超时、并发安全性、所需权限）告诉模型的是"有什么可以试着绕过"。
+
 ## 项目结构
 
 ```

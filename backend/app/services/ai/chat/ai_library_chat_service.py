@@ -28,6 +28,7 @@ from fastapi import HTTPException, status
 from loguru import logger
 
 from app.agent_framework.abort_controller import RunAborted
+from app.boundary.frame_markers import escape_frame_body
 from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
@@ -1408,13 +1409,13 @@ def format_script_context_block(script_context: Optional[dict]) -> str:
         return ""
     lines = ["<user_selection>"]
     if sc.get("scene_label"):
-        lines.append(f"scene: {sc['scene_label']}")
+        lines.append(f"scene: {escape_frame_body(sc['scene_label'])}")
     if scene_id:
         lines.append(f"scene_id: {scene_id}")
     if element_ids:
         lines.append(f"element_ids: {', '.join(element_ids)}")
     if sc.get("element_type"):
-        lines.append(f"element_type: {sc['element_type']}")
+        lines.append(f"element_type: {escape_frame_body(sc['element_type'])}")
     if sc.get("cross_scene"):
         lines.append("spans multiple scenes")
     if element_ids:
@@ -1462,7 +1463,9 @@ async def _surface_next_session_commitments(
             "your first reply if relevant:",
         ]
         for c in pending[:5]:  # cap on UI noise
-            reminder_lines.append(f"  - {c.description}")
+            # The description came out of an earlier model turn about the
+            # user's own words — untrusted for framing purposes.
+            reminder_lines.append(f"  - {escape_frame_body(c.description)}")
         reminder_lines.append("</pending_followups>")
 
         # Mark them fulfilled so they don't fire again.

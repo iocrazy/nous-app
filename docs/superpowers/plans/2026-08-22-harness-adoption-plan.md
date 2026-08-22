@@ -138,6 +138,15 @@ Retry-After 超限放弃有测试；UI 能渲染重试进度。
 - skill 目录快照 complete 位：incomplete 永不缓存、保留 last-good
 - 取消工具调用为未启动的 call 补写合成 error 结果（call/result 配对、replay 合法）
 - spill/临时文件 0700 + 随机名 + 'wx' 0600；保存失败 best-effort 保留内联，不把成功变 isError
+- **子进程环境擦洗**（W5 实测发现，规则已入 CLAUDE.md「防御模式」，代码未动）：
+  `backend/app` 下 35 处 `create_subprocess_exec` / `subprocess.run` **零处擦洗**——
+  仅 2 处传 `env=`，传的还是 `os.environ.copy()` / `{**os.environ, ...}`。
+  区分两类再动手：`services/workforce/isolated_runner.py` 跑的是我们自己的
+  Python 子进程，**需要**凭证，全量继承是对的；其余（yt-dlp、ffmpeg/ffprobe、
+  node、jimeng/codex CLI）不需要 `SUPABASE_SERVICE_ROLE_KEY` 和各家 LLM API key，
+  而 yt-dlp 处理的正是攻击者可控的 URL。
+  ⚠️ 有真实回归风险：`PATH`、代理变量、`FFMPEG_PATH` 都在环境里，逐点确认后
+  再改，且需真栈验收（下载/转码/缩略图三条链都要走一遍）。
 
 ## 待另行拍板（不在本计划）
 
