@@ -86,3 +86,21 @@ describe('UnifiedImageEditor ε4 editor chrome', () => {
     expect(screen.getByTestId('brush-redo')).toBeDisabled();
   });
 });
+
+it('preview arrows page between sibling items (IC previewPrev/Next)', () => {
+  const onNavigate = vi.fn();
+  render(
+    <UnifiedImageEditor
+      open
+      src="/b.png"
+      items={['/a.png', '/b.png', '/c.png']}
+      onNavigate={onNavigate}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.getByText('2 / 3')).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId('editor-next'));
+  expect(onNavigate).toHaveBeenCalledWith('/c.png');
+  fireEvent.click(screen.getByTestId('editor-prev'));
+  expect(onNavigate).toHaveBeenCalledWith('/a.png');
+});
