@@ -382,6 +382,36 @@ class MusicChartsRepository:
             for row in rows
         ]
 
+    async def count_stale_accounts(
+        self, *, ttl_hours: int, now: datetime.datetime | None = None
+    ) -> int:
+        """How many accounts are due — **not capped**.
+
+        The sweeper takes one account per tick on purpose (a harvest is ~2
+        minutes, holds that account's browser session, and leaves a draft). So
+        `list_stale_accounts(limit=1)` can never answer "is the queue draining
+        at all" — one row comes back whether two accounts are waiting or two
+        hundred.
+
+        That is the shape of a cap that lies: coverage silently bounded, every
+        number in the log looking healthy. This is the second query that makes
+        the difference observable, and it is cheap — a grouped count over one
+        small table, once an hour.
+        """
+        moment = now or datetime.datetime.now(datetime.timezone.utc)
+        cutoff = moment - datetime.timedelta(hours=max(1, ttl_hours))
+        async with read_scope() as session:
+            due = (
+                select(MusicCharts.account_id)
+                .group_by(MusicCharts.account_id)
+                .having(func.max(MusicCharts.fetched_at) < cutoff)
+                .subquery()
+            )
+            total = (
+                await session.execute(select(func.count()).select_from(due))
+            ).scalar_one_or_none()
+        return int(total or 0)
+
     async def find_track(
         self, account_id: int, music_id: str
     ) -> Optional[dict[str, Any]]:

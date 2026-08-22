@@ -26,7 +26,9 @@ async def test_a_disabled_module_scans_nothing_at_all(monkeypatch):
     """
     scanned = []
     monkeypatch.setattr(sweep, "_music_module_enabled", _const(False))
-    monkeypatch.setattr(sweep, "_scan_stale_accounts", _record(scanned, []))
+    monkeypatch.setattr(
+        sweep, "_scan_stale_accounts", _record(scanned, {"picked": [], "due_total": 0})
+    )
 
     counts = await sweep.music_charts_sweep_workflow.__wrapped__.__wrapped__(None, None)
     assert counts == {"due": 0, "harvested": 0}
@@ -41,7 +43,9 @@ async def test_an_unhealthy_browser_touches_no_account(monkeypatch):
     monkeypatch.setattr(
         sweep,
         "_scan_stale_accounts",
-        _const([{"account_id": "10", "platform": "douyin"}]),
+        _const(
+            {"picked": [{"account_id": "10", "platform": "douyin"}], "due_total": 1}
+        ),
     )
     monkeypatch.setattr(sweep, "_music_browser_is_healthy", _const(False))
     monkeypatch.setattr(sweep, "_harvest_one", _record(harvested, sweep.VERDICT_STORED))
@@ -58,11 +62,13 @@ async def test_nothing_due_ends_the_tick_before_the_browser_probe(monkeypatch):
     什么都不做的 tick 去打它，是把"每小时一次"变成"每小时至少一次请求"。"""
     probed = []
     monkeypatch.setattr(sweep, "_music_module_enabled", _const(True))
-    monkeypatch.setattr(sweep, "_scan_stale_accounts", _const([]))
+    monkeypatch.setattr(
+        sweep, "_scan_stale_accounts", _const({"picked": [], "due_total": 0})
+    )
     monkeypatch.setattr(sweep, "_music_browser_is_healthy", _record(probed, True))
 
     counts = await sweep.music_charts_sweep_workflow.__wrapped__.__wrapped__(None, None)
-    assert counts == {"due": 0, "harvested": 0}
+    assert counts == {"due": 0, "harvested": 0, "taken": 0}
     assert probed == []
 
 
@@ -187,3 +193,93 @@ async def _harvest_with(monkeypatch, envelope: dict) -> str:
         "app.services.distribution.music_charts.harvest_account_charts", _fake
     )
     return await sweep._harvest_one.__wrapped__("10")
+
+
+# ── 真的执行 step 函数体 ────────────────────────────────────────────────
+#
+# 上面所有闸门测试都 monkeypatch 掉了这两个 step —— 于是它们的**函数体一次都
+# 没被执行过**。代价已经付了：给 step 加 `_music_` 前缀那次用了全量字符串替换，
+# 而 `is_module_enabled` 恰好含有 `_module_enabled` 这个子串，导入名被一起改成
+# 了不存在的 `is_music_module_enabled`。
+#
+# 生产上 22 次 ERROR，这个定时任务从上线起一次都没成功过 —— **而单元测试全绿**。
+#
+# 教训不是"别用全量替换"，是：**把一个函数 patch 掉的测试，不构成对那个函数的
+# 任何保证**。所以下面两条不 patch 被测函数本身，只 patch 它调用的东西。
+
+
+async def test_the_module_gate_actually_resolves_its_import(monkeypatch):
+    """**这条就是那次事故的守卫。** 把导入名改错就红。"""
+    import app.services.distribution.module_config as module_config
+
+    called = []
+
+    async def _enabled():
+        called.append(1)
+        return True
+
+    monkeypatch.setattr(module_config, "is_module_enabled", _enabled)
+    assert await sweep._music_module_enabled.__wrapped__() is True
+    # 正向对照：真的走到了那个函数，而不是靠某个默认值返回 True。
+    assert called == [1]
+
+
+async def test_the_browser_probe_actually_resolves_its_import(monkeypatch):
+    """同一族的第二个 step。它这次没被误伤，但没有任何东西保证下次不会。"""
+    import app.services.distribution.browser_client as browser_client
+
+    class _Health:
+        ok = True
+        error_kind = None
+
+    class _Client:
+        async def health(self):
+            return _Health()
+
+    monkeypatch.setattr(browser_client, "BrowserClient", _Client)
+    assert await sweep._music_browser_is_healthy.__wrapped__() is True
+
+
+# ── 上限截断必须说出来 ─────────────────────────────────────────────────
+
+
+def test_a_drained_queue_says_nothing():
+    """空串是**结论**，不是缺省值 —— 两种情况调用方都会调到它。"""
+    assert sweep.describe_backlog(1, 1) == ""
+    assert sweep.describe_backlog(0, 0) == ""
+
+
+def test_a_backlog_names_the_ceiling_and_how_long_it_takes_to_drain():
+    """只报"还有 29 个在等"是不够的。
+
+    24 个积压 = 一天，240 个 = 十天 —— 后者意味着这个功能对大多数账号已经不
+    成立了，而两者的积压数长得一样。所以句子里必须同时有上限和排空天数。
+    """
+    line = sweep.describe_backlog(30, 1)
+    assert "29" in line  # 还在等的
+    assert "due=30" in line  # 真实过期总数
+    assert "taken=1" in line  # 这一轮取了几个
+    assert "24/day" in line  # 上限本身
+    assert "~2d" in line  # 排空要多久
+
+
+async def test_the_tick_reports_the_real_due_count_not_what_it_took(monkeypatch):
+    """**这条是「上限静默截断覆盖面」的守卫。**
+
+    报 `taken` 当 `due`，队列排不完就永远看不见：每一行日志都写着"该采 1 个、
+    采了 1 个"，而实际上有两百个在等。
+    """
+    monkeypatch.setattr(sweep, "_music_module_enabled", _const(True))
+    monkeypatch.setattr(
+        sweep,
+        "_scan_stale_accounts",
+        _const(
+            {"picked": [{"account_id": "10", "platform": "douyin"}], "due_total": 30}
+        ),
+    )
+    monkeypatch.setattr(sweep, "_music_browser_is_healthy", _const(True))
+    monkeypatch.setattr(sweep, "_harvest_one", _const(sweep.VERDICT_STORED))
+
+    counts = await sweep.music_charts_sweep_workflow.__wrapped__.__wrapped__(None, None)
+    assert counts["due"] == 30, "报的必须是真实过期总数"
+    assert counts["taken"] == 1
