@@ -40,6 +40,7 @@ export function AttachedComposerPanel({
   const [quality, setQuality] = useState<string | undefined>(undefined);
   const [resolution, setResolution] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [videoMode, setVideoMode] = useState<'multimodal' | 'frames' | undefined>(undefined);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
@@ -60,6 +61,10 @@ export function AttachedComposerPanel({
       (gen as { resolution?: string }).resolution = resolution;
     if (kind === 'video' && duration)
       (gen as { duration?: number }).duration = duration;
+    if (kind === 'video' && resolution)
+      (gen as { resolution?: string }).resolution = resolution;
+    if (kind === 'video' && videoMode)
+      (gen as { video_mode?: string }).video_mode = videoMode;
     const promptId = createPromptFromNode(nodeId, {
       body,
       gen,
@@ -155,7 +160,7 @@ export function AttachedComposerPanel({
           gen={
             (kind === 'image'
               ? { kind: 'image', model, ratio, count, quality, resolution }
-              : { kind: 'video', model, aspect: ratio, duration }) as never
+              : { kind: 'video', model, aspect: ratio, duration, resolution, video_mode: videoMode }) as never
           }
           models={models}
           onChange={(g) => {
@@ -166,6 +171,7 @@ export function AttachedComposerPanel({
             if ('quality' in g) setQuality(g.quality);
             if ('resolution' in g) setResolution(g.resolution);
             if ('duration' in g) setDuration(g.duration);
+            if ('video_mode' in g) setVideoMode(g.video_mode);
           }}
         />
         <button
