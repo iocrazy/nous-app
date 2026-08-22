@@ -36,6 +36,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from app.boundary.frame_markers import (
+    escape_frame_attr,
+    escape_frame_body,
+)
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import ComposedSystemPrompt
@@ -292,7 +296,8 @@ class PromptComposer:
             "conversations. Treat as background context; the user's "
             "current message wins when they conflict.\n"
         )
-        return f"{header}<user_context>\n{user_context.strip()}\n</user_context>"
+        safe = escape_frame_body(user_context.strip())
+        return f"{header}<user_context>\n{safe}\n</user_context>"
 
     def _render_graph_facts_section(self, facts: list[str]) -> str:
         """Render <graph_facts> — relationship facts from the knowledge
@@ -338,13 +343,16 @@ class PromptComposer:
             "Never call Skill more than once per turn unless the task "
             "clearly requires chaining.\n"
         )
+        # `escape_frame_attr` on element TEXT, not just attributes, is
+        # deliberate: it escapes `<`/`>` outright, which both preserves the
+        # pre-existing `&lt;tag&gt;` contract and is strictly stronger than
+        # body escaping here. Do not "correct" it to escape_frame_body.
         xml: list[str] = ["<available_skills>"]
         for s in skills:
             xml.append("  <skill>")
-            xml.append(f"    <name>{s.get('slug') or s.get('name')}</name>")
-            desc = (
-                (s.get("description") or "").replace("<", "&lt;").replace(">", "&gt;")
-            )
+            name = escape_frame_attr(s.get("slug") or s.get("name"))
+            xml.append(f"    <name>{name}</name>")
+            desc = escape_frame_attr(s.get("description"))
             xml.append(f"    <description>{desc}</description>")
             xml.append("  </skill>")
         xml.append("</available_skills>")
@@ -366,11 +374,9 @@ class PromptComposer:
         )
         xml: list[str] = ["<available_workers>"]
         for w in workers:
-            slug = w.get("slug") or w.get("name") or ""
-            desc = (
-                (w.get("description") or "").replace("<", "&lt;").replace(">", "&gt;")
-            )
-            model = w.get("model") or ""
+            slug = escape_frame_attr(w.get("slug") or w.get("name"))
+            desc = escape_frame_attr(w.get("description"))
+            model = escape_frame_attr(w.get("model"))
             xml.append("  <worker>")
             xml.append(f"    <slug>{slug}</slug>")
             xml.append(f"    <description>{desc}</description>")
@@ -670,22 +676,26 @@ def render_available_resources(refs: list[dict] | None) -> str:
     lines = ["<available_resources>"]
     any_status = False
     for r in refs:
+        # Every value is escaped, not just the obviously user-owned ones:
+        # picking per-attribute is how the next attribute added here ends up
+        # raw. `name` is the live vector — users rename resources freely.
         attrs = [
-            f'id="{r["id"]}"',
-            f'kind="{r["kind"]}"',
-            f'mime="{r.get("mime") or ""}"',
-            f'scope="{r.get("scope") or ""}"',
+            f'id="{escape_frame_attr(r["id"])}"',
+            f'kind="{escape_frame_attr(r["kind"])}"',
+            f'mime="{escape_frame_attr(r.get("mime"))}"',
+            f'scope="{escape_frame_attr(r.get("scope"))}"',
             f'size="{_fmt_size(r.get("size"))}"',
-            f'updated="{r.get("updated_at") or ""}"',
-            f'name="{r["name"]}"',
+            f'updated="{escape_frame_attr(r.get("updated_at"))}"',
+            f'name="{escape_frame_attr(r["name"])}"',
         ]
         status_attr = _status_attr(r)
         if status_attr:
             any_status = True
             attrs.append(status_attr)
         if r.get("brief"):
-            brief = r["brief"].replace('"', "'")
-            attrs.append(f'brief="{brief}"')
+            # Was `"` → `'`, which stops the quote breakout but leaves `<`/`>`
+            # free to open a frame the model trusts.
+            attrs.append(f'brief="{escape_frame_attr(r["brief"])}"')
         lines.append(f"  <resource {' '.join(attrs)} />")
     lines.append("</available_resources>")
     lines.append("")
