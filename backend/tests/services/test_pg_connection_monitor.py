@@ -17,7 +17,6 @@ import pytest
 
 from app.services.infra import pg_connection_monitor as mon
 
-
 # ── Thresholds ────────────────────────────────────────────────────────────
 
 
