@@ -24,14 +24,12 @@ describe('edgeRunStateClass', () => {
     );
   });
 
-  it('maps an edge out of a prompt (prompt→output) by the prompt status', () => {
+  it("a finished prompt's edges return to the default stroke (succeeded → no class)", () => {
     const nodeInfo = lookup({
       p1: { type: 'prompt', runStatus: 'succeeded' },
       out1: { type: 'output' },
     });
-    expect(edgeRunStateClass({ source: 'p1', target: 'out1' }, nodeInfo)).toBe(
-      'mh-edge-done',
-    );
+    expect(edgeRunStateClass({ source: 'p1', target: 'out1' }, nodeInfo)).toBe(null);
   });
 
   it('prefers the target prompt when both endpoints are prompts', () => {
@@ -48,7 +46,7 @@ describe('edgeRunStateClass', () => {
     const cases: Array<[string, string | null]> = [
       ['queued', 'mh-edge-wait'],
       ['running', 'mh-edge-active'],
-      ['succeeded', 'mh-edge-done'],
+      ['succeeded', null],
       ['failed', 'mh-edge-failed'],
       ['blocked', 'mh-edge-blocked'],
       ['idle', null],

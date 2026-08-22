@@ -334,35 +334,38 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
       try {
         setMaskCommitting(true);
         setMaskError(null);
-        // IC 生成遮罩节点: the commit product is the BLACK/WHITE mask
-        // image itself, dropped beside the source as a media node ready to
-        // wire into an inpaint prompt — NOT a cutout extraction (the
-        // 2026-08-21 "遮罩变成提取了" report).
+        // IC 生成遮罩: the black/white mask lands INSIDE this node, side by
+        // side with the original (one node feeds 图1+图2 downstream) — not
+        // as a separate card (2026-08-21 "遮罩直接在外面显示").
         const maskB64 = strokesToMaskPngBase64(strokes, size.width, size.height);
         const bin = atob(maskB64.split(',').pop() ?? maskB64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const file = new File([bytes], 'mask.png', { type: 'image/png' });
-        const store = useCanvasCoreStore.getState();
-        const self = store.nodes.find(
-          (node) => (node as { id?: string }).id === id,
-        ) as { position?: { x: number; y: number } } | undefined;
-        const base = self?.position ?? { x: 0, y: 0 };
-        await createMediaNodeFromFiles([file], {
-          x: base.x + 460,
-          y: base.y + 60,
+        const item = await importCanvasMedia(file, canvasId, id);
+        const current = (useCanvasCoreStore
+          .getState()
+          .nodes.find((n) => (n as { id?: string }).id === id) as
+          | { data?: { images?: Array<{ url: string }> } }
+          | undefined)?.data;
+        patchData({
+          images: [
+            ...((current?.images as Array<{ url: string }>) ?? []),
+            { url: item.url, kind: 'image', name: 'mask.png' },
+          ],
         });
         setMaskOpen(false);
         setEditorMode(null);
       } catch (err) {
-        console.error('mask node failed:', err);
+        console.error('mask append failed:', err);
         setMaskError(err instanceof Error ? err.message : 'Mask failed');
       } finally {
         setMaskCommitting(false);
       }
     },
-    [id],
+    [id, canvasId, patchData],
   );
+
 
   const openGridEditor = useCallback(() => {
     if (!canSplit) return;
