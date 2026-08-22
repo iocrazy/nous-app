@@ -215,3 +215,17 @@ export async function promoteGeneration(genId: string): Promise<string> {
   if (!id) throw new Error('promote returned no resource id');
   return id;
 }
+
+/** IC 放大: jimeng image_upscale on a durable generation → new gen url. */
+export async function upscaleGeneration(
+  genId: string,
+  resolution: '2k' | '4k' = '2k',
+): Promise<{ id: string; url: string }> {
+  const res = await apiFetch(`/api/v1/generated-media/${genId}/upscale`, {
+    method: 'POST',
+    json: { resolution },
+  });
+  const body = (await res.json()) as { data?: { id: string; url: string } };
+  if (!body.data?.url) throw new Error('upscale returned no url');
+  return body.data;
+}

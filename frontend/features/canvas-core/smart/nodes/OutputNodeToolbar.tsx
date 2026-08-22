@@ -16,6 +16,7 @@ import {
   Paintbrush,
   RefreshCw,
   Theater,
+  Maximize2,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -32,6 +33,9 @@ export interface OutputNodeToolbarProps {
   onMask?: () => void;
   /** IC 画笔 — annotate with free/rect/ellipse/label/text shapes. */
   onBrush?: () => void;
+  /** IC 放大 — jimeng image_upscale on the current image. */
+  onUpscale?: () => void;
+  upscaling?: boolean;
   onSplit?: () => void;
   /** Absent → no source prompt → the Rerun key is hidden. */
   onRerun?: () => void;
@@ -52,6 +56,8 @@ export function OutputNodeToolbar({
   onMask,
   onBrush,
   onSplit,
+  onUpscale,
+  upscaling,
   onRerun,
   rerunning,
   readOnly,
@@ -105,6 +111,15 @@ export function OutputNodeToolbar({
       {onSplit && (
         <ToolbarButton label="Split" onClick={onSplit} disabled={readOnly}>
           <Grid3x3 size={13} />
+        </ToolbarButton>
+      )}
+      {onUpscale && (
+        <ToolbarButton
+          label="Upscale"
+          onClick={onUpscale}
+          disabled={readOnly || upscaling}
+        >
+          <Maximize2 size={13} className={upscaling ? 'animate-pulse' : undefined} />
         </ToolbarButton>
       )}
       <ToolbarButton
