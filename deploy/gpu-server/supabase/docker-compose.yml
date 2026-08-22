@@ -587,13 +587,40 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
+    # ⚠️ 改这里**不会**自动生效 —— db 不在任何自动部署链里。
+    # `deploy-gpu.yml` 的 paths 含 `deploy/gpu-server/**`（所以改本文件会触发一次
+    # 部署），但那条链跑的是 `deploy/gpu-server/up.sh --build backend worker
+    # gateway browser` —— 另一个 compose 项目（`gpu-server`），根本不含 db。
+    # db 属于 `mediahub-sb-prod` 项目，只能人工换：
+    #   cd deploy/gpu-server/supabase && docker compose up -d db
+    # 且这两个参数都**不是**可 reload 的（max_connections 需重启 postmaster），
+    # `docker restart` 也不够 —— command 改动必须 `up -d` 重建容器。
+    # 挑业务空窗做：重启期间全栈（auth/rest/realtime/storage/DBOS）会短暂断连。
     command:
       [
         "postgres",
         "-c",
         "config_file=/etc/postgresql/postgresql.conf",
         "-c",
-        "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
+        "log_min_messages=fatal", # prevents Realtime polling queries from appearing in logs
+        # ── 连接预算（2026-08-21）────────────────────────────────────────
+        # 默认 100 太紧：自托管 Supabase 全家桶自己就占掉固定的 60-70 条
+        # （实测 2026-08-21：67/100，其中 supabase_admin 41 —— realtime 的
+        #  订阅管理/RLS/cluster_node 一堆常驻连接、supavisor_meta 5、
+        #  PostgREST 5、Supavisor→PG 6、dbos_transact 7 + client 1）。
+        # 那不是负载，是**开机就有的底噪**，留给业务的余量只剩 30 出头。
+        # 于是部署窗里新旧连接池并存就直接撞顶 —— 已实测到 106/100，
+        # 那种状态下连 psql 都进不去（连排查手段一起失去）。
+        # 200 是给底噪之上留出真正的业务余量，不是为了跑满。
+        "-c",
+        "max_connections=200",
+        # 默认 0 = 永不超时。事务开着不动的连接会一直占着槽位，这个项目
+        # 有前科：临时 DB 脚本 idle-in-transaction 把池饿死。10 分钟远长于
+        # 任何正常事务（发布链的 advisory-lock 事务是分钟级，见
+        # app/services/distribution/session_lock.py），却能兜住跑飞的脚本
+        # 和断线后残留的事务。踩到它的是 bug，不是正常负载。
+        "-c",
+        "idle_in_transaction_session_timeout=600000" # 10 min
       ]
 
   vector:
