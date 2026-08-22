@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
-import { ImagePlus, Library, Play, Square, Zap } from 'lucide-react';
+import { ImagePlus, Library, Play, Split, Square, Zap } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
 import type { GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
@@ -14,6 +14,7 @@ import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 import { isChainTail, startChainRun, useChainRunStore } from '../chainRun';
+import { splitPromptItems } from '../promptSplit';
 import { rerunPrompt } from '../regenerate';
 import { resolveSourceUrls, upstreamPromptText } from '../promptInputs';
 import { MAX_REFERENCE_IMAGES, reorderRefs } from '../refOrder';
@@ -45,6 +46,8 @@ import { CANVAS_PILL_TRIGGER } from './canvasPill';
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
     body,
+    split_enabled,
+    split_separator,
     provider_slug,
     agent_id = null,
     run_status,
@@ -396,6 +399,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           </UiSelect>
           <button
             type="button"
+            data-testid="prompt-split-toggle"
+            title="Split the prompt on a separator — each item runs as its own generation"
+            onClick={() => patch({ split_enabled: !split_enabled })}
+            disabled={readOnly}
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:opacity-50 ${
+              split_enabled ? 'font-bold text-canvas-text' : ''
+            }`}
+          >
+            <Split size={11} />
+          </button>
+          <button
+            type="button"
             className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
             onClick={() => setLibraryOpen(true)}
             aria-label="Load from library"
@@ -737,6 +752,25 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           )}
         </div>
 
+        {split_enabled && (
+          <div
+            data-testid="prompt-split-row"
+            className="mt-1.5 flex items-center gap-1.5 text-[10px] text-canvas-muted"
+          >
+            <span>Separator</span>
+            <input
+              type="text"
+              maxLength={8}
+              value={split_separator ?? ';'}
+              onChange={(e) => patch({ split_separator: e.target.value })}
+              aria-label="Split separator"
+              className="nodrag w-14 rounded border border-canvas-line bg-transparent px-1.5 py-0.5 text-xs text-canvas-text outline-none"
+            />
+            <span data-testid="prompt-split-count" className="font-semibold">
+              {splitPromptItems(draft, (split_separator ?? ';')).length} prompts
+            </span>
+          </div>
+        )}
         {/* Ref chips: show attached resources below the textarea */}
         {(resource_refs as PromptResourceRef[]).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1" data-testid="prompt-ref-chips">

@@ -17,6 +17,7 @@ import {
 } from './genResume';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveEntityRef } from './entityRef';
+import { DEFAULT_SPLIT_SEPARATOR, splitPromptItems } from './promptSplit';
 import {
   resolveEffectiveSourceUrl,
   resolveEffectiveSourceUrls,
@@ -100,6 +101,9 @@ export async function rerunPrompt(
     source_url: resolveEffectiveSourceUrl(prompt!, nodes, connections),
     source_urls: resolveEffectiveSourceUrls(prompt!, nodes, connections),
     entity_ref: resolveEntityRef(promptId, nodes, connections),
+    split_prompts: data.split_enabled
+      ? splitPromptItems(data.body, data.split_separator ?? DEFAULT_SPLIT_SEPARATOR)
+      : undefined,
   };
 
   regen.start(key);
