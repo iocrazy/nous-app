@@ -40,6 +40,7 @@ export function AttachedComposerPanel({
   const [quality, setQuality] = useState<string | undefined>(undefined);
   const [resolution, setResolution] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [videoMode, setVideoMode] = useState<'multimodal' | 'frames' | undefined>(undefined);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
@@ -60,6 +61,10 @@ export function AttachedComposerPanel({
       (gen as { resolution?: string }).resolution = resolution;
     if (kind === 'video' && duration)
       (gen as { duration?: number }).duration = duration;
+    if (kind === 'video' && resolution)
+      (gen as { resolution?: string }).resolution = resolution;
+    if (kind === 'video' && videoMode)
+      (gen as { video_mode?: string }).video_mode = videoMode;
     const promptId = createPromptFromNode(nodeId, {
       body,
       gen,
@@ -155,7 +160,7 @@ export function AttachedComposerPanel({
           gen={
             (kind === 'image'
               ? { kind: 'image', model, ratio, count, quality, resolution }
-              : { kind: 'video', model, aspect: ratio, duration }) as never
+              : { kind: 'video', model, aspect: ratio, duration, resolution, video_mode: videoMode }) as never
           }
           models={models}
           onChange={(g) => {
@@ -166,6 +171,7 @@ export function AttachedComposerPanel({
             if ('quality' in g) setQuality(g.quality);
             if ('resolution' in g) setResolution(g.resolution);
             if ('duration' in g) setDuration(g.duration);
+            if ('video_mode' in g) setVideoMode(g.video_mode);
           }}
         />
         <button
@@ -179,6 +185,57 @@ export function AttachedComposerPanel({
           Run
         </button>
       </div>
+      {/* IC flat option rows (用户: pill 弹层里的选项"看不见" — IC 把
+          分辨率/参考模式全部平铺在面板上). Only real jimeng-CLI channels
+          appear; the greyed IC checkboxes without a backend stay out. */}
+      {kind === 'video' && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {(['720p', '1080p', '4k'] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              data-testid={`composer-vres-${r}`}
+              onClick={() => setResolution(resolution === r ? undefined : r)}
+              className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                resolution === r
+                  ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                  : 'border-canvas-line text-canvas-text'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+          <span className="mx-0.5 h-3 w-px bg-canvas-line" />
+          <button
+            type="button"
+            data-testid="composer-mode-multimodal"
+            onClick={() =>
+              setVideoMode(videoMode === 'multimodal' ? undefined : 'multimodal')
+            }
+            title="All wired refs guide the clip (multimodal2video)"
+            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              videoMode === 'multimodal'
+                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                : 'border-canvas-line text-canvas-text'
+            }`}
+          >
+            Omni Ref
+          </button>
+          <button
+            type="button"
+            data-testid="composer-mode-frames"
+            onClick={() => setVideoMode(videoMode === 'frames' ? undefined : 'frames')}
+            title="Refs 1+2 become first/last frames (frames2video)"
+            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              videoMode === 'frames'
+                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                : 'border-canvas-line text-canvas-text'
+            }`}
+          >
+            First & Last
+          </button>
+        </div>
+      )}
     </div>
   );
 }

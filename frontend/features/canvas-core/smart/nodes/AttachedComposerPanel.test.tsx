@@ -111,3 +111,21 @@ describe('AttachedComposerPanel', () => {
     expect(screen.queryByTestId('attached-composer')).toBeNull();
   });
 });
+
+it('video Run carries video_mode + resolution picked in the duration panel', () => {
+  seed();
+  render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A, URL_B]} pinned />);
+  fireEvent.click(screen.getByTestId('composer-kind-video'));
+  fireEvent.click(screen.getByTestId('composer-vres-720p'));
+  fireEvent.click(screen.getByTestId('composer-mode-frames'));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Attached prompt' }), {
+    target: { value: 'morph' },
+  });
+  fireEvent.click(screen.getByTestId('composer-run'));
+  const s = useCanvasCoreStore.getState();
+  const prompt = s.nodes.find(
+    (n) => (n as { type: string }).type === 'prompt',
+  ) as unknown as { data: { gen: Record<string, unknown> } };
+  expect(prompt.data.gen.video_mode).toBe('frames');
+  expect(prompt.data.gen.resolution).toBe('720p');
+});
