@@ -516,3 +516,23 @@ async def test_generate_video_passes_video_resolution(monkeypatch):
     provider = JimengCliProvider()
     await provider.generate_video(prompt="a cat", aspect="16:9", resolution="1080p")
     assert "--video_resolution=1080p" in captured[0]
+
+
+async def test_generate_video_auto_aspect_omits_ratio(monkeypatch):
+    """aspect='auto' (IC 自适应) → no --ratio flag; the CLI infers."""
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "text2video": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "a1"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("clip.mp4"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    await provider.generate_video(prompt="free form", aspect="auto")
+    assert not any(str(a).startswith("--ratio=") for a in captured[0])

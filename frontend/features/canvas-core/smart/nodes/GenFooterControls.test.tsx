@@ -103,7 +103,7 @@ it('video kind shows a Duration pill and picks 10s', () => {
   expect(onChange).toHaveBeenCalledWith({ duration: 10 });
 });
 
-it('video duration panel offers resolution and reference-mode picks', () => {
+it('video kind has a resolution pill and an Adaptive aspect option', () => {
   const onChange = vi.fn();
   render(
     <GenFooterControls
@@ -112,10 +112,10 @@ it('video duration panel offers resolution and reference-mode picks', () => {
       models={[]}
     />,
   );
-  fireEvent.click(screen.getByTestId('pill-duration'));
-  fireEvent.click(screen.getAllByTestId('video-resolution-option')[1]);
+  fireEvent.click(screen.getByTestId('pill-vres'));
+  fireEvent.click(screen.getAllByTestId('vres-option')[2]); // 1080P
   expect(onChange).toHaveBeenCalledWith({ resolution: '1080p' });
-  fireEvent.click(screen.getByTestId('pill-duration'));
-  fireEvent.click(screen.getByText('Omni Ref'));
-  expect(onChange).toHaveBeenCalledWith({ video_mode: 'multimodal' });
+  fireEvent.click(screen.getByTestId('pill-size'));
+  fireEvent.click(screen.getByText('Adaptive'));
+  expect(onChange).toHaveBeenCalledWith({ aspect: 'auto' });
 });

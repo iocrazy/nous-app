@@ -287,6 +287,9 @@ class JimengCliProvider:
         (全能参考, refs capped at 9); one image → ``image2video``; none →
         ``text2video``. ``resolution`` rides as ``--video_resolution``
         (720p everywhere, 1080p/4k on vip models — CLI enforces)."""
+        # IC 自适应: aspect 'auto'/'' sends NO --ratio — the CLI infers from
+        # the reference; an unknown aspect falls back to the default.
+        adaptive = (aspect or "").strip().lower() in ("", "auto", "adaptive")
         ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
         refs = [p for p in (image_paths or []) if p][:9]
         if first_frame and last_frame:
@@ -297,7 +300,9 @@ class JimengCliProvider:
                 f"--prompt={prompt}",
             ]
         elif len(refs) >= 2:
-            args = ["multimodal2video", f"--prompt={prompt}", f"--ratio={ratio}"]
+            args = ["multimodal2video", f"--prompt={prompt}"]
+            if not adaptive:
+                args.append(f"--ratio={ratio}")
             for ref in refs:
                 args.append(f"--image={ref}")
         elif image_path or refs:
@@ -308,7 +313,9 @@ class JimengCliProvider:
                 f"--prompt={prompt}",
             ]
         else:
-            args = ["text2video", f"--prompt={prompt}", f"--ratio={ratio}"]
+            args = ["text2video", f"--prompt={prompt}"]
+            if not adaptive:
+                args.append(f"--ratio={ratio}")
         if duration:
             # IC parity: seconds knob, snapped by the CLI itself per model.
             args.append(f"--duration={int(duration)}")
