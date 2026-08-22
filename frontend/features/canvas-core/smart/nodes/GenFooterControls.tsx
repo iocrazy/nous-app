@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
   Sparkles,
 Timer,
+  Monitor,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -45,6 +46,17 @@ export const RATIO_LABELS: Record<string, string> = {
 /** Resolution ladder (IC 系统参数 right column). Consumed by providers
  *  with a resolution knob (jimeng resolution_type); codex sizes are fixed
  *  by the model and ignore it. */
+/** Video aspect set (IC 画面比例: jimeng-legal ratios + 自适应). */
+export const VIDEO_RATIOS: Array<{ value: string; label: string }> = [
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' },
+  { value: '1:1', label: '1:1' },
+  { value: '4:3', label: '4:3' },
+  { value: '3:4', label: '3:4' },
+  { value: '21:9', label: '21:9' },
+  { value: 'auto', label: 'Adaptive' },
+];
+
 /** Video resolutions (IC 分辨率: 720p everywhere; 1080p/4k vip models). */
 export const VIDEO_RESOLUTIONS = ['720p', '1080p', '4k'] as const;
 
@@ -72,7 +84,7 @@ const QUALITIES: Array<{ label: string; value: string | undefined }> = [
   { label: 'High', value: 'high' },
 ];
 
-type PopKey = 'model' | 'size' | 'quality' | 'count' | 'duration';
+type PopKey = 'model' | 'size' | 'quality' | 'count' | 'duration' | 'vres';
 
 export function GenFooterControls({
   gen,
@@ -133,6 +145,39 @@ export function GenFooterControls({
           {isImage ? ` · ${(gen.resolution ?? '1k').toUpperCase()}` : ''}
         </span>
       </Pill>
+      {!isImage && (
+        <Pill
+          testid="pill-vres"
+          ariaLabel="Video resolution"
+          onClick={() => toggle('vres')}
+          disabled={disabled}
+        >
+          <Monitor size={11} />
+          <span>{gen.resolution ? gen.resolution.toUpperCase() : 'Auto'}</span>
+        </Pill>
+      )}
+      {open === 'vres' && !isImage && (
+        <Pop title="Video Resolution">
+          <div className="flex w-40 flex-col gap-1">
+            {[undefined, '720p', '1080p', '4k'].map((r) => (
+              <button
+                key={r ?? 'auto'}
+                type="button"
+                data-testid="vres-option"
+                onClick={() => pick({ resolution: r } as never)}
+                className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${
+                  gen.resolution === r
+                    ? 'border-canvas-strong font-bold text-canvas-text'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                <span>{r ? r.toUpperCase() : 'Auto'}</span>
+                {gen.resolution === r && <span className="text-canvas-strong">●</span>}
+              </button>
+            ))}
+          </div>
+        </Pop>
+      )}
       {!isImage && (
         <Pill
           testid="pill-duration"
@@ -210,44 +255,6 @@ export function GenFooterControls({
                 </button>
               ))}
             </div>
-            {/* IC 分辨率 (multimodal/vip 模型支持更高档). */}
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
-              {VIDEO_RESOLUTIONS.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  data-testid="video-resolution-option"
-                  onMouseEnter={() => onChange({ resolution: r })}
-                  onClick={() => pick({ resolution: r })}
-                  className={`nodrag rounded-lg border px-1.5 py-1 text-xs ${
-                    (gen.resolution ?? '720p') === r
-                      ? 'border-canvas-strong font-bold text-canvas-text'
-                      : 'border-canvas-line text-canvas-text'
-                  }`}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-            {/* IC 全能参考 / 首尾帧 mode. */}
-            <div className="mt-1.5 flex flex-col gap-1">
-              {VIDEO_MODES.map((m) => (
-                <button
-                  key={m.label}
-                  type="button"
-                  data-testid="video-mode-option"
-                  onClick={() => pick({ video_mode: m.value } as never)}
-                  className={`nodrag flex items-center justify-between rounded-lg border px-2.5 py-1 text-xs ${
-                    gen.video_mode === m.value
-                      ? 'border-canvas-strong font-bold text-canvas-text'
-                      : 'border-canvas-line text-canvas-text'
-                  }`}
-                >
-                  <span>{m.label}</span>
-                  <span className="text-[10px] text-canvas-muted">{m.hint}</span>
-                </button>
-              ))}
-            </div>
             {/* IC custom seconds field (1–60, clamped). */}
             <label className="mt-1.5 flex items-center gap-1.5 text-[10px] text-canvas-muted">
               Custom
@@ -274,7 +281,10 @@ export function GenFooterControls({
               ladder right; HOVER selects (滑动到即选择), click closes. */}
           <div className="flex w-[380px] gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {FOOTER_RATIOS.map((r) => (
+              {(isImage
+                ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
+                : VIDEO_RATIOS.map((r) => ({ value: r.value, label: r.label }))
+              ).map(({ value: r, label: rl }) => (
                 <button
                   key={r}
                   type="button"
@@ -291,10 +301,8 @@ export function GenFooterControls({
                       : 'border-canvas-line text-canvas-text'
                   }`}
                 >
-                  <span>{r}</span>
-                  <span className="text-[10px] text-canvas-muted">
-                    {RATIO_LABELS[r]}
-                  </span>
+                  <span>{r === 'auto' ? 'Auto' : r}</span>
+                  <span className="text-[10px] text-canvas-muted">{rl}</span>
                 </button>
               ))}
             </div>
