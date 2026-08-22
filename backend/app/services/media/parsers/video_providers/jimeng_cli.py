@@ -277,19 +277,45 @@ class JimengCliProvider:
         model_version: Optional[str] = None,
         image_path: Optional[str] = None,
         duration: Optional[int] = None,
+        image_paths: Optional[List[str]] = None,
+        first_frame: Optional[str] = None,
+        last_frame: Optional[str] = None,
+        resolution: Optional[str] = None,
     ) -> GenResult:
-        """text2video (or image2video when ``image_path`` is given) → local mp4."""
-        if image_path:
+        """Video generation across the CLI's four commands (IC parity):
+        first+last → ``frames2video``; ≥2 images → ``multimodal2video``
+        (全能参考, refs capped at 9); one image → ``image2video``; none →
+        ``text2video``. ``resolution`` rides as ``--video_resolution``
+        (720p everywhere, 1080p/4k on vip models — CLI enforces)."""
+        ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
+        refs = [p for p in (image_paths or []) if p][:9]
+        if first_frame and last_frame:
+            args = [
+                "frames2video",
+                f"--first={first_frame}",
+                f"--last={last_frame}",
+                f"--prompt={prompt}",
+            ]
+        elif len(refs) >= 2:
+            args = ["multimodal2video", f"--prompt={prompt}", f"--ratio={ratio}"]
+            for ref in refs:
+                args.append(f"--image={ref}")
+        elif image_path or refs:
             # image2video takes a single --image; ratio is inferred from it.
-            args = ["image2video", f"--image={image_path}", f"--prompt={prompt}"]
+            args = [
+                "image2video",
+                f"--image={image_path or refs[0]}",
+                f"--prompt={prompt}",
+            ]
         else:
-            ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
             args = ["text2video", f"--prompt={prompt}", f"--ratio={ratio}"]
         if duration:
             # IC parity: seconds knob, snapped by the CLI itself per model.
             args.append(f"--duration={int(duration)}")
         if model_version:
             args.append(f"--model_version={model_version}")
+        if resolution:
+            args.append(f"--video_resolution={resolution}")
         args.append(f"--poll={self._video_poll}")
         submit_timeout = self._video_poll + self._video_margin
         return await self._submit_and_fetch(

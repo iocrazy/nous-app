@@ -445,3 +445,74 @@ async def test_generate_video_passes_duration_flag(monkeypatch):
     provider = JimengCliProvider()
     await provider.generate_video(prompt="a cat", aspect="16:9", duration=10)
     assert "--duration=10" in captured[0]
+
+
+async def test_generate_video_frames2video_with_first_last(monkeypatch):
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "frames2video": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "f1"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("clip.mp4"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    await provider.generate_video(
+        prompt="morph",
+        aspect="16:9",
+        first_frame="/tmp/a.png",
+        last_frame="/tmp/b.png",
+        duration=5,
+    )
+    assert "frames2video" in captured[0]
+    assert "--first=/tmp/a.png" in captured[0]
+    assert "--last=/tmp/b.png" in captured[0]
+
+
+async def test_generate_video_multimodal_with_many_images(monkeypatch):
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "multimodal2video": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "m1"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("clip.mp4"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    await provider.generate_video(
+        prompt="omni",
+        aspect="16:9",
+        image_paths=["/tmp/a.png", "/tmp/b.png", "/tmp/c.png"],
+    )
+    assert "multimodal2video" in captured[0]
+    assert "--image=/tmp/a.png" in captured[0]
+    assert "--image=/tmp/c.png" in captured[0]
+
+
+async def test_generate_video_passes_video_resolution(monkeypatch):
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "text2video": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "r1"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("clip.mp4"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    await provider.generate_video(prompt="a cat", aspect="16:9", resolution="1080p")
+    assert "--video_resolution=1080p" in captured[0]

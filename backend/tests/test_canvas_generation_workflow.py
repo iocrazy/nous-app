@@ -296,3 +296,83 @@ async def test_image_step_materializes_source_urls_for_local_ref_providers():
     kwargs = provider.generate.await_args.kwargs
     assert kwargs["reference_image_paths"] == ["/data/gen/ref.png", "/data/gen/ref.png"]
     assert kwargs["reference_image_url"] == "/api/v1/generated-media/1/file"
+
+
+async def test_video_step_multimodal_materializes_all_refs(monkeypatch):
+    """params.source_urls + video_mode=multimodal → every ref becomes a
+    local file handed to the provider as image_paths (全能参考)."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/jv/omni.mp4")
+        )
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="omni clip",
+            model="",
+            params={
+                "aspect": "16:9",
+                "video_mode": "multimodal",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                    "/api/v1/generated-media/3/cover",
+                ],
+            },
+            source_url="/api/v1/generated-media/1/cover",
+        )
+    call = provider.generate_video.await_args.kwargs
+    assert call["image_paths"] == [
+        "/data/gen/N/media.png",
+        "/data/gen/N/media.png",
+        "/data/gen/N/media.png",
+    ]
+    assert out["media_kind"] == "video"
+
+
+async def test_video_step_frames_mode_maps_first_last(monkeypatch):
+    """video_mode=frames → first two refs become first/last frames."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/jv/frames.mp4")
+        )
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "seedance2.0")),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+    ):
+        await generate_canvas_media_step(
+            kind="video",
+            prompt="between frames",
+            model="",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url="/api/v1/generated-media/1/cover",
+        )
+    call = provider.generate_video.await_args.kwargs
+    assert call["first_frame"] == "/data/gen/N/media.png"
+    assert call["last_frame"] == "/data/gen/N/media.png"
+    assert call["resolution"] == "720p"
