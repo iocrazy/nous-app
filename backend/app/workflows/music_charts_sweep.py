@@ -87,31 +87,72 @@ VERDICT_ERROR = "error"  # 该账号意外异常（已记日志，不影响其�
 
 
 @DBOS.step()
-async def _scan_stale_accounts() -> list[dict[str, str]]:
-    """这一轮该采的账号 —— 只返回 ``{account_id, platform}``。"""
+async def _scan_stale_accounts() -> dict[str, Any]:
+    """这一轮该采的账号，**外加真实的过期总数**。
+
+    ``{"picked": [{account_id, platform}, ...], "due_total": N}``
+
+    ⚠️ 两个数缺一不可。每 tick 只取 1 个是刻意的（一次采集约 2 分钟、独占该
+    账号的浏览器会话、并留一条草稿），所以 ``picked`` 永远是 0 或 1 —— **它
+    无法回答"队列到底在不在往前走"**：两个账号在等和两百个在等，它给出的数字
+    一模一样，而每一行日志都很健康。
+
+    这正是「上限静默截断覆盖面」那一类：每小时 1 个 = 全系统上限 24 个/天，
+    超过就永远排不完，而且不会有任何报错。多问一次总数，是让这件事可被发现的
+    唯一办法。
+    """
     from app.db.scope import system_request_scope
     from app.repositories.music_charts_repository import MusicChartsRepository
 
     limit = _max_per_tick()
+    repo = MusicChartsRepository()
     async with system_request_scope(
         "music chart sweep: find accounts whose cached charts went stale"
     ):
-        rows = await MusicChartsRepository().list_stale_accounts(
-            ttl_hours=_ttl_hours(), limit=limit
-        )
-    return [{"account_id": r["account_id"], "platform": r["platform"]} for r in rows]
+        rows = await repo.list_stale_accounts(ttl_hours=_ttl_hours(), limit=limit)
+        due_total = await repo.count_stale_accounts(ttl_hours=_ttl_hours())
+    return {
+        "picked": [
+            {"account_id": r["account_id"], "platform": r["platform"]} for r in rows
+        ],
+        "due_total": int(due_total),
+    }
 
 
-# ⚠️ 名字带 `_music_` 前缀不是风格问题:**DBOS 要求注册的函数名全局唯一**。
-# `session_health_check.py` 已经有 `_module_enabled` / `_browser_is_healthy`,
-# 重名会在 worker 启动时抛 "Duplicate registration of function" —— 炸掉的不是
-# 这一个 workflow,是整个 scheduled bundle 的 import,于是**所有**定时任务一起
-# 起不来。照抄邻居模块时最容易踩到这里。
+def describe_backlog(due_total: int, picked: int, *, cron_per_day: int = 24) -> str:
+    """积压说明，或空串。纯函数。
+
+    空串 = 这一轮把该采的都采了。**不是"没查"** —— 调用方在两种情况下都会调
+    到它，所以空串是一个结论，不是缺省值。
+
+    带上"排空要多少天"而不是只报一个积压数：24 个账号积压意味着一天，240 个
+    意味着十天 —— 后者等于这个功能对大多数账号已经不成立了，而两者的积压数
+    长得一样。
+    """
+    if due_total <= picked:
+        return ""
+    waiting = due_total - picked
+    days = (due_total + cron_per_day - 1) // max(1, cron_per_day)
+    return (
+        f"{waiting} account(s) still due after this tick "
+        f"(due={due_total}, taken={picked}, ceiling={cron_per_day}/day, "
+        f"~{days}d to drain)"
+    )
+
+
 @DBOS.step()
 async def _music_module_enabled() -> bool:
-    from app.services.distribution.module_config import is_music_module_enabled
+    # ⚠️ 导入的是 `is_module_enabled` —— 这里曾经写成 `is_music_module_enabled`，
+    # 而那个函数不存在。成因：给 step 加 `_music_` 前缀那次用了全量字符串替换，
+    # 而 `is_module_enabled` 恰好含有 `_module_enabled` 这个子串，导入名被一起
+    # 改掉了。生产上 22 次 ERROR，这个定时任务从上线起一次都没成功过。
+    #
+    # 测试没抓住，是因为它们全部 monkeypatch 掉了这个函数 —— **函数体一次都没
+    # 被执行过**。所以现在有一条测试真的调它，见
+    # `test_the_module_gate_actually_resolves_its_import`。
+    from app.services.distribution.module_config import is_module_enabled
 
-    return await is_music_module_enabled()
+    return await is_module_enabled()
 
 
 @DBOS.step()
@@ -187,8 +228,17 @@ async def music_charts_sweep_workflow(
     if not await _music_module_enabled():
         return counts
 
-    due = await _scan_stale_accounts()
-    counts["due"] = len(due)
+    scan = await _scan_stale_accounts()
+    due = list(scan.get("picked") or [])
+    # `due` 是**真实过期总数**，不是这一轮取了几个。两者在只取 1 个的设计下
+    # 几乎总是不同，而报小的那个会让"队列排不完"永远看不见。
+    counts["due"] = int(scan.get("due_total") or 0)
+    counts["taken"] = len(due)
+    backlog = describe_backlog(counts["due"], counts["taken"])
+    if backlog:
+        # 上限截断了覆盖面就必须说出来。这条 WARNING 进 application_logs，
+        # 是"这个功能对多少账号已经不成立了"唯一可查的地方。
+        logger.warning(f"[music.sweep] backlog: {backlog}")
     if not due:
         return counts
 
@@ -208,6 +258,7 @@ async def music_charts_sweep_workflow(
 
 __all__ = [
     "MUSIC_CHARTS_CRON",
+    "describe_backlog",
     "VERDICT_BUSY",
     "VERDICT_ERROR",
     "VERDICT_NOTHING",
