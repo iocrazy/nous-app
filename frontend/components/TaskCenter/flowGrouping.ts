@@ -54,13 +54,26 @@ function attemptKey(t: UnifiedTask): string {
   return subject ? `${t.task_type}::${String(subject)}` : `row::${t.id}`;
 }
 
-function buildFlow(flowId: string, rows: UnifiedTask[]): FlowItem {
+export interface CollapsedSteps {
+  /** One entry per step, newest attempt first-attempt-ordered. */
+  steps: UnifiedTask[];
+  /** Attempt count keyed by the representative (newest) row's id. */
+  attemptCounts: Record<string, number>;
+}
+
+/**
+ * Collapse a flow's raw task_tracking rows into its steps. THE single
+ * definition of "what counts as a retry" — both flow surfaces (the floating
+ * panel's FlowStepCard and Settings → Tasks' FlowGroupCard) derive their
+ * counts from this, so the two can't drift apart on the question.
+ */
+export function collapseRetries(rows: UnifiedTask[]): CollapsedSteps {
   const ordered = [...rows].sort((a, b) =>
     (a.created_at || '').localeCompare(b.created_at || ''),
   );
 
   // Insertion order = each step's FIRST attempt, so collapsing retries keeps
-  // the rail in dispatch order even when a retry lands after later steps.
+  // the steps in dispatch order even when a retry lands after later steps.
   const attempts = new Map<string, UnifiedTask[]>();
   for (const row of ordered) {
     const key = attemptKey(row);
@@ -76,6 +89,11 @@ function buildFlow(flowId: string, rows: UnifiedTask[]): FlowItem {
     steps.push(newest);
     attemptCounts[newest.id] = list.length;
   }
+  return { steps, attemptCounts };
+}
+
+function buildFlow(flowId: string, rows: UnifiedTask[]): FlowItem {
+  const { steps, attemptCounts } = collapseRetries(rows);
 
   const current =
     steps.find((s) => s.status === 'processing') ??
@@ -84,7 +102,7 @@ function buildFlow(flowId: string, rows: UnifiedTask[]): FlowItem {
   // Panel ordering follows the newest row of ANY attempt — a retry is fresh
   // activity even if the step it belongs to started long ago.
   let latest = '';
-  for (const s of ordered) {
+  for (const s of rows) {
     if ((s.created_at || '') > latest) latest = s.created_at || '';
   }
   return {

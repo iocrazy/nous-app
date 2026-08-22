@@ -29,6 +29,7 @@ import { ChevronDown, ChevronRight, Workflow, X, Loader2 } from 'lucide-react';
 import type { TaskGroup } from '../../utils/taskDisplay';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { flowService } from '../../services/flowService';
+import { collapseRetries } from './flowGrouping';
 import { useToast } from '../Toast';
 
 interface FlowGroupCardProps {
@@ -66,12 +67,22 @@ export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, ren
 
   // Aggregate counts derived purely from the in-page task list — no
   // extra API call, stays in sync with Realtime updates automatically.
-  const { total, done, failed, cancelled, running, hasActive, percent, elapsed, name } = useMemo(() => {
-    const total = group.tasks.length;
-    const done = group.tasks.filter((t) => t.status === 'completed').length;
-    const failed = group.tasks.filter((t) => t.status === 'failed').length;
-    const cancelled = group.tasks.filter((t) => t.status === 'cancelled').length;
-    const running = group.tasks.filter((t) => t.status === 'processing').length;
+  const { total, done, failed, cancelled, running, retried, hasActive, percent, elapsed, name } = useMemo(() => {
+    // Counts are per STEP, not per row: an endpoint-level retry creates a new
+    // task_tracking row in the same flow, and three attempts at one summary
+    // are one step the user asked for once. collapseRetries is shared with
+    // FlowStepCard so both surfaces answer "did this flow succeed?" the same
+    // way. Child rows below still list every attempt — that's the flat list's
+    // job, and `retried` explains why the header count is smaller.
+    const { steps, attemptCounts } = collapseRetries(group.tasks);
+    const total = steps.length;
+    const done = steps.filter((t) => t.status === 'completed').length;
+    const failed = steps.filter((t) => t.status === 'failed').length;
+    const cancelled = steps.filter((t) => t.status === 'cancelled').length;
+    const running = steps.filter((t) => t.status === 'processing').length;
+    const retried = steps.filter((t) => (attemptCounts[t.id] ?? 1) > 1).length;
+    // Cascade-cancel targets every non-terminal CHILD row, so this stays on
+    // the raw rows — an older attempt left in flight still needs stopping.
     const hasActive = group.tasks.some((t) => !TERMINAL.has(t.status));
     const percent = total === 0 ? 0 : Math.round(((done + failed + cancelled) / total) * 100);
 
@@ -97,7 +108,7 @@ export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, ren
       ?? group.tasks[0];
     const name = (root?.title && root.title.trim()) || `Flow ${flowId.slice(0, 8)}`;
 
-    return { total, done, failed, cancelled, running, hasActive, percent, elapsed, name };
+    return { total, done, failed, cancelled, running, retried, hasActive, percent, elapsed, name };
   }, [group.tasks, flowId]);
 
   const onCancel = useCallback(async (e: React.MouseEvent) => {
@@ -148,10 +159,12 @@ export const FlowGroupCard: React.FC<FlowGroupCardProps> = ({ group, flowId, ren
             {running > 0 && <span className="text-amber-400">• {running} running</span>}
             {failed > 0 && <span className="text-rose-400">• {failed} failed</span>}
             {cancelled > 0 && <span className="text-ink-500">• {cancelled} cancelled</span>}
+            {retried > 0 && <span className="text-ink-500">• {retried} retried</span>}
             <span>• {formatElapsed(elapsed)}</span>
           </div>
           <div className="mt-1.5 h-1 rounded bg-ink-800/80 overflow-hidden">
             <div
+              data-testid="flow-progress-bar"
               className={`h-full ${barColour} transition-all duration-300`}
               style={{ width: `${percent}%` }}
             />
