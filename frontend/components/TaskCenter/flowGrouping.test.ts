@@ -134,3 +134,131 @@ describe('summarizeFlowItems', () => {
     expect(counts).toEqual({ running: 1, queued: 1, completed: 2, failed: 1, waiting: 0 });
   });
 });
+
+describe('retry collapsing — one step per (task_type, resource) subject', () => {
+  // The shape from the production report (flow 3b0918de): one transcription
+  // plus THREE ai_summary rows — endpoint-level retries each created a new
+  // task_tracking row that _find_joinable_flow_id joined into the same flow.
+  const incidentRows = () => [
+    task({
+      task_type: 'ai_transcription', flow_id: 'f-incident', resource_id: 'r1',
+      status: 'completed', created_at: '2026-08-14T10:00:00Z',
+    }),
+    task({
+      task_type: 'ai_summary', flow_id: 'f-incident', resource_id: 'r1',
+      status: 'failed', created_at: '2026-08-14T10:01:00Z',
+    }),
+    task({
+      task_type: 'ai_summary', flow_id: 'f-incident', resource_id: 'r1',
+      status: 'failed', created_at: '2026-08-14T10:02:00Z',
+    }),
+    task({
+      task_type: 'ai_summary', flow_id: 'f-incident', resource_id: 'r1',
+      status: 'completed', created_at: '2026-08-14T10:03:00Z',
+    }),
+  ];
+
+  function incidentFlow() {
+    const flow = groupTasksByFlow(incidentRows())[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    return flow;
+  }
+
+  it('collapses the three summary attempts into ONE step carrying the newest status', () => {
+    const flow = incidentFlow();
+    expect(flow.steps.map((s) => s.task_type)).toEqual(['ai_transcription', 'ai_summary']);
+    const summary = flow.steps[1];
+    // Newest attempt succeeded → the step is done, not failed.
+    expect(summary.status).toBe('completed');
+    expect(summary.created_at).toBe('2026-08-14T10:03:00Z');
+    expect(flow.attemptCounts[summary.id]).toBe(3);
+    expect(flow.failedCount).toBe(0);
+    expect(flow.doneCount).toBe(2);
+  });
+
+  it('reports the whole flow as completed once the last attempt succeeded', () => {
+    const counts = summarizeFlowItems(groupTasksByFlow(incidentRows()));
+    expect(counts).toEqual({ running: 0, queued: 0, completed: 1, failed: 0, waiting: 0 });
+  });
+
+  it('is not a happy-path liar: newest attempt failed → the step is failed', () => {
+    const flow = groupTasksByFlow([
+      task({
+        task_type: 'ai_summary', flow_id: 'f2', resource_id: 'r1',
+        status: 'completed', created_at: '2026-08-14T10:00:00Z',
+      }),
+      task({
+        task_type: 'ai_summary', flow_id: 'f2', resource_id: 'r1',
+        status: 'failed', created_at: '2026-08-14T10:05:00Z',
+      }),
+    ])[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flow.steps).toHaveLength(1);
+    expect(flow.steps[0].status).toBe('failed');
+    expect(flow.failedCount).toBe(1);
+    expect(flow.doneCount).toBe(0);
+  });
+
+  it('keeps batch fan-out intact: same task_type, different resources are NOT retries', () => {
+    const rows = Array.from({ length: 5 }, (_, i) =>
+      task({
+        task_type: 'download', flow_id: 'f-batch', resource_id: `r${i}`,
+        status: 'completed', created_at: `2026-08-14T10:0${i}:00Z`,
+      }),
+    );
+    const flow = groupTasksByFlow(rows)[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flow.steps).toHaveLength(5);
+    expect(flow.doneCount).toBe(5);
+    expect(Object.values(flow.attemptCounts).every((n) => n === 1)).toBe(true);
+  });
+
+  it('rows without a resource/media subject (parse root) never merge', () => {
+    const flow = groupTasksByFlow([
+      task({ task_type: 'parse', flow_id: 'f3', status: 'failed', created_at: '2026-08-14T10:00:00Z' }),
+      task({ task_type: 'parse', flow_id: 'f3', status: 'completed', created_at: '2026-08-14T10:01:00Z' }),
+    ])[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flow.steps).toHaveLength(2);
+    expect(flow.failedCount).toBe(1);
+  });
+
+  it('falls back to media_id when the row has no resource_id yet', () => {
+    const flow = groupTasksByFlow([
+      task({
+        task_type: 'ai_summary', flow_id: 'f4', media_id: 'm1',
+        status: 'failed', created_at: '2026-08-14T10:00:00Z',
+      }),
+      task({
+        task_type: 'ai_summary', flow_id: 'f4', media_id: 'm1',
+        status: 'completed', created_at: '2026-08-14T10:01:00Z',
+      }),
+    ])[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flow.steps).toHaveLength(1);
+    expect(flow.steps[0].status).toBe('completed');
+  });
+
+  it('keeps steps in dispatch order (first attempt), and current = newest attempt in flight', () => {
+    const flow = groupTasksByFlow([
+      task({
+        task_type: 'ai_summary', flow_id: 'f5', resource_id: 'r1',
+        status: 'failed', created_at: '2026-08-14T10:00:00Z',
+      }),
+      task({
+        task_type: 'ai_transcription', flow_id: 'f5', resource_id: 'r1',
+        status: 'completed', created_at: '2026-08-14T10:01:00Z',
+      }),
+      task({
+        task_type: 'ai_summary', flow_id: 'f5', resource_id: 'r1',
+        status: 'processing', created_at: '2026-08-14T10:02:00Z',
+      }),
+    ])[0];
+    if (flow.kind !== 'flow') throw new Error('expected flow');
+    expect(flow.steps.map((s) => s.task_type)).toEqual(['ai_summary', 'ai_transcription']);
+    expect(flow.current?.task_type).toBe('ai_summary');
+    expect(flow.current?.status).toBe('processing');
+    expect(flow.hasActive).toBe(true);
+    expect(flow.latestCreatedAt).toBe('2026-08-14T10:02:00Z');
+  });
+});

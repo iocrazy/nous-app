@@ -255,12 +255,28 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
                     )}
                     <button
                       onClick={() => toggleStep(step.id)}
-                      title={`${taskTypeLabel(step.task_type)} · ${step.status}`}
-                      className={`p-0.5 rounded-full transition-transform hover:scale-125 ${
+                      data-testid="flow-step"
+                      data-step-status={step.status}
+                      title={`${taskTypeLabel(step.task_type)} · ${step.status}${
+                        (flow.attemptCounts[step.id] ?? 1) > 1
+                          ? ` · ${flow.attemptCounts[step.id]} attempts`
+                          : ''
+                      }`}
+                      className={`flex items-center p-0.5 rounded-full transition-transform hover:scale-125 ${
                         expandedId === step.id ? 'ring-1 ring-ink-500/60' : ''
                       }`}
                     >
                       <StepCircle step={step} active={step.id === flow.current?.id} />
+                      {/* Retries collapse into their step; the badge keeps the
+                          earlier attempts visible instead of erasing them. */}
+                      {(flow.attemptCounts[step.id] ?? 1) > 1 && (
+                        <span
+                          data-testid="flow-step-attempts"
+                          className="ml-0.5 text-[9px] leading-none text-ink-400 tabular-nums"
+                        >
+                          ×{flow.attemptCounts[step.id]}
+                        </span>
+                      )}
                     </button>
                   </React.Fragment>
                 ))}
