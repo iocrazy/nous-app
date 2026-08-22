@@ -123,7 +123,10 @@ export function AttachedComposerPanel({
         <button
           type="button"
           data-testid="composer-kind-video"
-          onClick={() => setKind('video')}
+          onClick={() => {
+            setKind('video');
+            if (ratio === '1:1') setRatio('16:9');
+          }}
           className={`nodrag flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
             kind === 'video'
               ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
@@ -234,22 +237,6 @@ export function AttachedComposerPanel({
           appear; the greyed IC checkboxes without a backend stay out. */}
       {kind === 'video' && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {(['720p', '1080p', '4k'] as const).map((r) => (
-            <button
-              key={r}
-              type="button"
-              data-testid={`composer-vres-${r}`}
-              onClick={() => setResolution(resolution === r ? undefined : r)}
-              className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                resolution === r
-                  ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                  : 'border-canvas-line text-canvas-text'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-          <span className="mx-0.5 h-3 w-px bg-canvas-line" />
           {([
             ['multimodal', 'Omni Ref', 'All wired refs guide the clip'],
             ['frames', 'First & Last', 'Refs 1+2 become the end frames'],
