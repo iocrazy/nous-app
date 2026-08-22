@@ -20,10 +20,13 @@ export type EdgeRunClass =
   | 'mh-edge-failed'
   | 'mh-edge-blocked';
 
+// succeeded is deliberately ABSENT: IC only colours wires while a cascade
+// is live (and on failure); a finished prompt's edges return to the default
+// stroke. Persisting the green forever made half the canvas green and half
+// black (2026-08-21 "有些线是黑色的，有些是绿色").
 const STATUS_CLASS: Record<string, EdgeRunClass> = {
   queued: 'mh-edge-wait',
   running: 'mh-edge-active',
-  succeeded: 'mh-edge-done',
   failed: 'mh-edge-failed',
   blocked: 'mh-edge-blocked',
 };

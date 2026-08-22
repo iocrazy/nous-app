@@ -38,6 +38,8 @@ export function AttachedComposerPanel({
   const [ratio, setRatio] = useState('1:1');
   const [count, setCount] = useState(1);
   const [quality, setQuality] = useState<string | undefined>(undefined);
+  const [resolution, setResolution] = useState<string | undefined>(undefined);
+  const [duration, setDuration] = useState<number | undefined>(undefined);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
   );
@@ -54,6 +56,10 @@ export function AttachedComposerPanel({
         ? { kind: 'image' as const, model, ratio, count }
         : { kind: 'video' as const, model, aspect: ratio };
     if (kind === 'image' && quality) (gen as { quality?: string }).quality = quality;
+    if (kind === 'image' && resolution)
+      (gen as { resolution?: string }).resolution = resolution;
+    if (kind === 'video' && duration)
+      (gen as { duration?: number }).duration = duration;
     const promptId = createPromptFromNode(nodeId, {
       body,
       gen,
@@ -68,7 +74,7 @@ export function AttachedComposerPanel({
   return (
     <div
       data-testid="attached-composer"
-      className="canvas-island absolute left-1/2 top-full z-10 mt-2 w-80 -translate-x-1/2 rounded-xl p-2"
+      className="canvas-island absolute left-1/2 top-full z-10 mt-2 w-[26rem] -translate-x-1/2 rounded-xl p-2.5"
     >
       {/* Image | Video pills (IC 图片/视频 tabs). */}
       <div className="mb-1.5 flex items-center gap-1">
@@ -141,15 +147,15 @@ export function AttachedComposerPanel({
         aria-label="Attached prompt"
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        rows={2}
+        rows={3}
       />
 
       <div className="flex min-w-0 items-center gap-1">
         <GenFooterControls
           gen={
             (kind === 'image'
-              ? { kind: 'image', model, ratio, count, quality }
-              : { kind: 'video', model, aspect: ratio }) as never
+              ? { kind: 'image', model, ratio, count, quality, resolution }
+              : { kind: 'video', model, aspect: ratio, duration }) as never
           }
           models={models}
           onChange={(g) => {
@@ -158,6 +164,8 @@ export function AttachedComposerPanel({
             if (g.aspect !== undefined) setRatio(g.aspect);
             if (g.count !== undefined) setCount(g.count);
             if ('quality' in g) setQuality(g.quality);
+            if ('resolution' in g) setResolution(g.resolution);
+            if ('duration' in g) setDuration(g.duration);
           }}
         />
         <button

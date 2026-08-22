@@ -4,13 +4,15 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
-import { createMediaNodeFromFiles } from '../dropCreate';
+import { importCanvasMedia } from '../mediaImport';
 import { OutputNodeView } from './OutputNodeView';
 
 // ----- Module mocks ---------------------------------------------------
 
-vi.mock('../dropCreate', () => ({
-  createMediaNodeFromFiles: vi.fn(() => Promise.resolve('mask-node-1')),
+vi.mock('../mediaImport', () => ({
+  importCanvasMedia: vi.fn(() =>
+    Promise.resolve({ url: '/api/v1/generated-media/77/file', kind: 'image' }),
+  ),
 }));
 
 vi.mock('../../editor/maskExport', () => ({
@@ -59,9 +61,9 @@ beforeEach(() => {
     } as DOMRect;
   };
   HTMLElement.prototype.setPointerCapture = () => {};
-  (createMediaNodeFromFiles as ReturnType<typeof vi.fn>)
+  (importCanvasMedia as ReturnType<typeof vi.fn>)
     .mockReset()
-    .mockResolvedValue('mask-node-1');
+    .mockResolvedValue({ url: '/api/v1/generated-media/77/file', kind: 'image' });
   (strokesToMaskPngBase64 as ReturnType<typeof vi.fn>)
     .mockReset()
     .mockReturnValue('MASKB64');
@@ -149,7 +151,7 @@ describe('OutputNodeView — Mask button', () => {
 });
 
 describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节点)', () => {
-  it('exports the black/white mask and drops it beside the source as a media node', async () => {
+  it('appends the black/white mask INTO this node beside the original', async () => {
     const fullData = seedImageOutput('source-123');
     render(
       <Wrap>
@@ -159,28 +161,24 @@ describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节
     paintAndCommit();
 
     await waitFor(() => {
-      expect(createMediaNodeFromFiles).toHaveBeenCalledTimes(1);
+      expect(importCanvasMedia).toHaveBeenCalledTimes(1);
     });
-    const [files, at] = (createMediaNodeFromFiles as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(files[0].name).toBe('mask.png');
-    expect(files[0].type).toBe('image/png');
-    expect(at.x).toBeGreaterThan(0);
-    // Export used the fallback raster size (jsdom images never load).
-    expect(strokesToMaskPngBase64).toHaveBeenCalledWith(
-      expect.any(Array),
-      1024,
-      1024,
-    );
+    const [file] = (importCanvasMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(file.name).toBe('mask.png');
     await waitFor(() => {
-      expect(
-        screen.queryByTestId('unified-image-editor'),
-      ).not.toBeInTheDocument();
+      const node = useCanvasCoreStore.getState().nodes[0] as {
+        data: { images?: Array<{ url: string; name?: string }> };
+      };
+      const imgs = node.data.images ?? [];
+      expect(imgs[imgs.length - 1]?.name).toBe('mask.png');
     });
+    // still ONE node — the mask did not spawn a separate card.
+    expect(useCanvasCoreStore.getState().nodes).toHaveLength(1);
   });
 
-  it('shows an error banner + keeps the modal open when the node drop fails', async () => {
+  it('shows an error banner + keeps the modal open when the import fails', async () => {
     const fullData = seedImageOutput('source-123');
-    (createMediaNodeFromFiles as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    (importCanvasMedia as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('upload exploded'),
     );
     render(
@@ -191,7 +189,7 @@ describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节
     paintAndCommit();
 
     await waitFor(() => {
-      expect(createMediaNodeFromFiles).toHaveBeenCalled();
+      expect(importCanvasMedia).toHaveBeenCalled();
     });
     expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
     const banner = await screen.findByTestId('mask-commit-error');
