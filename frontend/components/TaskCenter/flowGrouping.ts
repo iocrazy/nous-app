@@ -11,8 +11,13 @@ import { taskAwaitingInput } from './taskRowPresentation';
 export interface FlowItem {
   kind: 'flow';
   flowId: string;
-  /** Pipeline steps ordered by created_at asc (dispatch order). */
+  /**
+   * Pipeline steps ordered by created_at asc (dispatch order), with retries
+   * collapsed: one entry per (task_type, subject) carrying the NEWEST attempt.
+   */
   steps: UnifiedTask[];
+  /** Attempt count keyed by the step's (newest attempt) id; 1 unless retried. */
+  attemptCounts: Record<string, number>;
   /** The step the flow is "at": first processing, else first pending. */
   current: UnifiedTask | null;
   hasActive: boolean;
@@ -31,26 +36,84 @@ export type PanelItem = FlowItem | SingleItem;
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 
-function buildFlow(flowId: string, steps: UnifiedTask[]): FlowItem {
-  const ordered = [...steps].sort((a, b) =>
+/**
+ * Retrying a step creates a NEW task_tracking row that the backend joins into
+ * the SAME flow (_find_joinable_flow_id), so a summary retried twice arrives
+ * as three sibling rows. They are one pipeline step the user asked for once —
+ * key them together so the rail draws one circle whose state is the newest
+ * attempt's, instead of ✓✕✕✓.
+ *
+ * The subject (resource, media as fallback) is part of the key on purpose: a
+ * batch playlist flow fans out one download row PER resource, and those are
+ * genuinely separate steps, not retries of each other. Rows with no subject
+ * (the parse root, which runs before any resource exists) key on their own id
+ * so nothing unrelated merges.
+ */
+function attemptKey(t: UnifiedTask): string {
+  const subject = t.resource_id ?? t.media_id;
+  return subject ? `${t.task_type}::${String(subject)}` : `row::${t.id}`;
+}
+
+export interface CollapsedSteps {
+  /** One entry per step, newest attempt first-attempt-ordered. */
+  steps: UnifiedTask[];
+  /** Attempt count keyed by the representative (newest) row's id. */
+  attemptCounts: Record<string, number>;
+}
+
+/**
+ * Collapse a flow's raw task_tracking rows into its steps. THE single
+ * definition of "what counts as a retry" — both flow surfaces (the floating
+ * panel's FlowStepCard and Settings → Tasks' FlowGroupCard) derive their
+ * counts from this, so the two can't drift apart on the question.
+ */
+export function collapseRetries(rows: UnifiedTask[]): CollapsedSteps {
+  const ordered = [...rows].sort((a, b) =>
     (a.created_at || '').localeCompare(b.created_at || ''),
   );
+
+  // Insertion order = each step's FIRST attempt, so collapsing retries keeps
+  // the steps in dispatch order even when a retry lands after later steps.
+  const attempts = new Map<string, UnifiedTask[]>();
+  for (const row of ordered) {
+    const key = attemptKey(row);
+    const list = attempts.get(key);
+    if (list) list.push(row);
+    else attempts.set(key, [row]);
+  }
+
+  const steps: UnifiedTask[] = [];
+  const attemptCounts: Record<string, number> = {};
+  for (const list of attempts.values()) {
+    const newest = list[list.length - 1];
+    steps.push(newest);
+    attemptCounts[newest.id] = list.length;
+  }
+  return { steps, attemptCounts };
+}
+
+function buildFlow(flowId: string, rows: UnifiedTask[]): FlowItem {
+  const { steps, attemptCounts } = collapseRetries(rows);
+
   const current =
-    ordered.find((s) => s.status === 'processing') ??
-    ordered.find((s) => s.status === 'pending') ??
+    steps.find((s) => s.status === 'processing') ??
+    steps.find((s) => s.status === 'pending') ??
     null;
+  // Panel ordering follows the newest row of ANY attempt — a retry is fresh
+  // activity even if the step it belongs to started long ago.
   let latest = '';
-  for (const s of ordered) {
+  for (const s of rows) {
     if ((s.created_at || '') > latest) latest = s.created_at || '';
   }
   return {
     kind: 'flow',
     flowId,
-    steps: ordered,
+    steps,
+    attemptCounts,
     current,
     hasActive: current !== null,
-    doneCount: ordered.filter((s) => s.status === 'completed').length,
-    failedCount: ordered.filter((s) => s.status === 'failed').length,
+    doneCount: steps.filter((s) => s.status === 'completed').length,
+    failedCount: steps.filter((s) => s.status === 'failed').length,
     latestCreatedAt: latest,
   };
 }
