@@ -536,3 +536,26 @@ async def test_generate_video_auto_aspect_omits_ratio(monkeypatch):
     provider = JimengCliProvider()
     await provider.generate_video(prompt="free form", aspect="auto")
     assert not any(str(a).startswith("--ratio=") for a in captured[0])
+
+
+async def test_upscale_image_runs_image_upscale_command(monkeypatch):
+    """IC 放大: jimeng CLI `image_upscale --image= --resolution_type=`."""
+    captured: list = []
+    install_fake_exec(
+        monkeypatch,
+        {
+            "image_upscale": lambda argv: FakeProc(
+                rc=0, stdout=_json_bytes({"submit_id": "u1"})
+            ),
+            "query_result": lambda argv: FakeProc(
+                rc=0, stdout=b"", on_run=_writes_file("up.png", b"\x89PNG"), argv=argv
+            ),
+        },
+        captured,
+    )
+    provider = JimengCliProvider()
+    result = await provider.upscale_image(image_path="/tmp/in.png", resolution="4k")
+    assert "image_upscale" in captured[0]
+    assert "--image=/tmp/in.png" in captured[0]
+    assert "--resolution_type=4k" in captured[0]
+    assert result.local_path.endswith("up.png")

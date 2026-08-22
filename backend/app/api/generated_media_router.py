@@ -373,6 +373,77 @@ async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
     return {"data": {"deleted": ok}}
 
 
+def _upscale_provider():
+    """Seam: the jimeng CLI provider (patched in tests)."""
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
+
+    return JimengCliProvider()
+
+
+def _materialize_gen_file(gen_id: int):
+    """Seam: async-context yielding a local Path for the generation file."""
+    from app.services.library.generated_media_service import (
+        generated_media_local_path,
+    )
+
+    return generated_media_local_path(
+        f"/api/v1/generated-media/{gen_id}/file", media_kind="image"
+    )
+
+
+async def _register_upscale_result(**kwargs):
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        register_generated_media,
+    )
+
+    origin = kwargs.pop("origin_params")
+    return await register_generated_media(
+        origin=GenerationOrigin(kind="canvas_upload", params=origin), **kwargs
+    )
+
+
+class UpscaleRequest(BaseModel):
+    resolution: str = "2k"
+
+
+@router.post("/{gen_id}/upscale")
+async def upscale_generation(
+    gen_id: int, payload: UpscaleRequest, auth: AuthDep
+) -> dict:
+    """IC 放大: run jimeng ``image_upscale`` on this generation and register
+    the result as a NEW generated-media row (the source stays)."""
+    scope_id = await _scope(auth)
+    async with request_scope(Scope(user_id=str(auth.user_id))):
+        async with _materialize_gen_file(gen_id) as src:
+            if src is None:
+                raise HTTPException(status_code=404, detail="generation file missing")
+            try:
+                result = await _upscale_provider().upscale_image(
+                    image_path=str(src), resolution=payload.resolution
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"upscale failed: {exc}")
+        row = await _register_upscale_result(
+            user_id=str(auth.user_id),
+            scope_id=scope_id,
+            source_path=result.local_path,
+            mime=getattr(result, "mime", "image/png"),
+            origin_params={
+                "upscaled_from": str(gen_id),
+                "resolution": payload.resolution,
+            },
+        )
+        new_id = row.get("id")
+        if new_id is None:
+            raise HTTPException(status_code=500, detail="upscale registration failed")
+    return {
+        "data": {"id": str(new_id), "url": f"/api/v1/generated-media/{new_id}/file"}
+    }
+
+
 @router.post("/{gen_id}/promote")
 async def promote_generation(gen_id: int, auth: AuthDep) -> dict:
     target_scope_id = await _scope(auth)

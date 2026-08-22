@@ -26,6 +26,8 @@ import {
 } from '../../services/canvasService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
+import { genIdFromDurableUrl } from '../mediaEditBridge';
+import { upscaleGeneration } from '../../services/canvasGenerationService';
 import { requeryRecoverTask } from '../genResume';
 import { latestHistoryImageUrl } from '../outputHistory';
 import { resolveSourceUrls } from '../promptInputs';
@@ -88,6 +90,36 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
   // Grid dblclick: edit THAT image (falls back to the primary preview).
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  const [upscaling, setUpscaling] = useState(false);
+  // IC 放大: upscale the primary image via jimeng image_upscale; the result
+  // appends beside the original (source stays).
+  const handleUpscale = useCallback(() => {
+    const url = preview_url || (images?.[0] as { url?: string } | undefined)?.url;
+    const genId = url ? genIdFromDurableUrl(url) : null;
+    if (!genId) return;
+    void (async () => {
+      try {
+        setUpscaling(true);
+        const out = await upscaleGeneration(genId, '2k');
+        const current = (useCanvasCoreStore
+          .getState()
+          .nodes.find((n) => (n as { id?: string }).id === id) as
+          | { data?: { images?: Array<{ url: string }> } }
+          | undefined)?.data;
+        patchData({
+          images: [
+            ...((current?.images as Array<{ url: string }>) ?? []),
+            { url: out.url, kind: 'image', name: 'upscaled.png' },
+          ],
+        });
+      } catch (err) {
+        console.error('upscale failed:', err);
+      } finally {
+        setUpscaling(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview_url, images, id, patchData]);
   const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -485,6 +517,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onExpand={canSplit ? openOutpaintEditor : undefined}
           onMask={canCrop ? openMaskEditor : undefined}
           onBrush={() => setEditorMode('brush')}
+          onUpscale={canCrop ? handleUpscale : undefined}
+          upscaling={upscaling}
           onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}

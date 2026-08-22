@@ -269,6 +269,26 @@ class JimengCliProvider:
             args, submit_timeout, _IMAGE_EXTS, "image/png"
         )
 
+    async def upscale_image(
+        self,
+        *,
+        image_path: str,
+        resolution: str = "2k",
+    ) -> GenResult:
+        """IC 放大: ``image_upscale`` → higher-resolution PNG (2k/4k/8k;
+        the CLI normalizes unknown values to 2k, matching IC
+        jimeng_normalize_upscale_resolution)."""
+        args = [
+            "image_upscale",
+            f"--image={image_path}",
+            f"--resolution_type={resolution}",
+        ]
+        args.append(f"--poll={self._image_poll}")
+        submit_timeout = self._image_poll + self._image_margin
+        return await self._submit_and_fetch(
+            args, submit_timeout, _IMAGE_EXTS, "image/png"
+        )
+
     async def generate_video(
         self,
         *,
