@@ -147,3 +147,78 @@ async def get_monitoring_stats(
         ],
         recent_errors=[RecentErrorEntry(**r) for r in stats.get("recent_errors", [])],
     )
+
+
+# ============================================
+# Database connection pressure
+# ============================================
+
+
+class ConnectionGroupEntry(BaseModel):
+    application_name: str
+    usename: str
+    state: str
+    count: int
+    oldest_state_seconds: int
+
+
+class ConnectionsResponse(BaseModel):
+    """Live Postgres connection-slot usage.
+
+    ``status`` is ``ok`` / ``warning`` (>=80%) / ``critical`` (>=95%) /
+    ``unknown``. ``unknown`` means the reading could not be taken — the UI
+    renders that as "no reading", never as healthy. Thresholds come from
+    ``app.services.infra.pg_connection_monitor`` so this panel and the
+    scheduled WARNING line can never disagree about what "high" means.
+    """
+
+    status: str
+    used: Optional[int] = None
+    max_connections: Optional[int] = None
+    percent: Optional[float] = None
+    idle_in_transaction: Optional[int] = None
+    oldest_idle_in_transaction_seconds: Optional[int] = None
+    warn_pct: float
+    critical_pct: float
+    reason: Optional[str] = None
+    groups: List[ConnectionGroupEntry] = []
+
+
+@router.get("/connections", response_model=ConnectionsResponse)
+async def get_db_connections(auth: AdminAuthDep) -> ConnectionsResponse:
+    """Live connection-slot snapshot + per-client breakdown.
+
+    Queried on demand rather than read from the sampler's cache: an operator
+    opening this panel is usually reacting to something, and a reading up to
+    5 minutes stale is the wrong answer during an incident. The scheduled
+    sampler and this endpoint share the same query helpers, so the summary
+    numbers agree by construction.
+    """
+    from app.services.infra.pg_connection_monitor import (
+        CRITICAL_PCT,
+        WARN_PCT,
+        fetch_connection_breakdown,
+        sample_connection_usage,
+    )
+
+    summary = await sample_connection_usage()
+    # Skip the GROUP BY entirely when the cheap summary already failed —
+    # it would fail the same way, and one log line about it is enough.
+    groups = (
+        [] if summary.get("status") == "unknown" else await fetch_connection_breakdown()
+    )
+
+    return ConnectionsResponse(
+        status=summary.get("status", "unknown"),
+        used=summary.get("used"),
+        max_connections=summary.get("max_connections"),
+        percent=summary.get("percent"),
+        idle_in_transaction=summary.get("idle_in_transaction"),
+        oldest_idle_in_transaction_seconds=summary.get(
+            "oldest_idle_in_transaction_seconds"
+        ),
+        warn_pct=WARN_PCT,
+        critical_pct=CRITICAL_PCT,
+        reason=summary.get("reason"),
+        groups=[ConnectionGroupEntry(**g) for g in groups],
+    )

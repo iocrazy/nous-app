@@ -43,6 +43,7 @@ from app.workflows.scheduled_commitment_sweeper import (  # noqa: F401
 from app.workflows.scheduled_health import (  # noqa: F401
     health_check_workflow,
     mediahub_model_health_workflow,
+    pg_connection_pressure_workflow,
     update_system_status_workflow,
 )
 from app.workflows.scheduled_master import scheduled_master_workflow  # noqa: F401
