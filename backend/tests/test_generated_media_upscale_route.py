@@ -39,7 +39,9 @@ async def client() -> AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_upscale_route_runs_cli_and_registers_result(monkeypatch, client, tmp_path):
+async def test_upscale_route_runs_cli_and_registers_result(
+    monkeypatch, client, tmp_path
+):
     src = tmp_path / "src.png"
     src.write_bytes(b"\x89PNG src")
     up = tmp_path / "up.png"
