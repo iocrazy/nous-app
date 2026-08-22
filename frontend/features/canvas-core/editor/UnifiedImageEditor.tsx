@@ -54,6 +54,10 @@ export type EditorMode =
 export interface UnifiedImageEditorProps {
   open: boolean;
   src: string;
+  /** IC previewPrev/Next: sibling image urls — arrows page between them. */
+  items?: string[];
+  /** Fires when the arrows land on another item (caller updates src). */
+  onNavigate?(url: string): void;
   alt?: string;
   initialMode?: EditorMode;
   /** Seed for the crop rectangle (the node's persisted crop_region). */
@@ -98,6 +102,8 @@ const PAINT_TOOLS: Array<{ tool: PaintShapeTool; label: string }> = [
 export function UnifiedImageEditor({
   open,
   src,
+  items,
+  onNavigate,
   alt = '',
   initialMode = 'preview',
   cropInitialRegion,
@@ -562,6 +568,37 @@ export function UnifiedImageEditor({
           <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
           <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
           </div>
+        )}
+        {mode === 'preview' && items && items.length > 1 && onNavigate && (
+          <>
+            <button
+              type="button"
+              data-testid="editor-prev"
+              aria-label="Previous image"
+              onClick={() => {
+                const i = items.indexOf(src);
+                onNavigate(items[(i - 1 + items.length) % items.length]);
+              }}
+              className="nodrag absolute left-2 top-1/2 z-[2] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-canvas-card/90 text-canvas-text shadow hover:bg-canvas-card"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              data-testid="editor-next"
+              aria-label="Next image"
+              onClick={() => {
+                const i = items.indexOf(src);
+                onNavigate(items[(i + 1) % items.length]);
+              }}
+              className="nodrag absolute right-2 top-1/2 z-[2] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-canvas-card/90 text-canvas-text shadow hover:bg-canvas-card"
+            >
+              ›
+            </button>
+            <span className="absolute bottom-2 right-2 rounded-md bg-canvas-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-canvas-muted">
+              {items.indexOf(src) + 1} / {items.length}
+            </span>
+          </>
         )}
         <span
           data-testid="editor-zoom"
