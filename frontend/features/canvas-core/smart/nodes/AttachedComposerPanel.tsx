@@ -185,6 +185,57 @@ export function AttachedComposerPanel({
           Run
         </button>
       </div>
+      {/* IC flat option rows (用户: pill 弹层里的选项"看不见" — IC 把
+          分辨率/参考模式全部平铺在面板上). Only real jimeng-CLI channels
+          appear; the greyed IC checkboxes without a backend stay out. */}
+      {kind === 'video' && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {(['720p', '1080p', '4k'] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              data-testid={`composer-vres-${r}`}
+              onClick={() => setResolution(resolution === r ? undefined : r)}
+              className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                resolution === r
+                  ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                  : 'border-canvas-line text-canvas-text'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+          <span className="mx-0.5 h-3 w-px bg-canvas-line" />
+          <button
+            type="button"
+            data-testid="composer-mode-multimodal"
+            onClick={() =>
+              setVideoMode(videoMode === 'multimodal' ? undefined : 'multimodal')
+            }
+            title="All wired refs guide the clip (multimodal2video)"
+            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              videoMode === 'multimodal'
+                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                : 'border-canvas-line text-canvas-text'
+            }`}
+          >
+            Omni Ref
+          </button>
+          <button
+            type="button"
+            data-testid="composer-mode-frames"
+            onClick={() => setVideoMode(videoMode === 'frames' ? undefined : 'frames')}
+            title="Refs 1+2 become first/last frames (frames2video)"
+            className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+              videoMode === 'frames'
+                ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                : 'border-canvas-line text-canvas-text'
+            }`}
+          >
+            First & Last
+          </button>
+        </div>
+      )}
     </div>
   );
 }

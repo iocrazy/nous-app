@@ -116,10 +116,8 @@ it('video Run carries video_mode + resolution picked in the duration panel', () 
   seed();
   render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A, URL_B]} pinned />);
   fireEvent.click(screen.getByTestId('composer-kind-video'));
-  fireEvent.click(screen.getByTestId('pill-duration'));
-  fireEvent.click(screen.getAllByTestId('video-resolution-option')[0]); // 720p
-  fireEvent.click(screen.getByTestId('pill-duration'));
-  fireEvent.click(screen.getByText('First & Last'));
+  fireEvent.click(screen.getByTestId('composer-vres-720p'));
+  fireEvent.click(screen.getByTestId('composer-mode-frames'));
   fireEvent.change(screen.getByRole('textbox', { name: 'Attached prompt' }), {
     target: { value: 'morph' },
   });
