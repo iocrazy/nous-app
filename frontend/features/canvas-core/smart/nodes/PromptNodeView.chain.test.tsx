@@ -1,5 +1,5 @@
 // IC 一键运行: the chain-tail prompt shows a Chain button; non-tails don't.
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,4 +48,16 @@ describe('PromptNodeView chain button', () => {
     render(<ReactFlowProvider><PromptNodeView {...props('p2')} /></ReactFlowProvider>);
     expect(screen.queryByTestId('prompt-node-run-chain')).toBeNull();
   });
+});
+
+it('split-enabled prompt shows the separator row with a live item count', () => {
+  seed(false);
+  const p = props('p2');
+  (p.data as Record<string, unknown>).split_enabled = true;
+  (p.data as Record<string, unknown>).body = 'a cat; a dog; a bird';
+  render(<ReactFlowProvider><PromptNodeView {...p} /></ReactFlowProvider>);
+  expect(screen.getByTestId('prompt-split-row')).toBeInTheDocument();
+  expect(screen.getByTestId('prompt-split-count').textContent).toContain('3');
+  // the toggle pill is present for flipping it off
+  expect(screen.getByTestId('prompt-split-toggle')).toBeInTheDocument();
 });

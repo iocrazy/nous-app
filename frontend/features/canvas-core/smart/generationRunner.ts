@@ -94,15 +94,29 @@ export function withGenerationRunner(
         params.entity_id = ctx.entity_ref.id;
       }
 
-      const taskIds = await dispatchGenerations(deps.canvasId, {
-        node_id: ctx.promptId,
-        kind: gen.kind,
-        prompt: ctx.body,
-        model: gen.model ?? '',
-        count: gen.kind === 'video' ? 1 : Math.max(1, Math.min(gen.count ?? 1, 8)),
-        params,
-        ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
-      });
+      // IC 分隔符拆分: each split item dispatches independently — one
+      // prompt node fans out into N generations whose results all land on
+      // this node's output slot.
+      const promptItems =
+        ctx.split_prompts && ctx.split_prompts.length > 1
+          ? ctx.split_prompts
+          : [ctx.body];
+      const perItemCount =
+        gen.kind === 'video' ? 1 : Math.max(1, Math.min(gen.count ?? 1, 8));
+      const taskIdBatches = await Promise.all(
+        promptItems.map((item) =>
+          dispatchGenerations(deps.canvasId, {
+            node_id: ctx.promptId,
+            kind: gen.kind,
+            prompt: item,
+            model: gen.model ?? '',
+            count: perItemCount,
+            params,
+            ...(ctx.source_url ? { source_url: ctx.source_url } : {}),
+          }),
+        ),
+      );
+      const taskIds = taskIdBatches.flat();
       deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind, taskIds);
 
       // Fold N tasks' phases into one prompt-level signal: queued while

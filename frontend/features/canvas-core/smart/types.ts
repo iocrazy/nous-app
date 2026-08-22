@@ -103,6 +103,10 @@ export interface ShotNodeData {
 
 export interface PromptNodeData {
   body: string;
+  /** IC 分隔符拆分: split the body into independent generations. */
+  split_enabled?: boolean;
+  /** Separator (default ';', max 8 chars). */
+  split_separator?: string;
   /** Slug of the provider node-pack to invoke. Empty = not yet wired. */
   provider_slug: string;
   /** Snowflake AI library agent ID to ask, or null = use provider default. */

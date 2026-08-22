@@ -31,6 +31,8 @@ export interface RunnerContext {
    *  Ships as params.source_urls; providers that can eat several
    *  references use the whole set, others take source_url. */
   source_urls?: string[];
+  /** IC 分隔符: pre-split prompt items — each dispatches independently. */
+  split_prompts?: string[];
   /** Owning library card (CC5) — stamped into generation params so the
    *  produced media backlinks to its character/location/prop. */
   entity_ref?: EntityRef | null;
