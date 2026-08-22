@@ -1,3 +1,5 @@
+import { Trash2 } from 'lucide-react';
+
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
@@ -84,6 +86,8 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
+  // Grid dblclick: edit THAT image (falls back to the primary preview).
+  const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [pixCommitting, setPixCommitting] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -517,11 +521,15 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         // Double-click: images jump straight into the rich editor (IC
         // dblclick → imageEditModal); video/text keep the lightbox. Single
         // click falls through to React Flow node selection.
-        onDoubleClick={() =>
-          kind === 'image' && preview_url && !readOnly
-            ? setEditorMode('preview')
-            : openLightbox(0)
-        }
+        onDoubleClick={() => {
+          const firstUrl = preview_url || images?.[0]?.url;
+          if (kind === 'image' && firstUrl && !readOnly) {
+            setEditingUrl(firstUrl);
+            setEditorMode('preview');
+          } else {
+            openLightbox(0);
+          }
+        }}
         className={`p-3 ${lightboxItems.length > 0 ? 'cursor-zoom-in' : ''}`}
         title={lightboxItems.length > 0 ? 'Double-click to preview' : undefined}
       >
@@ -531,19 +539,43 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
              dispatched; each finished item replaces a cell as it arrives. */
           <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
             {(images ?? []).map((img, i) => (
-              <img
-                key={`${img.url}-${i}`}
-                src={mediaSrc(img.url)}
-                alt={img.name || `Generated ${i + 1}`}
-                draggable={false}
-                onDoubleClick={(e) => {
-                  // Don't let the body's dblclick (opens index 0) override
-                  // this grid image's own index.
-                  e.stopPropagation();
-                  openLightbox(i);
-                }}
-                className="block w-full cursor-zoom-in rounded object-contain"
-              />
+              <div key={`${img.url}-${i}`} className="group/cell relative">
+                <img
+                  src={mediaSrc(img.url)}
+                  alt={img.name || `Generated ${i + 1}`}
+                  draggable={false}
+                  onDoubleClick={(e) => {
+                    // IC: dblclick edits THIS image (a mask can be repainted);
+                    // single click keeps the lightbox via the body handler.
+                    e.stopPropagation();
+                    if (readOnly) {
+                      openLightbox(i);
+                      return;
+                    }
+                    setEditingUrl(img.url);
+                    setEditorMode('preview');
+                  }}
+                  className="block w-full cursor-zoom-in rounded object-contain"
+                />
+                {/* IC 图四: each grid item (e.g. a generated mask) can be
+                    removed on its own. */}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    data-testid={`output-image-delete-${i}`}
+                    aria-label="Remove image"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      patchData({
+                        images: (images ?? []).filter((_, j) => j !== i),
+                      });
+                    }}
+                    className="absolute right-1 top-1 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-rose-500/90 text-white opacity-0 transition-opacity group-hover/cell:opacity-100"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             ))}
             {Array.from({ length: gen_pending }, (_, i) => (
               <div
@@ -642,15 +674,18 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {outpaintError}
         </div>
       )}
-      {preview_url && (
+      {(preview_url || editingUrl) && (
         <UnifiedImageEditor
           open={editorMode !== null}
-          src={preview_url}
+          src={editingUrl ?? preview_url}
           alt={preview_text || 'Output preview'}
           initialMode={editorMode ?? 'preview'}
           cropInitialRegion={crop_region ?? undefined}
           outpaintInitialPrompt={preview_text}
-          onClose={() => setEditorMode(null)}
+          onClose={() => {
+            setEditorMode(null);
+            setEditingUrl(null);
+          }}
           onCropCommit={canCrop ? handleCommit : undefined}
           onOutpaintCommit={canSplit ? handleOutpaintCommit : undefined}
           onMaskCommit={canCrop ? handleMaskCommit : undefined}

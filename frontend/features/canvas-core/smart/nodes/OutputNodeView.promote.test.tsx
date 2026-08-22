@@ -71,3 +71,22 @@ it('a stored node_w wins over the default (user dragged the handle)', () => {
   render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
   expect(screen.getByTestId('smart-output-node').style.width).toBe('640px');
 });
+
+it('grid images: dblclick edits THAT image; hover delete removes it', async () => {
+  const node = useCanvasCoreStore.getState().nodes[0] as { data: Record<string, unknown> };
+  node.data = {
+    ...node.data,
+    images: [
+      { url: '/api/v1/generated-media/9/cover', kind: 'image' },
+      { url: '/api/v1/generated-media/10/file', kind: 'image', name: 'mask.png' },
+    ],
+  };
+  render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
+  const imgs = screen.getAllByAltText(/Generated|mask/i);
+  fireEvent.doubleClick(imgs[1]);
+  expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
+  // delete the second item
+  fireEvent.click(screen.getByTestId('output-image-delete-1'));
+  const data = (useCanvasCoreStore.getState().nodes[0] as { data: { images: unknown[] } }).data;
+  expect(data.images).toHaveLength(1);
+});
