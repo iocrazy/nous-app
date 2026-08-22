@@ -152,6 +152,82 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
    WHERE created_at > (extract(epoch from now())*1000 - 300000) GROUP BY 1"
 ```
 
+## 连接预算：`max_connections=200` + `idle_in_transaction_session_timeout=10min`（2026-08-21）
+
+声明在 `deploy/gpu-server/supabase/docker-compose.yml` 的 `db.command`（`-c` 命令行参数优先级高于 `config_file` 指向的 `postgresql.conf`，不必改那个文件）。
+
+### 为什么 100 不够
+
+**自托管 Supabase 全家桶的固定底噪就有 60-70 条，那不是负载，是开机就有的。** 2026-08-21 实测 67/100：
+
+| 来源 | 条数 | 说明 |
+|---|---|---|
+| `supabase_admin` | 41 | realtime 的订阅管理/RLS/cluster_node、`supavisor_meta` 5 条等，全是常驻 |
+| `dbos_transact` | 7 | worker 的 DBOS sys + app 两个池（各 `DBOS_DB_POOL_SIZE`，默认 5，`max_overflow=0`） |
+| `Supavisor` → PG | 6 | 服务端池自己连 PG 的那一层 |
+| `PostgREST` (`authenticator`) | 5 | |
+| `dbos_transact_client` | 1 | gateway 的 enqueue-only 句柄，SDK 写死 `pool_size=2` |
+
+留给业务的余量只剩 30 出头。**部署窗里新旧连接池并存就直接撞顶——已实测到 106/100**，而那种状态最坏的一点是「连 psql 都进不去」：排查手段和服务一起没了。
+
+200 是给底噪之上留出真正的业务余量，**不是为了跑满**。真正逼近 200 说明有泄漏，不是该继续加码的信号——所以同一批改动把连接压力接进了健康线和 admin 面板（见下）。
+
+### 为什么加 `idle_in_transaction_session_timeout`
+
+默认是 `0` = **永不超时**。事务开着不动的连接会一直占着槽位，而这个项目有前科：临时 DB 脚本 idle-in-transaction 把池饿死，表现是「所有业务请求超时但 `/readyz` 正常」。
+
+10 分钟远长于任何正常事务（发布链的 advisory-lock 事务是分钟级，见 `backend/app/services/distribution/session_lock.py`，它自己就把这个代价写在注释里），却能兜住跑飞的脚本和断线后残留的事务。**踩到这个超时的是 bug，不是正常负载**——被它杀掉的连接应该去查调用方，而不是调大这个值。
+
+### ⚠️ 改这两个参数不会自动生效
+
+`deploy-gpu.yml` 的 paths 含 `deploy/gpu-server/**`，所以改 compose **会触发一次部署**——但那条链跑的是：
+
+```
+./up.sh --build backend worker gateway browser
+```
+
+`up.sh` 作用在 `deploy/gpu-server/docker-compose.yml`（compose 项目 `gpu-server`），而 **db 属于另一个 compose 项目 `mediahub-sb-prod`**（`deploy/gpu-server/supabase/docker-compose.yml`），压根不在清单里。db 刻意不进自动重启链——重启数据库不该由一次代码合并顺手触发。
+
+所以合并后**必须人工执行**，挑业务空窗：
+
+```bash
+cd deploy/gpu-server/supabase
+docker compose up -d db          # 必须 up -d：command 改动 docker restart 不重读
+```
+
+`max_connections` 不是可 reload 的参数（要重启 postmaster），`docker restart` 也不够——改的是 compose 的 `command`，只有 `up -d` 会用新参数重建容器。重启期间全栈（auth / rest / realtime / storage / DBOS）会短暂断连。
+
+### 验收
+
+```bash
+# 1) 参数真的生效了（不是只改了文件）
+docker exec nous-db psql -U postgres -p 55434 -d postgres -Atc \
+  "SELECT current_setting('max_connections'), current_setting('idle_in_transaction_session_timeout');"
+# 期望: 200|10min
+
+# 2) 当前用量与余量
+docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
+  "SELECT count(*) FILTER (WHERE backend_type IN ('client backend','walsender')) AS used,
+          current_setting('max_connections')::int AS max FROM pg_stat_activity;"
+
+# 3) 全栈重新连上了（重启会断连，别只看 db 自己）
+docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz
+```
+
+**内存代价可忽略**：同镜像实测 `shared_memory_size` 143MB（`max_connections=100`）→ 148MB（200），+5MB。真正的成本是每条连接的 backend 进程 RSS（约 5-10MB），只有在真跑满 200 时才是 1-2GB——这台机 123GB 内存，不构成约束。
+
+### 连接压力的监控（同一批改动）
+
+参数调大只是把悬崖往后挪，没人看就还会再撞。三处共用 `backend/app/services/infra/pg_connection_monitor.py` 的同一套阈值（80% WARNING / 95% ERROR），所以它们不可能对「多高算高」有分歧：
+
+| 位置 | 行为 |
+|---|---|
+| `pg_connection_pressure_workflow`（每 5 分钟） | 采样 → 超阈值打 WARNING/ERROR 进 `application_logs` → 写 Redis 缓存 |
+| `/api/v1/readyz` 的 `connections` 字段 | 读上面那个缓存（**不查库**）。⚠️ **纯信息，不门控** —— 见下 |
+| Admin → Monitoring 的 Database Connections 面板 | 现查现算，带 application_name/usename/state 分组与最老 idle-in-transaction |
+
+⚠️ **`/readyz` 里的 `connections` 永远不能参与判定**。readyz 返 503 会触发 `deploy-gpu.yml` 的自动回滚，回滚要重启容器，重启会开**更多**连接池——让告警的处置动作去喂养故障本身。这跟 `long_running` / `gates_readiness` 是同一族教训：值得上报 ≠ 值得判失败。
+
 ## 回滚
 
 `docker compose down` + Cloudflare 删 `api`/`sb` 两条 CNAME + `tunnel delete nous-gpu`。NAS 全程未动，无需恢复。

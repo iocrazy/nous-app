@@ -4,6 +4,10 @@
   - update_system_status (every 30s) — upsert single-row system_status
     table for Realtime broadcast to admin dashboard
   - health_check         (hourly)     — multi-component liveness check
+  - pg_connection_pressure (every 5m) — Postgres connection-slot usage vs
+    max_connections; WARNING at 80%, ERROR at 95%. Informational only —
+    see app/services/infra/pg_connection_monitor.py for why it must never
+    gate readiness.
 
 The 30s cadence is preserved using 6-field cron ("*/30 * * * * *");
 DBOS croniter is initialized with second_at_beginning=True so seconds
@@ -155,6 +159,45 @@ async def health_check_workflow(
     result = await health_check_step()
     if result["status"] != "healthy":
         logger.warning(f"[health_check] degraded: {result['checks']}")
+
+
+@DBOS.step()
+async def sample_pg_connections_step() -> dict[str, Any]:
+    """Sample Postgres connection-slot pressure; log it; cache it for probes.
+
+    Complements ``collect_system_status_step``'s ``connections`` metric, which
+    counts THIS PROCESS's open sockets against the ephemeral port range. That
+    one cannot see the cluster: the ceiling that actually took the service
+    down is ``max_connections``, and most of it is consumed by the Supabase
+    stack's own fixed floor (~60 of 100 before this app connects at all).
+
+    Never raises — a monitoring step that can fail the workflow would turn a
+    pressure warning into a second incident.
+    """
+    from app.services.infra.pg_connection_monitor import (
+        cache_sample,
+        log_pressure,
+        sample_connection_usage,
+    )
+
+    sample = await sample_connection_usage()
+    log_pressure(sample)
+    await cache_sample(sample)
+    return sample
+
+
+# Every 5 minutes, NOT the 30s cadence of update_system_status_workflow.
+# Connection pressure is a slow-moving metric — 30s resolution buys an
+# operator nothing, while every sample writes an INFO audit line through
+# scoped_sql(system=True) into application_logs. 30s would be ~2,880 rows/day
+# of pure noise (the same flooding `app/core/utils.py` already filters probe
+# requests to avoid); 5 min is ~288 and still catches a deploy window.
+@DBOS.scheduled("*/5 * * * *")
+@DBOS.workflow()
+async def pg_connection_pressure_workflow(
+    scheduled_time: datetime, actual_time: datetime
+) -> None:
+    await sample_pg_connections_step()
 
 
 @DBOS.step()
