@@ -122,11 +122,16 @@ export function GenFooterControls({
     'Auto';
 
   return (
-    <div ref={rootRef} className="relative flex min-w-0 items-center gap-1">
+    <div
+      ref={rootRef}
+      className="relative flex min-w-0 items-center gap-1"
+      onMouseLeave={() => setOpen(null)}
+    >
       <Pill
         testid="pill-model"
         ariaLabel="Generation model"
         onClick={() => toggle('model')}
+        onHover={() => setOpen('model')}
         disabled={disabled}
         className="min-w-0 flex-1"
       >
@@ -137,6 +142,7 @@ export function GenFooterControls({
         testid="pill-size"
         ariaLabel="Aspect ratio"
         onClick={() => toggle('size')}
+        onHover={() => setOpen('size')}
         disabled={disabled}
       >
         <Scan size={11} />
@@ -150,6 +156,7 @@ export function GenFooterControls({
           testid="pill-vres"
           ariaLabel="Video resolution"
           onClick={() => toggle('vres')}
+        onHover={() => setOpen('vres')}
           disabled={disabled}
         >
           <Monitor size={11} />
@@ -183,6 +190,7 @@ export function GenFooterControls({
           testid="pill-duration"
           ariaLabel="Clip duration"
           onClick={() => toggle('duration')}
+        onHover={() => setOpen('duration')}
           disabled={disabled}
         >
           <Timer size={11} />
@@ -197,6 +205,7 @@ export function GenFooterControls({
           testid="pill-quality"
           ariaLabel="Quality"
           onClick={() => toggle('quality')}
+        onHover={() => setOpen('quality')}
           disabled={disabled}
         >
           <SlidersHorizontal size={11} />
@@ -208,6 +217,7 @@ export function GenFooterControls({
           testid="pill-count"
           ariaLabel="Image count"
           onClick={() => toggle('count')}
+        onHover={() => setOpen('count')}
           disabled={disabled}
         >
           <Copy size={11} />
@@ -381,6 +391,7 @@ export function GenFooterControls({
 function Pill({
   children,
   onClick,
+  onHover,
   disabled,
   testid,
   ariaLabel,
@@ -388,6 +399,8 @@ function Pill({
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  /** IC hover-to-open: pointer entering the pill opens its popover. */
+  onHover?: () => void;
   disabled?: boolean;
   testid: string;
   ariaLabel?: string;
@@ -399,6 +412,7 @@ function Pill({
       data-testid={testid}
       aria-label={ariaLabel}
       onClick={onClick}
+      onMouseEnter={onHover}
       disabled={disabled}
       className={`nodrag flex shrink-0 items-center gap-1 rounded-full border border-canvas-line bg-transparent px-2 py-0.5 text-xs text-canvas-text hover:border-canvas-strong/50 disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
     >

@@ -52,11 +52,10 @@ const IMAGE_DATA = {
 };
 
 describe('OutputNodeView lightbox wiring (P2-5)', () => {
-  it('double-click on a grid image opens the lightbox at that index', () => {
+  it('double-click on a grid image opens the EDITOR on that image (IC)', () => {
     renderOutput(IMAGE_DATA);
     fireEvent.doubleClick(screen.getAllByRole('img')[1]);
-    expect(screen.getByTestId('output-lightbox')).toBeTruthy();
-    expect(screen.getByText('2 / 2')).toBeTruthy();
+    expect(screen.getByTestId('unified-image-editor')).toBeInTheDocument();
   });
 
   it('single click does NOT open the lightbox (selection falls through)', () => {
