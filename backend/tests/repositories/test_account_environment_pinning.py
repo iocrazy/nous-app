@@ -71,13 +71,19 @@ def _sql(stmt) -> str:
     return str(stmt.compile(dialect=postgresql.dialect()))
 
 
-# ── 反向验证的核心：冲突时绝不覆盖 ───────────────────────────────────────
-async def test_pin_environment_does_nothing_on_conflict(monkeypatch):
+# ── 反向验证的核心：已经钉住的值绝不被覆盖 ─────────────────────────────
+async def test_pin_environment_never_overwrites_a_pinned_value(monkeypatch):
     """**这条是 P2-4 的地基。**
 
-    如果这里写成 ``ON CONFLICT DO UPDATE``，每次重扫二维码都会给账号换一套
-    指纹 —— 恰好制造出这个功能想消除的那个信号。SQL 里必须出现 DO NOTHING，
-    且**不能**出现 DO UPDATE。
+    规则是"钉住的值永不改变"，不是"有行就什么都别写"。这两者差一点点，而那
+    一点点在 2026-08-21 造成了一次静默故障：mig 424 加了 viewport 两列、回填
+    时没写它们，当时的 ``DO NOTHING`` 于是把那两个 NULL 变成了永久的 ——
+    **唯一能逐账号不同的轴对 100% 账号是关着的，而且没有任何东西报告它**。
+
+    现在用 ``COALESCE(库里的, 提议的)`` 逐列表达同一条规则：有值就保留，
+    空着才填。⚠️ **参数顺序就是这条规则本身** —— 反过来写成
+    ``COALESCE(提议的, 库里的)`` 就变成了"每次登录重掷指纹"，也就是这个功能
+    存在的意义被反转，而 SQL 看上去几乎一样。所以这里断言的是顺序。
     """
     session = _patch_scopes(monkeypatch, [[]])
     await SocialAccountsRepository().pin_environment(
@@ -87,32 +93,52 @@ async def test_pin_environment_does_nothing_on_conflict(monkeypatch):
         viewport_width=1440,
         viewport_height=900,
     )
-    sql = _sql(session.statements[0])
-    assert "ON CONFLICT" in sql
-    assert "DO NOTHING" in sql
-    assert "DO UPDATE" not in sql
+    sql = _sql(session.statements[0]).lower()
+    assert "on conflict" in sql
+    # 库里的那一列必须是第一个参数,提议值(excluded)第二个。
+    for col in ("viewport_width", "viewport_height", "locale", "timezone_id"):
+        assert (
+            f"coalesce(public.account_environments.{col}, excluded.{col})" in sql
+        ), col
+    # 正向对照:反着写的形状一个都不许出现。
+    for col in ("viewport_width", "locale"):
+        assert (
+            f"coalesce(excluded.{col}, public.account_environments.{col})" not in sql
+        ), col
+
+
+async def test_pin_environment_never_writes_the_conflict_key(monkeypatch):
+    """``account_id`` 是冲突键,不该出现在 SET 里 —— 把主键写进更新集合是
+    "看起来无害、直到某天不无害"的那类语句。"""
+    session = _patch_scopes(monkeypatch, [[]])
+    await SocialAccountsRepository().pin_environment(_ACCOUNT, locale="zh-CN")
+    sql = _sql(session.statements[0]).lower()
+    assert "coalesce(public.account_environments.account_id" not in sql
 
 
 async def test_pin_environment_returns_the_row_already_in_force(monkeypatch):
-    """冲突时返回的必须是**库里那一行**，不是调用方刚提议的那一套。
+    """返回的必须是**库里那一行**，不是调用方刚提议的那一套。
 
-    ``DO NOTHING`` 让 ``RETURNING`` 空手而归，所以要补一次读。调用方（登录
-    workflow）拿它写日志/回显；返回提议值会让日志说谎——看上去像是钉住了新
-    尺寸，实际用的还是老的。
+    调用方（登录 workflow）拿它写日志/回显；返回提议值会让日志说谎 —— 看上去
+    像是钉住了新尺寸，实际用的还是老的。
+
+    ⚠️ 现在只需要**一条语句**：``DO UPDATE`` 总会 RETURNING 出行，所以旧版
+    "冲突后补一次读"随着 ``DO NOTHING`` 一起消失了。这条断言顺带钉住那次清理
+    —— 留着那次多余的读不会报错，只会每次登录白打一次 DB。
     """
-    existing = {
+    in_force = {
         "account_id": _ACCOUNT,
         "proxy_url": None,
         "user_agent": None,
         "locale": "zh-CN",
         "timezone_id": "Asia/Shanghai",
+        "viewport_width": 1366,  # 库里已有的,COALESCE 会让它赢
+        "viewport_height": 768,
         "geo_lat": None,
         "geo_lng": None,
-        "viewport_width": 1366,  # 库里已有的
-        "viewport_height": 768,
         "fingerprint_profile_id": None,
     }
-    session = _patch_scopes(monkeypatch, [[], [existing]])  # insert 空 → 再读
+    session = _patch_scopes(monkeypatch, [[in_force]])
     out = await SocialAccountsRepository().pin_environment(
         _ACCOUNT,
         locale="zh-CN",
@@ -122,7 +148,7 @@ async def test_pin_environment_returns_the_row_already_in_force(monkeypatch):
     )
     assert out["viewport_width"] == 1366
     assert out["viewport_height"] == 768
-    assert len(session.statements) == 2, "冲突后必须补一次读，否则调用方拿到空"
+    assert len(session.statements) == 1, "DO UPDATE 之后不该再补一次读"
 
 
 async def test_pin_environment_returns_the_freshly_inserted_row(monkeypatch):

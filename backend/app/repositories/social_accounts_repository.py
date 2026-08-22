@@ -401,49 +401,67 @@ class SocialAccountsRepository:
     async def pin_environment(self, account_id: int, **env: Any) -> dict:
         """Write the account's browser environment — **once, for good** (mig 402/424).
 
-        ``ON CONFLICT (account_id) DO NOTHING``, and that is the entire point of
-        the method rather than an optimisation. An account whose fingerprint
-        changes every login looks more like a stolen session than an account
-        with a fixed one does, so "re-bind" must NOT re-roll: rescanning the QR
-        code of an already-bound account (which ``upsert_session_account``
-        deliberately routes onto the existing row, including waking a soft-
-        deleted one, mig 416) has to land on the environment that account has
-        been publishing from all along.
+        A pinned value is never changed. An account whose fingerprint changes
+        every login looks more like a stolen session than an account with a
+        fixed one does, so "re-bind" must NOT re-roll: rescanning the QR code of
+        an already-bound account (which ``upsert_session_account`` deliberately
+        routes onto the existing row, including waking a soft-deleted one, mig
+        416) has to land on the environment that account has been publishing
+        from all along.
 
-        Returns **the environment actually in force**, which on conflict is the
-        pre-existing row, not the one the caller proposed. ``DO NOTHING`` makes
-        ``RETURNING`` produce nothing on conflict — hence the second read. It is
-        not a race window worth locking over: two concurrent binds of the same
-        account both end up returning the same winning row, which is exactly the
-        contract ("whatever is pinned"), and the loser's proposal is discarded
-        either way.
+        ⚠️ What changed, and why it does NOT weaken that rule
+        ----------------------------------------------------
+        This used to be ``ON CONFLICT DO NOTHING``, which enforced the rule by
+        refusing to write anything at all when a row existed. That is stricter
+        than the rule requires, and the difference cost us a silent outage:
 
-        ⚠️ There is deliberately no update path here and no ``refresh_``
-        sibling. Assigning a proxy later is a separate, explicit action on an
-        existing row — not something a login should be able to do by accident.
+        mig 424 added ``viewport_width``/``viewport_height`` and backfilled the
+        existing rows **without them** (its INSERT listed only ``locale`` and
+        ``timezone_id``). ``DO NOTHING`` then made those NULLs permanent — so
+        the ONE axis that can differ per account without contradicting itself
+        was off for 100% of accounts, with nothing anywhere reporting it.
+        Measured on all three production accounts, 2026-08-21. mig 434 repairs
+        the data; this repairs the door.
+
+        Now: ``DO UPDATE`` with ``COALESCE(existing, proposed)`` per column —
+        **a NULL gets filled, a set value is left exactly as it was**. That is
+        the rule stated directly, instead of via a blanket refusal, and it makes
+        a missed backfill self-heal at the account's next login rather than
+        lasting forever.
+
+        ⚠️ Still no ``refresh_`` sibling and still no way for a login to assign
+        a proxy: ``GeneratedEnvironment`` has no ``proxy_url`` field at all, so
+        the value proposed for it is always absent and ``COALESCE`` keeps
+        whatever the row holds. "Fill a gap" and "change a decision" stay
+        different operations.
+
+        Returns **the environment actually in force**. With ``DO UPDATE`` the
+        row is always returned, so the old second read on conflict is gone.
         """
-        stmt = (
-            pg_insert(AccountEnvironments)
-            .values(account_id=_bigint(account_id), **env)
-            .on_conflict_do_nothing(index_elements=["account_id"])
-            .returning(*(getattr(AccountEnvironments, c) for c in _ENV_COLS))
+        insert = pg_insert(AccountEnvironments).values(
+            account_id=_bigint(account_id), **env
         )
+        # One COALESCE per writable column: the row's own value wins whenever it
+        # has one, so this can only ever turn a NULL into something. `account_id`
+        # is the conflict key and is not in the set.
+        fill_gaps = {
+            col: func.coalesce(
+                getattr(AccountEnvironments, col), getattr(insert.excluded, col)
+            )
+            for col in _ENV_COLS
+            if col != "account_id"
+        }
+        stmt = insert.on_conflict_do_update(
+            index_elements=["account_id"], set_=fill_gaps
+        ).returning(*(getattr(AccountEnvironments, c) for c in _ENV_COLS))
         async with write_scope() as session:
+            # `DO UPDATE` always produces a row, so the old "second read on
+            # conflict" is gone with the `DO NOTHING` that made it necessary.
+            # `first()` is still guarded below rather than asserted: a missing
+            # row here would mean the insert matched nothing at all, and
+            # returning `{}` (which the caller already handles) beats raising
+            # from a repository on a shape nobody has ever observed.
             row = (await session.execute(stmt)).mappings().first()
-            if row is None:
-                row = (
-                    (
-                        await session.execute(
-                            select(
-                                *(getattr(AccountEnvironments, c) for c in _ENV_COLS)
-                            ).where(
-                                AccountEnvironments.account_id == _bigint(account_id)
-                            )
-                        )
-                    )
-                    .mappings()
-                    .first()
-                )
         out = dict(row) if row else {}
         if out.get("account_id") is not None:
             out["account_id"] = str(out["account_id"])
