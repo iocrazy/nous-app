@@ -1121,6 +1121,38 @@ class AgentRunner:
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
     ) -> dict[str, Any]:
+        """Run one turn, with retry telemetry attached for its duration.
+
+        W1: the adapter is built during wiring, before this run exists, so a
+        recorder cannot be constructor-injected into the retry middleware.
+        The observer is attached here and detached in ``finally`` — an adapter
+        that outlived one turn while still holding a previous run's recorder
+        would file THIS run's retries under THAT run.
+
+        Adapters without an ``on_retry`` slot (every plain, non-chain adapter)
+        are left untouched.
+        """
+        has_slot = recorder is not None and hasattr(self.adapter, "on_retry")
+        if has_slot:
+            from app.services.ai.llm.retry_events import make_retry_observer
+
+            self.adapter.on_retry = make_retry_observer(recorder)
+        try:
+            return await self._run_turn_inner(
+                composed, user_messages, recorder=recorder, abort=abort
+            )
+        finally:
+            if has_slot:
+                self.adapter.on_retry = None
+
+    async def _run_turn_inner(
+        self,
+        composed: ComposedSystemPrompt,
+        user_messages: list[dict],
+        *,
+        recorder: Optional[RunRecorder] = None,
+        abort: Optional["AbortController"] = None,
+    ) -> dict[str, Any]:
         """Run one turn of the agent loop.
 
         ``recorder`` polls cancel BETWEEN iterations (cooperative).
