@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from loguru import logger
 
+from app.services.ai.adapters.response import adapter_text
+
 _SYSTEM_MESSAGE = (
     "You distil durable agent memory. " "Output only a JSON array of memory entries."
 )
@@ -58,9 +60,9 @@ async def default_consolidator(prompt: str, model: str = "") -> str:
             cache_fingerprint="agent_memory_consolidation_v1",
         )
         result = await adapter.call(composed, [{"role": "user", "content": prompt}])
-        return result.get("content") or ""
+        return adapter_text(result)
     except Exception as exc:
-        logger.debug(f"agent_memory consolidator failed: {exc}")
+        logger.warning(f"agent_memory consolidator failed: {exc!r}")
         return ""
 
 

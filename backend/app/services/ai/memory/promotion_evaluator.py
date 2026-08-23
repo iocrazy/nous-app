@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from loguru import logger
 
+from app.services.ai.adapters.response import adapter_text
+
 _SYSTEM_MESSAGE = (
     "You classify agent memory for team/project sharing and scrub PII. "
     "Output only a JSON object with keys: shareable, confidence, justification, "
@@ -60,9 +62,9 @@ async def default_promotion_evaluator(prompt: str, model: str = "") -> str:
             cache_fingerprint="agent_memory_promotion_v1",
         )
         result = await adapter.call(composed, [{"role": "user", "content": prompt}])
-        return result.get("content") or ""
+        return adapter_text(result)
     except Exception as exc:
-        logger.debug(f"agent_memory promotion evaluator failed: {exc}")
+        logger.warning(f"agent_memory promotion evaluator failed: {exc!r}")
         return ""
 
 

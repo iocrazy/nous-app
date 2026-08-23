@@ -33,6 +33,7 @@ from app.core.config import settings
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
+from app.services.ai.adapters.response import adapter_text
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
@@ -1226,8 +1227,12 @@ class AILibraryChatService:
                         cache_fingerprint="commitment_harvester_v1",
                     )
                     resp = await adapter.call(cs, [{"role": "user", "content": prompt}])
-                    return resp.get("content") or ""
-                except Exception:
+                    return adapter_text(resp)
+                except Exception as exc:
+                    # Was a bare `return ""` with no log at all — the harvester
+                    # could fail every turn and look identical to "the
+                    # conversation contained no commitments".
+                    logger.warning(f"[chat] commitment harvester failed: {exc!r}")
                     return ""
 
             async def _harvest_persistor(
@@ -1372,7 +1377,7 @@ class AILibraryChatService:
                     composed,
                     [{"role": "user", "content": _format_history_for_summary(head)}],
                 )
-                return resp["choices"][0]["message"].get("content") or ""
+                return adapter_text(resp)
             except Exception:
                 logger.exception(
                     "[chat] compactor summarizer failed; using empty summary"

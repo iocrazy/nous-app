@@ -33,6 +33,11 @@ from typing import Optional
 
 from loguru import logger
 
+from app.services.ai.adapters.response import (
+    AdapterResponseShapeError,
+    adapter_text,
+)
+
 # How many tokens the summary itself can use. Capped to a few hundred
 # so even a maximally verbose Haiku output doesn't blow the budget the
 # compaction was supposed to free up.
@@ -223,10 +228,22 @@ async def summarize(
     except Exception as exc:
         raise RuntimeError(f"[summarizer] {provider} call failed: {exc}") from exc
 
-    text = (resp or {}).get("content") or ""
-    if not isinstance(text, str) or not text.strip():
+    # Read the envelope, not a flat dict. This line used to be
+    # `resp.get("content")`, which is None on every real adapter response —
+    # so this function raised on every call and the caller fell back to lossy
+    # truncation, silently, forever. See adapters/response.py.
+    try:
+        text = adapter_text(resp)
+    except AdapterResponseShapeError as exc:
+        raise RuntimeError(f"[summarizer] {provider} {exc}") from exc
+
+    if not text.strip():
+        # Distinct from the shape error above: the model genuinely produced
+        # nothing. Still fatal here — a summary is the whole point — but the
+        # message must not blame the shape.
         raise RuntimeError(
-            f"[summarizer] {provider} returned empty content; resp shape={list((resp or {}).keys())}"
+            f"[summarizer] {provider} returned empty text "
+            f"(finish_reason={(resp.get('choices') or [{}])[0].get('finish_reason')!r})"
         )
 
     return text.strip()

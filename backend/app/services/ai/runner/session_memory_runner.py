@@ -22,6 +22,7 @@ from app.repositories.session_memory_repository import (
     SessionMemoryRepository,
     get_session_memory_repository,
 )
+from app.services.ai.adapters.response import adapter_text
 
 # Fallback model when the agent's own model is unknown/empty — a cheap Qwen
 # tier (DashScope) for session-note maintenance.
@@ -75,9 +76,12 @@ async def _default_summarizer(prompt: str, model: str = "") -> str:
             cache_fingerprint="session_memory_v1",
         )
         result = await adapter.call(composed, [{"role": "user", "content": prompt}])
-        return result.get("content") or ""
+        return adapter_text(result)
     except Exception as exc:
-        logger.debug(f"session_memory summarizer failed: {exc}")
+        # warning, not debug: this returns "" on failure, and an empty session
+        # memory is indistinguishable from a correctly-empty one. debug-level
+        # is why the envelope misread survived — see adapters/response.py.
+        logger.warning(f"session_memory summarizer failed: {exc!r}")
         return ""
 
 

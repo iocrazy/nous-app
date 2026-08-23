@@ -34,7 +34,19 @@ def _make_msgs() -> list[dict]:
 def _adapter_returning(text: str):
     """Build a fake adapter whose .call returns the given text."""
     fake_adapter = AsyncMock()
-    fake_adapter.call = AsyncMock(return_value={"content": text})
+    # The real wire shape. `{"content": ...}` — what this mock used to
+    # return — is a shape no adapter has ever produced, and it made every
+    # test here pass while production raised on every call.
+    fake_adapter.call = AsyncMock(
+        return_value={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
     return fake_adapter
 
 
@@ -185,7 +197,12 @@ async def test_provider_timeout_raises_runtime_error(monkeypatch):
 async def test_provider_returns_empty_raises(monkeypatch):
     """Empty / whitespace-only response is treated as a provider
     failure — prevents a downstream agent from getting an empty
-    [Earlier conversation summary] block."""
+    [Earlier conversation summary] block.
+
+    The message must blame the MODEL, not the response shape: a well-formed
+    envelope carrying no text is a provider outcome, while a malformed
+    envelope is our own bug. Conflating them is what hid the flat-dict
+    misread for months, so the wording is part of the contract here."""
     monkeypatch.setenv("COMPACTION_PROVIDER", "claude-haiku-4-5")
     fake_adapter = _adapter_returning("")
 
@@ -193,8 +210,12 @@ async def test_provider_returns_empty_raises(monkeypatch):
         "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
         new=AsyncMock(return_value=fake_adapter),
     ):
-        with pytest.raises(RuntimeError, match="empty content"):
+        with pytest.raises(RuntimeError, match="empty text") as ei:
             await summarize(_make_msgs())
+    assert "choices" not in str(ei.value), (
+        "a well-formed envelope with no text must not be reported as a shape "
+        f"problem: {ei.value}"
+    )
 
 
 async def test_unsupported_provider_raises(monkeypatch):

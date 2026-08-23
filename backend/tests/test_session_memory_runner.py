@@ -14,7 +14,16 @@ from app.services.ai.runner.session_memory_runner import (
 
 def _fake_adapter(content: str = "NOTES") -> MagicMock:
     a = MagicMock()
-    a.call = AsyncMock(return_value={"content": content})
+    a.call = AsyncMock(
+        return_value={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
     return a
 
 
