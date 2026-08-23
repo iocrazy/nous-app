@@ -83,6 +83,9 @@ from app.models.chat import (  # noqa: F401
     MessageRefs,
     Messages,
 )
+from app.models.codex_daemon import (  # noqa: F401
+    CodexDaemons,
+)
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
     DistributionOauthStates,
