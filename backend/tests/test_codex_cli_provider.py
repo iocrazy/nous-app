@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -140,7 +141,13 @@ class TestGenerateImage:
             argv.index("--auth-file") : argv.index("--auth-file") + 2
         ]
         assert "images" in argv and "generate" in argv
-        assert argv[argv.index("--prompt") + 1] == "a red apple"
+        # The user's words come FIRST and survive intact. They are no longer
+        # the whole argument: since 2026-08-23 an aspect sentence is appended,
+        # because --size turned out not to control the output shape on this
+        # provider (see TestAspectRatio for the measurements). Asserting strict
+        # equality here would pin the old, broken behaviour.
+        sent_prompt = argv[argv.index("--prompt") + 1]
+        assert sent_prompt.startswith("a red apple")
         assert argv[argv.index("--size") + 1] == "1536x1024"
         assert argv[argv.index("--format") + 1] == "png"
 
@@ -440,3 +447,140 @@ async def test_generate_image_forces_opaque_background(monkeypatch):
     await provider.generate_image(prompt="a red apple", aspect="1:1")
     assert "--background" in captured[0]
     assert captured[0][captured[0].index("--background") + 1] == "opaque"
+
+
+# ---------------------------------------------------------------------------
+# Aspect ratio: the prompt carries it, and the output is checked
+#
+# ⚠️ This whole block exists because the OPPOSITE was believed and shipped.
+# A comment above ``_ASPECT_TO_SIZE`` used to assert "The model supports exactly
+# three sizes… every catalog aspect maps to the nearest", so ``--size`` was
+# treated as the control. Measured 2026-08-23 against the real CLI:
+#
+#     --size 999x999                   → "must use ... multiples of 16"
+#                                         (not "three sizes" — the comment was
+#                                          simply false)
+#     --size 1024x1536 + neutral text  → ok:true, produced 1536x1024 LANDSCAPE
+#     --size 1024x1536 + portrait text → produced 1086x1448 = exactly 0.7500
+#
+# and all four codex images in production came back at a ratio nobody asked
+# for, three of them flipped to portrait after requesting 16:9 — every one with
+# ok:true. So: say the shape in words, then verify what came back.
+# ---------------------------------------------------------------------------
+class TestAspectRatio:
+    def _png(self, path, width: int, height: int) -> None:
+        from PIL import Image
+
+        Image.new("RGB", (width, height), (10, 10, 10)).save(path)
+
+    def _exec_writing(self, width: int, height: int):
+        """A fake CLI that writes a real PNG of the given size to --out."""
+
+        def make(argv):
+            out = _out_path(argv)
+            self._png(out, width, height)
+            return FakeProc(rc=0, stdout=_success_json(out), argv=argv)
+
+        return make
+
+    async def test_the_aspect_is_stated_in_the_prompt(self, monkeypatch, tmp_path):
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, self._exec_writing(768, 1024), captured)
+
+        await CodexCliProvider().generate_image(prompt="a cat", aspect="3:4")
+
+        argv = captured[0]
+        sent = argv[argv.index("--prompt") + 1]
+        # The user's words survive, first and intact.
+        assert sent.startswith("a cat")
+        # And the shape is spelled out, because --size does not control it.
+        assert "3:4" in sent and "portrait" in sent
+
+    async def test_an_empty_aspect_adds_nothing_to_the_prompt(
+        self, monkeypatch, tmp_path
+    ):
+        """IC 自适应 sends an empty aspect on purpose. Inventing a shape for
+        "you choose" would be worse than saying nothing."""
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, self._exec_writing(1024, 1024), captured)
+
+        await CodexCliProvider().generate_image(prompt="a cat", aspect="")
+
+        argv = captured[0]
+        assert argv[argv.index("--prompt") + 1] == "a cat"
+
+    async def test_an_unknown_aspect_adds_nothing_to_the_prompt(
+        self, monkeypatch, tmp_path
+    ):
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, self._exec_writing(1024, 1024), captured)
+
+        await CodexCliProvider().generate_image(prompt="a cat", aspect="7:13")
+
+        argv = captured[0]
+        assert argv[argv.index("--prompt") + 1] == "a cat"
+
+    async def test_size_is_still_sent(self, monkeypatch, tmp_path):
+        """Kept deliberately: free to send, it is the CLI's documented
+        contract, and an upstream fix would start working with no change."""
+        captured: list[list[str]] = []
+        install_fake_exec(monkeypatch, self._exec_writing(768, 1024), captured)
+
+        await CodexCliProvider().generate_image(prompt="p", aspect="3:4")
+
+        argv = captured[0]
+        assert argv[argv.index("--size") + 1] == "1024x1536"
+
+    async def test_a_complying_result_is_marked_honored(self, monkeypatch, tmp_path):
+        # 1086x1448 — the real measurement from the 2026-08-23 probe.
+        install_fake_exec(monkeypatch, self._exec_writing(1086, 1448))
+
+        res = await CodexCliProvider().generate_image(prompt="p", aspect="3:4")
+
+        assert res.raw["measured_size"] == "1086x1448"
+        assert res.raw["requested_aspect"] == "3:4"
+        assert res.raw["aspect_honored"] is True
+
+    async def test_a_flipped_result_is_marked_NOT_honored(self, monkeypatch, tmp_path):
+        """The exact production failure: ask for 16:9 landscape, get portrait.
+        It must be recorded as non-compliant — but still returned, because the
+        image is already generated and already paid for."""
+        install_fake_exec(monkeypatch, self._exec_writing(1184, 1328))
+
+        res = await CodexCliProvider().generate_image(prompt="p", aspect="16:9")
+
+        assert res.raw["aspect_honored"] is False
+        assert res.raw["measured_size"] == "1184x1328"
+        # Returned, not thrown away.
+        assert res.local_path and os.path.isfile(res.local_path)
+
+    async def test_rounding_slack_does_not_count_as_a_violation(
+        self, monkeypatch, tmp_path
+    ):
+        """The model picks its own pixels (1086x1448, not a round 1024x1365),
+        so an exact match is not the bar."""
+        install_fake_exec(monkeypatch, self._exec_writing(1024, 1365))
+
+        res = await CodexCliProvider().generate_image(prompt="p", aspect="3:4")
+
+        assert res.raw["aspect_honored"] is True
+
+    async def test_an_unmeasurable_file_is_not_treated_as_a_violation(
+        self, monkeypatch, tmp_path
+    ):
+        """Verification is a REPORT, not a gate. Refusing an image we already
+        paid for because Pillow could not open it trades a cosmetic problem for
+        a real one."""
+
+        def make(argv):
+            out = _out_path(argv)
+            Path(out).write_bytes(b"not a png")
+            return FakeProc(rc=0, stdout=_success_json(out), argv=argv)
+
+        install_fake_exec(monkeypatch, make)
+
+        res = await CodexCliProvider().generate_image(prompt="p", aspect="3:4")
+
+        assert res.local_path
+        assert "aspect_honored" not in res.raw
+        assert "measured_size" not in res.raw

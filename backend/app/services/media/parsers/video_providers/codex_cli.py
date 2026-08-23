@@ -56,8 +56,13 @@ class CodexCliError(RuntimeError):
         self.stderr = stderr
 
 
-# aspect → gpt-image-2 canonical size. The model supports exactly three sizes
-# (square / landscape / portrait); every catalog aspect maps to the nearest.
+# aspect → a size string for ``--size``.
+#
+# ⚠️ On THIS provider ``--size`` is not honoured — measured 2026-08-23, see
+# ``_ASPECT_TO_PHRASE`` below for the evidence and the actual mechanism. The
+# argument is still sent because it is free, it is the documented contract of
+# the CLI, and a future fix on the upstream side would start working with no
+# change here. It is NOT what makes the output the right shape.
 _ASPECT_TO_SIZE = {
     "21:9": "1536x1024",
     "16:9": "1536x1024",
@@ -69,6 +74,94 @@ _ASPECT_TO_SIZE = {
     "9:16": "1024x1536",
 }
 _DEFAULT_SIZE = "1024x1024"
+
+# aspect → the words that actually control the output shape.
+#
+# ★ Why the prompt and not ``--size`` (measured 2026-08-23, five probes):
+#
+#     --size 999x999                  → CLI: "must use width and height values
+#                                        that are multiples of 16"  (so the
+#                                        old "exactly three sizes" comment that
+#                                        used to sit above _ASPECT_TO_SIZE was
+#                                        simply wrong)
+#     --size 8192x10912               → CLI: "maximum edge of 3840px"
+#     --size 1056x1408 + neutral text → ok:true, produced 1536x1024 LANDSCAPE
+#     --size 1024x1536 + neutral text → ok:true, produced 1536x1024 LANDSCAPE
+#     --size 1024x1536 + portrait text→ produced 1086x1448 = exactly 0.7500
+#
+# So the size argument is discarded somewhere past the CLI and the model infers
+# the shape from the prompt. (Mechanism, likely: this provider talks to the
+# ChatGPT private backend `chatgpt.com/backend-api/codex/responses`, not the
+# public images API, and the size parameter has no landing spot there.)
+#
+# The damage was silent and already shipped: all four codex images in prod came
+# back at a ratio nobody asked for — three requested 16:9 landscape and are
+# PORTRAIT (1184x1328, 1147x1371, 1199x1312), one requested 1:1 and is 0.80.
+# `ok:true` every time. Hence both halves of this fix: say it in words, then
+# CHECK the result and say so when it still did not comply.
+_ASPECT_TO_PHRASE = {
+    "21:9": "21:9 ultra-wide landscape (much wider than tall)",
+    "16:9": "16:9 landscape (wider than tall)",
+    "3:2": "3:2 landscape (wider than tall)",
+    "4:3": "4:3 landscape (wider than tall)",
+    "1:1": "1:1 square (equal width and height)",
+    "3:4": "3:4 portrait (taller than wide)",
+    "2:3": "2:3 portrait (taller than wide)",
+    "9:16": "9:16 tall portrait (much taller than wide)",
+}
+
+# Numeric width/height target per aspect, for verifying what came back.
+_ASPECT_TO_RATIO = {
+    "21:9": 21 / 9,
+    "16:9": 16 / 9,
+    "3:2": 3 / 2,
+    "4:3": 4 / 3,
+    "1:1": 1.0,
+    "3:4": 3 / 4,
+    "2:3": 2 / 3,
+    "9:16": 9 / 16,
+}
+
+# How far off the requested ratio still counts as compliance. The model picks
+# its own pixel dimensions (1086x1448 rather than a round 1024x1365), so an
+# exact match is not the bar; 6% is loose enough for that rounding and tight
+# enough that a flipped orientation — the failure actually observed — can never
+# slip through (3:4 vs 4:3 is 78% apart).
+_ASPECT_TOLERANCE = 0.06
+
+
+def _aspect_instruction(aspect: str) -> str:
+    """The sentence appended to the prompt to pin the output shape.
+
+    Appended, never prepended, and only when the aspect is known: the user's
+    own words stay first and intact. An unknown or empty aspect adds nothing —
+    "let the model choose" is a real request (IC 自适应 sends an empty aspect
+    on purpose) and inventing a shape for it would be worse than silence.
+    """
+    phrase = _ASPECT_TO_PHRASE.get((aspect or "").strip())
+    if not phrase:
+        return ""
+    return (
+        f"\n\nOutput image aspect ratio: {phrase}. "
+        "The whole image must have this shape."
+    )
+
+
+def _measure(path: str) -> Optional[Tuple[int, int]]:
+    """(width, height) of the produced file, or None if it cannot be read.
+
+    None is not an error here: the verification below is a REPORT, not a gate.
+    Refusing to hand back an image we already paid for because we could not
+    measure it would trade a cosmetic problem for a real one.
+    """
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            return int(img.width), int(img.height)
+    except Exception as exc:  # noqa: BLE001 — Pillow's decode errors are varied
+        logger.warning("[codex-cli] could not measure produced image: {}", exc)
+        return None
 
 # Error-code / message needles for classification. Only ever consulted on the
 # failure branch (ok != true) — a successful payload containing "401"-ish
@@ -215,6 +308,9 @@ class CodexCliProvider:
         out_dir = tempfile.mkdtemp(prefix="codeximg_")
         out_path = os.path.join(out_dir, "gen.png")
         size = _ASPECT_TO_SIZE.get(aspect or "", _DEFAULT_SIZE)
+        # The shape actually comes from here, not from --size. See the block
+        # above _ASPECT_TO_PHRASE for the measurements.
+        effective_prompt = prompt + _aspect_instruction(aspect)
         refs = [
             r
             for r in (ref_image_paths or ([ref_image_path] if ref_image_path else []))
@@ -225,7 +321,7 @@ class CodexCliProvider:
             "images",
             mode,
             "--prompt",
-            prompt,
+            effective_prompt,
             "--out",
             out_path,
             "--size",
@@ -271,7 +367,35 @@ class CodexCliProvider:
                 f"gpt-image-2-skill reported ok but produced no file at {produced}",
                 stderr=err[:500],
             )
-        return GenResult(local_path=produced, mime="image/png", raw=payload)
+        # Verify rather than assume. The provider answered ok:true for every
+        # one of the four prod images whose ratio was wrong, so "it returned a
+        # file" has already been shown not to mean "it did what was asked".
+        raw = dict(payload)
+        measured = _measure(produced)
+        if measured:
+            width, height = measured
+            raw["measured_size"] = f"{width}x{height}"
+            want = _ASPECT_TO_RATIO.get((aspect or "").strip())
+            if want and height > 0:
+                got = width / height
+                raw["requested_aspect"] = aspect
+                raw["aspect_honored"] = abs(got - want) <= want * _ASPECT_TOLERANCE
+                if not raw["aspect_honored"]:
+                    # Warning, not an exception: the image is already generated
+                    # and already paid for, and a usable picture of the wrong
+                    # shape beats no picture. But it must not pass in silence —
+                    # that silence is exactly what hid this for months.
+                    logger.warning(
+                        "[codex-cli] asked for aspect {} ({:.3f}) but got "
+                        "{}x{} ({:.3f}) — the model did not honour the "
+                        "requested shape",
+                        aspect,
+                        want,
+                        width,
+                        height,
+                        got,
+                    )
+        return GenResult(local_path=produced, mime="image/png", raw=raw)
 
     # ------------------------------------------------------------------ health --
 
