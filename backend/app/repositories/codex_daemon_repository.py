@@ -85,3 +85,14 @@ class CodexDaemonRepository:
             if row is None:
                 return None
             return {"id": str(row.id), "user_id": str(row.user_id)}
+
+    async def touch_last_seen(self, device_id: int) -> None:
+        """Heartbeat bookkeeping — powers the settings page's 最后在线 column."""
+        from app.db.scope import system_session
+
+        async with system_session(reason="codex daemon heartbeat") as session:
+            await session.execute(
+                update(CodexDaemons)
+                .where(CodexDaemons.id == device_id)
+                .values(last_seen_at=datetime.now(timezone.utc))
+            )
