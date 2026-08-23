@@ -665,7 +665,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           </div>
         ) : null}
 
-        <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+        {/* Footer wraps: pills + Run no longer crush each other on a
+            narrow card (2026-08-22 "太拥挤"). */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-xs">
           {!gen && (
             <div className="flex flex-1 items-center gap-1.5">
               <UiSelect
@@ -703,7 +705,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </div>
           )}
           {gen && (
-            <div className="flex min-w-0 flex-1 items-center">
+            <div className="flex min-w-0 flex-1 basis-full items-center sm:basis-auto">
               <GenFooterControls
                 gen={gen}
                 models={genModels}
