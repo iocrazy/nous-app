@@ -94,7 +94,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // IC 放大: upscale the primary image via jimeng image_upscale; the result
   // appends beside the original (source stays).
   const handleUpscale = useCallback(() => {
-    const url = preview_url || (images?.[0] as { url?: string } | undefined)?.url;
+    const url = primaryImageUrl;
     const genId = url ? genIdFromDurableUrl(url) : null;
     if (!genId) return;
     void (async () => {
@@ -221,7 +221,12 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     void regenerateForOutput(id);
   }, [id]);
 
-  const canCrop = kind === 'image' && !!preview_url;
+  // History nodes carry images[] but NO preview_url (outputHistory archives
+  // the image list only) — gating on preview_url alone locked every editing
+  // affordance out of them (2026-08-23 "历史卡无法双击进入编辑").
+  const primaryImageUrl =
+    preview_url || ((images?.[0] as { url?: string } | undefined)?.url ?? null);
+  const canCrop = kind === 'image' && !!primaryImageUrl;
   // Grid split has no local fallback — every tile is derived
   // server-side, so a persisted source resource is required.
   const canSplit = canCrop && !!resource_id;
@@ -556,7 +561,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         // dblclick → imageEditModal); video/text keep the lightbox. Single
         // click falls through to React Flow node selection.
         onDoubleClick={() => {
-          const firstUrl = preview_url || images?.[0]?.url;
+          const firstUrl = primaryImageUrl;
           if (kind === 'image' && firstUrl && !readOnly) {
             setEditingUrl(firstUrl);
             setEditorMode('preview');
@@ -708,10 +713,10 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           {outpaintError}
         </div>
       )}
-      {(preview_url || editingUrl) && (
+      {(primaryImageUrl || editingUrl) && (
         <UnifiedImageEditor
           open={editorMode !== null}
-          src={editingUrl ?? preview_url}
+          src={editingUrl ?? primaryImageUrl ?? ''}
           alt={preview_text || 'Output preview'}
           initialMode={editorMode ?? 'preview'}
           cropInitialRegion={crop_region ?? undefined}

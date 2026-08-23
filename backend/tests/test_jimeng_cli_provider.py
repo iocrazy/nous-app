@@ -559,3 +559,23 @@ async def test_upscale_image_runs_image_upscale_command(monkeypatch):
     assert "--image=/tmp/in.png" in captured[0]
     assert "--resolution_type=4k" in captured[0]
     assert result.local_path.endswith("up.png")
+
+
+async def test_membership_tier_error_is_typed(monkeypatch):
+    """即梦 CLI needs a 高级 membership; the refusal must surface as a
+    readable error, not a generic 'no submit_id' (2026-08-23 prod)."""
+    install_fake_exec(
+        monkeypatch,
+        {
+            "image_upscale": lambda argv: FakeProc(
+                rc=1,
+                stdout=b"",
+                stderr="当前账号没有 dreamina_cli 使用权限: 仅限高级或高级以上的会员等级".encode(),
+            ),
+        },
+    )
+    provider = JimengCliProvider()
+    with pytest.raises(JimengCliError) as exc:
+        await provider.upscale_image(image_path="/tmp/x.png", resolution="2k")
+    assert exc.value.code == "tier_required"
+    assert "会员" in exc.value.message or "membership" in exc.value.message.lower()
