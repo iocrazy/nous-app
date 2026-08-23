@@ -56,6 +56,11 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       s.nodes.filter((n) => (n as { parentId?: string }).parentId === id).length,
   );
   const [dragOver, setDragOver] = useState(false);
+  // IC 宫格拼接 options (rows×cols preset / gap / output long edge).
+  const [stitchOpen, setStitchOpen] = useState(false);
+  const [stitchCols, setStitchCols] = useState<number | undefined>(undefined);
+  const [stitchGap, setStitchGap] = useState(0);
+  const [stitchSize, setStitchSize] = useState(2048);
   // η3 grip: group size lives on node.style (persisted). The oversized
   // groups minted during the giant-node era are stuck at their baked-in
   // style — the grip lets the user drag them back down directly.
@@ -153,9 +158,10 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         console.error('[GroupNodeView] zip download failed:', err);
       }
     })();
-  }, [items, label]);
+  }, [items, label, stitchCols, stitchGap, stitchSize]);
 
   const onStitch = useCallback(() => {
+    setStitchOpen(false);
     void (async () => {
       const store = useCanvasCoreStore.getState;
       const dataOf = () =>
@@ -164,7 +170,11 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           | undefined)?.data ?? {}) as GroupNodeData;
       patch({ uploading: (dataOf().uploading ?? 0) + 1 });
       try {
-        const blob = await stitchImageItems(imageItems);
+        const blob = await stitchImageItems(imageItems, {
+          cols: stitchCols,
+          gap: stitchGap,
+          outputLongEdge: stitchSize,
+        });
         const file = new File([blob], 'stitched-grid.png', { type: 'image/png' });
         const item = await importCanvasMedia(file, canvasId, id);
         const current = dataOf();
@@ -224,7 +234,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         memberCount={memberCount}
         onArrange={onArrange}
         onPreview={() => setLightboxIndex(0)}
-        onStitch={onStitch}
+        onStitch={() => setStitchOpen((v) => !v)}
         onDownload={onDownload}
         onUngroup={onUngroup}
         readOnly={readOnly}
@@ -321,6 +331,73 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
+      )}
+      {stitchOpen && !readOnly && (
+        <div
+          data-testid="stitch-options"
+          className="canvas-island absolute -top-2 left-1/2 z-20 w-64 -translate-x-1/2 -translate-y-full rounded-xl p-2 text-xs"
+        >
+          <div className="mb-1 font-bold text-canvas-text">Stitch</div>
+          <div className="mb-1.5 flex flex-wrap items-center gap-1">
+            <span className="text-[10px] text-canvas-muted">Grid</span>
+            {[undefined, 1, 2, 3, 4].map((c) => (
+              <button
+                key={c ?? 'auto'}
+                type="button"
+                data-testid={`stitch-cols-${c ?? 'auto'}`}
+                onClick={() => setStitchCols(c)}
+                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] ${
+                  stitchCols === c
+                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                {c ? `${c} col` : 'Auto'}
+              </button>
+            ))}
+          </div>
+          <label className="mb-1.5 flex items-center gap-1.5 text-[10px] text-canvas-muted">
+            Gap
+            <input
+              type="range"
+              min={0}
+              max={240}
+              value={stitchGap}
+              onChange={(e) => setStitchGap(Number(e.target.value))}
+              aria-label="Stitch gap"
+              className="nodrag flex-1"
+            />
+            <span className="w-8 text-right font-semibold text-canvas-text">
+              {stitchGap}
+            </span>
+          </label>
+          <div className="mb-1.5 flex items-center gap-1">
+            <span className="text-[10px] text-canvas-muted">Output</span>
+            {[1024, 2048, 4096].map((sz) => (
+              <button
+                key={sz}
+                type="button"
+                data-testid={`stitch-size-${sz}`}
+                onClick={() => setStitchSize(sz)}
+                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] ${
+                  stitchSize === sz
+                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
+                    : 'border-canvas-line text-canvas-text'
+                }`}
+              >
+                {sz === 1024 ? '1K' : sz === 2048 ? '2K' : '4K'}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            data-testid="stitch-apply"
+            onClick={onStitch}
+            className="nodrag w-full rounded-full bg-canvas-strong px-3 py-1 text-xs font-bold text-canvas-card"
+          >
+            Stitch {imageItems.length} images
+          </button>
+        </div>
       )}
       {!readOnly && (
         <NodeWidthGrip
