@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, PrimaryKeyConstraint, String, text
+from sqlalchemy import BigInteger, DateTime, PrimaryKeyConstraint, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,11 +24,11 @@ class CodexDaemons(Base):
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
-    device_name: Mapped[str] = mapped_column(String, nullable=False)
+    device_name: Mapped[str] = mapped_column(Text, nullable=False)
     platform: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("''")
+        Text, nullable=False, server_default=text("''")
     )
-    token_hash: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
