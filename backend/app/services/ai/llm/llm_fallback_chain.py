@@ -97,6 +97,10 @@ class LLMFallbackChain:
     fallback_models: list[str]
     adapter_factory: AdapterFactory
     cancel_check: Optional[CancelCheck] = None
+    # W1: passed straight to each model's retry middleware so a retry on ANY
+    # model in the chain is recorded. Set per-run by the caller that owns a
+    # recorder; the chain itself never touches storage.
+    on_retry: Optional[Any] = None
 
     # Per-attempt retry settings — passed through to LLMRetryMiddleware.
     max_retries_per_model: int = 3
@@ -211,6 +215,7 @@ class LLMFallbackChain:
             mw = LLMRetryMiddleware(
                 adapter,
                 cancel_check=self.cancel_check,
+                on_retry=self.on_retry,
                 max_retries=self.max_retries_per_model,
                 base_delay_s=self.base_delay_s,
                 max_delay_s=self.max_delay_s,

@@ -30,6 +30,8 @@ after the middleware exhausts retries on each model). Order of escalation:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import random
 import time
 from dataclasses import dataclass, field
@@ -72,6 +74,12 @@ class RunCancelled(Exception):
 
 
 CancelCheck = Callable[[], Awaitable[bool]]
+
+# Called once per retry, BEFORE the backoff sleep. Receives the event payload.
+# Deliberately a plain callback rather than a recorder handle: the middleware
+# must stay provider- and storage-agnostic, and a telemetry sink must never be
+# able to fail a model call (the caller wraps, this module contains).
+RetryObserver = Callable[[dict], Awaitable[None]]
 
 
 def classify_error(exc: BaseException) -> str:
@@ -249,6 +257,10 @@ class LLMRetryMiddleware:
 
     adapter: Any
     cancel_check: Optional[CancelCheck] = None
+    # W1: emit one durable event per retry so the count survives a process
+    # restart and the UI can render progress. None = no telemetry (unchanged
+    # behaviour).
+    on_retry: Optional[RetryObserver] = None
     max_retries: int = DEFAULT_MAX_RETRIES
     base_delay_s: float = DEFAULT_BASE_DELAY_S
     max_delay_s: float = DEFAULT_MAX_DELAY_S
@@ -279,6 +291,42 @@ class LLMRetryMiddleware:
     monotonic: Callable[[], float] = field(
         default_factory=lambda: time.monotonic, init=False
     )
+
+    def policy_key(self) -> str:
+        """A stable fingerprint of the retry policy currently in force.
+
+        Retry counts are only meaningful under one policy. Carrying a count
+        across a config change would report "attempt 3 of 3" under rules that
+        allowed 5 — so the key changes when the policy does, and the count
+        naturally starts over.
+
+        Only policy participates. The adapter, the cancel hook and the test
+        seams are not policy; keying on them would restart the count for
+        reasons that have nothing to do with the rules.
+        """
+        canonical = json.dumps(
+            {
+                "max_retries": self.max_retries,
+                "base_delay_s": self.base_delay_s,
+                "max_delay_s": self.max_delay_s,
+                "jitter_ratio": self.jitter_ratio,
+                "total_deadline_seconds": self.total_deadline_seconds,
+                "retryable_statuses": sorted(_RETRYABLE_STATUSES),
+                "non_retryable_statuses": sorted(_NON_RETRYABLE_STATUSES),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha1(canonical.encode()).hexdigest()[:16]  # noqa: S324
+
+    async def _emit_retry(self, event: dict) -> None:
+        """Never let telemetry fail a model call."""
+        if self.on_retry is None:
+            return
+        try:
+            await self.on_retry(event)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[LLMRetry] retry observer failed (ignored): {exc!r}")
 
     async def call(
         self, composed: ComposedSystemPrompt, messages: list[dict]
@@ -350,6 +398,24 @@ class LLMRetryMiddleware:
                         rng=self.rng,
                     )
                 )
+                # Emit BEFORE the wait: a UI that only learns of a backoff
+                # once it is over cannot show it, and a crash mid-sleep would
+                # otherwise leave no trace that we were waiting at all.
+                # ⚠️ Same-model transient retry. Cross-model fallback stays
+                # prohibited — this must never become the seam where one
+                # quietly turns into the other.
+                await self._emit_retry(
+                    {
+                        "attempt": attempt + 1,
+                        "max_retries": self.max_retries,
+                        "model": getattr(composed, "model", None),
+                        "policy_key": self.policy_key(),
+                        "delay_ms": int(delay * 1000),
+                        "classification": classification,
+                        "failure": describe_llm_error(exc)[:300],
+                    }
+                )
+
                 # AI-007: never sleep past the deadline; if the backoff would
                 # blow it, give up now rather than wake up already-expired.
                 if self.total_deadline_seconds is not None:
