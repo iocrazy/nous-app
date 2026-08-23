@@ -45,6 +45,8 @@ from app.schemas.distribution import (
 from app.schemas.distribution_cover import (
     CoverExtractRequest,
     CoverExtractResponse,
+    CoverGenerateRequest,
+    CoverGenerateResponse,
     CoverGrabFrameRequest,
     CoverGrabFrameResponse,
     CoverSelectRequest,
@@ -1679,6 +1681,100 @@ async def grab_cover_frame(body: CoverGrabFrameRequest, user: CurrentUserDep):
         ) from e
 
     return CoverGrabFrameResponse(**grabbed.as_dict())
+
+
+@router.post(
+    "/covers/generate",
+    response_model=CoverGenerateResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
+    """派一次封面生成（阶段一四草案网格 / 阶段二精修选中那格）。
+
+    **复用现有的出图引擎，只换一个入口。** `POST /canvases/{id}/generations` 要
+    canvas_id 且按画布鉴权，而封面工作室没有画布；`canvas_generation_workflow` 的
+    `canvas_id` 本来就是 Optional，所以这里直接以 None 起它，不去凭空造一个隐藏
+    画布来满足一个路由前缀。
+
+    进度轮询复用 `GET /api/v1/canvases/generations/{task_id}` —— 它读的是
+    task_tracking、按用户闸门，跟画布无关。
+
+    prompt 由服务端组装并**原样回给前端**：设计稿有一块"What was sent to the
+    model"要显示它。让前端自己拼一份"应该一样"的字符串，是两份必然漂移的真相。
+    """
+    import uuid as _uuid
+
+    from app.services.distribution.cover_prompt import (
+        COVER_ASPECT,
+        CoverPromptInput,
+        build_stage1_prompt,
+        build_stage2_prompt,
+    )
+    from app.services.infra import dbos_orchestrator
+    from app.workflows.canvas_generation import canvas_generation_workflow
+
+    data = CoverPromptInput(
+        topic=body.topic,
+        allow_small_labels=body.allow_small_labels,
+        selected_draft=body.selected_draft,
+        headline=body.headline,
+    )
+    try:
+        prompt = (
+            build_stage1_prompt(data) if body.stage == 1 else build_stage2_prompt(data)
+        )
+    except ValueError as e:
+        # 组装器的拒绝是对**输入**的判断（空主题、编号越界），是 4xx 不是 500。
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    # 只过滤空串，**不截断**。上限由 schema 的 max_length=9 在边界上响亮拒绝
+    # （422），这里再 `[:9]` 一刀是静默截断 —— 客户端多送了两张，服务端一声不吭
+    # 地扔掉，用户看到的是"我明明选了 11 张"。而且那会是同一个数字的第三份副本：
+    # schema 一份、引擎侧 canvas_generation.py:141 一份，将来谁改了谁不知道。
+    # 引擎那一刀是最终兜底，且它兜的是内部不变量，不是用户输入。
+    refs = [u for u in body.source_urls if u]
+
+    wf_id = str(_uuid.uuid4())
+    task_id = await get_task_manager().create(
+        user_id=user["id"],
+        task_type="cover_gen",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
+        title=f"Cover stage {body.stage}",
+        subtitle=body.topic[:80],
+        dbos_workflow_id=wf_id,
+        metadata={
+            "cover_stage": body.stage,
+            "topic": body.topic,
+            "selected_draft": body.selected_draft,
+            "reference_count": len(refs),
+        },
+    )
+    await dbos_orchestrator.start_workflow_routed(
+        "canvas_generation",
+        dbos_workflow_callable=canvas_generation_workflow,
+        dbos_workflow_kwargs={
+            "kind": "image",
+            "prompt": prompt,
+            "model": body.model,
+            # ⚠️ 图片分支读的是 params["ratio"]，不是 "aspect"（视频才读 aspect）。
+            # 写错不会报错，只会静默变成正方形。
+            "params": {
+                "ratio": COVER_ASPECT,
+                "quality": body.quality,
+                "source_urls": refs,
+            },
+            "canvas_id": None,
+            "node_id": None,
+            "user_id": user["id"],
+            "source_url": None,
+        },
+        workflow_id=wf_id,
+    )
+    return CoverGenerateResponse(
+        task_id=task_id,
+        prompt=prompt,
+        aspect=COVER_ASPECT,
+        reference_count=len(refs),
+    )
 
 
 # --- 「选择音乐」 charts ------------------------------------------------------

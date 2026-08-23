@@ -163,6 +163,7 @@ def _measure(path: str) -> Optional[Tuple[int, int]]:
         logger.warning("[codex-cli] could not measure produced image: {}", exc)
         return None
 
+
 # Error-code / message needles for classification. Only ever consulted on the
 # failure branch (ok != true) — a successful payload containing "401"-ish
 # tokens must never be misread (M1 discipline, inherited from jimeng_cli).

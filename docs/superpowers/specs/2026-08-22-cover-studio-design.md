@@ -318,4 +318,29 @@ JSON —— 序列化当场抛异常，调用方拿到一个不知所云的 500�
 约束浮点的 schema 不足以保护下游，凡是要把这个数交给子进程/文件系统的地方都得自己
 `math.isfinite`（grab-frame 有）。
 
-尚未做：封面工作室页面本身（抓帧 UI / 风格与模型选择 / 两阶段生成 / 最终回填）。
+### 第五波（两阶段 prompt + 生成入口）
+
+| 文件 | 内容 |
+|---|---|
+| `backend/app/services/distribution/cover_prompt.py` | skill 两个骨架的原样落地 + 小标签开关 |
+| `POST /api/v1/distribution/covers/generate` | 派一次封面生成，回传 task_id **与 prompt 原文** |
+
+**复用现有出图引擎，只换入口**：`/canvases/{id}/generations` 要 canvas_id 且按画布
+鉴权，封面工作室没有画布；而 `canvas_generation_workflow` 的 `canvas_id` 本来就是
+Optional，所以直接以 None 起它，不为了满足一个路由前缀去造隐藏画布。进度轮询复用
+`GET /canvases/generations/{task_id}`（读 task_tracking、按用户闸门，与画布无关）。
+
+**prompt 由服务端组装并原样回给前端** —— 设计稿有一块「What was sent to the model」
+要显示它。让前端自己拼一份"应该一样"的字符串，是两份必然漂移的真相。
+
+三处刻意：
+- 骨架里 `Draft 1: [headline A]…` 那四行**故意不填**（那是模型的活），但同时明确
+  要求「你自己想四个方向」——不填占位符不能变成没人负责想。
+- **小标签开关打开时，阶段二 Safety 句里夹带的同一条禁令必须一起摘掉**。只改前面
+  那句，prompt 里会同时出现"允许"和"no small platform-style labels"，模型收到自相
+  矛盾的指令，而用户看到的只是"开关没生效"。这条最容易漏，专门钉了测试。
+- 超过 9 张**响亮拒绝**（schema 422），服务端不再 `[:9]` 静默截断 —— 后者会把
+  「我明明选了 11 张」变成一声不吭扔掉两张，而且是同一个数字的第三份副本。
+
+尚未做：封面工作室页面本身（把这些拼起来的浮层外壳 / 抓帧 UI / 风格与模型选择 /
+2×2 选格 / 最终回填）。
