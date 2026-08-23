@@ -22,6 +22,8 @@ import type { PromptGenSettings } from '../types';
 export interface FooterModel {
   name: string;
   display_name?: string;
+  /** 'codex-local' rows run on the user's own machine (C 方案). */
+  actual_provider?: string;
 }
 
 export interface GenFooterControlsProps {
@@ -32,6 +34,11 @@ export interface GenFooterControlsProps {
 }
 
 /** Semantic label per ratio (IC 尺寸选择 right-hand hints). */
+/** Catalog rows whose actual_provider is 'codex-local' run on the USER's
+ *  machine via their paired daemon (C 方案) — the picker marks them so an
+ *  offline daemon is visible BEFORE the run, not only in the failure. */
+export const LOCAL_PROVIDER = 'codex-local';
+
 export const RATIO_LABELS: Record<string, string> = {
   '1:1': 'Square',
   '2:3': 'Portrait',
@@ -236,7 +243,11 @@ export function GenFooterControls({
             {models.map((m) => (
               <PopRow
                 key={m.name}
-                label={m.display_name || m.name}
+                label={
+                  m.actual_provider === LOCAL_PROVIDER
+                    ? `${m.display_name || m.name} · local`
+                    : m.display_name || m.name
+                }
                 active={gen.model === m.name}
                 onClick={() => pick({ model: m.name })}
               />
