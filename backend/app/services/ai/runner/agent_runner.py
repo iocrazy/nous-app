@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
 from app.agent_framework import ContextCompactor
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.ai.llm.empty_response import diagnose_empty_response
 from app.services.ai.runner.reasoning import (
     ReasoningStreamFilter,
     model_uses_reasoning,
@@ -1326,6 +1327,28 @@ class AgentRunner:
                 content = strip_reasoning(msg.get("content") or "")
                 if recorder is not None and hasattr(recorder, "record_event"):
                     await recorder.record_event("assistant", {"content": content})
+                    # A turn that ends with neither text nor a tool call
+                    # leaves the user with nothing, and today leaves US with
+                    # nothing either: 22% of `doubao-seed-2-0-lite-260428`
+                    # runs closed exactly like this in the 30 days to
+                    # 2026-08-23, 7 of 8 with billed completion tokens, and
+                    # no record anywhere of what the response held. Record
+                    # the field names and sizes (never the content) so the
+                    # next occurrence says whether the text went somewhere we
+                    # don't read — which decides whether retrying it would
+                    # help or just buy more of the same.
+                    diagnosis = diagnose_empty_response(resp)
+                    if diagnosis is not None:
+                        try:
+                            await recorder.record_event(
+                                "error", {"kind": "empty_response", **diagnosis}
+                            )
+                        except Exception as diag_exc:
+                            # Evidence is never worth losing the turn over.
+                            logger.warning(
+                                f"[AgentRunner] empty-response diagnosis "
+                                f"could not be recorded: {diag_exc!r}"
+                            )
                 return {
                     "content": content,
                     "raw": resp,
