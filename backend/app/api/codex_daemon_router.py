@@ -20,10 +20,13 @@ The plaintext token then authenticates the daemon's WS connection.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import secrets
+import tempfile
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -33,6 +36,8 @@ from app.core.redis import get_async_redis
 router = APIRouter(prefix="/codex-daemon", tags=["Codex Daemon"])
 
 PAIR_KEY_PREFIX = "codex_pair:"
+UPLOAD_KEY_PREFIX = "codex_upload:"
+UPLOAD_TTL_SECONDS = 1800
 PAIR_TTL_SECONDS = 600
 # Ambiguous glyphs (0/O, 1/I/L) are out — the code is read off a screen and
 # typed into a terminal by hand.
@@ -136,6 +141,99 @@ async def pair_device(payload: PairRequest) -> dict:
         raise HTTPException(500, "device registration failed")
     # Plaintext token travels exactly once, in this response.
     return {"data": {"device_id": str(device_id), "device_token": device_token}}
+
+
+async def mint_upload_ticket(*, user_id: str, scope_id: int, job_id: str) -> str:
+    """One-shot upload authority handed to the daemon inside a job (spec §5).
+
+    The daemon has no nous session; this ticket is its only credential, so it
+    is short-lived, single-use and carries the owner it will file under.
+    """
+    ticket = secrets.token_urlsafe(32)
+    redis = await get_async_redis()
+    await redis.set(
+        f"{UPLOAD_KEY_PREFIX}{ticket}",
+        json.dumps({"user_id": user_id, "scope_id": scope_id, "job_id": job_id}),
+        ex=UPLOAD_TTL_SECONDS,
+    )
+    return ticket
+
+
+async def _consume_upload_ticket(ticket: str) -> Optional[dict]:
+    if not ticket:
+        return None
+    redis = await get_async_redis()
+    try:
+        raw = await redis.execute_command("GETDEL", f"{UPLOAD_KEY_PREFIX}{ticket}")
+    except Exception as exc:
+        logger.exception(f"[codex-daemon] upload ticket consume failed: {exc}")
+        return None
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+async def _register_daemon_result(**kwargs: Any) -> dict:
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        register_generated_media,
+    )
+
+    params = kwargs.pop("origin_params", {})
+    return await register_generated_media(
+        origin=GenerationOrigin(kind="canvas_upload", params=params), **kwargs
+    )
+
+
+@router.post("/upload")
+async def upload_daemon_result(
+    file: UploadFile = File(...),
+    ticket: str = Form(...),
+) -> dict:
+    """Receive a daemon-produced file and file it under the ticket's owner."""
+    claim = await _consume_upload_ticket(ticket)
+    if not claim:
+        raise HTTPException(401, "upload ticket invalid or already used")
+    mime = (file.content_type or "image/png").lower()
+    if not (mime.startswith("image/") or mime.startswith("video/")):
+        raise HTTPException(400, "only image/* or video/* uploads")
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix="codex_daemon_")
+        total = 0
+        with os.fdopen(fd, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > 50 * 1024 * 1024:
+                    raise HTTPException(413, "file exceeds 50MB")
+                out.write(chunk)
+        if total == 0:
+            raise HTTPException(400, "empty file")
+        row = await _register_daemon_result(
+            user_id=str(claim["user_id"]),
+            scope_id=int(claim["scope_id"]),
+            source_path=tmp_path,
+            mime=mime,
+            origin_params={
+                "produced_by": "codex-daemon",
+                "job_id": claim.get("job_id"),
+            },
+        )
+        gen_id = row.get("id")
+        if gen_id is None:
+            raise HTTPException(500, "registration failed")
+        return {"data": {"gen_id": str(gen_id)}}
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 @router.get("/devices")

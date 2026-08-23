@@ -1,0 +1,46 @@
+# nous-codex
+
+Run nous canvas generations **on your own machine, with your own codex login**.
+
+Your codex credentials never leave your computer. nous only sends job
+descriptions over an outbound connection; this program runs the CLI locally
+and uploads the finished file back.
+
+## Requirements
+
+- Node.js 20+
+- `codex` CLI, logged in (`codex login`) — for text jobs
+- `gpt-image-2-skill`, logged in — for image jobs
+
+## Install & pair
+
+1. In nous: **Settings → Local codex → Pair a device** → copy the 8-character code.
+2. On your machine:
+
+```bash
+npx @nous/codex-daemon pair ABCD2345
+npx @nous/codex-daemon run
+```
+
+`run` stays connected and takes jobs. Keep it running (or add it to your
+login items / a systemd user unit).
+
+## What it will and will not do
+
+It runs **exactly two commands**, always with an argument array (never a
+shell string), so nothing the server sends can be interpreted as shell
+syntax:
+
+- `gpt-image-2-skill images generate|edit …`
+- `codex exec --json …`
+
+Reference images are downloaded only from the nous API host; any other URL
+is refused. Config lives in `~/.config/nous-codex/config.json` (mode 600)
+and holds only the device token issued at pairing — revoke it any time from
+the nous settings page and this device stops working immediately.
+
+## Environment
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NOUS_API_BASE` | `https://api.nous.ink` | Point at a different nous deployment |
