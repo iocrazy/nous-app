@@ -26,6 +26,7 @@ from app.agent_framework.context_compactor import (
     CompactionTier,
     ContextCompactor,
 )
+from tests.agent_framework.compaction_stubs import token_stub
 
 
 @pytest.fixture
@@ -175,7 +176,9 @@ async def test_orange_tier_invokes_summarizer(compactor):
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
             "app.agent_framework.context_compactor.count_messages_tokens",
-            side_effect=[850, 830, 400],  # before / after-prune / final-after-summary
+            # tier counts in order; the head/summary counts answer by content
+            # (a call-order list breaks whenever the compactor counts once more).
+            new=token_stub([850, 830], summary_tokens=100, head_tokens=400),
         ),
         patch(
             "app.agent_framework.context_compactor.prune",
@@ -219,7 +222,7 @@ async def test_summarizer_failure_falls_back_to_emergency_cap(compactor):
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
             "app.agent_framework.context_compactor.count_messages_tokens",
-            side_effect=[850, 830, 200, 400],
+            new=token_stub([850, 830], summary_tokens=100, head_tokens=400),
         ),
         patch(
             "app.agent_framework.context_compactor.prune",
@@ -258,7 +261,7 @@ async def test_red_tier_keeps_fewer_recent_turns(compactor):
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
             "app.agent_framework.context_compactor.count_messages_tokens",
-            side_effect=[950, 940, 300],
+            new=token_stub([950, 940], summary_tokens=100, head_tokens=300),
         ),
         patch(
             "app.agent_framework.context_compactor.prune",
