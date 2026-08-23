@@ -93,6 +93,9 @@ _VIDEO_EXTS = (".mp4", ".mov", ".webm", ".m4v")
 # Real not-logged-in output (verified 2026-07-07):
 #   未检测到有效登录态，请先执行 dreamina login
 _NOT_LOGGED_IN_ZH = ("未检测到有效登录态", "请先执行 dreamina login")
+# 即梦 CLI is gated behind a paid membership tier (2026-08-23 prod: the
+# account authenticated fine but every command 403s with this text).
+_TIER_REQUIRED_ZH = ("没有 dreamina_cli 使用权限", "会员等级")
 # NB: no bare "401" needle — it substring-matches any numeric token (a credit
 # balance, a submit_id fragment) in an otherwise-successful payload and would
 # misread a paid generation as not-logged-in (M1). "unauthorized" carries the
@@ -232,6 +235,13 @@ class JimengCliProvider:
             return JimengCliError(
                 "not_logged_in",
                 "dreamina is not logged in — run `dreamina login` on the host",
+                stderr=stderr[:500],
+            )
+        if _contains_any(text, _TIER_REQUIRED_ZH):
+            return JimengCliError(
+                "tier_required",
+                "即梦 CLI 需要高级及以上会员等级 — this dreamina account "
+                "cannot use the CLI (membership tier too low)",
                 stderr=stderr[:500],
             )
         if _contains_any(text, _NO_CREDIT_ZH) or _contains_any(low, _NO_CREDIT_EN):
