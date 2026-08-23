@@ -361,7 +361,15 @@ async def test_conversation_summary_honors_assigned_model() -> None:
 
         async def _call(cs, messages):
             captured["wire_model"] = cs.model
-            return {"content": "SUMMARY"}
+            # Real wire shape — see app/services/ai/adapters/response.py.
+            return {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "SUMMARY"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
 
         fake_adapter.call = _call
         return fake_adapter

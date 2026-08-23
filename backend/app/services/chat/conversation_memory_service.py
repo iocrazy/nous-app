@@ -27,6 +27,7 @@ from app.repositories.conversation_memory_repository import (
     get_conversation_memory_repository,
 )
 from app.repositories.conversation_repository import get_conversation_repository
+from app.services.ai.adapters.response import adapter_text
 from app.services.ai.memory.agent_memory import (  # noqa: F401 (re-exported for tests: svc.MemoryHit)
     MemoryContext,
     MemoryHit,
@@ -103,7 +104,7 @@ async def _summarize(previous: str, transcript: str, model: str) -> str:
             f"NEW MESSAGES:\n{transcript}"
         )
         resp = await adapter.call(cs, [{"role": "user", "content": prompt}])
-        return (resp.get("content") or "").strip()
+        return adapter_text(resp).strip()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[conv_memory] summarize failed: {exc!r}")
         return ""
