@@ -738,6 +738,30 @@
       "endedExpired": "No code was entered in time, so this publish was stopped. Retry the batch to try again.",
       "endedExhausted": "The platform refused every code that was entered. Retry the batch to try again.",
       "endedAbandoned": "This publish stopped waiting for a code."
+    },
+    "coverStudio": {
+      "templates": "Templates",
+      "templateCount": "{{saved}} saved · {{inUse}} in use",
+      "usedTimes": "used {{times}}×",
+      "add": "Add",
+      "fromLibrary": "From library",
+      "orUpload": "or upload",
+      "addTemplate": "Add a template",
+      "saveTemplate": "Save template",
+      "saving": "Saving…",
+      "templateName": "Name",
+      "templateNamePlaceholder": "Bold headline",
+      "dropOrBrowse": "Drop a picture here, or click to choose a file",
+      "orFromLibrary": "or pick from your library",
+      "removeTemplate": "Remove template",
+      "noTemplates": "No templates yet. Save a picture you want the model to imitate.",
+      "libraryNoImages": "No images in your library yet — upload one above.",
+      "libraryLoadFailed": "Could not load your library.",
+      "templatesLoadFailed": "Could not load your templates.",
+      "templateSaveFailed": "That picture could not be saved as a template. Try again.",
+      "templateNeedsImage": "A cover template has to be an image.",
+      "templateExplainer": "A template is a picture you liked, kept as an example and handed to the model as a reference image. It does not replace the style, which is text.",
+      "templateRemoveFailed": "That template could not be removed — it is still saved."
     }
   },
   "parser": {

@@ -765,11 +765,22 @@ const num = (v: unknown): number | null =>
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v !== '' ? v : null;
 
-export const listLibraryMedia = async (
+/**
+ * The same query as ``listLibraryMedia`` but it THROWS instead of swallowing.
+ *
+ * ``listLibraryMedia`` catches everything and returns ``[]``, which makes a
+ * failed load indistinguishable from "you own no media" — the publish picker
+ * tolerates that because an empty grid there still reads as "nothing to pick".
+ * A surface that must tell the two apart (the cover-template picker says
+ * "Nothing here yet" in one case and "Could not load your library" in the
+ * other) cannot be built on a function whose only failure signal is an empty
+ * array. New callers should prefer this one.
+ */
+export const listLibraryMediaOrThrow = async (
   scopeId: string,
   opts?: { tagId?: string; mediaType?: 'video' | 'image' },
 ): Promise<LibraryVideo[]> => {
-  try {
+  {
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
     // `types` maps to the backend mime filter: 'video' → mime LIKE 'video/%',
     // 'image' → mime LIKE 'image/%'. Defaults to video for back-compat.
@@ -813,6 +824,15 @@ export const listLibraryMedia = async (
         created_at: str(r.resource?.created_at),
       };
     });
+  }
+};
+
+export const listLibraryMedia = async (
+  scopeId: string,
+  opts?: { tagId?: string; mediaType?: 'video' | 'image' },
+): Promise<LibraryVideo[]> => {
+  try {
+    return await listLibraryMediaOrThrow(scopeId, opts);
   } catch (err) {
     console.error('distribution: list library media failed', err);
     return [];

@@ -738,6 +738,30 @@
       "endedExpired": "未在时限内输入验证码，本次发布已停止。可重试该批次。",
       "endedExhausted": "平台拒绝了所有已输入的验证码。可重试该批次。",
       "endedAbandoned": "本次发布已不再等待验证码。"
+    },
+    "coverStudio": {
+      "templates": "样图模板",
+      "templateCount": "已存 {{saved}} 张 · 在用 {{inUse}} 张",
+      "usedTimes": "用过 {{times}} 次",
+      "add": "添加",
+      "fromLibrary": "从素材库",
+      "orUpload": "或上传",
+      "addTemplate": "添加样图模板",
+      "saveTemplate": "保存模板",
+      "saving": "保存中…",
+      "templateName": "名称",
+      "templateNamePlaceholder": "大标题",
+      "dropOrBrowse": "把图片拖到这里，或点击选择文件",
+      "orFromLibrary": "或从素材库里挑一张",
+      "removeTemplate": "移除模板",
+      "noTemplates": "还没有模板。把你想让模型照着画的图存一张进来。",
+      "libraryNoImages": "素材库里还没有图片 —— 先在上面传一张。",
+      "libraryLoadFailed": "素材库没能加载出来。",
+      "templatesLoadFailed": "模板没能加载出来。",
+      "templateSaveFailed": "这张图没能存成模板，再试一次。",
+      "templateNeedsImage": "封面模板必须是图片。",
+      "templateExplainer": "模板是你觉得好看、想让模型照着画的一张图，作为参考图交给它。它不替代风格 —— 风格是文字。",
+      "templateRemoveFailed": "这个模板没能移除 —— 它还在。"
     }
   },
   "parser": {

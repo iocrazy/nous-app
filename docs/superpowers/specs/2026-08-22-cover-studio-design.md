@@ -224,4 +224,26 @@ skill 通篇写死 3:4，设计稿默认模型是 codex，而 codex 物理上出
 | `frontend/services/coverTemplateService.ts` | 客户端 + 类型化失败类 |
 | `frontend/features/canvas-core/smart/mediaImport.ts` + `types.ts` | 把后端一直在返回、前端从没读过的 `id` 接上 |
 
-尚未做：模板库 UI（选择器/上传/卡片网格）、封面工作室页面本身。
+### 第二波（模板库 UI）
+
+| 文件 | 内容 |
+|---|---|
+| `frontend/components/Distribution/CoverStudio/cover-studio.css` | 作用域样式，token 全部复用 `index.css` |
+| `.../CoverTemplateGrid.tsx` | 「Templates」卡片：网格 + 用量 + 删除 + Add 磁贴 |
+| `.../AddCoverTemplateModal.tsx` | 两条来路合一：上传（拖拽/选文件）+ 素材库选 + 命名 |
+| `frontend/services/distributionService.ts` | 拆出 `listLibraryMediaOrThrow`（见下） |
+| `frontend/public/locales/{en,zh}.json` | `distribution.coverStudio.*`，22 个 key，两侧结构一致 |
+
+**刻意做成容器无关**：封面工作室最终是路由还是浮层（§2.4）尚未拍板，这两个组件
+不该被那个决定作废。
+
+**`listLibraryMediaOrThrow` 为什么要拆**：`listLibraryMedia` 出错时 catch 掉返回
+`[]`，于是"加载失败"和"你没有图片"在调用方眼里完全一样。发布页容忍这一点（空网格
+在那里读作"没东西可选"），但模板库必须把两者分开说，所以新增一个会抛错的孪生导出，
+既有调用方行为不变。
+
+**组件里发现并修掉的一个 silent no-op**：删除模板失败后会重新拉列表，而
+`load()` 在入口清掉错误标志 —— 于是卡片自己回来了、**没有任何解释**。现在删除失败
+有独立的状态与文案（"这个模板没能移除 —— 它还在"），且在 reload **之后**置位。
+
+尚未做：封面工作室页面本身（9 张参考池 / 抓帧 / 两阶段生成 / 最终回填）。
