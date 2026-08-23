@@ -851,6 +851,52 @@ cd frontend && npm run e2e:prod
 bash scripts/sync-worktree.sh                   # rebase + 首次运行会启用 rerere
 ```
 
+### 生产 Supabase 栈的配置有两份，靠 drift 检查兜（2026-08-22 立约）
+
+同一份 compose 配置在 gpupc 上存在**两个互不同步的副本**：
+
+| | 路径 | 谁在用 |
+|---|---|---|
+| 仓库副本 | `deploy/gpu-server/supabase/` | 没有任何部署链读它 |
+| 生产活文件 | `/media/heygo/program/datahub/nous/supabase/` | `mediahub-sb-prod` 项目，**真正在跑的** |
+
+活文件**不在任何 git 仓库里**（`git rev-parse` 报 not a repository），也没有任何机制让两侧保持一致。
+
+⚠️ **改仓库那份不会生效。** 2026-08-22 已实证代价：PR #1964 把 `max_connections` 100→200 写进仓库副本，PR 合了、CI 全绿、`deploy-gpu.yml` 也绿 —— 而生产至今是 100。整条链上没有一处会说出"这个改动其实没生效"，与「`backend.env` 静默盖掉 `config.yml`」同族。
+
+**为什么部署链不管它**：`deploy-gpu.yml` 的 paths 含 `deploy/gpu-server/**`（所以改这个目录**会**触发一次部署，更容易误以为生效了），但那条链跑的是 `up.sh --build backend worker gateway browser` —— 那是 `gpu-server` 项目，根本不含 db。
+
+**守卫**：`.github/workflows/config-drift.yml`（self-hosted gpu，push 到 master 碰该目录 / 每日 02:00 UTC / 手动 dispatch），跑 `scripts/check-config-drift.sh`。比对集是仓库侧被 git 跟踪的文件，排除 `.env.example` 与 `README.md`。
+
+退出码三态，**2 与 0 必须分开**：`0` 一致 / `1` 漂移 / `2` 检查本身没跑起来（活目录不存在、一个文件都没比到）。"没比到"绝不能读作"没漂移"——那会让守卫在自己坏掉时报平安。`scripts/check-config-drift.selftest.sh` 在真检查之前先跑，四场景覆盖两向；已用两次突变验过（摘掉 diff 判定、把退出码 2 改成 0）都会让自测转红。
+
+**同步操作（仓库 → 生产）**，必须在活目录里跑：
+
+```bash
+D=/media/heygo/program/datahub/nous/supabase
+cp -p "$D/docker-compose.yml" "$D/docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)"
+git -C <仓库> show origin/master:deploy/gpu-server/supabase/docker-compose.yml > "$D/docker-compose.yml"
+cd "$D" && docker compose up -d db     # 挑业务空窗；restart 不重读 command
+```
+
+⚠️ **不要照 #1964 commit message 里那条 `cd deploy/gpu-server/supabase && docker compose up -d db`**：仓库那个目录没有 `.env`（只有 `.env.example`），项目名会变成 `supabase` 而非 `mediahub-sb-prod`，而 compose 里 PGDATA 是硬编码绝对路径 —— 等于对同一个数据目录再起一个 postmaster，靠 `postmaster.pid` 自保而不是靠命令正确。
+
+### 容器的配置来源不止一处（查"改了为什么没生效"时先看这张表）
+
+```bash
+docker inspect <容器> --format '{{index .Config.Labels "com.docker.compose.project"}} | {{index .Config.Labels "com.docker.compose.project.config_files"}}'
+```
+
+2026-08-22 实测：
+
+| 容器 | 项目 | 配置来自 | 漂移风险 |
+|---|---|---|---|
+| `nous-db` 及整个 supabase 栈 | `mediahub-sb-prod` | datahub 活目录（不在 git） | 有，靠上面的 drift 检查兜 |
+| `nous-backend` / `worker` / `browser` / `gateway` | `gpu-server` | **runner 工作区 checkout** | 无——每次部署从 git 重出 |
+| `nous-admin` | `gpu-server` | **开发工作树** `projects-code/repos/nous-app/` | ⚠️ 见下 |
+
+⚠️ **`nous-admin` 是从开发工作树构建的**，而那棵树可以挂在任意分支上（实测时挂在 `chore/ext-release-packaging`）。更麻烦的是它与另外四个容器**共用项目名 `gpu-server` 却指向不同的 compose 文件**——从开发树跑 `docker compose up -d --build admin` 时，compose 看到的是开发树那份 compose 对整个项目的定义，有可能顺带影响到另外四个容器。手动部署 admin 前先确认开发树的 `deploy/gpu-server/docker-compose.yml` 与 master 一致。根治要么给 admin 补自动部署链（阻塞项见「已知缺口」的 `NOUS_ANON_KEY`），要么让它也从 runner checkout 构建。
+
 ### 已知缺口
 
 - **admin 没有自动部署**。gpupc 的 `nous-admin` 是 compose 本机 build（`context: ../../admin`），但 `deploy-gpu.yml` 的 paths 不含 `admin/**`。补齐前提是先决定 build arg `NOUS_ANON_KEY` 怎么进 CI（缺了会 build 出空 anon key 的 admin）。当前只能手动：`cd deploy/gpu-server && NOUS_ANON_KEY=<key> docker compose up -d --build admin`。
