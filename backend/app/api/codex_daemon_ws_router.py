@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.api.codex_daemon_router import token_hash
+from app.services.codex.daemon_dispatch import resolve_job
 from app.services.codex.daemon_registry import registry
 
 router = APIRouter(tags=["Codex Daemon"])
@@ -67,14 +68,24 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "pong"})
                 await _touch_last_seen(device_id)
             elif kind in ("job_done", "job_failed", "job_progress"):
-                # C4 wires these into the dispatch waiter; until then they are
-                # logged so an early daemon build is debuggable.
+                job_id = str(message.get("job_id") or "")
                 logger.info(
-                    "[codex-daemon] {} from device={} job={}",
-                    kind,
-                    device_id,
-                    message.get("job_id"),
+                    "[codex-daemon] {} from device={} job={}", kind, device_id, job_id
                 )
+                if kind == "job_done":
+                    resolve_job(
+                        job_id,
+                        {
+                            "gen_id": message.get("gen_id"),
+                            "text": message.get("text"),
+                        },
+                    )
+                elif kind == "job_failed":
+                    code = str(message.get("code") or "job_failed")
+                    resolve_job(
+                        job_id,
+                        {"error": f"{code}: {message.get('message') or ''}".strip()},
+                    )
             else:
                 logger.debug("[codex-daemon] unknown frame: {}", kind)
     except WebSocketDisconnect:

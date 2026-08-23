@@ -41,6 +41,31 @@ _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
+async def _is_codex_local(model_name: str) -> bool:
+    """True when the picked catalog row runs on the user's own machine."""
+    try:
+        from app.services.media.parsers.video_providers import db_registry
+
+        rows = await db_registry._enabled_rows("image")  # noqa: SLF001
+        for row in rows:
+            if str(row.get("name")) == model_name:
+                return str(row.get("actual_provider") or "").lower() == "codex-local"
+    except Exception:
+        return False
+    return False
+
+
+def _absolute_media_url(url: str) -> str:
+    """The daemon fetches refs over the public API, so relative durable urls
+    must be absolutised (it only accepts nous' own host — spec §10 SSRF)."""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    from app.core.config import settings
+
+    base = str(getattr(settings, "PUBLIC_API_BASE", "") or "https://api.nous.ink")
+    return f"{base.rstrip('/')}{url}"
+
+
 async def generate_canvas_media_step(
     kind: str,
     prompt: str,
@@ -117,6 +142,39 @@ async def generate_canvas_media_step(
             "model": gen_model or "",
         }
 
+    # C 方案: a catalog row whose actual_provider is 'codex-local' is not a
+    # server-side provider at all — the work runs on the USER's machine via
+    # their paired daemon (spec §6). Offline is a typed failure at dispatch
+    # time, not a hang.
+    if (model or "").strip() and await _is_codex_local(model):
+        from app.services.codex.daemon_dispatch import dispatch_to_daemon
+
+        raw_refs = params.get("source_urls")
+        ref_urls = [
+            u
+            for u in (raw_refs if isinstance(raw_refs, list) else [])
+            if isinstance(u, str) and u
+        ][:9] or ([source_url] if source_url else [])
+        result = await dispatch_to_daemon(
+            user_id=str(user_id),
+            scope_id=int(await _resolve_personal_team_id(str(user_id))),
+            kind="image",
+            payload={
+                "prompt": prompt,
+                "size": str(params.get("size") or ""),
+                "model": str(params.get("actual_model") or ""),
+                "ref_urls": [_absolute_media_url(u) for u in ref_urls],
+            },
+        )
+        return {
+            "media_kind": "image",
+            "local_path": None,
+            "remote_url": None,
+            "existing_gen_id": result.get("gen_id"),
+            "provider": "codex-local",
+            "model": model or "",
+        }
+
     provider, actual_model = await db_registry.resolve_image_provider(
         model or None, user_id=user_id
     )
@@ -186,6 +244,21 @@ async def persist_canvas_generation_step(
     local files, and it makes remote products durable too) — any failure
     raises (route C). The jimeng scratch dir is reaped after ingest.
     """
+    # C 方案: a daemon-produced file was already registered by the upload
+    # endpoint (it holds the bytes, we never did) — skip re-registration and
+    # just mint the URL shape the rest of the chain expects.
+    existing_gen_id = media.get("existing_gen_id")
+    if existing_gen_id:
+        media_kind = str(media.get("media_kind") or "image")
+        endpoint = "cover" if media_kind == "image" else "stream"
+        return {
+            "generated_media_id": str(existing_gen_id),
+            "result_url": f"/api/v1/generated-media/{existing_gen_id}/{endpoint}",
+            "media_kind": media_kind,
+            "provider": str(media.get("provider") or ""),
+            "model": str(media.get("model") or ""),
+        }
+
     local_path = media.get("local_path")
     try:
         if not user_id:
