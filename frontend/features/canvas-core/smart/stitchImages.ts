@@ -36,23 +36,48 @@ function drawCover(
   ctx.drawImage(bmp, x + (size - w) / 2, y + (size - h) / 2, w, h);
 }
 
-/** Stitch up to STITCH_MAX image urls into one PNG grid blob. */
+export interface StitchOptions {
+  /** Explicit grid; omitted → √n auto (IC gridJoinAutoDims). */
+  rows?: number;
+  cols?: number;
+  /** Gap between cells in output px (IC 间隔 slider, 0–240). */
+  gap?: number;
+  /** Long-edge target of the composed image (IC 1K/2K/4K, 256–8192). */
+  outputLongEdge?: number;
+}
+
+/** Stitch up to STITCH_MAX image urls into one PNG grid blob (IC 宫格拼接:
+ *  rows×cols preset, gap, white matting and a long-edge output size). */
 export async function stitchImageItems(
   items: Array<{ url: string }>,
+  options: StitchOptions = {},
 ): Promise<Blob> {
   const slice = items.slice(0, STITCH_MAX);
   if (slice.length < 2) throw new Error('stitch needs at least 2 images');
-  const { cols, rows } = stitchGridFor(slice.length);
+  const auto = stitchGridFor(slice.length);
+  const cols = Math.max(1, options.cols ?? auto.cols);
+  const rows = Math.max(1, options.rows ?? Math.ceil(slice.length / cols));
+  const gap = Math.max(0, Math.min(240, options.gap ?? 0));
   const bitmaps = await Promise.all(slice.map((i) => loadBitmap(i.url)));
+  const baseW = cols * STITCH_CELL + (cols - 1) * gap;
+  const baseH = rows * STITCH_CELL + (rows - 1) * gap;
+  const target = Math.max(256, Math.min(8192, options.outputLongEdge ?? Math.max(baseW, baseH)));
+  const scale = target / Math.max(baseW, baseH);
   const canvas = document.createElement('canvas');
-  canvas.width = cols * STITCH_CELL;
-  canvas.height = rows * STITCH_CELL;
+  canvas.width = Math.round(baseW * scale);
+  canvas.height = Math.round(baseH * scale);
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('stitch: no 2d context');
+  // IC fills the sheet white first — gaps and letterboxed cells must not
+  // come out transparent (a PNG with holes looks broken over dark UIs).
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const cell = STITCH_CELL * scale;
+  const g = gap * scale;
   bitmaps.forEach((bmp, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    drawCover(ctx, bmp, col * STITCH_CELL, row * STITCH_CELL, STITCH_CELL);
+    drawCover(ctx, bmp, col * (cell + g), row * (cell + g), cell);
   });
   return new Promise((resolve, reject) => {
     canvas.toBlob(
