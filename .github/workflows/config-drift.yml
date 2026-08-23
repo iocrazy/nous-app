@@ -1,0 +1,48 @@
+# 生产 Supabase 栈的配置漂移守卫。
+#
+# 背景见 scripts/check-config-drift.sh 顶部：仓库里的
+# `deploy/gpu-server/supabase/` 与 gpupc 上真正在跑的
+# `/media/heygo/program/datahub/nous/supabase/` 是两份互不同步的副本。
+# 2026-08-22 已实证代价：PR #1964 的 max_connections 100→200 合了、CI 绿了、
+# 部署也绿了，而生产至今是 100 —— 全链路没有一处会说出"这个改动没生效"。
+#
+# ⚠️ 必须在 self-hosted gpu runner 上跑：只有 gpupc 有那份活配置。
+# 托管 runner 上活目录不存在，脚本会以退出码 2 明确报"检查跑不起来"，
+# 而不是假装通过。
+#
+# 刻意不挂 pull_request：PR 本身不可能造成漂移（还没合），而 public repo +
+# self-hosted 的组合一旦挂 PR 触发就必须带 fork 守卫（见 CLAUDE.md）。
+# 少一个口子，少一份出错的机会。
+name: Config Drift
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'deploy/gpu-server/supabase/**'
+      - 'scripts/check-config-drift.sh'
+      - '.github/workflows/config-drift.yml'
+  schedule:
+    # 每天 02:00 UTC（北京时间 10:00）。抓"改完拖了几天没同步"，
+    # 以及"有人手改了生产没回写仓库"。
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supabase-config:
+    name: Supabase stack config matches production
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v4
+
+      # 先验守卫本身。漂移检查平时的正常输出就是"一致"，一旦它坏成
+      # "永远说一致"，表现与健康时完全同形 —— 没有任何东西会发现。
+      # 自测只用临时目录，不碰生产。
+      - name: Self-test the drift checker
+        run: bash scripts/check-config-drift.selftest.sh
+
+      - name: Compare repo config against the live stack
+        run: bash scripts/check-config-drift.sh
