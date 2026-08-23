@@ -65,6 +65,11 @@ services:
       #   setfacl -R -m u:1031:rwX -m d:u:1031:rwX /home/heygo/.codex
       # 部署后必须跑写入探针(读正常≠服务正常),见 docs/runbook/codex-image.md。
       - /home/heygo/.codex:/app/.codex
+      # 即梦 CLI OAuth token — 容器重建会丢（2026-08-23 实发），落在宿主
+      # secrets 目录挂进来；uid 1031 用 ACL 授权（同 .codex 做法）。
+      # 重新登录: docker exec nous-worker dreamina login，token 会直接写回
+      # 这个挂载目录，无需再拷贝。
+      - /media/heygo/program/datahub/nous/secrets/dreamina:/app/.local/share/dreamina
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -205,6 +210,11 @@ services:
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
       # 同 backend:Codex OAuth 会话目录(读写,ACL 授权 uid 1031)。
       - /home/heygo/.codex:/app/.codex
+      # 即梦 CLI OAuth token — 容器重建会丢（2026-08-23 实发），落在宿主
+      # secrets 目录挂进来；uid 1031 用 ACL 授权（同 .codex 做法）。
+      # 重新登录: docker exec nous-worker dreamina login，token 会直接写回
+      # 这个挂载目录，无需再拷贝。
+      - /media/heygo/program/datahub/nous/secrets/dreamina:/app/.local/share/dreamina
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
