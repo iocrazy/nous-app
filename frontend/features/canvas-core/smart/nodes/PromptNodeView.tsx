@@ -46,6 +46,7 @@ import { CANVAS_PILL_TRIGGER } from './canvasPill';
 export function PromptNodeView({ id, data, selected }: NodeProps) {
   const {
     body,
+    body_h,
     split_enabled,
     split_separator,
     provider_slug,
@@ -563,6 +564,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           // nodrag → React Flow doesn't start a drag from this input
           // nowheel → wheel events scroll the textarea instead of zooming canvas
           className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
+          style={body_h ? { height: body_h } : undefined}
+          onMouseUp={(e) => {
+            // IC promptH: the drag handle is the textarea's own resizer —
+            // capture the new height once the drag ends and persist it.
+            const h = Math.round(e.currentTarget.getBoundingClientRect().height);
+            if (h > 0 && h !== body_h) patch({ body_h: h });
+          }}
           placeholder="What should the model generate? Type @ to reference an asset"
           value={draft}
           onChange={handleBodyChange}

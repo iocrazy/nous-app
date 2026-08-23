@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Theater,
   Maximize2,
+  Copy,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -35,6 +36,8 @@ export interface OutputNodeToolbarProps {
   onBrush?: () => void;
   /** IC 放大 — jimeng image_upscale on the current image. */
   onUpscale?: () => void;
+  /** IC duplicateSmartNodeMediaToCanvas — copy this image out as its own node. */
+  onDuplicate?: () => void;
   upscaling?: boolean;
   onSplit?: () => void;
   /** Absent → no source prompt → the Rerun key is hidden. */
@@ -58,6 +61,7 @@ export function OutputNodeToolbar({
   onSplit,
   onUpscale,
   upscaling,
+  onDuplicate,
   onRerun,
   rerunning,
   readOnly,
@@ -120,6 +124,11 @@ export function OutputNodeToolbar({
           disabled={readOnly || upscaling}
         >
           <Maximize2 size={13} className={upscaling ? 'animate-pulse' : undefined} />
+        </ToolbarButton>
+      )}
+      {onDuplicate && (
+        <ToolbarButton label="Copy to canvas" onClick={onDuplicate} disabled={readOnly}>
+          <Copy size={13} />
         </ToolbarButton>
       )}
       <ToolbarButton

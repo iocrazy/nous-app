@@ -90,3 +90,12 @@ it('grid images: dblclick edits THAT image; hover delete removes it', async () =
   const data = (useCanvasCoreStore.getState().nodes[0] as { data: { images: unknown[] } }).data;
   expect(data.images).toHaveLength(1);
 });
+
+it('Copy to canvas drops the image as an independent media node', () => {
+  render(<ReactFlowProvider><OutputNodeView {...props()} /></ReactFlowProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy to canvas' }));
+  const nodes = useCanvasCoreStore.getState().nodes as Array<{ type: string; data: { items?: unknown[] } }>;
+  const media = nodes.find((n) => n.type === 'media');
+  expect(media).toBeTruthy();
+  expect(media!.data.items).toHaveLength(1);
+});
