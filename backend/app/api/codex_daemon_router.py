@@ -149,4 +149,9 @@ async def revoke_device(device_id: int, auth: AuthDep) -> dict:
     ok = await _revoke_daemon(str(auth.user_id), device_id)
     if not ok:
         raise HTTPException(404, "device not found")
+    # Revocation must be immediate — a still-open socket would keep taking
+    # jobs after the user pulled the device (spec §10 security checklist).
+    from app.services.codex.daemon_registry import registry
+
+    await registry.disconnect_device(str(auth.user_id), str(device_id))
     return {"data": {"revoked": True}}
