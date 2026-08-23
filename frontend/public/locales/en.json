@@ -761,7 +761,18 @@
       "templateSaveFailed": "That picture could not be saved as a template. Try again.",
       "templateNeedsImage": "A cover template has to be an image.",
       "templateExplainer": "A template is a picture you liked, kept as an example and handed to the model as a reference image. It does not replace the style, which is text.",
-      "templateRemoveFailed": "That template could not be removed — it is still saved."
+      "templateRemoveFailed": "That template could not be removed — it is still saved.",
+      "references": "References",
+      "refCount": "{{used}} / {{max}}",
+      "refPerson": "Person",
+      "refFrame": "Frame",
+      "refTemplate": "Template",
+      "refPersonMissing": "not set",
+      "refRemove": "Remove reference",
+      "refFromTemplates": "From templates",
+      "refFullMsg": "The pool already holds {{max}} pictures. Remove one to add another.",
+      "refDuplicateMsg": "That picture is already in the pool.",
+      "refExplainer": "One list of nine, shared. Frames say what is in your video; templates say what it should look like."
     }
   },
   "parser": {
