@@ -16,6 +16,7 @@ the browser.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -77,6 +78,35 @@ class ValidationError(AppError):
 class ConflictError(AppError):
     status_code = 409
     code = "conflict"
+
+
+def _scrub_nonfinite(value: Any) -> Any:
+    """Replace NaN / ±Infinity with their text form, recursively.
+
+    Same failure class the ``jsonable_encoder`` above already fixes once, one
+    variant it does not cover. A validation error echoes the offending ``input``
+    verbatim, and ``json.loads`` — which is what FastAPI parses request bodies
+    with — **accepts the bare tokens** ``NaN`` / ``Infinity``. So a client can
+    put a non-finite float into any float field, pydantic correctly rejects it,
+    and then Starlette's ``JSONResponse`` (which renders with
+    ``allow_nan=False``) raises while serializing the 422 body — turning a
+    correct, actionable 422 into an opaque 500.
+
+    It is not hypothetical or specific to one route: every endpoint with a
+    constrained float field has this shape. ``/distribution/covers/select``
+    (``timestamp_seconds: float, ge=0``) has had it since it shipped.
+
+    The value is stringified rather than dropped so the message still tells the
+    user what they actually sent — "Input should be greater than or equal to 0"
+    with the input missing is a worse error, not a safer one.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if isinstance(value, dict):
+        return {k: _scrub_nonfinite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_nonfinite(v) for v in value]
+    return value
 
 
 def _request_id(request: Request) -> Optional[str]:
@@ -258,7 +288,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 error="Request validation failed",
                 code="validation_error",
                 request_id=_request_id(request),
-                details=jsonable_encoder(exc.errors()),
+                details=_scrub_nonfinite(jsonable_encoder(exc.errors())),
             ).model_dump(),
             headers=_cors_headers_for(request),
         )

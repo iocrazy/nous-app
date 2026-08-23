@@ -137,6 +137,32 @@ class CoverSelectRequest(BaseModel):
         return self
 
 
+class CoverGrabFrameRequest(BaseModel):
+    """Grab one frame by hand, to use as a REFERENCE (Cover Studio).
+
+    Deliberately not the same request as ``CoverSelectRequest``: that one
+    finishes a cover, this one only collects raw material. Sharing a schema
+    would make the two indistinguishable at the boundary, and they differ in
+    the one way that matters — where the bytes land.
+    """
+
+    source_resource_id: str = Field(..., min_length=1)
+    timestamp_seconds: float = Field(..., ge=0)
+
+
+class CoverGrabFrameResponse(BaseModel):
+    """The frame, already durable enough to be handed to the model.
+
+    ``url`` is the ONLY URL shape the image generation bridge accepts as a
+    reference; the frontend must pass it through untouched rather than rebuild
+    it from ``generated_media_id``.
+    """
+
+    generated_media_id: str
+    url: str
+    timestamp_seconds: float
+
+
 class CoverSelectResponse(BaseModel):
     cover_vertical_resource_id: str
     cover_horizontal_resource_id: str

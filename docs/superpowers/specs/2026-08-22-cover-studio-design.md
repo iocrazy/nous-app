@@ -266,4 +266,29 @@ skill 通篇写死 3:4，设计稿默认模型是 codex，而 codex 物理上出
 自己称之为 blocker 的状态）；满九张时 Add 磁贴**置灰而不是消失**（消失会让用户到处
 找它），同时计数变红。
 
-尚未做：封面工作室页面本身（抓帧 / 风格与模型选择 / 两阶段生成 / 最终回填）。
+### 第四波（手动抓帧的后端）
+
+`POST /api/v1/distribution/covers/grab-frame` —— 与 `/covers/select` **共用抽帧那
+一半**，只有落点不同：
+
+    select      重抽 → 居中裁 3:4 + 4:3 → 两个 resources 行（成品封面）
+    grab-frame  重抽 →   不裁          → 一个 generated_media 行（参考图）
+
+落点不能对调（理由见 §1.2）。**不裁**也是刻意的：这一帧说的是"我片子里有什么"
+（人物长相、场景），裁掉边缘只丢信息；构图由模型按 3:4 重新生成。
+
+⚠️ **顺带修掉一个仓库级的既有缺陷**：非有限浮点会把它自己的 422 变成 500。
+FastAPI 解析请求体用 `json.loads`，它**接受**裸的 `NaN` / `Infinity` 记号；pydantic
+正确拒绝后，错误体里原样带着那个 `input`，而 Starlette 用 `allow_nan=False` 渲染
+JSON —— 序列化当场抛异常，调用方拿到一个不知所云的 500。
+`app/core/exceptions.py` 的 handler 现在会递归清洗非有限值（转成文本而不是丢弃，
+"输入超出范围"却不说输入是什么是更糟的错误）。
+这跟该 handler 里 `jsonable_encoder` 那句注释记的是**同一类 bug 的另一个变体**。
+`/distribution/covers/select` 的 `timestamp_seconds`（同样是 `float, ge=0`）从上线
+起就有这个洞。
+
+另一条已钉成测试的事实：`inf >= 0` **为真**，所以 `ge=0` 拦不住 `+Infinity` ——
+约束浮点的 schema 不足以保护下游，凡是要把这个数交给子进程/文件系统的地方都得自己
+`math.isfinite`（grab-frame 有）。
+
+尚未做：封面工作室页面本身（抓帧 UI / 风格与模型选择 / 两阶段生成 / 最终回填）。

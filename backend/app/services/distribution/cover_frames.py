@@ -718,6 +718,120 @@ async def derive_cover_pair(
     )
 
 
+@dataclass(frozen=True)
+class GrabbedFrame:
+    """A frame the user grabbed by hand, already durable enough to be a reference.
+
+    ``generated_media_id`` and ``url`` are the SAME row seen two ways; both are
+    returned because the caller needs both (the id to dedupe the pool, the URL
+    to render it and to hand to the model).
+    """
+
+    generated_media_id: str
+    url: str
+    timestamp_seconds: float
+
+    def as_dict(self) -> dict:
+        return {
+            "generated_media_id": self.generated_media_id,
+            "url": self.url,
+            "timestamp_seconds": self.timestamp_seconds,
+        }
+
+
+async def grab_frame_as_reference(
+    *,
+    source_resource_id: str,
+    timestamp_seconds: float,
+    user_id: str,
+    repo: Optional[ResourceRepoProtocol] = None,
+) -> GrabbedFrame:
+    """抓一帧当**参考图**用（封面工作室），而不是当成品封面。
+
+    与 ``derive_cover_pair`` 的区别只有落点，抽帧那一半完全共用：
+
+        derive_cover_pair       重抽 → 居中裁 3:4 + 4:3 → 两个 resources 行
+        grab_frame_as_reference 重抽 →   不裁          → 一个 generated_media 行
+
+    ⚠️ 落点不是随便选的。出图链路的参考图入口只认
+    ``/api/v1/generated-media/{id}/(cover|stream|file)``；别的 URL 会被
+    ``generated_media_local_path()`` 返回 None 然后**静默丢弃**。落成 resources
+    行的帧看起来一切正常，却永远进不了模型 —— 而且不报错。
+
+    **不裁**也是刻意的：这一帧是说"我的片子里有什么"（人物长相、场景），裁掉
+    边缘只会丢信息；构图由模型按 3:4 重新生成，不由这张参考图决定。
+
+    Raises:
+        CoverFrameError: 404/400 源视频不合法，422 重抽不出这一帧，504 超时。
+    """
+    import os
+    import tempfile
+
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        register_generated_media,
+    )
+    from app.services.library.resources_service import _resolve_personal_team_id
+
+    repo = repo or ResourcesRepository()
+
+    # 与 derive_cover_pair 同源的校验：时间点是用户可达输入，NaN / inf 会一路飘
+    # 到 ffmpeg 的 -ss 变成 500。
+    if not math.isfinite(timestamp_seconds) or timestamp_seconds < 0:
+        raise CoverFrameError(
+            status_code=400,
+            detail=f"frame timestamp out of range: {timestamp_seconds}",
+        )
+
+    source = await load_source_video(repo, source_resource_id)
+    frame_bytes = await _reextract_frame_from_storage(
+        source.file_path, float(timestamp_seconds)
+    )
+
+    scope_id = int(await _resolve_personal_team_id(str(user_id)))
+    tmp_path: Optional[str] = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix="cover_frame_", suffix=".jpg")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(frame_bytes)
+        row = await register_generated_media(
+            user_id=str(user_id),
+            scope_id=scope_id,
+            source_path=tmp_path,
+            mime=_COVER_MIME,
+            origin=GenerationOrigin(
+                kind="canvas_upload",
+                params={
+                    "filename": f"frame-{timestamp_seconds:.1f}s.jpg",
+                    # 溯源：哪个视频、第几秒。存这两个是为了将来能回答"这张参考
+                    # 图是从哪来的"，而不必靠文件名去猜。
+                    "cover_frame_source_resource_id": str(source_resource_id),
+                    "cover_frame_timestamp_seconds": float(timestamp_seconds),
+                },
+            ),
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    gen_id = row.get("id")
+    if gen_id is None:
+        # register_generated_media 的成功路径一定有 id；到这里说明写入没成交。
+        # 回一个类型化失败，而不是让 None 顺着 f-string 变成字面量 "None" 的 URL。
+        raise CoverFrameError(
+            status_code=500, detail="grabbed frame could not be stored"
+        )
+    return GrabbedFrame(
+        generated_media_id=str(gen_id),
+        url=f"/api/v1/generated-media/{gen_id}/cover",
+        timestamp_seconds=float(timestamp_seconds),
+    )
+
+
 async def derive_cover_pair_from_frame(
     *,
     frame_resource_id: str,

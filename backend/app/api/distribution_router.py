@@ -43,6 +43,8 @@ from app.schemas.distribution import (
     SessionSmsRequest,
 )
 from app.schemas.distribution_cover import (
+    CoverGrabFrameRequest,
+    CoverGrabFrameResponse,
     CoverExtractRequest,
     CoverExtractResponse,
     CoverSelectRequest,
@@ -1633,6 +1635,50 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
         cover_horizontal_resource_id=pair.horizontal_resource_id,
         publish_task_id=body.publish_task_id,
     )
+
+
+@router.post(
+    "/covers/grab-frame",
+    response_model=CoverGrabFrameResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def grab_cover_frame(body: CoverGrabFrameRequest, user: CurrentUserDep):
+    """抓一帧当**参考图**（封面工作室），不是当成品封面。
+
+    与 ``/covers/select`` 共用抽帧那一半，区别只有落点：select 裁两张并落成
+    ``resources``（成品封面按 id 被 publish_tasks 引用、被浏览器侧取走），这里
+    不裁、落成一个 ``generated_media`` 行。
+
+    ⚠️ 落点不能对调。出图链路的参考图入口只认
+    ``/api/v1/generated-media/{id}/(cover|stream|file)``，别的 URL 会被
+    ``generated_media_local_path()`` 静默丢弃 —— 一帧落成 resources 行看起来
+    一切正常，却永远进不了模型，而且不报错。
+
+    同步而不是 workflow，理由与 select 相同：抓帧是用户在时间轴上拖完就按的
+    动作，源视频多半还在 materialize 的本机读通缓存里；让它绕一圈 Realtime
+    才是净损失。504 上界在服务层。
+    """
+    from app.services.distribution.cover_frames import (
+        CoverFrameError,
+        grab_frame_as_reference,
+    )
+
+    try:
+        async with request_scope(Scope(user_id=user["id"])):
+            grabbed = await grab_frame_as_reference(
+                source_resource_id=str(body.source_resource_id),
+                timestamp_seconds=float(body.timestamp_seconds),
+                user_id=user["id"],
+            )
+    except CoverFrameError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except UnscopedQueryError as e:
+        logger.error("cover frame grab ran without a tenant scope: %s", e)
+        raise HTTPException(
+            status_code=500, detail="cover frame grab is misconfigured"
+        ) from e
+
+    return CoverGrabFrameResponse(**grabbed.as_dict())
 
 
 # --- 「选择音乐」 charts ------------------------------------------------------

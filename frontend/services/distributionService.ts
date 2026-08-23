@@ -697,6 +697,35 @@ export const extractCoverFrames = (body: {
  * form picks a cover BEFORE the task is created and passes the two returned
  * ids into the create body instead.
  */
+/**
+ * Grab one frame by hand, to use as a REFERENCE (Cover Studio).
+ *
+ * Not `selectCoverFrame`: that one finishes a cover (crops 3:4 + 4:3 into two
+ * `resources` rows that the publish task references by id). This one only
+ * collects raw material and lands it as a single `generated_media` row —
+ * because the image generation bridge accepts ONLY
+ * `/api/v1/generated-media/{id}/...` URLs as references and silently drops
+ * anything else. Pass `url` through untouched; rebuilding it from `id` is the
+ * one place the two could drift apart.
+ */
+export interface GrabbedCoverFrame {
+  generated_media_id: string;
+  url: string;
+  timestamp_seconds: number;
+}
+
+export const grabCoverFrame = async (
+  sourceResourceId: string,
+  timestampSeconds: number,
+): Promise<GrabbedCoverFrame> =>
+  request<GrabbedCoverFrame>('/covers/grab-frame', {
+    method: 'POST',
+    body: JSON.stringify({
+      source_resource_id: sourceResourceId,
+      timestamp_seconds: timestampSeconds,
+    }),
+  });
+
 export const selectCoverFrame = (body: {
   source_resource_id: string;
   timestamp_seconds: number;
