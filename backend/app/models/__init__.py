@@ -86,6 +86,9 @@ from app.models.chat import (  # noqa: F401
 from app.models.codex_daemon import (  # noqa: F401
     CodexDaemons,
 )
+from app.models.cover_templates import (  # noqa: F401
+    CoverTemplates,
+)
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
     DistributionOauthStates,
@@ -94,9 +97,6 @@ from app.models.distribution import (  # noqa: F401
     PublishTaskAccounts,
     PublishTasks,
     SocialAccounts,
-)
-from app.models.cover_templates import (  # noqa: F401
-    CoverTemplates,
 )
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,

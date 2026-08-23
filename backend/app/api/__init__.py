@@ -21,11 +21,11 @@ from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.conversation_router import router as conversation_router
+from app.api.cover_templates_router import router as cover_templates_router
 from app.api.episodes_router import router as episodes_router
 from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
-from app.api.cover_templates_router import router as cover_templates_router
 from app.api.generated_media_router import router as generated_media_router
 from app.api.inbox_router import router as inbox_router
 from app.api.inspiration_router import router as inspiration_router

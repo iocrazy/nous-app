@@ -162,7 +162,9 @@ class CoverTemplatesRepository:
                             CoverTemplates.id == template_id,
                             CoverTemplates.scope_id == scope_id,
                         )
-                        .values(name=name, updated_at=datetime.datetime.now(datetime.UTC))
+                        .values(
+                            name=name, updated_at=datetime.datetime.now(datetime.UTC)
+                        )
                         .returning(*_CT_COLS)
                     )
                 )

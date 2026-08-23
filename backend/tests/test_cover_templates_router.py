@@ -222,10 +222,7 @@ async def test_image_url_is_exactly_the_shape_the_generation_bridge_accepts(
     )
 
     assert resp.status_code == 200
-    assert (
-        resp.json()["data"]["image_url"]
-        == f"/api/v1/generated-media/{GEN_ID}/cover"
-    )
+    assert resp.json()["data"]["image_url"] == f"/api/v1/generated-media/{GEN_ID}/cover"
 
 
 @pytest.mark.asyncio
