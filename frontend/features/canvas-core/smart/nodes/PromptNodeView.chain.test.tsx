@@ -61,3 +61,17 @@ it('split-enabled prompt shows the separator row with a live item count', () => 
   // the toggle pill is present for flipping it off
   expect(screen.getByTestId('prompt-split-toggle')).toBeInTheDocument();
 });
+
+it('persists a dragged textarea height (IC promptH)', () => {
+  seed(false);
+  const p = props('p2');
+  render(<ReactFlowProvider><PromptNodeView {...p} /></ReactFlowProvider>);
+  const ta = screen.getByRole('textbox', { name: /prompt/i });
+  ta.getBoundingClientRect = () =>
+    ({ height: 180, width: 300, top: 0, left: 0, right: 300, bottom: 180, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  fireEvent.mouseUp(ta);
+  const node = useCanvasCoreStore.getState().nodes.find(
+    (n) => (n as { id: string }).id === 'p2',
+  ) as { data: { body_h?: number } };
+  expect(node.data.body_h).toBe(180);
+});

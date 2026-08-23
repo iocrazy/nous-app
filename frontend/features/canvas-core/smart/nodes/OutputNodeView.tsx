@@ -25,7 +25,7 @@ import {
   deriveOutpaint,
 } from '../../services/canvasService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
-import { createOutputNode } from '../factories';
+import { createMediaNode, createOutputNode } from '../factories';
 import { genIdFromDurableUrl } from '../mediaEditBridge';
 import { upscaleGeneration } from '../../services/canvasGenerationService';
 import { createPromptFromNode } from '../recreate';
@@ -92,6 +92,28 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // Grid dblclick: edit THAT image (falls back to the primary preview).
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [upscaling, setUpscaling] = useState(false);
+  // IC duplicateSmartNodeMediaToCanvas: drop the current image beside this
+  // node as an independent media card (no re-upload — same durable url).
+  const handleDuplicate = useCallback(() => {
+    const url = preview_url || (images?.[0] as { url?: string } | undefined)?.url;
+    if (!url) return;
+    const store = useCanvasCoreStore.getState();
+    const self = store.nodes.find((n) => (n as { id?: string }).id === id) as
+      | { position?: { x: number; y: number } }
+      | undefined;
+    const base = self?.position ?? { x: 0, y: 0 };
+    const node = createMediaNode(
+      { title: 'Copy', items: [{ url, kind: 'image' }] },
+      {
+        position: {
+          x: base.x + SMART_NODE_DEFAULT_WIDTH.output + TILE_LAYOUT_GAP_X,
+          y: base.y + 40,
+        },
+      },
+    );
+    store.setNodes([...store.nodes, node]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview_url, images, id]);
   // IC 放大: upscale the primary image via jimeng image_upscale; the result
   // appends beside the original (source stays).
   const handleUpscale = useCallback(() => {
@@ -538,6 +560,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onMask={canCrop ? openMaskEditor : undefined}
           onBrush={() => setEditorMode('brush')}
           onUpscale={canCrop ? handleUpscale : undefined}
+          onDuplicate={canCrop ? handleDuplicate : undefined}
           upscaling={upscaling}
           onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}

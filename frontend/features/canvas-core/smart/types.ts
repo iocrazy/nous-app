@@ -103,6 +103,9 @@ export interface ShotNodeData {
 
 export interface PromptNodeData {
   body: string;
+  /** IC promptH: user-dragged textarea height in px (persisted so the
+   *  card keeps its size across reloads). */
+  body_h?: number;
   /** IC 分隔符拆分: split the body into independent generations. */
   split_enabled?: boolean;
   /** Separator (default ';', max 8 chars). */
