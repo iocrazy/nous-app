@@ -121,6 +121,45 @@ def _extract_status_code(exc: BaseException) -> Optional[int]:
 # How much of a provider error body to keep. Long enough for a JSON error
 # envelope's code+message, short enough that task_tracking.error_msg (500
 # chars, and it also carries the class name + model list) isn't crowded out.
+def retry_after_seconds(exc: BaseException) -> Optional[float]:
+    """The provider's own ``Retry-After``, in seconds, or ``None``.
+
+    ``None`` means "no usable guidance — use our own backoff". It is
+    deliberately distinct from ``0.0`` ("retry immediately"): a garbled header
+    must not be read as permission to hammer.
+
+    Only the delta-seconds form is supported. The HTTP-date form is left
+    unparsed on purpose — resolving it correctly needs the server's clock, and
+    a wrong absolute time is more dangerous than no guidance at all.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if not headers:
+        return None
+    raw = None
+    try:
+        # Header names are case-insensitive and providers disagree in
+        # practice; httpx maps are already case-insensitive but a plain dict
+        # (every test double, and some SDKs) is not.
+        raw = headers.get("Retry-After")
+        if raw is None:
+            for k, v in dict(headers).items():
+                if str(k).lower() == "retry-after":
+                    raw = v
+                    break
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if seconds != seconds or seconds < 0:  # NaN or negative
+        return None
+    return seconds
+
+
 _BODY_SNIPPET_MAX = 220
 
 
@@ -283,13 +322,33 @@ class LLMRetryMiddleware:
                         ) from exc
                 if attempt >= self.max_retries:
                     break  # exhausted; raise after loop
+
+                # The provider's own Retry-After outranks our guess — it knows
+                # when its bucket refills. Two rules, and the second is the one
+                # that matters: a value beyond our ceiling means give up NOW.
+                # Sleeping an hour inside one turn is worse than failing —
+                # it pins a connection, a task row and the user's attention,
+                # while every caller above has its own deadline. Without this,
+                # one provider header can hang the run.
+                provider_delay = retry_after_seconds(exc)
+                if provider_delay is not None and provider_delay > self.max_delay_s:
+                    raise LLMRetryExhausted(
+                        f"provider asked to wait {provider_delay:.0f}s, beyond "
+                        f"the {self.max_delay_s:.0f}s ceiling for a single "
+                        f"turn; giving up without retrying. last={exc}"
+                    ) from exc
+
                 # Sleep before next try, polling cancel every poll-interval.
-                delay = compute_backoff(
-                    attempt + 1,
-                    base_delay_s=self.base_delay_s,
-                    max_delay_s=self.max_delay_s,
-                    jitter_ratio=self.jitter_ratio,
-                    rng=self.rng,
+                delay = (
+                    provider_delay
+                    if provider_delay is not None
+                    else compute_backoff(
+                        attempt + 1,
+                        base_delay_s=self.base_delay_s,
+                        max_delay_s=self.max_delay_s,
+                        jitter_ratio=self.jitter_ratio,
+                        rng=self.rng,
+                    )
                 )
                 # AI-007: never sleep past the deadline; if the backoff would
                 # blow it, give up now rather than wake up already-expired.
