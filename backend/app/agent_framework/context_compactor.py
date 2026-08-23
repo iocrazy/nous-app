@@ -39,7 +39,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app.agent_framework.context_window import model_window_size
+from app.agent_framework.context_window import resolve_model_window
 from app.agent_framework.message_truncation import cap_messages_tokens
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
 from app.agent_framework.tool_result_pruner import PruneStats, prune
@@ -153,7 +153,20 @@ class ContextCompactor:
                 notes=("AGENT_AUTO_COMPACT=false",),
             )
 
-        window = model_window_size(model)
+        window, window_known = resolve_model_window(model)
+        # Every tier below divides by `window`. When the table didn't know the
+        # model, that denominator is a default, and a wrong denominator makes
+        # a confidently-wrong tier — so it rides every return path, including
+        # green, which is where a mis-measured model is most likely to sit.
+        window_notes: tuple[str, ...] = (
+            ()
+            if window_known
+            else (
+                f"window is a fallback ({window} tokens): model={model!r} is "
+                "not in _MODEL_WINDOWS, so tier thresholds are relative to a "
+                "default, not to this model's real context window",
+            )
+        )
         if window <= 0:
             # Unknown model → bail out with noop. Same sentinel semantics
             # as the kill-switch path: don't pay for tokenization just to
@@ -179,6 +192,7 @@ class ContextCompactor:
                 tokens_before=total,
                 tokens_after=total,
                 tokens_saved=0,
+                notes=window_notes,
             )
 
         # Yellow tier: prune tool results (dedupe + age old bodies).
@@ -197,6 +211,7 @@ class ContextCompactor:
                 tokens_after=new_total,
                 tokens_saved=total - new_total,
                 yellow_prune=prune_stats,
+                notes=window_notes,
             )
 
         # Orange / Red: head summarization. Replace older turns with a
@@ -209,7 +224,7 @@ class ContextCompactor:
             if tier == CompactionTier.RED
             else self.EMERGENCY_KEEP_RECENT_TURNS
         )
-        notes: list[str] = []
+        notes: list[str] = list(window_notes)
         capped: list[dict]
         dropped_chars = 0
 

@@ -62,8 +62,8 @@ async def test_pruner_alone_rescues_and_the_model_is_never_called(
     msgs = _msgs()
     with (
         patch(
-            "app.agent_framework.context_compactor.model_window_size",
-            return_value=1000,
+            "app.agent_framework.context_compactor.resolve_model_window",
+            return_value=(1000, True),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -98,8 +98,8 @@ async def test_pruner_that_does_not_rescue_still_pays_for_the_summary():
     msgs = _msgs()
     with (
         patch(
-            "app.agent_framework.context_compactor.model_window_size",
-            return_value=1000,
+            "app.agent_framework.context_compactor.resolve_model_window",
+            return_value=(1000, True),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
@@ -202,8 +202,8 @@ async def test_rejection_falls_back_to_the_emergency_cap_end_to_end(compactor):
     msgs = _msgs(12)
     with (
         patch(
-            "app.agent_framework.context_compactor.model_window_size",
-            return_value=1000,
+            "app.agent_framework.context_compactor.resolve_model_window",
+            return_value=(1000, True),
         ),
         patch("app.agent_framework.context_compactor.count_tokens", return_value=0),
         patch(
