@@ -23,6 +23,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from 'react';
 
 import { mediaSrc } from '../smart/mediaUrl';
@@ -55,6 +56,12 @@ export const PaintCanvas = forwardRef<
   }
 >(function PaintCanvas({ src, alt = '', tool, color, size, onHistoryChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // crossOrigin lets exportComposite read the pixels back, but a host that
+  // does not send CORS headers REJECTS the request outright and the image
+  // never paints (2026-08-22: brush tab showed a broken-image icon). Try
+  // anonymous first, fall back to a plain load — the export path then
+  // degrades to overlay-only instead of failing to show anything.
+  const [anonymous, setAnonymous] = useState(true);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const undoStack = useRef<ImageData[]>([]);
   const redoStack = useRef<ImageData[]>([]);
@@ -305,9 +312,22 @@ export const PaintCanvas = forwardRef<
       out.height = c.height;
       const ctx = out.getContext('2d');
       if (!ctx) return null;
-      ctx.drawImage(img, 0, 0, out.width, out.height);
+      try {
+        ctx.drawImage(img, 0, 0, out.width, out.height);
+      } catch (err) {
+        // Cross-origin image without CORS headers — compositing would taint
+        // the canvas; ship the annotation layer alone rather than nothing.
+        console.error('[paint] base image not exportable, overlay only', err);
+      }
       ctx.drawImage(c, 0, 0);
-      return new Promise((resolve) => out.toBlob(resolve, 'image/png'));
+      return new Promise((resolve) => {
+        try {
+          out.toBlob(resolve, 'image/png');
+        } catch (err) {
+          console.error('[paint] export failed (tainted canvas)', err);
+          resolve(null);
+        }
+      });
     },
   }));
 
@@ -323,11 +343,15 @@ export const PaintCanvas = forwardRef<
   return (
     <div className="relative inline-block max-h-full max-w-full select-none">
       <img
+        key={anonymous ? 'anon' : 'plain'}
         ref={imgRef}
         src={mediaSrc(src)}
         alt={alt}
         draggable={false}
-        crossOrigin="anonymous"
+        {...(anonymous ? { crossOrigin: 'anonymous' as const } : {})}
+        onError={() => {
+          if (anonymous) setAnonymous(false);
+        }}
         className="pointer-events-none block max-h-[62vh] max-w-full object-contain"
         onLoad={(e) => {
           const img = e.currentTarget;

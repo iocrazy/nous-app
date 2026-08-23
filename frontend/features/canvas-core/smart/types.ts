@@ -422,7 +422,7 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   shot: 280,
   media: 240,
   llm: 300,
-  prompt: 280,
+  prompt: 320,
   output: 260,
   loop: 340,
   timeline: 420,
