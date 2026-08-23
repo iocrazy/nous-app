@@ -48,7 +48,7 @@
 read durable /generated-media/ URLs, so uploads must land in the same store as
 generations."*
 
-### 1.3 ★ 三个图片模型里，codex 出不了真 3:4
+### 1.3 ★ codex 的 `--size` 根本不被采纳（**2026-08-23 更正，此前本节写错了**）
 
 | catalog `name` | provider / model | enabled | owner | 3:4 实际落到 |
 |---|---|---|---|---|
@@ -56,11 +56,39 @@ generations."*
 | `jimeng-cli-image` | jimeng-cli / 5.0 | ✓ | 用户本人 | `3:4` 真 3:4 |
 | `mediahub-doubao-seedream-t2i` | doubao / `doubao-seedream-3-0-t2i-250415` | ✓ | 平台 | 864×1152 真 3:4 |
 
-`codex_cli.py:59-73` 的注释自陈："The model supports exactly three sizes
-(square / landscape / portrait); every catalog aspect maps to the nearest."
+⚠️ **本节原先照抄了 `codex_cli.py:59-60` 的注释**（"The model supports exactly
+three sizes (square / landscape / portrait); every catalog aspect maps to the
+nearest."）并据此断言"codex 出不了真 3:4"。**那条注释是错的，我的转述也是错的。**
+2026-08-23 实测推翻：
 
-而这个 skill 通篇写死 3:4，设计稿默认模型却是 codex。**这是一个尚未消解的冲突**，
-见 §2.5。
+| 探针 | 结果 |
+|---|---|
+| `--size 999x999` | CLI 回 "must use width and height values that are **multiples of 16**" —— 不是"只有三种尺寸" |
+| `--size 8192x10912` | "maximum edge of **3840px**" —— 有上界，但远不止三档 |
+| `--size 1056x1408` + 中性 prompt | `ok:true`，产物 **1536×1024 横版** |
+| `--size 1024x1536`（规范竖版）+ 中性 prompt | `ok:true`，产物**仍是 1536×1024 横版** |
+| `--size 1024x1536` + **竖版语义 prompt** | 产物 **1086×1448 = 正好 0.7500 = 真 3:4** |
+
+结论：**`--size` 在这条链路上不被采纳，尺寸由 prompt 决定**；而 codex **能**出真
+3:4 —— 上面那张就是。（机理推测：这个 provider 走的是 ChatGPT 私有后端
+`chatgpt.com/backend-api/codex/responses`，不是标准 images API，size 参数在那条路
+上没有落点。见 `docs/runbook/codex-image.md`。）
+
+⚠️ **这是一个已上线的静默缺陷，影响所有 codex 出图**，不只封面。生产库里仅有的
+4 张 codex 图，**没有一张符合请求的比例**：
+
+| generated_media id | 请求 | 实际 | 比值 |
+|---|---|---|---|
+| 340306475426428 | 16:9 | 1184×1328 | 0.89 **竖版** |
+| 340306472342133 | 16:9 | 1147×1371 | 0.84 **竖版** |
+| 340305777021402 | 16:9 | 1199×1312 | 0.91 **竖版** |
+| 340107793822620 | 1:1 | 1122×1402 | 0.80 |
+
+三张要横版 16:9 全部回了竖版，四张尺寸各不相同、无一落在那三个"规范尺寸"上 ——
+`_ASPECT_TO_SIZE` 这张表在这条链路上是**装饰性的**。
+
+**修法方向**（未实施）：codex 分支要把画幅写进 prompt，而不是指望 `--size`；并且
+产出后应校验实际尺寸，与请求不符要能报出来，而不是像现在这样 `ok:true` 了事。
 
 ⚠️ `mediahub-doubao-seedream-t2i` **没有任何迁移**，只是 prod 上 admin 手插的行 ——
 全新库 / CI 上不存在。
@@ -183,19 +211,18 @@ CSS `pointer-events:none`（`distribution-v4.css:369`）。`#cover-studio` 是�
 （"Back to publish" = 关闭浮层），上下文天然拿得到，表单天然不丢。
 **尚未实现，等确认。**
 
-### 2.5 ⚠️ 未决：3:4 与 codex 的冲突
+### 2.5 ~~未决：3:4 与 codex 的冲突~~ → 已消解（2026-08-23）
 
-skill 通篇写死 3:4，设计稿默认模型是 codex，而 codex 物理上出不了 3:4（§1.3）。
-三个选项：
+**这一节原先的前提是错的。** 它建立在"codex 物理上出不了 3:4"之上，而 §1.3 的实测
+证明 codex **能**出真 3:4（实测 1086×1448 = 0.7500）。原来列的三个选项（换默认模型 /
+后处理裁切 / 接受 2:3）**全部作废**，不需要再拍板。
 
-1. **默认换成即梦或 seedream**（两者都出真 3:4）。零代码，但 codex 是唯一"真出过图"
-   的那个（4 张），即梦与 seedream 目前都是 `not_probed`。
-2. **codex 出 1024×1536 后裁成 1024×1365**。多一步后处理，且 2×2 网格阶段裁切会
-   切掉草案边缘 —— 网格本身就是 3:4，裁它等于每格都变形。
-3. **接受 codex 出 2:3**，界面上标明"此模型输出 2:3，不是 3:4"。
+真正要做的是另一件事，而且它比原来那个问题更严重：**`--size` 不被采纳，画幅必须写进
+prompt**。这对封面工作室是好消息 —— skill 的 prompt 骨架本来就通篇在说 3:4，只要把
+画幅要求确实带进 prompt 就行，不用换模型、不用后处理。
 
-倾向 1（模型选择器里把出真 3:4 的排前面，codex 保留但标注），因为它不引入后处理、
-也不撒谎。**等你拍板。**
+⚠️ 但要连带修 `_ASPECT_TO_SIZE` 那条链路的静默失败（§1.3 末尾），否则"用户选了比例、
+系统装作照做了"这件事会一直存在。
 
 ### 2.6 ⚠️ 小标签开关：设计稿的说明文字写反了
 
