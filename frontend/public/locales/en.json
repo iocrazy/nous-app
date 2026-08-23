@@ -772,7 +772,20 @@
       "refFromTemplates": "From templates",
       "refFullMsg": "The pool already holds {{max}} pictures. Remove one to add another.",
       "refDuplicateMsg": "That picture is already in the pool.",
-      "refExplainer": "One list of nine, shared. Frames say what is in your video; templates say what it should look like."
+      "refExplainer": "One list of nine, shared. Frames say what is in your video; templates say what it should look like.",
+      "drafts": "Drafts",
+      "stepDrafts": "Four drafts",
+      "stepPick": "Pick one",
+      "stepFinal": "Final cover",
+      "draftN": "Draft {{n}}",
+      "drafting": "Drawing four drafts…",
+      "draftsEmpty": "Four drafts will appear here as one picture.",
+      "oneImageFour": "One image, four directions",
+      "oneImageFourWhy": "The model draws all four in a single 3:4 picture, so a round of ideas costs one generation instead of four.",
+      "makeFinal": "Make #{{n}} the final cover",
+      "refining": "Redrawing…",
+      "refineNote": "A second pass redraws it full size and drops the number.",
+      "whatWasSent": "What was sent to the model"
     }
   },
   "parser": {

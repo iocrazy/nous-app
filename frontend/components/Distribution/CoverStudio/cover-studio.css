@@ -438,3 +438,257 @@
 .cover-studio .cs-card > h4 .aux.bad {
   color: var(--danger);
 }
+
+/* ── Drafts: steps ──────────────────────────────────────────────────────── */
+
+.cover-studio .cs-steps {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px 0;
+  font-size: 11.5px;
+}
+
+.cover-studio .cs-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--content-4);
+}
+
+.cover-studio .cs-step .num {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cover-studio .cs-step.done {
+  color: var(--content-2);
+}
+
+.cover-studio .cs-step.done .num {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--island);
+}
+
+.cover-studio .cs-step.now {
+  color: var(--content);
+  font-weight: 600;
+}
+
+.cover-studio .cs-step.now .num {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cover-studio .cs-steps .bar {
+  width: 34px;
+  height: 1px;
+  background: var(--line-strong);
+  margin: 0 11px;
+}
+
+/* ── Drafts: the 2x2 grid ───────────────────────────────────────────────── */
+
+.cover-studio .cs-gridwrap {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .cover-studio .cs-gridwrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 3:4 overall, because two 3:4 covers side by side and stacked also form a 3:4
+   grid — that is why the skill can ask for four drafts in one image. */
+.cover-studio .cs-draftgrid {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--island-2);
+}
+
+.cover-studio .cs-draftgrid > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Four hit areas over ONE picture. The drafts are quadrants of a single image,
+   not four images — slicing them apart would misrepresent the output. */
+.cover-studio .cs-draftgrid .cell {
+  position: absolute;
+  width: 50%;
+  height: 50%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cover-studio .cs-draftgrid .cell.q1 { left: 0; top: 0; }
+.cover-studio .cs-draftgrid .cell.q2 { right: 0; top: 0; }
+.cover-studio .cs-draftgrid .cell.q3 { left: 0; bottom: 0; }
+.cover-studio .cs-draftgrid .cell.q4 { right: 0; bottom: 0; }
+
+.cover-studio .cs-draftgrid .cell:hover {
+  background: var(--accent-soft);
+}
+
+.cover-studio .cs-draftgrid .cell.on {
+  box-shadow: 0 0 0 2px var(--accent) inset;
+  background: var(--accent-soft);
+}
+
+.cover-studio .cs-draftgrid .cell .no {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 19px;
+  height: 19px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--island);
+  border: 1px solid var(--line-strong);
+  color: var(--content-2);
+}
+
+.cover-studio .cs-draftgrid .cell.on .no {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--island);
+}
+
+.cover-studio .cs-draft-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--content-4);
+}
+
+/* ── Drafts: pick side ──────────────────────────────────────────────────── */
+
+.cover-studio .cs-pickside .h {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.cover-studio .cs-picks {
+  display: flex;
+  gap: 7px;
+  margin: 12px 0;
+}
+
+.cover-studio .cs-picks .pk {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--island-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--content-2);
+}
+
+.cover-studio .cs-picks .pk.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cover-studio .cs-picks .pk:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cover-studio .cs-primary {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--island);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cover-studio .cs-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Drafts: the prompt disclosure ──────────────────────────────────────── */
+
+.cover-studio .cs-prompt {
+  border-top: 1px solid var(--line);
+}
+
+.cover-studio .cs-prompt > summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--content-2);
+  list-style: none;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.cover-studio .cs-prompt > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cover-studio .cs-prompt > summary::before {
+  content: '▸';
+  color: var(--content-4);
+}
+
+.cover-studio .cs-prompt[open] > summary::before {
+  content: '▾';
+}
+
+.cover-studio .cs-promptbox {
+  margin: 0 14px 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--island-2);
+  overflow-x: auto;
+}
+
+.cover-studio .cs-promptbox pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--content-2);
+  white-space: pre-wrap;
+}
