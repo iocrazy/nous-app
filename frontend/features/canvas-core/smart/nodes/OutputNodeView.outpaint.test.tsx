@@ -182,7 +182,14 @@ describe('OutputNodeView — outpaint commit spawns the extended node', () => {
     expect(opts).toEqual({ prompt: 'a windswept meadow' });
 
     await waitFor(() => {
-      expect(useCanvasCoreStore.getState().nodes).toHaveLength(2);
+      // IC 扩图联动: source + extended output + the pre-seeded prompt.
+      expect(useCanvasCoreStore.getState().nodes).toHaveLength(3);
+      const prompt = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as { type?: string }).type === 'prompt') as
+        | { data?: { body?: string } }
+        | undefined;
+      expect(prompt?.data?.body).toMatch(/white area/i);
     });
     const nodes = useCanvasCoreStore.getState().nodes as Array<{
       id: string;

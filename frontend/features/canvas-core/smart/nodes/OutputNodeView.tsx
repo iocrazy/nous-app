@@ -28,6 +28,7 @@ import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { createOutputNode } from '../factories';
 import { genIdFromDurableUrl } from '../mediaEditBridge';
 import { upscaleGeneration } from '../../services/canvasGenerationService';
+import { createPromptFromNode } from '../recreate';
 import { requeryRecoverTask } from '../genResume';
 import { latestHistoryImageUrl } from '../outputHistory';
 import { resolveSourceUrls } from '../promptInputs';
@@ -341,6 +342,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           },
         );
         store.setNodes([...store.nodes, extendedNode]);
+        // IC 扩图联动: the extended image is meant to be re-generated with
+        // the白 area filled, so spawn a wired prompt pre-seeded with IC's
+        // own instruction instead of leaving the user to type it (IC
+        // applyImageOutpaint → setPromptDraftForNode).
+        const extId = String(
+          (extendedNode as unknown as { id?: unknown }).id ?? '',
+        );
+        if (extId) {
+          createPromptFromNode(extId, {
+            body: 'Remove the white area and fill the scene naturally',
+            gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+            source_ref: newUrl,
+          });
+        }
         setOutpaintOpen(false);
         setEditorMode(null);
       } catch (err) {
