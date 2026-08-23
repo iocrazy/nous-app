@@ -139,16 +139,40 @@ jobs:
         id: changed
         working-directory: ${{ github.workspace }}
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1 2>/dev/null || true
+          set -euo pipefail
+          # ⚠️ NO --depth=1 here. The checkout above sets fetch-depth: 0
+          # precisely so the merge-base exists; re-fetching the base ref
+          # shallow UNDOES that and truncates origin/<base> to its tip.
+          # The three-dot diff below then dies with "no merge base", and —
+          # before this was fixed — the `|| true` swallowed it into an empty
+          # CHANGED, so black/isort/flake8 all SKIPPED and the job still
+          # reported green.
+          #
+          # It failed nondeterministically, which is worse than always: while
+          # a PR sits exactly on the base tip the merge-base IS that tip, so
+          # depth=1 contains it and the gate works. The moment master moves
+          # ahead the gate silently stops checking — i.e. it switches itself
+          # off exactly when the branch is drifting and you need it most.
+          # (Measured 2026-08-23 on PR #1973: lint ran and caught a black
+          # violation; two master commits later the same job skipped all
+          # three linters.)
+          git fetch origin "${{ github.base_ref }}"
           # --diff-filter=AMR: Added, Modified, Renamed (skip Deleted —
           # nothing to lint on a removed file).
           # Pathspec scopes to backend/ then we filter .py via grep —
           # the `**/*.py` pathspec form skips files at depth 1 (e.g.
           # tests/foo.py directly under tests/), which is wrong.
-          CHANGED=$(git diff --name-only --diff-filter=AMR \
+          #
+          # `git diff` gets its own `if` rather than `|| true`: "the diff
+          # failed" and "nothing changed" must not collapse into one empty
+          # string. An unlintable PR has to be loud, not green.
+          if ! RAW=$(git diff --name-only --diff-filter=AMR \
             "origin/${{ github.base_ref }}...HEAD" \
-            -- 'backend/app/**' 'backend/tests/**' \
-            | grep -E '\.py$' || true)
+            -- 'backend/app/**' 'backend/tests/**'); then
+            echo "::error::Could not diff against origin/${{ github.base_ref }} — the changed-file set is unknown, so the lint gate cannot run."
+            exit 1
+          fi
+          CHANGED=$(echo "$RAW" | grep -E '\.py$' || true)
           if [ -z "$CHANGED" ]; then
             echo "No backend Python files changed in this PR."
             echo "files=" >> "$GITHUB_OUTPUT"
