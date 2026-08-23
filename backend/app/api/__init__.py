@@ -244,10 +244,12 @@ api_router.include_router(router=deep_health_router, tags=["Health"])
 # double-registered every /flows route until test_route_uniqueness caught it.
 from app.api.lanes_router import router as lanes_router  # noqa: E402
 from app.api.schedules_router import router as schedules_router  # noqa: E402
+from app.api.codex_daemon_router import router as codex_daemon_router  # noqa: E402
 from app.api.ws_ticket_router import router as ws_ticket_router  # noqa: E402
 
 api_router.include_router(router=schedules_router, tags=["Schedules"])
 api_router.include_router(router=lanes_router, tags=["Lanes"])
+api_router.include_router(router=codex_daemon_router, tags=["Codex Daemon"])
 api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])
 
 # A8: paperclip-style chat thread per issue (issue_messages table, mig 205).
