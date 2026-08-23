@@ -238,13 +238,14 @@ from app.api.health_router import router as deep_health_router  # noqa: E402
 
 api_router.include_router(router=deep_health_router, tags=["Health"])
 
+from app.api.codex_daemon_router import router as codex_daemon_router  # noqa: E402
+
 # A 路线 (2026-05-04, session 2/3): 任务集 / 用户定时 / 4-Lane 优先级 / WS ticket
 # Imports from feat/a5 + feat/a7 + feat/a9 (PR 队列 #158/159/160/161).
 # flows_router (feat/a3) is already included above — a second include here
 # double-registered every /flows route until test_route_uniqueness caught it.
 from app.api.lanes_router import router as lanes_router  # noqa: E402
 from app.api.schedules_router import router as schedules_router  # noqa: E402
-from app.api.codex_daemon_router import router as codex_daemon_router  # noqa: E402
 from app.api.ws_ticket_router import router as ws_ticket_router  # noqa: E402
 
 api_router.include_router(router=schedules_router, tags=["Schedules"])
