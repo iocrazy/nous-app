@@ -25,7 +25,26 @@ describe('importResourceAsCanvasMedia', () => {
       method: 'POST',
       json: { resource_id: 'res-1' },
     });
-    expect(result).toEqual({ url: '/api/v1/generated-media/gm-1', kind: 'image' });
+    // `id` is asserted, not merely tolerated: Cover Studio saves a template
+    // by generated_media_id, so dropping it here would silently produce
+    // templates that point nowhere. The fixture always carried it — until
+    // 2026-08-22 nothing read it.
+    expect(result).toEqual({
+      url: '/api/v1/generated-media/gm-1',
+      kind: 'image',
+      id: 'gm-1',
+    });
+  });
+
+  it('leaves id undefined when the response omits it', async () => {
+    // Absence must read as "not known", never as an error: older callers and
+    // any future endpoint that skips the field still have to work.
+    mockApiFetch.mockResolvedValue({
+      json: async () => ({ data: { url: '/api/v1/generated-media/gm-9' } }),
+    });
+
+    const result = await importResourceAsCanvasMedia('res-9');
+    expect(result.id).toBeUndefined();
   });
 
   it('defaults kind to image when media_kind is not video', async () => {

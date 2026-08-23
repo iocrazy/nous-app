@@ -95,6 +95,9 @@ from app.models.distribution import (  # noqa: F401
     PublishTasks,
     SocialAccounts,
 )
+from app.models.cover_templates import (  # noqa: F401
+    CoverTemplates,
+)
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
@@ -310,6 +313,7 @@ __all__ = [
     # media
     "Folders",
     "GalleryItems",
+    "CoverTemplates",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",

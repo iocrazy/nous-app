@@ -1,0 +1,227 @@
+# 封面工作室（Cover Studio）—— 设计与地面真值
+
+2026-08-22。分支 `feat/cover-studio`，worktree `.worktrees/feat-cover-studio`。
+设计稿 v3（已定）：<https://claude.ai/code/artifact/2cc195f1-e52f-4680-b3da-60a1fef4462c>
+
+本文件分两部分：**已核实的事实**（每条都是当场跑命令查的，不是回忆）和**设计决策**。
+下一段会话拿到它就不必重新调研。
+
+---
+
+## 一、已核实的事实
+
+### 1.1 `style_templates` 不是模板库，它是 `skills` 的空壳前身
+
+线上存在、**0 行**、只有 `prompt_content`（纯文字），没有任何图片列。
+
+来历查清了：mig 113 建 `style_templates` → mig 114 `RENAME TO skills`。但 113 是
+`CREATE TABLE IF NOT EXISTS` 且**在改名之后被重放过**，于是原样复活了一个空壳，
+从此与 `skills` 并存（`schema_baseline.sql:7476` 与 `:7331`）。后端至今留着与之配套、
+但**零生产调用方**的 model / repository / schemas，router 是个 301 跳转桩。
+
+→ 不要复用，不要"修好它"。样图模板库是新表（mig 435）。
+
+### 1.2 ★ 参考图必须是 `generated_media` 行 —— 这条决定了整个数据模型
+
+`canvas_generation.py:136-149` 把 `params.source_urls` 每一项交给
+`generated_media_service.generated_media_local_path()`，而后者只认这一个正则：
+
+```
+/generated-media/(\d+)/(?:cover|stream|file)$
+```
+
+不匹配 → 返回 `None` → **静默丢弃**（`:507-510`）。除 codex 会记一条 warning 外
+**没有任何信号**。
+
+后果不是报错，是"模板选了、也生成了、图里没有它"，而且查不出为什么 —— 与
+`reference-empty-output-is-not-a-negative-result` 同族。
+
+→ 封面工作室那个 9 张的参考池（视频帧 + 模板样图 + 人物参考），**每一张都必须
+先成为 `generated_media` 行**。现成入口两个，都已存在：
+
+| 来路 | 端点 | 前端封装 |
+|---|---|---|
+| 直接上传 | `POST /api/v1/generated-media/import`（50MB） | `importCanvasMedia(file, canvasId, nodeId)` |
+| 从素材库选 | `POST /api/v1/generated-media/import-from-resource` | `importResourceAsCanvasMedia(resourceId)` |
+
+`import` 的 docstring 自己就写了这条约束：*"The canvas generation bridge can only
+read durable /generated-media/ URLs, so uploads must land in the same store as
+generations."*
+
+### 1.3 ★ 三个图片模型里，codex 出不了真 3:4
+
+| catalog `name` | provider / model | enabled | owner | 3:4 实际落到 |
+|---|---|---|---|---|
+| `codex-image` | codex / gpt-5.4 | ✓ | 用户本人 | **1024×1536 = 2:3，不是 3:4** |
+| `jimeng-cli-image` | jimeng-cli / 5.0 | ✓ | 用户本人 | `3:4` 真 3:4 |
+| `mediahub-doubao-seedream-t2i` | doubao / `doubao-seedream-3-0-t2i-250415` | ✓ | 平台 | 864×1152 真 3:4 |
+
+`codex_cli.py:59-73` 的注释自陈："The model supports exactly three sizes
+(square / landscape / portrait); every catalog aspect maps to the nearest."
+
+而这个 skill 通篇写死 3:4，设计稿默认模型却是 codex。**这是一个尚未消解的冲突**，
+见 §2.5。
+
+⚠️ `mediahub-doubao-seedream-t2i` **没有任何迁移**，只是 prod 上 admin 手插的行 ——
+全新库 / CI 上不存在。
+
+### 1.4 ★ 封面 skill 在 RLS 下对它自己的 owner 都不可见
+
+`skills` 的 SELECT 策略是 `is_public = true OR team_id IN get_user_team_ids(auth.uid())`
+—— **没有 `created_by = auth.uid()` 分支**。而 `viral-video-cover` 是
+`team_id=NULL, project_id=NULL, is_public=false`，两个条件都不满足。
+
+实测（以 `authenticated` 角色 + owner 的 jwt sub 开事务查）：
+
+```
+visible_as_owner=0
+```
+
+→ 前端**绝不能**走 `supabase.from('skills')` 直读，会拿到空列表且**不报错**。
+必须走后端 `GET /api/v1/ai-library/skills/{slug}`（服务端 service-role，
+`list_accessible` 里才有 `created_by=user` 分支）。
+
+### 1.5 ★ 做成独立页面会丢掉整张发布表单
+
+`PublishPage.tsx` 有 **~75 个 `useState`**（第 528-944 行），**没有任何持久化**：
+无 `useParams` / `useLocation` / `useSearchParams` / `sessionStorage` / `localStorage`。
+路由是 `/team/:teamId/distribution/publish`（`router.tsx:289`）。
+
+→ 用户填完标题/描述/话题/账号/音乐/定时后跳去 `/cover-studio`，再点
+"Back to publish" 回来，**全部清空**。设计稿头部那句 "For clip-a.mp4 · topic … ·
+publishing to iocrazy" 也没有任何现成传递通道。
+
+→ 结论见 §2.4。
+
+### 1.6 封面的落点是 `resources`，而抽帧候选是临时物
+
+- `publish_tasks.cover_vertical_resource_id` / `cover_horizontal_resource_id`
+  都是 BIGINT → `resources.id`（mig 356）。发布时**竖版优先、横版兜底、只用一张**
+  （`publish_distribution.py:353-356`），`publish_gate.py:166` 也只要求二者有其一。
+  → AI 封面只产 3:4 竖版可行；但**不能**对一张 3:4 图中心裁 4:3（会把脸裁没）。
+- 抽帧候选**不落库**：预览图以 base64 随 `task_tracking.metadata` 送前端
+  （2026-08-18 改，因为曾污染用户文件夹）。成品封面才是真 `resources` 行。
+- 「同一秒数重抽 = 同一帧」**已实测**（跨 mp4/mkv/mov/webm、稀疏关键帧+B帧、VFR，
+  三次逐字节相同 JPEG）。单点 builder `video_frame_extractor.seek_frame_cmd:86`。
+- 已有 `_reextract_frame_from_storage`（任意时间点重抽）—— 正是「手动截」要的。
+
+### 1.7 那张占位卡片
+
+`PublishPage.tsx:2638-2654`。三重失活：`aria-disabled` + `preventDefault` +
+CSS `pointer-events:none`（`distribution-v4.css:369`）。`#cover-studio` 是死锚点。
+被删的三张渐变假候选留下孤儿 CSS：`.cover-cands` / `.cand`（`:370-371`）、
+`.cover-slot.is-soon`（`:333-336`）。i18n key 已存在（`en/zh.json:472-476`）。
+
+### 1.8 可直接复用、不要重造的现成件
+
+| 要做的东西 | 用现成的 |
+|---|---|
+| 播放器 + 可拖时间轴 + **已截帧的圆点** | `VideoPlayer.tsx`，`commentMarkers` 就是那些圆点，另有逐帧步进 |
+| 素材库图片选择器 | `chat/ResourcePicker.tsx`（加 `types:['image']` 过滤即可） |
+| 拖拽上传 | `hooks/useComposerDropzone.ts:30`，`rootProps` 摊到任意容器 |
+| 「模态里传图并创建一个实体」的先例 | `GalleryUploadDialog.tsx` |
+| 模态 / 卡片 / 下拉 | `components/ui/primitives.tsx`：`UiModal:699`、`UiPanel:149`（就是 Card）、`UiSelect:218` |
+| 开关 / 滑块 / Tabs | **没有**共享组件，分别抄 `PermissionsSection.tsx` 的 `role="switch"`、裸 `<input type="range">`、`AILibraryTabs.tsx` |
+
+配色只能用语义 token（`ink-*` + `{ok|warn|danger|info|agent}` 三件套），有
+`index.css.test.ts` 盯着；图标只用 lucide-react，**UI 禁 emoji**。
+
+### 1.9 其他会绊人的细节
+
+- 图片读 `params["ratio"]`，视频读 `params["aspect"]` —— 名字不一致，写错**静默变正方形**。
+- `POST /canvases/{id}/generations` 的 `count` 被 clamp 到 1..8；阶段一要 `count=1`（一张 2×2 网格）。
+- 9 张上限在 `canvas_generation.py:141` 与 `codex_cli.py:222` 各钉一次，前端无限制。
+- `/generated-media/{id}/cover` **无鉴权**（按 snowflake 世界可读，供裸 `<img>`）。
+- `resources` 表**没有** `metadata` 列（插了会 PGRST204 500）。
+- promote 是**另存一份拷贝**，不是移动；删 generation 不动已 promote 的库资产。
+- codex：`--background opaque` 必需（`auto` 会绿底渗色）；远程 URL 参考图被丢弃只吃本地文件；
+  `auth.json` 必须可写（只读挂载是静默断裂）。
+- ⚠️ `seed_loader._upsert_skill` 对用户导入的 skill **没有 owner 守卫**
+  （`get_by_slug` 是裸 `WHERE slug=`）。当前安全（种子目录只有三个 `script-*`），
+  但将来加同名种子目录会静默覆盖用户那一行并删掉其 `references/`。
+
+---
+
+## 二、设计决策
+
+### 2.1 已由用户拍板（照做，不再讨论）
+
+风格**单选**；参考帧**手动截**（播放器 + 时间轴 + 抓帧）；选中封面后**回填发布页 +
+同时存入素材库**（两件事都要在界面上写出来）；模板图来源**素材库选 + 直接上传两者都要**；
+**两阶段**生成（一张 2×2 网格 4 草案 → 选编号 → 二次精修）；人物参考图**从自己视频截**；
+只管**竖版 3:4**，横版灰掉并说明原因；视频帧与模板样图**共用同一个 9 张池子**。
+
+### 2.2 模板表锚在 `generated_media`，不是 `resources`
+
+理由见 §1.2。另白拿三件事：缩略图可裸 `<img>`（`/cover` 无鉴权）；内容寻址天然去重；
+两条来路都有现成后端。`source_resource_id` 只做溯源，**刻意不加 FK**（素材被删/移走
+不该让模板消失）。
+
+### 2.3 删除是硬删除，外键是 RESTRICT
+
+三种组合都试过，只有这一种没有隐藏状态：
+
+| 方案 | 后果 |
+|---|---|
+| `ON DELETE CASCADE` | 用户在画布里删一张图，模板库里对应模板**无声消失** |
+| 不加 FK | 模板指向不存在的行 = 永远加载失败的破图 |
+| RESTRICT + **软**删除 | 归档行仍握着外键 → 用户几个月后删那张图被拒，理由里点名一个他**已经删掉、界面上再也看不见**的模板 |
+| **RESTRICT + 硬删除**（采用） | 删除被引用的图被 DB 拒绝，由 API 层翻译成类型化 409 并点名模板 |
+
+软删除通常换来的两样东西在这里都不成立：① 没有任何表引用 `cover_templates.id`
+（生成记录存的是 URL 不是模板 id），硬删不会让任何记录指向虚空；② `usage_count`
+也保不住（删掉再重加同一张图本来就是新一行、从 0 计数）。
+
+那个 409 用 `ConflictError`（`app/core/exceptions.py`）而不是
+`HTTPException(detail={...})`：共用 handler 把 AppError 渲染成
+`{error: message, code, details}`，而 dict 型 detail 会被塞进 `details` 并把
+`error` 留成通用的 "Request failed" —— 用户读到的就是后者，那正是这条分支要避免的。
+
+### 2.4 ⚠️ 建议：封面工作室做成发布页内的**全屏浮层**，不是新路由
+
+理由见 §1.5：新路由会丢掉 75 个 `useState`。浮层视觉与设计稿完全一致
+（"Back to publish" = 关闭浮层），上下文天然拿得到，表单天然不丢。
+**尚未实现，等确认。**
+
+### 2.5 ⚠️ 未决：3:4 与 codex 的冲突
+
+skill 通篇写死 3:4，设计稿默认模型是 codex，而 codex 物理上出不了 3:4（§1.3）。
+三个选项：
+
+1. **默认换成即梦或 seedream**（两者都出真 3:4）。零代码，但 codex 是唯一"真出过图"
+   的那个（4 张），即梦与 seedream 目前都是 `not_probed`。
+2. **codex 出 1024×1536 后裁成 1024×1365**。多一步后处理，且 2×2 网格阶段裁切会
+   切掉草案边缘 —— 网格本身就是 3:4，裁它等于每格都变形。
+3. **接受 codex 出 2:3**，界面上标明"此模型输出 2:3，不是 3:4"。
+
+倾向 1（模型选择器里把出真 3:4 的排前面，codex 保留但标注），因为它不引入后处理、
+也不撒谎。**等你拍板。**
+
+### 2.6 ⚠️ 小标签开关：设计稿的说明文字写反了
+
+两份原文确实矛盾（这一点设计稿是对的）：
+- `SKILL.md` 第 4 步：*"Do not add small platform-style labels, recording marks,
+  search UI, badges, or corner tags unless the user explicitly asks for them."*
+- `cover-grammar.md` 标题即「v1 深色人物版，**小标签仍允许**」，正文：
+  *"可用小标签增强平台感：如 "101 Shorts""REC""搜索框" 等，但必须做成通用原创元素"*
+
+但设计稿那句 **"Off follows the newer file"** 是错的：**允许**的是 grammar，
+**禁止**的是 SKILL.md。默认关 = 跟随 SKILL.md。实现时文案要改成
+"Off follows SKILL.md, which forbids them"，别照抄设计稿。
+
+---
+
+## 三、本波已落地（模板库）
+
+| 文件 | 内容 |
+|---|---|
+| `supabase/migrations/435_cover_templates.sql` | 新表，决策理由写在文件头 |
+| `backend/app/models/cover_templates.py` | ORM 模型（+ 注册进 `models/__init__.py`） |
+| `backend/app/repositories/cover_templates_repository.py` | 数据访问；`names_blocking_media()` 是删图前的引用检查 |
+| `backend/app/schemas/cover_template.py` | Pydantic（id 一律 str） |
+| `backend/app/api/cover_templates_router.py` | 5 个端点（+ 注册进 `api/__init__.py`） |
+| `backend/app/api/generated_media_router.py` | `delete_generation` 增类型化 409 |
+| `frontend/services/coverTemplateService.ts` | 客户端 + 类型化失败类 |
+| `frontend/features/canvas-core/smart/mediaImport.ts` + `types.ts` | 把后端一直在返回、前端从没读过的 `id` 接上 |
+
+尚未做：模板库 UI（选择器/上传/卡片网格）、封面工作室页面本身。

@@ -32,7 +32,7 @@ export async function importCanvasMedia(
     raw: form,
   });
   const json = (await response.json()) as {
-    data?: { url?: string; media_kind?: string };
+    data?: { id?: string; url?: string; media_kind?: string };
   };
   const data = json?.data;
   if (!data?.url) {
@@ -42,6 +42,9 @@ export async function importCanvasMedia(
     url: data.url,
     kind: data.media_kind === 'video' ? 'video' : 'image',
     name: file.name,
+    // The backend has always sent this; nothing read it until Cover Studio
+    // needed the row id to save a template. String, not number — snowflake.
+    id: data.id,
   };
 }
 
@@ -55,13 +58,13 @@ export async function importCanvasMedia(
  */
 export async function importResourceAsCanvasMedia(
   resourceId: string,
-): Promise<{ url: string; kind: 'image' | 'video' }> {
+): Promise<{ url: string; kind: 'image' | 'video'; id?: string }> {
   const response = await apiFetch('/api/v1/generated-media/import-from-resource', {
     method: 'POST',
     json: { resource_id: resourceId },
   });
   const json = (await response.json()) as {
-    data?: { url?: string; media_kind?: string };
+    data?: { id?: string; url?: string; media_kind?: string };
   };
   const data = json?.data;
   if (!data?.url) {
@@ -70,5 +73,6 @@ export async function importResourceAsCanvasMedia(
   return {
     url: data.url,
     kind: data.media_kind === 'video' ? 'video' : 'image',
+    id: data.id,
   };
 }

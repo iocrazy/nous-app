@@ -194,6 +194,17 @@ export interface GeneratedImageRef {
   url: string;
   kind: OutputKind;
   name?: string;
+  /**
+   * The generated_media row id, as a STRING (snowflake > 2^53).
+   *
+   * Both import endpoints have always returned this and nothing read it —
+   * `url` was enough for the canvas, which only ever re-serves the picture.
+   * Cover Studio needs the id itself: a cover template stores
+   * `generated_media_id`, not a URL, so that the URL stays derivable instead
+   * of stored-and-stale. Optional because older persisted node data predates
+   * it; treat absence as "not known", never as an error.
+   */
+  id?: string;
 }
 
 /** Tag on loop-produced output slots — reused by (loop, round) on re-runs. */

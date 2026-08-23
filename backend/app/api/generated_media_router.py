@@ -7,7 +7,8 @@ Routes (all under prefix /generated-media, registered in app/api/__init__.py):
   GET  /generated-media/{id}/cover     → FileResponse  (image, no auth — <img>)
   GET  /generated-media/{id}/stream    → FileResponse  (video, no auth — <video>)
   GET  /generated-media/{id}/file      → FileResponse  (404 if row/file missing)
-  DELETE /generated-media/{id}         → {data: {deleted: bool}}
+  DELETE /generated-media/{id}         → {data: {deleted: bool}} (409 if a
+                                         cover template still cites the image)
 
 Scope = caller's personal team resolved via _resolve_personal_team_id.
 """
@@ -369,7 +370,49 @@ async def get_generation(gen_id: int, auth: AuthDep) -> dict:
 
 @router.delete("/{gen_id}")
 async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
-    ok = await GeneratedMediaRepository().delete(gen_id, await _scope(auth))
+    """Delete a generation.
+
+    ⚠️ ``cover_templates.generated_media_id`` is ON DELETE RESTRICT (mig 435),
+    so an image someone saved as a cover template cannot be deleted while that
+    template exists. Left unhandled, Postgres raises IntegrityError and FastAPI
+    turns it into a bare 500 — which tells the user the server is broken when
+    the truth is that their own template is holding the picture. That is both
+    wrong and unactionable, so the block is detected first and reported as a
+    typed 409 naming the templates.
+
+    ``ConflictError``, not ``HTTPException(detail={...})``: the shared handler
+    renders an AppError as ``{error: message, code: code, details: details}``,
+    whereas a dict-valued HTTPException detail is filed under ``details`` and
+    leaves ``error`` as the generic "Request failed" — i.e. the user would read
+    nothing useful, which is the failure this branch exists to prevent.
+
+    The IntegrityError catch is not redundant with the pre-check: the two are
+    separated by a network round-trip, and a template created in between would
+    otherwise still surface as a 500.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.exceptions import ConflictError
+    from app.repositories.cover_templates_repository import CoverTemplatesRepository
+
+    scope_id = await _scope(auth)
+    blocking = await CoverTemplatesRepository().names_blocking_media(gen_id)
+    if blocking:
+        raise ConflictError(
+            "This image is saved as a cover template. Remove the template "
+            "first, then delete the image.",
+            code="used_by_cover_templates",
+            details={"template_names": blocking},
+        )
+    try:
+        ok = await GeneratedMediaRepository().delete(gen_id, scope_id)
+    except IntegrityError:
+        raise ConflictError(
+            "This image was just saved as a cover template. Remove the "
+            "template first, then delete the image.",
+            code="used_by_cover_templates",
+            details={"template_names": []},
+        )
     return {"data": {"deleted": ok}}
 
 
