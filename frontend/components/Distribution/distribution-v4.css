@@ -367,11 +367,13 @@
 .dist-v4 .cover-ai .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .dist-v4 .cover-ai .head b { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--violet); }
 .dist-v4 .cover-ai .head b svg { width: 14px; height: 14px; }
-.dist-v4 .cover-ai .head a { font-size: 11.5px; color: var(--violet); text-decoration: none; font-weight: 550; opacity: .5; cursor: not-allowed; pointer-events: none; }
+/* Was a dead `a` (opacity .5, pointer-events none) while the studio said
+   "Coming in D4". A real button since 2026-08-23. */
+.dist-v4 .cover-ai .head .open-studio { font-size: 11.5px; color: var(--violet); font-weight: 550; background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
+.dist-v4 .cover-ai .head .open-studio:hover { text-decoration: underline; }
 .dist-v4 .cover-cands { display: flex; gap: 9px; }
 .dist-v4 .cand { width: 62px; height: 82px; border-radius: 9px; border: 1px solid rgba(167, 139, 250, .3); cursor: not-allowed; position: relative; overflow: hidden; }
 .dist-v4 .cover-ai .foot { font-size: 10.5px; color: var(--content-4); margin-top: 9px; line-height: 1.5; }
-.dist-v4 .d4-note { font-size: 10.5px; color: var(--content-4); margin-top: 8px; font-style: italic; }
 
 /* ═══ phone preview ═══ */
 .dist-v4 .phone-card { background: var(--card); border: 1px solid var(--line); border-radius: 15px; padding: 14px; box-shadow: var(--shadow-card); }

@@ -86,6 +86,9 @@ from app.models.chat import (  # noqa: F401
 from app.models.codex_daemon import (  # noqa: F401
     CodexDaemons,
 )
+from app.models.cover_templates import (  # noqa: F401
+    CoverTemplates,
+)
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
     DistributionOauthStates,
@@ -310,6 +313,7 @@ __all__ = [
     # media
     "Folders",
     "GalleryItems",
+    "CoverTemplates",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",

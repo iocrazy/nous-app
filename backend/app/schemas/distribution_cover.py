@@ -10,9 +10,9 @@ BIGINT id 一律用 str 序列化 —— 与 ``distribution_publish`` 同款，J
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.services.distribution.cover_frames import (
     DEFAULT_COVER_FRAMES,
@@ -135,6 +135,77 @@ class CoverSelectRequest(BaseModel):
                 "(frame_resource_id is the deprecated alternative)"
             )
         return self
+
+
+class CoverGrabFrameRequest(BaseModel):
+    """Grab one frame by hand, to use as a REFERENCE (Cover Studio).
+
+    Deliberately not the same request as ``CoverSelectRequest``: that one
+    finishes a cover, this one only collects raw material. Sharing a schema
+    would make the two indistinguishable at the boundary, and they differ in
+    the one way that matters — where the bytes land.
+    """
+
+    source_resource_id: str = Field(..., min_length=1)
+    timestamp_seconds: float = Field(..., ge=0)
+
+
+class CoverGrabFrameResponse(BaseModel):
+    """The frame, already durable enough to be handed to the model.
+
+    ``url`` is the ONLY URL shape the image generation bridge accepts as a
+    reference; the frontend must pass it through untouched rather than rebuild
+    it from ``generated_media_id``.
+    """
+
+    generated_media_id: str
+    url: str
+    timestamp_seconds: float
+
+
+class CoverGenerateRequest(BaseModel):
+    """Dispatch one Cover Studio generation.
+
+    ``stage`` is the whole shape of the flow, so it is a required Literal and
+    not an optional flag: stage 1 asks for the 2x2 grid of four drafts, stage 2
+    redraws the one the user picked. They build different prompts and stage 2
+    is meaningless without ``selected_draft``.
+    """
+
+    stage: Literal[1, 2]
+    topic: str = Field(..., min_length=1, max_length=200)
+    # mediahub_models catalog row name; "" = let the catalog pick.
+    model: str = ""
+    # generated_media reference URLs, in pool order. The server re-checks the
+    # cap, so a client bug cannot quietly spend more than nine.
+    source_urls: list[str] = Field(default_factory=list, max_length=9)
+    quality: str = "high"
+    # ⚠️ Default OFF — the two source files disagree and this follows SKILL.md,
+    # which forbids them. See cover_prompt.CoverPromptInput.
+    allow_small_labels: bool = False
+    # Stage 2 only.
+    selected_draft: Optional[int] = Field(default=None, ge=1, le=4)
+    headline: str = Field(default="", max_length=120)
+
+    @field_validator("topic")
+    @classmethod
+    def _topic_not_blank(cls, v: str) -> str:
+        trimmed = (v or "").strip()
+        if not trimmed:
+            # ``min_length=1`` inspects the RAW string, so four spaces pass it
+            # and then the prompt builder raises deeper in — as a 500.
+            raise ValueError("topic cannot be blank")
+        return trimmed
+
+
+class CoverGenerateResponse(BaseModel):
+    task_id: str
+    # Echoed so the UI can show exactly what the model was asked, which the
+    # design puts behind a "What was sent to the model" disclosure. Sending it
+    # back beats rebuilding it client-side and hoping the two agree.
+    prompt: str
+    aspect: str
+    reference_count: int
 
 
 class CoverSelectResponse(BaseModel):

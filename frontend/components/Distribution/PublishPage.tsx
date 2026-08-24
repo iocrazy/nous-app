@@ -27,6 +27,7 @@ import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
+import { CoverStudioOverlay } from './CoverStudio/CoverStudioOverlay';
 import { PublishPreview, type PreviewSoundtrack } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
 import { DateTimePopover } from '../common/DateTimePopover';
@@ -588,6 +589,7 @@ export const PublishPage: React.FC = () => {
   // The 3:4 / 4:3 pair derived from a video frame. Null = let the platform
   // pick its own frame at publish time.
   const [covers, setCovers] = useState<CoverPair | null>(null);
+  const [coverStudioOpen, setCoverStudioOpen] = useState(false);
   const [aiContent, setAiContent] = useState(false);
   // '' = leave the platform's declaration control alone. Deliberately NOT the
   // same as '无需添加自主声明', which is a declaration the user chose and the
@@ -2638,21 +2640,36 @@ export const PublishPage: React.FC = () => {
                 <div className="cover-ai">
                   <div className="head">
                     <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
-                    <a href="#cover-studio" aria-disabled="true" onClick={(e) => e.preventDefault()}>
+                    {/* A real button at last — the dead `aria-disabled` anchor
+                        ("Coming in D4") lived here until 2026-08-23. Opens a
+                        full-screen LAYER, not a route: this page holds ~75
+                        pieces of un-persisted form state, and navigating away
+                        would wipe everything the user just filled in. */}
+                    <button
+                      type="button"
+                      className="open-studio"
+                      onClick={() => setCoverStudioOpen(true)}
+                      data-testid="open-cover-studio"
+                    >
                       {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
-                    </a>
+                    </button>
                   </div>
-                  {/* The three gradient tiles that used to sit here were mock
-                      candidates — placeholder art, not images anyone could pick.
-                      They were harmless while the whole cover area was a stub;
-                      now they sit directly beside a frame picker that DOES work,
-                      and two rows of thumbnails where only one is clickable reads
-                      as a bug rather than as "not built yet". The line below says
-                      the same thing without pretending to have output. */}
                   <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
-                  <div className="d4-note">{t('distribution.publish.comingInD4', 'Coming in D4')}</div>
                 </div>
               </div>
+              <CoverStudioOverlay
+                open={coverStudioOpen}
+                scopeId={scopeId ?? ''}
+                sources={selectedVideoObjs}
+                topic={title}
+                onClose={() => setCoverStudioOpen(false)}
+                onApply={(verticalResourceId) => {
+                  // The studio's cover is 3:4 only; CoverPair allows a missing
+                  // horizontal precisely for this path, and publishing uses
+                  // vertical first anyway.
+                  setCovers({ vertical: verticalResourceId });
+                }}
+              />
             </div>
           )}
 

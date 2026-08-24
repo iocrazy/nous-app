@@ -697,6 +697,35 @@ export const extractCoverFrames = (body: {
  * form picks a cover BEFORE the task is created and passes the two returned
  * ids into the create body instead.
  */
+/**
+ * Grab one frame by hand, to use as a REFERENCE (Cover Studio).
+ *
+ * Not `selectCoverFrame`: that one finishes a cover (crops 3:4 + 4:3 into two
+ * `resources` rows that the publish task references by id). This one only
+ * collects raw material and lands it as a single `generated_media` row —
+ * because the image generation bridge accepts ONLY
+ * `/api/v1/generated-media/{id}/...` URLs as references and silently drops
+ * anything else. Pass `url` through untouched; rebuilding it from `id` is the
+ * one place the two could drift apart.
+ */
+export interface GrabbedCoverFrame {
+  generated_media_id: string;
+  url: string;
+  timestamp_seconds: number;
+}
+
+export const grabCoverFrame = async (
+  sourceResourceId: string,
+  timestampSeconds: number,
+): Promise<GrabbedCoverFrame> =>
+  request<GrabbedCoverFrame>('/covers/grab-frame', {
+    method: 'POST',
+    body: JSON.stringify({
+      source_resource_id: sourceResourceId,
+      timestamp_seconds: timestampSeconds,
+    }),
+  });
+
 export const selectCoverFrame = (body: {
   source_resource_id: string;
   timestamp_seconds: number;
@@ -765,11 +794,22 @@ const num = (v: unknown): number | null =>
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v !== '' ? v : null;
 
-export const listLibraryMedia = async (
+/**
+ * The same query as ``listLibraryMedia`` but it THROWS instead of swallowing.
+ *
+ * ``listLibraryMedia`` catches everything and returns ``[]``, which makes a
+ * failed load indistinguishable from "you own no media" — the publish picker
+ * tolerates that because an empty grid there still reads as "nothing to pick".
+ * A surface that must tell the two apart (the cover-template picker says
+ * "Nothing here yet" in one case and "Could not load your library" in the
+ * other) cannot be built on a function whose only failure signal is an empty
+ * array. New callers should prefer this one.
+ */
+export const listLibraryMediaOrThrow = async (
   scopeId: string,
   opts?: { tagId?: string; mediaType?: 'video' | 'image' },
 ): Promise<LibraryVideo[]> => {
-  try {
+  {
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
     // `types` maps to the backend mime filter: 'video' → mime LIKE 'video/%',
     // 'image' → mime LIKE 'image/%'. Defaults to video for back-compat.
@@ -813,6 +853,15 @@ export const listLibraryMedia = async (
         created_at: str(r.resource?.created_at),
       };
     });
+  }
+};
+
+export const listLibraryMedia = async (
+  scopeId: string,
+  opts?: { tagId?: string; mediaType?: 'video' | 'image' },
+): Promise<LibraryVideo[]> => {
+  try {
+    return await listLibraryMediaOrThrow(scopeId, opts);
   } catch (err) {
     console.error('distribution: list library media failed', err);
     return [];

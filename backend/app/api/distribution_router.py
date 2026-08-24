@@ -45,6 +45,10 @@ from app.schemas.distribution import (
 from app.schemas.distribution_cover import (
     CoverExtractRequest,
     CoverExtractResponse,
+    CoverGenerateRequest,
+    CoverGenerateResponse,
+    CoverGrabFrameRequest,
+    CoverGrabFrameResponse,
     CoverSelectRequest,
     CoverSelectResponse,
 )
@@ -1632,6 +1636,144 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
         cover_vertical_resource_id=pair.vertical_resource_id,
         cover_horizontal_resource_id=pair.horizontal_resource_id,
         publish_task_id=body.publish_task_id,
+    )
+
+
+@router.post(
+    "/covers/grab-frame",
+    response_model=CoverGrabFrameResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def grab_cover_frame(body: CoverGrabFrameRequest, user: CurrentUserDep):
+    """抓一帧当**参考图**（封面工作室），不是当成品封面。
+
+    与 ``/covers/select`` 共用抽帧那一半，区别只有落点：select 裁两张并落成
+    ``resources``（成品封面按 id 被 publish_tasks 引用、被浏览器侧取走），这里
+    不裁、落成一个 ``generated_media`` 行。
+
+    ⚠️ 落点不能对调。出图链路的参考图入口只认
+    ``/api/v1/generated-media/{id}/(cover|stream|file)``，别的 URL 会被
+    ``generated_media_local_path()`` 静默丢弃 —— 一帧落成 resources 行看起来
+    一切正常，却永远进不了模型，而且不报错。
+
+    同步而不是 workflow，理由与 select 相同：抓帧是用户在时间轴上拖完就按的
+    动作，源视频多半还在 materialize 的本机读通缓存里；让它绕一圈 Realtime
+    才是净损失。504 上界在服务层。
+    """
+    from app.services.distribution.cover_frames import (
+        CoverFrameError,
+        grab_frame_as_reference,
+    )
+
+    try:
+        async with request_scope(Scope(user_id=user["id"])):
+            grabbed = await grab_frame_as_reference(
+                source_resource_id=str(body.source_resource_id),
+                timestamp_seconds=float(body.timestamp_seconds),
+                user_id=user["id"],
+            )
+    except CoverFrameError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except UnscopedQueryError as e:
+        logger.error("cover frame grab ran without a tenant scope: %s", e)
+        raise HTTPException(
+            status_code=500, detail="cover frame grab is misconfigured"
+        ) from e
+
+    return CoverGrabFrameResponse(**grabbed.as_dict())
+
+
+@router.post(
+    "/covers/generate",
+    response_model=CoverGenerateResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
+    """派一次封面生成（阶段一四草案网格 / 阶段二精修选中那格）。
+
+    **复用现有的出图引擎，只换一个入口。** `POST /canvases/{id}/generations` 要
+    canvas_id 且按画布鉴权，而封面工作室没有画布；`canvas_generation_workflow` 的
+    `canvas_id` 本来就是 Optional，所以这里直接以 None 起它，不去凭空造一个隐藏
+    画布来满足一个路由前缀。
+
+    进度轮询复用 `GET /api/v1/canvases/generations/{task_id}` —— 它读的是
+    task_tracking、按用户闸门，跟画布无关。
+
+    prompt 由服务端组装并**原样回给前端**：设计稿有一块"What was sent to the
+    model"要显示它。让前端自己拼一份"应该一样"的字符串，是两份必然漂移的真相。
+    """
+    import uuid as _uuid
+
+    from app.services.distribution.cover_prompt import (
+        COVER_ASPECT,
+        CoverPromptInput,
+        build_stage1_prompt,
+        build_stage2_prompt,
+    )
+    from app.services.infra import dbos_orchestrator
+    from app.workflows.canvas_generation import canvas_generation_workflow
+
+    data = CoverPromptInput(
+        topic=body.topic,
+        allow_small_labels=body.allow_small_labels,
+        selected_draft=body.selected_draft,
+        headline=body.headline,
+    )
+    try:
+        prompt = (
+            build_stage1_prompt(data) if body.stage == 1 else build_stage2_prompt(data)
+        )
+    except ValueError as e:
+        # 组装器的拒绝是对**输入**的判断（空主题、编号越界），是 4xx 不是 500。
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    # 只过滤空串，**不截断**。上限由 schema 的 max_length=9 在边界上响亮拒绝
+    # （422），这里再 `[:9]` 一刀是静默截断 —— 客户端多送了两张，服务端一声不吭
+    # 地扔掉，用户看到的是"我明明选了 11 张"。而且那会是同一个数字的第三份副本：
+    # schema 一份、引擎侧 canvas_generation.py:141 一份，将来谁改了谁不知道。
+    # 引擎那一刀是最终兜底，且它兜的是内部不变量，不是用户输入。
+    refs = [u for u in body.source_urls if u]
+
+    wf_id = str(_uuid.uuid4())
+    task_id = await get_task_manager().create(
+        user_id=user["id"],
+        task_type="cover_gen",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
+        title=f"Cover stage {body.stage}",
+        subtitle=body.topic[:80],
+        dbos_workflow_id=wf_id,
+        metadata={
+            "cover_stage": body.stage,
+            "topic": body.topic,
+            "selected_draft": body.selected_draft,
+            "reference_count": len(refs),
+        },
+    )
+    await dbos_orchestrator.start_workflow_routed(
+        "canvas_generation",
+        dbos_workflow_callable=canvas_generation_workflow,
+        dbos_workflow_kwargs={
+            "kind": "image",
+            "prompt": prompt,
+            "model": body.model,
+            # ⚠️ 图片分支读的是 params["ratio"]，不是 "aspect"（视频才读 aspect）。
+            # 写错不会报错，只会静默变成正方形。
+            "params": {
+                "ratio": COVER_ASPECT,
+                "quality": body.quality,
+                "source_urls": refs,
+            },
+            "canvas_id": None,
+            "node_id": None,
+            "user_id": user["id"],
+            "source_url": None,
+        },
+        workflow_id=wf_id,
+    )
+    return CoverGenerateResponse(
+        task_id=task_id,
+        prompt=prompt,
+        aspect=COVER_ASPECT,
+        reference_count=len(refs),
     )
 
 

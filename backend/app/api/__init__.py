@@ -21,6 +21,7 @@ from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
 from app.api.conversation_router import router as conversation_router
+from app.api.cover_templates_router import router as cover_templates_router
 from app.api.episodes_router import router as episodes_router
 from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
@@ -135,6 +136,7 @@ api_router.include_router(router=canvases_router, tags=["Canvas"])
 api_router.include_router(router=_project_assets_router, tags=["Project Assets"])
 
 api_router.include_router(router=generated_media_router, tags=["Generated Media"])
+api_router.include_router(router=cover_templates_router, tags=["Cover Templates"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])
 
