@@ -172,7 +172,7 @@ class MediahubModelRepository:
         """
         try:
             stmt = (
-                select(*_PUBLIC_COLS)
+                select(*_PUBLIC_COLS, MediahubModels.actual_provider)
                 .where(MediahubModels.is_enabled.is_(True))
                 .order_by(MediahubModels.sort_order)
             )
@@ -190,7 +190,16 @@ class MediahubModelRepository:
             async with read_scope() as session:
                 result = await session.execute(stmt)
                 # Partial-column SELECT → mappings() gives DB-column-keyed rows.
-                return [_parity(dict(m)) for m in result.mappings().all()]
+                # actual_provider itself stays private (the 2026-08-14 leak
+                # tripwire); the picker only needs ONE bit — does this row run
+                # on the viewer's own machine via the codex daemon?
+                out = []
+                for m in result.mappings().all():
+                    row = dict(m)
+                    provider = row.pop("actual_provider", None)
+                    row["is_local"] = provider == "codex-local"
+                    out.append(_parity(row))
+                return out
         except Exception as e:
             logger.error(f"Failed to list enabled mediahub models: {e}")
             return []

@@ -100,7 +100,7 @@ async def test_list_enabled_filters_is_enabled_true(
 ) -> None:
     fake_session.mapping_rows = [{"id": 1, "name": "nous-base"}]
     rows = await repo.list_enabled()
-    assert rows == [{"id": 1, "name": "nous-base"}]
+    assert rows == [{"id": 1, "name": "nous-base", "is_local": False}]
 
     sql, _ = fake_session.calls[-1]
     assert "mediahub_models" in sql

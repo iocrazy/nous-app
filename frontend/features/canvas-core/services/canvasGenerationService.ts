@@ -15,7 +15,10 @@ export interface GenerationModel {
   name: string;
   display_name: string;
   type: 'image' | 'video';
-  actual_provider: string;
+  /** True when this row runs on the viewer's own machine via the paired
+   *  codex daemon. (The raw provider name is deliberately not exposed —
+   *  2026-08-14 leak tripwire.) */
+  is_local?: boolean;
   sort_order?: number;
 }
 

@@ -1,6 +1,10 @@
 # Locally-managed tunnel ingress —— 唯一真相在此文件（非 dashboard）
 # 凭证住服务器 /media/heygo/program/nous/secrets/cloudflared/（2T 数据盘），compose 挂到容器 /etc/cloudflared/creds/
 tunnel: 95222cdd-1ea0-40aa-8329-f0f6a35282bd
+# 传输层强制 http2(TCP):本机网络对 QUIC/UDP 不友好 —— 实测 QUIC 模式下
+# >0.5MB 上行直接把隧道连接打崩("timeout: no recent network activity"),
+# WebSocket 也随机 1006 断线(2026-08-24 codex-daemon 上传 502 事故)。
+protocol: http2
 credentials-file: /etc/cloudflared/creds/95222cdd-1ea0-40aa-8329-f0f6a35282bd.json
 
 ingress:
