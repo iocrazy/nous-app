@@ -111,6 +111,56 @@ class InterceptHandler(logging.Handler):
         ).log(level, record.getMessage())
 
 
+# Our own modules that use stdlib logging live under the ``app.*`` logger
+# namespace (``logging.getLogger(__name__)`` in ``app/services/...``).
+APP_LOGGER_NAMESPACE = "app"
+
+
+def bridge_app_logging_to_loguru() -> None:
+    """Route our own stdlib-logging modules into loguru (and thus the DB sink).
+
+    ``InterceptHandler`` was only ever attached to third-party logger names
+    (uvicorn, celery, httpx, httpcore). Modules of ours that use
+    ``logging.getLogger(__name__)`` were on nobody's list, so their output
+    reached neither loguru nor ``application_logs``.
+
+    Production, 2026-08-23, in a 2.8M-row ``application_logs``::
+
+        agent_runner            stdlib   0 rows
+        llm_fallback_chain      stdlib   0 rows
+        llm_compactor           stdlib   0 rows
+        agent_worker            stdlib   0 rows
+        ai_library_chat_service loguru  63 rows   <- positive control
+        browser_client          loguru 209 rows   <- positive control
+
+    The whole agent hot path had no logs in the database. Absent, not sparse —
+    the loguru controls prove the query worked.
+
+    **``app``, not root.** Bridging the root logger would sweep in every
+    library that logs (sqlalchemy, asyncio, botocore, …) and turn that table
+    into a firehose — swapping a blind spot for a flood. The ``app`` namespace
+    captures exactly our own ~168 statements and nothing else.
+
+    Idempotent: startup can run more than once (reload, worker fork, tests),
+    and duplicate handlers would write every line twice.
+    """
+    app_logger = logging.getLogger(APP_LOGGER_NAMESPACE)
+    if not any(isinstance(h, InterceptHandler) for h in app_logger.handlers):
+        app_logger.handlers = [
+            h for h in app_logger.handlers if not isinstance(h, InterceptHandler)
+        ] + [InterceptHandler()]
+    app_logger.setLevel(logging.INFO)
+    # Propagation is deliberately LEFT ON. Turning it off is the reflex here —
+    # "stop the same line reaching root handlers too" — but this app never
+    # configures root handlers (verified: root's handler list is empty after
+    # setup), so there is nothing to double up. What propagation does buy is
+    # that standard tooling can still observe these records: pytest's `caplog`
+    # captures through root, and five existing tests assert on exactly that.
+    # Switching it off traded five working tests for a benefit that does not
+    # exist in this codebase.
+    app_logger.propagate = True
+
+
 class SingletonMeta(type):
     _instances = {}
 
@@ -228,6 +278,10 @@ class Utils:
             logger.add(db_log_sink, level="INFO", format="{message}", catch=True)
         except Exception:
             pass  # Skip if Supabase not configured
+
+        # Our own modules first — see bridge_app_logging_to_loguru for why the
+        # `app` namespace and not root.
+        bridge_app_logging_to_loguru()
 
         # Bridge stdlib logging → loguru (captures uvicorn, httpx, celery, etc.)
         intercept = InterceptHandler()
