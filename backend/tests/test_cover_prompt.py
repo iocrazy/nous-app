@@ -79,7 +79,13 @@ class TestStageOne:
         """骨架里 `Draft 1: [headline A], [composition A]…` 是给模型填的槽。
         把方括号原样发出去，模型会照着 "[headline A]" 画字。"""
         p = _s1()
-        for marker in ("[headline", "[composition", "[background", "[emotion", "[topic"):
+        for marker in (
+            "[headline",
+            "[composition",
+            "[background",
+            "[emotion",
+            "[topic",
+        ):
             assert marker not in p, f"占位符 {marker} 漏进了 prompt"
 
     def test_it_tells_the_model_to_invent_the_four_directions(self):
@@ -89,7 +95,7 @@ class TestStageOne:
         assert "clearly different" in p
 
     def test_it_pins_the_character_across_all_four(self):
-        """"保持同一个人"是这套风格的一半。四格里换脸就等于风格坏了。"""
+        """ "保持同一个人"是这套风格的一半。四格里换脸就等于风格坏了。"""
         p = _s1()
         assert "same person and core facial features" in p
 
@@ -102,9 +108,7 @@ class TestStageOne:
 
 class TestStageTwo:
     def test_it_names_the_chosen_draft(self):
-        p = build_stage2_prompt(
-            CoverPromptInput(topic=TOPIC, selected_draft=3)
-        )
+        p = build_stage2_prompt(CoverPromptInput(topic=TOPIC, selected_draft=3))
         assert "draft number 3" in p
         assert "labelled 3" in p
 

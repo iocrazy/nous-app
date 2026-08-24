@@ -142,7 +142,11 @@ class TestDispatch:
         assert spy.started == [], "被拒绝的请求不该派出任何工作"
 
     def test_empty_urls_are_filtered_without_changing_the_rest(self, spy):
-        urls = ["/api/v1/generated-media/1/cover", "", "/api/v1/generated-media/2/cover"]
+        urls = [
+            "/api/v1/generated-media/1/cover",
+            "",
+            "/api/v1/generated-media/2/cover",
+        ]
         resp = _post(TestClient(_make_app()), source_urls=urls)
 
         sent = spy.started[0]["dbos_workflow_kwargs"]["params"]["source_urls"]
