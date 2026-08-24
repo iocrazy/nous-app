@@ -689,7 +689,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 {/* Empty value → backend resolves the DB catalog default. */}
                 <option value="">Catalog default</option>
                 {textModels.map((m) => (
-                  <option key={m.name} value={m.name} data-description={m.actual_provider}>
+                  <option key={m.name} value={m.name}>
                     {m.display_name || m.name}
                   </option>
                 ))}

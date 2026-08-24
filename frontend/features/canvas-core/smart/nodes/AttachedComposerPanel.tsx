@@ -49,9 +49,17 @@ export function AttachedComposerPanel({
     inputUrls[0] ?? null,
   );
   const allModels = useGenerationModels(kind);
-  const engines = Array.from(new Set(allModels.map((m) => m.actual_provider))).sort();
+  // actual_provider never reaches the client (2026-08-14 leak tripwire —
+  // the field was always null in prod, so this grouping never worked).
+  // Until a public grouping key is decided, filter out the ghost values so
+  // the dropdown doesn't render an 'undefined' entry.
+  const engines = Array.from(
+    new Set(allModels.map((m) => (m as { actual_provider?: string }).actual_provider)),
+  )
+    .filter((e): e is string => Boolean(e))
+    .sort();
   const models = engine
-    ? allModels.filter((m) => m.actual_provider === engine)
+    ? allModels.filter((m) => (m as { actual_provider?: string }).actual_provider === engine)
     : allModels;
 
   // Unlike the small hover toolbars, the FULL panel renders only while the

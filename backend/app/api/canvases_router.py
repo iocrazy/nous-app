@@ -213,7 +213,7 @@ _GENERATION_MODEL_PUBLIC_FIELDS = (
     "name",
     "display_name",
     "type",
-    "actual_provider",
+    "is_local",
     "sort_order",
 )
 
