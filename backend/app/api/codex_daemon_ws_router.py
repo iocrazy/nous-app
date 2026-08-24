@@ -1,31 +1,44 @@
-"""codex_daemon_ws_router — the daemon's outbound WebSocket (C2).
+"""codex_daemon_ws_router — the daemon's outbound WebSocket (C2 + C4 glue).
 
 The daemon dials OUT to nous (no inbound port, no public IP needed on the
 user's machine) and holds the socket open. Auth is the device token minted
 at pairing: we hash it and look the device up; unknown or revoked tokens are
 refused BEFORE accept() so a dead device never sees an open socket.
 
+Cross-container glue (spec §4): this handler runs in the *gateway* process,
+but jobs originate in the *worker* container. So on connect we
+
+- refresh the Redis presence marker on every real heartbeat (a zombie
+  socket stops refreshing and the marker dies with it — presence stays
+  falsifiable), and
+- run a forwarder task subscribed to ``codex_jobs:<user_id>`` that hands
+  each job to this socket (first-wins claim dedupes multi-device users),
+  publishing the daemon's verdict back on ``codex_results:<job_id>``.
+
 Protocol (spec §4/§5):
   daemon → {"type":"ping"}                  every 30s
   server → {"type":"pong"}
-  server → {"type":"job", ...}              dispatch (C4)
-  daemon → {"type":"job_done"|"job_failed"} result (C4)
+  server → {"type":"job", ...}              dispatch
+  daemon → {"type":"job_done"|"job_failed"} result
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from app.api.codex_daemon_router import token_hash
-from app.services.codex.daemon_dispatch import resolve_job
+from app.services.codex import daemon_presence
 from app.services.codex.daemon_registry import registry
 
 router = APIRouter(tags=["Codex Daemon"])
 
-# 90s without a ping (3 missed heartbeats) ⇒ the device is gone.
+# 90s without a frame (3 missed heartbeats) ⇒ the device is gone. Enforced
+# via receive timeout — a half-dead TCP session cannot squat the registry.
 HEARTBEAT_TIMEOUT_SECONDS = 90
 
 
@@ -40,6 +53,53 @@ async def authenticate_device(device_token: str) -> Optional[dict[str, Any]]:
     if not device_token:
         return None
     return await _lookup_device(token_hash(device_token))
+
+
+async def _forward_jobs(websocket: WebSocket, user_id: str, device_id: str) -> None:
+    """Relay worker-published jobs from Redis to this device's socket."""
+    from app.core.redis import get_async_redis
+
+    redis = await get_async_redis()
+    pubsub = redis.pubsub()
+    channel = f"{daemon_presence.JOBS_CHANNEL_PREFIX}{user_id}"
+    await pubsub.subscribe(channel)
+    try:
+        while True:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=5.0
+            )
+            if message is None:
+                continue
+            data = message.get("data")
+            if isinstance(data, bytes):
+                data = data.decode()
+            try:
+                job = json.loads(data)
+            except Exception:
+                continue
+            job_id = str(job.get("job_id") or "")
+            if not job_id:
+                continue
+            if not await daemon_presence.claim_job(job_id, device_id):
+                continue  # another device of this user won the job
+            try:
+                await websocket.send_json(job)
+            except Exception as exc:
+                # Socket died between claim and send: publish a typed failure
+                # so the worker's waiter fails fast instead of timing out.
+                logger.warning(
+                    "[codex-daemon] forward failed device={} err={}", device_id, exc
+                )
+                await daemon_presence.publish_result(
+                    job_id, {"error": "daemon_offline: socket closed mid-dispatch"}
+                )
+                return
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+        except Exception:
+            pass
 
 
 @router.websocket("/ws/codex-agent")
@@ -58,14 +118,25 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
     device_id = str(device["id"])
     await websocket.accept()
     registry.register(user_id=user_id, device_id=device_id, ws=websocket)
+    await daemon_presence.mark_online(user_id, device_id)
     await _touch_last_seen(device_id)
+    forwarder = asyncio.create_task(_forward_jobs(websocket, user_id, device_id))
 
     try:
         while True:
-            message = await websocket.receive_json()
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive_json(), timeout=HEARTBEAT_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.info(
+                    "[codex-daemon] heartbeat timeout device={} — closing", device_id
+                )
+                break
             kind = str(message.get("type") or "")
             if kind == "ping":
                 await websocket.send_json({"type": "pong"})
+                await daemon_presence.mark_online(user_id, device_id)
                 await _touch_last_seen(device_id)
             elif kind in ("job_done", "job_failed", "job_progress"):
                 job_id = str(message.get("job_id") or "")
@@ -73,7 +144,7 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                     "[codex-daemon] {} from device={} job={}", kind, device_id, job_id
                 )
                 if kind == "job_done":
-                    resolve_job(
+                    await daemon_presence.publish_result(
                         job_id,
                         {
                             "gen_id": message.get("gen_id"),
@@ -82,7 +153,7 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                     )
                 elif kind == "job_failed":
                     code = str(message.get("code") or "job_failed")
-                    resolve_job(
+                    await daemon_presence.publish_result(
                         job_id,
                         {"error": f"{code}: {message.get('message') or ''}".strip()},
                     )
@@ -93,7 +164,16 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
     except Exception as exc:
         logger.warning("[codex-daemon] socket error device={} err={}", device_id, exc)
     finally:
+        forwarder.cancel()
         registry.unregister(user_id=user_id, device_id=device_id)
+        # Clearing presence on one device's exit briefly hides a second
+        # device of the same user; its next ping (≤30s) restores the marker.
+        # Better a 30s false-offline than a 90s zombie-online.
+        await daemon_presence.mark_offline(user_id, device_id)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 async def _touch_last_seen(device_id: str) -> None:
