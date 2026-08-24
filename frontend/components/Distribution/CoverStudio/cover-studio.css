@@ -692,3 +692,300 @@
   color: var(--content-2);
   white-space: pre-wrap;
 }
+
+/* ── Frame grabber ──────────────────────────────────────────────────────── */
+
+.cover-studio .cs-source {
+  width: 100%;
+  margin-bottom: 10px;
+  appearance: none;
+  background: var(--island-2);
+  color: var(--content);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cover-studio .cs-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--island-2);
+}
+
+.cover-studio .cs-stage video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+
+.cover-studio .cs-track {
+  margin-top: 9px;
+  position: relative;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--island-2);
+  border: 1px solid var(--line-strong);
+}
+
+/* The range input IS the whole track — transparent, on top, owning the
+   interaction (same layering VideoPlayer uses). The painted bar and the dots
+   underneath are presentation only. */
+.cover-studio .cs-track input[type='range'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: ew-resize;
+  z-index: 2;
+  margin: 0;
+}
+
+.cover-studio .cs-track .played {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-soft);
+  border-radius: 4px 0 0 4px;
+  pointer-events: none;
+}
+
+.cover-studio .cs-track .mark {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--content-3);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cover-studio .cs-grab {
+  margin-top: 9px;
+  width: 100%;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cover-studio .cs-grab:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.cover-studio .cs-grab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── The overlay shell ──────────────────────────────────────────────────── */
+
+/* A LAYER over the publish page, not a route: the ~75 pieces of publish form
+   state stay alive underneath, and "Back to publish" is literally true. */
+.cover-studio.cs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow-y: auto;
+  background: var(--app-bg, var(--island));
+  padding: 22px 20px 60px;
+}
+
+.cover-studio .cs-top {
+  max-width: 1180px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.cover-studio .cs-top h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cover-studio .cs-top .ctx {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--content-3);
+}
+
+.cover-studio .cs-back {
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--content-2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cover-studio .cs-back:hover {
+  color: var(--content);
+  border-color: var(--content-4);
+}
+
+.cover-studio .cs-cols {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 348px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 940px) {
+  .cover-studio .cs-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cover-studio .cs-col-controls > * + *,
+.cover-studio .cs-col-results > * + * {
+  margin-top: 14px;
+}
+
+.cover-studio .cs-style-name {
+  font-weight: 550;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.cover-studio .cs-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--content-2);
+  cursor: pointer;
+}
+
+.cover-studio .cs-toggle input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.cover-studio .cs-toggle em {
+  display: block;
+  font-style: normal;
+  color: var(--content-4);
+  margin-top: 2px;
+}
+
+/* The person toggle sits between grabber and pool — a card-less strip. */
+.cover-studio .cs-person-toggle {
+  padding: 2px 4px;
+  margin-top: 0;
+}
+
+/* ── Final cover ────────────────────────────────────────────────────────── */
+
+.cover-studio .cs-finalwrap {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .cover-studio .cs-finalwrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cover-studio .cs-final {
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--island-2);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cover-studio .cs-final img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-studio .cs-chosen {
+  padding: 11px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--ok-line);
+  background: var(--ok-soft);
+  font-size: 12.5px;
+}
+
+.cover-studio .cs-chosen b {
+  color: var(--ok);
+}
+
+.cover-studio .cs-chosen ul {
+  margin: 5px 0 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--content-2);
+}
+
+.cover-studio .cs-actions {
+  margin-top: 11px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cover-studio .cs-ghost {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--content-2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cover-studio .cs-ghost:hover:not(:disabled) {
+  color: var(--content);
+  border-color: var(--content-4);
+}
+
+.cover-studio .cs-ghost:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

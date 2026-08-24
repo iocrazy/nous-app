@@ -59,7 +59,14 @@ const SAMPLING_TIMEOUT_MS = 11 * 60 * 1000;
 
 export interface CoverPair {
   vertical: string;
-  horizontal: string;
+  /**
+   * Optional since Cover Studio: the AI cover is 3:4 only, and center-cropping
+   * a portrait into 4:3 would cut the face out — so that path genuinely has no
+   * horizontal. Publishing only ever uses one of the two anyway
+   * (publish_distribution.py: vertical first, horizontal as fallback), and the
+   * gate requires "either", not "both".
+   */
+  horizontal?: string;
 }
 
 export interface CoverPickerProps {

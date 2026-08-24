@@ -342,5 +342,28 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - 超过 9 张**响亮拒绝**（schema 422），服务端不再 `[:9]` 静默截断 —— 后者会把
   「我明明选了 11 张」变成一声不吭扔掉两张，而且是同一个数字的第三份副本。
 
-尚未做：封面工作室页面本身（把这些拼起来的浮层外壳 / 抓帧 UI / 风格与模型选择 /
-2×2 选格 / 最终回填）。
+### 第六波（浮层外壳 —— 全部拼装完成）
+
+| 文件 | 内容 |
+|---|---|
+| `.../CoverFrameGrabber.tsx` | 抓帧卡：原生 `<video>` + 时间轴 + 已截帧圆点 |
+| `.../CoverDrafts.tsx` | Drafts 卡：**一张图四个象限**、步骤条、「发给模型的原文」 |
+| `.../CoverStudioOverlay.tsx` | 浮层外壳：拼装 + 两阶段驱动 + Apply（promote → 回填） |
+| `services/coverStudioService.ts` | 两阶段派工 + 等结果（复用 `pollGeneration`） |
+| `PublishPage.tsx` | 死占位卡（"Coming in D4"）→ 真按钮 + 渲染浮层 |
+| `CoverPicker.tsx` | `CoverPair.horizontal` 放宽为可缺省（AI 封面只产 3:4） |
+
+拼装层的关键约定（各有测试钉住）：
+- **抓的是时间戳不是像素**：服务端回源文件按全画质重读那一帧；抓之前先暂停（播放中
+  时钟会在点击与读取之间前进，用户抓到的必须是他看到的那一帧）。
+- **人物参考来自勾选后的下一次抓取**，抓完自动取消勾选（留着会让之后每次抓取都变成
+  一次没被要求的换人）。
+- **阶段二只发 人物 + 网格** —— 阶段二的 prompt 只提到这两张图；把帧和模板也重发，
+  是把参考位花在 prompt 从没提过的图上。
+- **Apply 回传的是 promote 后的 resources id**，不是 generated_media id ——
+  `publish_tasks.cover_vertical_resource_id` 引用的是 resources 行，发 gen id 会在
+  发布时 404。promote 失败时浮层**不关**（关了看起来和成功一模一样）。
+- tsconfig 没开 strict → 判别联合在 else 分支收窄不掉 `ok: true` 成员，必须用
+  `=== false` 字面量比较（`CoverStudioOverlay` 里有注释）。
+
+**全部六波完成。** 剩余为真机验收（走查 npm run e2e:prod 范式）与发布。
