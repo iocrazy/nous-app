@@ -1,5 +1,21 @@
 # deepseek-harness 借鉴落地计划（2026-08-22）
 
+> **✅ 完成账（2026-08-24 回填）**：五波全部实施完毕。执行序 W5→W3→W1→W4→W2，
+> 每波开工先验计划假设 —— **五波里四波的计划描述与勘察后的现状不符**，照原文
+> 直接动手会做错四次。逐波状态：
+>
+> | 波 | PR | 实测后的改判 |
+> |---|---|---|
+> | W5 纪律包 | #1966 | 第 5 项"工具 schema 改白名单"实测**已是白名单**，降级为回归测试钉住；多抓出未登记框 `pending_followups` |
+> | W3 压缩 | #1972 #1975 | 勘察时挖出**信封误读六处**（记忆/摘要链恒空写，生产 `ai_session_memory` 唯一行全空实证）；第 2 项已实现→补真覆盖；第 4 项改判为"分母坏了"（12/20 agent 窗口回落默认 28000，静默）；**第 1 项 warm-prefix 未做待拍板**（要求摘要改走对话模型，是成本挪移） |
+> | W1 重试 | #1978 #1979 #1981 | 第 3 项"EMPTY_RESPONSE 改可重试"**不能先做**：生产 doubao-lite 22% 空产出、649 token 计费零内容、无任何 transcript 证据分辨"字段没读"还是"真没产出"——先落取证（W1-A）；Retry-After 全仓从未被读过；mig 436 + llm_retry 事件 + policy_key（W1-B）。读侧计数/前端进度/errorChain 未做 |
+> | W4 遥测 | #1982 | 改判：不是缺 record 契约，是 **agent 热路径日志哪儿都没去**（InterceptHandler 只挂 8 个三方 logger；agent_runner/fallback/compactor/agent_worker 在 280 万行 application_logs 里 0 条）。桥 `app` 命名空间不桥 root。契约 1-4 项无实证缺口，未做 |
+> | W2 Projection | #1988 #1990 | 改判：只做第 5 项（mig 438 意图落库，刷新不丢摘要；#1927 documented boundary 收口）。1-4 项不搬：Postgres 行即 fold 后完整状态（整值规则天然成立），无撕裂实证 |
+>
+> 附录小刀清单仍开放（env 擦洗 35 处 spawn 等）；`_MODEL_WINDOWS` 缺
+> doubao-seed-2-0-lite / nous-qwen3-llm 真实窗口值，补表后 compactor 的
+> fallback note 自动消失（那是收口的验收信号）。
+
 > 来源：对 `/media/heygo/program/projects-code/github-repos/deepseek-harness`（MIT，b150a551）的
 > 完整侦察评估。结论：**无 evals 体系可搬**；架构纪律与五个机制高度对口 nous 已知短板。
 > 用户拍板顺序：**W5 → W3 → W1 → W4 → W2**（性价比降序的执行序）。
