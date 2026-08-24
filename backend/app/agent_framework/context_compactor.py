@@ -39,7 +39,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app.agent_framework.context_window import model_window_size
+from app.agent_framework.context_window import resolve_model_window
 from app.agent_framework.message_truncation import cap_messages_tokens
 from app.agent_framework.tokenizer import count_messages_tokens, count_tokens
 from app.agent_framework.tool_result_pruner import PruneStats, prune
@@ -94,6 +94,12 @@ class ContextCompactor:
     EMERGENCY_KEEP_RECENT_TURNS = 4
     RED_KEEP_RECENT_TURNS = 2
 
+    # Total summarization attempts before giving up and letting the caller
+    # fall back to the deterministic emergency cap. Low on purpose: retrying
+    # a model that is echoing its input costs real tokens each time, and the
+    # fallback is free and guaranteed to shrink.
+    SUMMARY_ATTEMPTS = 2
+
     # Emergency cap targets this fraction of the window for messages
     # (rest reserved for system prompt). 0.80 lands a compacted run at
     # the orange/red boundary — enough headroom for the next turn's
@@ -147,7 +153,20 @@ class ContextCompactor:
                 notes=("AGENT_AUTO_COMPACT=false",),
             )
 
-        window = model_window_size(model)
+        window, window_known = resolve_model_window(model)
+        # Every tier below divides by `window`. When the table didn't know the
+        # model, that denominator is a default, and a wrong denominator makes
+        # a confidently-wrong tier — so it rides every return path, including
+        # green, which is where a mis-measured model is most likely to sit.
+        window_notes: tuple[str, ...] = (
+            ()
+            if window_known
+            else (
+                f"window is a fallback ({window} tokens): model={model!r} is "
+                "not in _MODEL_WINDOWS, so tier thresholds are relative to a "
+                "default, not to this model's real context window",
+            )
+        )
         if window <= 0:
             # Unknown model → bail out with noop. Same sentinel semantics
             # as the kill-switch path: don't pay for tokenization just to
@@ -173,6 +192,7 @@ class ContextCompactor:
                 tokens_before=total,
                 tokens_after=total,
                 tokens_saved=0,
+                notes=window_notes,
             )
 
         # Yellow tier: prune tool results (dedupe + age old bodies).
@@ -191,6 +211,7 @@ class ContextCompactor:
                 tokens_after=new_total,
                 tokens_saved=total - new_total,
                 yellow_prune=prune_stats,
+                notes=window_notes,
             )
 
         # Orange / Red: head summarization. Replace older turns with a
@@ -203,13 +224,13 @@ class ContextCompactor:
             if tier == CompactionTier.RED
             else self.EMERGENCY_KEEP_RECENT_TURNS
         )
-        notes: list[str] = []
+        notes: list[str] = list(window_notes)
         capped: list[dict]
         dropped_chars = 0
 
         try:
             capped = await self._compact_with_summary(
-                messages=pruned, keep_recent_turns=keep
+                messages=pruned, keep_recent_turns=keep, model=model
             )
             notes.append("compacted via LLM head summary")
         except Exception as exc:
@@ -259,14 +280,22 @@ class ContextCompactor:
         *,
         messages: list[dict],
         keep_recent_turns: int,
+        model: str,
     ) -> list[dict]:
         """Replace messages[:-keep_recent_turns] with a single
         [Earlier conversation summary] system message produced by the
         configured cheap model.
 
-        Raises ``RuntimeError`` (from summarizer) on any provider
-        failure so the caller can fall back to the lossy
-        ``_emergency_cap`` path.
+        Convergence is enforced here, not assumed: a summary is accepted only
+        if it is genuinely smaller than the messages it replaces. A model that
+        echoes its input back — a real failure mode for small models handed a
+        long transcript — would otherwise GROW the context and be recorded as
+        a successful compaction. Rejected drafts are retried up to
+        ``SUMMARY_ATTEMPTS`` in total, then this raises.
+
+        Raises ``RuntimeError`` (from the summarizer, or from the shrink
+        check) so the caller can fall back to the lossy ``_emergency_cap``
+        path — which is deterministic and always shrinks.
         """
         if len(messages) <= keep_recent_turns:
             return list(messages)  # nothing to summarize
@@ -275,13 +304,41 @@ class ContextCompactor:
 
         head = messages[:-keep_recent_turns]
         tail = messages[-keep_recent_turns:]
-        summary_text = await summarize(head)
+        head_tokens = count_messages_tokens(head, model)
 
-        summary_message = {
-            "role": "system",
-            "content": "[Earlier conversation summary]\n" + summary_text,
-        }
-        return [summary_message] + list(tail)
+        last_summary_tokens: Optional[int] = None
+        for attempt in range(1, self.SUMMARY_ATTEMPTS + 1):
+            summary_text = await summarize(head)
+            summary_message = {
+                "role": "system",
+                "content": "[Earlier conversation summary]\n" + summary_text,
+            }
+            summary_tokens = count_messages_tokens([summary_message], model)
+            if summary_tokens < head_tokens:
+                if attempt > 1:
+                    logger.info(
+                        "[compactor] summary accepted on attempt {} "
+                        "({} → {} tokens)",
+                        attempt,
+                        head_tokens,
+                        summary_tokens,
+                    )
+                return [summary_message] + list(tail)
+
+            last_summary_tokens = summary_tokens
+            logger.warning(
+                "[compactor] summary did not shrink its source on attempt "
+                "{}/{}: {} tokens in, {} tokens out",
+                attempt,
+                self.SUMMARY_ATTEMPTS,
+                head_tokens,
+                summary_tokens,
+            )
+
+        raise RuntimeError(
+            f"summary did not shrink its source after {self.SUMMARY_ATTEMPTS} "
+            f"attempts ({head_tokens} tokens in, {last_summary_tokens} out)"
+        )
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
         if used_pct >= self.thresholds.red_pct:

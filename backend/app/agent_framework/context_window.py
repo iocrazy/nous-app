@@ -122,16 +122,34 @@ def model_window_size(model: str) -> int:
     settings.LLM_MAX_CONTEXT_TOKENS so behaviour is predictable for
     user-configured custom models.
     """
+    window, _ = resolve_model_window(model)
+    return window
+
+
+def resolve_model_window(model: str) -> tuple[int, bool]:
+    """``(window, is_known)`` — the size, plus whether we actually knew it.
+
+    ``model_window_size()`` answers every model, which makes the generic
+    fallback indistinguishable from a real lookup at the call site. Callers
+    that divide by this number (the compactor decides all four tiers by
+    ``used / window``) need to be able to say whether the denominator was
+    knowledge or a default, so they can report it instead of quietly acting
+    on a guess.
+
+    Production 2026-08-23: 12 of 20 configured agents run models missing from
+    the table (``doubao-seed-2-0-lite-260428``, ``nous-qwen3-llm``), so their
+    tier decisions have all been made against ``LLM_MAX_CONTEXT_TOKENS``.
+    """
     if not model:
-        return settings.LLM_MAX_CONTEXT_TOKENS
+        return settings.LLM_MAX_CONTEXT_TOKENS, False
     key = model.strip().lower()
     if key in _MODEL_WINDOWS:
-        return _MODEL_WINDOWS[key]
+        return _MODEL_WINDOWS[key], True
     # Try base model name (drop -date / -instruct / -chat suffix)
     base = key.split(":")[0].split("-instruct")[0].split("-chat")[0]
     if base in _MODEL_WINDOWS:
-        return _MODEL_WINDOWS[base]
-    return settings.LLM_MAX_CONTEXT_TOKENS
+        return _MODEL_WINDOWS[base], True
+    return settings.LLM_MAX_CONTEXT_TOKENS, False
 
 
 def _extract_text_from_user_messages(
