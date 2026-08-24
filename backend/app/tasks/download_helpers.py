@@ -334,6 +334,93 @@ async def chain_transcription_unconditional(
         )
 
 
+async def _dispatch_post_transcript_summary(
+    parsed_media_id: int,
+    *,
+    media: dict,
+    resource_id: str,
+    task_row_user_id: str,
+    workflow_user_id: str,
+) -> None:
+    """Create the ai_summary task row + start the workflow, inheriting the
+    transcript task's flow_id so the card lands in the same FlowGroupCard.
+
+    Two identities on purpose (pinned by test_chain_dispatches_as_resource_
+    creator): the task_tracking row attributes to whoever TRIGGERED the work
+    (their Task Center shows the card), while the workflow runs as the
+    identity whose creator_id filter and points ledger apply.
+
+    Shared by the tag-gated chain (``chain_summary_for_tags``) and the
+    server-side follow-up consumer (``consume_summary_follow_up``) — one
+    dispatch implementation, two gates. Raises on enqueue failure so callers
+    can decide whether the trigger that got them here should be kept.
+    """
+    import uuid as _uuid
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.ai_summary import ai_summary_workflow
+
+    platform_id = media.get("platform_id")
+
+    # Inherit flow_id from the transcript task on the same chain so
+    # the summary card lands in the same FlowGroupCard as parse →
+    # download → extract_audio → transcript.
+    async def _read_flow_id() -> str | None:
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(TaskTracking.flow_id)
+                    .where(
+                        TaskTracking.media_id
+                        == (str(platform_id) if platform_id else "")
+                    )
+                    .where(TaskTracking.task_type == "ai_transcription")
+                    .order_by(TaskTracking.created_at.desc())
+                    .limit(1)
+                )
+            ).first()
+        # flow_id is uuid → str to match the PostgREST value the caller fed
+        # into task_manager.create(flow_id=...).
+        return str(row[0]) if row and row[0] is not None else None
+
+    flow_id = await _read_flow_id()
+
+    title_clip = (media.get("title") or platform_id or str(parsed_media_id))[:50]
+    sm_wf_id = str(_uuid.uuid4())
+    try:
+        await get_task_manager().create(
+            user_id=task_row_user_id,
+            task_type="ai_summary",
+            title=f"Summary {title_clip}",
+            media_id=str(platform_id) if platform_id else None,
+            resource_id=resource_id,
+            dbos_workflow_id=sm_wf_id,
+            flow_id=flow_id,
+        )
+
+    except Exception as e:
+        logger.warning(f"[AI] pre-create ai_summary row: {e}")
+    await start_workflow_routed(
+        "ai_summary",
+        dbos_workflow_callable=ai_summary_workflow,
+        dbos_workflow_kwargs={
+            "parsed_media_id": int(parsed_media_id),
+            "user_id": workflow_user_id,
+        },
+        workflow_id=sm_wf_id,
+    )
+
+    logger.info(
+        f"[AI] summary chained post-transcript for parsed_media_id={parsed_media_id}"
+    )
+
+
 async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
     """Dispatch ai_summary_workflow IFF the resource tied to
     ``parsed_media_id`` carries the Summary tag. Called by
@@ -345,21 +432,16 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
     is what counts.
     """
     try:
-        import uuid as _uuid
         from contextlib import nullcontext
 
         from app.db.scope import is_enforced, system_request_scope
         from app.repositories.media_repository import MediaRepository
         from app.repositories.resources_repository import ResourcesRepository
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.services.infra.unified_task_manager import get_task_manager
-        from app.workflows.ai_summary import ai_summary_workflow
 
         media = await MediaRepository().get_by_id(int(parsed_media_id))
         if not media:
             logger.debug(f"[AI] summary chain: no parsed_media {parsed_media_id}")
             return
-        platform_id = media.get("platform_id")
 
         # Creator-agnostic lookup — transcription may have been triggered
         # by a teammate on a shared resource, so the caller's user_id is
@@ -406,66 +488,135 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
         if "Summary" not in tag_names:
             return
 
-        # Inherit flow_id from the transcript task on the same chain so
-        # the summary card lands in the same FlowGroupCard as parse →
-        # download → extract_audio → transcript.
-        async def _read_flow_id() -> str | None:
-            from sqlalchemy import select
-
-            from app.db.session import read_scope
-            from app.models import TaskTracking
-
-            async with read_scope() as session:
-                row = (
-                    await session.execute(
-                        select(TaskTracking.flow_id)
-                        .where(
-                            TaskTracking.media_id
-                            == (str(platform_id) if platform_id else "")
-                        )
-                        .where(TaskTracking.task_type == "ai_transcription")
-                        .order_by(TaskTracking.created_at.desc())
-                        .limit(1)
-                    )
-                ).first()
-            # flow_id is uuid → str to match the PostgREST value the caller fed
-            # into task_manager.create(flow_id=...).
-            return str(row[0]) if row and row[0] is not None else None
-
-        flow_id = await _read_flow_id()
-
-        title_clip = (media.get("title") or platform_id or str(parsed_media_id))[:50]
-        sm_wf_id = str(_uuid.uuid4())
-        try:
-            await get_task_manager().create(
-                user_id=user_id,
-                task_type="ai_summary",
-                title=f"Summary {title_clip}",
-                media_id=str(platform_id) if platform_id else None,
-                resource_id=resource_id,
-                dbos_workflow_id=sm_wf_id,
-                flow_id=flow_id,
-            )
-
-        except Exception as e:
-            logger.warning(f"[AI] pre-create ai_summary row: {e}")
-        await start_workflow_routed(
-            "ai_summary",
-            dbos_workflow_callable=ai_summary_workflow,
-            dbos_workflow_kwargs={
-                "parsed_media_id": int(parsed_media_id),
-                "user_id": owner_id,
-            },
-            workflow_id=sm_wf_id,
-        )
-
-        logger.info(
-            f"[AI] summary chained post-transcript for parsed_media_id={parsed_media_id}"
+        await _dispatch_post_transcript_summary(
+            int(parsed_media_id),
+            media=media,
+            resource_id=resource_id,
+            task_row_user_id=user_id,
+            workflow_user_id=owner_id,
         )
     except Exception as e:
         logger.warning(
             f"[AI] chain_summary_for_tags failed for "
             f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
+        )
+
+
+async def _clear_summary_follow_up(resource_id: str) -> None:
+    """One-shot consumption: NULL the intent column. ORM write (裸 SQL 禁令)."""
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models.media import Resources
+
+    async with write_scope() as session:
+        await session.execute(
+            update(Resources)
+            .where(Resources.id == int(resource_id))
+            .values(summary_follow_up=None)
+        )
+
+
+async def consume_summary_follow_up(parsed_media_id: int) -> None:
+    """Honour a persisted "summarize after this transcription" intent.
+
+    The other half of migration 438: the transcribe trigger endpoint writes
+    ``resources.summary_follow_up`` when the caller asked for a follow-up
+    summary; this consumer runs on ``ai_transcription_workflow``'s success
+    path (right after ``chain_summary_for_tags``) and turns the intent into
+    an actual ai_summary dispatch.
+
+    Before this, the intent lived only in the requesting browser's memory
+    (transcriptionFollowUp registry) — a page refresh wiped it and the
+    summary silently never came (PR #1927 documented the boundary).
+
+    Rules:
+    - Best-effort: never raises. A lookup miss or dispatch failure must not
+      turn a finished transcription into a failed workflow.
+    - Tag guard: a "Summary"-tagged resource was already dispatched by
+      ``chain_summary_for_tags`` a moment ago on this same success path —
+      consume (clear) the intent without firing a second, double-billed run.
+    - Clear AFTER successful enqueue: a failed enqueue keeps the intent (with
+      a warning) so a transcription retry re-consumes it. Clear-first would
+      turn one enqueue hiccup into exactly the silently-lost summary this
+      column exists to end.
+    - Identity: the requester — their Task Center card, their points. Falls
+      back to the resource creator when the intent is malformed.
+    """
+    try:
+        from contextlib import nullcontext
+
+        from app.db.scope import is_enforced, system_request_scope
+        from app.repositories.media_repository import MediaRepository
+        from app.repositories.resources_repository import ResourcesRepository
+
+        media = await MediaRepository().get_by_id(int(parsed_media_id))
+        if not media:
+            return
+
+        # Same creator-agnostic lookup + scope gate as chain_summary_for_tags
+        # (F1): the transcription caller may be a teammate; the resource must
+        # still be found.
+        scope_cm = (
+            system_request_scope(
+                reason="summary follow-up: resolve resource regardless of "
+                "transcription caller"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            resource = await ResourcesRepository().get_resource_by_media_id(
+                str(parsed_media_id)
+            )
+        if not resource:
+            return
+
+        intent = resource.get("summary_follow_up")
+        if not intent:
+            return
+
+        resource_id = str(resource["id"])
+        requester = str(
+            (intent.get("requested_by") if isinstance(intent, dict) else None)
+            or resource.get("creator_id")
+            or ""
+        )
+        if not requester:
+            logger.warning(
+                f"[AI] summary follow-up on resource {resource_id} has no "
+                "usable identity; leaving intent in place"
+            )
+            return
+
+        tag_names = await read_resource_tag_names(resource_id)
+        if "Summary" in tag_names:
+            # The tag chain already dispatched on this very success path —
+            # a second dispatch would double-bill for the same summary.
+            await _clear_summary_follow_up(resource_id)
+            logger.info(
+                f"[AI] summary follow-up consumed by tag chain for "
+                f"resource {resource_id}"
+            )
+            return
+
+        await _dispatch_post_transcript_summary(
+            int(parsed_media_id),
+            media=media,
+            resource_id=resource_id,
+            task_row_user_id=requester,
+            workflow_user_id=requester,
+        )
+        await _clear_summary_follow_up(resource_id)
+        logger.info(
+            f"[AI] summary follow-up dispatched for resource {resource_id} "
+            f"as {requester}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[AI] consume_summary_follow_up failed for "
+            f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r} "
+            "(intent kept for a future retry)"
         )
 
 

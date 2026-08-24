@@ -492,6 +492,22 @@ describe('resource-scoped trigger response contract (RECON#4)', () => {
     expect('task_id' in res).toBe(false);
   });
 
+  it('rides follow_up_summary to the server when the ensure flow asks', async () => {
+    // W2-5 (438): the flag is what makes the summary survive a page refresh
+    // — the server persists the intent and the transcription success chain
+    // consumes it. No flag → no body → legacy request byte-for-byte.
+    const spy = stubJson({ message: 'ok', resource_id: 'r-9' });
+    await triggerTranscriptionByResource('r-9', { followUpSummary: true });
+    const [, init] = spy.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ follow_up_summary: true });
+
+    // spyOn returns the SAME spy across stubs — read this call, not call #0.
+    const spy2 = stubJson({ message: 'ok', resource_id: 'r-9' });
+    await triggerTranscriptionByResource('r-9');
+    const secondInit = spy2.mock.calls.at(-1)?.[1];
+    expect(secondInit?.body).toBeUndefined();
+  });
+
   it('passes through the dedup body (200 "already in progress")', async () => {
     stubJson({ message: 'Summary already in progress', resource_id: 'r-1' });
 

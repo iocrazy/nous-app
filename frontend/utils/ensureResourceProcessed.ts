@@ -163,7 +163,12 @@ export async function ensureResourceProcessed(
 
   if (transcript !== 'completed') {
     try {
-      const res = await triggerTranscriptionByResource(input.id);
+      // The ensure flow ALWAYS wants the summary after the transcript —
+      // that is its whole contract — so the intent rides to the server
+      // where a refresh can't erase it.
+      const res = await triggerTranscriptionByResource(input.id, {
+        followUpSummary: true,
+      });
       // A 200 that queued NOTHING: an audio extraction with no transcription
       // intent holds the unique slot. It reports `points_charged: 0` like a
       // dedup does, but calling it "already being processed" would be the

@@ -560,6 +560,23 @@ async def ai_transcription_workflow(
                 f"[ai_transcription] post-success summary chain failed for "
                 f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
             )
+        # W2-5 (438): honour a persisted "summarize after this transcription"
+        # intent — the server-side replacement for the browser-memory
+        # follow-up registry a refresh wiped. Runs AFTER the tag chain so its
+        # tag guard can see that a Summary-tagged resource is already
+        # covered. Own try: a tag-chain failure must not skip the follow-up,
+        # and vice versa (both are best-effort; transcript success is what
+        # counts).
+        try:
+            from app.tasks.download_helpers import consume_summary_follow_up
+
+            async with request_scope(Scope(user_id=user_id)):
+                await consume_summary_follow_up(parsed_media_id)
+        except Exception as e:
+            logger.warning(
+                f"[ai_transcription] summary follow-up consume failed for "
+                f"parsed_media_id={parsed_media_id}: {type(e).__name__}: {e!r}"
+            )
         return {"parsed_media_id": parsed_media_id, **summary}
     except Exception as e:  # noqa: BLE001
         # Surface the failure on the resource so the frontend Transcript

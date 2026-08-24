@@ -12,6 +12,7 @@ Supports both platform_id-based (legacy) and resource_id-based triggers.
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep, get_team_id_for_user
 from app.core.scope_dep import ScopedRequestDep
@@ -365,12 +366,48 @@ def _summary_already_exists_response(resource_id: str, platform_id: str) -> dict
 # ------------------------------------------------------------------
 
 
+class TranscribeTriggerBody(BaseModel):
+    """Optional body for the transcribe trigger.
+
+    ``follow_up_summary``: persist a server-side "summarize once this
+    transcription completes" intent (resources.summary_follow_up, 438),
+    consumed by ai_transcription's success chain. Set by the chat's
+    ensure-processed flow; survives page refreshes, which the old
+    browser-memory registry did not (PR #1927's documented boundary).
+    """
+
+    follow_up_summary: bool = False
+
+
+async def _persist_summary_follow_up(resource_id: str, user_id: str) -> None:
+    """Write the one-shot intent. Cleared by consume_summary_follow_up."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update as _sa_update
+
+    from app.db.session import write_scope
+    from app.models.media import Resources
+
+    async with write_scope() as session:
+        await session.execute(
+            _sa_update(Resources)
+            .where(Resources.id == int(resource_id))
+            .values(
+                summary_follow_up={
+                    "requested_by": str(user_id),
+                    "requested_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        )
+
+
 @router.post("/transcribe/resource/{resource_id}")
 async def trigger_transcription_by_resource(
     resource_id: str,
     auth: AuthDep,
     _scope: ScopedRequestDep,
     force: bool = False,
+    body: TranscribeTriggerBody | None = None,
 ):
     """Trigger AI transcription by resource_id.
 
@@ -418,6 +455,16 @@ async def trigger_transcription_by_resource(
             ),
         )
     # === End classification ===
+
+    # W2-5 (438): every exit below either returns with a transcription in
+    # flight (dedup) or ends in one being dispatched (direct / via the
+    # extract_audio chain) — and the transcription success chain consumes
+    # this intent. Placed AFTER the two dead ends above on purpose: the
+    # already-transcribed short-circuit needs no follow-up (the caller goes
+    # straight to summary), and a 409 means nothing will ever complete, so a
+    # stored intent would be a lie that outlives the request.
+    if body and body.follow_up_summary:
+        await _persist_summary_follow_up(resource_id, auth.user_id)
 
     # === Dedup: something already occupies the transcription slot? ===
     # Which slot that is depends on the classification above, so this runs
