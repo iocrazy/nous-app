@@ -18,9 +18,12 @@ and uploads the finished file back.
 2. On your machine:
 
 ```bash
-npx @nous/codex-daemon pair ABCD2345
-npx @nous/codex-daemon run
+curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs -o nous-codex.mjs
+node nous-codex.mjs pair ABCD2345
+node nous-codex.mjs run
 ```
+
+(`npx @nous/codex-daemon` will work once the package is published to npm.)
 
 `run` stays connected and takes jobs. Keep it running (or add it to your
 login items / a systemd user unit).

@@ -48,7 +48,7 @@ describe('CodexDaemonSettings', () => {
     await waitFor(() => expect(screen.getByTestId('codex-pair-code')).toBeInTheDocument());
     expect(screen.getByTestId('codex-pair-code').textContent).toContain('ABCD2345');
     expect(screen.getByTestId('codex-pair-command').textContent).toContain(
-      'npx @nous/codex-daemon pair ABCD2345',
+      'node nous-codex.mjs pair ABCD2345',
     );
   });
 

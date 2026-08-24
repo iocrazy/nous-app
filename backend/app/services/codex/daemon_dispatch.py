@@ -1,26 +1,28 @@
 """Dispatch a canvas generation to the user's OWN daemon (C4, spec §5).
 
+Cross-container by construction: the daemon's socket lives in the *gateway*
+process while generation workflows run in the *worker* container, so every
+leg rides Redis —
+
+    worker ──publish codex_jobs:<user>──► gateway (socket holder) ──WS──► daemon
+    worker ◄─subscribe codex_results:<job_id>── gateway ◄──WS── daemon
+
 Two rules shape this module:
 
-1. **Offline is an answer, not a wait.** If the user has no daemon
-   connected, the click must fail immediately with a typed error the UI can
-   phrase ("your local codex isn't connected") — never a silent hang
-   (CLAUDE.md「触发路径必须类型化失败回显」).
-2. **The daemon reports back over the socket**, so the dispatcher parks on a
-   future keyed by job_id and the WS handler resolves it. A daemon that dies
-   mid-job simply never resolves — hence the hard timeout.
+1. **Offline is an answer, not a wait.** No live presence marker → typed
+   ``DaemonOfflineError`` at click time, never a silent hang.
+2. **A daemon that dies mid-job never publishes a result** — hence the hard
+   timeout on the results subscription.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
-from typing import Any, Callable, Dict, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from loguru import logger
-
-# job_id -> future awaiting the daemon's verdict
-_WAITERS: Dict[str, asyncio.Future] = {}
 
 DEFAULT_TIMEOUT_S = 600
 
@@ -29,17 +31,59 @@ class DaemonOfflineError(RuntimeError):
     """The user has no daemon connected right now."""
 
 
-class _Registry(Protocol):
-    def is_online(self, user_id: str) -> bool: ...
-    async def send_job(self, user_id: str, payload: dict) -> bool: ...
+class DaemonTransport(Protocol):
+    async def is_online(self, user_id: str) -> bool: ...
+    async def send_job(self, user_id: str, job: dict) -> None: ...
+    async def wait_result(self, job_id: str, timeout_s: float) -> dict: ...
 
 
-def resolve_job(job_id: str, result: dict[str, Any]) -> None:
-    """Called by the WS handler when the daemon reports done/failed."""
-    fut = _WAITERS.pop(job_id, None)
-    if fut is None or fut.done():
-        return
-    fut.set_result(result)
+class RedisDaemonTransport:
+    """Production transport: presence + pub/sub via the shared Redis."""
+
+    async def is_online(self, user_id: str) -> bool:
+        from app.services.codex import daemon_presence
+
+        return await daemon_presence.is_online_anywhere(user_id)
+
+    async def send_job(self, user_id: str, job: dict) -> None:
+        from app.services.codex import daemon_presence
+
+        await daemon_presence.publish_job(user_id, job)
+
+    async def wait_result(self, job_id: str, timeout_s: float) -> dict:
+        from app.core.redis import get_async_redis
+        from app.services.codex.daemon_presence import RESULTS_CHANNEL_PREFIX
+
+        redis = await get_async_redis()
+        pubsub = redis.pubsub()
+        channel = f"{RESULTS_CHANNEL_PREFIX}{job_id}"
+        await pubsub.subscribe(channel)
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout_s
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=min(remaining, 5.0),
+                )
+                if message is None:
+                    continue
+                data = message.get("data")
+                if isinstance(data, bytes):
+                    data = data.decode()
+                try:
+                    return json.loads(data)
+                except Exception:
+                    continue
+        finally:
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
+            except Exception:
+                pass
 
 
 async def dispatch_to_daemon(
@@ -48,7 +92,7 @@ async def dispatch_to_daemon(
     scope_id: int,
     kind: str,
     payload: dict[str, Any],
-    registry: Optional[_Registry] = None,
+    transport: Optional[DaemonTransport] = None,
     mint_ticket: Optional[Callable[..., Any]] = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -58,16 +102,14 @@ async def dispatch_to_daemon(
     when the daemon never answers, ``RuntimeError`` when it answers with a
     failure (message carries the daemon's typed code).
     """
-    if registry is None:
-        from app.services.codex.daemon_registry import registry as default_registry
-
-        registry = default_registry
+    if transport is None:
+        transport = RedisDaemonTransport()
     if mint_ticket is None:
         from app.api.codex_daemon_router import mint_upload_ticket
 
         mint_ticket = mint_upload_ticket
 
-    if not registry.is_online(user_id):
+    if not await transport.is_online(user_id):
         raise DaemonOfflineError(
             "your local codex daemon is not connected — run `nous-codex run`"
         )
@@ -77,27 +119,26 @@ async def dispatch_to_daemon(
     if asyncio.iscoroutine(ticket):
         ticket = await ticket
 
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    _WAITERS[job_id] = fut
-
     job = {
         "type": "job",
         "job_id": job_id,
         "kind": kind,
         "payload": {**payload, "upload_ticket": ticket},
     }
+    # The waiter owns its own subscription; start it BEFORE publishing so the
+    # daemon's (fast) answer can never race past an unsubscribed channel.
+    waiter = asyncio.create_task(transport.wait_result(job_id, timeout_s))
+    await asyncio.sleep(0)
     try:
-        delivered = await registry.send_job(user_id, job)
-        if not delivered:
-            raise DaemonOfflineError("daemon disconnected before the job was sent")
-        result = await asyncio.wait_for(fut, timeout=timeout_s)
+        await transport.send_job(user_id, job)
+        result = await waiter
     except asyncio.TimeoutError as exc:
         raise TimeoutError(
             f"local codex daemon did not answer within {int(timeout_s)}s"
         ) from exc
     finally:
-        _WAITERS.pop(job_id, None)
+        if not waiter.done():
+            waiter.cancel()
 
     if result.get("error"):
         logger.info("[codex-daemon] job {} failed: {}", job_id, result["error"])

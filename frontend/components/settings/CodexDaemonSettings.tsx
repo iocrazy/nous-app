@@ -94,8 +94,9 @@ export function CodexDaemonSettings() {
               data-testid="codex-pair-command"
               className="block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
             >
-              npx @nous/codex-daemon pair {pairCode}
-              {'\n'}npx @nous/codex-daemon run
+              curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs
+              -o nous-codex.mjs{'\n'}node nous-codex.mjs pair {pairCode}
+              {'\n'}node nous-codex.mjs run
             </code>
             <button
               type="button"
