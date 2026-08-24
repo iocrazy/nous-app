@@ -125,6 +125,12 @@ jobs:
             exit 1
           fi
 
+          # gateway 的 nginx 在启动时解析一次 upstream IP;容器 destroy/recreate
+          # 后 IP 可能漂移(单次部署常拿回同 IP,连换两轮就会错位 —— 2026-08-24
+          # 回滚事故:容器已 healthy 而公网全线 502,根因就是 gateway 持旧 IP)。
+          # reload 是无损操作,成功部署后必刷一次。
+          docker exec nous-gateway nginx -s reload || true
+
       # up.sh 在 smoke 之前就把容器换成了新镜像,所以 smoke 失败 == 此刻生产是坏的。
       # 退回锚点镜像,让"发布失败"不等于"生产不可用"。只在 smoke 失败时触发:
       # build 阶段失败的话容器根本没被替换,回滚是多余的重启。
@@ -158,6 +164,9 @@ jobs:
               sleep 3
             done
           done
+          # 回滚同样重建了容器 —— 不刷 gateway 的话,「回滚成功」仍是公网 502
+          # (正是这次被抓到的次生故障形态)。
+          docker exec nous-gateway nginx -s reload || true
           for i in $(seq 1 40); do
             if docker exec nous-browser python3 -c \
                  "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=15).status==200 else 1)" \
