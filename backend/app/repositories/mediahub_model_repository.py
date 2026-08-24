@@ -90,6 +90,9 @@ _PUBLIC_COLS = (
     MediahubModels.name,
     MediahubModels.display_name,
     MediahubModels.type,
+    # actual_provider is routing metadata, not a secret — the canvas picker
+    # needs it to mark 'codex-local' rows as running on the user's machine.
+    MediahubModels.actual_provider,
     MediahubModels.pricing_type,
     MediahubModels.pricing_value,
     MediahubModels.sort_order,
