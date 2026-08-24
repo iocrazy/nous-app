@@ -374,6 +374,15 @@ class Resources(Base, UserScoped):
             '{"<name>": {en, zh, neg_en, neg_zh}}'
         ),
     )
+    summary_follow_up: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment=(
+            "One-shot server-side intent: summarize after the in-flight/next "
+            "transcription completes. {requested_by, requested_at}. Written "
+            "by the transcribe trigger endpoint, consumed (read + cleared) by "
+            "ai_transcription's success chain. NULL = nobody waiting (438)."
+        ),
+    )
     gen_prompt_json: Mapped[str | None] = mapped_column(
         Text,
         comment="Structured JSON prompt (subject/style/composition/lighting/color/text/aspect_ratio)",
