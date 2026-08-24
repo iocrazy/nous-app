@@ -88,13 +88,21 @@ export const triggerTranscription = async (
 };
 
 export const triggerTranscriptionByResource = async (
-  resourceId: string
+  resourceId: string,
+  opts?: { followUpSummary?: boolean }
 ): Promise<ResourceAITriggerResponse> => {
   const apiUrl = getApiUrl();
 
+  // followUpSummary persists the "summarize once this transcription
+  // completes" intent SERVER-side (resources.summary_follow_up, 438) — the
+  // in-memory registry below still runs as the fast path, but a page
+  // refresh no longer loses the summary (PR #1927's documented boundary).
   const response = await fetch(`${apiUrl}/api/v1/ai/transcribe/resource/${resourceId}`, {
     method: 'POST',
-    headers: await getAuthHeaders(),
+    headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+    ...(opts?.followUpSummary
+      ? { body: JSON.stringify({ follow_up_summary: true }) }
+      : {}),
   });
 
   if (!response.ok) {

@@ -325,7 +325,9 @@ export function useResourceProcessingFollowUps(
 
       firing.current.add(key);
       forgetPendingAudioRetry(entry.resourceId);
-      void triggerTranscriptionByResource(entry.resourceId)
+      void triggerTranscriptionByResource(entry.resourceId, {
+        followUpSummary: true,
+      })
         .then((res) => {
           if (res?.transcription_pending_audio) {
             // Still blocked. Do NOT re-arm: another wait on another blocker

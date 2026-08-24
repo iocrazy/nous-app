@@ -14,7 +14,8 @@ const transcribeMock = vi.fn();
 const summaryMock = vi.fn();
 
 vi.mock('../services/aiService', () => ({
-  triggerTranscriptionByResource: (id: string) => transcribeMock(id),
+  triggerTranscriptionByResource: (id: string, opts?: unknown) =>
+    transcribeMock(id, opts),
   triggerSummaryByResource: (id: string) => summaryMock(id),
 }));
 
@@ -65,7 +66,9 @@ describe('ensureResourceProcessed', () => {
 
     expect(result.action).toBe('triggered_transcribe');
     expect(transcribeMock).toHaveBeenCalledTimes(1);
-    expect(transcribeMock).toHaveBeenCalledWith('r-1');
+    expect(transcribeMock).toHaveBeenCalledWith('r-1', {
+      followUpSummary: true,
+    });
     expect(summaryMock).not.toHaveBeenCalled();
   });
 
@@ -77,7 +80,9 @@ describe('ensureResourceProcessed', () => {
     });
 
     expect(result.action).toBe('triggered_transcribe');
-    expect(transcribeMock).toHaveBeenCalledWith('r-1');
+    expect(transcribeMock).toHaveBeenCalledWith('r-1', {
+      followUpSummary: true,
+    });
   });
 
   it('triggers summary once the transcript is complete', async () => {
@@ -129,7 +134,9 @@ describe('ensureResourceProcessed', () => {
     });
 
     expect(result.action).toBe('triggered_transcribe');
-    expect(transcribeMock).toHaveBeenCalledWith('r-6');
+    expect(transcribeMock).toHaveBeenCalledWith('r-6', {
+      followUpSummary: true,
+    });
   });
 
   it('never guesses from a missing transcript_status — it looks it up', async () => {
@@ -156,7 +163,9 @@ describe('ensureResourceProcessed', () => {
     const result = await ensureResourceProcessed({ id: 'r-7b', kind: 'video' });
 
     expect(result.action).toBe('triggered_transcribe');
-    expect(transcribeMock).toHaveBeenCalledWith('r-7b');
+    expect(transcribeMock).toHaveBeenCalledWith('r-7b', {
+      followUpSummary: true,
+    });
   });
 
   it('looks up an unknown SUMMARY on a transcribed asset too', async () => {
