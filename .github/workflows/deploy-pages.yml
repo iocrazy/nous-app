@@ -39,7 +39,9 @@ jobs:
           # 大陆入口：nas-A(180.121.75.101):88 灰云直连，绕开 CF 隧道跨境(930ms→~40ms)
           # 老的 CF 隧道入口 api/sb.nous.ink(橙云)保留作海外兜底
           VITE_API_URL: https://cn.nous.ink:88
+          VITE_API_FALLBACK_URL: https://api.nous.ink
           VITE_SUPABASE_URL: https://cn-sb.nous.ink:88
+          VITE_SUPABASE_FALLBACK_URL: https://sb.nous.ink
           # 生产 feature flags —— 必须与 frontend/.env.production 一致。
           # 本地 `npm run build` 读不到这里的 env，只读 .env.production；两边
           # 漂移会让"本地构建 + wrangler 直传"应急路径产出功能残缺的包。

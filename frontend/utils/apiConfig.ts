@@ -3,10 +3,94 @@
  * All frontend files should import from here instead of defining their own.
  */
 export const getApiUrl = (): string => {
+  if (_useFallback) {
+    const fb = getFallbackApiUrl();
+    if (fb) return fb;
+  }
+  return getPrimaryApiUrl();
+};
+
+const getPrimaryApiUrl = (): string => {
   if (typeof import.meta !== 'undefined' && 'VITE_API_URL' in import.meta.env) {
     return sanitizeApiUrl(import.meta.env.VITE_API_URL || '');
   }
   return 'http://localhost:8080';
+};
+
+/** Secondary API base (the Cloudflare tunnel). Null when not configured —
+ *  dev / self-hosted setups have one origin and no failover. */
+export const getFallbackApiUrl = (): string | null => {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_FALLBACK_URL) {
+    const fb = sanitizeApiUrl(import.meta.env.VITE_API_FALLBACK_URL);
+    // A fallback identical to the primary is no fallback at all.
+    if (fb && fb !== getPrimaryApiUrl()) return fb;
+  }
+  return null;
+};
+
+// ── failover state ─────────────────────────────────────────────────────────
+// The cn.nous.ink:88 primary is a residential direct link: fast from inside
+// China but it flaps (carrier resets, NAT expiry, IP churn). Two consecutive
+// network-level failures flip every subsequent request to the Cloudflare
+// fallback; a background probe flips back the moment the primary answers.
+// HTTP errors (4xx/5xx) are NOT failures here — the origin answered.
+
+const FAILOVER_THRESHOLD = 2;
+export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
+
+let _failureCount = 0;
+let _useFallback = false;
+let _probeTimer: ReturnType<typeof setInterval> | null = null;
+
+export const isUsingFallbackApi = (): boolean => _useFallback;
+
+/** Call on fetch-level failures only (TypeError / abort on timeout). */
+export const reportApiNetworkFailure = (): void => {
+  if (_useFallback || !getFallbackApiUrl()) return;
+  _failureCount += 1;
+  if (_failureCount >= FAILOVER_THRESHOLD) {
+    _useFallback = true;
+    console.warn(
+      `[apiConfig] primary API unreachable ×${_failureCount} — switching to ${getFallbackApiUrl()}`,
+    );
+    if (!_probeTimer && typeof setInterval !== 'undefined') {
+      _probeTimer = setInterval(() => {
+        void probePrimaryOnce();
+      }, PRIMARY_PROBE_INTERVAL_MS);
+    }
+  }
+};
+
+/** One primary-health probe; flips back and stops probing on success. */
+export const probePrimaryOnce = async (): Promise<void> => {
+  if (!_useFallback) return;
+  try {
+    const res = await fetch(`${getPrimaryApiUrl()}/api/v1/healthz`, {
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? AbortSignal.timeout(5000)
+        : undefined,
+    });
+    if (res.ok) {
+      _useFallback = false;
+      _failureCount = 0;
+      if (_probeTimer) {
+        clearInterval(_probeTimer);
+        _probeTimer = null;
+      }
+      console.info('[apiConfig] primary API recovered — switching back');
+    }
+  } catch {
+    // still down — keep the fallback
+  }
+};
+
+export const _resetFailoverForTests = (): void => {
+  _failureCount = 0;
+  _useFallback = false;
+  if (_probeTimer) {
+    clearInterval(_probeTimer);
+    _probeTimer = null;
+  }
 };
 
 /**

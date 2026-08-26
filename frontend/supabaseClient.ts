@@ -7,8 +7,45 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
  * JavaScript's Number.MAX_SAFE_INTEGER is 2^53-1 (9007199254740991, 16 digits).
  * Snowflake IDs can exceed this, causing silent data corruption.
  */
+// ── Supabase host failover (2026-08-26) ────────────────────────────────────
+// The cn-sb direct link rides the same residential line as the cn API base
+// and flaps with it. On fetch-level failure, rewrite the host to the
+// Cloudflare-tunnelled origin and stick there. Realtime websockets are out
+// of scope — they reconnect on their own schedule.
+const SB_FALLBACK_URL: string | null =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta as any).env?.VITE_SUPABASE_FALLBACK_URL) ||
+  null;
+let _sbUseFallback = false;
+
+const rewriteToFallback = (url: string): string | null => {
+  const primary = getEnv('VITE_SUPABASE_URL') || '';
+  if (!SB_FALLBACK_URL || !primary || !url.startsWith(primary)) return null;
+  return SB_FALLBACK_URL.replace(/\/+$/, '') + url.slice(primary.replace(/\/+$/, '').length);
+};
+
+const failoverFetch = async (
+  input: Parameters<typeof globalThis.fetch>[0],
+  init?: RequestInit,
+): Promise<Response> => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const rewritten = _sbUseFallback ? rewriteToFallback(url) : null;
+  try {
+    return await globalThis.fetch(rewritten ?? input, init);
+  } catch (err) {
+    const fallbackUrl = rewriteToFallback(url);
+    if (!fallbackUrl || rewritten) throw err; // already on fallback, or no rewrite possible
+    const response = await globalThis.fetch(fallbackUrl, init);
+    if (!_sbUseFallback) {
+      _sbUseFallback = true;
+      console.warn('[supabase] direct link unreachable — switched to fallback origin');
+    }
+    return response;
+  }
+};
+
 const bigIntSafeFetch: typeof globalThis.fetch = async (input, init) => {
-  const response = await globalThis.fetch(input, init);
+  const response = await failoverFetch(input, init);
   const contentType = response.headers.get('content-type');
 
   // Only process JSON responses (application/json, application/vnd.pgrst.object+json, etc.)
