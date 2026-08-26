@@ -381,8 +381,12 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 
 ### Task 7: W1 读侧 —— 事件端点 + 重试进度 + errorChain
 
+**改判（2026-08-25 复核）：事件端点已存在**（`ai_library_router.py:2335`
+`list_run_events`，after_seq/limit、外人 404）。本任务不建新端点。
+
 **Files:**
-- Create: `backend/app/api/agent_run_events_router.py`（挂 `main.py` 注册表）
+- Modify: `backend/app/api/ai_library_router.py`（`list_run_events` 加
+  `types: str = ""` CSV 过滤，空=全部保持向后兼容）
 - Modify: `backend/app/services/ai/llm/retry_events.py`（镜像 last_retry）
 - Modify: `backend/app/services/ai/llm/llm_retry_middleware.py`（errorChain：
   `describe_llm_error` 拼 `__cause__` 链，每层 `f"{type(c).__name__}: {c}"`，
@@ -391,20 +395,65 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 - Test: `backend/tests/api/test_agent_run_events_router.py`、middleware/前端各自 test 文件
 
 **Interfaces:**
-- Produces: `GET /api/v1/ai-library/runs/{run_id}/events?type=<csv>&limit=<n>&before_seq=<n>`
-  → `{"events":[{seq,event_type,payload,created_at}], "next_before_seq": n|null}`；
-  仅 run 所有者可读（`AuthDep` + agent_runs.user_id 比对，非所有者 404 不 403——
-  不泄露存在性，照仓库既有口径）。
+- Produces: 既有 `GET /api/v1/ai-library/runs/{run_id}/events` 增
+  `types=<csv>`（如 `types=todo_write,llm_retry`）；响应形状不变。
+  鉴权已是所有者-404 口径，不动。
 
-- [ ] **Step 1: 红灯** —— 所有者可读且按 seq 升序；type 过滤只回请求的类型；
-  非所有者 404；分页 before_seq 生效；空 run 回 `[]` 不 404（run 存在但无事件
-  ≠ run 不存在——两个 404 语义别混）。
+- [ ] **Step 1: 红灯** —— `types=todo_write` 只回该类型；`types=""`/缺省回全部
+  （向后兼容——useRunToolActivity 等既有消费者一行不改仍工作，此测必写）；
+  乱值类型静默空集不 500。
 - [ ] **Step 2: 实现端点 + last_retry 镜像 + errorChain**（cause 链测试：三层嵌套异常
   → error_message 含三层名+文案且不超预算）。
 - [ ] **Step 3: 前端 Retry 进度**（读 `metadata_json.last_retry`；无则不渲染）。
 - [ ] **Step 4: 突变/lint/全量/commit/PR（后端前端分 PR）**
 
 ---
+
+
+
+---
+
+### Task 8: Issues 详情页消费（spec §9）
+
+**Files:**
+- Modify: `frontend/components/Todolist/IssueDetailView.tsx`
+  （PROGRESS 栏 reason 行，:436-460 的 NeedsInputCard 门旁；勿动 needs_input 既有路径）
+- Create: `frontend/components/agentActivity/useRunTodoProgress.ts`
+  （照同目录 `useRunToolActivity.ts` 的轮询/停机范式）
+- Modify: `frontend/components/Todolist/IssueChatThread.tsx`
+  （run 卡 `RunToolActivity` 旁挂 todo 进度 + retry 行）
+- Test: `IssueDetailView.test.tsx` 增块、`useRunTodoProgress.test.ts`
+
+**Interfaces:**
+- Consumes: Task 2/3 的 `todo_write` payload（spec §2.1 形状）；Task 7 的
+  `types` 过滤（**可选**——没合并时客户端过滤同样正确，只是多拖数据；两种都可发）；
+  `issue.raw.execution_state.{agent_outcome, outcome_reason}`（已在行上）。
+- Produces: `useRunTodoProgress(runId, isRunning): {done,total,label} | null`；
+  reason 行文案键 `issueDetail.stoppedReason.*`（en/zh locales 同步）。
+
+- [ ] **Step 1: 红灯（reason 行）**
+
+```tsx
+it('a blocked issue shows the recorded reason', () => {
+  render(<IssueDetailView issue={mk({ status: 'blocked',
+    execution_state: { agent_outcome: 'empty_output',
+      outcome_reason: 'Agent produced no output (EMPTY_OUTPUT)' } })} />);
+  expect(screen.getByText(/produced no output/)).toBeInTheDocument();
+});
+it('needs_input keeps flowing through NeedsInputCard, not duplicated', () => {
+  /* status=needs_followup+needs_input → reason 行不渲染,NeedsInputCard 渲染(既有测试保持绿) */
+});
+it('no reason recorded renders nothing — never an empty label', () => { /* execution_state null → 无该行 */ });
+```
+
+- [ ] **Step 2: 红灯（todo 进度 hook）** —— 事件序列 [3 条 todo_write] 取**最后一条**；
+  零事件 → null；isRunning=false 停轮询（照 useRunToolActivity 的既有停机断言抄形）。
+- [ ] **Step 3: 实现 + 挂载**（timeline run 卡 + PROGRESS 栏活跃 run 行）。
+- [ ] **Step 4: 突变** —— 取第一条快照而非最后一条 → last-write-wins 测试红。
+- [ ] **Step 5: vitest + typecheck + i18n 双语 + commit + PR**
+
+⚠️ blocked 写入方核对（spec §9 不确定点）：`grep -rn "'blocked'" backend/app | grep -v test`
+——若来源是依赖谓词，reason 行改落依赖名，测试相应换形。
 
 ## 波次与 PR 依赖
 
@@ -415,7 +464,8 @@ Task 3 (todo 后端)  ─┐
 Task 5 (压缩括号)     ├─ 依赖 Task 2;彼此独立,可并行(各自 worktree)
 Task 6 (turn_end)   ─┘
 Task 4 (todo 前端)     依赖 Task 3 合并(消费 metadata 形状)
-Task 7 (W1 读侧)       端点部分依赖 Task 2;errorChain 独立
+Task 7 (W1 读侧)       types 过滤独立可先行;errorChain 独立
+Task 8 (Issue 详情页)  reason 行完全独立可先行;todo 进度依赖 Task 3(+可选 Task 7)
 ```
 
 ## Self-Review 已做
