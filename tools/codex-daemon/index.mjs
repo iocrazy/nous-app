@@ -462,9 +462,17 @@ function scriptPath() {
 }
 
 /** systemd --user unit. Pure so its content is asserted by tests rather than
- *  "it looked right the one time I ran it". */
-export function renderSystemdUnit({ nodePath, scriptPath: script, apiBase = null }) {
-  const env = apiBase ? `Environment=NOUS_API_BASE=${apiBase}\n` : '';
+ *  "it looked right the one time I ran it".
+ *
+ *  `pathEnv` matters more than it looks: `systemd --user` starts services with
+ *  a minimal PATH (no ~/.local/bin, no linuxbrew), so a daemon installed from
+ *  a shell where all three CLIs resolve would come up reporting every one of
+ *  them missing and bounce every job with cli_missing. Baking the installing
+ *  shell's PATH in is what makes the service equivalent to `run`. */
+export function renderSystemdUnit({ nodePath, scriptPath: script, apiBase = null, pathEnv = null }) {
+  const env =
+    (pathEnv ? `Environment=PATH=${pathEnv}\n` : '') +
+    (apiBase ? `Environment=NOUS_API_BASE=${apiBase}\n` : '');
   return `[Unit]
 Description=nous-codex — run nous canvas generations on this machine
 Documentation=https://github.com/iocrazy/nous-app/tree/master/tools/codex-daemon
@@ -491,12 +499,21 @@ WantedBy=default.target
  *  revoked device is still relaunched (reprinting the revocation message
  *  every ~10s) until `uninstall-service` runs. Documented, not verified on
  *  real hardware — see README. */
-export function renderLaunchdPlist({ nodePath, scriptPath: script, logPath, apiBase = null }) {
-  const envBlock = apiBase
+export function renderLaunchdPlist({
+  nodePath,
+  scriptPath: script,
+  logPath,
+  apiBase = null,
+  pathEnv = null,
+}) {
+  // launchd hands the job a minimal PATH too — same reasoning as the unit.
+  const vars = [];
+  if (pathEnv) vars.push(['PATH', pathEnv]);
+  if (apiBase) vars.push(['NOUS_API_BASE', apiBase]);
+  const envBlock = vars.length
     ? `  <key>EnvironmentVariables</key>
   <dict>
-    <key>NOUS_API_BASE</key>
-    <string>${apiBase}</string>
+${vars.map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`).join('\n')}
   </dict>
 `
     : '';
@@ -546,6 +563,7 @@ async function installServiceLinux() {
       nodePath: process.execPath,
       scriptPath: scriptPath(),
       apiBase: process.env.NOUS_API_BASE || null,
+      pathEnv: process.env.PATH || null,
     }),
   );
   log(`wrote ${unitPath}`);
@@ -581,6 +599,7 @@ async function installServiceDarwin() {
       scriptPath: scriptPath(),
       logPath,
       apiBase: process.env.NOUS_API_BASE || null,
+      pathEnv: process.env.PATH || null,
     }),
   );
   log(`wrote ${plistPath}`);

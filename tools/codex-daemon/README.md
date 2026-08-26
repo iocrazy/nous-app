@@ -72,6 +72,14 @@ for.
 | macOS | LaunchAgent `~/Library/LaunchAgents/ink.nous.codex.plist`, logs at `~/Library/Logs/nous-codex.log` | ⚠️ not verified (no mac in the loop) |
 | Windows | Scheduled task `NousCodex`, trigger ON LOGON | ⚠️ not verified |
 
+`install-service` bakes the **PATH of the shell you ran it from** into the
+unit/plist. Service managers start jobs with a minimal PATH that contains
+neither `~/.local/bin` nor Homebrew, so without this the daemon comes up
+reporting `codex` / `gpt-image-2-skill` / `dreamina` all missing and bounces
+every job with `cli_missing` — observed on a real machine before the fix. If
+you later move a CLI somewhere new, re-run `install-service` from a shell
+where it resolves.
+
 ## Revocation is a dead end, on purpose
 
 Revoke a device from the nous settings page and the server closes the socket

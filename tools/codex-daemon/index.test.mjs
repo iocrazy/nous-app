@@ -74,6 +74,32 @@ test('renderSystemdUnit: NOUS_API_BASE is carried into the unit when set', () =>
   assert.match(unit, /^Environment=NOUS_API_BASE=http:\/\/10\.0\.0\.10:8080$/m);
 });
 
+test('renderSystemdUnit: the installing shell PATH is baked in', () => {
+  // systemd --user gives services a minimal PATH: without this the daemon
+  // starts fine and then reports codex / gpt-image-2-skill / dreamina all
+  // missing, bouncing every job with cli_missing. Verified on a real box.
+  const unit = renderSystemdUnit({
+    nodePath: '/usr/bin/node',
+    scriptPath: '/x/nous-codex.mjs',
+    pathEnv: '/home/u/.local/bin:/usr/bin:/bin',
+  });
+  assert.match(unit, /^Environment=PATH=\/home\/u\/\.local\/bin:\/usr\/bin:\/bin$/m);
+});
+
+test('renderLaunchdPlist: PATH and API base share one EnvironmentVariables dict', () => {
+  const plist = renderLaunchdPlist({
+    nodePath: '/usr/local/bin/node',
+    scriptPath: '/x/nous-codex.mjs',
+    logPath: '/x/nous-codex.log',
+    apiBase: 'https://api.example.test',
+    pathEnv: '/opt/homebrew/bin:/usr/bin',
+  });
+  const dicts = plist.match(/<key>EnvironmentVariables<\/key>/g) ?? [];
+  assert.equal(dicts.length, 1, 'exactly one EnvironmentVariables dict');
+  assert.match(plist, /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
+  assert.match(plist, /<key>NOUS_API_BASE<\/key>\s*<string>https:\/\/api\.example\.test<\/string>/);
+});
+
 test('renderLaunchdPlist: label, argv, RunAtLoad and log paths', () => {
   const plist = renderLaunchdPlist({
     nodePath: '/opt/homebrew/bin/node',
