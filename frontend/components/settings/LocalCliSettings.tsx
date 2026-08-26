@@ -10,6 +10,7 @@ import { Check, X } from 'lucide-react';
 
 import type { CodexDevice } from '../../services/codexDaemonService';
 import { CodexDaemonSettings } from './CodexDaemonSettings';
+import { JimengCliCard } from './JimengCliCard';
 
 export interface DaemonEnvReport {
   codex_ok?: boolean;
@@ -57,6 +58,9 @@ export function LocalCliSettings() {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <section className="bg-ink-900 border border-ink-800 rounded-xl p-6">
         <CodexDaemonSettings />
+      </section>
+      <section className="bg-ink-900 border border-ink-800 rounded-xl p-6">
+        <JimengCliCard />
       </section>
     </div>
   );
