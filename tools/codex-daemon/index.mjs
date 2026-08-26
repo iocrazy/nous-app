@@ -217,11 +217,48 @@ async function connect(cfg) {
   });
 }
 
+function which(bin) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ['--version'], { stdio: 'ignore' });
+    child.on('error', () => resolve(false));
+    // Some CLIs exit non-zero on --version by design; spawning at all means
+    // the binary exists, which is all preflight needs to know.
+    child.on('close', () => resolve(true));
+  });
+}
+
+/** Tell the user NOW what will fail later — a daemon that connects happily
+ *  and then bounces every job with cli_missing is technically "typed
+ *  failure", practically a puzzle. */
+async function preflight() {
+  const problems = [];
+  if (!(await which('gpt-image-2-skill'))) {
+    problems.push(
+      'gpt-image-2-skill not found — image jobs will fail. Install: npm i -g gpt-image-2-skill',
+    );
+  }
+  if (!(await which('codex'))) {
+    problems.push(
+      'codex CLI not found — text jobs will fail. Install: npm i -g @openai/codex',
+    );
+  }
+  try {
+    await fs.access(path.join(os.homedir(), '.codex', 'auth.json'));
+  } catch {
+    problems.push(
+      'no codex login found (~/.codex/auth.json) — run: codex login',
+    );
+  }
+  for (const problem of problems) log(`WARNING: ${problem}`);
+  if (!problems.length) log('preflight ok: codex login + CLIs found');
+}
+
 async function run() {
   const cfg = await readConfig();
   if (!cfg?.device_token) {
     throw new Error('not paired yet — run: nous-codex pair <CODE>');
   }
+  await preflight();
   let backoff = RECONNECT_MIN_MS;
   for (;;) {
     const started = Date.now();

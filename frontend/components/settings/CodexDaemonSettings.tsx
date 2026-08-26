@@ -82,7 +82,17 @@ export function CodexDaemonSettings() {
         {pairCode ? (
           <div className="space-y-2">
             <div className="text-xs text-content-3">
-              Run this on the machine you want to pair (code expires in 10 minutes):
+              One-time setup on your machine (needs Node 20+ and a ChatGPT
+              subscription):
+            </div>
+            <code
+              data-testid="codex-prereq-command"
+              className="block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
+            >
+              npm i -g @openai/codex gpt-image-2-skill{'\n'}codex login
+            </code>
+            <div className="text-xs text-content-3">
+              Then pair this device (code expires in 10 minutes):
             </div>
             <div
               data-testid="codex-pair-code"
