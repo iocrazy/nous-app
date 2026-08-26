@@ -84,10 +84,10 @@ const PROVIDER_META: Record<
 > = {
   openai: {
     name: 'OpenAI',
-    description: 'Cloud-hosted GPT & Whisper models',
+    description: 'aiSettings.providerDesc.openai',
     icon: <Sparkles size={18} />,
     color: 'emerald',
-    badge: 'Recommended',
+    badge: 'aiSettings.badge.recommended',
     website: 'https://platform.openai.com/api-keys',
     models: ['gpt-5.6', 'gpt-5.4', 'gpt-5.2', 'gpt-5.2-mini', 'gpt-4o'],
     whisperModels: ['whisper-1'],
@@ -96,7 +96,7 @@ const PROVIDER_META: Record<
   },
   deepseek: {
     name: 'DeepSeek',
-    description: 'Cost-effective cloud AI',
+    description: 'aiSettings.providerDesc.deepseek',
     website: 'https://platform.deepseek.com/api_keys',
     icon: <Zap size={18} />,
     color: 'blue',
@@ -105,7 +105,7 @@ const PROVIDER_META: Record<
   },
   doubao: {
     name: 'Doubao',
-    description: 'ByteDance Ark — 豆包大模型',
+    description: 'aiSettings.providerDesc.doubao',
     icon: <Globe size={18} />,
     color: 'violet',
     defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
@@ -116,7 +116,7 @@ const PROVIDER_META: Record<
   },
   minimax: {
     name: 'MiniMax',
-    description: 'MiniMax cloud AI',
+    description: 'aiSettings.providerDesc.minimax',
     website: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
     icon: <MessageSquare size={18} />,
     color: 'amber',
@@ -125,7 +125,7 @@ const PROVIDER_META: Record<
   },
   kimi: {
     name: 'Kimi',
-    description: 'Moonshot AI',
+    description: 'aiSettings.providerDesc.kimi',
     website: 'https://platform.moonshot.cn/console/api-keys',
     icon: <Moon size={18} />,
     color: 'teal',
@@ -135,7 +135,7 @@ const PROVIDER_META: Record<
   },
   qwen: {
     name: 'Qwen (Bailian)',
-    description: 'Alibaba Cloud Bailian — Qwen models',
+    description: 'aiSettings.providerDesc.qwen',
     icon: <Cloud size={18} />,
     color: 'rose',
     defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -150,10 +150,10 @@ const PROVIDER_META: Record<
   },
   modelscope: {
     name: 'ModelScope',
-    description: 'ModelScope (魔搭) — community inference, free tier',
+    description: 'aiSettings.providerDesc.modelscope',
     icon: <Brain size={18} />,
     color: 'violet',
-    badge: 'Free Tier',
+    badge: 'aiSettings.badge.freeTier',
     website: 'https://modelscope.cn/my/myaccesstoken',
     defaultBaseUrl: 'https://api-inference.modelscope.cn/v1',
     models: [
@@ -167,7 +167,7 @@ const PROVIDER_META: Record<
   },
   volcengine: {
     name: 'Volcengine',
-    description: 'ByteDance — 火山引擎语音识别',
+    description: 'aiSettings.providerDesc.volcengine',
     icon: <Mic size={18} />,
     color: 'cyan',
     whisperModels: ['bigasr', 'seed-asr'],
@@ -178,7 +178,7 @@ const PROVIDER_META: Record<
   },
   ollama: {
     name: 'Ollama',
-    description: 'Local models, free & private',
+    description: 'aiSettings.providerDesc.ollama',
     icon: <Server size={18} />,
     color: 'orange',
     isLocal: true,
@@ -188,7 +188,7 @@ const PROVIDER_META: Record<
   },
   lmstudio: {
     name: 'LM Studio',
-    description: 'Local models via LM Studio',
+    description: 'aiSettings.providerDesc.lmstudio',
     icon: <Server size={18} />,
     color: 'pink',
     isLocal: true,
@@ -199,14 +199,14 @@ const PROVIDER_META: Record<
 };
 
 const LANGUAGE_OPTIONS = [
-  { value: 'auto', label: 'Auto Detect' },
-  { value: 'en', label: 'English' },
-  { value: 'zh', label: 'Chinese' },
-  { value: 'ja', label: 'Japanese' },
-  { value: 'ko', label: 'Korean' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'fr', label: 'French' },
-  { value: 'de', label: 'German' },
+  { value: 'auto', label: 'aiSettings.lang.auto' },
+  { value: 'en', label: 'aiSettings.lang.en' },
+  { value: 'zh', label: 'aiSettings.lang.zh' },
+  { value: 'ja', label: 'aiSettings.lang.ja' },
+  { value: 'ko', label: 'aiSettings.lang.ko' },
+  { value: 'es', label: 'aiSettings.lang.es' },
+  { value: 'fr', label: 'aiSettings.lang.fr' },
+  { value: 'de', label: 'aiSettings.lang.de' },
 ];
 
 const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badge: string }> = {
@@ -309,6 +309,7 @@ const EnabledModelsField: React.FC<{
   selectedModel,
   nonChatWarning,
 }) => {
+  const { t } = useTranslation();
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -322,7 +323,7 @@ const EnabledModelsField: React.FC<{
 
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-ink-400">Enabled Models</label>
+      <label className="text-xs font-medium text-ink-400">{t('aiSettings.enabledModels')}</label>
       <div className="flex flex-wrap items-center gap-2">
         {enabledModels.map((m) => {
           const suspect = nonChatWarning?.(m) ?? null;
@@ -345,7 +346,7 @@ const EnabledModelsField: React.FC<{
               className={`transition-opacity hover:opacity-70 ${
                 suspect ? 'text-danger' : 'text-[var(--accent-text)]'
               }`}
-              aria-label={`Remove ${m}`}
+              aria-label={t('aiSettings.removeModel', { model: m })}
             >
               <X size={12} />
             </button>
@@ -362,7 +363,7 @@ const EnabledModelsField: React.FC<{
             className="inline-flex items-center gap-1 rounded-full border border-dashed border-ink-700 px-3 py-1 text-xs text-ink-400 hover:text-ink-50 hover:border-ink-500 transition-colors"
           >
             <Plus size={12} />
-            Add Model
+            {t('aiSettings.addModel')}
           </button>
         )}
       </div>
@@ -375,25 +376,25 @@ const EnabledModelsField: React.FC<{
               type="text"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter models..."
+              placeholder={t('aiSettings.filterModels')}
               className="flex-1 bg-transparent text-xs text-ink-200 placeholder:text-ink-600 focus:outline-none"
             />
             <button
               type="button"
               onClick={() => setPicking(false)}
               className="text-ink-500 hover:text-ink-200 transition-colors"
-              aria-label="Close picker"
+              aria-label={t('aiSettings.closePicker')}
             >
               <X size={14} />
             </button>
           </div>
           {catalog.length === 0 ? (
             <div className="text-xs text-ink-500 px-1 py-2">
-              Catalog empty — run Test Connection first.
+              {t('aiSettings.catalogEmpty')}
             </div>
           ) : remaining.length === 0 ? (
             <div className="text-xs text-ink-500 px-1 py-2">
-              {filter ? 'No matches' : 'All models already enabled'}
+              {filter ? t('aiSettings.noMatches') : t('aiSettings.allEnabled')}
             </div>
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-0.5">
@@ -437,7 +438,7 @@ const EnabledModelsField: React.FC<{
       })()}
 
       <p className="text-[11px] text-ink-500">
-        Only enabled models are shown to agents in the AI Library — provider:{' '}
+        {t('aiSettings.enabledModelsHint')}{' '}
         <span className="font-mono">{providerKey}</span>
       </p>
     </div>
@@ -445,18 +446,21 @@ const EnabledModelsField: React.FC<{
 };
 
 /** Small note shown in place of a locked module's Task Assignment row. */
-const ManagedNote: React.FC = () => (
-  <div className="flex items-center gap-1.5 text-xs text-ink-500 py-1">
-    <Lock size={11} className="text-ink-600 shrink-0" aria-hidden />
-    <span>Managed by your administrator</span>
-  </div>
-);
+const ManagedNote: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-ink-500 py-1">
+      <Lock size={11} className="text-ink-600 shrink-0" aria-hidden />
+      <span>{t('aiSettings.managedByAdmin')}</span>
+    </div>
+  );
+};
 
 export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, section = 'all' }) => {
-  // Only the model-health warning below goes through i18n so far — the rest of
-  // this page is still hardcoded English. A health warning is the one string
-  // here a user has to ACT on, so it is worth reading in their own language
-  // even while the labels around it lag behind.
+  // Every user-facing string on this page resolves through i18n (2026-08-26):
+  // labels, placeholders, option text and the model-health / non-chat warnings
+  // alike. Provider brand names, model ids and upstream error text stay verbatim
+  // — they are identifiers, not copy.
   const { t } = useTranslation();
   const [taskTab, setTaskTab] = useState<TaskTab>('media');
   const [governance, setGovernance] = useState<AIGovernanceFlags>(GOVERNANCE_ALL_ALLOWED);
@@ -845,7 +849,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             modelCount > 0 ? `${modelCount} models available` : 'Connection OK',
           ).catch((e) => console.error('[AISettings] reportProviderHealth failed:', e));
         } else {
-          const detail = `Server responded with status ${response.status}`;
+          const detail = t('aiSettings.errServerStatus', { status: response.status });
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
           setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
           markTested();
@@ -872,12 +876,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'success' }));
         } else {
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-          setConnectionError((prev) => ({ ...prev, [providerKey]: result.error || 'Connection failed' }));
+          setConnectionError((prev) => ({
+            ...prev,
+            [providerKey]: result.error || t('aiSettings.errConnectionFailed'),
+          }));
         }
         markTested();
       }
     } catch (err) {
-      const detail = err instanceof Error ? err.message : 'Connection failed';
+      const detail = err instanceof Error ? err.message : t('aiSettings.errConnectionFailed');
       setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
       setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
       markTested();
@@ -903,7 +910,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Failed to save settings');
+      setSaveError(err instanceof Error ? err.message : t('aiSettings.errSaveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -948,19 +955,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     for (const model of matchingNousModels) {
       const pricingLabel =
         model.pricing_type === 'per_hour'
-          ? `${model.pricing_value} pts/hr`
+          ? t('aiSettings.pricingPerHour', { value: model.pricing_value })
           : model.pricing_type === 'per_request'
-            ? `${model.pricing_value} pts`
-            : `${model.pricing_value} pts/1k tokens`;
+            ? t('aiSettings.pricingPerRequest', { value: model.pricing_value })
+            : t('aiSettings.pricingPerTokens', { value: model.pricing_value });
       const warning = nousHealthWarning(model.name);
       options.push({
         value: `nous:${model.name}`,
-        label: `${model.display_name} (Platform · ${pricingLabel})${warning ? ` — ${warning}` : ''}`,
+        label:
+          t('aiSettings.platformAsrOption', {
+            name: model.display_name,
+            pricing: pricingLabel,
+          }) + (warning ? ` — ${warning}` : ''),
       });
     }
 
     if (options.length === 0) {
-      options.push({ value: '', label: 'No Provider Enabled' });
+      options.push({ value: '', label: t('aiSettings.noProviderEnabled') });
     }
 
     return options;
@@ -973,7 +984,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   const getAgentOptions = (): AgentOption[] => {
     return agents.map((a) => ({
       value: a.slug,
-      label: a.is_system_preset ? `[System] ${a.name}` : `${a.name} (mine)`,
+      label: a.is_system_preset
+        ? t('aiSettings.agentSystem', { name: a.name })
+        : t('aiSettings.agentMine', { name: a.name }),
       group: a.is_system_preset ? 'system' : 'mine',
     }));
   };
@@ -1008,10 +1021,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
     taskKey: keyof AISettingsType['task_assignment'],
   ): string => {
     const slug = TASK_DEFAULT_AGENT_SLUG[taskKey];
-    if (!slug) return 'Default (system)';
+    if (!slug) return t('aiSettings.defaultSystem');
     const agent = agents.find((a) => a.slug === slug);
-    if (!agent) return `Default — ${slug}`;
-    return `Default — ${agent.is_system_preset ? `[System] ${agent.name}` : agent.name}`;
+    if (!agent) return t('aiSettings.defaultSlug', { slug });
+    return t('aiSettings.defaultAgent', {
+      name: agent.is_system_preset
+        ? t('aiSettings.agentSystem', { name: agent.name })
+        : agent.name,
+    });
   };
 
   // Disabled placeholder select shown while the async option sources are still
@@ -1022,7 +1039,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
   // the real list once optionsReady flips.
   const renderLoadingSelect = (currentValue: string, className = 'min-w-[220px]') => (
     <UiSelect value={currentValue} disabled aria-busy="true" className={className}>
-      <option value={currentValue}>{currentValue || 'Loading…'}</option>
+      <option value={currentValue}>{currentValue || t('aiSettings.loading')}</option>
     </UiSelect>
   );
 
@@ -1049,7 +1066,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             const warning = nousHealthWarning(m.name);
             return {
               value: `nous:${m.name}`,
-              label: `${m.display_name} (Platform)${warning ? ` — ${warning}` : ''}`,
+              label:
+                t('aiSettings.platformLlmOption', { name: m.display_name }) +
+                (warning ? ` — ${warning}` : ''),
             };
           })
       : [];
@@ -1066,29 +1085,31 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         className="min-w-[220px]"
       >
           {options.length === 0 && nousLlmOptions.length === 0 ? (
-            <option value="">No Agents Available</option>
+            <option value="">{t('aiSettings.noAgents')}</option>
           ) : (
             <option value="">{getDefaultAgentLabel(taskKey)}</option>
           )}
           {isLegacy && (
-            <option value={currentValue}>{currentValue} (legacy — please reselect)</option>
+            <option value={currentValue}>
+              {t('aiSettings.legacyOption', { value: currentValue })}
+            </option>
           )}
           {systemOptions.length > 0 && (
-            <optgroup label="System">
+            <optgroup label={t('aiSettings.groupSystem')}>
               {systemOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </optgroup>
           )}
           {mineOptions.length > 0 && (
-            <optgroup label="My Agents">
+            <optgroup label={t('aiSettings.groupMine')}>
               {mineOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </optgroup>
           )}
           {nousLlmOptions.length > 0 && (
-            <optgroup label="Nous Platform">
+            <optgroup label={t('aiSettings.groupPlatform')}>
               {nousLlmOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
@@ -1126,8 +1147,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             <Brain size={20} />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-ink-200">AI Intelligence</h2>
-            <p className="text-xs text-ink-500">Configure AI providers for transcription, summarization, and analysis</p>
+            <h2 className="font-semibold text-ink-200">{t('aiSettings.intelligenceTitle')}</h2>
+            <p className="text-xs text-ink-500">{t('aiSettings.intelligenceDesc')}</p>
           </div>
         </div>
 
@@ -1136,7 +1157,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={`w-2.5 h-2.5 rounded-full ${localSettings.ai_enabled ? 'bg-green-400 shadow-lg shadow-green-400/30' : 'bg-ink-600'}`} />
-              <span className="font-medium text-ink-200">AI Enabled</span>
+              <span className="font-medium text-ink-200">{t('aiSettings.aiEnabled')}</span>
             </div>
             <button
               onClick={toggleAIEnabled}
@@ -1149,12 +1170,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               {localSettings.ai_enabled ? (
                 <>
                   <ToggleRight size={16} />
-                  Disable AI
+                  {t('aiSettings.disableAi')}
                 </>
               ) : (
                 <>
                   <ToggleLeft size={16} />
-                  Enable AI
+                  {t('aiSettings.enableAi')}
                 </>
               )}
             </button>
@@ -1165,7 +1186,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               Replaces the old global Auto-Transcribe / Auto-Summarize toggles. */}
           <div className={`space-y-4 transition-opacity ${localSettings.ai_enabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-ink-300">Preferred Language</span>
+              <span className="text-sm text-ink-300">{t('aiSettings.preferredLanguage')}</span>
               <UiSelect
                 value={localSettings.preferred_language}
                 onChange={(e) => setPreferredLanguage(e.target.value)}
@@ -1173,7 +1194,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               >
                 {LANGUAGE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label}
+                    {t(opt.label)}
                   </option>
                 ))}
               </UiSelect>
@@ -1182,15 +1203,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             {/* Transcription hotwords — a content hint (people, terms) applied
                 on every ASR run, even under governance lock. */}
             <div className="flex flex-col gap-1.5 py-2">
-              <span className="text-sm text-ink-300">Transcription Hotwords</span>
+              <span className="text-sm text-ink-300">{t('aiSettings.hotwordsLabel')}</span>
               <HotwordChipInput
                 value={localSettings.transcription_hotwords ?? ''}
                 onChange={setTranscriptionHotwords}
                 disabled={!localSettings.ai_enabled}
-                placeholder="Type a name or term, press Enter to add"
+                placeholder={t('aiSettings.hotwordsPlaceholder')}
               />
               <span className="text-xs text-ink-500">
-                Helps the transcriber spell proper nouns and jargon correctly.
+                {t('aiSettings.hotwordsHint')}
               </span>
             </div>
           </div>
@@ -1206,8 +1227,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             <Zap size={20} />
           </div>
           <div>
-            <h2 className="font-semibold text-ink-200">Task Assignment</h2>
-            <p className="text-xs text-ink-500">Choose which provider handles each AI task</p>
+            <h2 className="font-semibold text-ink-200">{t('aiSettings.taskAssignTitle')}</h2>
+            <p className="text-xs text-ink-500">{t('aiSettings.taskAssignDesc')}</p>
           </div>
         </div>
 
@@ -1223,7 +1244,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
-              Media
+              {t('aiSettings.tabMedia')}
             </button>
             <button
               type="button"
@@ -1234,7 +1255,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
-              Storyboard
+              {t('aiSettings.tabStoryboard')}
             </button>
           </div>
         </div>
@@ -1247,7 +1268,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Transcription</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskTranscription')}</span>
             </div>
             {!optionsReady ? (
               renderLoadingSelect(localSettings.task_assignment.transcription)
@@ -1267,7 +1288,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Transcription</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskTranscription')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1278,7 +1299,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Summarization</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskSummarization')}</span>
             </div>
             {renderAgentSelect('summarization', localSettings.task_assignment.summarization)}
           </div>
@@ -1286,7 +1307,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Summarization</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskSummarization')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1297,7 +1318,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Visual Analysis</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskVisualAnalysis')}</span>
             </div>
             {renderAgentSelect('visual_analysis', localSettings.task_assignment.visual_analysis)}
           </div>
@@ -1305,7 +1326,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Visual Analysis</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskVisualAnalysis')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1316,7 +1337,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Languages size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Translation</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskTranslation')}</span>
             </div>
             {renderAgentSelect('translation', localSettings.task_assignment.translation ?? '')}
           </div>
@@ -1324,7 +1345,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Languages size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Translation</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskTranslation')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1335,7 +1356,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ImageIcon size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Caption (Image → Prompt)</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskCaption')}</span>
             </div>
             {renderAgentSelect('caption', localSettings.task_assignment.caption ?? '')}
           </div>
@@ -1343,7 +1364,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <ImageIcon size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Caption (Image → Prompt)</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskCaption')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1354,7 +1375,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Classification (Auto Tag)</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskClassification')}</span>
             </div>
             {renderAgentSelect('classification', localSettings.task_assignment.classification ?? '')}
           </div>
@@ -1362,7 +1383,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-ink-500" />
-              <span className="text-sm font-medium text-ink-500">Classification (Auto Tag)</span>
+              <span className="text-sm font-medium text-ink-500">{t('aiSettings.taskClassification')}</span>
             </div>
             <ManagedNote />
           </div>
@@ -1377,7 +1398,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-ink-400" />
-              <span className="text-sm font-medium text-ink-300">Script / Prompt</span>
+              <span className="text-sm font-medium text-ink-300">{t('aiSettings.taskScript')}</span>
             </div>
             {renderAgentSelect('script_generation', localSettings.task_assignment.script_generation ?? '')}
           </div>
@@ -1409,8 +1430,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             <Settings size={20} />
           </div>
           <div className="flex-1">
-            <h2 className="font-semibold text-ink-200">AI Providers</h2>
-            <p className="text-xs text-ink-500">Configure API keys and connections for each provider</p>
+            <h2 className="font-semibold text-ink-200">{t('aiSettings.providersTitle')}</h2>
+            <p className="text-xs text-ink-500">{t('aiSettings.providersDesc')}</p>
           </div>
         </div>
 
@@ -1442,8 +1463,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                           href={meta.website}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`Open ${meta.name} console`}
-                          aria-label={`Open ${meta.name} console`}
+                          title={t('aiSettings.openConsole', { name: meta.name })}
+                          aria-label={t('aiSettings.openConsole', { name: meta.name })}
                           className="text-ink-500 hover:text-ink-200 transition-colors"
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -1452,23 +1473,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       )}
                       {meta.badge && (
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${colors.badge}`}>
-                          {meta.badge}
+                          {t(meta.badge)}
                         </span>
                       )}
                       {isLocal && connStatus === 'success' && (
                         <span className="flex items-center gap-1 text-xs text-green-400">
                           <Wifi size={12} />
-                          Connected
+                          {t('aiSettings.connected')}
                         </span>
                       )}
                       {isLocal && connStatus === 'error' && (
                         <span className="flex items-center gap-1 text-xs text-red-400">
                           <WifiOff size={12} />
-                          Disconnected
+                          {t('aiSettings.disconnected')}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-ink-500 mt-0.5">{meta.description}</p>
+                    <p className="text-xs text-ink-500 mt-0.5">{t(meta.description)}</p>
                   </div>
                   {renderToggle(config.enabled, () => toggleProvider(providerKey))}
                 </div>
@@ -1481,7 +1502,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
-                          API Key
+                          {t('aiSettings.apiKey')}
                         </label>
                         <div className="relative">
                           <input
@@ -1490,8 +1511,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                             onChange={(e) => updateProviderField(providerKey, 'api_key', e.target.value)}
                             placeholder={
                               config.api_key_set
-                                ? `Set (…${config.api_key_hint || '****'}) — leave blank to keep`
-                                : `Enter your ${meta.name} API key`
+                                ? t('aiSettings.apiKeyPlaceholderSet', {
+                                    hint: config.api_key_hint || '****',
+                                  })
+                                : t('aiSettings.apiKeyPlaceholder', { name: meta.name })
                             }
                             className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 pr-10 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                           />
@@ -1505,9 +1528,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                         </div>
                         {config.api_key_set && !config.api_key && (
                           <p className="text-[11px] text-ink-500">
-                            API key configured (…{config.api_key_hint || '****'})
-                            {(config.api_key_count ?? 1) > 1 && ` — ${config.api_key_count} keys`}
-                            . Type a new key to replace it.
+                            {t('aiSettings.apiKeyConfigured', {
+                              hint: config.api_key_hint || '****',
+                            })}
+                            {(config.api_key_count ?? 1) > 1 &&
+                              t('aiSettings.apiKeyCount', { n: config.api_key_count })}
+                            {t('aiSettings.apiKeyReplace')}
                           </p>
                         )}
                       </div>
@@ -1518,13 +1544,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Key size={12} />
-                          App ID
+                          {t('aiSettings.appId')}
                         </label>
                         <input
                           type="text"
                           value={config.app_id || ''}
                           onChange={(e) => updateProviderField(providerKey, 'app_id' as keyof AIProviderConfig, e.target.value)}
-                          placeholder="Enter App ID"
+                          placeholder={t('aiSettings.appIdPlaceholder')}
                           className="w-full bg-ink-950 border border-ink-800 rounded-lg px-4 py-2.5 text-sm text-ink-200 placeholder-ink-600 font-mono focus:outline-none focus:border-indigo-500 transition-colors"
                         />
                       </div>
@@ -1535,7 +1561,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-ink-400 flex items-center gap-1.5">
                           <Server size={12} />
-                          Server URL
+                          {t('aiSettings.serverUrl')}
                         </label>
                         <input
                           type="text"
@@ -1588,39 +1614,43 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                           {connStatus === 'error' && <WifiOff size={14} />}
                           {connStatus === 'idle' && <Wifi size={14} />}
                           {connStatus === 'testing'
-                            ? 'Testing...'
+                            ? t('aiSettings.testing')
                             : connStatus === 'success'
-                            ? 'Connected'
+                            ? t('aiSettings.connected')
                             : connStatus === 'error'
-                            ? 'Retry Connection'
-                            : 'Test Connection'}
+                            ? t('aiSettings.retryConnection')
+                            : t('aiSettings.testConnection')}
                         </button>
                         {connStatus === 'error' && connectionError[providerKey] && (
                           <p className="mt-2 text-xs text-red-400">{connectionError[providerKey]}</p>
                         )}
                         {connStatus === 'success' && config.models && config.models.length > 0 && (
                           <p className="mt-2 text-xs text-green-400/70">
-                            Detected {config.models.length} model{config.models.length !== 1 ? 's' : ''} from server
+                            {config.models.length === 1
+                              ? t('aiSettings.detectedModelOne')
+                              : t('aiSettings.detectedModels', { n: config.models.length })}
                           </p>
                         )}
                         {connStatus === 'success' && quotaInfo[providerKey] && (
                           <p className="mt-1 text-xs text-ink-400">
-                            Daily quota
-                            {quotaInfo[providerKey]?.requests_remaining != null && (
-                              <> — account: {quotaInfo[providerKey]?.requests_remaining}
-                              /{quotaInfo[providerKey]?.requests_limit ?? '?'} requests left</>
-                            )}
-                            {quotaInfo[providerKey]?.model_requests_remaining != null && (
-                              <> · this model: {quotaInfo[providerKey]?.model_requests_remaining}
-                              /{quotaInfo[providerKey]?.model_requests_limit ?? '?'} left</>
-                            )}
+                            {t('aiSettings.dailyQuota')}
+                            {quotaInfo[providerKey]?.requests_remaining != null &&
+                              t('aiSettings.quotaAccount', {
+                                remaining: quotaInfo[providerKey]?.requests_remaining,
+                                limit: quotaInfo[providerKey]?.requests_limit ?? '?',
+                              })}
+                            {quotaInfo[providerKey]?.model_requests_remaining != null &&
+                              t('aiSettings.quotaModel', {
+                                remaining: quotaInfo[providerKey]?.model_requests_remaining,
+                                limit: quotaInfo[providerKey]?.model_requests_limit ?? '?',
+                              })}
                           </p>
                         )}
                         {/* Persisted across reloads — restores when the DB has a
                             prior test result even before this session tests. */}
                         {lastTested[providerKey] && (
                           <p className="mt-1.5 text-[11px] text-ink-500">
-                            Last tested {relativeTime(lastTested[providerKey])}
+                            {t('aiSettings.lastTested', { ago: relativeTime(lastTested[providerKey]) })}
                           </p>
                         )}
                       </div>
@@ -1643,14 +1673,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-ink-100">Nous (Platform)</span>
+                    <span className="font-medium text-ink-100">{t('aiSettings.nousPlatform')}</span>
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
-                      Platform-managed
+                      {t('aiSettings.platformManaged')}
                     </span>
                   </div>
                   <p className="text-xs text-ink-400 mt-0.5">
-                    Platform-provided models. No API key required — select one as an
-                    agent's model or a transcription option.
+                    {t('aiSettings.nousDesc')}
                   </p>
                 </div>
                 {renderToggle(nousUserEnabled, toggleNousMaster)}
@@ -1661,7 +1690,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
               {nousUserEnabled && (
                 <div className="px-6 pb-4 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
                   {nousModels.length === 0 ? (
-                    <p className="text-xs text-ink-500">No platform models available.</p>
+                    <p className="text-xs text-ink-500">{t('aiSettings.noPlatformModels')}</p>
                   ) : (
                     [...nousModels]
                       .sort(
@@ -1729,7 +1758,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
           ) : (
             <Save size={18} />
           )}
-          {saveSuccess ? 'Settings Saved!' : 'Save Settings'}
+          {saveSuccess ? t('aiSettings.settingsSaved') : t('aiSettings.saveSettings')}
         </button>
       </div>
 
