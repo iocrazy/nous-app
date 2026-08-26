@@ -1089,6 +1089,12 @@ class AgentRunner:
             system_message=composed.system_message,
             user_messages=user_messages,
             model=composed.model,
+            # W3-1: the compactor replays this conversation's own prefix on
+            # its own adapter, so the summary's input tokens ride the
+            # provider's warm cache. Same account, same routing — the
+            # maintenance model has no cache of this conversation to hit.
+            adapter=self.adapter,
+            tools=composed.tools,
         )
         if (
             recorder is not None

@@ -249,8 +249,121 @@ async def summarize(
     return text.strip()
 
 
+# W3-1 (user-approved cost shift): the final user message appended after the
+# replayed conversation. Everything BEFORE it is byte-identical to the
+# conversation's own requests, so the provider's prefix cache covers it; this
+# instruction and the summary output are the only uncached tokens.
+WARM_PREFIX_INSTRUCTION = (
+    "Stop. Do not continue the conversation and do not call any tool.\n"
+    "Compress everything above into a summary an AI agent can resume work "
+    "from, following these rules in priority order:\n"
+    "1. Preserve verbatim every URL, absolute file path, ID, model name, "
+    "code symbol, and any number 8+ digits long.\n"
+    "2. Preserve every tool call made and its outcome (success / error / "
+    "value). Name the tool.\n"
+    "3. Preserve the user's stated intent and constraints (deadlines, "
+    "must-not-do, preferences).\n"
+    "4. Drop chit-chat, repeated explanations, and verbose tool output "
+    "already covered by rule 2.\n"
+    "5. Output ONE paragraph of plain text. No bullet points, no headers, "
+    "no preamble."
+)
+
+
+async def summarize_warm_prefix(
+    *,
+    adapter,
+    system_message: str,
+    tools: list | None,
+    head: list[dict],
+    model: str,
+    max_tokens: int = DEFAULT_SUMMARY_MAX_TOKENS,
+) -> str:
+    """Summarize ``head`` by replaying the conversation's own warm prefix.
+
+    The request is the conversation's request: the SAME adapter (same account,
+    same routing), same model, same system message, same tools, the head
+    messages verbatim — plus ``WARM_PREFIX_INSTRUCTION`` as one final user
+    message. Nothing before that instruction may differ from what the
+    conversation already sent, or the provider's prefix-cache key diverges and
+    every input token goes back to full price. That byte-identity is the whole
+    feature; tests pin it down to object identity.
+
+    Because the tools ride the replayed prefix, the model MAY answer with a
+    tool call. A tool call is not a summary — stored in a checkpoint it
+    becomes an orphaned call replayed into every later request — so it raises
+    and the caller falls back (legacy cheap-model summarize, then the
+    emergency cap).
+
+    Boundary repair: a head ending on an assistant ``tool_calls`` message
+    whose result lives in the retained tail would, on replay + user-message
+    append, hand Anthropic-shaped providers an orphaned tool_use (hard 400).
+    The boundary retreats until the head ends on a complete exchange; the
+    displaced messages are simply not summarized this round (retaining more
+    is always safe).
+    """
+    from uuid import UUID
+
+    from app.schemas.ai_library import ComposedSystemPrompt
+    from app.services.ai.adapters.response import (
+        AdapterResponseShapeError,
+        adapter_text,
+        adapter_tool_calls,
+    )
+    from app.services.ai.runner.reasoning import strip_reasoning
+
+    head = list(head)
+    while head and head[-1].get("tool_calls"):
+        head.pop()
+    if not head:
+        return ""
+
+    composed = ComposedSystemPrompt(
+        agent_id=UUID(int=0),
+        agent_slug="__compaction_warm_prefix__",
+        model=model,
+        temperature=0.0,
+        max_tokens=max_tokens,
+        system_message=system_message,
+        tools=list(tools or []),
+        skill_manifest=[],
+        cache_fingerprint="",
+    )
+    messages = head + [{"role": "user", "content": WARM_PREFIX_INSTRUCTION}]
+
+    try:
+        resp = await asyncio.wait_for(
+            adapter.call(composed, messages), timeout=SUMMARIZE_TIMEOUT_S
+        )
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(
+            f"[summarizer] warm-prefix {model} timed out after "
+            f"{SUMMARIZE_TIMEOUT_S}s"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"[summarizer] warm-prefix {model} call failed: {exc}"
+        ) from exc
+
+    try:
+        if adapter_tool_calls(resp):
+            raise RuntimeError(
+                f"[summarizer] warm-prefix {model} answered with a tool call, "
+                "not a summary — a stored call would replay as an orphan"
+            )
+        text = strip_reasoning(adapter_text(resp))
+    except AdapterResponseShapeError as exc:
+        raise RuntimeError(f"[summarizer] warm-prefix {model} {exc}") from exc
+
+    if not text.strip():
+        raise RuntimeError(f"[summarizer] warm-prefix {model} returned empty text")
+    return text.strip()
+
+
 __all__ = [
     "DEFAULT_SUMMARY_MAX_TOKENS",
+    "WARM_PREFIX_INSTRUCTION",
+    "summarize_warm_prefix",
     "SUMMARIZE_SYSTEM_PROMPT",
     "SUMMARIZE_TIMEOUT_S",
     "summarize",
