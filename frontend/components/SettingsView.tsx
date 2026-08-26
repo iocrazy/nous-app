@@ -2,6 +2,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
+import { AgentMemoriesPanel } from './AgentMemoriesPanel';
+import { LocalCliSettings } from './settings/LocalCliSettings';
+import { MCPServersPanel } from './MCPServersPanel';
+import { MemoryPanel } from './MemoryPanel';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon, GitBranch
@@ -33,7 +37,7 @@ const startOfToday = (): Date => {
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies' | 'workflow';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'ai-providers' | 'local-cli' | 'mcp' | 'memory' | 'docs' | 'cookies' | 'workflow';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
@@ -789,7 +793,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* AI Tab */}
       {activeTab === 'ai' && aiSettings && onSaveAISettings && (
-        <AISettings settings={aiSettings} onSave={onSaveAISettings} />
+        <AISettings settings={aiSettings} onSave={onSaveAISettings} section="core" />
+      )}
+
+      {/* 2026-08-26 tab split: cloud API keys / local CLI / MCP / memory each
+          get their own sidebar entry — the AI tab had grown unnavigable. */}
+      {activeTab === 'ai-providers' && aiSettings && onSaveAISettings && (
+        <AISettings settings={aiSettings} onSave={onSaveAISettings} section="providers" />
+      )}
+
+      {activeTab === 'local-cli' && <LocalCliSettings />}
+
+      {activeTab === 'mcp' && (
+        <section className="bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
+          <MCPServersPanel />
+        </section>
+      )}
+
+      {activeTab === 'memory' && (
+        <div className="space-y-6">
+          <MemoryPanel />
+          <AgentMemoriesPanel />
+        </div>
       )}
 
       {/* Docs Tab */}

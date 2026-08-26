@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { CodexDaemonSettings } from './settings/CodexDaemonSettings';
 import {
   Brain,
   Zap,
@@ -46,16 +45,17 @@ import { relativeTime } from '../utils/taskDisplay';
 import { buildModelHealth, healthReasonKey } from '../utils/modelHealth';
 import { suspectedNonChatKind, nonChatKindKey } from '../utils/nonChatModel';
 import { aiLibraryService } from '../services/aiLibraryService';
-import { MCPServersPanel } from './MCPServersPanel';
 import { HotwordChipInput } from './settings/HotwordChipInput';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
-import { MemoryPanel } from './MemoryPanel';
-import { AgentMemoriesPanel } from './AgentMemoriesPanel';
 import { AIHealthBoard } from './AIHealthBoard';
 import { UiSelect } from './ui';
 
 interface AISettingsProps {
+  /** Which slice to render (settings-page tab split, 2026-08-26):
+   *  'core' = intelligence + task assignment + health; 'providers' = the
+   *  cloud API-key cards. Default 'all' keeps old callers working. */
+  section?: 'all' | 'core' | 'providers';
   settings: AISettingsType;
   onSave: (settings: AISettingsType) => void;
 }
@@ -452,7 +452,7 @@ const ManagedNote: React.FC = () => (
   </div>
 );
 
-export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
+export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, section = 'all' }) => {
   // Only the model-health warning below goes through i18n so far — the rest of
   // this page is still hardcoded English. A health warning is the one string
   // here a user has to ACT on, so it is worth reading in their own language
@@ -1117,6 +1117,8 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {section !== 'providers' && (
+      <>
       {/* Master AI Toggle Section */}
       <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
@@ -1385,12 +1387,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
 
       {/* Capability health board — what each feature actually uses */}
       <AIHealthBoard />
+      </>
+      )}
 
       {/* Provider Cards Section — hidden only when ALL governance-controlled
           modules are locked (chat + 5 task modules). When every module is
           admin-managed, no user BYOK key has any effect so the section is
           irrelevant to end-users. Partial-lock keeps it visible. */}
-      {!(
+      {section !== 'core' && !(
         !governance.chat &&
         !governance.transcription &&
         !governance.translation &&
@@ -1543,7 +1547,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       </div>
                     )}
 
-
                     {/* Generic model whitelist — one shape for every
                         provider, OpenAI included (its bespoke selectors
                         retired 2026-08-25). Chips = ``enabled_models``;
@@ -1560,17 +1563,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       />
                     )}
 
-                    {/* C 方案: run canvas generations on the user's own
-                        machine with their own codex login — lives under
-                        OpenAI because that's whose subscription it uses.
-                        (The per-task model selectors that used to sit here
-                        are gone: task→model assignment moved to the Task
-                        Assignment section, 2026-08-25.) */}
-                    {providerKey === 'openai' && (
-                      <div className="border-t border-ink-800 pt-4">
-                        <CodexDaemonSettings />
-                      </div>
-                    )}
+                    {/* Local codex moved to the Local CLI tab (2026-08-26). */}
 
                     {/* Test Connection button. A stored-but-not-retyped key
                         (api_key_set, masked on GET) can't be tested without
@@ -1745,22 +1738,14 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         </button>
       </div>
 
-      {/* A: MCP Servers section — independent of LLM provider settings,
-          but shown here since both are agent-runtime configs. */}
-      <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
-        <MCPServersPanel />
-      </section>
+      {/* MCP moved to its own settings tab (2026-08-26 tab split). */}
 
       {/* G1-UI: Pending approvals — auto-hides when empty */}
       <section className="mt-8 bg-ink-900/40 border border-ink-800 rounded-lg overflow-hidden">
         <ApprovalsPanel hideWhenEmpty />
       </section>
 
-      {/* Phase 4: user-facing AI memory management (Claude-style) */}
-      <MemoryPanel />
-
-      {/* Agent memories: facts/decisions the AI has curated (own + team-shared) */}
-      <AgentMemoriesPanel />
+      {/* Memory panels moved to the Memory settings tab (2026-08-26). */}
 
 
       {/* Canvas + AI Phase 2 closer: nous-center protocol probe */}

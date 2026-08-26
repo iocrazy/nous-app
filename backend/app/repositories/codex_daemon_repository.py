@@ -53,6 +53,7 @@ class CodexDaemonRepository:
                     "last_seen_at": (
                         r.last_seen_at.isoformat() if r.last_seen_at else None
                     ),
+                    "env_report": r.env_report,
                 }
                 for r in result.scalars().all()
             ]
@@ -95,4 +96,15 @@ class CodexDaemonRepository:
                 update(CodexDaemons)
                 .where(CodexDaemons.id == device_id)
                 .values(last_seen_at=datetime.now(timezone.utc))
+            )
+
+    async def save_env_report(self, device_id: int, report: dict) -> None:
+        """Persist the daemon-reported local environment (IC-style CLI panel)."""
+        from app.db.scope import system_session
+
+        async with system_session(reason="codex daemon env report") as session:
+            await session.execute(
+                update(CodexDaemons)
+                .where(CodexDaemons.id == device_id)
+                .values(env_report=report)
             )

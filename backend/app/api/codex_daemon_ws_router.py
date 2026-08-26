@@ -42,6 +42,24 @@ router = APIRouter(tags=["Codex Daemon"])
 HEARTBEAT_TIMEOUT_SECONDS = 90
 
 
+async def _save_env_report(device_id: str, report: dict) -> None:
+    from app.repositories.codex_daemon_repository import CodexDaemonRepository
+
+    await CodexDaemonRepository().save_env_report(int(device_id), report)
+
+
+async def handle_env_report(device_id: str, message: dict) -> None:
+    """Persist a daemon environment self-check; malformed frames are noise,
+    never an error (the socket must survive a buggy daemon build)."""
+    report = message.get("report")
+    if not isinstance(report, dict):
+        return
+    try:
+        await _save_env_report(device_id, report)
+    except Exception as exc:
+        logger.debug("[codex-daemon] env report save failed: {}", exc)
+
+
 async def _lookup_device(hashed: str) -> Optional[dict[str, Any]]:
     from app.repositories.codex_daemon_repository import CodexDaemonRepository
 
@@ -138,6 +156,8 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "pong"})
                 await daemon_presence.mark_online(user_id, device_id)
                 await _touch_last_seen(device_id)
+            elif kind == "env_report":
+                await handle_env_report(device_id, message)
             elif kind in ("job_done", "job_failed", "job_progress"):
                 job_id = str(message.get("job_id") or "")
                 logger.info(

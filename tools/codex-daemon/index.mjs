@@ -160,6 +160,11 @@ async function connect(cfg) {
 
   ws.addEventListener('open', () => {
     log('connected to nous');
+    if (cfg.envReport) {
+      try {
+        ws.send(JSON.stringify({ type: 'env_report', report: cfg.envReport }));
+      } catch { /* non-fatal */ }
+    }
     heartbeat = setInterval(() => {
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
@@ -227,30 +232,58 @@ function which(bin) {
   });
 }
 
+function versionOf(bin) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout?.on('data', (d) => (out += d));
+    child.stderr?.on('data', (d) => (out += d));
+    child.on('error', () => resolve(null));
+    child.on('close', () => {
+      const m = out.match(/\d+\.\d+[.\d]*/);
+      resolve(m ? m[0] : out.trim().slice(0, 20) || 'installed');
+    });
+  });
+}
+
 /** Tell the user NOW what will fail later — a daemon that connects happily
  *  and then bounces every job with cli_missing is technically "typed
- *  failure", practically a puzzle. */
+ *  failure", practically a puzzle. The same report is sent to nous on
+ *  connect so the settings page can show it (IC's 检测 CLI panel UX). */
 async function preflight() {
+  const codexVersion = await versionOf('codex');
+  const skillVersion = await versionOf('gpt-image-2-skill');
+  let authOk = true;
+  try {
+    await fs.access(path.join(os.homedir(), '.codex', 'auth.json'));
+  } catch {
+    authOk = false;
+  }
   const problems = [];
-  if (!(await which('gpt-image-2-skill'))) {
+  if (!skillVersion) {
     problems.push(
       'gpt-image-2-skill not found — image jobs will fail. Install: npm i -g gpt-image-2-skill',
     );
   }
-  if (!(await which('codex'))) {
+  if (!codexVersion) {
     problems.push(
       'codex CLI not found — text jobs will fail. Install: npm i -g @openai/codex',
     );
   }
-  try {
-    await fs.access(path.join(os.homedir(), '.codex', 'auth.json'));
-  } catch {
-    problems.push(
-      'no codex login found (~/.codex/auth.json) — run: codex login',
-    );
+  if (!authOk) {
+    problems.push('no codex login found (~/.codex/auth.json) — run: codex login');
   }
   for (const problem of problems) log(`WARNING: ${problem}`);
   if (!problems.length) log('preflight ok: codex login + CLIs found');
+  return {
+    codex_ok: Boolean(codexVersion),
+    codex_version: codexVersion,
+    skill_ok: Boolean(skillVersion),
+    skill_version: skillVersion,
+    auth_ok: authOk,
+    node_version: process.version,
+    platform: process.platform,
+  };
 }
 
 async function run() {
@@ -258,7 +291,8 @@ async function run() {
   if (!cfg?.device_token) {
     throw new Error('not paired yet — run: nous-codex pair <CODE>');
   }
-  await preflight();
+  const envReport = await preflight();
+  cfg.envReport = envReport;
   let backoff = RECONNECT_MIN_MS;
   for (;;) {
     const started = Date.now();
