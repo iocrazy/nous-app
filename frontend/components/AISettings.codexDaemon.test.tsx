@@ -49,10 +49,13 @@ const settings: AISettingsType = {
   },
 } as AISettingsType;
 
-describe('settings tab split (2026-08-26)', () => {
-  it('the Local CLI tab renders the codex pairing card', async () => {
-    const { LocalCliSettings } = await import('./settings/LocalCliSettings');
-    render(<LocalCliSettings />);
+describe('settings tab split (2026-08-26, sub-tabs inside AI)', () => {
+  it('the AI area shows sub-tabs and Local CLI renders the pairing card', async () => {
+    const { AISettingsTabs } = await import('./settings/AISettingsTabs');
+    const { fireEvent } = await import('@testing-library/react');
+    render(<AISettingsTabs settings={settings} onSave={vi.fn()} />);
+    expect(screen.getByTestId('ai-subtabs')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('ai-subtab-local-cli'));
     await waitFor(() =>
       expect(screen.getByTestId('codex-daemon-settings')).toBeInTheDocument(),
     );
