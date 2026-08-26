@@ -1563,17 +1563,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
                       />
                     )}
 
-                    {/* C 方案: run canvas generations on the user's own
-                        machine with their own codex login — lives under
-                        OpenAI because that's whose subscription it uses.
-                        (The per-task model selectors that used to sit here
-                        are gone: task→model assignment moved to the Task
-                        Assignment section, 2026-08-25.) */}
-                    {providerKey === 'openai' && (
-                      <div className="border-t border-ink-800 pt-4">
-                        <CodexDaemonSettings />
-                      </div>
-                    )}
+                    {/* Local codex moved to the Local CLI tab (2026-08-26). */}
 
                     {/* Test Connection button. A stored-but-not-retyped key
                         (api_key_set, masked on GET) can't be tested without
