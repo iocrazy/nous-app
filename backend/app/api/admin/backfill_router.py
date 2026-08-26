@@ -31,6 +31,9 @@ from app.workflows.backfill_project_stage_issue_team_ids import (
 from app.workflows.backfill_publish_task_team_ids import (
     backfill_publish_task_team_ids_workflow,
 )
+from app.workflows.backfill_resource_gen_params import (
+    backfill_resource_gen_params_workflow,
+)
 
 router = APIRouter()
 
@@ -43,7 +46,23 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
         backfill_normalize_personal_project_team_ids_workflow
     ),
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
+    "resource_gen_params": backfill_resource_gen_params_workflow,
 }
+
+
+def workflow_kwargs(
+    name: str, body: "BackfillRequest", admin_user_id: str
+) -> dict[str, Any]:
+    """Build the workflow kwargs; pass the admin's id to workflows that take
+    ``run_user_id`` so their task_tracking row has a real auth.users owner
+    (the all-zero system id violates the FK and the row is never created)."""
+    import inspect
+
+    kwargs: dict[str, Any] = {"dry_run": body.dry_run, "limit": body.limit}
+    target = inspect.unwrap(_BACKFILLS[name])
+    if "run_user_id" in inspect.signature(target).parameters:
+        kwargs["run_user_id"] = admin_user_id
+    return kwargs
 
 
 class BackfillRequest(BaseModel):
@@ -82,7 +101,7 @@ async def dispatch_backfill(
     result = await start_workflow_routed(
         "backfill",
         dbos_workflow_callable=_BACKFILLS[body.name],
-        dbos_workflow_kwargs={"dry_run": body.dry_run, "limit": body.limit},
+        dbos_workflow_kwargs=workflow_kwargs(body.name, body, auth.user_id),
     )
     workflow_id = result["dbos_workflow_id"]
 

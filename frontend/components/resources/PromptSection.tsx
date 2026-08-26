@@ -47,6 +47,7 @@ import { generateGenPrompt } from '../../services/resourceService';
 import { useTaskCompletion } from '../../hooks/useTaskCompletion';
 import { useOptionalToast } from '../Toast';
 import { SendToCanvasModal } from './SendToCanvasModal';
+import { GenParamsBlock } from './GenParamsBlock';
 
 export interface PromptSectionProps {
   resource: Resource;
@@ -507,6 +508,7 @@ export function PromptSection({
             {t('resources.infoPanel.promptExpandHint', 'Click to expand')}
           </div>
         </button>
+        <GenParamsBlock params={resource.gen_params} />
       </div>
     );
   }
@@ -629,6 +631,7 @@ export function PromptSection({
           </button>
         </div>
       )}
+      <GenParamsBlock params={resource.gen_params} />
       {sendToCanvasOpen && (
         <SendToCanvasModal
           resource={resource}

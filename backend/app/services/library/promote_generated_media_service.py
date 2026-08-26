@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 from pathlib import Path
+from typing import Optional
 
 from loguru import logger
 from sqlalchemy import text
@@ -24,6 +25,55 @@ from app.services.library.media_storage import (
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 from app.services.library.storage_flag import unified_storage_enabled
+
+# generated_media.params keys that ARE generation parameters (the column
+# also carries unrelated provenance like cover-frame timestamps / filenames).
+_GEN_PARAM_PASSTHROUGH = (
+    "seed",
+    "steps",
+    "cfg",
+    "sampler",
+    "scheduler",
+    "width",
+    "height",
+    "size",
+    "aspect_ratio",
+    "denoise",
+    "loras",
+)
+
+
+def generation_params_from_generated_media(gen: dict) -> Optional[dict]:
+    """Normalise a generated_media row's provenance into ``resources.gen_params``.
+
+    Same dict shape the PNG extractor produces (migration 440) so the detail
+    panel renders in-app generations and uploads alike. None when the row
+    says nothing about how the image was made — an absent column reads as
+    "unknown", an empty dict would read as "known: nothing".
+    """
+    params: dict = {}
+    model = (
+        (gen.get("model") or "").strip() if isinstance(gen.get("model"), str) else None
+    )
+    provider = (
+        (gen.get("provider") or "").strip()
+        if isinstance(gen.get("provider"), str)
+        else None
+    )
+    if model:
+        params["model"] = model[:200]
+    if provider:
+        params["provider"] = provider[:200]
+    raw = gen.get("params")
+    if isinstance(raw, dict):
+        for key in _GEN_PARAM_PASSTHROUGH:
+            value = raw.get(key)
+            if value is None or value == "" or value == []:
+                continue
+            params[key] = value[:200] if isinstance(value, str) else value
+    if not params:
+        return None
+    return {"tool": "nous", **params}
 
 
 class PromoteGeneratedMediaService:
@@ -122,6 +172,7 @@ class PromoteGeneratedMediaService:
                     "current_version": 1,
                     "file_hash": file_hash,
                     "gen_prompt": gen.get("prompt"),
+                    "gen_params": generation_params_from_generated_media(gen),
                 }
             )
             resource_id = str(resource["id"])

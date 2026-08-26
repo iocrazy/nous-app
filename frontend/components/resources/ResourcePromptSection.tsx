@@ -50,12 +50,12 @@ import { PromptSection } from './PromptSection';
 // viewer reports its first slide, and the column is null on everything that
 // isn't a download album.
 const PROMPT_FIELDS =
-  'id, filename, file_type, mime_type, media_id, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json, slide_prompts';
+  'id, filename, file_type, mime_type, media_id, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json, gen_params, slide_prompts';
 
 type PromptResource = Pick<
   Resource,
   | 'id' | 'filename' | 'file_type' | 'mime_type' | 'media_id' | 'gen_prompt' | 'gen_prompt_zh'
-  | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json' | 'slide_prompts'
+  | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json' | 'gen_params' | 'slide_prompts'
 >;
 
 type SlidePromptsMap = NonNullable<Resource['slide_prompts']>;
@@ -278,6 +278,8 @@ export function ResourcePromptSection({
     gen_prompt_negative: slideEntry.neg_en ?? null,
     gen_prompt_negative_zh: slideEntry.neg_zh ?? null,
     gen_prompt_json: null,
+    // Same reasoning: generation params belong to the album file, not a slide.
+    gen_params: null,
   };
 
   const slideBadge = slideMode ? (

@@ -51,6 +51,13 @@ class ResourceUpdate(BaseModel):
         max_length=20000,
         description="Structured JSON prompt (subject/style/composition/lighting/color/text/aspect_ratio)",
     )
+    gen_params: Optional[dict] = Field(
+        None,
+        description=(
+            "Normalised AI generation parameters "
+            "(tool/model/sampler/scheduler/steps/cfg/seed/width/height/loras...)"
+        ),
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None

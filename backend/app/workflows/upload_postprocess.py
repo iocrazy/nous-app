@@ -80,18 +80,23 @@ async def upload_postprocess_probe_step(
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def upload_postprocess_png_prompt_step(file_path: str) -> Optional[dict]:
-    """Extract an embedded AI generation positive+negative prompt pair from
-    a PNG upload (A1111 ``parameters`` / ComfyUI ``prompt`` text chunks).
-    Pure read I/O — returns ``{"positive": str, "negative": str | None}`` or
-    None; the body persists it. A dict (not the ``PngPromptPair`` NamedTuple)
-    because DBOS step outputs are JSON-serialized."""
-    from app.services.library.png_prompt_extractor import extract_png_prompt_pair
+    """Extract the embedded AI generation prompt pair AND parameters from a
+    PNG upload (A1111 ``parameters`` / ComfyUI ``prompt`` text chunks).
+    Pure read I/O — returns ``{"positive": str, "negative": str | None,
+    "params": dict | None}`` or None; the body persists it. A dict (not
+    the ``PngGeneration`` NamedTuple) because DBOS step outputs are
+    JSON-serialized."""
+    from app.services.library.png_prompt_extractor import extract_png_generation
 
     async with materialize(file_path) as local_path:
-        pair = extract_png_prompt_pair(local_path)
-        if not pair:
+        gen = extract_png_generation(local_path)
+        if not gen:
             return None
-        return {"positive": pair.positive, "negative": pair.negative}
+        return {
+            "positive": gen.positive,
+            "negative": gen.negative,
+            "params": gen.params,
+        }
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -179,12 +184,13 @@ async def upload_postprocess_workflow(
                 f"{resource_id} (non-fatal): {e}"
             )
 
-        # ── Phase A2: PNG generation-prompt extraction (non-fatal) ─────
+        # ── Phase A2: PNG generation metadata extraction (non-fatal) ───
         # AI-generated PNGs (A1111/ComfyUI) carry positive+negative prompts
-        # in text chunks — surface both into gen_prompt / gen_prompt_negative
-        # for free. Never clobbers a user-entered value (new-version uploads
-        # re-run this workflow), so each side is only written when currently
-        # empty.
+        # and the generation parameters (model/sampler/steps/seed/size…) in
+        # text chunks — surface them into gen_prompt / gen_prompt_negative /
+        # gen_params for free. Never clobbers a user-entered value
+        # (new-version uploads re-run this workflow), so each field is only
+        # written when currently empty.
         if mime_type == "image/png" or file_path.lower().endswith(".png"):
             try:
                 pair = await upload_postprocess_png_prompt_step(file_path)
@@ -199,6 +205,8 @@ async def upload_postprocess_workflow(
                             and not (current.get("gen_prompt_negative") or "").strip()
                         ):
                             patch["gen_prompt_negative"] = pair["negative"]
+                        if pair.get("params") and not current.get("gen_params"):
+                            patch["gen_params"] = pair["params"]
                         if patch:
                             await svc.repo.update_resource(resource_id, patch)
             except Exception as e:

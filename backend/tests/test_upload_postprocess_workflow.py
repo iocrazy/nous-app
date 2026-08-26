@@ -32,12 +32,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.library.png_prompt_extractor import PngPromptPair
+from app.services.library.png_prompt_extractor import PngGeneration
 
 pytestmark = pytest.mark.asyncio
 
 _USER = "11111111-1111-1111-1111-111111111111"
 _RID = "9000000000000000001"
+_PARAMS = {"tool": "comfyui", "model": "krea2", "steps": 10, "seed": 42}
 _META = {"duration_seconds": 12, "resolution": "1080x1920"}
 
 
@@ -275,13 +276,15 @@ async def test_png_prompt_step_reads_via_materialize(tmp_path):
     fixture.write_bytes(b"fake png bytes")
     seen: dict = {}
     extract_pair = MagicMock(
-        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+        return_value=PngGeneration(
+            positive="masterpiece, 1girl", negative="lowres", params=_PARAMS
+        )
     )
 
     with (
         patch.object(m, "materialize", _fake_materialize(seen, fixture)),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            "app.services.library.png_prompt_extractor.extract_png_generation",
             extract_pair,
         ),
     ):
@@ -290,7 +293,11 @@ async def test_png_prompt_step_reads_via_materialize(tmp_path):
 
     assert seen["file_path"] == "sb://library/t1/ab/cd/deadbeef.png"
     extract_pair.assert_called_once_with(fixture)
-    assert result == {"positive": "masterpiece, 1girl", "negative": "lowres"}
+    assert result == {
+        "positive": "masterpiece, 1girl",
+        "negative": "lowres",
+        "params": _PARAMS,
+    }
 
 
 async def test_png_prompt_step_returns_none_when_no_prompt_found(tmp_path):
@@ -304,7 +311,7 @@ async def test_png_prompt_step_returns_none_when_no_prompt_found(tmp_path):
     with (
         patch.object(m, "materialize", _fake_materialize(seen, fixture)),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            "app.services.library.png_prompt_extractor.extract_png_generation",
             extract_pair,
         ),
     ):
@@ -326,7 +333,9 @@ async def test_png_prompt_writes_positive_and_negative_when_both_empty():
         return_value={"gen_prompt": "", "gen_prompt_negative": ""}
     )
     extract_pair = MagicMock(
-        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+        return_value=PngGeneration(
+            positive="masterpiece, 1girl", negative="lowres", params=_PARAMS
+        )
     )
 
     with (
@@ -341,7 +350,7 @@ async def test_png_prompt_writes_positive_and_negative_when_both_empty():
             get_resource_by_id=get_resource_by_id,
         ),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            "app.services.library.png_prompt_extractor.extract_png_generation",
             extract_pair,
         ),
     ):
@@ -355,7 +364,12 @@ async def test_png_prompt_writes_positive_and_negative_when_both_empty():
 
     assert result["status"] == "success"
     update_resource.assert_any_await(
-        _RID, {"gen_prompt": "masterpiece, 1girl", "gen_prompt_negative": "lowres"}
+        _RID,
+        {
+            "gen_prompt": "masterpiece, 1girl",
+            "gen_prompt_negative": "lowres",
+            "gen_params": _PARAMS,
+        },
     )
 
 
@@ -368,10 +382,16 @@ async def test_png_prompt_never_clobbers_existing_negative():
     trigger_transcode = AsyncMock(return_value=None)
     manager = _make_manager()
     get_resource_by_id = AsyncMock(
-        return_value={"gen_prompt": "", "gen_prompt_negative": "user typed"}
+        return_value={
+            "gen_prompt": "",
+            "gen_prompt_negative": "user typed",
+            "gen_params": {"tool": "a1111", "seed": 1},
+        }
     )
     extract_pair = MagicMock(
-        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+        return_value=PngGeneration(
+            positive="masterpiece, 1girl", negative="lowres", params=_PARAMS
+        )
     )
 
     with (
@@ -386,7 +406,7 @@ async def test_png_prompt_never_clobbers_existing_negative():
             get_resource_by_id=get_resource_by_id,
         ),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            "app.services.library.png_prompt_extractor.extract_png_generation",
             extract_pair,
         ),
     ):
@@ -415,10 +435,16 @@ async def test_png_prompt_never_clobbers_existing_positive():
     trigger_transcode = AsyncMock(return_value=None)
     manager = _make_manager()
     get_resource_by_id = AsyncMock(
-        return_value={"gen_prompt": "user typed", "gen_prompt_negative": ""}
+        return_value={
+            "gen_prompt": "user typed",
+            "gen_prompt_negative": "",
+            "gen_params": {"tool": "a1111", "seed": 1},
+        }
     )
     extract_pair = MagicMock(
-        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+        return_value=PngGeneration(
+            positive="masterpiece, 1girl", negative="lowres", params=_PARAMS
+        )
     )
 
     with (
@@ -433,7 +459,7 @@ async def test_png_prompt_never_clobbers_existing_positive():
             get_resource_by_id=get_resource_by_id,
         ),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            "app.services.library.png_prompt_extractor.extract_png_generation",
             extract_pair,
         ),
     ):
