@@ -179,14 +179,14 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 - **子进程环境要擦洗**：spawn 出去的命令不该看到 `*KEY*` / `*SECRET*` / `*TOKEN*` / `*PASSWORD*`，否则凭证会从子进程的输出、`env` 转储、崩溃日志里漏出去。
 - **临时文件用私有目录**：0700 目录 + 随机文件名 + 独占创建（`O_EXCL`，0600）。可预测的世界可读路径招来符号链接竞争和信息泄露。
 
-⚠️ **本仓当前不满足第一条**（2026-08-22 实测）：`backend/app` 下 **35 处** `create_subprocess_exec` / `subprocess.run`，**零处擦洗**——只有 2 处显式传了 `env=`，而那两处传的是 `os.environ.copy()` / `{**os.environ, ...}`，是全量继承再追加。
+✅ **第一条已于 2026-08-26 收口（PR #2009）**。一期实测 35 处 spawn 零擦洗；修法不是 35 处补丁，而是骑在 `safe_popen_kwargs()`（`app/agent_framework/process_lifecycle.py`）这个 45 处 spawn 站点都 splat 的咽喉点上，每个站点零改动覆盖：
 
-要区分两类，别一刀切：
+- 名模式（大小写不敏感）：`KEY / SECRET / TOKEN / PASSWORD / PASSWD / CREDENTIAL / DSN / DATABASE_URL`；**值模式**：任何 `scheme://user:pass@host` 形状的值不论名字一律丢（`REDIS_URL` 名上不命中，值上命中）
+- 误报的回答是往 `SAFE_ENV_NAMES` 加一行（如 `TOKENIZERS_PARALLELISM`），**不是放宽模式**
+- 子进程真需要某个密钥 → `safe_popen_kwargs(env_keep=("X",))`；子进程专属变量 → `env_extra={...}`。**别再自己传 `env=`**——与 splat 并存是重复关键字、spawn 时 TypeError，有源码扫描守卫钉住这一类
+- 唯一例外：`services/workforce/isolated_runner.py` 跑的是**我们自己的** Python 代码、需要数据库，刻意保留完整环境且不走咽喉点（有测试钉住它不会悄悄改用）
 
-- **自家 Python 子进程**（`services/workforce/isolated_runner.py`）跑的是我们自己的代码，它**需要**数据库凭证才能干活，全量继承是对的。
-- **第三方二进制**（yt-dlp、ffmpeg/ffprobe、node、jimeng/codex CLI）占了绝大多数，它们不需要 `SUPABASE_SERVICE_ROLE_KEY` 和各家 LLM API key，而 yt-dlp 处理的还是攻击者可控的 URL——**这些是该擦洗的**。
-
-收口要逐点确认各自真正依赖的变量（`PATH`、代理变量、`FFMPEG_PATH` 都在环境里），属独立改动，未在本波处理。
+真栈验证法（比端到端 fetch 更决定性——fetch 会撞抖音反爬）：`docker exec -i -w /app nous-backend /app/.venv/bin/python -` 喂脚本，经真实 `safe_popen_kwargs()` 拉 ffmpeg/ffprobe/yt-dlp/node，断言父进程有 `SUPABASE_SERVICE_ROLE_KEY` 而子进程 env 没有、四个二进制 rc=0。⚠️ `docker exec` 喂 stdin **必须 `-i`**，否则 heredoc 静默丢失、零输出还 exit 1。
 
 ### 形似链接的路径要用 unlink 删
 
