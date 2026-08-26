@@ -9,8 +9,15 @@ and uploads the finished file back.
 ## Requirements
 
 - Node.js 20+
-- `codex` CLI, logged in (`codex login`) — for text jobs
-- `gpt-image-2-skill`, logged in — for image jobs
+- A ChatGPT subscription (the whole point: generations spend YOUR quota)
+
+```bash
+npm i -g @openai/codex gpt-image-2-skill
+codex login        # browser OAuth; credentials stay in ~/.codex/auth.json
+```
+
+`run` checks both CLIs and the login at startup and prints exactly what is
+missing, so you never discover a gap through a failed job.
 
 ## Install & pair
 

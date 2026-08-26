@@ -50,6 +50,9 @@ describe('CodexDaemonSettings', () => {
     expect(screen.getByTestId('codex-pair-command').textContent).toContain(
       'node nous-codex.mjs pair ABCD2345',
     );
+    expect(screen.getByTestId('codex-prereq-command').textContent).toContain(
+      'codex login',
+    );
   });
 
   it('revokes a device and refreshes the list', async () => {
