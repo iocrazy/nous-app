@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
-import { CodexDaemonSettings } from './settings/CodexDaemonSettings';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon, GitBranch
@@ -790,14 +789,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* AI Tab */}
       {activeTab === 'ai' && aiSettings && onSaveAISettings && (
-        <>
-          <AISettings settings={aiSettings} onSave={onSaveAISettings} />
-          {/* C 方案: pair a machine that runs generations on the user's own
-              codex login (their subscription, their credentials). */}
-          <div className="mt-6 border-t border-line pt-6">
-            <CodexDaemonSettings />
-          </div>
-        </>
+        <AISettings settings={aiSettings} onSave={onSaveAISettings} />
       )}
 
       {/* Docs Tab */}

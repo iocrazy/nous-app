@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { CodexDaemonSettings } from './settings/CodexDaemonSettings';
 import {
   Brain,
   Zap,
@@ -1582,6 +1583,13 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                               <option key={m} value={m}>{m}</option>
                             ))}
                           </UiSelect>
+                        </div>
+
+                        {/* C 方案: run canvas generations on the user's own
+                            machine with their own codex login — lives under
+                            OpenAI because that's whose subscription it uses. */}
+                        <div className="border-t border-ink-800 pt-4">
+                          <CodexDaemonSettings />
                         </div>
                       </>
                     )}
