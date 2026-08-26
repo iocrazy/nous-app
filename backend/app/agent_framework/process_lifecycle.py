@@ -47,8 +47,10 @@ from __future__ import annotations
 
 import atexit
 import os
+import re
 import signal
 import sys
+from typing import Iterable, Optional
 
 from loguru import logger
 
@@ -240,7 +242,80 @@ def bind_to_parent_death() -> bool:
         return False
 
 
-def safe_popen_kwargs() -> dict:
+# ── Child-process environment scrubbing ───────────────────────────────────
+#
+# Every third-party binary this backend spawns (ffmpeg, ffprobe, yt-dlp, node
+# for a_bogus signing, dreamina) used to inherit the parent's complete
+# environment — nine credential-bearing variables in the production
+# container as of 2026-08-26, SUPABASE_SERVICE_ROLE_KEY among them. yt-dlp
+# processes attacker-controlled URLs; a crash dump, an `env` in a
+# postprocessor hook, or a malicious extractor plugin would hand over the
+# whole key ring. dsh's defensive-patterns rule, applied at the one
+# chokepoint 45 spawn sites already splat into.
+#
+# Name patterns are matched case-insensitively on the variable NAME.
+# `*_URL` is not a pattern (SUPABASE_URL is harmless), but any VALUE shaped
+# like a credential-bearing URL (`scheme://user:pass@host`) is dropped
+# regardless of name — that is what catches REDIS_URL / *_DATABASE_URL.
+SECRET_NAME_PATTERNS: tuple[str, ...] = (
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "DSN",
+    "DATABASE_URL",
+)
+
+# Names that match a pattern but are known-harmless switches. The answer to
+# a false positive is a line here, never a looser pattern.
+SAFE_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "TOKENIZERS_PARALLELISM",  # HuggingFace tokenizers thread switch
+    }
+)
+
+# user part may be EMPTY (`redis://:hunter2@host` is the common redis shape);
+# the password part must not be.
+_CRED_URL_RE = re.compile(r"^[a-z][a-z0-9+.-]*://[^/@\s]*:[^/@\s]+@", re.I)
+
+
+def _looks_secret(name: str, value: str) -> bool:
+    if name in SAFE_ENV_NAMES:
+        return False
+    upper = name.upper()
+    if any(p in upper for p in SECRET_NAME_PATTERNS):
+        return True
+    return bool(_CRED_URL_RE.match(value or ""))
+
+
+def scrubbed_env(
+    *,
+    keep: Iterable[str] = (),
+    extra: Optional[dict[str, str]] = None,
+) -> dict[str, str]:
+    """A copy of ``os.environ`` with credential-shaped entries removed.
+
+    ``keep`` reinstates named variables for a child that genuinely needs one
+    (explicit, per call — the only escape hatch). ``extra`` adds child-
+    specific variables. Always a fresh dict: mutating it never writes back
+    into this process.
+    """
+    keep_set = set(keep)
+    out = {
+        k: v for k, v in os.environ.items() if k in keep_set or not _looks_secret(k, v)
+    }
+    if extra:
+        out.update(extra)
+    return out
+
+
+def safe_popen_kwargs(
+    *,
+    env_keep: Iterable[str] = (),
+    env_extra: Optional[dict[str, str]] = None,
+) -> dict:
     """R2: returns kwargs to splat into subprocess.Popen / subprocess.run /
     asyncio.create_subprocess_exec so the spawned child:
 
@@ -258,13 +333,21 @@ def safe_popen_kwargs() -> dict:
             "ffmpeg", "-i", src, dst, **safe_popen_kwargs()
         )
 
-    On Windows: returns empty dict (passthrough).
-    On Linux/macOS: passes ``preexec_fn`` (sets up new process group +
+    Also carries ``env=scrubbed_env(...)`` on every platform: the child gets
+    a copy of our environment with credential-shaped entries removed (see
+    the scrubbing block above). A site that must hand a child one specific
+    secret names it in ``env_keep``; child-specific additions go in
+    ``env_extra``. Do NOT pass your own ``env=`` alongside this — the
+    duplicate kwarg is a TypeError at spawn, and a test scans for it.
+
+    On Windows: env only (no preexec_fn).
+    On Linux/macOS: also passes ``preexec_fn`` (sets up new process group +
     binds-to-parent-death where supported).
     """
-    if sys.platform == "win32":
-        return {}
-    return {"preexec_fn": bind_to_parent_death}
+    kwargs: dict = {"env": scrubbed_env(keep=env_keep, extra=env_extra)}
+    if sys.platform != "win32":
+        kwargs["preexec_fn"] = bind_to_parent_death
+    return kwargs
 
 
 __all__ = [
