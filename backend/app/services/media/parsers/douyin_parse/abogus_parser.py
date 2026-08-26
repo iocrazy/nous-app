@@ -220,8 +220,6 @@ class ABogusDouyinParser:
     @classmethod
     def _sign_with_node(cls, url: str, ua: str) -> str:
         """Legacy: spawn node env.js to compute a_bogus via douyin_bdms.js."""
-        import os
-
         node_bin = shutil.which("node") or "node"
         completed = subprocess.run(
             [node_bin, str(_ENV_JS), url, ua],
@@ -229,8 +227,10 @@ class ABogusDouyinParser:
             text=True,
             timeout=cls.SIGN_TIMEOUT,
             check=False,
-            env={**os.environ, "DOUYIN_UA": ua},
-            **safe_popen_kwargs(),
+            # env rides safe_popen_kwargs (scrubbed of our secrets); the
+            # child-specific UA goes through env_extra. Passing env= here as
+            # well is a duplicate kwarg — TypeError at spawn.
+            **safe_popen_kwargs(env_extra={"DOUYIN_UA": ua}),
         )
         if completed.returncode != 0:
             raise RuntimeError(
