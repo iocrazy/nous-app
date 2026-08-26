@@ -209,8 +209,8 @@ async def upload_daemon_result(
         with os.fdopen(fd, "wb") as out:
             while chunk := await file.read(1024 * 1024):
                 total += len(chunk)
-                if total > 50 * 1024 * 1024:
-                    raise HTTPException(413, "file exceeds 50MB")
+                if total > 200 * 1024 * 1024:
+                    raise HTTPException(413, "file exceeds 200MB")
                 out.write(chunk)
         if total == 0:
             raise HTTPException(400, "empty file")

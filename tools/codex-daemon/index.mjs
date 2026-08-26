@@ -128,6 +128,47 @@ async function runImageJob(payload, workDir) {
   return out;
 }
 
+const DREAMINA_COMMANDS = new Set([
+  'text2image', 'image_upscale', 'text2video', 'image2video',
+  'multimodal2video', 'frames2video',
+]);
+const MEDIA_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.mp4', '.mov', '.webm'];
+
+/** Run one dreamina generation on the user's own login. The server sends a
+ *  pre-built argv (same pure builders it uses itself); this side only
+ *  whitelists the subcommand, swaps {ref:N} placeholders for downloaded
+ *  files, and never touches a shell. */
+async function runDreaminaJob(payload, workDir) {
+  const raw = Array.isArray(payload.submit_args) ? payload.submit_args.map(String) : [];
+  if (!raw.length || !DREAMINA_COMMANDS.has(raw[0])) {
+    throw new Error(`refused dreamina subcommand: ${raw[0] ?? '(none)'}`);
+  }
+  for (const a of raw.slice(1)) {
+    if (!a.startsWith('--')) throw new Error(`refused dreamina arg: ${a.slice(0, 40)}`);
+  }
+  const refs = [];
+  for (const [i, url] of (payload.ref_urls ?? []).slice(0, 9).entries()) {
+    refs.push(await downloadRef(url, workDir, i));
+  }
+  const args = raw.map((a) => a.replace(/\{ref:(\d+)\}/g, (_, n) => refs[Number(n)] ?? ''));
+
+  const { out } = await runCommand('dreamina', args, { timeoutMs: 20 * 60_000 });
+  const jsonStart = out.indexOf('{');
+  let submitId = null;
+  if (jsonStart >= 0) {
+    try { submitId = JSON.parse(out.slice(jsonStart)).submit_id ?? null; } catch { /* scan below */ }
+  }
+  if (submitId) {
+    await runCommand('dreamina', [
+      'query_result', `--submit_id=${submitId}`, `--download_dir=${workDir}`,
+    ], { timeoutMs: 5 * 60_000 });
+  }
+  const files = await fs.readdir(workDir);
+  const media = files.find((f) => MEDIA_EXTS.includes(path.extname(f).toLowerCase()) && !f.startsWith('ref-'));
+  if (!media) throw new Error('dreamina produced no media file');
+  return path.join(workDir, media);
+}
+
 async function runTextJob(payload) {
   const args = ['exec', '--json'];
   if (payload.model) args.push('--model', String(payload.model));
@@ -136,10 +177,17 @@ async function runTextJob(payload) {
   return out;
 }
 
+const MIME_BY_EXT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+};
+
 async function uploadResult(filePath, ticket) {
   const body = new FormData();
   const bytes = await fs.readFile(filePath);
-  body.append('file', new Blob([bytes], { type: 'image/png' }), path.basename(filePath));
+  const mime = MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? 'image/png';
+  body.append('file', new Blob([bytes], { type: mime }), path.basename(filePath));
   body.append('ticket', ticket);
   const res = await fetch(`${API_BASE}/api/v1/codex-daemon/upload`, {
     method: 'POST',
@@ -187,7 +235,11 @@ async function connect(cfg) {
     const send = (payload) => ws.send(JSON.stringify({ ...payload, job_id: jobId }));
     try {
       send({ type: 'job_progress', phase: 'running' });
-      if (msg.kind === 'image') {
+      if (msg.payload?.engine === 'dreamina') {
+        const file = await runDreaminaJob(msg.payload ?? {}, workDir);
+        const genId = await uploadResult(file, msg.payload?.upload_ticket);
+        send({ type: 'job_done', gen_id: String(genId) });
+      } else if (msg.kind === 'image') {
         const file = await runImageJob(msg.payload ?? {}, workDir);
         const genId = await uploadResult(file, msg.payload?.upload_ticket);
         send({ type: 'job_done', gen_id: String(genId) });
@@ -253,6 +305,14 @@ function versionOf(bin) {
 async function preflight() {
   const codexVersion = await versionOf('codex');
   const skillVersion = await versionOf('gpt-image-2-skill');
+  const dreaminaVersion = await versionOf('dreamina');
+  let dreaminaAuthOk = false;
+  try {
+    await fs.access(
+      path.join(os.homedir(), '.local', 'share', 'dreamina', 'byted_cli_user_token.json'),
+    );
+    dreaminaAuthOk = true;
+  } catch { /* not logged in */ }
   let authOk = true;
   try {
     await fs.access(path.join(os.homedir(), '.codex', 'auth.json'));
@@ -275,12 +335,20 @@ async function preflight() {
   }
   for (const problem of problems) log(`WARNING: ${problem}`);
   if (!problems.length) log('preflight ok: codex login + CLIs found');
+  if (!dreaminaVersion) {
+    log('note: dreamina CLI not found — 即梦 jobs disabled on this device');
+  } else if (!dreaminaAuthOk) {
+    log('note: dreamina not logged in — run: dreamina login');
+  }
   return {
     codex_ok: Boolean(codexVersion),
     codex_version: codexVersion,
     skill_ok: Boolean(skillVersion),
     skill_version: skillVersion,
     auth_ok: authOk,
+    dreamina_ok: Boolean(dreaminaVersion),
+    dreamina_version: dreaminaVersion,
+    dreamina_auth_ok: dreaminaAuthOk,
     node_version: process.version,
     platform: process.platform,
   };
