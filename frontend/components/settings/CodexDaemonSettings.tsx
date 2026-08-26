@@ -10,6 +10,7 @@
 
 import { HelpCircle, Loader2, Monitor, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { apiFetch } from '../../services/apiClient';
 import {
@@ -25,6 +26,7 @@ const BTN_SECONDARY =
   'flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-content';
 
 export function CodexDaemonSettings() {
+  const { t } = useTranslation();
   const [devices, setDevices] = useState<CodexDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [pairCode, setPairCode] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function CodexDaemonSettings() {
       setError(null);
     } catch (err) {
       console.error('[codex-cli] detect failed:', err);
-      setError('CLI detection failed');
+      setError(t('settings.localCli.errDetect'));
     } finally {
       setDetecting(false);
     }
@@ -59,7 +61,7 @@ export function CodexDaemonSettings() {
       setError(null);
     } catch (err) {
       console.error('[codex-daemon] device list failed:', err);
-      setError('Could not load your devices');
+      setError(t('settings.localCli.errDevices'));
     } finally {
       setLoading(false);
     }
@@ -79,7 +81,7 @@ export function CodexDaemonSettings() {
       setError(null);
     } catch (err) {
       console.error('[codex-daemon] pair code failed:', err);
-      setError('Could not create a pairing code');
+      setError(t('settings.localCli.errPairCode'));
     }
   };
 
@@ -89,7 +91,7 @@ export function CodexDaemonSettings() {
       await refresh();
     } catch (err) {
       console.error('[codex-daemon] revoke failed:', err);
-      setError('Could not revoke that device');
+      setError(t('settings.localCli.errRevoke'));
     }
   };
 
@@ -98,7 +100,7 @@ export function CodexDaemonSettings() {
   return (
     <div className="space-y-3" data-testid="codex-daemon-settings">
       <div className="flex items-center gap-2">
-        <h3 className="text-sm font-bold text-content">GPT CLI (codex)</h3>
+        <h3 className="text-sm font-bold text-content">{t('settings.localCli.codexTitle')}</h3>
         {!loading && (
           <span
             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
@@ -110,16 +112,15 @@ export function CodexDaemonSettings() {
             }`}
           >
             {online > 0
-              ? `${online} online`
+              ? t('settings.localCli.nOnline', { count: online })
               : devices.length
-                ? 'All offline'
-                : 'Not paired'}
+                ? t('settings.localCli.allOffline')
+                : t('settings.localCli.notPaired')}
           </span>
         )}
       </div>
       <p className="text-xs text-content-3">
-        Run canvas generations on your own machine with your own codex login.
-        Your credentials never leave your computer — nous only sends the job.
+        {t('settings.localCli.codexDesc')}
       </p>
 
       {error && (
@@ -135,7 +136,7 @@ export function CodexDaemonSettings() {
           onClick={() => void startPairing()}
           className={BTN_PRIMARY}
         >
-          Pair a device
+          {t('settings.localCli.pairDevice')}
         </button>
         <button
           type="button"
@@ -145,7 +146,7 @@ export function CodexDaemonSettings() {
           className={BTN_SECONDARY}
         >
           {detecting ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-          Detect CLI
+          {t('settings.localCli.detectCli')}
         </button>
         <button
           type="button"
@@ -153,10 +154,10 @@ export function CodexDaemonSettings() {
           onClick={() => setHelpOpen((v) => !v)}
           className={BTN_SECONDARY}
         >
-          <HelpCircle size={12} /> Help
+          <HelpCircle size={12} /> {t('settings.localCli.help')}
         </button>
         <button type="button" onClick={() => void refresh()} className={BTN_SECONDARY}>
-          <RefreshCw size={12} /> Refresh
+          <RefreshCw size={12} /> {t('settings.localCli.refresh')}
         </button>
       </div>
 
@@ -168,28 +169,27 @@ export function CodexDaemonSettings() {
           {serverCli.skill.installed ? (
             <>
               gpt-image-2-skill{serverCli.skill.version ? ` ${serverCli.skill.version}` : ''}
-              {serverCli.skill.path ? ` · ${serverCli.skill.path}` : ''} · GPT Image 2
-              helper installed — canvas image jobs on the server use it.
+              {serverCli.skill.path ? ` · ${serverCli.skill.path}` : ''} ·{' '}
+              {t('settings.localCli.skillInstalled')}
             </>
           ) : (
-            <>gpt-image-2-skill not installed on the server.</>
+            <>{t('settings.localCli.skillMissing')}</>
           )}{' '}
           {serverCli.codex.installed
-            ? `codex CLI ${serverCli.codex.version ?? ''} installed.`
-            : 'codex chat CLI not installed on the server (image-only).'}{' '}
+            ? t('settings.localCli.codexInstalled', { version: serverCli.codex.version ?? '' })
+            : t('settings.localCli.codexMissing')}{' '}
           {serverCli.auth_ok
-            ? 'OAuth session present — login is validated on first run.'
-            : 'No OAuth session — the server runtime is not logged in.'}
+            ? t('settings.localCli.authPresent')
+            : t('settings.localCli.authMissing')}
           <div className="mt-1 text-[10px] text-content-3">
-            Server runtime (shared). Your own devices report their CLI state on
-            the device rows below after pairing.
+            {t('settings.localCli.serverRuntimeNote')}
           </div>
         </div>
       )}
 
       {helpOpen && (
         <div className="rounded-xl border border-line p-3 text-xs text-content-3">
-          <div>One-time setup on your machine (needs Node 20+ and a ChatGPT subscription):</div>
+          <div>{t('settings.localCli.helpSetup')}</div>
           <code
             data-testid="codex-prereq-command"
             className="mt-1 block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
@@ -197,9 +197,7 @@ export function CodexDaemonSettings() {
             npm i -g @openai/codex gpt-image-2-skill{'\n'}codex login
           </code>
           <div className="mt-2">
-            Then click Pair a device and run the shown commands. Once the daemon
-            connects, each device row below shows its CLI check (versions +
-            login state) automatically.
+            {t('settings.localCli.helpAfter')}
           </div>
         </div>
       )}
@@ -207,7 +205,7 @@ export function CodexDaemonSettings() {
       {pairCode && (
         <div className="rounded-xl border border-line p-3">
           <div className="text-xs text-content-3">
-            Run this on the machine you want to pair (code expires in 10 minutes):
+            {t('settings.localCli.pairInstruction')}
           </div>
           <div
             data-testid="codex-pair-code"
@@ -228,7 +226,7 @@ export function CodexDaemonSettings() {
             onClick={() => void refresh()}
             className="mt-2 text-xs font-semibold text-accent"
           >
-            I've run it — refresh the list
+            {t('settings.localCli.pairDone')}
           </button>
         </div>
       )}
@@ -236,13 +234,11 @@ export function CodexDaemonSettings() {
       <div className="space-y-2">
         {loading ? (
           <div className="flex items-center gap-2 text-xs text-content-3">
-            <Loader2 size={12} className="animate-spin" /> Loading devices…
+            <Loader2 size={12} className="animate-spin" /> {t('settings.localCli.loadingDevices')}
           </div>
         ) : devices.length === 0 ? (
           <div className="text-xs text-content-3">
-            No paired devices yet. Once a device connects, its CLI check
-            (codex / gpt-image-2-skill / dreamina versions + login state)
-            shows here automatically.
+            {t('settings.localCli.noDevices')}
           </div>
         ) : (
           devices.map((d) => {
@@ -261,8 +257,8 @@ export function CodexDaemonSettings() {
                   <div className="text-[10px] text-content-3">
                     {d.platform || 'unknown'} ·{' '}
                     {d.last_seen_at
-                      ? `last seen ${new Date(d.last_seen_at).toLocaleString()}`
-                      : 'never connected'}
+                      ? t('settings.localCli.lastSeen', { time: new Date(d.last_seen_at).toLocaleString() })
+                      : t('settings.localCli.neverConnected')}
                   </div>
                   <EnvReportLine report={deviceEnvReport(d)} />
                 </div>
@@ -271,7 +267,7 @@ export function CodexDaemonSettings() {
                     isOnline ? 'bg-ok/15 text-ok' : 'bg-line/40 text-content-3'
                   }`}
                 >
-                  {isOnline ? 'Online' : 'Offline'}
+                  {isOnline ? t('settings.localCli.online') : t('settings.localCli.offline')}
                 </span>
                 <button
                   type="button"

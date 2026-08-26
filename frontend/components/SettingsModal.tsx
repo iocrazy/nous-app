@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, GitBranch,
 } from 'lucide-react';
@@ -52,46 +53,46 @@ interface NavSection {
 
 // Static nav sections (team section added dynamically)
 const ACCOUNT_SECTION: NavSection = {
-  label: 'ACCOUNT',
+  label: 'settings.nav.account',
   items: [
-    { id: 'personal', label: 'Personal Settings', icon: User },
+    { id: 'personal', label: 'settings.nav.personal', icon: User },
   ],
 };
 
 const TEAM_SECTION: NavSection = {
-  label: 'TEAM',
+  label: 'settings.nav.teamGroup',
   items: [
-    { id: 'team', label: 'Team Settings', icon: Users },
+    { id: 'team', label: 'settings.nav.team', icon: Users },
   ],
 };
 
 const APP_SETTINGS_SECTION: NavSection = {
-  label: 'APP SETTINGS',
+  label: 'settings.nav.appSettings',
   items: [
-    { id: 'general', label: 'General', icon: FolderOpen },
-    { id: 'api', label: 'API Management', icon: Key },
-    { id: 'logs', label: 'Logs', icon: ScrollText },
-    { id: 'tasks', label: 'Tasks', icon: ListTodo },
-    { id: 'tags', label: 'Tags', icon: Tag },
-    { id: 'workflow', label: 'Workflow Templates', icon: GitBranch },
-    { id: 'ai', label: 'AI', icon: Sparkles },
-    { id: 'docs', label: 'API Docs', icon: FileText },
-    { id: 'cookies', label: 'Cookies', icon: Cookie },
+    { id: 'general', label: 'settings.nav.general', icon: FolderOpen },
+    { id: 'api', label: 'settings.nav.api', icon: Key },
+    { id: 'logs', label: 'settings.nav.logs', icon: ScrollText },
+    { id: 'tasks', label: 'settings.nav.tasks', icon: ListTodo },
+    { id: 'tags', label: 'settings.nav.tags', icon: Tag },
+    { id: 'workflow', label: 'settings.nav.workflow', icon: GitBranch },
+    { id: 'ai', label: 'settings.nav.ai', icon: Sparkles },
+    { id: 'docs', label: 'settings.nav.docs', icon: FileText },
+    { id: 'cookies', label: 'settings.nav.cookies', icon: Cookie },
   ],
 };
 
 const TAB_LABELS: Record<SettingsTab, string> = {
-  personal: 'Personal Settings',
-  team: 'Team Settings',
-  general: 'General',
-  api: 'API Management',
-  logs: 'Logs',
-  tasks: 'Tasks',
-  tags: 'Tags',
-  workflow: 'Workflow Templates',
-  ai: 'AI',
-  docs: 'API Docs',
-  cookies: 'Cookies',
+  personal: 'settings.nav.personal',
+  team: 'settings.nav.team',
+  general: 'settings.nav.general',
+  api: 'settings.nav.api',
+  logs: 'settings.nav.logs',
+  tasks: 'settings.nav.tasks',
+  tags: 'settings.nav.tags',
+  workflow: 'settings.nav.workflow',
+  ai: 'settings.nav.ai',
+  docs: 'settings.nav.docs',
+  cookies: 'settings.nav.cookies',
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -110,6 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onTeamLeft,
   onTeamUpdated,
 }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [hasInvalidCookie, setHasInvalidCookie] = useState(false);
 
@@ -214,7 +216,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
                 )}
               </span>
-              <span className="whitespace-nowrap">{item.label}</span>
+              <span className="whitespace-nowrap">{t(item.label)}</span>
               {activeTab === item.id && (
                 <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-500 rounded-full" />
               )}
@@ -248,7 +250,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {navSections.map((section) => (
               <div key={section.label}>
                 <p className="px-3 text-[10px] font-semibold text-ink-600 uppercase tracking-wider mb-2">
-                  {section.label}
+                  {t(section.label)}
                 </p>
                 <div className="space-y-0.5">
                   {section.items.map((item) => (
@@ -267,7 +269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
                         )}
                       </span>
-                      {item.label}
+                      {t(item.label)}
                     </button>
                   ))}
                 </div>
@@ -286,7 +288,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Desktop Header */}
           <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-ink-800">
             <h2 className="text-lg font-semibold text-ink-50">
-              {TAB_LABELS[activeTab]}
+              {t(TAB_LABELS[activeTab])}
             </h2>
             <button
               onClick={onClose}
