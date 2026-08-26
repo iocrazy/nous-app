@@ -50,6 +50,8 @@ describe('CodexDaemonSettings', () => {
     expect(screen.getByTestId('codex-pair-command').textContent).toContain(
       'node nous-codex.mjs pair ABCD2345',
     );
+    // One-time setup moved into the collapsible Help (IC-style card).
+    fireEvent.click(screen.getByTestId('codex-help-toggle'));
     expect(screen.getByTestId('codex-prereq-command').textContent).toContain(
       'codex login',
     );
