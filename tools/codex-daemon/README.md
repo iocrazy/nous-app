@@ -62,7 +62,7 @@ for.
 | `run` | Stay connected in the foreground and take jobs. |
 | `install-service` | Register a per-user service so the daemon starts at login/boot and restarts if it crashes. |
 | `uninstall-service` | Stop and remove that service. |
-| `status` | Print the config file, device id, whether the service is installed and running, and the CLI preflight report. |
+| `status` | Print the config file, device id, why the daemon last stopped for good (if it did), whether the service is installed and running, and the CLI preflight report. |
 
 ## Platform support
 
@@ -90,17 +90,31 @@ treats both as **final**: it prints
 device revoked or token invalid — re-pair from nous Settings → Local CLI
 ```
 
-and exits with status **2**. Every other close code (network blips, server
-restarts, `1006`) is still retried with exponential backoff.
+records the reason, and **exits 0**. Every other close code (network blips,
+server restarts, `1006`) is still retried with exponential backoff.
 
-The systemd unit carries `RestartPreventExitStatus=2`, so a revoked device
-stops for good instead of reconnect-looping in silence.
+Exit **0** is deliberate, and it is what makes the three platforms agree.
+systemd's `Restart=on-failure` and launchd's `KeepAlive`/`SuccessfulExit=false`
+both mean "relaunch only after a *non-zero* exit", so a clean exit stops the
+service for good everywhere — no `RestartPreventExitStatus`, no job that has
+to unload itself. A crash still gets restarted, because a crash is non-zero.
 
-⚠️ **macOS caveat**: launchd has no `RestartPreventExitStatus` equivalent.
-`KeepAlive`/`SuccessfulExit=false` only suppresses respawn after a *clean*
-exit, so on macOS a revoked daemon is relaunched and reprints the message
-every ~10 seconds until you run `uninstall-service`. Loud, not silent — but
-not self-stopping either.
+The cost of exiting cleanly is that afterwards nothing looks unusual, so the
+reason is written to `~/.config/nous-codex/last_stop.json`:
+
+```json
+{ "reason": "revoked", "at": "2026-08-26T12:28:17.101Z" }
+```
+
+`status` reads it back:
+
+```
+last stop   : this device was revoked in nous — re-pair to use it again (stopped 2026-08-26T12:28:17.101Z)
+```
+
+`reason` is `revoked` (close `4003`) or `auth_failed` (close `4001`). A
+successful `pair` deletes the file, so `status` never reports a revocation
+that no longer applies.
 
 ## What it will and will not do
 

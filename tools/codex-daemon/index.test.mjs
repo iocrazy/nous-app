@@ -7,15 +7,25 @@
 // content, and --name handling.
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  clearLastStop,
+  describeLastStop,
   isTerminalClose,
   parsePairArgs,
   parseVersion,
+  readLastStop,
   renderLaunchdPlist,
   renderSystemdUnit,
+  stopReasonForCloseCode,
+  writeLastStop,
 } from './index.mjs';
+
+const tmpdir = () => fs.mkdtemp(path.join(os.tmpdir(), 'nous-codex-test-'));
 
 test('isTerminalClose: revocation and auth failure are final', () => {
   // codex_daemon_ws_router.py closes 4001; daemon_registry.py closes 4003.
@@ -51,6 +61,68 @@ test('parseVersion: unparseable but present output is not mistaken for absent', 
   assert.equal(parseVersion(null), 'installed');
 });
 
+test('stopReasonForCloseCode: the two terminal closes are told apart', () => {
+  assert.equal(stopReasonForCloseCode(4003), 'revoked');
+  assert.equal(stopReasonForCloseCode(4001), 'auth_failed');
+});
+
+test('stopReasonForCloseCode: retryable closes record nothing', () => {
+  for (const code of [1000, 1001, 1006, 1011, 4000, 4002, 4004, null, undefined]) {
+    assert.equal(stopReasonForCloseCode(code), null, `code ${code} must not be terminal`);
+  }
+});
+
+test('describeLastStop: a recorded revocation reads as an instruction', () => {
+  const line = describeLastStop({ reason: 'revoked', at: '2026-08-26T12:28:17.101Z' });
+  assert.match(line, /revoked/);
+  assert.match(line, /re-pair/);
+  assert.match(line, /2026-08-26T12:28:17\.101Z/);
+  assert.match(describeLastStop({ reason: 'auth_failed', at: 'x' }), /token was rejected/);
+});
+
+test('describeLastStop: nothing, or an unrecognised reason, prints nothing', () => {
+  // An unknown reason must not be rendered as if it were understood — that is
+  // how a stale/foreign file would turn into a confident wrong explanation.
+  assert.equal(describeLastStop(null), null);
+  assert.equal(describeLastStop(undefined), null);
+  assert.equal(describeLastStop('revoked'), null);
+  assert.equal(describeLastStop({ reason: 'something_else', at: 'x' }), null);
+  assert.equal(describeLastStop({}), null);
+});
+
+test('last_stop.json: write → read round-trips, and clear removes it', async () => {
+  const dir = await tmpdir();
+  try {
+    assert.equal(await readLastStop(dir), null, 'absent file reads as null');
+
+    await writeLastStop('revoked', dir);
+    const entry = await readLastStop(dir);
+    assert.equal(entry.reason, 'revoked');
+    assert.ok(!Number.isNaN(Date.parse(entry.at)), 'at is an ISO timestamp');
+    assert.match(describeLastStop(entry), /re-pair/);
+
+    // pair() calls this: a fresh pairing must not leave `status` reporting a
+    // revocation that no longer applies.
+    await clearLastStop(dir);
+    assert.equal(await readLastStop(dir), null);
+    // Clearing an already-absent file is not an error (pair on a fresh box).
+    await clearLastStop(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('last_stop.json: the file is private to the user', async () => {
+  const dir = await tmpdir();
+  try {
+    await writeLastStop('auth_failed', dir);
+    const st = await fs.stat(path.join(dir, 'last_stop.json'));
+    assert.equal(st.mode & 0o077, 0, 'no group/other bits');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('renderSystemdUnit: restarts on crash but never after a revocation', () => {
   const unit = renderSystemdUnit({
     nodePath: '/usr/bin/node',
@@ -59,8 +131,11 @@ test('renderSystemdUnit: restarts on crash but never after a revocation', () => 
   assert.match(unit, /^ExecStart=\/usr\/bin\/node \/home\/u\/\.local\/share\/nous-codex\/nous-codex\.mjs run$/m);
   assert.match(unit, /^Restart=on-failure$/m);
   assert.match(unit, /^RestartSec=5$/m);
-  assert.match(unit, /^RestartPreventExitStatus=2$/m);
   assert.match(unit, /^WantedBy=default\.target$/m);
+  // The revocation guard is Restart=on-failure + a clean exit 0, so there is
+  // no exit-status exception to declare — and Restart=always would defeat it.
+  assert.doesNotMatch(unit, /RestartPreventExitStatus/);
+  assert.doesNotMatch(unit, /^Restart=always$/m);
   // No API base set → no Environment line at all (not an empty one).
   assert.doesNotMatch(unit, /^Environment=/m);
 });

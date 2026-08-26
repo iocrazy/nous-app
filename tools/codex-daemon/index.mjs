@@ -34,9 +34,11 @@ const HEARTBEAT_MS = 30_000;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
-/** Exit code meaning "this device is finished — do NOT restart me".
- *  systemd honours it via RestartPreventExitStatus=2. */
-const EXIT_REVOKED = 2;
+/** Written next to config.json when the daemon stops for good, so `status`
+ *  can say WHY a service that is no longer running stopped. Needed because
+ *  the terminal exit is now a clean exit 0 (see run()) — without this the
+ *  only trace would be a line in the journal. */
+const LAST_STOP_FILENAME = 'last_stop.json';
 
 const SERVICE_LABEL = 'ink.nous.codex';
 const SYSTEMD_UNIT_NAME = 'nous-codex.service';
@@ -57,6 +59,56 @@ async function readConfig() {
 async function writeConfig(cfg) {
   await fs.mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
   await fs.writeFile(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+}
+
+// ── last stop ─────────────────────────────────────────────────────────────
+//
+// The daemon exits 0 when it is revoked, so that every service manager (which
+// all leave a clean exit alone) stops it for good with one code. The cost of a
+// clean exit is that nothing about it looks unusual afterwards — so the reason
+// is recorded here and surfaced by `status`.
+
+/** Terminal close codes → the reason recorded in last_stop.json.
+ *  Returns null for every retryable close. */
+export function stopReasonForCloseCode(code) {
+  if (code === 4003) return 'revoked';
+  if (code === 4001) return 'auth_failed';
+  return null;
+}
+
+const STOP_REASON_TEXT = {
+  revoked: 'this device was revoked in nous — re-pair to use it again',
+  auth_failed: 'the device token was rejected — re-pair to use it again',
+};
+
+/** One line for `status`, or null when there is nothing (or nothing we
+ *  recognise) to report — an unknown reason must not print as if understood. */
+export function describeLastStop(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const text = STOP_REASON_TEXT[entry.reason];
+  if (!text) return null;
+  return `${text} (stopped ${entry.at || 'at an unknown time'})`;
+}
+
+export async function writeLastStop(reason, dir = CONFIG_DIR) {
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  await fs.writeFile(
+    path.join(dir, LAST_STOP_FILENAME),
+    JSON.stringify({ reason, at: new Date().toISOString() }, null, 2),
+    { mode: 0o600 },
+  );
+}
+
+export async function readLastStop(dir = CONFIG_DIR) {
+  try {
+    return JSON.parse(await fs.readFile(path.join(dir, LAST_STOP_FILENAME), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function clearLastStop(dir = CONFIG_DIR) {
+  await fs.rm(path.join(dir, LAST_STOP_FILENAME), { force: true });
 }
 
 // ── argv ──────────────────────────────────────────────────────────────────
@@ -101,6 +153,9 @@ async function pair(argv) {
   }
   const { data } = await res.json();
   await writeConfig({ device_id: data.device_id, device_token: data.device_token });
+  // A fresh pairing answers whatever the last stop was; leaving the file
+  // would make `status` keep reporting a revocation that no longer applies.
+  await clearLastStop();
   const self = path.basename(scriptPath());
   log(`paired as "${deviceName}" (device ${data.device_id})`);
   log(`next: node ${self} install-service   — start at login and restart on crash`);
@@ -267,9 +322,10 @@ async function uploadResult(filePath, ticket) {
  *    4003 — device revoked               (services/codex/daemon_registry.py)
  *  Everything else (network blips, server restarts, 1006) is retryable.
  *  Retrying a revoked token forever is exactly the silently-useless daemon
- *  this guards against. */
+ *  this guards against. Derived from stopReasonForCloseCode so the two can
+ *  never disagree about which closes are final. */
 export function isTerminalClose(code) {
-  return code === 4001 || code === 4003;
+  return stopReasonForCloseCode(code) !== null;
 }
 
 async function connect(cfg) {
@@ -438,13 +494,19 @@ async function run() {
   for (;;) {
     const started = Date.now();
     const closeCode = await connect(cfg);
-    if (isTerminalClose(closeCode)) {
-      // Terminal, not transient: this token will never start working again,
-      // so exit loudly with the code the service files refuse to restart.
+    const stopReason = stopReasonForCloseCode(closeCode);
+    if (stopReason) {
+      // Terminal, not transient: this token will never start working again.
+      // Exit 0 on purpose — systemd's Restart=on-failure and launchd's
+      // KeepAlive/SuccessfulExit=false both leave a clean exit alone, so one
+      // exit code gives the same "stop for good" semantics on all three
+      // platforms, with no RestartPreventExitStatus and no self-bootout. The
+      // reason is not lost: it goes to last_stop.json, which `status` reads.
+      await writeLastStop(stopReason);
       console.error(
         'device revoked or token invalid — re-pair from nous Settings → Local CLI',
       );
-      process.exit(EXIT_REVOKED);
+      process.exit(0);
     }
     // A connection that lived a while means the endpoint is healthy —
     // reset the backoff so a nightly blip doesn't leave us at 30s forever.
@@ -484,9 +546,9 @@ Type=simple
 ExecStart=${nodePath} ${script} run
 ${env}Restart=on-failure
 RestartSec=5
-# exit 2 = device revoked / token invalid. Restarting would only reprint the
-# same message forever, so systemd must treat it as a final answer.
-RestartPreventExitStatus=2
+# on-failure is the whole revocation guard: a revoked daemon exits 0, and a
+# clean exit is not a failure, so systemd leaves it stopped. Do NOT change
+# this to Restart=always — that would reconnect-loop a revoked device.
 
 [Install]
 WantedBy=default.target
@@ -494,11 +556,10 @@ WantedBy=default.target
 }
 
 /** launchd LaunchAgent plist (macOS).
- *  ⚠️ launchd has no RestartPreventExitStatus equivalent. KeepAlive
- *  SuccessfulExit=false suppresses respawn after a *clean* exit only, so a
- *  revoked device is still relaunched (reprinting the revocation message
- *  every ~10s) until `uninstall-service` runs. Documented, not verified on
- *  real hardware — see README. */
+ *  KeepAlive/SuccessfulExit=false means "relaunch only after a non-zero
+ *  exit", which is exactly the systemd Restart=on-failure semantics: a
+ *  revoked daemon exits 0 and launchd leaves it stopped. Crashes still get
+ *  relaunched. Not verified on real hardware — no mac in the loop. */
 export function renderLaunchdPlist({
   nodePath,
   scriptPath: script,
@@ -706,6 +767,7 @@ async function status() {
   const cfg = await readConfig();
   console.log(`config file : ${CONFIG_FILE} ${cfg ? '(present)' : '(MISSING — not paired)'}`);
   console.log(`device id   : ${cfg?.device_id ?? '(none)'}`);
+  console.log(`last stop   : ${describeLastStop(await readLastStop()) ?? '(none recorded)'}`);
   console.log(`api base    : ${API_BASE}`);
   console.log(`script      : ${scriptPath()}`);
   console.log(`node        : ${process.execPath} ${process.version}`);
