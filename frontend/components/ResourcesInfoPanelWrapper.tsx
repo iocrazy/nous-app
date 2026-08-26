@@ -1,6 +1,4 @@
 import React from 'react';
-import { ChevronRight } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import { ResourceInfoPanel } from './ResourceInfoPanel';
 import { FolderInfoPanel } from './FolderInfoPanel';
@@ -28,14 +26,11 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
   trashedFolderPreviews,
   onRenameFolder,
 }) => {
-  const { t } = useTranslation();
   const {
     isDownloadsView,
     isRecycleView,
     selectedResource,
-    setSelectedResource,
     selectedFolder,
-    setSelectedFolder,
     selectedResourceTags,
     allTags,
     folders,
@@ -54,19 +49,11 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
   }
 
   // Bare panel for the shell's info island. The shell owns the width + reopen
-  // handle, so this renders only a collapse control + the inner panel content
-  // (no fixed overlay, no own resize handle, no expand tab).
+  // handle; the inner panel's own header X collapses the island (selection is
+  // kept so the shell's reopen handle can bring it back) — one control, not a
+  // second chrome row stacked above the panel's header.
   return (
       <div className="h-full flex flex-col">
-        <div className="flex justify-end px-2 py-1.5 shrink-0">
-          <button
-            onClick={() => setShowInfoPanel(false)}
-            title={t('resources.toggleInfoPanel')}
-            className="w-8 h-8 grid place-items-center rounded-lg text-content-2 hover:text-content hover:bg-island-2 transition-colors"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
         <div className="flex-1 min-h-0 overflow-auto">
           {selectedFolder ? (
             <FolderInfoPanel
@@ -77,7 +64,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
                   : folderPreviews[selectedFolder.id]
               }
               readOnly={isRecycleView}
-              onClose={() => setSelectedFolder(null)}
+              onClose={() => setShowInfoPanel(false)}
               onRename={async (name) => {
                 await onRenameFolder(selectedFolder.id, name);
               }}
@@ -89,7 +76,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
               assignedTags={selectedResourceTags.map(item => item.tag).filter((t): t is Tag => !!t)}
               folderName={selectedResource.folder_id ? folders.find(f => f.id === selectedResource.folder_id)?.name : null}
               readOnly={isRecycleView}
-              onClose={() => setSelectedResource(null)}
+              onClose={() => setShowInfoPanel(false)}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
               onCreate={handleCreateTag}
