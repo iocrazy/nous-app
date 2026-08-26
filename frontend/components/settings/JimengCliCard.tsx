@@ -10,6 +10,7 @@
 
 import { Coins, HelpCircle, Loader2, QrCode, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { apiFetch } from '../../services/apiClient';
 
@@ -27,6 +28,7 @@ interface JimengStatus {
 }
 
 export function JimengCliCard() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<JimengStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -47,7 +49,7 @@ export function JimengCliCard() {
       setError(null);
     } catch (err) {
       console.error('[jimeng-cli] status failed:', err);
-      setError('Could not reach the server CLI');
+      setError(t('settings.localCli.errStatus'));
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,7 @@ export function JimengCliCard() {
       if (body.data?.already_logged_in) void refresh();
     } catch (err) {
       console.error('[jimeng-cli] login failed:', err);
-      setError('Login flow failed to start');
+      setError(t('settings.localCli.errLogin'));
     } finally {
       setWorking(false);
     }
@@ -76,26 +78,24 @@ export function JimengCliCard() {
   return (
     <div className="space-y-3" data-testid="jimeng-cli-card">
       <div className="flex items-center gap-2">
-        <h3 className="text-sm font-bold text-content">Dreamina (即梦) CLI</h3>
+        <h3 className="text-sm font-bold text-content">{t('settings.localCli.jimengTitle')}</h3>
         {!loading && status && (
           <span
             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
               status.logged_in ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'
             }`}
           >
-            {status.logged_in ? 'Logged in' : 'Not logged in'}
+            {status.logged_in ? t('settings.localCli.jimengLoggedIn') : t('settings.localCli.jimengNotLoggedIn')}
           </span>
         )}
         {status?.logged_in && status.total_credit != null && (
           <span className="inline-flex items-center gap-1 text-xs text-content-2">
-            <Coins size={12} /> {status.total_credit} credits
+            <Coins size={12} /> {t('settings.localCli.credits', { count: status.total_credit })}
           </span>
         )}
       </div>
       <p className="text-xs text-content-3">
-        Per-device dreamina runs with YOUR credits — pair a device above and
-        its dreamina check appears on the device row. This card manages the
-        transitional server-side shared account.
+        {t('settings.localCli.jimengDesc')}
       </p>
 
       {error && <div className="text-xs text-danger">{error}</div>}
@@ -109,10 +109,10 @@ export function JimengCliCard() {
           className={BTN_PRIMARY}
         >
           {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
-          Log in
+          {t('settings.localCli.logIn')}
         </button>
         <button type="button" onClick={() => void refresh()} className={BTN_SECONDARY}>
-          <RefreshCw size={12} /> Check credits
+          <RefreshCw size={12} /> {t('settings.localCli.checkCredits')}
         </button>
         <button
           type="button"
@@ -120,20 +120,18 @@ export function JimengCliCard() {
           onClick={() => setHelpOpen((v) => !v)}
           className={BTN_SECONDARY}
         >
-          <HelpCircle size={12} /> Help
+          <HelpCircle size={12} /> {t('settings.localCli.help')}
         </button>
       </div>
 
       {helpOpen && (
         <div className="rounded-xl border border-line p-3 text-xs text-content-3">
-          <div>To run dreamina on your own machine (your own credits):</div>
+          <div>{t('settings.localCli.jimengHelpIntro')}</div>
           <code className="mt-1 block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2">
             curl -fsSL https://jimeng.jianying.com/cli | bash{'\n'}dreamina login
           </code>
           <div className="mt-2">
-            Then pair the device above — the daemon detects dreamina
-            automatically and canvas picks &quot;Dreamina (Local)&quot; will run
-            there. Video and some features need a premium 即梦 membership.
+            {t('settings.localCli.jimengHelpAfter')}
           </div>
         </div>
       )}
@@ -141,7 +139,7 @@ export function JimengCliCard() {
       {loginInfo && !loginInfo.already_logged_in && loginInfo.verification_uri && (
         <div className="rounded-xl border border-line p-3 text-xs">
           <div className="text-content-3">
-            Open this link on any device and approve (expires in ~10 minutes):
+            {t('settings.localCli.loginLink')}
           </div>
           <a
             href={loginInfo.verification_uri}
@@ -161,7 +159,7 @@ export function JimengCliCard() {
             onClick={() => void refresh()}
             className="mt-2 text-xs font-semibold text-accent"
           >
-            I've approved — check status
+            {t('settings.localCli.loginDone')}
           </button>
         </div>
       )}

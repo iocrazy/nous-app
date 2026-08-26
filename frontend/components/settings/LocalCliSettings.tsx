@@ -7,6 +7,7 @@
 // facts come from the daemon's self-report instead of a local backend.
 
 import { Check, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import type { CodexDevice } from '../../services/codexDaemonService';
 import { CodexDaemonSettings } from './CodexDaemonSettings';
@@ -27,10 +28,11 @@ export interface DaemonEnvReport {
 
 /** IC-style one-line CLI status for a paired device. */
 export function EnvReportLine({ report }: { report: DaemonEnvReport | null | undefined }) {
+  const { t } = useTranslation();
   if (!report) {
     return (
       <div className="text-[10px] text-content-3">
-        Environment not reported yet — starts with the next daemon connect.
+        {t('settings.localCli.envNotReported')}
       </div>
     );
   }
@@ -44,13 +46,13 @@ export function EnvReportLine({ report }: { report: DaemonEnvReport | null | und
     <div className="flex flex-wrap items-center gap-2 text-[10px]">
       {item(report.codex_ok, `codex${report.codex_version ? ` ${report.codex_version}` : ''}`)}
       {item(report.skill_ok, `gpt-image-2-skill${report.skill_version ? ` ${report.skill_version}` : ''}`)}
-      {item(report.auth_ok, report.auth_ok ? 'logged in' : 'not logged in')}
+      {item(report.auth_ok, report.auth_ok ? t('settings.localCli.loggedIn') : t('settings.localCli.notLoggedIn'))}
       {report.dreamina_ok !== undefined &&
         item(
           report.dreamina_ok && report.dreamina_auth_ok,
           report.dreamina_ok
-            ? `dreamina${report.dreamina_version ? ` ${report.dreamina_version}` : ''}${report.dreamina_auth_ok ? '' : ' (not logged in)'}`
-            : 'dreamina missing',
+            ? `dreamina${report.dreamina_version ? ` ${report.dreamina_version}` : ''}${report.dreamina_auth_ok ? '' : ` (${t('settings.localCli.notLoggedIn')})`}`
+            : t('settings.localCli.dreaminaMissing'),
         )}
       {report.node_version && (
         <span className="text-content-3">node {report.node_version}</span>

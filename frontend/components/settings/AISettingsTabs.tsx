@@ -5,6 +5,7 @@
 // top-level sidebar entries). One sidebar entry — five sub-views.
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { AISettings as AISettingsType } from '../../types';
 import AISettings from '../AISettings';
@@ -15,12 +16,12 @@ import { LocalCliSettings } from './LocalCliSettings';
 
 type AISubTab = 'general' | 'providers' | 'local-cli' | 'mcp' | 'memory';
 
-const SUB_TABS: Array<{ id: AISubTab; label: string }> = [
-  { id: 'general', label: 'General' },
-  { id: 'providers', label: 'Providers' },
-  { id: 'local-cli', label: 'Local CLI' },
-  { id: 'mcp', label: 'MCP' },
-  { id: 'memory', label: 'Memory' },
+const SUB_TABS: Array<{ id: AISubTab; labelKey: string }> = [
+  { id: 'general', labelKey: 'settings.aiTabs.general' },
+  { id: 'providers', labelKey: 'settings.aiTabs.providers' },
+  { id: 'local-cli', labelKey: 'settings.aiTabs.localCli' },
+  { id: 'mcp', labelKey: 'settings.aiTabs.mcp' },
+  { id: 'memory', labelKey: 'settings.aiTabs.memory' },
 ];
 
 export function AISettingsTabs({
@@ -30,6 +31,7 @@ export function AISettingsTabs({
   settings: AISettingsType;
   onSave: (settings: AISettingsType) => void;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<AISubTab>('general');
   return (
     <div className="space-y-6">
@@ -37,19 +39,19 @@ export function AISettingsTabs({
         className="flex gap-1 rounded-xl bg-ink-900 border border-ink-800 p-1"
         data-testid="ai-subtabs"
       >
-        {SUB_TABS.map((t) => (
+        {SUB_TABS.map((st) => (
           <button
-            key={t.id}
+            key={st.id}
             type="button"
-            data-testid={`ai-subtab-${t.id}`}
-            onClick={() => setTab(t.id)}
+            data-testid={`ai-subtab-${st.id}`}
+            onClick={() => setTab(st.id)}
             className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              tab === t.id
+              tab === st.id
                 ? 'bg-ink-800 text-ink-100'
                 : 'text-ink-400 hover:text-ink-200'
             }`}
           >
-            {t.label}
+            {t(st.labelKey)}
           </button>
         ))}
       </div>

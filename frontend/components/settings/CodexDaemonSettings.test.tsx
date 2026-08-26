@@ -85,6 +85,6 @@ describe('CodexDaemonSettings', () => {
     const text = screen.getByTestId('codex-cli-readout').textContent ?? '';
     expect(text).toContain('gpt-image-2-skill 0.7.3');
     expect(text).toContain('/usr/local/bin/gpt-image-2-skill');
-    expect(text).toContain('OAuth session present');
+    expect(text).toContain('settings.localCli.authPresent');
   });
 });
