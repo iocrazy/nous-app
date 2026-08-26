@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { CodexDaemonSettings } from './settings/CodexDaemonSettings';
 import {
   Brain,
   Zap,
@@ -1542,56 +1543,23 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       </div>
                     )}
 
-                    {/* OpenAI-specific model selectors */}
+                    {/* C 方案: run canvas generations on the user's own
+                        machine with their own codex login — lives under
+                        OpenAI because that's whose subscription it uses.
+                        (The per-task model selectors that used to sit here
+                        are gone: task→model assignment moved to the Task
+                        Assignment section, 2026-08-25.) */}
                     {providerKey === 'openai' && (
-                      <>
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-ink-400">Whisper Model</label>
-                          <UiSelect
-                            value={config.selected_model?.startsWith('whisper') ? config.selected_model : 'whisper-1'}
-                            onChange={(e) => updateProviderField(providerKey, 'selected_model', e.target.value)}
-                            className="w-full"
-                          >
-                            {(meta.whisperModels || []).map((m) => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </UiSelect>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-ink-400">Summary Model</label>
-                          <UiSelect
-                            value={config.summary_model || 'gpt-4o-mini'}
-                            onChange={(e) => updateProviderField(providerKey, 'summary_model' as keyof AIProviderConfig, e.target.value)}
-                            className="w-full"
-                          >
-                            {(meta.summaryModels || []).map((m) => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </UiSelect>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-ink-400">Analysis Model</label>
-                          <UiSelect
-                            value={config.analysis_model || 'gpt-4o'}
-                            onChange={(e) => updateProviderField(providerKey, 'analysis_model' as keyof AIProviderConfig, e.target.value)}
-                            className="w-full"
-                          >
-                            {(meta.analysisModels || []).map((m) => (
-                              <option key={m} value={m}>{m}</option>
-                            ))}
-                          </UiSelect>
-                        </div>
-                      </>
+                      <div className="border-t border-ink-800 pt-4">
+                        <CodexDaemonSettings />
+                      </div>
                     )}
 
-                    {/* Generic model whitelist for non-OpenAI providers.
-                        Chips = ``enabled_models`` (what gets exposed to
-                        agent pickers). Test Connection populates the full
-                        catalog (``config.models``); the user adds the
-                        models they actually want from there. */}
-                    {providerKey !== 'openai' && (
+                    {/* Generic model whitelist — one shape for every
+                        provider, OpenAI included (its bespoke selectors
+                        retired 2026-08-25). Chips = ``enabled_models``;
+                        Test Connection populates ``config.models``. */}
+                    {(
                       <EnabledModelsField
                         providerKey={providerKey}
                         enabledModels={config.enabled_models ?? (config.selected_model ? [config.selected_model] : [])}
