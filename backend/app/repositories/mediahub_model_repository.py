@@ -197,7 +197,7 @@ class MediahubModelRepository:
                 for m in result.mappings().all():
                     row = dict(m)
                     provider = row.pop("actual_provider", None)
-                    row["is_local"] = provider == "codex-local"
+                    row["is_local"] = provider in ("codex-local", "jimeng-local")
                     out.append(_parity(row))
                 return out
         except Exception as e:

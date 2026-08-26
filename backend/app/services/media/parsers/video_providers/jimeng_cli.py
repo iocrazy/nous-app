@@ -47,6 +47,82 @@ class GenResult:
     raw: dict = field(default_factory=dict)
 
 
+def build_image_args(
+    *,
+    prompt: str,
+    aspect: str,
+    poll: int,
+    resolution_type: Optional[str] = None,
+    model_version: Optional[str] = None,
+) -> List[str]:
+    """Pure ``text2image`` argv (shared: server provider + daemon dispatch)."""
+    ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
+    args = [
+        "text2image",
+        f"--prompt={prompt}",
+        f"--ratio={ratio}",
+        f"--poll={poll}",
+    ]
+    if resolution_type:
+        args.append(f"--resolution_type={resolution_type}")
+    if model_version:
+        args.append(f"--model_version={model_version}")
+    return args
+
+
+def build_video_args(
+    *,
+    prompt: str,
+    aspect: str,
+    poll: int,
+    image_path: Optional[str] = None,
+    image_paths: Optional[List[str]] = None,
+    first_frame: Optional[str] = None,
+    last_frame: Optional[str] = None,
+    duration: Optional[int] = None,
+    model_version: Optional[str] = None,
+    resolution: Optional[str] = None,
+) -> List[str]:
+    """Pure video argv across the CLI's four commands (IC parity, extracted
+    from the provider so the per-user daemon path builds identical commands).
+    Image refs may be ``{ref:N}`` placeholders — the daemon substitutes local
+    paths after downloading."""
+    adaptive = (aspect or "").strip().lower() in ("", "auto", "adaptive")
+    ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
+    refs = [p for p in (image_paths or []) if p][:9]
+    if first_frame and last_frame:
+        args = [
+            "frames2video",
+            f"--first={first_frame}",
+            f"--last={last_frame}",
+            f"--prompt={prompt}",
+        ]
+    elif len(refs) >= 2:
+        args = ["multimodal2video", f"--prompt={prompt}"]
+        if not adaptive:
+            args.append(f"--ratio={ratio}")
+        for ref in refs:
+            args.append(f"--image={ref}")
+    elif image_path or refs:
+        args = [
+            "image2video",
+            f"--image={image_path or refs[0]}",
+            f"--prompt={prompt}",
+        ]
+    else:
+        args = ["text2video", f"--prompt={prompt}"]
+        if not adaptive:
+            args.append(f"--ratio={ratio}")
+    if duration:
+        args.append(f"--duration={int(duration)}")
+    if model_version:
+        args.append(f"--model_version={model_version}")
+    if resolution:
+        args.append(f"--video_resolution={resolution}")
+    args.append(f"--poll={poll}")
+    return args
+
+
 class JimengCliError(RuntimeError):
     """Structured provider failure carrying a stable ``code`` for the caller/UI.
 
@@ -263,17 +339,13 @@ class JimengCliProvider:
         resolution_type: Optional[str] = None,
     ) -> GenResult:
         """text2image → local image file."""
-        ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
-        args = [
-            "text2image",
-            f"--prompt={prompt}",
-            f"--ratio={ratio}",
-            f"--poll={self._image_poll}",
-        ]
-        if resolution_type:
-            args.append(f"--resolution_type={resolution_type}")
-        if model_version:
-            args.append(f"--model_version={model_version}")
+        args = build_image_args(
+            prompt=prompt,
+            aspect=aspect,
+            poll=self._image_poll,
+            resolution_type=resolution_type,
+            model_version=model_version,
+        )
         submit_timeout = self._image_poll + self._image_margin
         return await self._submit_and_fetch(
             args, submit_timeout, _IMAGE_EXTS, "image/png"
@@ -317,43 +389,18 @@ class JimengCliProvider:
         (全能参考, refs capped at 9); one image → ``image2video``; none →
         ``text2video``. ``resolution`` rides as ``--video_resolution``
         (720p everywhere, 1080p/4k on vip models — CLI enforces)."""
-        # IC 自适应: aspect 'auto'/'' sends NO --ratio — the CLI infers from
-        # the reference; an unknown aspect falls back to the default.
-        adaptive = (aspect or "").strip().lower() in ("", "auto", "adaptive")
-        ratio = _ASPECT_TO_RATIO.get(aspect or "", _DEFAULT_RATIO)
-        refs = [p for p in (image_paths or []) if p][:9]
-        if first_frame and last_frame:
-            args = [
-                "frames2video",
-                f"--first={first_frame}",
-                f"--last={last_frame}",
-                f"--prompt={prompt}",
-            ]
-        elif len(refs) >= 2:
-            args = ["multimodal2video", f"--prompt={prompt}"]
-            if not adaptive:
-                args.append(f"--ratio={ratio}")
-            for ref in refs:
-                args.append(f"--image={ref}")
-        elif image_path or refs:
-            # image2video takes a single --image; ratio is inferred from it.
-            args = [
-                "image2video",
-                f"--image={image_path or refs[0]}",
-                f"--prompt={prompt}",
-            ]
-        else:
-            args = ["text2video", f"--prompt={prompt}"]
-            if not adaptive:
-                args.append(f"--ratio={ratio}")
-        if duration:
-            # IC parity: seconds knob, snapped by the CLI itself per model.
-            args.append(f"--duration={int(duration)}")
-        if model_version:
-            args.append(f"--model_version={model_version}")
-        if resolution:
-            args.append(f"--video_resolution={resolution}")
-        args.append(f"--poll={self._video_poll}")
+        args = build_video_args(
+            prompt=prompt,
+            aspect=aspect,
+            poll=self._video_poll,
+            image_path=image_path,
+            image_paths=image_paths,
+            first_frame=first_frame,
+            last_frame=last_frame,
+            duration=duration,
+            model_version=model_version,
+            resolution=resolution,
+        )
         submit_timeout = self._video_poll + self._video_margin
         return await self._submit_and_fetch(
             args, submit_timeout, _VIDEO_EXTS, "video/mp4"

@@ -18,6 +18,9 @@ export interface DaemonEnvReport {
   skill_ok?: boolean;
   skill_version?: string | null;
   auth_ok?: boolean;
+  dreamina_ok?: boolean;
+  dreamina_version?: string | null;
+  dreamina_auth_ok?: boolean;
   node_version?: string;
   platform?: string;
 }
@@ -42,6 +45,13 @@ export function EnvReportLine({ report }: { report: DaemonEnvReport | null | und
       {item(report.codex_ok, `codex${report.codex_version ? ` ${report.codex_version}` : ''}`)}
       {item(report.skill_ok, `gpt-image-2-skill${report.skill_version ? ` ${report.skill_version}` : ''}`)}
       {item(report.auth_ok, report.auth_ok ? 'logged in' : 'not logged in')}
+      {report.dreamina_ok !== undefined &&
+        item(
+          report.dreamina_ok && report.dreamina_auth_ok,
+          report.dreamina_ok
+            ? `dreamina${report.dreamina_version ? ` ${report.dreamina_version}` : ''}${report.dreamina_auth_ok ? '' : ' (not logged in)'}`
+            : 'dreamina missing',
+        )}
       {report.node_version && (
         <span className="text-content-3">node {report.node_version}</span>
       )}

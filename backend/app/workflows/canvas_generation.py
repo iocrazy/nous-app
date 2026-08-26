@@ -40,19 +40,27 @@ _KIND_MIME = {"image": "image/png", "video": "video/mp4"}
 _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 
 
-@DBOS.step(retries_allowed=True, max_attempts=2)
-async def _is_codex_local(model_name: str) -> bool:
-    """True when the picked catalog row runs on the user's own machine."""
+_LOCAL_ENGINES = {"codex-local": "codex", "jimeng-local": "dreamina"}
+
+
+async def _local_engine(model_name: str, media_type: str) -> tuple[str, str] | None:
+    """(engine, actual_model) when the picked catalog row runs on the user's
+    own machine via the paired daemon; None for server-side providers."""
     try:
         from app.services.media.parsers.video_providers import db_registry
 
-        rows = await db_registry._enabled_rows("image")  # noqa: SLF001
+        rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
         for row in rows:
             if str(row.get("name")) == model_name:
-                return str(row.get("actual_provider") or "").lower() == "codex-local"
+                engine = _LOCAL_ENGINES.get(
+                    str(row.get("actual_provider") or "").lower()
+                )
+                if engine:
+                    return engine, str(row.get("actual_model") or "")
+                return None
     except Exception:
-        return False
-    return False
+        return None
+    return None
 
 
 def _absolute_media_url(url: str) -> str:
@@ -66,6 +74,7 @@ def _absolute_media_url(url: str) -> str:
     return f"{base.rstrip('/')}{url}"
 
 
+@DBOS.step(retries_allowed=True, max_attempts=2)
 async def generate_canvas_media_step(
     kind: str,
     prompt: str,
@@ -146,7 +155,13 @@ async def generate_canvas_media_step(
     # server-side provider at all — the work runs on the USER's machine via
     # their paired daemon (spec §6). Offline is a typed failure at dispatch
     # time, not a hang.
-    if (model or "").strip() and await _is_codex_local(model):
+    local = (
+        await _local_engine(model, kind if kind in ("image", "video") else "image")
+        if (model or "").strip()
+        else None
+    )
+    if local:
+        engine, engine_model = local
         from app.services.codex.daemon_dispatch import dispatch_to_daemon
 
         raw_refs = params.get("source_urls")
@@ -155,23 +170,65 @@ async def generate_canvas_media_step(
             for u in (raw_refs if isinstance(raw_refs, list) else [])
             if isinstance(u, str) and u
         ][:9] or ([source_url] if source_url else [])
-        result = await dispatch_to_daemon(
-            user_id=str(user_id),
-            scope_id=int(await _resolve_personal_team_id(str(user_id))),
-            kind="image",
-            payload={
+        ref_urls = [_absolute_media_url(u) for u in ref_urls]
+
+        if engine == "dreamina":
+            # Build the exact dreamina argv server-side (single source of
+            # truth: the same pure builders the server provider uses). Refs
+            # become {ref:N} placeholders the daemon swaps for local paths.
+            from app.services.media.parsers.video_providers.jimeng_cli import (
+                build_image_args,
+                build_video_args,
+            )
+
+            placeholders = [f"{{ref:{i}}}" for i in range(len(ref_urls))]
+            if kind == "video":
+                submit_args = build_video_args(
+                    prompt=prompt,
+                    aspect=str(params.get("aspect") or params.get("ratio") or ""),
+                    poll=90,
+                    image_paths=placeholders,
+                    duration=(
+                        int(params["duration"]) if params.get("duration") else None
+                    ),
+                    model_version=engine_model or None,
+                    resolution=str(params.get("resolution") or "") or None,
+                )
+            else:
+                submit_args = build_image_args(
+                    prompt=prompt,
+                    aspect=str(params.get("ratio") or ""),
+                    poll=60,
+                    resolution_type=str(params.get("resolution") or "") or None,
+                    model_version=engine_model or None,
+                )
+            payload = {
+                "engine": "dreamina",
+                "submit_args": submit_args,
+                "media_kind": kind,
+                "ref_urls": ref_urls,
+            }
+        else:
+            payload = {
+                "engine": "codex",
                 "prompt": prompt,
                 "size": str(params.get("size") or ""),
                 "model": str(params.get("actual_model") or ""),
-                "ref_urls": [_absolute_media_url(u) for u in ref_urls],
-            },
+                "ref_urls": ref_urls,
+            }
+
+        result = await dispatch_to_daemon(
+            user_id=str(user_id),
+            scope_id=int(await _resolve_personal_team_id(str(user_id))),
+            kind=kind if kind in ("image", "video") else "image",
+            payload=payload,
         )
         return {
-            "media_kind": "image",
+            "media_kind": kind if kind in ("image", "video") else "image",
             "local_path": None,
             "remote_url": None,
             "existing_gen_id": result.get("gen_id"),
-            "provider": "codex-local",
+            "provider": f"{engine}-local",
             "model": model or "",
         }
 
