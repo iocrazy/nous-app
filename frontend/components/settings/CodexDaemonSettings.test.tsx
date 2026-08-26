@@ -53,18 +53,24 @@ describe('CodexDaemonSettings', () => {
     expect(screen.getByTestId('codex-device-2').textContent).toMatch(/offline/i);
   });
 
-  it('shows the pairing code and the exact command to run', async () => {
+  it('shows the pairing code and the one-line installer that also registers a service', async () => {
     render(<CodexDaemonSettings />);
     fireEvent.click(screen.getByTestId('codex-pair-start'));
     await waitFor(() => expect(screen.getByTestId('codex-pair-code')).toBeInTheDocument());
     expect(screen.getByTestId('codex-pair-code').textContent).toContain('ABCD2345');
-    expect(screen.getByTestId('codex-pair-command').textContent).toContain(
-      'node nous-codex.mjs pair ABCD2345',
-    );
+    // The old copy told users to run `node nous-codex.mjs run` in a terminal,
+    // which dies with the terminal — the installer registers a login service.
+    const command = screen.getByTestId('codex-pair-command').textContent ?? '';
+    expect(command).toContain('tools/codex-daemon/install.sh');
+    expect(command).toContain('sh -s -- ABCD2345');
+    expect(command).not.toContain('nous-codex.mjs run');
     // One-time setup moved into the collapsible Help (IC-style card).
     fireEvent.click(screen.getByTestId('codex-help-toggle'));
     expect(screen.getByTestId('codex-prereq-command').textContent).toContain(
       'codex login',
+    );
+    expect(screen.getByTestId('codex-manage-command').textContent).toContain(
+      'uninstall-service',
     );
   });
 
