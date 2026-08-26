@@ -7,6 +7,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import BigInteger, DateTime, PrimaryKeyConstraint, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,3 +39,4 @@ class CodexDaemons(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    env_report: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
