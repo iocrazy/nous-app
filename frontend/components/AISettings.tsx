@@ -89,7 +89,7 @@ const PROVIDER_META: Record<
     color: 'emerald',
     badge: 'Recommended',
     website: 'https://platform.openai.com/api-keys',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    models: ['gpt-5.6', 'gpt-5.4', 'gpt-5.2', 'gpt-5.2-mini', 'gpt-4o'],
     whisperModels: ['whisper-1'],
     summaryModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     analysisModels: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
@@ -1543,17 +1543,6 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                       </div>
                     )}
 
-                    {/* C 方案: run canvas generations on the user's own
-                        machine with their own codex login — lives under
-                        OpenAI because that's whose subscription it uses.
-                        (The per-task model selectors that used to sit here
-                        are gone: task→model assignment moved to the Task
-                        Assignment section, 2026-08-25.) */}
-                    {providerKey === 'openai' && (
-                      <div className="border-t border-ink-800 pt-4">
-                        <CodexDaemonSettings />
-                      </div>
-                    )}
 
                     {/* Generic model whitelist — one shape for every
                         provider, OpenAI included (its bespoke selectors
@@ -1569,6 +1558,18 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                         selectedModel={config.selected_model}
                         nonChatWarning={nonChatWarning}
                       />
+                    )}
+
+                    {/* C 方案: run canvas generations on the user's own
+                        machine with their own codex login — lives under
+                        OpenAI because that's whose subscription it uses.
+                        (The per-task model selectors that used to sit here
+                        are gone: task→model assignment moved to the Task
+                        Assignment section, 2026-08-25.) */}
+                    {providerKey === 'openai' && (
+                      <div className="border-t border-ink-800 pt-4">
+                        <CodexDaemonSettings />
+                      </div>
                     )}
 
                     {/* Test Connection button. A stored-but-not-retyped key
