@@ -129,11 +129,28 @@ async def _probe_codex_cli() -> dict:
         path = shutil.which(binary)
         return {"installed": bool(path), "version": version, "path": path}
 
+    async def _npm_latest(package: str) -> Optional[str]:
+        """Latest published version, best-effort (3s budget, CN mirror)."""
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(
+                    f"https://registry.npmmirror.com/{package}/latest"
+                )
+                if resp.status_code == 200:
+                    return str(resp.json().get("version") or "") or None
+        except Exception:
+            pass
+        return None
+
     skill_version = await _version_of("gpt-image-2-skill")
     codex_version = await _version_of("codex")
     auth_ok = os.path.exists(os.path.expanduser("~/.codex/auth.json"))
+    skill = _facet("gpt-image-2-skill", skill_version)
+    skill["latest"] = await _npm_latest("gpt-image-2-skill")
     return {
-        "skill": _facet("gpt-image-2-skill", skill_version),
+        "skill": skill,
         "codex": _facet("codex", codex_version),
         "auth_ok": auth_ok,
     }
