@@ -35,7 +35,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -127,6 +127,8 @@ class ContextCompactor:
         system_message: str,
         user_messages: list[dict],
         model: str,
+        adapter: Any = None,
+        tools: Optional[list] = None,
     ) -> tuple[list[dict], CompactionStats]:
         """Return possibly-compacted messages + stats.
 
@@ -230,7 +232,12 @@ class ContextCompactor:
 
         try:
             capped = await self._compact_with_summary(
-                messages=pruned, keep_recent_turns=keep, model=model
+                messages=pruned,
+                keep_recent_turns=keep,
+                model=model,
+                system_message=system_message,
+                tools=tools,
+                adapter=adapter,
             )
             notes.append("compacted via LLM head summary")
         except Exception as exc:
@@ -281,6 +288,9 @@ class ContextCompactor:
         messages: list[dict],
         keep_recent_turns: int,
         model: str,
+        system_message: Optional[str] = None,
+        tools: Optional[list] = None,
+        adapter: Any = None,
     ) -> list[dict]:
         """Replace messages[:-keep_recent_turns] with a single
         [Earlier conversation summary] system message produced by the
@@ -300,15 +310,19 @@ class ContextCompactor:
         if len(messages) <= keep_recent_turns:
             return list(messages)  # nothing to summarize
 
-        from app.agent_framework.summarizer import summarize
-
         head = messages[:-keep_recent_turns]
         tail = messages[-keep_recent_turns:]
         head_tokens = count_messages_tokens(head, model)
 
         last_summary_tokens: Optional[int] = None
         for attempt in range(1, self.SUMMARY_ATTEMPTS + 1):
-            summary_text = await summarize(head)
+            summary_text = await self._produce_summary(
+                head,
+                system_message=system_message,
+                tools=tools,
+                adapter=adapter,
+                model=model,
+            )
             summary_message = {
                 "role": "system",
                 "content": "[Earlier conversation summary]\n" + summary_text,
@@ -339,6 +353,47 @@ class ContextCompactor:
             f"summary did not shrink its source after {self.SUMMARY_ATTEMPTS} "
             f"attempts ({head_tokens} tokens in, {last_summary_tokens} out)"
         )
+
+    async def _produce_summary(
+        self,
+        head: list[dict],
+        *,
+        system_message: Optional[str],
+        tools: Optional[list],
+        adapter: Any,
+        model: str,
+    ) -> str:
+        """Warm-prefix first, legacy cheap-model second.
+
+        W3-1 (user-approved cost shift): replaying the conversation's own
+        prefix on its own adapter lets the provider's KV cache cover every
+        input token but the appended instruction. The chain is
+        warm → legacy → (caller's) emergency cap — a warm hiccup must not skip
+        straight to lossy truncation. No adapter / no system message (the
+        background paths that never had one) → straight to legacy.
+
+        Calls go through the module attribute (`summarizer.summarize`), not a
+        from-import: tests patch that attribute, and a from-import would pin
+        the original function object here and make the patch invisible.
+        """
+        from app.agent_framework import summarizer
+
+        if adapter is not None and system_message:
+            try:
+                return await summarizer.summarize_warm_prefix(
+                    adapter=adapter,
+                    system_message=system_message,
+                    tools=tools,
+                    head=head,
+                    model=model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[compactor] warm-prefix summarize failed, falling back "
+                    "to the maintenance model: {}",
+                    exc,
+                )
+        return await summarizer.summarize(head)
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
         if used_pct >= self.thresholds.red_pct:
