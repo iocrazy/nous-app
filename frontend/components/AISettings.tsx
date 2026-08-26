@@ -1565,21 +1565,16 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
 
                     {/* Local codex moved to the Local CLI tab (2026-08-26). */}
 
-                    {/* Test Connection button. A stored-but-not-retyped key
-                        (api_key_set, masked on GET) can't be tested without
-                        the user re-entering it — the backend never echoes a
-                        raw key back (secret-at-rest Phase 2) — so the button
-                        stays visible but disabled with an explanatory title. */}
+                    {/* Test Connection button. A stored key is tested
+                        SERVER-SIDE (2026-08-26): a blank api_key in the
+                        request means "use what the server already holds",
+                        so a saved provider is always testable — the old
+                        re-type-to-test dead-end is gone. */}
                     {(isLocal || config.api_key || config.api_key_set) && (
                       <div className="pt-1">
                         <button
                           onClick={() => testConnection(providerKey)}
-                          disabled={connStatus === 'testing' || (!isLocal && !config.api_key)}
-                          title={
-                            !isLocal && !config.api_key && config.api_key_set
-                              ? 'Re-enter the API key above to test it'
-                              : undefined
-                          }
+                          disabled={connStatus === 'testing'}
                           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 border disabled:opacity-50 disabled:cursor-not-allowed ${
                             connStatus === 'success'
                               ? 'bg-green-500/10 text-green-400 border-green-500/30'
