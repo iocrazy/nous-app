@@ -19,9 +19,11 @@ import {
   parsePairArgs,
   parseVersion,
   readLastStop,
+  escapeXml,
   renderLaunchdPlist,
   renderSystemdUnit,
   stopReasonForCloseCode,
+  systemdQuote,
   writeLastStop,
 } from './index.mjs';
 
@@ -77,7 +79,9 @@ test('describeLastStop: a recorded revocation reads as an instruction', () => {
   assert.match(line, /revoked/);
   assert.match(line, /re-pair/);
   assert.match(line, /2026-08-26T12:28:17\.101Z/);
-  assert.match(describeLastStop({ reason: 'auth_failed', at: 'x' }), /token was rejected/);
+  assert.match(describeLastStop({ reason: 'auth_failed', at: 'x' }), /token is no longer valid/);
+  // Both sentences must carry the fix, not just name the problem.
+  assert.match(describeLastStop({ reason: 'auth_failed', at: 'x' }), /re-pair/);
 });
 
 test('describeLastStop: nothing, or an unrecognised reason, prints nothing', () => {
@@ -128,7 +132,7 @@ test('renderSystemdUnit: restarts on crash but never after a revocation', () => 
     nodePath: '/usr/bin/node',
     scriptPath: '/home/u/.local/share/nous-codex/nous-codex.mjs',
   });
-  assert.match(unit, /^ExecStart=\/usr\/bin\/node \/home\/u\/\.local\/share\/nous-codex\/nous-codex\.mjs run$/m);
+  assert.match(unit, /^ExecStart="\/usr\/bin\/node" "\/home\/u\/\.local\/share\/nous-codex\/nous-codex\.mjs" run$/m);
   assert.match(unit, /^Restart=on-failure$/m);
   assert.match(unit, /^RestartSec=5$/m);
   assert.match(unit, /^WantedBy=default\.target$/m);
@@ -146,7 +150,7 @@ test('renderSystemdUnit: NOUS_API_BASE is carried into the unit when set', () =>
     scriptPath: '/x/nous-codex.mjs',
     apiBase: 'http://10.0.0.10:8080',
   });
-  assert.match(unit, /^Environment=NOUS_API_BASE=http:\/\/10\.0\.0\.10:8080$/m);
+  assert.match(unit, /^Environment=NOUS_API_BASE="http:\/\/10\.0\.0\.10:8080"$/m);
 });
 
 test('renderSystemdUnit: the installing shell PATH is baked in', () => {
@@ -158,7 +162,7 @@ test('renderSystemdUnit: the installing shell PATH is baked in', () => {
     scriptPath: '/x/nous-codex.mjs',
     pathEnv: '/home/u/.local/bin:/usr/bin:/bin',
   });
-  assert.match(unit, /^Environment=PATH=\/home\/u\/\.local\/bin:\/usr\/bin:\/bin$/m);
+  assert.match(unit, /^Environment=PATH="\/home\/u\/\.local\/bin:\/usr\/bin:\/bin"$/m);
 });
 
 test('renderLaunchdPlist: PATH and API base share one EnvironmentVariables dict', () => {
@@ -231,4 +235,49 @@ test('parsePairArgs: blank or missing name falls back to null (caller uses hostn
   assert.equal(parsePairArgs(['ABCD2345', '--name', '   ']).name, null);
   assert.equal(parsePairArgs(['ABCD2345', '--name']).name, null);
   assert.equal(parsePairArgs([]).code, null);
+});
+
+
+test('systemdQuote: a PATH with spaces survives as ONE value', () => {
+  // Unquoted, systemd splits on whitespace and ExecStart/PATH is silently
+  // truncated at the first space — the symptom is every CLI "missing".
+  assert.equal(systemdQuote('/home/my tools/bin:/usr/bin'), '"/home/my tools/bin:/usr/bin"');
+});
+
+test('systemdQuote: % is doubled and backslash/quote are escaped', () => {
+  // systemd expands %x specifiers even inside quotes, so a literal % must be
+  // written %%; a bare " or \ would otherwise end (or corrupt) the value.
+  assert.equal(systemdQuote('a%b'), '"a%%b"');
+  assert.equal(systemdQuote('a"b'), '"a\\"b"');
+  assert.equal(systemdQuote('a\\b'), '"a\\\\b"');
+});
+
+test('renderSystemdUnit: paths with spaces and % are quoted in place', () => {
+  const unit = renderSystemdUnit({
+    nodePath: '/opt/my node/bin/node',
+    scriptPath: '/home/a b/nous-codex.mjs',
+    pathEnv: '/home/a b/.local/bin:/usr/bin',
+    apiBase: 'http://h/%2Fx',
+  });
+  assert.match(unit, /^ExecStart="\/opt\/my node\/bin\/node" "\/home\/a b\/nous-codex\.mjs" run$/m);
+  assert.match(unit, /^Environment=PATH="\/home\/a b\/\.local\/bin:\/usr\/bin"$/m);
+  assert.match(unit, /^Environment=NOUS_API_BASE="http:\/\/h\/%%2Fx"$/m);
+});
+
+test('escapeXml: plist-breaking characters are neutralised', () => {
+  assert.equal(escapeXml('a&b<c>"d\'e'), 'a&amp;b&lt;c&gt;&quot;d&apos;e');
+});
+
+test('renderLaunchdPlist: an & in a path does not produce invalid XML', () => {
+  const plist = renderLaunchdPlist({
+    nodePath: '/usr/bin/node',
+    scriptPath: '/Users/a&b/nous-codex.mjs',
+    logPath: '/Users/a&b/nous-codex.log',
+    apiBase: 'https://h/?x=1&y=2',
+    pathEnv: '/Users/a&b/bin',
+  });
+  assert.match(plist, /<string>\/Users\/a&amp;b\/nous-codex\.mjs<\/string>/);
+  assert.match(plist, /<string>https:\/\/h\/\?x=1&amp;y=2<\/string>/);
+  // A bare & anywhere would make launchd reject the plist.
+  assert.doesNotMatch(plist, /&(?!amp;|lt;|gt;|quot;|apos;)/);
 });

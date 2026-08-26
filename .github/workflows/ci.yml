@@ -366,3 +366,34 @@ jobs:
         env:
           PYO3_PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: cargo clippy -- -D warnings
+
+  codex-daemon:
+    name: Codex Daemon Tests
+    # fork PR 一律跳过 —— 同 frontend job 的理由（public repo + self-hosted
+    # runner 就是生产部署机）。往 self-hosted 上加任何 pull_request 触发的
+    # job 都要带这一行。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
+    defaults:
+      run:
+        working-directory: tools/codex-daemon
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 读 .nvmrc，不写死版本号（同 frontend job）。⚠️ 路径相对 workspace
+          # 根，defaults.run.working-directory 不影响 action 输入。
+          node-version-file: .nvmrc
+          # 不配 cache：这个包零依赖、没有 lockfile，setup-node 的 npm cache
+          # 会因为找不到 package-lock.json 直接失败。
+
+      # 没有 npm ci —— 零依赖，node --test 是内置的。整个 job 跑不到一秒。
+      #
+      # 刻意不加 paths 过滤：GitHub Actions 不支持 job 级 paths，而在
+      # on.pull_request 上加会同时影响另外四个 job。用「改了哪些文件」去
+      # 决定跑不跑，本身就是门禁静默跳过的经典成因（见 CLAUDE.md 里
+      # lint 门禁那条），为一个亚秒级的 job 冒这个险不值得。
+      - name: Unit tests (node --test)
+        run: npm test

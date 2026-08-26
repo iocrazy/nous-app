@@ -28,7 +28,16 @@ import { fileURLToPath } from 'node:url';
 
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'nous-codex');
+/** Both the config dir and the systemd unit dir must agree on where
+ *  "$XDG_CONFIG_HOME" is, or `install-service` writes the unit somewhere the
+ *  config is not — which is exactly how a service ends up running as "not
+ *  paired yet" while `status` from a shell looks fine. Unset means ~/.config
+ *  per the XDG spec, so this is a no-op for almost everyone. */
+function xdgConfigHome() {
+  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+}
+
+const CONFIG_DIR = path.join(xdgConfigHome(), 'nous-codex');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HEARTBEAT_MS = 30_000;
 const RECONNECT_MIN_MS = 1_000;
@@ -76,9 +85,13 @@ export function stopReasonForCloseCode(code) {
   return null;
 }
 
+// One sentence per reason, carrying the fix. Used verbatim by both the
+// console line at exit and by `status`, so the two can never drift into
+// telling the user different things about the same event.
 const STOP_REASON_TEXT = {
-  revoked: 'this device was revoked in nous — re-pair to use it again',
-  auth_failed: 'the device token was rejected — re-pair to use it again',
+  revoked: 'this device was revoked in nous — re-pair from Settings → AI → Local CLI to use it again',
+  auth_failed:
+    'this device token is no longer valid — re-pair from Settings → AI → Local CLI to use it again',
 };
 
 /** One line for `status`, or null when there is nothing (or nothing we
@@ -336,6 +349,9 @@ async function connect(cfg) {
 
   ws.addEventListener('open', () => {
     log('connected to nous');
+    // Whatever stopped us last time is demonstrably over — otherwise `status`
+    // keeps reporting a revocation that a later re-pair already resolved.
+    clearLastStop().catch(() => {});
     if (cfg.envReport) {
       try {
         ws.send(JSON.stringify({ type: 'env_report', report: cfg.envReport }));
@@ -503,9 +519,7 @@ async function run() {
       // platforms, with no RestartPreventExitStatus and no self-bootout. The
       // reason is not lost: it goes to last_stop.json, which `status` reads.
       await writeLastStop(stopReason);
-      console.error(
-        'device revoked or token invalid — re-pair from nous Settings → Local CLI',
-      );
+      console.error(STOP_REASON_TEXT[stopReason]);
       process.exit(0);
     }
     // A connection that lived a while means the endpoint is healthy —
@@ -523,6 +537,26 @@ function scriptPath() {
   return fileURLToPath(import.meta.url);
 }
 
+/** systemd unit files split unquoted values on whitespace, so a PATH or an
+ *  install directory containing a space is silently truncated — `/home/my
+ *  tools/bin` becomes `/home/my`, and the only symptom is every CLI reporting
+ *  as missing. Quote the value, escape backslash and quote, and double `%`
+ *  (systemd expands `%x` specifiers even inside quotes). */
+export function systemdQuote(value) {
+  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%')}"`;
+}
+
+/** plist values are XML text: an install path with `&` or `<` in it would
+ *  otherwise produce a plist launchd refuses to parse. */
+export function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 /** systemd --user unit. Pure so its content is asserted by tests rather than
  *  "it looked right the one time I ran it".
  *
@@ -533,8 +567,8 @@ function scriptPath() {
  *  shell's PATH in is what makes the service equivalent to `run`. */
 export function renderSystemdUnit({ nodePath, scriptPath: script, apiBase = null, pathEnv = null }) {
   const env =
-    (pathEnv ? `Environment=PATH=${pathEnv}\n` : '') +
-    (apiBase ? `Environment=NOUS_API_BASE=${apiBase}\n` : '');
+    (pathEnv ? `Environment=PATH=${systemdQuote(pathEnv)}\n` : '') +
+    (apiBase ? `Environment=NOUS_API_BASE=${systemdQuote(apiBase)}\n` : '');
   return `[Unit]
 Description=nous-codex — run nous canvas generations on this machine
 Documentation=https://github.com/iocrazy/nous-app/tree/master/tools/codex-daemon
@@ -543,7 +577,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${script} run
+ExecStart=${systemdQuote(nodePath)} ${systemdQuote(script)} run
 ${env}Restart=on-failure
 RestartSec=5
 # on-failure is the whole revocation guard: a revoked daemon exits 0, and a
@@ -574,7 +608,9 @@ export function renderLaunchdPlist({
   const envBlock = vars.length
     ? `  <key>EnvironmentVariables</key>
   <dict>
-${vars.map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`).join('\n')}
+${vars
+  .map(([k, v]) => `    <key>${escapeXml(k)}</key>\n    <string>${escapeXml(v)}</string>`)
+  .join('\n')}
   </dict>
 `
     : '';
@@ -586,8 +622,8 @@ ${vars.map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`).join('\
   <string>${SERVICE_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${nodePath}</string>
-    <string>${script}</string>
+    <string>${escapeXml(nodePath)}</string>
+    <string>${escapeXml(script)}</string>
     <string>run</string>
   </array>
   <key>RunAtLoad</key>
@@ -598,17 +634,16 @@ ${vars.map(([k, v]) => `    <key>${k}</key>\n    <string>${v}</string>`).join('\
     <false/>
   </dict>
 ${envBlock}  <key>StandardOutPath</key>
-  <string>${logPath}</string>
+  <string>${escapeXml(logPath)}</string>
   <key>StandardErrorPath</key>
-  <string>${logPath}</string>
+  <string>${escapeXml(logPath)}</string>
 </dict>
 </plist>
 `;
 }
 
 function systemdUnitPath() {
-  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(base, 'systemd', 'user', SYSTEMD_UNIT_NAME);
+  return path.join(xdgConfigHome(), 'systemd', 'user', SYSTEMD_UNIT_NAME);
 }
 
 function launchdPlistPath() {
@@ -629,7 +664,12 @@ async function installServiceLinux() {
   );
   log(`wrote ${unitPath}`);
   await requireCommand('systemctl', ['--user', 'daemon-reload']);
-  await requireCommand('systemctl', ['--user', 'enable', '--now', SYSTEMD_UNIT_NAME]);
+  await requireCommand('systemctl', ['--user', 'enable', SYSTEMD_UNIT_NAME]);
+  // `enable --now` is a no-op on an already-active unit, so re-running the
+  // installer after an upgrade would leave the OLD daemon running while
+  // `status` reported everything green. restart is the only verb that both
+  // starts a stopped unit and reloads a running one.
+  await requireCommand('systemctl', ['--user', 'restart', SYSTEMD_UNIT_NAME]);
   // Without linger the unit dies at logout and never starts at boot on a
   // headless box. Not fatal — some systems forbid it.
   const linger = await tryCommand('loginctl', ['enable-linger', os.userInfo().username]);
@@ -665,6 +705,11 @@ async function installServiceDarwin() {
   );
   log(`wrote ${plistPath}`);
   const uid = process.getuid?.() ?? 501;
+  // Both `bootstrap` and the legacy `load -w` fail on an already-loaded
+  // label, which would make a second install-service (an upgrade) throw
+  // instead of picking up the new code. Unload first; failing here just
+  // means it was not loaded.
+  await tryCommand('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`]);
   const boot = await tryCommand('launchctl', ['bootstrap', `gui/${uid}`, plistPath]);
   if (!boot.ok) {
     // Older syntax, still accepted on current macOS.
@@ -684,6 +729,18 @@ async function uninstallServiceDarwin() {
 
 async function installServiceWin32() {
   // ⚠️ NOT verified on real Windows hardware.
+  //
+  // Unlike the unit and the plist, a scheduled task carries no environment of
+  // its own: schtasks has no equivalent of Environment= / EnvironmentVariables.
+  // So NOUS_API_BASE must be set as a *user* environment variable (setx, or
+  // System Properties → Environment Variables) for the task to see it — the
+  // README says so rather than pretending this line handles it.
+  if (process.env.NOUS_API_BASE) {
+    log(
+      'NOTE: NOUS_API_BASE is NOT copied into the scheduled task. Set it as a user '
+        + 'environment variable (setx NOUS_API_BASE "…") or the service will use the default.',
+    );
+  }
   const tr = `"${process.execPath}" "${scriptPath()}" run`;
   await requireCommand('schtasks', [
     '/Create', '/SC', 'ONLOGON', '/TN', WIN_TASK_NAME, '/TR', tr, '/F',
@@ -692,8 +749,10 @@ async function installServiceWin32() {
 }
 
 async function uninstallServiceWin32() {
-  await requireCommand('schtasks', ['/Delete', '/TN', WIN_TASK_NAME, '/F']);
-  log(`removed scheduled task ${WIN_TASK_NAME}`);
+  // Idempotent like the other two: removing an absent task is success, not an
+  // error the user has to interpret.
+  const r = await tryCommand('schtasks', ['/Delete', '/TN', WIN_TASK_NAME, '/F']);
+  log(r.ok ? `removed scheduled task ${WIN_TASK_NAME}` : `no scheduled task ${WIN_TASK_NAME} to remove`);
 }
 
 async function installService() {

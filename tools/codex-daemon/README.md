@@ -112,9 +112,29 @@ reason is written to `~/.config/nous-codex/last_stop.json`:
 last stop   : this device was revoked in nous — re-pair to use it again (stopped 2026-08-26T12:28:17.101Z)
 ```
 
-`reason` is `revoked` (close `4003`) or `auth_failed` (close `4001`). A
-successful `pair` deletes the file, so `status` never reports a revocation
-that no longer applies.
+`reason` is `revoked` (the socket was closed under you, `4003`) or
+`auth_failed` (the token no longer resolves, `4001` — this is what a device
+that was *offline* when it got revoked sees on its next connect). A successful
+`pair`, and any successful connect, deletes the file, so `status` never reports
+a stop that no longer applies.
+
+⚠️ **"Stopped" does not mean "uninstalled."** The unit is still enabled
+(`WantedBy=default.target`, or `RunAtLoad` on macOS), so a revoked device
+still starts once at every boot/login, fails to authenticate, prints the
+reason and exits again. That is one short-lived process per boot, not a
+reconnect loop — but if you want it gone, run:
+
+```bash
+node ~/.local/share/nous-codex/nous-codex.mjs uninstall-service
+```
+
+## Only run the command nous gave you
+
+Install by copying the command out of **Settings → AI → Local CLI → Pair a
+device** verbatim. It is a `curl … | sh` from this repository; a pairing code
+that arrived any other way (chat, email, a page that is not nous) is worth
+exactly as much trust as its sender. This program runs CLIs on your machine
+with your logins.
 
 ## What it will and will not do
 
@@ -134,7 +154,7 @@ and holds only the device token issued at pairing.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NOUS_API_BASE` | `https://api.nous.ink` | Point at a different nous deployment. `install-service` bakes it into the unit/plist/task, so the background service uses the same one. |
+| `NOUS_API_BASE` | `https://api.nous.ink` | Point at a different nous deployment. On Linux and macOS `install-service` bakes it into the unit/plist, so the background service uses the same one. **On Windows it is not** — a scheduled task carries no environment of its own, so set it as a user environment variable (`setx NOUS_API_BASE "…"`) before the task runs. |
 
 ## Development
 

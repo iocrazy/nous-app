@@ -3,6 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- <PAIRING-CODE>
 #
+# Anything after the pairing code is forwarded to `pair`, so this works too:
+#   … | sh -s -- <PAIRING-CODE> --name "studio mac"
+#
 # Installs the two CLIs if missing, drops the daemon in
 # ~/.local/share/nous-codex/, pairs it with your nous account, and registers
 # it as a login service so it survives closing the terminal and rebooting.
@@ -72,6 +75,8 @@ say "codex login found"
 
 # ── pair ──────────────────────────────────────────────────────────────────
 CODE="${1-}"
+# Everything after the code (e.g. --name "studio mac") is forwarded to `pair`.
+[ "$#" -gt 0 ] && shift
 if [ -z "$CODE" ]; then
   # `curl … | sh` leaves stdin as the pipe, so read from the terminal.
   if [ -r /dev/tty ]; then
@@ -84,7 +89,7 @@ fi
 [ -n "$CODE" ] || die "no pairing code given. Usage: install.sh <PAIRING-CODE>"
 
 say ""
-node "$SCRIPT" pair "$CODE"
+node "$SCRIPT" pair "$CODE" "$@"
 
 # ── run at login, restart on crash ────────────────────────────────────────
 say ""

@@ -7,18 +7,37 @@
 #   irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1 | iex
 #   # or, with the pairing code up front:
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) ABCD2345
+#   # trailing args are forwarded to `pair`:
+#   … ABCD2345 --name "studio pc"
 #
-# $env:NOUS_API_BASE is honoured and carried into the scheduled task's env.
+# $env:NOUS_API_BASE is honoured while this script runs, but a scheduled task
+# carries no environment of its own — set it with `setx NOUS_API_BASE "…"` (or
+# System Properties -> Environment Variables) so the background task sees it.
 
-param([string]$PairingCode)
+param(
+  [string]$PairingCode,
+  # Everything after the code (e.g. --name "studio pc") is forwarded to `pair`.
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$RemainingArgs
+)
 
 $ErrorActionPreference = 'Stop'
+# Make a failing native command (node, npm, schtasks) a terminating error
+# instead of something the script sails past. PowerShell 7.3+; older hosts
+# ignore it, which is why the $LASTEXITCODE checks below are still here.
+$PSNativeCommandUseErrorActionPreference = $true
 
 $RawUrl     = 'https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'nous-codex'
 $Script     = Join-Path $InstallDir 'nous-codex.mjs'
 
-function Die($msg) { Write-Error $msg; exit 1 }
+# Write-Error is terminating under $ErrorActionPreference = 'Stop', so the
+# `exit 1` that used to follow it was unreachable.
+function Die($msg) { Write-Error $msg }
+
+function Assert-NativeOk($what) {
+  if ($LASTEXITCODE -ne 0) { Die "$what failed (exit $LASTEXITCODE)" }
+}
 
 # ── node >= 20 ────────────────────────────────────────────────────────────
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -40,12 +59,14 @@ if (Get-Command codex -ErrorAction SilentlyContinue) {
 } else {
   Write-Host 'installing codex CLI (npm i -g @openai/codex) …'
   npm i -g '@openai/codex' | Out-Null
+  Assert-NativeOk 'npm i -g @openai/codex'
 }
 if (Get-Command gpt-image-2-skill -ErrorAction SilentlyContinue) {
   Write-Host 'gpt-image-2-skill found'
 } else {
   Write-Host 'installing gpt-image-2-skill (npm i -g gpt-image-2-skill) …'
   npm i -g 'gpt-image-2-skill' | Out-Null
+  Assert-NativeOk 'npm i -g gpt-image-2-skill'
 }
 
 # ── the daemon itself ─────────────────────────────────────────────────────
@@ -73,11 +94,13 @@ if (-not $PairingCode) {
 if (-not $PairingCode) { Die 'no pairing code given.' }
 
 Write-Host ''
-node $Script pair $PairingCode
+node $Script pair $PairingCode @RemainingArgs
+Assert-NativeOk 'nous-codex pair'
 
 # ── run at logon ──────────────────────────────────────────────────────────
 Write-Host ''
 node $Script install-service
+Assert-NativeOk 'nous-codex install-service'
 
 Write-Host ''
 node $Script status
