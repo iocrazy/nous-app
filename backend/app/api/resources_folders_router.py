@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from app.core.deps import AuthDep
+from app.core.exceptions import AppError
 from app.core.scope_dep import scoped_request
 from app.core.scope_guards import verify_scope_access
 from app.repositories.resources_repository import ResourcesRepository
@@ -199,6 +200,12 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
             raise HTTPException(status_code=404, detail="Folder not found")
 
         update_data = data.model_dump(exclude_none=True)
+        # Only identity/placement changes are refused on a system folder;
+        # cosmetic fields (icon, color, sort_order) stay editable.
+        if any(
+            k in update_data for k in ("name", "parent_id", "library_id", "is_trashed")
+        ):
+            _refuse_if_system(folder, "renamed, moved or trashed")
 
         if data.is_trashed is True:
             update_data["trashed_at"] = datetime.now(timezone.utc).isoformat()
@@ -207,7 +214,7 @@ async def update_folder(folder_id: str, data: FolderUpdate, auth: AuthDep):
 
         result = await repo.update_folder(folder_id, update_data)
         return {"success": True, "data": result}
-    except HTTPException:
+    except (HTTPException, AppError):
         raise
     except Exception as e:
         logger.error(f"Failed to update folder {folder_id}: {e}")
@@ -232,6 +239,25 @@ async def get_folder_content_count(folder_id: str, auth: AuthDep):
     except Exception as e:
         logger.error(f"Failed to count folder contents {folder_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to count folder contents")
+
+
+def _refuse_if_system(folder: dict, action: str) -> None:
+    """System folders (mig 441: is_system + system_key) cannot be renamed,
+    moved, trashed or deleted — Cover Studio finds its template library by
+    that folder's identity. Contents stay free: filing into / out of it is
+    what the folder is FOR. A typed 409 rather than a 500 or a silent
+    no-op, so the UI can say which folder and why."""
+    if folder.get("is_system"):
+        from app.core.exceptions import ConflictError
+
+        raise ConflictError(
+            f"This is a system folder and cannot be {action}.",
+            code="system_folder",
+            details={
+                "folder_id": str(folder.get("id")),
+                "system_key": folder.get("system_key"),
+            },
+        )
 
 
 async def _verify_folder_ownership_inline(folder: dict, auth: AuthDep) -> None:
@@ -278,10 +304,11 @@ async def trash_folder_cascade(folder_id: str, auth: AuthDep):
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
         await _verify_folder_ownership_inline(folder, auth)
+        _refuse_if_system(folder, "trashed")
 
         result = await repo.trash_folder_cascade(folder_id)
         return {"success": True, "data": result}
-    except HTTPException:
+    except (HTTPException, AppError):
         raise
     except Exception as e:
         logger.error(f"Failed to trash folder cascade {folder_id}: {e}")
@@ -316,6 +343,7 @@ async def delete_folder(folder_id: str, auth: AuthDep):
         if not folder:
             raise HTTPException(status_code=404, detail="Folder not found")
         await _verify_folder_ownership_inline(folder, auth)
+        _refuse_if_system(folder, "deleted")
 
         result = await svc.permanent_delete_folder(folder_id, auth.user_id)
         return {
@@ -323,7 +351,7 @@ async def delete_folder(folder_id: str, auth: AuthDep):
             "message": "Folder permanently deleted",
             "data": result,
         }
-    except HTTPException:
+    except (HTTPException, AppError):
         raise
     except Exception as e:
         logger.error(f"Failed to delete folder {folder_id}: {e}")

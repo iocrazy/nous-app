@@ -1,16 +1,17 @@
 /**
- * The add-template modal — the five properties worth pinning.
+ * The add-template modal — the properties worth pinning.
  *
- *   1. Upload and library-pick reach DIFFERENT service calls; the library path
- *      also records which resource it came from (provenance).
+ *   1. Upload and library-pick reach DIFFERENT service calls, and both carry
+ *      the scope, because both end in the same scope's template folder.
  *   2. A gallery entity is filtered out. `listLibraryMedia` includes galleries
  *      in image mode on purpose (the publish picker CAN post one), but a
  *      gallery is a container of images, not an image — handing one to the
  *      model as a single reference is meaningless.
  *   3. "could not load your library" and "no images yet" are different boxes.
  *   4. A non-image drop is refused BEFORE any upload happens.
- *   5. The name is trimmed, and a blank one cannot be saved — the server
- *      rejects it too, but a disabled button beats a round-trip to a 422.
+ *   5. Nothing can be saved until a picture is picked; there is no name to
+ *      type — the filename is the name, as in the library.
+ *   6. A failed save keeps the modal open and says so.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -51,15 +52,12 @@ const GALLERY_ROW = {
 };
 
 const SAVED = {
-  id: '341588599799820',
-  name: 'reference',
-  generated_media_id: '341582104263581',
-  image_url: '/api/v1/generated-media/341582104263581/cover',
-  source_kind: 'upload' as const,
-  source_resource_id: null,
+  resource_id: '777',
+  name: 'reference.png',
+  mime_type: 'image/png',
+  thumb_url: '/api/v1/resources/777/cover',
   usage_count: 0,
   last_used_at: null,
-  created_at: '2026-08-22T00:00:00Z',
 };
 
 const makeI18n = (): I18n => {
@@ -69,7 +67,6 @@ const makeI18n = (): I18n => {
     fallbackLng: 'en',
     resources: { en: { translation: enJson } },
     interpolation: { escapeValue: false },
-    react: { useSuspense: false },
   });
   return inst;
 };
@@ -79,142 +76,105 @@ function renderModal(over: Partial<React.ComponentProps<typeof AddCoverTemplateM
   const onClose = vi.fn();
   render(
     <I18nextProvider i18n={makeI18n()}>
-      <AddCoverTemplateModal
-        open
-        scopeId="42"
-        onClose={onClose}
-        onAdded={onAdded}
-        {...over}
-      />
+      <AddCoverTemplateModal open scopeId="scope-1" onClose={onClose} onAdded={onAdded} {...over} />
     </I18nextProvider>,
   );
   return { onAdded, onClose };
 }
 
-/** jsdom has no createObjectURL; the component uses it for the file preview. */
+function dropFile(file: File) {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [file] } });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   listLibraryMediaOrThrow.mockResolvedValue([IMAGE_ROW, GALLERY_ROW]);
-  addCoverTemplateFromFile.mockResolvedValue(SAVED);
-  addCoverTemplateFromResource.mockResolvedValue({ ...SAVED, source_kind: 'library' });
-  Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:x'), writable: true });
-  Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), writable: true });
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: vi.fn(() => 'blob:preview'),
+    revokeObjectURL: vi.fn(),
+  });
 });
 
-function dropFile(file: File) {
-  const zone = screen.getByTestId('cover-template-dropzone');
-  fireEvent.drop(zone, { dataTransfer: { files: [file], types: ['Files'] } });
-}
-
 describe('AddCoverTemplateModal', () => {
-  it('leaves a gallery entity out of the library grid', async () => {
+  it('lists library images but NOT galleries', async () => {
     renderModal();
-
-    const grid = await screen.findByTestId('cover-template-library');
-    // Positive proof the grid rendered, so "the gallery is absent" cannot pass
-    // just because nothing rendered at all.
-    expect(screen.getByTitle('reference.png')).toBeTruthy();
-    expect(grid.querySelectorAll('button')).toHaveLength(1);
+    expect(await screen.findByTitle('reference.png')).toBeTruthy();
     expect(screen.queryByTitle('My album')).toBeNull();
   });
 
-  it('uploading a file saves it as a template under the typed name', async () => {
-    const { onAdded, onClose } = renderModal();
-    await screen.findByTestId('cover-template-library');
-
-    dropFile(new File(['x'], 'bold-headline.png', { type: 'image/png' }));
-
-    // The name seeds from the filename, extension stripped.
-    const input = (await screen.findByLabelText('Name')) as HTMLInputElement;
-    expect(input.value).toBe('bold-headline');
-
-    fireEvent.change(input, { target: { value: '  Bold headline  ' } });
-    fireEvent.click(screen.getByTestId('cover-template-save'));
-
-    await waitFor(() =>
-      expect(addCoverTemplateFromFile).toHaveBeenCalledWith(
-        expect.any(File),
-        'Bold headline',
-      ),
-    );
-    expect(addCoverTemplateFromResource).not.toHaveBeenCalled();
-    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(SAVED));
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('picking from the library records the resource it came from', async () => {
+  it('cannot save until a picture is picked, and has no name field', async () => {
     renderModal();
-    await screen.findByTestId('cover-template-library');
-
-    fireEvent.click(screen.getByTitle('reference.png'));
-    fireEvent.click(screen.getByTestId('cover-template-save'));
-
-    await waitFor(() =>
-      expect(addCoverTemplateFromResource).toHaveBeenCalledWith('777', 'reference'),
-    );
-    expect(addCoverTemplateFromFile).not.toHaveBeenCalled();
-  });
-
-  it('refuses a non-image before anything is uploaded', async () => {
-    renderModal();
-    await screen.findByTestId('cover-template-library');
-
-    dropFile(new File(['x'], 'clip.mp4', { type: 'video/mp4' }));
-
-    expect(await screen.findByText(/has to be an image/)).toBeTruthy();
-    expect(addCoverTemplateFromFile).not.toHaveBeenCalled();
-    // No name field either — nothing was picked.
+    await screen.findByTitle('reference.png');
+    expect((screen.getByTestId('cover-template-save') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByLabelText('Name')).toBeNull();
   });
 
-  it('says the library FAILED rather than showing it as empty', async () => {
-    listLibraryMediaOrThrow.mockRejectedValueOnce(new Error('boom'));
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('library pick → linked into the folder for this scope', async () => {
+    addCoverTemplateFromResource.mockResolvedValueOnce(SAVED);
+    const { onAdded, onClose } = renderModal();
 
+    fireEvent.click(await screen.findByTitle('reference.png'));
+    fireEvent.click(screen.getByTestId('cover-template-save'));
+
+    await waitFor(() => expect(addCoverTemplateFromResource).toHaveBeenCalledWith('777', 'scope-1'));
+    expect(addCoverTemplateFromFile).not.toHaveBeenCalled();
+    expect(onAdded).toHaveBeenCalledWith(SAVED);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('upload → the file goes to the folder for this scope', async () => {
+    addCoverTemplateFromFile.mockResolvedValueOnce({ ...SAVED, name: 'mine.png' });
+    const { onAdded } = renderModal();
+    await screen.findByTitle('reference.png');
+
+    const file = new File(['x'], 'mine.png', { type: 'image/png' });
+    dropFile(file);
+    expect(screen.getByText('mine.png')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('cover-template-save'));
+
+    await waitFor(() => expect(addCoverTemplateFromFile).toHaveBeenCalledWith(file, 'scope-1'));
+    expect(addCoverTemplateFromResource).not.toHaveBeenCalled();
+    expect(onAdded).toHaveBeenCalled();
+  });
+
+  it('refuses a non-image before any upload', async () => {
     renderModal();
+    await screen.findByTitle('reference.png');
 
-    expect(await screen.findByText(/Could not load your library/)).toBeTruthy();
-    expect(screen.queryByText(/No images in your library yet/)).toBeNull();
+    dropFile(new File(['x'], 'clip.mp4', { type: 'video/mp4' }));
+
+    expect(screen.getByText('A cover template has to be an image.')).toBeTruthy();
+    expect((screen.getByTestId('cover-template-save') as HTMLButtonElement).disabled).toBe(true);
+    expect(addCoverTemplateFromFile).not.toHaveBeenCalled();
+  });
+
+  it('a failed save stays open and says so', async () => {
+    addCoverTemplateFromResource.mockRejectedValueOnce(new Error('500'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { onClose } = renderModal();
+
+    fireEvent.click(await screen.findByTitle('reference.png'));
+    fireEvent.click(screen.getByTestId('cover-template-save'));
+
+    expect(
+      await screen.findByText('That picture could not be saved as a template. Try again.'),
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 
-  it('says "no images yet" only when the load actually succeeded and was empty', async () => {
-    listLibraryMediaOrThrow.mockResolvedValueOnce([]);
-
-    renderModal();
-
-    expect(await screen.findByText(/No images in your library yet/)).toBeTruthy();
-    expect(screen.queryByText(/Could not load your library/)).toBeNull();
-  });
-
-  it('cannot save with a blank name', async () => {
-    renderModal();
-    await screen.findByTestId('cover-template-library');
-    dropFile(new File(['x'], 'ref.png', { type: 'image/png' }));
-
-    const input = (await screen.findByLabelText('Name')) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: '   ' } });
-
-    expect(
-      (screen.getByTestId('cover-template-save') as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
-
-  it('reports a save failure instead of closing silently', async () => {
-    addCoverTemplateFromFile.mockRejectedValueOnce(
-      Object.assign(new Error('nope'), { failure: 'server' }),
-    );
+  it('"could not load" and "no images" are different boxes', async () => {
+    listLibraryMediaOrThrow.mockRejectedValueOnce(new Error('503'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { onClose } = renderModal();
-    await screen.findByTestId('cover-template-library');
-    dropFile(new File(['x'], 'ref.png', { type: 'image/png' }));
-    await screen.findByLabelText('Name');
+    renderModal();
+    expect(await screen.findByText('Could not load your library.')).toBeTruthy();
+    expect(screen.queryByText(/No images in your library yet/)).toBeNull();
 
-    fireEvent.click(screen.getByTestId('cover-template-save'));
-
-    expect(await screen.findByText(/could not be saved as a template/)).toBeTruthy();
-    // Closing on failure would look exactly like success.
-    expect(onClose).not.toHaveBeenCalled();
+    listLibraryMediaOrThrow.mockResolvedValueOnce([GALLERY_ROW]);
+    fireEvent.click(screen.getByText('Retry'));
+    expect(await screen.findByText(/No images in your library yet/)).toBeTruthy();
     spy.mockRestore();
   });
 });

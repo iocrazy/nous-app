@@ -725,6 +725,13 @@ class Folders(Base):
             "is_trashed",
             postgresql_where="(is_trashed = true)",
         ),
+        Index(
+            "ux_folders_scope_system_key",
+            "scope_id",
+            "system_key",
+            unique=True,
+            postgresql_where="(system_key IS NOT NULL AND is_trashed = false)",
+        ),
         {"schema": "public"},
     )
 
@@ -737,6 +744,10 @@ class Folders(Base):
     is_system: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Stable identity of a system folder (e.g. 'cover_templates'), independent
+    # of its display name. is_system is the "protected" switch; both are set
+    # together. Migration 441.
+    system_key: Mapped[str | None] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

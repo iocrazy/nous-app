@@ -1,10 +1,20 @@
 /**
- * Unit tests for coverTemplateService — the 样图模板库 client (migration 435).
+ * Unit tests for coverTemplateService — the template-library client
+ * (migration 441: the library is a system folder in the resource library).
  *
  * ⚠️ Fixtures use the REAL wire shape: every snowflake id is a JSON **string**,
- * because that is what `cover_templates_router.py` emits (it stringifies
- * explicitly, the `canvases` convention). Prettifying these into numbers is
- * exactly the class of drift that produced the 2026-08-12 storyboard incident.
+ * because that is what `cover_templates_router.py` emits. Prettifying these
+ * into numbers is exactly the class of drift that produced the 2026-08-12
+ * storyboard incident.
+ *
+ * What is pinned:
+ *   1. Adding goes INTO THE FOLDER — upload lands there, a library pick is
+ *      linked there — never through generated-media.
+ *   2. A template becomes a model reference only when resolved, via the
+ *      generated-media import (the bridge accepts nothing else).
+ *   3. Usage ticks send resource ids and NEVER throw.
+ *   4. Saving a generated cover reuses an already-promoted resource id
+ *      instead of promoting the same picture twice.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,34 +24,45 @@ vi.mock('./apiClient', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-const mockImportFile = vi.fn();
 const mockImportResource = vi.fn();
 vi.mock('../features/canvas-core/smart/mediaImport', () => ({
-  importCanvasMedia: (...args: unknown[]) => mockImportFile(...args),
   importResourceAsCanvasMedia: (...args: unknown[]) => mockImportResource(...args),
+}));
+
+const mockUpload = vi.fn();
+const mockLink = vi.fn();
+vi.mock('./resourceService', () => ({
+  uploadResource: (...args: unknown[]) => mockUpload(...args),
+  linkExistingResource: (...args: unknown[]) => mockLink(...args),
+}));
+
+const mockPromote = vi.fn();
+vi.mock('./generatedMediaService', () => ({
+  promoteGeneration: (...args: unknown[]) => mockPromote(...args),
 }));
 
 import {
   CoverTemplateError,
   addCoverTemplateFromFile,
   addCoverTemplateFromResource,
-  createCoverTemplate,
-  deleteCoverTemplate,
+  getCoverTemplateFolder,
   listCoverTemplates,
   markCoverTemplatesUsed,
+  resolveCoverTemplateReference,
+  saveGeneratedCoverAsTemplate,
 } from './coverTemplateService';
 
+const FOLDER = { folder_id: '341588599799820', name: '封面', adopted: true };
 const TEMPLATE = {
-  id: '341588599799820',
-  name: 'Bold headline',
-  generated_media_id: '341582104263581',
-  image_url: '/api/v1/generated-media/341582104263581/cover',
-  source_kind: 'upload' as const,
-  source_resource_id: null,
+  resource_id: '341582104263581',
+  name: 'bold-headline.png',
+  mime_type: 'image/png',
+  thumb_url: '/api/v1/resources/341582104263581/cover',
   usage_count: 12,
   last_used_at: null,
-  created_at: '2026-08-22T00:00:00Z',
 };
+/** What uploadResource / linkExistingResource hand back (a Resource). */
+const RESOURCE = { id: '341590000000001', filename: 'new-pick.png', mime_type: 'image/png' };
 
 function respond(data: unknown) {
   mockApiFetch.mockResolvedValueOnce({ json: async () => ({ data }) });
@@ -51,174 +72,151 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('listCoverTemplates', () => {
-  it('unwraps {data:{items}} and returns the rows', async () => {
-    respond({ items: [TEMPLATE] });
-    const rows = await listCoverTemplates();
+describe('reading the library', () => {
+  it('lists the folder and its pictures', async () => {
+    respond({ folder: FOLDER, items: [TEMPLATE] });
+
+    const list = await listCoverTemplates();
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/cover-templates', undefined);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe('Bold headline');
+    expect(list.folder).toEqual(FOLDER);
+    expect(list.items).toEqual([TEMPLATE]);
+    expect(typeof list.items[0].resource_id).toBe('string');
   });
 
-  it('returns [] when the server sends an empty list', async () => {
-    respond({ items: [] });
-    await expect(listCoverTemplates()).resolves.toEqual([]);
+  it('returns the folder on its own', async () => {
+    respond(FOLDER);
+    expect(await getCoverTemplateFolder()).toEqual(FOLDER);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/cover-templates/folder', undefined);
   });
 
-  it('keeps every snowflake id a string', async () => {
-    // Not cosmetic: these exceed 2^53. A number here loses the low digits and
-    // the template silently addresses a different row.
-    respond({ items: [TEMPLATE] });
-    const [row] = await listCoverTemplates();
-
-    expect(typeof row.id).toBe('string');
-    expect(typeof row.generated_media_id).toBe('string');
+  it('turns HTTP failures into a typed error', async () => {
+    mockApiFetch.mockRejectedValueOnce(Object.assign(new Error('nope'), { status: 403 }));
+    await expect(listCoverTemplates()).rejects.toMatchObject({
+      name: 'CoverTemplateError',
+      failure: 'forbidden',
+      status: 403,
+    });
   });
 });
 
-describe('createCoverTemplate', () => {
-  it('POSTs snake_case body and returns the row', async () => {
-    respond(TEMPLATE);
-    const row = await createCoverTemplate({
-      generatedMediaId: '341582104263581',
-      name: 'Bold headline',
-      sourceKind: 'library',
-      sourceResourceId: '99',
+describe('adding a template puts a picture INTO THE FOLDER', () => {
+  it('upload: straight into the folder, and the result is the list shape', async () => {
+    respond(FOLDER);
+    mockUpload.mockResolvedValueOnce(RESOURCE);
+    const file = new File(['x'], 'new-pick.png', { type: 'image/png' });
+
+    const tpl = await addCoverTemplateFromFile(file, 'scope-1');
+
+    expect(mockUpload).toHaveBeenCalledWith(file, 'scope-1', FOLDER.folder_id);
+    expect(mockImportResource).not.toHaveBeenCalled();
+    expect(tpl).toEqual({
+      resource_id: RESOURCE.id,
+      name: 'new-pick.png',
+      mime_type: 'image/png',
+      thumb_url: `/api/v1/resources/${RESOURCE.id}/cover`,
+      usage_count: 0,
+      last_used_at: null,
     });
-
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/cover-templates', {
-      method: 'POST',
-      json: {
-        generated_media_id: '341582104263581',
-        name: 'Bold headline',
-        source_kind: 'library',
-        source_resource_id: '99',
-      },
-    });
-    expect(row.id).toBe('341588599799820');
   });
 
-  it('maps a 404 to a typed not-found failure, not a bare Error', async () => {
-    mockApiFetch.mockRejectedValueOnce(Object.assign(new Error('nope'), { status: 404 }));
-
-    await expect(
-      createCoverTemplate({ generatedMediaId: '1', name: 'x' }),
-    ).rejects.toMatchObject({ failure: 'not-found', status: 404 });
-  });
-
-  it('maps a transport failure (no status) to network', async () => {
-    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
-
-    await expect(
-      createCoverTemplate({ generatedMediaId: '1', name: 'x' }),
-    ).rejects.toMatchObject({ failure: 'network' });
-  });
-});
-
-describe('addCoverTemplateFromFile', () => {
-  it('imports first, then saves the returned generated-media id', async () => {
-    // The ORDER is the point: the template must cite a durable
-    // /generated-media/ id, because that is the only URL shape the image
-    // generation bridge will read as a reference.
-    mockImportFile.mockResolvedValueOnce({
-      url: '/api/v1/generated-media/341582104263581/cover',
-      kind: 'image',
-      id: '341582104263581',
-    });
-    respond(TEMPLATE);
-
-    const file = new File(['x'], 'ref.png', { type: 'image/png' });
-    const row = await addCoverTemplateFromFile(file, 'Bold headline');
-
-    expect(mockImportFile).toHaveBeenCalledWith(file, null, null);
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/v1/cover-templates',
-      expect.objectContaining({
-        json: expect.objectContaining({
-          generated_media_id: '341582104263581',
-          source_kind: 'upload',
-        }),
-      }),
-    );
-    expect(row.image_url).toBe('/api/v1/generated-media/341582104263581/cover');
-  });
-
-  it('refuses a video and never reaches the template endpoint', async () => {
-    mockImportFile.mockResolvedValueOnce({ url: '/u', kind: 'video', id: '5' });
-
+  it('upload: a non-image is refused before any request is made', async () => {
     const file = new File(['x'], 'clip.mp4', { type: 'video/mp4' });
-    await expect(addCoverTemplateFromFile(file, 'x')).rejects.toBeInstanceOf(
+    await expect(addCoverTemplateFromFile(file, 'scope-1')).rejects.toMatchObject({
+      failure: 'not-an-image',
+    });
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
+  it('library pick: LINKED into the folder, not copied and not imported', async () => {
+    respond(FOLDER);
+    mockLink.mockResolvedValueOnce(RESOURCE);
+
+    const tpl = await addCoverTemplateFromResource('777', 'scope-1');
+
+    expect(mockLink).toHaveBeenCalledWith('777', 'scope-1', FOLDER.folder_id);
+    expect(mockUpload).not.toHaveBeenCalled();
+    expect(mockImportResource).not.toHaveBeenCalled();
+    expect(tpl.resource_id).toBe(RESOURCE.id);
+  });
+
+  it('a failed link surfaces as a typed error, not a bare one', async () => {
+    respond(FOLDER);
+    mockLink.mockRejectedValueOnce(new Error('Failed to link resource'));
+    await expect(addCoverTemplateFromResource('777', 'scope-1')).rejects.toBeInstanceOf(
       CoverTemplateError,
     );
-    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolving a template into a model reference', () => {
+  it('imports through generated-media and returns the id + url pair', async () => {
+    mockImportResource.mockResolvedValueOnce({
+      kind: 'image',
+      id: '900',
+      url: '/api/v1/generated-media/900/cover',
+    });
+
+    const ref = await resolveCoverTemplateReference(TEMPLATE.resource_id);
+
+    expect(mockImportResource).toHaveBeenCalledWith(TEMPLATE.resource_id);
+    expect(ref).toEqual({ genId: '900', url: '/api/v1/generated-media/900/cover' });
   });
 
-  it('fails loudly when the import returns no id', async () => {
-    // A missing id means the backend contract moved. Saving anyway would
-    // create a template pointing nowhere — a broken thumbnail the user
-    // cannot explain and we cannot trace.
-    mockImportFile.mockResolvedValueOnce({ url: '/u', kind: 'image' });
-
-    const file = new File(['x'], 'ref.png', { type: 'image/png' });
-    await expect(addCoverTemplateFromFile(file, 'x')).rejects.toMatchObject({
+  it('refuses a video and a missing id loudly', async () => {
+    mockImportResource.mockResolvedValueOnce({ kind: 'video', id: '1', url: '/x' });
+    await expect(resolveCoverTemplateReference('1')).rejects.toMatchObject({
+      failure: 'not-an-image',
+    });
+    mockImportResource.mockResolvedValueOnce({ kind: 'image', url: '/x' });
+    await expect(resolveCoverTemplateReference('1')).rejects.toMatchObject({
       failure: 'server',
     });
-    expect(mockApiFetch).not.toHaveBeenCalled();
   });
 });
 
-describe('addCoverTemplateFromResource', () => {
-  it('records the originating resource id as provenance', async () => {
-    mockImportResource.mockResolvedValueOnce({
-      url: '/api/v1/generated-media/341582104263581/cover',
-      kind: 'image',
-      id: '341582104263581',
+describe('usage ticks', () => {
+  it('sends resource ids', async () => {
+    respond({ counted: 2 });
+    await markCoverTemplatesUsed(['1', '2']);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/cover-templates/use', {
+      method: 'POST',
+      json: { resource_ids: ['1', '2'] },
     });
-    respond({ ...TEMPLATE, source_kind: 'library', source_resource_id: '777' });
-
-    const row = await addCoverTemplateFromResource('777', 'From library');
-
-    expect(mockImportResource).toHaveBeenCalledWith('777');
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/v1/cover-templates',
-      expect.objectContaining({
-        json: expect.objectContaining({
-          source_kind: 'library',
-          source_resource_id: '777',
-        }),
-      }),
-    );
-    expect(row.source_resource_id).toBe('777');
   });
-});
 
-describe('deleteCoverTemplate', () => {
-  it('DELETEs and reports whether a row went away', async () => {
-    respond({ deleted: true });
-    await expect(deleteCoverTemplate('341588599799820')).resolves.toBe(true);
-    expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/v1/cover-templates/341588599799820',
-      { method: 'DELETE' },
-    );
-  });
-});
-
-describe('markCoverTemplatesUsed', () => {
-  it('does not call the server for an empty list', async () => {
+  it('sends nothing for an empty list and never throws', async () => {
     await markCoverTemplatesUsed([]);
     expect(mockApiFetch).not.toHaveBeenCalled();
-  });
-
-  it('swallows failures so a cosmetic counter can never break a generation', async () => {
-    // The one deliberate swallow in this module. It is logged, and the reason
-    // is that this call happens AFTER the generation the user asked for has
-    // already been dispatched successfully.
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockApiFetch.mockRejectedValueOnce(Object.assign(new Error('boom'), { status: 500 }));
-
-    await expect(markCoverTemplatesUsed(['1', '2'])).resolves.toBeUndefined();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(markCoverTemplatesUsed(['1'])).resolves.toBeUndefined();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe('saving a generated cover as a template', () => {
+  it('promotes once, then links the resource into the folder', async () => {
+    mockPromote.mockResolvedValueOnce({ promoted_resource_id: '9000' });
+    respond(FOLDER);
+    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: '9000' });
+
+    const out = await saveGeneratedCoverAsTemplate('600', 'scope-1');
+
+    expect(mockPromote).toHaveBeenCalledWith('600');
+    expect(mockLink).toHaveBeenCalledWith('9000', 'scope-1', FOLDER.folder_id);
+    expect(out.resourceId).toBe('9000');
+  });
+
+  it('reuses an already-promoted resource id instead of promoting twice', async () => {
+    respond(FOLDER);
+    mockLink.mockResolvedValueOnce({ ...RESOURCE, id: '9000' });
+
+    await saveGeneratedCoverAsTemplate('600', 'scope-1', '9000');
+
+    expect(mockPromote).not.toHaveBeenCalled();
+    expect(mockLink).toHaveBeenCalledWith('9000', 'scope-1', FOLDER.folder_id);
   });
 });

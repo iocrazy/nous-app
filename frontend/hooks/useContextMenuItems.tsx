@@ -10,6 +10,7 @@ import {
   FolderOpen, Upload, Trash2, Share2, Download,
   FolderPlus, ExternalLink, Pencil, Copy, Move, RefreshCw, Eye,
   Sparkles, Tag, Bookmark, Images, Bot,
+  Lock,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ContextMenuItem } from '../components/ContextMenu';
@@ -272,11 +273,17 @@ export function useContextMenuItems({
         { label: t('resources.openInNewTab'), icon: <ExternalLink size={14} />, onClick: () => window.open(folderUrl, '_blank') },
         { label: t('resources.open'), icon: <FolderOpen size={14} />, onClick: () => navigate(folderUrl) },
       ];
-      if (canDo('update')) items.push({ label: t('resources.rename'), icon: <Pencil size={14} />, onClick: () => { ops.setRenamingFolderId(folder.id); ops.setRenameFolderValue(folder.name); }, divider: true });
+      // System folders (e.g. the cover-template library) keep their name and
+      // place: the backend refuses rename / move / trash with a typed 409, so
+      // offering those here would only produce a failure toast. Say why instead.
+      if (folder.is_system) {
+        items.push({ label: t('resources.systemFolderLocked', 'System folder — cannot be renamed, moved or trashed'), icon: <Lock size={14} />, onClick: () => {}, disabled: true, divider: true });
+      }
+      if (canDo('update') && !folder.is_system) items.push({ label: t('resources.rename'), icon: <Pencil size={14} />, onClick: () => { ops.setRenamingFolderId(folder.id); ops.setRenameFolderValue(folder.name); }, divider: true });
       if (canDo('copy')) items.push({ label: t('resources.copyTo'), icon: <Copy size={14} />, onClick: () => { ops.setOperationTargetItems([]); ops.setOperationTargetFolders([folder]); ops.setFolderPickerMode('copy'); } });
-      if (canDo('move')) items.push({ label: t('resources.moveTo'), icon: <Move size={14} />, onClick: () => { ops.setOperationTargetItems([]); ops.setOperationTargetFolders([folder]); ops.setFolderPickerMode('move'); } });
+      if (canDo('move') && !folder.is_system) items.push({ label: t('resources.moveTo'), icon: <Move size={14} />, onClick: () => { ops.setOperationTargetItems([]); ops.setOperationTargetFolders([folder]); ops.setFolderPickerMode('move'); } });
       if (canDo('share')) items.push({ label: t('resources.share'), icon: <Share2 size={14} />, onClick: () => ops.setShareTarget({ folderId: String(folder.id) }) });
-      if (canDo('delete')) {
+      if (canDo('delete') && !folder.is_system) {
         items.push({
           label: t('resources.moveToTrash'), icon: <Trash2 size={14} />,
           onClick: async () => {

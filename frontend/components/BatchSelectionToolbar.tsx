@@ -257,8 +257,15 @@ export const BatchSelectionToolbar: React.FC<BatchSelectionToolbarProps> = ({
                 if (resourceIds.length > 0) {
                   await trashResources(resourceIds, scopeId, selectedFolderId);
                 }
-                const folderIds = childFolders
-                  .filter((f) => selectedIds.has(`folder:${f.id}`))
+                const selectedFolders = childFolders.filter((f) => selectedIds.has(`folder:${f.id}`));
+                // System folders are refused server-side (409 system_folder);
+                // skip them here and say so rather than failing the whole batch.
+                const locked = selectedFolders.filter((f) => f.is_system);
+                if (locked.length > 0) {
+                  addToast(t('resources.systemFolderLocked', 'System folder — cannot be renamed, moved or trashed'), 'error');
+                }
+                const folderIds = selectedFolders
+                  .filter((f) => !f.is_system)
                   .map((f) => String(f.id));
                 for (const fid of folderIds) {
                   const { trashFolder } = await import('../services/resourceService');

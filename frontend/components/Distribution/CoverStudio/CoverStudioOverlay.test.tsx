@@ -32,8 +32,9 @@ const svc = vi.hoisted(() => ({
   refineCoverDraft: vi.fn(),
   awaitCoverGeneration: vi.fn(),
   promoteGeneration: vi.fn(),
-  createCoverTemplate: vi.fn(),
   markCoverTemplatesUsed: vi.fn(),
+  resolveCoverTemplateReference: vi.fn(),
+  saveGeneratedCoverAsTemplate: vi.fn(),
   listGenerationModels: vi.fn(),
 }));
 
@@ -46,8 +47,9 @@ vi.mock('../../../services/generatedMediaService', () => ({
   promoteGeneration: svc.promoteGeneration,
 }));
 vi.mock('../../../services/coverTemplateService', () => ({
-  createCoverTemplate: svc.createCoverTemplate,
   markCoverTemplatesUsed: svc.markCoverTemplatesUsed,
+  resolveCoverTemplateReference: svc.resolveCoverTemplateReference,
+  saveGeneratedCoverAsTemplate: svc.saveGeneratedCoverAsTemplate,
 }));
 vi.mock('../../../features/canvas-core/services/canvasGenerationService', () => ({
   listGenerationModels: svc.listGenerationModels,
@@ -80,10 +82,12 @@ vi.mock('./CoverTemplateGrid', () => ({
       data-testid="stub-template"
       onClick={() =>
         onToggle({
-          id: 'tpl-7',
+          resource_id: 'tpl-7',
           name: 'Bold headline',
-          generated_media_id: '777',
-          image_url: '/api/v1/generated-media/777/cover',
+          mime_type: 'image/png',
+          thumb_url: '/api/v1/resources/tpl-7/cover',
+          usage_count: 0,
+          last_used_at: null,
         })
       }
     >
@@ -154,7 +158,14 @@ beforeEach(() => {
     generatedMediaId: '500',
   });
   svc.promoteGeneration.mockResolvedValue({ promoted_resource_id: '9000' });
-  svc.createCoverTemplate.mockResolvedValue({ id: 'tpl-new' });
+  svc.resolveCoverTemplateReference.mockResolvedValue({
+    genId: '777',
+    url: '/api/v1/generated-media/777/cover',
+  });
+  svc.saveGeneratedCoverAsTemplate.mockResolvedValue({
+    resourceId: '9000',
+    template: { resource_id: '9000', name: 'Cover', mime_type: 'image/png', thumb_url: '/api/v1/resources/9000/cover', usage_count: 0, last_used_at: null },
+  });
   svc.markCoverTemplatesUsed.mockResolvedValue(undefined);
 });
 
@@ -210,6 +221,7 @@ describe('CoverStudioOverlay — the two-stage run', () => {
     renderOverlay();
     setPerson();
     fireEvent.click(screen.getByTestId('stub-template'));
+    await screen.findByText('Bold headline');
 
     fireEvent.click(screen.getByTestId('cover-generate'));
 
@@ -233,6 +245,7 @@ describe('CoverStudioOverlay — the two-stage run', () => {
     renderOverlay();
     setPerson();
     fireEvent.click(screen.getByTestId('stub-template'));
+    await screen.findByText('Bold headline');
     fireEvent.click(screen.getByTestId('cover-generate'));
     await waitFor(() => expect(screen.queryByTestId('cover-draft-2')).toBeTruthy());
 
@@ -347,11 +360,16 @@ describe('CoverStudioOverlay — apply', () => {
 
     fireEvent.click(screen.getByTestId('cover-save-template'));
 
+    // Promote → link into the folder; nothing was promoted yet, so no
+    // resource id is passed for reuse.
     await waitFor(() =>
-      expect(svc.createCoverTemplate).toHaveBeenCalledWith(
-        expect.objectContaining({ generatedMediaId: '600', sourceKind: 'generated' }),
+      expect(svc.saveGeneratedCoverAsTemplate).toHaveBeenCalledWith(
+        '600',
+        expect.any(String),
+        undefined,
       ),
     );
+    expect(await screen.findByText('Saved as template')).toBeTruthy();
   });
 });
 

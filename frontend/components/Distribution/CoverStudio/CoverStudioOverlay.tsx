@@ -30,8 +30,10 @@ import {
 } from '../../../services/coverStudioService';
 import { promoteGeneration } from '../../../services/generatedMediaService';
 import {
-  createCoverTemplate,
   markCoverTemplatesUsed,
+  resolveCoverTemplateReference,
+  saveGeneratedCoverAsTemplate,
+  type CoverTemplate,
 } from '../../../services/coverTemplateService';
 import type { LibraryVideo } from '../../../types';
 import {
@@ -91,6 +93,14 @@ export function CoverStudioOverlay({
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
+  // The final cover's resource id once it has been promoted — by "Use this
+  // cover" OR by "Save as template" — so the other button never promotes the
+  // same picture a second time.
+  const [promotedId, setPromotedId] = useState<string | undefined>(undefined);
+  // Which template tile is being turned into a reference right now (the
+  // generated-media import is a round-trip), and why the last one failed.
+  const [templateBusyId, setTemplateBusyId] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -157,6 +167,7 @@ export function CoverStudioOverlay({
     setFinalUrl(undefined);
     setFinalGenId(undefined);
     setSavedAsTemplate(false);
+    setPromotedId(undefined);
     try {
       const dispatched = await generateCoverDrafts({
         topic: topic.trim(),
@@ -209,6 +220,8 @@ export function CoverStudioOverlay({
       }
       setFinalUrl(outcome.url);
       setFinalGenId(outcome.generatedMediaId);
+      setSavedAsTemplate(false);
+      setPromotedId(undefined);
       setStage('done');
     } catch (err) {
       console.error('[CoverStudio] stage 2 failed:', err);
@@ -225,8 +238,10 @@ export function CoverStudioOverlay({
       // Promote = the "saved to your library" half; the returned resource id
       // is the "filled in on the publish page" half. One call, both effects —
       // and both are NAMED on the card below.
-      const res = await promoteGeneration(finalGenId);
-      onApply(res.promoted_resource_id);
+      const resourceId =
+        promotedId ?? (await promoteGeneration(finalGenId)).promoted_resource_id;
+      setPromotedId(resourceId);
+      onApply(resourceId);
       onClose();
     } catch (err) {
       console.error('[CoverStudio] apply failed:', err);
@@ -239,21 +254,66 @@ export function CoverStudioOverlay({
     } finally {
       setApplying(false);
     }
-  }, [finalGenId, applying, onApply, onClose, t]);
+  }, [finalGenId, applying, promotedId, onApply, onClose, t]);
 
   const saveAsTemplate = useCallback(async () => {
     if (!finalGenId || savedAsTemplate) return;
+    setApplyError(null);
     try {
-      await createCoverTemplate({
-        generatedMediaId: finalGenId,
-        name: topic.trim().slice(0, 60) || 'Cover',
-        sourceKind: 'generated',
-      });
+      const { resourceId } = await saveGeneratedCoverAsTemplate(
+        finalGenId,
+        scopeId,
+        promotedId,
+      );
+      setPromotedId(resourceId);
       setSavedAsTemplate(true);
     } catch (err) {
       console.error('[CoverStudio] save as template failed:', err);
+      setApplyError(
+        t(
+          'distribution.coverStudio.saveTemplateFailed',
+          'The cover could not be saved as a template. It is still here — try again.',
+        ),
+      );
     }
-  }, [finalGenId, savedAsTemplate, topic]);
+  }, [finalGenId, savedAsTemplate, scopeId, promotedId, t]);
+
+  const toggleTemplate = useCallback(
+    async (tpl: CoverTemplate) => {
+      const existing = refs.find((r) => r.templateId === tpl.resource_id);
+      if (existing) {
+        setRefs((prev) => removeReference(prev, existing.genId));
+        setRefusal(null);
+        return;
+      }
+      if (templateBusyId) return;
+      setTemplateBusyId(tpl.resource_id);
+      setTemplateError(null);
+      try {
+        // The model only sees generated-media URLs, so the folder picture is
+        // imported into one here, at the moment it enters the pool.
+        const ref = await resolveCoverTemplateReference(tpl.resource_id);
+        addRef({
+          kind: 'template',
+          genId: ref.genId,
+          url: ref.url,
+          label: tpl.name,
+          templateId: tpl.resource_id,
+        });
+      } catch (err) {
+        console.error('[CoverStudio] template reference failed:', err);
+        setTemplateError(
+          t(
+            'distribution.coverStudio.templateRefFailed',
+            'That template could not be prepared as a reference. Try again.',
+          ),
+        );
+      } finally {
+        setTemplateBusyId(null);
+      }
+    },
+    [refs, templateBusyId, addRef, t],
+  );
 
   if (!open) return null;
 
@@ -511,28 +571,16 @@ export function CoverStudioOverlay({
             </div>
           )}
 
+          {templateError && (
+            <div className="cs-error" data-testid="cover-template-ref-error">
+              {templateError}
+            </div>
+          )}
           <CoverTemplateGrid
             scopeId={scopeId}
             selectedIds={templateIds(refs)}
-            onToggle={(tpl) => {
-              const existing = refs.find((r) => r.templateId === tpl.id);
-              if (existing) {
-                setRefs((prev) => removeReference(prev, existing.genId));
-                setRefusal(null);
-              } else {
-                addRef({
-                  kind: 'template',
-                  genId: tpl.generated_media_id,
-                  url: tpl.image_url,
-                  label: tpl.name,
-                  templateId: tpl.id,
-                });
-              }
-            }}
-            onRemoved={(templateId) => {
-              const inPool = refs.find((r) => r.templateId === templateId);
-              if (inPool) setRefs((prev) => removeReference(prev, inPool.genId));
-            }}
+            busyId={templateBusyId}
+            onToggle={(tpl) => void toggleTemplate(tpl)}
           />
         </div>
       </div>

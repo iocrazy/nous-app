@@ -7,8 +7,7 @@ Routes (all under prefix /generated-media, registered in app/api/__init__.py):
   GET  /generated-media/{id}/cover     → FileResponse  (image, no auth — <img>)
   GET  /generated-media/{id}/stream    → FileResponse  (video, no auth — <video>)
   GET  /generated-media/{id}/file      → FileResponse  (404 if row/file missing)
-  DELETE /generated-media/{id}         → {data: {deleted: bool}} (409 if a
-                                         cover template still cites the image)
+  DELETE /generated-media/{id}         → {data: {deleted: bool}}
 
 Scope = caller's personal team resolved via _resolve_personal_team_id.
 """
@@ -275,6 +274,27 @@ def resolve_resource_import(resource: dict, file_path: Optional[str]) -> dict:
     return {"file_path": file_path, "mime": mime}
 
 
+# Formats the image models will not take as references; converted to PNG at
+# import time. Pillow in the production image reads AVIF (features.check('avif')
+# is True there), and PNG is lossless so nothing is thrown away twice.
+_TRANSCODE_TO_PNG = frozenset(
+    {"image/avif", "image/heic", "image/heif", "image/tiff", "image/bmp"}
+)
+
+
+def _transcode_to_png(src_path: str) -> str:
+    """Write ``src_path`` out as a PNG temp file and return its path."""
+    from PIL import Image
+
+    fd, out = tempfile.mkstemp(prefix="genmedia_ref_", suffix=".png")
+    os.close(fd)
+    with Image.open(src_path) as im:
+        im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").save(
+            out, format="PNG"
+        )
+    return out
+
+
 class ResourceImportRequest(BaseModel):
     resource_id: str
 
@@ -331,23 +351,39 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
         # register_generated_media's copy step instead of a clean 404.
         await loc_cm.__aexit__(None, None, None)
         raise HTTPException(status_code=404, detail="Resource file missing")
+    transcoded: Optional[str] = None
     try:
+        source_path, mime = str(local_path), args["mime"]
+        if mime in _TRANSCODE_TO_PNG:
+            # Upstream image models accept jpeg/png/gif/webp only (codex's own
+            # error text: "supported image formats: ['image/jpeg', 'image/png',
+            # 'image/gif', 'image/webp']"). AVIF is what the library actually
+            # holds — every sample in the first real cover folder was AVIF — so
+            # convert here, at the one place a library asset becomes a
+            # reference, rather than in each provider.
+            transcoded = _transcode_to_png(source_path)
+            source_path, mime = transcoded, "image/png"
         row = await register_generated_media(
             user_id=str(auth.user_id),
             scope_id=await _scope(auth),
-            source_path=str(local_path),
-            mime=args["mime"],
+            source_path=source_path,
+            mime=mime,
             origin=GenerationOrigin(kind="canvas_upload"),
         )
     finally:
         await loc_cm.__aexit__(None, None, None)
+        if transcoded and os.path.exists(transcoded):
+            try:
+                os.unlink(transcoded)
+            except OSError:
+                pass
     return {
         "data": {
             "id": str(row["id"]),
             "url": f"/api/v1/generated-media/{row['id']}/"
-            f"{_IMPORT_KIND_ENDPOINT.get(media_kind_from_mime(args['mime']), 'file')}",
-            "media_kind": media_kind_from_mime(args["mime"]),
-            "mime": args["mime"],
+            f"{_IMPORT_KIND_ENDPOINT.get(media_kind_from_mime(mime), 'file')}",
+            "media_kind": media_kind_from_mime(mime),
+            "mime": mime,
         }
     }
 
@@ -370,49 +406,7 @@ async def get_generation(gen_id: int, auth: AuthDep) -> dict:
 
 @router.delete("/{gen_id}")
 async def delete_generation(gen_id: int, auth: AuthDep) -> dict:
-    """Delete a generation.
-
-    ⚠️ ``cover_templates.generated_media_id`` is ON DELETE RESTRICT (mig 435),
-    so an image someone saved as a cover template cannot be deleted while that
-    template exists. Left unhandled, Postgres raises IntegrityError and FastAPI
-    turns it into a bare 500 — which tells the user the server is broken when
-    the truth is that their own template is holding the picture. That is both
-    wrong and unactionable, so the block is detected first and reported as a
-    typed 409 naming the templates.
-
-    ``ConflictError``, not ``HTTPException(detail={...})``: the shared handler
-    renders an AppError as ``{error: message, code: code, details: details}``,
-    whereas a dict-valued HTTPException detail is filed under ``details`` and
-    leaves ``error`` as the generic "Request failed" — i.e. the user would read
-    nothing useful, which is the failure this branch exists to prevent.
-
-    The IntegrityError catch is not redundant with the pre-check: the two are
-    separated by a network round-trip, and a template created in between would
-    otherwise still surface as a 500.
-    """
-    from sqlalchemy.exc import IntegrityError
-
-    from app.core.exceptions import ConflictError
-    from app.repositories.cover_templates_repository import CoverTemplatesRepository
-
-    scope_id = await _scope(auth)
-    blocking = await CoverTemplatesRepository().names_blocking_media(gen_id)
-    if blocking:
-        raise ConflictError(
-            "This image is saved as a cover template. Remove the template "
-            "first, then delete the image.",
-            code="used_by_cover_templates",
-            details={"template_names": blocking},
-        )
-    try:
-        ok = await GeneratedMediaRepository().delete(gen_id, scope_id)
-    except IntegrityError:
-        raise ConflictError(
-            "This image was just saved as a cover template. Remove the "
-            "template first, then delete the image.",
-            code="used_by_cover_templates",
-            details={"template_names": []},
-        )
+    ok = await GeneratedMediaRepository().delete(gen_id, await _scope(auth))
     return {"data": {"deleted": ok}}
 
 

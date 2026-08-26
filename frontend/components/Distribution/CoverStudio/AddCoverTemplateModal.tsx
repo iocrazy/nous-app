@@ -5,12 +5,12 @@
 // than two entry points because from the user's side it is a single decision
 // ("which picture?") that happens to have two sources.
 //
-// Both paths converge on the same two-step server call — import the bytes into
-// generated-media, then save the template against the returned id. That detour
-// is not incidental: the image generation bridge only accepts
-// /api/v1/generated-media/{id}/... URLs as references, and silently drops
-// anything else. coverTemplateService owns that sequence; this file only
-// collects the picture and the name.
+// Both paths end in the same place — the cover-template folder in the
+// resource library. An upload lands there directly; a library pick is LINKED
+// into it (the picture stays wherever else it already lives). There is no
+// separate name to type: the picture's filename is its name, as in the
+// library. coverTemplateService owns the calls; this file only collects the
+// picture.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -43,13 +43,6 @@ type Picked =
   | { kind: 'file'; file: File; previewUrl: string }
   | { kind: 'resource'; resource: LibraryVideo };
 
-/** Strip the extension so "bold-headline.png" suggests "bold-headline". */
-function defaultNameFor(picked: Picked): string {
-  const raw =
-    picked.kind === 'file' ? picked.file.name : picked.resource.filename;
-  return raw.replace(/\.[^./\\]+$/, '').slice(0, 120);
-}
-
 export function AddCoverTemplateModal({
   open,
   scopeId,
@@ -66,7 +59,6 @@ export function AddCoverTemplateModal({
   // never came back.
   const [loadError, setLoadError] = useState(false);
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -98,7 +90,6 @@ export function AddCoverTemplateModal({
       if (prev?.kind === 'file') URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
-    setName('');
     setSaveError(null);
     setSaving(false);
   }, [open]);
@@ -132,22 +123,15 @@ export function AddCoverTemplateModal({
 
   const { rootProps, isDragActive } = useComposerDropzone({ onFiles });
 
-  // Seed the name from the picture, but only while the user has not typed —
-  // re-deriving it after they have would silently discard their wording.
-  useEffect(() => {
-    if (!picked) return;
-    setName((prev) => (prev.trim() ? prev : defaultNameFor(picked)));
-  }, [picked]);
-
   const save = useCallback(async () => {
-    if (!picked || !name.trim() || saving) return;
+    if (!picked || saving) return;
     setSaving(true);
     setSaveError(null);
     try {
       const created =
         picked.kind === 'file'
-          ? await addCoverTemplateFromFile(picked.file, name.trim())
-          : await addCoverTemplateFromResource(picked.resource.id, name.trim());
+          ? await addCoverTemplateFromFile(picked.file, scopeId)
+          : await addCoverTemplateFromResource(picked.resource.id, scopeId);
       onAdded(created);
       onClose();
     } catch (err) {
@@ -167,7 +151,7 @@ export function AddCoverTemplateModal({
     } finally {
       setSaving(false);
     }
-  }, [picked, name, saving, onAdded, onClose, t]);
+  }, [picked, saving, scopeId, onAdded, onClose, t]);
 
   return (
     <UiModal
@@ -183,7 +167,7 @@ export function AddCoverTemplateModal({
           </UiButton>
           <UiButton
             variant="primary"
-            disabled={!picked || !name.trim() || saving}
+            disabled={!picked || saving}
             onClick={() => void save()}
             data-testid="cover-template-save"
           >
@@ -196,8 +180,8 @@ export function AddCoverTemplateModal({
     >
       <p className="cs-hint">
         {t(
-          'distribution.coverStudio.templateExplainer',
-          'A template is a picture you liked, kept as an example and handed to the model as a reference image. It does not replace the style, which is text.',
+          'distribution.coverStudio.templateGoesToFolder',
+          'It goes into your cover-template folder in the library. Pick from the library and the picture is linked there, not copied.',
         )}
       </p>
 
@@ -287,24 +271,6 @@ export function AddCoverTemplateModal({
               </button>
             );
           })}
-        </div>
-      )}
-
-      {picked && (
-        <div className="cs-name">
-          <label htmlFor="cover-template-name">
-            {t('distribution.coverStudio.templateName', 'Name')}
-          </label>
-          <input
-            id="cover-template-name"
-            value={name}
-            maxLength={120}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t(
-              'distribution.coverStudio.templateNamePlaceholder',
-              'Bold headline',
-            )}
-          />
         </div>
       )}
 
