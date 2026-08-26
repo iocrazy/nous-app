@@ -122,7 +122,7 @@ export function CodexDaemonSettings() {
             type="button"
             data-testid="codex-pair-start"
             onClick={() => void startPairing()}
-            className="rounded-full bg-content px-3 py-1.5 text-xs font-bold text-surface"
+            className="rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-bold"
           >
             Pair a device
           </button>
@@ -135,7 +135,12 @@ export function CodexDaemonSettings() {
             <Loader2 size={12} className="animate-spin" /> Loading devices…
           </div>
         ) : devices.length === 0 ? (
-          <div className="text-xs text-content-3">No paired devices yet.</div>
+          <div className="text-xs text-content-3">
+            No paired devices yet. Once a device connects, its CLI check
+            (codex / gpt-image-2-skill / dreamina versions + login state)
+            shows here automatically — the pairing IS the detection: unlike a
+            local app, a cloud page cannot probe your machine directly.
+          </div>
         ) : (
           devices.map((d) => {
             const online = isDeviceOnline(d);

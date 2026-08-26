@@ -91,7 +91,7 @@ export function JimengCliCard() {
           data-testid="jimeng-login"
           onClick={() => void startLogin()}
           disabled={working}
-          className="flex items-center gap-1.5 rounded-full bg-content px-3 py-1.5 text-xs font-bold text-surface disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-50"
         >
           {working ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
           Log in
