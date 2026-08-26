@@ -228,3 +228,236 @@ class TestExtractPngPromptPair:
         assert extract_png_prompt(png) == (
             "masterpiece, 1girl, silver hair,\nbacklit, golden hour"
         )
+
+
+# ── Generation parameters (gen_params, migration 440) ─────────────────
+
+from app.services.library.png_prompt_extractor import (  # noqa: E402
+    extract_comfyui_generation,
+    extract_png_generation,
+    parse_a1111_settings,
+)
+
+A1111_FULL_BLOB = (
+    "masterpiece, 1girl, <lora:detail_slider:0.6>, silver hair <lora:hanfu_v2:1>\n"
+    "Negative prompt: lowres, bad anatomy\n"
+    "Steps: 28, Sampler: DPM++ 2M, Schedule type: Karras, CFG scale: 5.5, "
+    "Seed: 987654321, Size: 832x1216, Model hash: abcd1234, "
+    "Model: sdxl\\animagine-xl-3.1.safetensors, Denoising strength: 0.4, "
+    'Lora hashes: "detail_slider: 1111, hanfu_v2: 2222", Version: v1.9.4'
+)
+
+# Mirrors the real production PNG that motivated this feature (resource
+# 342622656467658): Krea2 UNET, qwen3vl text encoder, seed wired from an
+# rgthree Seed node, and a negative CLIPTextEncode that is NOT wired into
+# the sampler (negative goes through ConditioningZeroOut instead).
+COMFY_REAL_GRAPH = {
+    "137": {
+        "inputs": {"samples": ["158", 0], "vae": ["167", 0]},
+        "class_type": "VAEDecode",
+    },
+    "140": {
+        "inputs": {"conditioning": ["164", 0]},
+        "class_type": "ConditioningZeroOut",
+    },
+    "153": {"inputs": {"seed": 399257458555967}, "class_type": "Seed (rgthree)"},
+    "156": {
+        "inputs": {"width": 1920, "height": 1080, "batch_size": 1},
+        "class_type": "EmptyLatentImage",
+    },
+    "158": {
+        "inputs": {
+            "seed": ["153", 0],
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "denoise": 1.0,
+            "model": ["168", 0],
+            "positive": ["164", 0],
+            "negative": ["140", 0],
+            "latent_image": ["156", 0],
+        },
+        "class_type": "KSampler",
+    },
+    "164": {
+        "inputs": {
+            "text": "A realistic, intimate home photograph of a young woman",
+            "clip": ["166", 0],
+        },
+        "class_type": "CLIPTextEncode",
+    },
+    "166": {
+        "inputs": {"clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "type": "krea2"},
+        "class_type": "CLIPLoader",
+    },
+    "167": {
+        "inputs": {"vae_name": "qwen_image_vae.safetensors"},
+        "class_type": "VAELoader",
+    },
+    "168": {
+        "inputs": {
+            "unet_name": "Krea2\\Krea2-redcraft_fp8.safetensors",
+            "weight_dtype": "default",
+        },
+        "class_type": "UNETLoader",
+    },
+    "173": {
+        "inputs": {
+            "text": "mosaic, censored, lowres, watermark, extra limbs, bad hands, jpeg artifacts, ugly",
+            "clip": ["166", 0],
+        },
+        "class_type": "CLIPTextEncode",
+    },
+}
+
+
+class TestParseA1111Settings:
+    def test_full_settings_line(self):
+        params = parse_a1111_settings(A1111_FULL_BLOB)
+        assert params == {
+            "tool": "a1111",
+            "model": "animagine-xl-3.1",
+            "model_hash": "abcd1234",
+            "sampler": "DPM++ 2M",
+            "scheduler": "Karras",
+            "steps": 28,
+            "cfg": 5.5,
+            "seed": 987654321,
+            "denoise": 0.4,
+            "width": 832,
+            "height": 1216,
+            "loras": ["detail_slider", "hanfu_v2"],
+        }
+
+    def test_no_settings_line_returns_none(self):
+        assert parse_a1111_settings("just a prompt\nNegative prompt: x") is None
+
+    def test_minimal_line_omits_unknown_keys(self):
+        params = parse_a1111_settings("p\nSteps: 20, Seed: 7")
+        assert params == {"tool": "a1111", "steps": 20, "seed": 7}
+
+
+class TestExtractComfyuiGeneration:
+    def test_real_graph_follows_sampler_wiring(self):
+        gen = extract_comfyui_generation(json.dumps(COMFY_REAL_GRAPH))
+        assert gen.positive.startswith("A realistic, intimate")
+        # #173 is longer than the positive but NOT wired into the sampler:
+        # the wiring, not text length, decides — and an unwired negative
+        # is reported as absent.
+        assert gen.negative is None
+        assert gen.params == {
+            "tool": "comfyui",
+            "model": "Krea2-redcraft_fp8",
+            "sampler": "euler",
+            "scheduler": "simple",
+            "steps": 10,
+            "cfg": 1.0,
+            "denoise": 1.0,
+            "seed": 399257458555967,
+            "width": 1920,
+            "height": 1080,
+            "text_encoder": "qwen3vl_4b_fp8_scaled",
+            "vae": "qwen_image_vae",
+        }
+
+    def test_wired_negative_and_lora_chain(self):
+        graph = {
+            "1": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {"ckpt_name": "sd15/dreamshaper_8.safetensors"},
+            },
+            "2": {
+                "class_type": "LoraLoader",
+                "inputs": {"lora_name": "add_detail.safetensors", "model": ["1", 0]},
+            },
+            "3": {
+                "class_type": "LoraLoaderModelOnly",
+                "inputs": {"lora_name": "styles\\ink.safetensors", "model": ["2", 0]},
+            },
+            "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "cat"}},
+            "5": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "a very long negative prompt, lowres, blurry, bad"},
+            },
+            "6": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 512, "height": 768},
+            },
+            "7": {
+                "class_type": "KSamplerAdvanced",
+                "inputs": {
+                    "noise_seed": 42,
+                    "steps": 30,
+                    "cfg": 7,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "model": ["3", 0],
+                    "positive": ["4", 0],
+                    "negative": ["5", 0],
+                    "latent_image": ["6", 0],
+                },
+            },
+        }
+        gen = extract_comfyui_generation(json.dumps(graph))
+        # Short positive wins over the longer negative because of wiring.
+        assert gen.positive == "cat"
+        assert gen.negative.startswith("a very long negative")
+        assert gen.params["model"] == "dreamshaper_8"
+        assert gen.params["loras"] == ["add_detail", "ink"]
+        assert gen.params["seed"] == 42
+        assert (gen.params["width"], gen.params["height"]) == (512, 768)
+        assert gen.params["cfg"] == 7.0
+
+    def test_no_sampler_falls_back_to_longest_text(self):
+        graph = {
+            "1": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "only prompt here"},
+            }
+        }
+        gen = extract_comfyui_generation(json.dumps(graph))
+        assert gen.positive == "only prompt here"
+        assert gen.negative is None
+        assert gen.params is None
+
+    def test_cyclic_graph_does_not_hang(self):
+        graph = {
+            "1": {
+                "class_type": "ConditioningCombine",
+                "inputs": {"conditioning_1": ["1", 0]},
+            },
+            "2": {
+                "class_type": "LoraLoader",
+                "inputs": {"lora_name": "x", "model": ["2", 0]},
+            },
+            "3": {
+                "class_type": "KSampler",
+                "inputs": {"positive": ["1", 0], "model": ["2", 0], "steps": 1},
+            },
+        }
+        assert extract_comfyui_generation(json.dumps(graph)) is None
+
+
+class TestExtractPngGeneration:
+    def test_a1111_png_yields_prompts_and_params(self, tmp_path: Path):
+        png = tmp_path / "a.png"
+        png.write_bytes(_png_with_text_chunk("parameters", A1111_FULL_BLOB))
+        gen = extract_png_generation(png)
+        assert gen.negative == "lowres, bad anatomy"
+        assert gen.params["steps"] == 28
+        assert gen.params["loras"] == ["detail_slider", "hanfu_v2"]
+
+    def test_comfy_png_yields_params(self, tmp_path: Path):
+        png = tmp_path / "c.png"
+        png.write_bytes(_png_with_text_chunk("prompt", json.dumps(COMFY_REAL_GRAPH)))
+        gen = extract_png_generation(png)
+        assert gen.params["seed"] == 399257458555967
+        # The prompt-only view stays consistent with the full one.
+        pair = extract_png_prompt_pair(png)
+        assert (pair.positive, pair.negative) == (gen.positive, gen.negative)
+
+    def test_plain_png_returns_none(self, tmp_path: Path):
+        png = tmp_path / "p.png"
+        png.write_bytes(_png())
+        assert extract_png_generation(png) is None

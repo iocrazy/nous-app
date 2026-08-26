@@ -326,6 +326,26 @@ export interface Folder {
 }
 
 // Resource (core resource record)
+export interface GenParams {
+  tool?: 'comfyui' | 'a1111' | 'nous' | string;
+  provider?: string;
+  model?: string;
+  model_hash?: string;
+  sampler?: string;
+  scheduler?: string;
+  steps?: number;
+  cfg?: number;
+  seed?: number;
+  denoise?: number;
+  width?: number;
+  height?: number;
+  size?: string;
+  aspect_ratio?: string;
+  loras?: string[];
+  text_encoder?: string;
+  vae?: string;
+}
+
 export interface Resource {
   id: string;
   creator_id: string;
@@ -351,6 +371,10 @@ export interface Resource {
   gen_prompt_negative_zh?: string | null;
   slide_prompts?: Record<string, { en?: string; zh?: string; neg_en?: string; neg_zh?: string }> | null;
   gen_prompt_json?: string | null;
+  // Normalised AI generation parameters (migration 440). Every key optional;
+  // written by upload_postprocess (PNG metadata), promote (generated_media)
+  // and the resource_gen_params backfill. Absent/null == unknown.
+  gen_params?: GenParams | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;

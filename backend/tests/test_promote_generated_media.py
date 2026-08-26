@@ -92,6 +92,11 @@ async def test_promote_creates_resource_and_marks(monkeypatch, tmp_path):
     assert out["id"] == 555
     assert created["resource"]["source_type"] == "generated"
     assert created["resource"]["creator_id"] == "u-uuid"
+    assert created["resource"]["gen_params"] == {
+        "tool": "nous",
+        "model": "m",
+        "provider": "p",
+    }
     assert created["item"]["scope_id"] == 42 and created["item"]["folder_id"] is None
     # file copied into resources layout
     dst = tmp_path / "teams/42/uploads/555/v1"
@@ -475,3 +480,43 @@ async def test_promote_flag_on_store_failure_falls_back_to_filesystem(
     assert dst.read_bytes() == b"imgbytes"
     err_mock.assert_called_once()
     assert "unified-storage write failed" in err_mock.call_args[0][0]
+
+
+class TestGenerationParamsFromGeneratedMedia:
+    def test_model_provider_and_whitelisted_params(self):
+        from app.services.library.promote_generated_media_service import (
+            generation_params_from_generated_media,
+        )
+
+        out = generation_params_from_generated_media(
+            {
+                "model": "seedream-4",
+                "provider": "doubao",
+                # cover-frame provenance is NOT a generation parameter
+                "params": {
+                    "seed": 7,
+                    "size": "2K",
+                    "filename": "x.png",
+                    "cover_frame_timestamp_seconds": 1.5,
+                },
+            }
+        )
+        assert out == {
+            "tool": "nous",
+            "model": "seedream-4",
+            "provider": "doubao",
+            "seed": 7,
+            "size": "2K",
+        }
+
+    def test_nothing_known_returns_none(self):
+        from app.services.library.promote_generated_media_service import (
+            generation_params_from_generated_media,
+        )
+
+        assert (
+            generation_params_from_generated_media(
+                {"model": "", "params": {"filename": "a"}}
+            )
+            is None
+        )

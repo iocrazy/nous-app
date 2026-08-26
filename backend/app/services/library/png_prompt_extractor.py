@@ -16,6 +16,12 @@ can't balloon memory (uploads are untrusted input).
 
 Used by ``upload_postprocess_workflow`` to auto-fill ``resources.gen_prompt``
 on PNG upload when the user hasn't entered one (IC-port P1, 2026-06-12).
+
+Since 2026-08-26 the same pass also yields the generation PARAMETERS
+(model / sampler / scheduler / steps / cfg / seed / size / loras …) as one
+normalised dict — ``extract_png_generation`` — which lands in
+``resources.gen_params`` (migration 440). The dict shape is shared with
+``promote_generated_media`` so the detail panel renders every source alike.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ import re
 import struct
 import zlib
 from pathlib import Path
-from typing import Iterator, NamedTuple, Optional, Tuple
+from typing import Any, Iterator, NamedTuple, Optional, Tuple
 
 from loguru import logger
 
@@ -195,10 +201,298 @@ def extract_comfyui_prompt(graph_json: str) -> Optional[str]:
 
 
 def extract_png_prompt_pair(file_path: str | Path) -> Optional[PngPromptPair]:
-    """Extract positive+negative generation prompts from a PNG, or None.
+    """Positive+negative generation prompts from a PNG, or None.
 
-    A1111 ``parameters`` first (labeled negative), then ComfyUI ``prompt``
-    graph (positive only — API format doesn't label negative). Never raises.
+    Thin view over ``extract_png_generation`` (same precedence, same
+    never-raises contract) for callers that only want the prompts.
+    """
+    gen = extract_png_generation(file_path)
+    if not gen:
+        return None
+    return PngPromptPair(positive=gen.positive, negative=gen.negative)
+
+
+def extract_png_prompt(file_path: str | Path) -> Optional[str]:
+    """Back-compat: positive prompt only. See extract_png_prompt_pair."""
+    pair = extract_png_prompt_pair(file_path)
+    return pair.positive if pair else None
+
+
+# ── Generation parameters ──────────────────────────────────────────────
+
+# Cap on any single string value stored into gen_params (model names,
+# lora names) and on the lora list — the column is for display, not for
+# round-tripping a whole graph.
+MAX_PARAM_STR_CHARS = 200
+MAX_LORAS = 20
+
+# A1111 settings line: `Key: value, Key: value, Key: "quoted, value"`.
+_A1111_KV_RE = re.compile(r'\s*([^:,]+?):\s*("(?:\\.|[^"])*"|[^,]*)(?:,|$)')
+_A1111_SIZE_RE = re.compile(r"^\s*(\d+)\s*x\s*(\d+)\s*$")
+_LORA_TAG_RE = re.compile(r"<lora:([^:>]+)(?::[^>]*)?>")
+
+_COMFY_SAMPLER_TYPES = ("KSampler", "KSamplerAdvanced")
+_COMFY_MODEL_LOADERS = {
+    "UNETLoader": "unet_name",
+    "CheckpointLoaderSimple": "ckpt_name",
+    "CheckpointLoader": "ckpt_name",
+    "UnetLoaderGGUF": "unet_name",
+}
+_COMFY_LATENT_TYPES = (
+    "EmptyLatentImage",
+    "EmptySD3LatentImage",
+    "EmptyHunyuanLatentVideo",
+)
+
+
+class PngGeneration(NamedTuple):
+    """Everything the PNG metadata tells us about how the image was made."""
+
+    positive: str
+    negative: Optional[str]
+    params: Optional[dict]
+
+
+def _clip_str(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value[:MAX_PARAM_STR_CHARS] if value else None
+
+
+def _as_int(value: Any) -> Optional[int]:
+    try:
+        if isinstance(value, bool):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    try:
+        if isinstance(value, bool):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _put(params: dict, key: str, value: Any) -> None:
+    """Set only when the value is meaningful — absent == unknown."""
+    if value is None or value == "" or value == []:
+        return
+    params[key] = value
+
+
+def _model_basename(name: Optional[str]) -> Optional[str]:
+    """``Krea2\\Krea2-foo_fp8.safetensors`` → ``Krea2-foo_fp8``.
+
+    Checkpoint names carry the loader's subfolder and extension; neither
+    helps the reader identify the model.
+    """
+    if not name:
+        return None
+    base = re.split(r"[\\/]", name)[-1]
+    base = re.sub(r"\.(safetensors|ckpt|pt|pth|gguf|bin)$", "", base, flags=re.I)
+    return _clip_str(base)
+
+
+def parse_a1111_settings(text: str) -> Optional[dict]:
+    """Parse the ``Steps: …`` settings line of an A1111 blob into gen_params.
+
+    Only the settings line is read (positive/negative are handled by
+    ``parse_a1111_pair``); ``<lora:name:w>`` tags in the positive prompt
+    are folded into ``loras``. None when there is no settings line.
+    """
+    settings_line: Optional[str] = None
+    prompt_lines: list[str] = []
+    for line in text.splitlines():
+        if _SETTINGS_LINE_RE.match(line):
+            settings_line = line
+            break
+        prompt_lines.append(line)
+    if settings_line is None:
+        return None
+
+    kv: dict[str, str] = {}
+    for m in _A1111_KV_RE.finditer(settings_line):
+        key = m.group(1).strip().lower()
+        val = m.group(2).strip()
+        if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+            val = val[1:-1]
+        if key and key not in kv:
+            kv[key] = val
+
+    params: dict[str, Any] = {"tool": "a1111"}
+    _put(params, "model", _model_basename(kv.get("model")))
+    _put(params, "model_hash", _clip_str(kv.get("model hash")))
+    _put(params, "sampler", _clip_str(kv.get("sampler")))
+    _put(params, "scheduler", _clip_str(kv.get("schedule type")))
+    _put(params, "steps", _as_int(kv.get("steps")))
+    _put(params, "cfg", _as_float(kv.get("cfg scale")))
+    _put(params, "seed", _as_int(kv.get("seed")))
+    _put(params, "denoise", _as_float(kv.get("denoising strength")))
+    size = _A1111_SIZE_RE.match(kv.get("size", ""))
+    if size:
+        params["width"], params["height"] = int(size.group(1)), int(size.group(2))
+    loras: list[str] = []
+    for name in _LORA_TAG_RE.findall("\n".join(prompt_lines)):
+        clipped = _clip_str(name)
+        if clipped and clipped not in loras:
+            loras.append(clipped)
+    _put(params, "loras", loras[:MAX_LORAS])
+    return params
+
+
+def _comfy_link_target(graph: dict, ref: Any) -> Optional[dict]:
+    """Resolve a ComfyUI API-format input link ``[node_id, output_idx]``."""
+    if isinstance(ref, list) and ref and isinstance(ref[0], (str, int)):
+        node = graph.get(str(ref[0]))
+        return node if isinstance(node, dict) else None
+    return None
+
+
+def _comfy_text_at(graph: dict, ref: Any, depth: int = 0) -> Optional[str]:
+    """Follow a conditioning link back to its CLIPTextEncode text.
+
+    ``ConditioningZeroOut`` (and any other node without ``text``) means
+    "no prompt on this side" — return None rather than guessing. Bounded
+    depth guards against cyclic graphs in hostile files.
+    """
+    if depth > 8:
+        return None
+    node = _comfy_link_target(graph, ref)
+    if node is None:
+        return None
+    inputs = node.get("inputs") or {}
+    if "CLIPTextEncode" in str(node.get("class_type", "")):
+        text = inputs.get("text")
+        # The text itself may be wired from a primitive/string node.
+        if isinstance(text, list):
+            src = _comfy_link_target(graph, text)
+            src_inputs = (src or {}).get("inputs") or {}
+            for key in ("text", "string", "value"):
+                if isinstance(src_inputs.get(key), str):
+                    return src_inputs[key].strip() or None
+            return None
+        return text.strip() if isinstance(text, str) and text.strip() else None
+    if str(node.get("class_type", "")) == "ConditioningZeroOut":
+        return None
+    # Pass-through conditioning nodes (ConditioningCombine, ControlNet
+    # apply, FluxGuidance…): follow the first conditioning-looking input.
+    for key in ("conditioning", "positive", "conditioning_1"):
+        if key in inputs:
+            return _comfy_text_at(graph, inputs[key], depth + 1)
+    return None
+
+
+def _comfy_model_chain(graph: dict, ref: Any) -> tuple[Optional[str], list[str]]:
+    """Walk ``model`` links through LoRA loaders to the checkpoint/UNET."""
+    loras: list[str] = []
+    for _ in range(16):
+        node = _comfy_link_target(graph, ref)
+        if node is None:
+            break
+        ctype = str(node.get("class_type", ""))
+        inputs = node.get("inputs") or {}
+        if ctype in _COMFY_MODEL_LOADERS:
+            # Walked sampler→checkpoint, i.e. last-applied LoRA first; report
+            # them in the order the graph applies them.
+            return _model_basename(inputs.get(_COMFY_MODEL_LOADERS[ctype])), loras[::-1]
+        if "Lora" in ctype or "LoRA" in ctype:
+            name = _model_basename(inputs.get("lora_name"))
+            if name and name not in loras:
+                loras.append(name)
+        ref = inputs.get("model")
+        if ref is None:
+            break
+    return None, loras[::-1]
+
+
+def extract_comfyui_generation(graph_json: str) -> Optional[PngGeneration]:
+    """Positive/negative prompts + params from a ComfyUI API-format graph.
+
+    Prefers the sampler's actual wiring: ``KSampler.positive`` /
+    ``.negative`` links tell positive from negative exactly (API format
+    doesn't label them) and expose an unwired negative node as what it is —
+    absent. Falls back to the longest CLIPTextEncode text when no sampler
+    is found, so graphs from unknown sampler nodes still yield a prompt.
+    """
+    try:
+        graph = json.loads(graph_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(graph, dict):
+        return None
+
+    sampler: Optional[dict] = None
+    for node in graph.values():
+        if (
+            isinstance(node, dict)
+            and str(node.get("class_type", "")) in _COMFY_SAMPLER_TYPES
+        ):
+            sampler = node
+            break
+
+    params: dict[str, Any] = {"tool": "comfyui"}
+    positive: Optional[str] = None
+    negative: Optional[str] = None
+    if sampler is not None:
+        inputs = sampler.get("inputs") or {}
+        positive = _comfy_text_at(graph, inputs.get("positive"))
+        negative = _comfy_text_at(graph, inputs.get("negative"))
+        model, loras = _comfy_model_chain(graph, inputs.get("model"))
+        _put(params, "model", model)
+        _put(params, "loras", loras[:MAX_LORAS])
+        _put(params, "sampler", _clip_str(inputs.get("sampler_name")))
+        _put(params, "scheduler", _clip_str(inputs.get("scheduler")))
+        _put(params, "steps", _as_int(inputs.get("steps")))
+        _put(params, "cfg", _as_float(inputs.get("cfg")))
+        _put(params, "denoise", _as_float(inputs.get("denoise")))
+        seed_ref = inputs.get("seed", inputs.get("noise_seed"))
+        if isinstance(seed_ref, list):  # wired from a seed node
+            seed_node = _comfy_link_target(graph, seed_ref) or {}
+            seed_ref = (seed_node.get("inputs") or {}).get("seed")
+        _put(params, "seed", _as_int(seed_ref))
+        latent = _comfy_link_target(graph, inputs.get("latent_image"))
+        if latent and str(latent.get("class_type", "")) in _COMFY_LATENT_TYPES:
+            li = latent.get("inputs") or {}
+            _put(params, "width", _as_int(li.get("width")))
+            _put(params, "height", _as_int(li.get("height")))
+
+    # Text encoder / VAE aren't on the sampler's wiring — take the first of each.
+    for node in graph.values():
+        if not isinstance(node, dict):
+            continue
+        ctype = str(node.get("class_type", ""))
+        ni = node.get("inputs") or {}
+        if ctype in ("CLIPLoader", "DualCLIPLoader") and "text_encoder" not in params:
+            _put(
+                params,
+                "text_encoder",
+                _model_basename(ni.get("clip_name") or ni.get("clip_name1")),
+            )
+        elif ctype == "VAELoader" and "vae" not in params:
+            _put(params, "vae", _model_basename(ni.get("vae_name")))
+
+    if not positive:
+        positive = extract_comfyui_prompt(graph_json)
+        negative = None
+    if not positive:
+        return None
+    return PngGeneration(
+        positive=positive,
+        negative=negative,
+        params=params if len(params) > 1 else None,
+    )
+
+
+def extract_png_generation(file_path: str | Path) -> Optional[PngGeneration]:
+    """Prompts + generation params from a PNG, or None. Never raises.
+
+    Same precedence as ``extract_png_prompt_pair``: A1111 ``parameters``
+    first, then the ComfyUI ``prompt`` graph.
     """
     path = Path(file_path)
     try:
@@ -207,18 +501,23 @@ def extract_png_prompt_pair(file_path: str | Path) -> Optional[PngPromptPair]:
             if keyword == "parameters":
                 pair = parse_a1111_pair(text)
                 if pair:
-                    return PngPromptPair(
+                    return PngGeneration(
                         positive=pair.positive[:MAX_PROMPT_CHARS],
                         negative=(
                             pair.negative[:MAX_PROMPT_CHARS] if pair.negative else None
                         ),
+                        params=parse_a1111_settings(text),
                     )
             elif keyword == "prompt" and comfy_graph is None:
                 comfy_graph = text
         if comfy_graph:
-            prompt = extract_comfyui_prompt(comfy_graph)
-            if prompt:
-                return PngPromptPair(positive=prompt[:MAX_PROMPT_CHARS], negative=None)
+            gen = extract_comfyui_generation(comfy_graph)
+            if gen:
+                return PngGeneration(
+                    positive=gen.positive[:MAX_PROMPT_CHARS],
+                    negative=gen.negative[:MAX_PROMPT_CHARS] if gen.negative else None,
+                    params=gen.params,
+                )
         return None
     except OSError as e:
         logger.warning(f"[PngPrompt] cannot read {path}: {e}")
@@ -226,9 +525,3 @@ def extract_png_prompt_pair(file_path: str | Path) -> Optional[PngPromptPair]:
     except Exception as e:
         logger.warning(f"[PngPrompt] unexpected parse failure for {path}: {e}")
         return None
-
-
-def extract_png_prompt(file_path: str | Path) -> Optional[str]:
-    """Back-compat: positive prompt only. See extract_png_prompt_pair."""
-    pair = extract_png_prompt_pair(file_path)
-    return pair.positive if pair else None

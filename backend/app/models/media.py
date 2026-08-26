@@ -374,6 +374,13 @@ class Resources(Base, UserScoped):
             '{"<name>": {en, zh, neg_en, neg_zh}}'
         ),
     )
+    gen_params: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment=(
+            "Normalised AI generation parameters (tool/model/sampler/steps/"
+            "cfg/seed/width/height/loras...); every key optional (440)"
+        ),
+    )
     summary_follow_up: Mapped[dict | None] = mapped_column(
         JSONB,
         comment=(
