@@ -984,7 +984,11 @@
       "loginLink": "在任意设备打开此链接并授权（约 10 分钟内有效）：",
       "loginDone": "已授权 — 检查状态",
       "errStatus": "无法连接服务器 CLI",
-      "errLogin": "登录流程启动失败"
+      "errLogin": "登录流程启动失败",
+      "serverBadge": "服务器",
+      "upToDate": "（已是最新）",
+      "updateAvailable": "（可更新到 {{version}}）",
+      "detectNote": "检测的是「服务器」运行时。你本机的 CLI 状态在配对后显示于设备行。"
     },
     "nav": {
       "account": "账户",

@@ -33,7 +33,7 @@ export function CodexDaemonSettings() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverCli, setServerCli] = useState<{
-    skill: { installed: boolean; version?: string | null; path?: string | null };
+    skill: { installed: boolean; version?: string | null; path?: string | null; latest?: string | null };
     codex: { installed: boolean; version?: string | null; path?: string | null };
     auth_ok: boolean;
   } | null>(null);
@@ -166,9 +166,17 @@ export function CodexDaemonSettings() {
           data-testid="codex-cli-readout"
           className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs text-content-2"
         >
+          <span className="mr-1.5 rounded-full bg-line/50 px-1.5 py-0.5 text-[10px] font-bold text-content-3">
+            {t('settings.localCli.serverBadge')}
+          </span>
           {serverCli.skill.installed ? (
             <>
               gpt-image-2-skill{serverCli.skill.version ? ` ${serverCli.skill.version}` : ''}
+              {serverCli.skill.latest &&
+                serverCli.skill.version &&
+                (serverCli.skill.latest === serverCli.skill.version
+                  ? ` ${t('settings.localCli.upToDate')}`
+                  : ` ${t('settings.localCli.updateAvailable', { version: serverCli.skill.latest })}`)}
               {serverCli.skill.path ? ` · ${serverCli.skill.path}` : ''} ·{' '}
               {t('settings.localCli.skillInstalled')}
             </>
@@ -182,7 +190,7 @@ export function CodexDaemonSettings() {
             ? t('settings.localCli.authPresent')
             : t('settings.localCli.authMissing')}
           <div className="mt-1 text-[10px] text-content-3">
-            {t('settings.localCli.serverRuntimeNote')}
+            {t('settings.localCli.detectNote')}
           </div>
         </div>
       )}
