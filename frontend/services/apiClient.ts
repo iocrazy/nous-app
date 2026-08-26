@@ -14,7 +14,11 @@
  */
 
 import { getSupabaseAccessToken } from '../supabaseClient';
-import { getApiUrl } from '../utils/apiConfig';
+import {
+  getApiUrl,
+  getFallbackApiUrl,
+  reportApiNetworkFailure,
+} from '../utils/apiConfig';
 
 const API_KEY_STORAGE_KEYS = ['mediahub_api_key', 'douyin_api_key'] as const;
 const TEAM_STORAGE_KEY = 'mediahub_selected_team';
@@ -137,7 +141,21 @@ export async function apiFetch(
     delete headers['Content-Type'];
   }
 
-  const response = await fetch(url, { ...rest, headers, body });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...rest, headers, body });
+  } catch (err) {
+    // Network-level failure (the cn direct link flapping — 2026-08-26).
+    // Report it; if that flipped us onto the fallback base, retry THIS
+    // request there immediately instead of failing the user's click.
+    reportApiNetworkFailure();
+    const retryUrl = buildUrl(path, options);
+    if (!options.absolute && getFallbackApiUrl() && retryUrl !== url) {
+      response = await fetch(retryUrl, { ...rest, headers, body });
+    } else {
+      throw err;
+    }
+  }
   if (!response.ok) {
     throw await toApiError(response);
   }
