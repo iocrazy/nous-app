@@ -668,6 +668,27 @@ class AgentRunner:
                     self.mcp_registry,
                 )
                 if not is_mcp and tool_name not in SUPPORTED_TOOLS:
+                    # Never skip silently. An assistant tool_call left without a
+                    # tool result is an orphan the NEXT request is rejected for
+                    # (OpenAI: every tool_call_id must be answered; Anthropic:
+                    # orphaned tool_use). Synthesize an error result so the log
+                    # stays replay-legal AND the model learns the tool does not
+                    # exist instead of calling it again (dsh tools rule: a call
+                    # that never started still gets a paired result).
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "name": tool_name,
+                            "content": _json.dumps(
+                                {
+                                    "error": f"unknown tool: {tool_name}",
+                                    "synthetic": True,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
                     continue
                 try:
                     args = _json.loads(fn.get("arguments") or "{}")
@@ -1411,7 +1432,27 @@ class AgentRunner:
                     tool_name or "", self.mcp_registry
                 )
                 if not is_mcp and tool_name not in SUPPORTED_TOOLS:
-                    # Unknown tool — skip (caller-provided tools handled elsewhere in future)
+                    # Never skip silently. An assistant tool_call left without a
+                    # tool result is an orphan the NEXT request is rejected for
+                    # (OpenAI: every tool_call_id must be answered; Anthropic:
+                    # orphaned tool_use). Synthesize an error result so the log
+                    # stays replay-legal AND the model learns the tool does not
+                    # exist instead of calling it again (dsh tools rule: a call
+                    # that never started still gets a paired result).
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id"),
+                            "name": tool_name,
+                            "content": json.dumps(
+                                {
+                                    "error": f"unknown tool: {tool_name}",
+                                    "synthetic": True,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
                     continue
                 try:
                     args = json.loads(fn.get("arguments", "{}"))
