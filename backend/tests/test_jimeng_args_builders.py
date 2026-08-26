@@ -16,6 +16,8 @@ def test_image_args_basic():
     assert "--prompt=a cat" in args
     assert "--ratio=16:9" in args
     assert "--poll=60" in args
+    # resolution_type is REQUIRED by the CLI — absent input must default.
+    assert "--resolution_type=2k" in args
 
 
 def test_image_args_resolution_and_model():
