@@ -49,19 +49,19 @@ const settings: AISettingsType = {
   },
 } as AISettingsType;
 
-describe('OpenAI provider card', () => {
-  it('renders the Local codex pairing card when enabled', async () => {
-    render(<AISettings settings={settings} onSave={vi.fn()} />);
+describe('settings tab split (2026-08-26)', () => {
+  it('the Local CLI tab renders the codex pairing card', async () => {
+    const { LocalCliSettings } = await import('./settings/LocalCliSettings');
+    render(<LocalCliSettings />);
     await waitFor(() =>
       expect(screen.getByTestId('codex-daemon-settings')).toBeInTheDocument(),
     );
   });
 
-  it('no longer renders the retired per-task model selectors', async () => {
-    render(<AISettings settings={settings} onSave={vi.fn()} />);
-    await waitFor(() =>
-      expect(screen.getByTestId('codex-daemon-settings')).toBeInTheDocument(),
-    );
+  it('the providers section has neither the daemon card nor retired selectors', async () => {
+    render(<AISettings settings={settings} onSave={vi.fn()} section="providers" />);
+    await waitFor(() => expect(screen.getByText('AI Providers')).toBeInTheDocument());
+    expect(screen.queryByTestId('codex-daemon-settings')).toBeNull();
     expect(screen.queryByText('Whisper Model')).toBeNull();
     expect(screen.queryByText('Summary Model')).toBeNull();
     expect(screen.queryByText('Analysis Model')).toBeNull();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, User, FolderOpen, Key, ScrollText, ListTodo, Tag, Sparkles, FileText, Users, Cookie, GitBranch,
+  KeyRound, TerminalSquare, Plug, Brain,
 } from 'lucide-react';
 import { fetchCookieStatuses, CookieStatus } from '../services/cookiesService';
 import { PersonalSettings } from './PersonalSettings';
@@ -11,7 +12,7 @@ import { VersionBadge } from './VersionBadge';
 
 declare const __APP_VERSION__: string;
 
-type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies' | 'workflow';
+type SettingsTab = 'personal' | 'team' | 'general' | 'api' | 'logs' | 'tasks' | 'tags' | 'ai' | 'ai-providers' | 'local-cli' | 'mcp' | 'memory' | 'docs' | 'cookies' | 'workflow';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -75,6 +76,10 @@ const APP_SETTINGS_SECTION: NavSection = {
     { id: 'tags', label: 'Tags', icon: Tag },
     { id: 'workflow', label: 'Workflow Templates', icon: GitBranch },
     { id: 'ai', label: 'AI', icon: Sparkles },
+    { id: 'ai-providers', label: 'AI Providers', icon: KeyRound },
+    { id: 'local-cli', label: 'Local CLI', icon: TerminalSquare },
+    { id: 'mcp', label: 'MCP', icon: Plug },
+    { id: 'memory', label: 'Memory', icon: Brain },
     { id: 'docs', label: 'API Docs', icon: FileText },
     { id: 'cookies', label: 'Cookies', icon: Cookie },
   ],
@@ -90,6 +95,10 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   tags: 'Tags',
   workflow: 'Workflow Templates',
   ai: 'AI',
+  'ai-providers': 'AI Providers',
+  'local-cli': 'Local CLI',
+  mcp: 'MCP',
+  memory: 'Memory',
   docs: 'API Docs',
   cookies: 'Cookies',
 };

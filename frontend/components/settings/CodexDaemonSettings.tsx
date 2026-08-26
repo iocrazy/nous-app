@@ -15,6 +15,7 @@ import {
   isDeviceOnline,
   type CodexDevice,
 } from '../../services/codexDaemonService';
+import { deviceEnvReport, EnvReportLine } from './LocalCliSettings';
 
 export function CodexDaemonSettings() {
   const [devices, setDevices] = useState<CodexDevice[]>([]);
@@ -155,6 +156,7 @@ export function CodexDaemonSettings() {
                       ? `last seen ${new Date(d.last_seen_at).toLocaleString()}`
                       : 'never connected'}
                   </div>
+                  <EnvReportLine report={deviceEnvReport(d)} />
                 </div>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
