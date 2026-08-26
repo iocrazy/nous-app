@@ -62,9 +62,11 @@ def build_image_args(
         f"--prompt={prompt}",
         f"--ratio={ratio}",
         f"--poll={poll}",
+        # The CLI marks resolution_type REQUIRED (verified live 2026-08-26:
+        # `required flag(s) "resolution_type" not set`) — default to 2k, the
+        # CLI's own normalization target for unknown values.
+        f"--resolution_type={resolution_type or '2k'}",
     ]
-    if resolution_type:
-        args.append(f"--resolution_type={resolution_type}")
     if model_version:
         args.append(f"--model_version={model_version}")
     return args
