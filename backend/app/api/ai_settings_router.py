@@ -286,18 +286,47 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
         raise HTTPException(status_code=500, detail="Failed to save AI settings")
 
 
+async def _stored_provider_config(user_id: str, provider_key: str) -> dict | None:
+    """Decrypted stored config for one provider, or None when absent."""
+    try:
+        repo = UserSettingsRepository()
+        settings = await repo.get_by_user_id(user_id)
+        blob = (settings or {}).get("settings_json") or {}
+        providers = (blob.get(_AI_SETTINGS_KEY) or {}).get("ai_providers") or {}
+        revealed = reveal_byok_providers(providers, user_id=str(user_id))
+        cfg = revealed.get(provider_key)
+        return dict(cfg) if isinstance(cfg, dict) else None
+    except Exception as exc:
+        logger.warning("stored provider config load failed: {}", exc)
+        return None
+
+
 @router.post("/test-connection", response_model=TestConnectionResponse)
 async def test_ai_connection(body: TestConnectionRequest, auth: AuthDep):
     """Test AI provider connection.
 
     Validates that the provider is reachable and lists available models.
     """
+    # Secret-at-rest fallback (2026-08-26): the frontend cannot re-send a
+    # stored key (GET masks it), which used to leave Test Connection
+    # permanently disabled for saved providers. A blank key now means
+    # "test with what the server already holds".
+    api_key = body.api_key
+    app_id = body.app_id
+    base_url = body.base_url
+    if not api_key:
+        stored = await _stored_provider_config(auth.user_id, body.provider_key)
+        if stored:
+            api_key = stored.get("api_key") or api_key
+            app_id = app_id or stored.get("app_id")
+            base_url = base_url or stored.get("base_url")
+
     result = await AIProviderFactory.test_connection(
         provider_key=body.provider_key,
         config={
-            "api_key": body.api_key,
-            "app_id": body.app_id,
-            "base_url": body.base_url,
+            "api_key": api_key,
+            "app_id": app_id,
+            "base_url": base_url,
             "model": body.model,
         },
     )
