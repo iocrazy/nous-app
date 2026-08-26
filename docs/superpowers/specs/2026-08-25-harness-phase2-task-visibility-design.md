@@ -22,7 +22,7 @@
 | run_turn 的结束方式散落：正常 stop / preflight 拒绝(length) / cancelled / abort_reason / Max iterations —— 无类型化词表，UI 只见 completed/failed | `agent_runner.py:427-599` 各出口 |
 | W3-1（warm-prefix）在途：`summarize_warm_prefix` 已实现 8/11 绿，**3 个接线红灯未接**；worktree 未提交 | `.worktrees/feat-harness-w3-warm-prefix`（见 §6） |
 
-## 1. W3-1 收尾（在途，最先做）
+## 1. W3-1 收尾（✅ 已完成，PR #2008；本节留档）
 
 半成品接完即可，设计已定型（第一期已拍板成本挪移）：
 
@@ -129,7 +129,7 @@ class TurnEndReason(str, Enum):
 3. **errorChain**：`describe_llm_error` 已产完整描述；把 `exc.__cause__` 链逐层拼进
    `error_message`（每层 `type: msg`，截断按既有 500 字符预算），治 "fetch failed 掩盖真因"。
 
-## 6. W3-1 在途工作区快照（执行者直接取用）
+## 6. W3-1 在途工作区快照（已失效——工作区随 #2008 合并删除）
 
 ```
 worktree:  .worktrees/feat-harness-w3-warm-prefix   （分支 feat/harness-w3-warm-prefix，基于 ca1dd44c）

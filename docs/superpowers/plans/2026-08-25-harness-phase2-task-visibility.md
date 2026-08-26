@@ -37,6 +37,8 @@
 
 ### Task 1: W3-1 收尾 —— warm-prefix 接进 compactor 与 runner
 
+> **✅ 已完成（2026-08-26，PR #2008 合入 master `14a9ac61`）**。在途 worktree 已删除；下面的步骤留作记录，勿再执行。改判之外顺带做掉的：一期附录小刀"子进程环境擦洗"也已落地（PR #2009，`safe_popen_kwargs` 咽喉点统一擦洗，45 处 spawn 零改动覆盖）。
+
 **现成工作区**（不要新建）：`.worktrees/feat-harness-w3-warm-prefix`
 （分支 `feat/harness-w3-warm-prefix`，基 ca1dd44c，落后 master 若干——先
 `git fetch origin master && git rebase origin/master`，rebase 后重跑 11 测确认仍 8 绿 3 红）。
@@ -458,7 +460,7 @@ it('no reason recorded renders nothing — never an empty label', () => { /* exe
 ## 波次与 PR 依赖
 
 ```
-Task 1 (W3-1)          独立,最先 —— 在途工作区接完
+Task 1 (W3-1)          ✅ 已合入(#2008)
 Task 2 (mig 439)       独立 —— 合并后其余任务才能落事件
 Task 3 (todo 后端)  ─┐
 Task 5 (压缩括号)     ├─ 依赖 Task 2;彼此独立,可并行(各自 worktree)
