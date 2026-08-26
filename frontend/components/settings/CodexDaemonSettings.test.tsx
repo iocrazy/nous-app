@@ -3,6 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CodexDaemonSettings } from './CodexDaemonSettings';
 
+vi.mock('../../services/apiClient', () => ({
+  apiFetch: vi.fn().mockResolvedValue({
+    json: async () => ({
+      data: {
+        skill: { installed: true, version: '0.7.3', path: '/usr/local/bin/gpt-image-2-skill' },
+        codex: { installed: false, version: null, path: null },
+        auth_ok: true,
+      },
+    }),
+  }),
+}));
 vi.mock('../../services/codexDaemonService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/codexDaemonService')>();
   return {
@@ -64,5 +75,16 @@ describe('CodexDaemonSettings', () => {
     await waitFor(() =>
       expect(codexDaemonService.revokeDevice).toHaveBeenCalledWith('1'),
     );
+  });
+  it('Detect CLI shows the IC-style server readout', async () => {
+    render(<CodexDaemonSettings />);
+    fireEvent.click(screen.getByTestId('codex-detect-cli'));
+    await waitFor(() =>
+      expect(screen.getByTestId('codex-cli-readout')).toBeInTheDocument(),
+    );
+    const text = screen.getByTestId('codex-cli-readout').textContent ?? '';
+    expect(text).toContain('gpt-image-2-skill 0.7.3');
+    expect(text).toContain('/usr/local/bin/gpt-image-2-skill');
+    expect(text).toContain('OAuth session present');
   });
 });

@@ -88,6 +88,63 @@ async def _start_login_flow() -> Optional[dict]:
     return None
 
 
+# ── GPT CLI (codex) server-side detection ─────────────────────────────────
+# IC's 检测 CLI shows what ITS machine has; the nous equivalent for the
+# shared A-route runtime is what THIS container has. Per-device state comes
+# from each daemon's env_report — this endpoint covers the server column.
+
+codex_router = APIRouter(prefix="/codex-cli", tags=["Codex CLI"])
+
+
+async def _probe_codex_cli() -> dict:
+    import os
+    import re as _re
+    import shutil
+
+    async def _version_of(binary: str) -> Optional[str]:
+        try:
+            code, out, err = await asyncio.wait_for(
+                _exec_capture(binary, ["--version"]), timeout=10
+            )
+        except Exception:
+            return None
+        m = _re.search(r"\d+\.\d+[.\d]*", out + err)
+        return m.group(0) if m else None
+
+    async def _exec_capture(binary: str, args: list[str]):
+        proc = await asyncio.create_subprocess_exec(
+            binary,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        return (
+            proc.returncode or 0,
+            out.decode(errors="replace"),
+            err.decode(errors="replace"),
+        )
+
+    def _facet(binary: str, version: Optional[str]) -> dict:
+        path = shutil.which(binary)
+        return {"installed": bool(path), "version": version, "path": path}
+
+    skill_version = await _version_of("gpt-image-2-skill")
+    codex_version = await _version_of("codex")
+    auth_ok = os.path.exists(os.path.expanduser("~/.codex/auth.json"))
+    return {
+        "skill": _facet("gpt-image-2-skill", skill_version),
+        "codex": _facet("codex", codex_version),
+        "auth_ok": auth_ok,
+    }
+
+
+@codex_router.get("/status")
+async def codex_cli_status(auth: AuthDep) -> dict:
+    """Server-side GPT CLI inventory (skill / codex / OAuth session)."""
+    return {"data": await _probe_codex_cli()}
+
+
 @router.get("/status")
 async def jimeng_status(auth: AuthDep) -> dict:
     """Login + credit state of the server's shared dreamina account."""
