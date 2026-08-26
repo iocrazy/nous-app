@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Trash2, Loader2, Save, AlertTriangle, X } from 'lucide-react';
 import Loading from './common/Loading';
 import { useTranslation } from 'react-i18next';
@@ -20,6 +20,16 @@ import {
  */
 export const MemoryPanel: React.FC = () => {
   const { t } = useTranslation();
+  // `load` MUST keep an empty dep array: it seeds `cardDraft` from the server
+  // copy, and the effect below re-runs whenever `load`'s identity changes — so
+  // listing `t` there would make a language switch overwrite whatever the user
+  // is typing in the About-me box (the "useEffect-seeded prop swallows edits"
+  // family). The error fallback only needs the CURRENT language at the moment
+  // it throws, which a ref gives us without touching the callback identity.
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const [profile, setProfile] = useState<MemoryProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,11 +46,11 @@ export const MemoryPanel: React.FC = () => {
       setProfile(p);
       setCardDraft((p.card || []).join('\n'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('memory.errLoad'));
+      setError(err instanceof Error ? err.message : tRef.current('memory.errLoad'));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     load();

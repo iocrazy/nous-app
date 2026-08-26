@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,15 @@ import { getAIHealth, type CapabilityHealth } from '../services/aiService';
  */
 export const AIHealthBoard: React.FC = () => {
   const { t } = useTranslation();
+  // `load` MUST keep an empty dep array: the effect below re-runs on every
+  // change of its identity, and that effect deliberately defers a SLOW health
+  // probe to idle time. Listing `t` would re-fire that probe on every language
+  // switch. The error fallback reads the current language through a ref
+  // instead, which leaves the callback identity stable.
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const [rows, setRows] = useState<CapabilityHealth[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +32,11 @@ export const AIHealthBoard: React.FC = () => {
     try {
       setRows(await getAIHealth());
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('aiHealth.loadError'));
+      setError(err instanceof Error ? err.message : tRef.current('aiHealth.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, []);
 
   // Defer the initial probe to idle time so this board's (potentially slow)
   // real health check never competes with the first paint of the AI settings

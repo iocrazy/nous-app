@@ -849,11 +849,21 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
             modelCount > 0 ? `${modelCount} models available` : 'Connection OK',
           ).catch((e) => console.error('[AISettings] reportProviderHealth failed:', e));
         } else {
-          const detail = t('aiSettings.errServerStatus', { status: response.status });
+          // Two audiences, two strings. `reportDetail` is PERSISTED by the
+          // backend (user_settings.provider_health) and later stitched into
+          // English operator hints (ai_health.py), so it must stay an English
+          // literal — same style as the 'Connection OK' success branch above.
+          // Only `displayDetail` is read by this page, so only that one is
+          // localized. Sending the localized copy to the backend would write
+          // the user's UI language into shared health data.
+          const reportDetail = `Server responded with status ${response.status}`;
+          const displayDetail = t('aiSettings.errServerStatus', {
+            status: response.status,
+          });
           setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-          setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
+          setConnectionError((prev) => ({ ...prev, [providerKey]: displayDetail }));
           markTested();
-          reportProviderHealth(providerKey, 'fail', detail).catch((e) =>
+          reportProviderHealth(providerKey, 'fail', reportDetail).catch((e) =>
             console.error('[AISettings] reportProviderHealth failed:', e),
           );
         }
@@ -884,19 +894,28 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave, sectio
         markTested();
       }
     } catch (err) {
-      const detail = err instanceof Error ? err.message : t('aiSettings.errConnectionFailed');
+      // Same split as the non-ok branch above: the persisted copy stays
+      // English, only the on-screen copy goes through i18n. An Error message
+      // is upstream text and identical on both paths.
+      const reportDetail = err instanceof Error ? err.message : 'Connection failed';
+      const displayDetail =
+        err instanceof Error ? err.message : t('aiSettings.errConnectionFailed');
       setConnectionStatus((prev) => ({ ...prev, [providerKey]: 'error' }));
-      setConnectionError((prev) => ({ ...prev, [providerKey]: detail }));
+      setConnectionError((prev) => ({ ...prev, [providerKey]: displayDetail }));
       markTested();
       // Local test threw (timeout / network) — the backend never saw it, so
       // report the failure here. Cloud failures are already persisted server-side.
       if (isLocal) {
-        reportProviderHealth(providerKey, 'fail', detail).catch((e) =>
+        reportProviderHealth(providerKey, 'fail', reportDetail).catch((e) =>
           console.error('[AISettings] reportProviderHealth failed:', e),
         );
       }
     }
-  }, [localSettings.providers]);
+    // `t` belongs here: the callback localizes the two display strings above.
+    // Nothing subscribes to this callback's identity (it is only wired to the
+    // Test Connection onClick), so re-creating it on a language switch costs
+    // nothing and re-running is impossible.
+  }, [localSettings.providers, t]);
 
   // Save handler - persists to API then updates local state
   const handleSave = async () => {
