@@ -644,7 +644,8 @@
       "gateDeclarationRejected": "自主声明被拒绝 — 请换一项，或保持不设置。",
       "gateUnknownVisibility": "该平台不支持这个可见性设置。",
       "gateUnknownReason": "发布请求被拒绝（{{reason}}）。",
-      "schedulePick": "选择时间"
+      "schedulePick": "选择时间",
+      "chooseCover": "选择封面"
     },
     "records": {
       "title": "记录",

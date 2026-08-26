@@ -2636,6 +2636,7 @@ export const PublishPage: React.FC = () => {
                   sources={selectedVideoObjs}
                   value={covers}
                   onChange={setCovers}
+                  onOpenStudio={() => setCoverStudioOpen(true)}
                 />
                 <div className="cover-ai">
                   <div className="head">

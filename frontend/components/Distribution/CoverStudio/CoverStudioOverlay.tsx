@@ -16,7 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Sparkles } from 'lucide-react';
+import { Sparkles, X } from 'lucide-react';
 
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
@@ -258,13 +258,20 @@ export function CoverStudioOverlay({
   if (!open) return null;
 
   return (
+    // Same chrome as SettingsModal: dimmed, blurred backdrop that closes on
+    // click, and a centred rounded panel. Cover Studio used to take the whole
+    // viewport, which read as "I navigated to another page" — the platform's
+    // own cover editor is a dialog over the publish form, and that is the
+    // mental model the user already has.
     <div
-      className="cover-studio cs-overlay"
+      className="cover-studio cs-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={t('distribution.coverStudio.title', 'Cover Studio')}
       data-testid="cover-studio-overlay"
     >
+      <div className="cs-scrim" onClick={onClose} data-testid="cover-studio-scrim" />
+      <div className="cs-modal">
       <div className="cs-top">
         <div>
           <h1>
@@ -281,9 +288,14 @@ export function CoverStudioOverlay({
             {topic.trim() ? ` · ${topic.trim()}` : null}
           </div>
         </div>
-        <button type="button" className="cs-back" onClick={onClose} data-testid="cover-studio-back">
-          <ArrowLeft size={14} />
-          {t('distribution.coverStudio.backToPublish', 'Back to publish')}
+        <button
+          type="button"
+          className="cs-close"
+          onClick={onClose}
+          aria-label={t('common.close', 'Close')}
+          data-testid="cover-studio-back"
+        >
+          <X size={20} />
         </button>
       </div>
 
@@ -523,6 +535,7 @@ export function CoverStudioOverlay({
             }}
           />
         </div>
+      </div>
       </div>
     </div>
   );

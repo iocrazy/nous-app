@@ -802,23 +802,71 @@
 
 /* ── The overlay shell ──────────────────────────────────────────────────── */
 
-/* A LAYER over the publish page, not a route: the ~75 pieces of publish form
-   state stay alive underneath, and "Back to publish" is literally true. */
-.cover-studio.cs-overlay {
+/* A DIALOG over the publish page, not a route: the ~75 pieces of publish form
+   state stay alive underneath. Chrome copied from SettingsModal (fixed inset-0,
+   bg-black/60 backdrop-blur-sm scrim, centred max-w-6xl / 82vh rounded-2xl
+   panel) so the two dialogs read as one family. */
+.cover-studio.cs-backdrop {
   position: fixed;
   inset: 0;
   z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-studio .cs-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.cover-studio .cs-modal {
+  position: relative;
+  width: 100%;
+  max-width: 1152px;
+  height: 82vh;
+  margin: 0 16px;
+  background: var(--island);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cover-studio .cs-modal > .cs-cols {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  background: var(--app-bg, var(--island));
-  padding: 22px 20px 60px;
+  padding: 16px 20px 24px;
+}
+
+.cover-studio .cs-close {
+  margin-left: auto;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--content-3);
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.cover-studio .cs-close:hover {
+  color: var(--content);
+  background: var(--island-2);
 }
 
 .cover-studio .cs-top {
-  max-width: 1180px;
-  margin: 0 auto 18px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
 .cover-studio .cs-top h1 {
@@ -858,8 +906,6 @@
 }
 
 .cover-studio .cs-cols {
-  max-width: 1180px;
-  margin: 0 auto;
   display: grid;
   grid-template-columns: 348px minmax(0, 1fr);
   gap: 18px;

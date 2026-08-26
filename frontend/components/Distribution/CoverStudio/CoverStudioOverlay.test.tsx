@@ -354,3 +354,31 @@ describe('CoverStudioOverlay — apply', () => {
     );
   });
 });
+
+describe('CoverStudioOverlay — dialog chrome', () => {
+  it('closes when the scrim is clicked, like SettingsModal', () => {
+    const onClose = vi.fn();
+    render(
+      <I18nextProvider i18n={makeI18n()}>
+        <CoverStudioOverlay open scopeId="42" sources={[VIDEO]} topic="x" onClose={onClose} onApply={vi.fn()} />
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('cover-studio-scrim'));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes from the corner X', () => {
+    const onClose = vi.fn();
+    render(
+      <I18nextProvider i18n={makeI18n()}>
+        <CoverStudioOverlay open scopeId="42" sources={[VIDEO]} topic="x" onClose={onClose} onApply={vi.fn()} />
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('cover-studio-back'));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
