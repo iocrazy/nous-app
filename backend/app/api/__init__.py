@@ -244,6 +244,7 @@ from app.api.codex_daemon_router import router as codex_daemon_router  # noqa: E
 from app.api.codex_daemon_ws_router import (  # noqa: E402
     router as codex_daemon_ws_router,
 )
+from app.api.jimeng_cli_router import codex_router as codex_cli_router  # noqa: E402
 from app.api.jimeng_cli_router import router as jimeng_cli_router  # noqa: E402
 
 # A 路线 (2026-05-04, session 2/3): 任务集 / 用户定时 / 4-Lane 优先级 / WS ticket
@@ -258,6 +259,7 @@ api_router.include_router(router=schedules_router, tags=["Schedules"])
 api_router.include_router(router=lanes_router, tags=["Lanes"])
 api_router.include_router(router=codex_daemon_router, tags=["Codex Daemon"])
 api_router.include_router(router=jimeng_cli_router, tags=["Jimeng CLI"])
+api_router.include_router(router=codex_cli_router, tags=["Codex CLI"])
 api_router.include_router(router=codex_daemon_ws_router, tags=["Codex Daemon"])
 api_router.include_router(router=ws_ticket_router, tags=["WS Ticket"])
 
