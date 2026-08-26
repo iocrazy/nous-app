@@ -71,7 +71,8 @@ async def test_second_device_for_same_user_coexists():
 @pytest.mark.asyncio
 async def test_ws_auth_resolves_device_by_token_hash(monkeypatch):
     """The daemon socket authenticates with its device token (hashed lookup);
-    unknown/revoked tokens are refused before accept()."""
+    unknown/revoked tokens resolve to None and are refused (see
+    test_unauthenticated_socket_is_accepted_then_closed for how)."""
     import sys
 
     import app.main  # noqa: F401  (populate sys.modules)
@@ -89,3 +90,45 @@ async def test_ws_auth_resolves_device_by_token_hash(monkeypatch):
     assert await mod.authenticate_device("good") == {"id": "d1", "user_id": "u1"}
     assert await mod.authenticate_device("bad") is None
     assert await mod.authenticate_device("") is None
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_socket_is_accepted_then_closed(monkeypatch):
+    """A rejected daemon MUST be accept()ed before close(4001).
+
+    Closing an unaccepted WebSocket makes uvicorn fail the HTTP handshake with
+    403 and throw the close code away — the daemon then only sees 1006, which
+    it correctly treats as a transient network error and retries forever. Since
+    find_by_token_hash filters `revoked_at IS NULL`, a *revoked* device that
+    reconnects lands on exactly this path (not on 4003), so getting the order
+    wrong makes revocation unenforceable for any device that was offline when
+    it was revoked.
+    """
+    import sys
+
+    import app.main  # noqa: F401  (populate sys.modules)
+
+    mod = sys.modules["app.api.codex_daemon_ws_router"]
+
+    calls: list[tuple] = []
+
+    class _RejectedWS:
+        headers = {"authorization": "Bearer revoked-or-unknown"}
+
+        async def accept(self) -> None:
+            calls.append(("accept",))
+
+        async def close(self, code: int = 1000, reason: str = "") -> None:
+            calls.append(("close", code, reason))
+
+    async def _no_device(_hashed: str):
+        return None
+
+    monkeypatch.setattr(mod, "_lookup_device", _no_device)
+    await mod.ws_codex_agent(_RejectedWS())
+
+    assert [c[0] for c in calls] == [
+        "accept",
+        "close",
+    ], f"accept() must come first, got {calls}"
+    assert calls[1][1] == 4001
