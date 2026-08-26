@@ -313,7 +313,7 @@ export const MCPServersPanel: React.FC = () => {
       {/* List */}
       <div className="flex-1 overflow-y-auto">
         {loading && items.length === 0 ? (
-          <div className="text-center py-8 text-xs text-ink-500">Loading...</div>
+          <div className="text-center py-8 text-xs text-ink-500">{t('common.loading')}</div>
         ) : items.length === 0 ? (
           <div className="text-center py-12 text-sm text-ink-500">
             <Plug className="w-8 h-8 mx-auto mb-2 opacity-30" />

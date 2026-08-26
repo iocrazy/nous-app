@@ -6,9 +6,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryPanel } from './MemoryPanel';
 import type { MemoryProfile } from '../services/memoryService';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => k }),
-}));
+vi.mock('react-i18next', () => {
+  // Factory-scoped so `t` is referentially stable across renders, like the real hook.
+  const t = (k: string) => k;
+  return { useTranslation: () => ({ t }) };
+});
 
 const mockService = vi.hoisted(() => ({
   getMemoryProfile: vi.fn(),

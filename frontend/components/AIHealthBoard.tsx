@@ -23,11 +23,11 @@ export const AIHealthBoard: React.FC = () => {
     try {
       setRows(await getAIHealth());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load health');
+      setError(err instanceof Error ? err.message : t('aiHealth.loadError'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Defer the initial probe to idle time so this board's (potentially slow)
   // real health check never competes with the first paint of the AI settings

@@ -36,11 +36,11 @@ export const MemoryPanel: React.FC = () => {
       setProfile(p);
       setCardDraft((p.card || []).join('\n'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load memory');
+      setError(err instanceof Error ? err.message : t('memory.errLoad'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -54,7 +54,7 @@ export const MemoryPanel: React.FC = () => {
       await setMemoryPrefs({ [key]: next });
     } catch (err) {
       setProfile({ ...profile, [key]: !next }); // revert on failure
-      setError(err instanceof Error ? err.message : 'Failed to update');
+      setError(err instanceof Error ? err.message : t('memory.errUpdate'));
     }
   };
 
@@ -69,7 +69,7 @@ export const MemoryPanel: React.FC = () => {
       await setMemoryCard(lines);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : t('memory.errSave'));
     } finally {
       setSavingCard(false);
     }
@@ -84,7 +84,7 @@ export const MemoryPanel: React.FC = () => {
     try {
       await deleteMemoryObservation(id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete');
+      setError(err instanceof Error ? err.message : t('memory.errDelete'));
       load();
     }
   };
@@ -97,7 +97,7 @@ export const MemoryPanel: React.FC = () => {
       setConfirmForget(false);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to forget');
+      setError(err instanceof Error ? err.message : t('memory.errForget'));
     } finally {
       setBusy(false);
     }

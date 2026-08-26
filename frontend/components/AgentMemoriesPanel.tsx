@@ -137,7 +137,7 @@ export const AgentMemoriesPanel: React.FC = () => {
                           <button
                             onClick={() => setConfirmDeleteId(null)}
                             className="p-1 text-ink-500 hover:text-ink-300 transition-colors"
-                            aria-label="cancel"
+                            aria-label={t('common.cancel')}
                           >
                             <X size={13} />
                           </button>
