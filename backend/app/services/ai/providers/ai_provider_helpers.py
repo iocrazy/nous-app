@@ -335,6 +335,8 @@ async def resolve_db_adapter(
     model: str,
     module: str,
     user_provider_config: Optional[Dict[str, Any]] = None,
+    *,
+    user_id: Optional[str] = None,
 ):
     """DB-first adapter resolution (铁律 2026-07-07: LLM credentials never
     come from env). Order:
@@ -351,6 +353,11 @@ async def resolve_db_adapter(
     health panel, dead in canvas). The final fallback is the
     OpenAI-compatible adapter — the same base_url + /chat/completions
     contract the health probe validates against this row.
+
+    ``user_id`` is not a credential — it is routing context for protocols that
+    dispatch per-user (``codex-local`` runs the turn on that user's own paired
+    machine). Callers with no user in hand may omit it; ``codex-local`` then
+    refuses to build instead of dialing someone else's daemon.
     """
     from app.services.ai.adapters.factory import (
         get_adapter_for_key,
@@ -363,7 +370,9 @@ async def resolve_db_adapter(
         actual_provider, cfg, actual_model = hit
         creds = {"api_key": cfg["api_key"], "base_url": cfg["base_url"]}
         provider_key = resolve_provider_key(actual_provider, actual_model)
-        return get_adapter_for_key(provider_key, actual_model, {provider_key: creds})
+        return get_adapter_for_key(
+            provider_key, actual_model, {provider_key: creds}, user_id=user_id
+        )
 
     return get_adapter_for_user(model, user_provider_config or {}, None)
 

@@ -3341,6 +3341,7 @@
     "retry": "Retry",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
+    "localModelPlainTextHint": "Local Codex runs as plain text: Skills and tools bound to this agent will be rejected at run time.",
     "tabs": {
       "agents": "Agents",
       "skills": "Skills"
@@ -4712,7 +4713,11 @@
       "providerUnreachable": "The AI model provider is unreachable. Try again shortly.",
       "providerAuth": "The AI provider rejected the platform credentials. The team has been notified.",
       "providerBadModel": "The configured AI model is unavailable.",
-      "taskTimeout": "The AI model took too long to respond. Try again."
+      "taskTimeout": "The AI model took too long to respond. Try again.",
+      "localDaemonOffline": "Your local codex daemon is not connected. Start it on your machine (Settings → AI → Local CLI) and try again.",
+      "localToolsUnsupported": "Local Codex cannot run tools or Skills. Unbind them from this agent or pick another model.",
+      "localCodexNotLoggedIn": "Your local codex CLI is not logged in. Run `codex login` on your machine.",
+      "localCodexFailed": "Local Codex failed to produce a reply. Check the daemon log on your machine."
     }
   },
   "issueDetail": {

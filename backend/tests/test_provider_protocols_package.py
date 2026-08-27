@@ -15,7 +15,7 @@ from app.services.ai.provider_protocols.base import (
 @pytest.mark.unit
 def test_public_api_unchanged():
     assert pp.chat_provider_keys() == frozenset(
-        {"claude", "deepseek", "doubao", "openai", "modelscope", "qwen"}
+        {"claude", "codex-local", "deepseek", "doubao", "openai", "modelscope", "qwen"}
     )
     assert pp.generation_keys_for("ark") == frozenset({"doubao", "ark"})
     assert pp.generation_keys_for("jimeng-cli") == frozenset({"jimeng-cli", "jimeng"})

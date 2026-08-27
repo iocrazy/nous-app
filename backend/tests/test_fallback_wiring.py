@@ -207,3 +207,23 @@ async def test_batch_module_kwarg_passed_to_resolve_mediahub_model():
         )
     rmm.assert_any_call("doubao-seed-1-6", "caption")
     rmm.assert_any_call("doubao-seed-fallback", "caption")
+
+
+@pytest.mark.asyncio
+async def test_user_id_reaches_get_adapter_for_key():
+    hit = ("codex-local", {"api_key": "", "base_url": ""}, "")
+    with (
+        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=hit)),
+        patch.object(fw, "resolve_provider_key", MagicMock(return_value="codex-local")),
+        patch.object(fw, "get_adapter_for_key", MagicMock(return_value="LOCAL")) as gak,
+        patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
+    ):
+        chain = await fw.build_fallback_llm(
+            primary_model="Codex (Local)",
+            fallback_models=[],
+            user_provider_config={},
+            user_id="u7",
+        )
+    gak.assert_called_once()
+    assert gak.call_args.kwargs.get("user_id") == "u7"
+    assert chain.adapter_factory("Codex (Local)") == "LOCAL"

@@ -17,7 +17,9 @@ class QwenProtocol(ProviderProtocol):
     is_chat_key = True
     is_default = True
 
-    def build_chat_adapter(self, model: str, creds: dict[str, Any]) -> Any:
+    def build_chat_adapter(
+        self, model: str, creds: dict[str, Any], **context: Any
+    ) -> Any:
         # Qwen-compatible endpoints have no universal public URL — the
         # base_url IS part of the credential set, so it must come from the
         # DB (platform catalog or BYOK). Unlike every other provider, qwen

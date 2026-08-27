@@ -54,6 +54,13 @@ interface AgentPersonaTabProps {
   modelHealth?: Record<string, ModelHealth>;
   /** Localized warning suffixes for failing models, passed to the picker. */
   unhealthyModelLabels?: Record<string, string>;
+  /**
+   * Platform model names that run on the USER's own machine (backend
+   * `is_local`). Passed in rather than matched by name here — the display
+   * name is admin-editable, and a hint keyed on a guessed string would go
+   * quiet the moment someone renamed the row.
+   */
+  localModelNames: string[];
   localSkillIds: number[];
   allSkills: AILibrarySkill[] | null;
   skillsLoading: boolean;
@@ -71,6 +78,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   modelGroups,
   modelHealth,
   unhealthyModelLabels,
+  localModelNames,
   localSkillIds,
   allSkills,
   skillsLoading,
@@ -248,6 +256,18 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
             noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
             unhealthyLabels: unhealthyModelLabels,
           })}
+          {/* The local Codex link is plain text — no tool calling — so the
+              backend rejects a run whose agent has Skills or tools bound
+              (`local_tools_unsupported`). Saying it here, at the moment the
+              two settings become incompatible, beats letting the user find
+              out from an error code after sending a message. Both halves are
+              required: with nothing bound there is nothing to reject, and a
+              warning that is always on is a warning nobody reads. */}
+          {localModelNames.includes(draft.model ?? '') && localSkillIds.length > 0 && (
+            <p className="mt-1 text-xs text-warn" data-testid="local-model-plain-text-hint">
+              {t('aiLibrary.localModelPlainTextHint')}
+            </p>
+          )}
           {selectedHealth?.status === 'fail' && (
             <div
               data-testid="model-health-warning"

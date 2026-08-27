@@ -21,6 +21,12 @@ describe('providerErrorMessage', () => {
     ['provider_auth', 'errors.provider.providerAuth'],
     ['provider_bad_model', 'errors.provider.providerBadModel'],
     ['task_timeout', 'errors.provider.taskTimeout'],
+    // codex-local 的四个码(backend/app/services/ai/error_catalog.py)。走的是同一条
+    // SSE error 通道,所以共用这份映射——本机链路的失败不该退化成通用兜底文案。
+    ['local_daemon_offline', 'errors.provider.localDaemonOffline'],
+    ['local_tools_unsupported', 'errors.provider.localToolsUnsupported'],
+    ['local_codex_not_logged_in', 'errors.provider.localCodexNotLoggedIn'],
+    ['local_codex_failed', 'errors.provider.localCodexFailed'],
   ])('maps known code %s to i18n key %s', (code, expectedKey) => {
     expect(providerErrorMessage(code, t)).toBe(`${expectedKey}|${code}`);
   });

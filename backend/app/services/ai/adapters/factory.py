@@ -24,7 +24,7 @@ reading env.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.provider_protocols import chat_provider_keys as _chat_keys
@@ -139,6 +139,8 @@ def get_adapter_for_key(
     provider_key: str,
     model: str,
     user_provider_config: Dict[str, Any],
+    *,
+    user_id: Optional[str] = None,
 ) -> AIAdapter:
     """Build an adapter for an EXPLICITLY named provider key.
 
@@ -146,8 +148,16 @@ def get_adapter_for_key(
     on that instead of guessing from the model prefix, which breaks for models
     like ``qwen3-6-35b`` that no prefix rule knows. ``provider_key`` must be
     one of the buildable keys (see ``resolve_provider_key``).
+
+    ``user_id`` is NOT a credential — it is the routing target for protocols
+    that dispatch per-user (``codex-local`` runs the turn on THAT user's own
+    paired machine). Every other protocol ignores it. Callers with no user in
+    hand may omit it; ``codex-local`` then refuses to build rather than dial
+    an arbitrary daemon.
     """
-    return _build_adapter_for_key(provider_key, model, user_provider_config, None)
+    return _build_adapter_for_key(
+        provider_key, model, user_provider_config, None, user_id=user_id
+    )
 
 
 def _build_adapter_for_key(
@@ -155,6 +165,8 @@ def _build_adapter_for_key(
     model: str,
     user_provider_config: Dict[str, Any],
     fallback_settings: Any,
+    *,
+    user_id: Optional[str] = None,
 ) -> AIAdapter:
     user_cfg = (user_provider_config or {}).get(provider_key, {}) or {}
 
@@ -189,6 +201,7 @@ def _build_adapter_for_key(
                     provider_key: {**user_cfg, "api_key": key},
                 },
                 fallback_settings,
+                user_id=user_id,
             )
 
         return RotatingAdapter(rotator, _build_with_key)
@@ -200,5 +213,5 @@ def _build_adapter_for_key(
 
     protocol = get_chat_protocol(provider_key)
     return protocol.build_chat_adapter(
-        model, {"api_key": user_key, "base_url": user_base}
+        model, {"api_key": user_key, "base_url": user_base}, user_id=user_id
     )

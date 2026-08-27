@@ -54,9 +54,17 @@ class ProviderProtocol:
     is_default: bool = False
 
     # ---- capability hooks (default: unsupported) --------------------
-    def build_chat_adapter(self, model: str, creds: dict[str, Any]) -> Any:
+    def build_chat_adapter(
+        self, model: str, creds: dict[str, Any], **context: Any
+    ) -> Any:
         """Build a chat/embedding/asr AIAdapter from a single-provider cred
-        dict ``{"api_key": str, "base_url": str}``."""
+        dict ``{"api_key": str, "base_url": str}``.
+
+        ``context`` carries call-site facts that are NOT credentials. Today the
+        only key is ``user_id``, consumed solely by protocols that route
+        per-user (``codex-local`` dials THAT user's paired daemon). Every other
+        protocol accepts and ignores it — the factory passes it unconditionally,
+        so a subclass that omits ``**context`` would TypeError on every build."""
         raise ProtocolCapabilityError(self.key, "chat")
 
     def build_image_provider(self, row: dict[str, Any]) -> Any:

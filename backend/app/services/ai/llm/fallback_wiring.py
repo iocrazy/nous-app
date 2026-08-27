@@ -69,6 +69,7 @@ async def build_fallback_llm(
     user_provider_config: Optional[dict],
     provider_key: Optional[str] = None,
     module: str = "chat",
+    user_id: Optional[str] = None,
 ) -> LLMFallbackChain:
     """Build the fallback-wrapped adapter chain (DB-only credentials).
 
@@ -104,6 +105,13 @@ async def build_fallback_llm(
     ``git show d48cd956~1`` for the pre-fallback-chain original) faithfully,
     so a primary whose provider the factory can't derive doesn't get treated
     as ``adapter_init_failed`` and skipped straight to a fallback model.
+
+    ``user_id`` is consumed ONLY by protocols that route per-user (today just
+    ``codex-local``, which dispatches the turn to that user's own paired
+    machine); every other protocol ignores it. It is not a credential and does
+    not participate in resolution — batch callers that have no user may leave
+    it unset, and ``codex-local`` then refuses to build rather than dial an
+    arbitrary daemon.
     """
     # Pre-resolve every model the fallback chain may dial against the platform
     # ``mediahub_models`` catalog (async — the factory below must stay sync for
@@ -124,7 +132,9 @@ async def build_fallback_llm(
             # models like ``qwen3-6-35b`` and killed EVERY chat turn at
             # stack-build time (prod 2026-07-06→13).
             _key = resolve_provider_key(_prov, _actual)
-            _platform_adapters[_m] = get_adapter_for_key(_key, _actual, {_key: _creds})
+            _platform_adapters[_m] = get_adapter_for_key(
+                _key, _actual, {_key: _creds}, user_id=user_id
+            )
 
     # Captured as a local now (not re-looked-up from the module global at
     # call time) so the returned chain's ``adapter_factory`` keeps working

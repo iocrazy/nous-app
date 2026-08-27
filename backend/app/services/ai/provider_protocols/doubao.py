@@ -12,7 +12,9 @@ class DoubaoProtocol(ProviderProtocol):
     model_types = ("llm", "embedding", "asr")
     is_chat_key = True
 
-    def build_chat_adapter(self, model: str, creds: dict[str, Any]) -> Any:
+    def build_chat_adapter(
+        self, model: str, creds: dict[str, Any], **context: Any
+    ) -> Any:
         from app.services.ai.adapters.doubao import DOUBAO_DEFAULT_URL, DoubaoAdapter
         from app.services.ai.provider_protocols.base import (
             ProviderNotConfiguredError,
