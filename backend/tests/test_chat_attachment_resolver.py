@@ -648,9 +648,7 @@ from app.services.ai.chat.chat_attachment_resolver import (  # noqa: E402
 
 def _res(n_atts: int = 1, failures=None) -> ResolveResult:
     # 只有 .attachments 的真假与 .failures 的 index 被读到,用轻量占位即可。
-    return ResolveResult(
-        attachments=[object()] * n_atts, failures=list(failures or [])
-    )
+    return ResolveResult(attachments=[object()] * n_atts, failures=list(failures or []))
 
 
 @pytest.mark.unit
