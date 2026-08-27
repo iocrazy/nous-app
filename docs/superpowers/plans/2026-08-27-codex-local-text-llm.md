@@ -1118,7 +1118,7 @@ INSERT INTO public.mediahub_models
     (name, display_name, type, actual_provider, actual_model, api_key,
      is_enabled, sort_order, description)
 VALUES
-    ('codex-local-text', 'Codex (Local)', 'llm', 'codex-local', '', '',
+    ('Codex (Local)', 'Codex (Local)', 'llm', 'codex-local', '', '',
      TRUE, 30,
      'Text generation on your own machine via the paired nous-codex daemon. Plain text only — no tools or Skills.')
 ON CONFLICT (name) DO NOTHING;
