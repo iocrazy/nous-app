@@ -520,3 +520,25 @@ class TestGenerationParamsFromGeneratedMedia:
             )
             is None
         )
+
+
+def test_generation_params_ratio_aliases_to_aspect_ratio():
+    """codex writes ``ratio``; the detail panel renders ``aspect_ratio``."""
+    from app.services.library.promote_generated_media_service import (
+        generation_params_from_generated_media,
+    )
+
+    out = generation_params_from_generated_media(
+        {"model": "gpt-5.4", "provider": "codex", "params": {"ratio": "1:1"}}
+    )
+    assert out == {
+        "tool": "nous",
+        "model": "gpt-5.4",
+        "provider": "codex",
+        "aspect_ratio": "1:1",
+    }
+    # explicit aspect_ratio wins over the alias
+    out = generation_params_from_generated_media(
+        {"model": "m", "params": {"ratio": "1:1", "aspect_ratio": "16:9"}}
+    )
+    assert out["aspect_ratio"] == "16:9"

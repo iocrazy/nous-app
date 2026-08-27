@@ -71,6 +71,11 @@ def generation_params_from_generated_media(gen: dict) -> Optional[dict]:
             if value is None or value == "" or value == []:
                 continue
             params[key] = value[:200] if isinstance(value, str) else value
+        # codex writes ``ratio``; the detail panel renders ``aspect_ratio``.
+        # Explicit aspect_ratio (set above) wins over the alias.
+        ratio = raw.get("ratio")
+        if "aspect_ratio" not in params and isinstance(ratio, str) and ratio:
+            params["aspect_ratio"] = ratio[:200]
     if not params:
         return None
     return {"tool": "nous", **params}
