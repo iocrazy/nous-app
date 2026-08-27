@@ -312,6 +312,33 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   // ─── Hide 'temp' from the top-level My Uploads FOLDERS grid ───────
   // Only filter at the root level (no folder selected) — navigating INTO
   // the temp folder explicitly must still work via the sidebar "Temp" item.
+  // Folder single-click opens the info panel, which shrinks the grid and
+  // reflows the auto-fill columns — moving the card out from under the second
+  // click of a double-click, so the dblclick never fires (or hits a neighbour).
+  // Same fix as files (ResourcesViewInner.handleResourceClick): defer the
+  // selection past the dblclick window and let a double-click cancel it.
+  const folderClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingFolderClick = () => {
+    if (folderClickTimerRef.current) {
+      clearTimeout(folderClickTimerRef.current);
+      folderClickTimerRef.current = null;
+    }
+  };
+  useEffect(() => cancelPendingFolderClick, []);
+  const deferFolderSelect = (folder: Folder) => {
+    cancelPendingFolderClick();
+    folderClickTimerRef.current = setTimeout(() => {
+      folderClickTimerRef.current = null;
+      setSelectedResource(null);
+      if (selectedFolder?.id === folder.id) {
+        setSelectedFolder(null);
+      } else {
+        setSelectedFolder(folder);
+        setShowInfoPanel(true);
+      }
+    }, 250);
+  };
+
   const visibleFolders = isResourcesView && !selectedFolderId && !selectedSmartFolderId && !selectedLibraryId
     ? filteredFolders.filter((f) => f.name !== 'temp')
     : filteredFolders;
@@ -961,16 +988,10 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         onClick={(e?: any) => {
                           onCardClick(`folder:${folder.id}`, e);
                           if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                            setSelectedResource(null);
-                            if (selectedFolder?.id === folder.id) {
-                              setSelectedFolder(null);
-                            } else {
-                              setSelectedFolder(folder);
-                              setShowInfoPanel(true);
-                            }
+                            deferFolderSelect(folder);
                           }
                         }}
-                        onDoubleClick={() => setRecycleFolderId(String(folder.id))}
+                        onDoubleClick={() => { cancelPendingFolderClick(); setRecycleFolderId(String(folder.id)); }}
                         previewItems={trashedFolderPreviews[String(folder.id)]}
                         selectable
                         isChecked={selectedIds.has(`folder:${folder.id}`)}
@@ -992,6 +1013,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
                       {visibleFolders.map((folder) => {
                         const folderNavigate = () => {
+                          cancelPendingFolderClick();
                           if (selectedLibraryId) {
                             navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                           } else {
@@ -1014,13 +1036,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                             }
                             onCardClick(`folder:${folder.id}`, e);
                             if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                              setSelectedResource(null);
-                              if (selectedFolder?.id === folder.id) {
-                                setSelectedFolder(null);
-                              } else {
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
-                              }
+                              deferFolderSelect(folder);
                             }
                           }}
                           onDoubleClick={folderNavigate}
@@ -1047,6 +1063,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     <div className="space-y-1.5">
                       {visibleFolders.map((folder) => {
                         const folderNavigate = () => {
+                          cancelPendingFolderClick();
                           if (selectedLibraryId) {
                             navigate(resPath(`/resources/library/${selectedLibraryId}/folder/${folder.id}`));
                           } else {
@@ -1069,13 +1086,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                             }
                             onCardClick(`folder:${folder.id}`, e);
                             if (!(e?.metaKey || e?.ctrlKey || e?.shiftKey)) {
-                              setSelectedResource(null);
-                              if (selectedFolder?.id === folder.id) {
-                                setSelectedFolder(null);
-                              } else {
-                                setSelectedFolder(folder);
-                                setShowInfoPanel(true);
-                              }
+                              deferFolderSelect(folder);
                             }
                           }}
                           onDoubleClick={folderNavigate}

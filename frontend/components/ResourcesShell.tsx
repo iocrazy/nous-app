@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ResourcesSidebar, type ResourcesSidebarProps } from './ResourcesSidebar';
 import { ResourcesInfoPanelWrapper } from './ResourcesInfoPanelWrapper';
@@ -57,8 +57,16 @@ export const ResourcesShell: React.FC<ResourcesShellProps> = ({ sidebarProps, in
   // reopen handle, so we reflect that into showInfoPanel (ResourcesContext stays the source of
   // truth). The collapse/hide direction flows the OTHER way (showInfoPanel→false drives effect 2),
   // never via setInfoVisible(false) from the shell — that asymmetry is what keeps this loop-free.
-  // Guarded so it can't loop.
-  useEffect(() => { if (!isDownloadsView && infoVisible && !showInfoPanel) setShowInfoPanel(true); }, [infoVisible, showInfoPanel, isDownloadsView, setShowInfoPanel]);
+  // Guarded on the RISING EDGE of infoVisible (false → true), not its level: in the
+  // commit where showInfoPanel flips to false, effect 2 has only *queued*
+  // infoVisible=false — this effect still reads the stale true, and a level check
+  // would flip showInfoPanel straight back, so the collapse button looked dead.
+  const prevInfoVisible = useRef(infoVisible);
+  useEffect(() => {
+    const rose = infoVisible && !prevInfoVisible.current;
+    prevInfoVisible.current = infoVisible;
+    if (!isDownloadsView && rose && !showInfoPanel) setShowInfoPanel(true);
+  }, [infoVisible, showInfoPanel, isDownloadsView, setShowInfoPanel]);
 
   return (
     <div className="flex h-full min-h-0">
