@@ -44,8 +44,8 @@ daemon 无 DB / API 写能力，只回 WS 帧。
   - 图片：`payload.image_urls` 走现有 `downloadRef`（只允许 nous API 主机，SSRF 守卫不变），落 workDir 后 `--image`
   - 解析 JSONL：`parseCodexExecOutput(text) -> {text, usage, thread_id}`（纯函数，可测）。没有 `agent_message` 时抛 `codex_no_output`；stderr / 非零退出按 §5 分类
   - 超时 180s（可由 payload.timeout_s 覆盖，上限 600）
-  - 返回 `{text, usage}`；`send({type:'job_done', job_id, text, usage})`——**修 `job_id` 缺失**（现状文本分支不带 `job_id`，ws router 按 `job_id` 发布结果，缺了 worker 会白等到超时）
-  - 结果超过 **900 KB**（留 uvicorn 1 MB 帧上限余量）→ 不发 WS 帧，改走现有 `upload_ticket` 上传 `.txt`，`job_done` 带 `text_gen_id`；后端从 generated_media 读回。第一版实现此分支并用单测钉住阈值；真链验证用一个 1 MB 的 prompt 让 codex 原样复述
+  - 返回 `{text, usage}`；`send({type:'job_done', text, usage, chunked:false})`（`send` 闭包已自动带 `job_id`）
+  - 结果超过 **900 KB**（留 uvicorn 1 MB 帧上限余量）→ 按 256 KB 切成 `{type:'job_chunk', seq, data}` 帧序列，末尾 `{type:'job_done', chunked:true, chunks:n, usage}`；ws router 拼接后一次发布。不走 upload ticket——那个端点只收 `image/*|video/*`，改它牵涉 generated_media 登记。单测钉住阈值与 UTF-8 边界；真链验证用一个 1 MB 的 prompt 让 codex 原样复述
 - 单测：`parseCodexExecOutput`（正常 / 无 agent_message / usage 缺失 / 多条 agent_message 取最后）、超长分流阈值、argv 构造（含 `-s read-only`、`-C`）
 
 ### 3.2 后端
@@ -54,7 +54,7 @@ daemon 无 DB / API 写能力，只回 WS 帧。
 - `user_id` 打通：`build_chat_adapter` 链路目前没有 `user_id`。给 `fallback_wiring.build_fallback_llm` / `ai_provider_helpers.resolve_db_adapter` 加 `user_id: str | None = None` 参数，`ai_library_chat_wiring.py:331` 处传入；其它 protocol 忽略该参数。协议基类 `build_chat_adapter` 签名加 `**kwargs` 兼容
 - `scope_id`：复用 `canvas_generation._resolve_personal_team_id(user_id)`（抽到 `app/services/codex/` 公共处，画布与 adapter 共用）
 - 错误映射（`LLMFallbackChain` 语义）：`DaemonOfflineError` / `TimeoutError` / `CodexLocalToolsUnsupported` / daemon 上报的 `codex_not_logged_in` / `cli_missing` 一律**不可重试、不进 fallback 池**（换服务器模型会静默改变"谁在付费"，用户没同意）。错误文案走现有类型化回显（`error_code` + 用户可读 `detail`）
-- 超长结果：`job_done.text_gen_id` 时从 generated_media 取文件内容
+- 超长结果：ws router 拼接 `job_chunk`，`chunks` 数不符 → `chunk_mismatch` 错误结果
 - 目录行 migration：`mediahub_models` 插入 `type='llm'`, `name='Codex (Local)'`, `actual_provider='codex-local'`, `actual_model=''`（空 = 用 codex 默认模型；用户可在 admin 改成具体型号）, `is_enabled=true`，无 owner（平台行，`is_local` 由 repository 派生）。取号前 `git fetch` 核最新编号
 - 记账：`usage` 直接映射 `prompt_tokens=input_tokens`, `completion_tokens=output_tokens`, `cached_input_tokens=cached_input_tokens`；`cost_cents=None`（`ai_usage.py:104` 允许，与 codex 出图不计费口径一致）
 
