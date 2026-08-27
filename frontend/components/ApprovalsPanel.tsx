@@ -34,16 +34,18 @@ interface ApprovalsPanelProps {
   onCountChange?: (count: number) => void;
 }
 
-function _formatExpires(iso: string | null): string {
+type Translate = (key: string, opts?: Record<string, unknown>) => string;
+
+function _formatExpires(iso: string | null, t: Translate): string {
   if (!iso) return '';
-  const t = new Date(iso).getTime();
-  const diff = t - Date.now();
-  if (diff <= 0) return 'expired';
+  const at = new Date(iso).getTime();
+  const diff = at - Date.now();
+  if (diff <= 0) return t('approvals.expired');
   const HOUR = 3600_000;
   if (diff < HOUR) {
-    return `${Math.round(diff / 60_000)}m left`;
+    return t('approvals.minutesLeft', { n: Math.round(diff / 60_000) });
   }
-  return `${Math.round(diff / HOUR)}h left`;
+  return t('approvals.hoursLeft', { n: Math.round(diff / HOUR) });
 }
 
 export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
@@ -170,7 +172,7 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
                       {req.expires_at && (
                         <span className="flex items-center gap-1">
                           <Clock className="w-2.5 h-2.5" />
-                          {_formatExpires(req.expires_at)}
+                          {_formatExpires(req.expires_at, t)}
                         </span>
                       )}
                     </div>

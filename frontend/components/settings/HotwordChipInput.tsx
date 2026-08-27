@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
 /**
@@ -36,6 +37,7 @@ export const HotwordChipInput: React.FC<HotwordChipInputProps> = ({
   disabled = false,
   placeholder,
 }) => {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const words = parseHotwords(value);
 
@@ -72,7 +74,7 @@ export const HotwordChipInput: React.FC<HotwordChipInputProps> = ({
           {word}
           <button
             type="button"
-            aria-label={`Remove ${word}`}
+            aria-label={t('aiSettings.hotwordRemove', { word })}
             onClick={() => removeAt(i)}
             disabled={disabled}
             className="p-0.5 rounded-full text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"

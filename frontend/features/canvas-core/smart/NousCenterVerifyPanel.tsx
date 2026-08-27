@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { apiFetch } from '../../../services/apiClient';
 
@@ -32,6 +33,7 @@ type ProbeState =
   | { kind: 'done'; result: VerifyResult };
 
 export function NousCenterVerifyPanel() {
+  const { t } = useTranslation();
   const [state, setState] = useState<ProbeState>({ kind: 'idle' });
 
   const run = useCallback(async () => {
@@ -43,7 +45,7 @@ export function NousCenterVerifyPanel() {
       const body = (await response.json()) as EnvelopeShape;
       const result = body?.data ?? {
         ok: false,
-        error: 'malformed response',
+        error: t('nousCenterVerify.malformed'),
       };
       setState({ kind: 'done', result });
     } catch (err) {
@@ -53,7 +55,7 @@ export function NousCenterVerifyPanel() {
         result: { ok: false, error: message },
       });
     }
-  }, []);
+  }, [t]);
 
   return (
     <section
@@ -63,12 +65,10 @@ export function NousCenterVerifyPanel() {
       <header className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            nous-center protocol
+            {t('nousCenterVerify.title')}
           </h3>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Pings the configured nous-center service to confirm the
-            workflow-provider contract is live. Uses the server-side
-            service token, not your account.
+            {t('nousCenterVerify.desc')}
           </p>
         </div>
         <button
@@ -77,7 +77,9 @@ export function NousCenterVerifyPanel() {
           disabled={state.kind === 'probing'}
           className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
         >
-          {state.kind === 'probing' ? 'Verifying…' : 'Verify protocol'}
+          {state.kind === 'probing'
+            ? t('nousCenterVerify.verifying')
+            : t('nousCenterVerify.verify')}
         </button>
       </header>
 
@@ -87,6 +89,7 @@ export function NousCenterVerifyPanel() {
 }
 
 function ProbeResult({ result }: { result: VerifyResult }) {
+  const { t } = useTranslation();
   if (result.ok) {
     return (
       <div
@@ -94,11 +97,11 @@ function ProbeResult({ result }: { result: VerifyResult }) {
         aria-live="polite"
         className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
       >
-        <p className="font-medium">✓ Service reachable</p>
+        <p className="font-medium">✓ {t('nousCenterVerify.reachable')}</p>
         <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-xs">
-          <dt>Base URL</dt>
+          <dt>{t('nousCenterVerify.baseUrl')}</dt>
           <dd className="truncate">{result.base_url}</dd>
-          <dt>Workflows visible</dt>
+          <dt>{t('nousCenterVerify.workflowsVisible')}</dt>
           <dd>{result.workflows_visible}</dd>
         </dl>
       </div>
@@ -111,10 +114,14 @@ function ProbeResult({ result }: { result: VerifyResult }) {
       className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200"
     >
       <p className="font-medium">
-        ✗ {result.status_code ? `HTTP ${result.status_code} — ` : ''}
-        verification failed
+        ✗{' '}
+        {result.status_code
+          ? t('nousCenterVerify.failedWithStatus', { status: result.status_code })
+          : t('nousCenterVerify.failed')}
       </p>
-      <p className="mt-1 text-xs">{result.error ?? 'unknown reason'}</p>
+      <p className="mt-1 text-xs">
+        {result.error ?? t('nousCenterVerify.unknownReason')}
+      </p>
     </div>
   );
 }

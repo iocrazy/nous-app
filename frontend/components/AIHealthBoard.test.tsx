@@ -6,12 +6,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { AIHealthBoard } from './AIHealthBoard';
 import type { CapabilityHealth } from '../services/aiService';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (k: string, o?: { count?: number }) =>
-      o?.count !== undefined ? `${k}:${o.count}` : k,
-  }),
-}));
+vi.mock('react-i18next', () => {
+  // Factory-scoped so `t` is referentially stable across renders, like the real hook.
+  const t = (k: string, o?: { count?: number }) =>
+    o?.count !== undefined ? `${k}:${o.count}` : k;
+  return { useTranslation: () => ({ t }) };
+});
 
 const mockService = vi.hoisted(() => ({ getAIHealth: vi.fn() }));
 vi.mock('../services/aiService', () => mockService);
