@@ -32,6 +32,10 @@ export function providerErrorMessage(
     'local_codex_failed',
     'local_ref_rejected',
     'local_cli_missing',
+    // 版本闸门(终审 I-2)。旧 daemon 收到文本任务不会报错,而是无沙箱执行、prompt
+    // 进 ps、把原始 JSONL 当回复返回——所以这条的文案必须指向"去更新",不能落到
+    // 通用兜底。
+    'local_daemon_outdated',
   ];
   if (typeof code !== 'string' || !KNOWN.includes(code)) return null;
   const key = code

@@ -31,6 +31,9 @@ describe('providerErrorMessage', () => {
     // 自己的电脑上,而且比其余四条更具体——装 CLI、换图片来源。
     ['local_ref_rejected', 'errors.provider.localRefRejected'],
     ['local_cli_missing', 'errors.provider.localCliMissing'],
+    // 版本闸门(终审 I-2)。这条的修复动作是「重跑安装命令」,跟其余任何一条都不同,
+    // 掉进通用兜底会让用户去查一个其实健康的 daemon 的日志。
+    ['local_daemon_outdated', 'errors.provider.localDaemonOutdated'],
   ])('maps known code %s to i18n key %s', (code, expectedKey) => {
     expect(providerErrorMessage(code, t)).toBe(`${expectedKey}|${code}`);
   });

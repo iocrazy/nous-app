@@ -4719,7 +4719,8 @@
       "localCodexNotLoggedIn": "Your local codex CLI is not logged in. Run `codex login` on your machine.",
       "localCodexFailed": "Local Codex failed to produce a reply. Check the daemon log on your machine.",
       "localRefRejected": "One of the attached images could not be used by your local daemon. Attach images from your nous library and try again.",
-      "localCliMissing": "The codex CLI is not installed on your machine. Run `npm i -g @openai/codex` and restart the daemon."
+      "localCliMissing": "The codex CLI is not installed on your machine. Run `npm i -g @openai/codex` and restart the daemon.",
+      "localDaemonOutdated": "Your local codex daemon is out of date. Re-run the install command from Settings → AI → Local CLI to update it."
     }
   },
   "issueDetail": {

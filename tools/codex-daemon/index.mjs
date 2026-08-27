@@ -26,6 +26,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** This daemon's own version, reported in `env_report` so the server can
+ *  refuse to send job kinds an older build would mishandle.
+ *
+ *  A literal, NOT a read of package.json: `install.sh` downloads this single
+ *  file to ~/.local/share/nous-codex/nous-codex.mjs, so in every real
+ *  installation there is no package.json next to it. Kept in sync with
+ *  package.json by `index.test.mjs` ("DAEMON_VERSION matches package.json"),
+ *  which is the only thing standing between the two copies.
+ *
+ *  Bump this whenever the server needs to tell old daemons apart from new
+ *  ones — see MIN_TEXT_DAEMON_VERSION in
+ *  backend/app/services/ai/adapters/codex_daemon.py. */
+export const DAEMON_VERSION = '0.3.0';
+
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
 /** Both the config dir and the systemd unit dir must agree on where
@@ -697,6 +711,10 @@ async function preflight() {
     log('note: dreamina not logged in — run: dreamina login');
   }
   return {
+    // First field on purpose: this is what the server gates job kinds on.
+    // A report WITHOUT it is a pre-0.3.0 daemon — see the backend's
+    // MIN_TEXT_DAEMON_VERSION check, which treats "missing" as "too old".
+    daemon_version: DAEMON_VERSION,
     codex_ok: Boolean(codexVersion),
     codex_version: codexVersion,
     skill_ok: Boolean(skillVersion),

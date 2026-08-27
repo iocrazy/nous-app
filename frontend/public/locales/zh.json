@@ -4719,7 +4719,8 @@
       "localCodexNotLoggedIn": "本机 codex CLI 未登录。请在你的电脑上运行 `codex login`。",
       "localCodexFailed": "本机 Codex 没有返回内容。请查看你电脑上的 daemon 日志。",
       "localRefRejected": "有一张附图无法被你的本机 daemon 使用。请改用 nous 素材库中的图片后重试。",
-      "localCliMissing": "你的电脑上没有安装 codex CLI。请运行 `npm i -g @openai/codex` 后重启 daemon。"
+      "localCliMissing": "你的电脑上没有安装 codex CLI。请运行 `npm i -g @openai/codex` 后重启 daemon。",
+      "localDaemonOutdated": "你的本机 codex daemon 版本过旧。请到 设置 → AI → 本地 CLI 重新执行安装命令以更新。"
     }
   },
   "issueDetail": {

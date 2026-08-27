@@ -23,6 +23,9 @@ from app.services.codex.errors import CodexLocalError
         ("codex_no_output", 424),
         ("codex_failed", 424),
         ("ref_rejected", 400),
+        # 426 Upgrade Required — 4xx like the rest, so an out-of-date daemon
+        # can never silently fall through to a paid model.
+        ("daemon_outdated", 426),
     ],
 )
 def test_every_code_is_non_retryable(code, status):
@@ -67,6 +70,10 @@ def test_catalog_classifies_from_message_marker():
         error_catalog.classify_ai_error(CodexLocalError("codex_failed", "x"))
         == error_catalog.LOCAL_CODEX_FAILED
     )
+    assert (
+        error_catalog.classify_ai_error(CodexLocalError("daemon_outdated", "x"))
+        == error_catalog.LOCAL_DAEMON_OUTDATED
+    )
     # the marker survives the LLMCallError wrap the middleware applies
     wrapped = LLMCallError("non-retryable: [codex-local:daemon_offline] x")
     assert (
@@ -95,6 +102,7 @@ def test_payload_and_stream_data_carry_the_code():
         ("ref_rejected", 400, "local_ref_rejected"),
         ("codex_no_output", 424, "local_codex_failed"),
         ("codex_failed", 424, "local_codex_failed"),
+        ("daemon_outdated", 426, "local_daemon_outdated"),
     ],
 )
 def test_a_bare_error_keeps_its_code_without_the_middleware_wrap(

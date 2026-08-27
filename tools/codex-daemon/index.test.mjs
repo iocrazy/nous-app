@@ -752,3 +752,20 @@ test('downloadRef: a 3xx with no Location is a typed refusal, not a crash on nul
     stub.restore();
   }
 });
+
+// ── daemon version, reported so the server can gate job kinds ─────────────
+
+import { DAEMON_VERSION } from './index.mjs';
+
+// DAEMON_VERSION is a literal because install.sh ships index.mjs ALONE —
+// there is no package.json next to it on a user's machine, so reading one at
+// runtime would throw in every real installation. This test is therefore the
+// only thing keeping the two copies of the version in sync; without it they
+// drift silently and the server gates on a number nobody bumped.
+test('DAEMON_VERSION matches the version in package.json', async () => {
+  const pkg = JSON.parse(
+    await fs.readFile(new URL('./package.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(DAEMON_VERSION, pkg.version);
+  assert.match(DAEMON_VERSION, /^\d+\.\d+\.\d+$/);
+});

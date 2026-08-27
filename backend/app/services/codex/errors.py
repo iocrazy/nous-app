@@ -27,6 +27,12 @@ _STATUS_BY_CODE: dict[str, int] = {
     # is wrong — nothing about the user's machine needs fixing, they just have
     # to attach a different image.
     "ref_rejected": 400,
+    # The user's daemon is older than the build that learned to run text jobs
+    # safely (sandbox flags, prompt on stdin, chunked results). 426 Upgrade
+    # Required says exactly that, and like every other code here it is 4xx —
+    # so the retry middleware calls it non-retryable and the call never falls
+    # through to a paid model.
+    "daemon_outdated": 426,
 }
 
 

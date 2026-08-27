@@ -95,6 +95,15 @@ _MAPPING: dict[str, tuple[int, str, str]] = {
         "local_codex_failed",
         "Local Codex failed to produce a reply. Check the daemon log on your machine.",
     ),
+    # 426 Upgrade Required — the one thing that fixes this is on the user's
+    # machine and takes one command, so the copy is that command's location
+    # rather than "try again".
+    error_catalog.LOCAL_DAEMON_OUTDATED: (
+        426,
+        "local_daemon_outdated",
+        "Your local codex daemon is out of date. Re-run the install command "
+        "from Settings → AI → Local CLI to update it.",
+    ),
 }
 
 _FALLBACK = (500, "internal_error", "Internal server error")

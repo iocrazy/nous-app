@@ -11,6 +11,7 @@ text-only degrade.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from loguru import logger
@@ -51,6 +52,80 @@ _MAX_IMAGES = 9
 # the wire and the daemon fetches the image itself.
 MAX_INLINE_IMAGE_BYTES = 6 * 1024 * 1024
 
+# ── daemon version gate ───────────────────────────────────────────────────
+#
+# The catalog row is global: the day it lands, EVERY user can pick "Codex
+# (Local)" in the agent editor. But the daemon on their machine is a script
+# they installed themselves, and a pre-0.3.0 build does not reject a
+# ``kind:"text"`` job — it has the skeleton, so it "works", badly:
+#
+#   * ``codex exec --json`` with NO ``-s read-only --ephemeral -C <tmpdir>``
+#     — every sandbox promise in spec §6 is simply absent;
+#   * the prompt (agent instructions + conversation history) goes on argv,
+#     where ``ps`` can read it, instead of stdin;
+#   * the raw JSONL transcript is returned as if it were the model's reply,
+#     with no usage and no chunking (a >1 MiB result kills the socket).
+#
+# So the gate is not a nicety: it is the only thing that makes the sandbox
+# and privacy properties true for the users who have not updated.
+MIN_TEXT_DAEMON_VERSION = "0.3.0"
+
+# What a connected daemon that reports no version at all is treated as. It is
+# a real pre-0.3.0 build (``daemon_version`` did not exist before), and going
+# through the same integer comparison as everything else keeps one code path.
+UNVERSIONED = "0.0.0"
+
+_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)")
+
+
+def _parse_version(raw: object) -> tuple[int, int, int]:
+    """``"0.3.0"`` → ``(0, 3, 0)``. Unparseable → ``(0, 0, 0)``.
+
+    Falling back to zeros means a garbled report reads as "older than every
+    real release" and is refused, rather than being waved through because we
+    could not understand it. Trailing junk is ignored on purpose so a
+    prerelease tag (``0.3.0-rc1``) still compares as 0.3.0.
+    """
+    match = _VERSION_RE.match(str(raw or ""))
+    if not match:
+        return (0, 0, 0)
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _version_at_least(reported: object, minimum: str) -> bool:
+    return _parse_version(reported) >= _parse_version(minimum)
+
+
+async def _reported_daemon_version(user_id: str) -> Optional[str]:
+    """Version of the daemon currently holding this user's socket.
+
+    ``None`` means "no daemon is connected, or we could not find out" — NOT a
+    verdict. The caller must skip the gate on ``None`` so that dispatch raises
+    the truthful ``daemon_offline`` a moment later; telling someone to update
+    a daemon that is not running is the worse of the two wrong answers.
+
+    A device that IS online but whose ``env_report`` carries no
+    ``daemon_version`` returns ``UNVERSIONED`` — that is a real pre-0.3.0
+    build, and it is exactly the case this gate exists for.
+    """
+    from app.repositories.codex_daemon_repository import CodexDaemonRepository
+    from app.services.codex import daemon_presence
+
+    device_id = await daemon_presence.online_device_id(user_id)
+    if not device_id:
+        return None
+    devices = await CodexDaemonRepository().list_for_user(user_id)
+    row = next((d for d in devices if str(d.get("id")) == str(device_id)), None)
+    if row is None:
+        # Presence and the table disagree (revoked mid-flight, replica lag).
+        # Not enough to convict a version on.
+        return None
+    report = row.get("env_report")
+    version = report.get("daemon_version") if isinstance(report, dict) else None
+    if isinstance(version, str) and version.strip():
+        return version
+    return UNVERSIONED
+
 
 def _inline_bytes(urls: List[str]) -> int:
     """Decoded size of the ``data:`` URLs in ``urls``, estimated.
@@ -77,12 +152,14 @@ class CodexDaemonAdapter:
         timeout_s: int = DEFAULT_TEXT_TIMEOUT_S,
         dispatch: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None,
         scope_resolver: Optional[Callable[[str], Awaitable[int]]] = None,
+        version_resolver: Optional[Callable[[str], Awaitable[Optional[str]]]] = None,
     ) -> None:
         self.user_id = str(user_id)
         self.model = model or ""
         self.timeout_s = int(timeout_s)
         self._dispatch = dispatch or dispatch_to_daemon
         self._scope = scope_resolver or resolve_personal_scope_id
+        self._daemon_version = version_resolver or _reported_daemon_version
 
     async def call(
         self,
@@ -118,6 +195,18 @@ class CodexDaemonAdapter:
                 "ref_rejected",
                 f"inline images exceed 6 MB ({inline_bytes} bytes across "
                 f"{len(kept_images)} attachments)",
+            )
+        # Before anything is sent: refuse a daemon too old to run a text job
+        # the way this design promises. ``None`` = nothing connected, which is
+        # dispatch's story to tell (``daemon_offline``), not ours.
+        reported = await self._daemon_version(self.user_id)
+        if reported is not None and not _version_at_least(
+            reported, MIN_TEXT_DAEMON_VERSION
+        ):
+            raise CodexLocalError(
+                "daemon_outdated",
+                f"local daemon reports {reported}; text jobs need "
+                f">= {MIN_TEXT_DAEMON_VERSION}",
             )
         scope_id = await self._scope(self.user_id)
         payload = {
@@ -188,4 +277,6 @@ __all__ = [
     "DEFAULT_TEXT_TIMEOUT_S",
     "DISPATCH_GRACE_S",
     "MAX_INLINE_IMAGE_BYTES",
+    "MIN_TEXT_DAEMON_VERSION",
+    "UNVERSIONED",
 ]

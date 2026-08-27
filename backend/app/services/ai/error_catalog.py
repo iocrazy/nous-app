@@ -66,6 +66,7 @@ LOCAL_TOOLS_UNSUPPORTED: Final = "local_tools_unsupported"
 LOCAL_CODEX_NOT_LOGGED_IN: Final = "local_codex_not_logged_in"
 LOCAL_REF_REJECTED: Final = "local_ref_rejected"
 LOCAL_CODEX_FAILED: Final = "local_codex_failed"
+LOCAL_DAEMON_OUTDATED: Final = "local_daemon_outdated"
 
 ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     PROVIDER_AUTH,
@@ -82,6 +83,7 @@ ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     LOCAL_CODEX_NOT_LOGGED_IN,
     LOCAL_REF_REJECTED,
     LOCAL_CODEX_FAILED,
+    LOCAL_DAEMON_OUTDATED,
 )
 
 # ── Provider error codes that outrank the HTTP status carrying them ───
@@ -147,6 +149,7 @@ _CODEX_LOCAL_RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = (
         re.compile(r"\[codex-local:codex_not_logged_in\]"),
     ),
     (LOCAL_REF_REJECTED, re.compile(r"\[codex-local:ref_rejected\]")),
+    (LOCAL_DAEMON_OUTDATED, re.compile(r"\[codex-local:daemon_outdated\]")),
     (
         LOCAL_CODEX_FAILED,
         re.compile(r"\[codex-local:(codex_no_output|codex_failed)\]"),
@@ -359,6 +362,7 @@ __all__ = [
     "LOCAL_CODEX_FAILED",
     "LOCAL_CODEX_NOT_LOGGED_IN",
     "LOCAL_DAEMON_OFFLINE",
+    "LOCAL_DAEMON_OUTDATED",
     "LOCAL_REF_REJECTED",
     "LOCAL_TOOLS_UNSUPPORTED",
     "OUTPUT_PARSE",
