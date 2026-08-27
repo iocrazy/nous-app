@@ -1116,6 +1116,9 @@ class AgentRunner:
             # maintenance model has no cache of this conversation to hit.
             adapter=self.adapter,
             tools=composed.tools,
+            # Phase 2: the compaction bracket (start/summary/end) lands in the
+            # run transcript so a crash mid-summary is visible as an orphan.
+            recorder=recorder,
         )
         if (
             recorder is not None
