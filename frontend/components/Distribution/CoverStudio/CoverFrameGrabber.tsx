@@ -22,7 +22,7 @@ import { Camera, Check, Upload } from 'lucide-react';
 
 import { getSupabaseClient } from '../../../supabaseClient';
 import { getResourceFileUrl } from '../../../services/resourceService';
-import { grabCoverFrame } from '../../../services/distributionService';
+import { grabCoverFrame, listLibraryMediaOrThrow } from '../../../services/distributionService';
 import type { LibraryVideo } from '../../../types';
 import { formatTimestamp } from './coverReferences';
 import './cover-studio.css';
@@ -68,6 +68,11 @@ interface Props {
   ) => Promise<void>;
   /** A picture from disk becomes the cover as-is. */
   onUploadCover?: (file: File) => Promise<void>;
+  /** Lets the stage offer the library's videos when the publish page has
+   *  none selected yet — the studio can be opened before anything else. */
+  scopeId?: string;
+  /** Fired when a video is picked here, so the parent can select it too. */
+  onPickSource?: (video: LibraryVideo) => void;
 }
 
 export function CoverFrameGrabber({
@@ -79,6 +84,8 @@ export function CoverFrameGrabber({
   aspect = '3:4',
   onUseAsCover,
   onUploadCover,
+  scopeId,
+  onPickSource,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -97,7 +104,38 @@ export function CoverFrameGrabber({
   const stageRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startX: number; startY: number; focus: CropFocus } | null>(null);
 
-  const active = sources.find((s) => s.id === sourceId) ?? sources[0] ?? null;
+  // A video picked inside the studio, for when the publish page had none.
+  const [picked, setPicked] = useState<LibraryVideo | null>(null);
+  const [library, setLibrary] = useState<LibraryVideo[] | null>(null);
+  const [libraryError, setLibraryError] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+
+  const active =
+    sources.find((s) => s.id === sourceId) ?? sources[0] ?? picked ?? null;
+
+  const loadLibrary = useCallback(async () => {
+    if (!scopeId) return;
+    setLibraryError(false);
+    try {
+      const rows = await listLibraryMediaOrThrow(scopeId, { mediaType: 'video' });
+      setLibrary(rows);
+    } catch (err) {
+      console.error('[CoverFrameGrabber] library videos failed:', err);
+      setLibraryError(true);
+      setLibrary([]);
+    }
+  }, [scopeId]);
+
+  useEffect(() => {
+    if (active || !scopeId || library !== null) return;
+    void loadLibrary();
+  }, [active, scopeId, library, loadLibrary]);
+
+  const pickVideo = (v: LibraryVideo) => {
+    setPicked(v);
+    setChoosing(false);
+    onPickSource?.(v);
+  };
 
   // <video src> cannot carry headers; the file endpoint accepts the Supabase
   // JWT as ?token= — same transport CoverPicker already uses for its slots.
@@ -274,18 +312,64 @@ export function CoverFrameGrabber({
     [onUploadCover, t],
   );
 
-  if (!active) {
-    // No button here on purpose: an enabled control that cannot work is worse
-    // than saying what is missing (CoverPicker's own rule).
-    return (
-      <div className="cs-card">
-        <h4>{t('distribution.coverStudio.grabFrame', 'Grab a frame')}</h4>
-        <div className="cs-empty">
-          {t(
-            'distribution.coverStudio.grabNeedsVideo',
-            'Pick a video on the publish page first — frames are grabbed from it.',
-          )}
+  const picker = (
+    <div className="cs-body" data-testid="cover-video-picker">
+      {libraryError ? (
+        <div className="cs-error">
+          {t('distribution.coverStudio.libraryLoadFailed', 'Could not load your library.')}
+          <button type="button" onClick={() => void loadLibrary()}>
+            {t('common.retry', 'Retry')}
+          </button>
         </div>
+      ) : library === null ? (
+        <div className="cs-empty">{t('common.loading', 'Loading…')}</div>
+      ) : library.length === 0 ? (
+        <div className="cs-empty">
+          {t('distribution.coverStudio.libraryNoVideos', 'No videos in your library yet.')}
+        </div>
+      ) : (
+        <div className="cs-videopick">
+          {library.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              title={v.filename}
+              onClick={() => pickVideo(v)}
+              data-testid={`cover-video-pick-${v.id}`}
+            >
+              {v.thumbnail_url ? <img src={v.thumbnail_url} alt="" /> : <span className="noimg" />}
+              <span className="name">{v.filename}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  if (!active || choosing) {
+    // With a scope we can offer the library right here; without one there is
+    // nothing to offer, and an enabled control that cannot work is worse than
+    // saying what is missing (CoverPicker's own rule).
+    return (
+      <div className={embedded ? 'cs-stagewrap' : 'cs-card'}>
+        <h4>
+          {t('distribution.coverStudio.pickVideo', 'Pick a video to grab frames from')}
+          {choosing && (
+            <button type="button" className="cs-ghost aux" onClick={() => setChoosing(false)}>
+              {t('common.cancel', 'Cancel')}
+            </button>
+          )}
+        </h4>
+        {scopeId ? (
+          picker
+        ) : (
+          <div className="cs-empty">
+            {t(
+              'distribution.coverStudio.grabNeedsVideo',
+              'Pick a video on the publish page first — frames are grabbed from it.',
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -311,6 +395,19 @@ export function CoverFrameGrabber({
         </span>
       </h4>
       <div className="cs-body">
+        {sources.length <= 1 && scopeId && (
+          <button
+            type="button"
+            className="cs-ghost cs-change-video"
+            onClick={() => {
+              setChoosing(true);
+              if (library === null) void loadLibrary();
+            }}
+            data-testid="cover-change-video"
+          >
+            {t('distribution.coverStudio.changeVideo', 'Change video')} · {active.filename}
+          </button>
+        )}
         {sources.length > 1 && (
           <select
             className="cs-source"

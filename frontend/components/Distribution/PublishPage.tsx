@@ -2664,6 +2664,12 @@ export const PublishPage: React.FC = () => {
                 sources={selectedVideoObjs}
                 topic={title}
                 onClose={() => setCoverStudioOpen(false)}
+                onPickSource={(v) => {
+                  // A video chosen inside the studio is the video being
+                  // published — select it here too, so covers and content
+                  // never point at different files.
+                  setSelectedVideos((s) => (s.includes(v.id) ? s : [...s, v.id]));
+                }}
                 onApply={(patch) => {
                   // The studio fills ONE slot per apply (the vertical tab an
                   // AI cover or a 3:4 crop, the horizontal tab a 4:3 crop);

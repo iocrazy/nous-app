@@ -95,12 +95,21 @@ vi.mock('./CoverFrameGrabber', () => ({
     onGrabbed,
     onUseAsCover,
     aspect,
+    onPickSource,
   }: {
     onGrabbed: (f: unknown) => void;
     onUseAsCover?: (sourceId: string, at: number, focus: { x: number; y: number }) => Promise<void>;
     aspect?: string;
+    onPickSource?: (v: unknown) => void;
   }) => (
     <>
+    <button
+      type="button"
+      data-testid="stub-pick-source"
+      onClick={() => onPickSource?.({ id: '902', filename: 'talk.mp4', thumbnail_url: null })}
+    >
+      pick
+    </button>
     <button
       type="button"
       data-testid="stub-use-frame"
@@ -600,5 +609,26 @@ describe('CoverStudioOverlay — v4 layout', () => {
     expect(screen.getByTestId('cover-draft-1')).toBeTruthy();
     expect(svc.generateCoverDrafts).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId('cover-history-round-1').className).toContain('on');
+  });
+});
+
+
+describe('CoverStudioOverlay — merged references card and in-studio video pick', () => {
+  it('shows the nine slots and the template library as ONE card, with no jump tile', () => {
+    renderOverlay();
+    const card = screen.getByTestId('cover-ref-card');
+    expect(card.querySelector('[data-testid="cover-ref-pool"]')).toBeTruthy();
+    expect(card.querySelector('[data-testid="stub-template"]')).toBeTruthy();
+    expect(screen.queryByTestId('cover-ref-add-template')).toBeNull();
+    expect(screen.getByText('Sent to the model')).toBeTruthy();
+  });
+
+  it('hands a video picked inside the studio up to the publish page', () => {
+    const onPickSource = vi.fn();
+    renderOverlay({ sources: [], onPickSource });
+
+    fireEvent.click(screen.getByTestId('stub-pick-source'));
+
+    expect(onPickSource).toHaveBeenCalledWith(expect.objectContaining({ id: '902' }));
   });
 });

@@ -1339,3 +1339,85 @@
   transform: none;
   aspect-ratio: auto;
 }
+
+/* ── merged references card + in-studio video picker ───────────────────── */
+
+.cover-studio .cs-refcard > .cs-embedded + .cs-embedded {
+  border-top: 1px solid var(--line);
+}
+
+.cover-studio .cs-subhead {
+  margin: 0;
+  padding: 11px 14px 0;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cover-studio .cs-subhead .aux {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 11.5px;
+  color: var(--content-3);
+}
+
+.cover-studio .cs-embedded-tpl .cs-tpl-grid {
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+}
+
+.cover-studio .cs-videopick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.cover-studio .cs-videopick button {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--island-2);
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--content);
+}
+
+.cover-studio .cs-videopick button:hover {
+  border-color: var(--accent);
+}
+
+.cover-studio .cs-videopick img,
+.cover-studio .cs-videopick .noimg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+}
+
+.cover-studio .cs-videopick .name {
+  display: block;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-studio .cs-change-video {
+  margin-bottom: 10px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-studio .cs-stagewrap > h4 .cs-ghost.aux {
+  margin-left: auto;
+  padding: 3px 9px;
+  font-size: 11.5px;
+}
