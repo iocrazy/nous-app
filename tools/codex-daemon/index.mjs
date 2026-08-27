@@ -251,10 +251,54 @@ async function requireCommand(bin, args) {
   return r;
 }
 
-async function downloadRef(url, dir, index) {
-  // SSRF guard: only nous' own API may be fetched by this daemon.
+export const REF_MAX_BYTES = 6 * 1024 * 1024;
+
+/** Only formats codex actually reads as pictures. `image/svg+xml` is left
+ *  out on purpose: it is markup with script, not pixels. */
+const DATA_IMAGE_EXT = {
+  'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp', 'image/gif': 'gif',
+};
+
+function refRejected(why) {
+  throw Object.assign(new Error(`ref_rejected: ${why}`), { code: 'ref_rejected' });
+}
+
+/** The chat layer inlines attachments as `data:image/<mime>;base64,<b64>`
+ *  (see backend `flatten_for_codex`, which passes `image_url.url` through
+ *  verbatim), so the daemon has to accept them. This widens nothing: a data:
+ *  URL carries its own bytes and causes no network fetch, so the SSRF
+ *  whitelist below still governs every URL that does. */
+export function parseDataImageUrl(url) {
+  const m = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([\s\S]*)$/i.exec(String(url));
+  if (!m) refRejected('only base64-encoded data:image URLs are accepted');
+  const mime = m[1].toLowerCase();
+  if (!(mime in DATA_IMAGE_EXT)) refRejected(`unsupported image type: ${mime}`);
+  const b64 = m[2].replace(/\s+/g, '');
+  // Buffer.from(…, 'base64') silently drops anything it cannot read, so a
+  // corrupt payload would otherwise become a corrupt image instead of an error.
+  if (!b64.length || b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+    refRejected('malformed base64 payload');
+  }
+  // Refuse on the encoded length first — do not allocate to find out it is huge.
+  if ((b64.length / 4) * 3 > REF_MAX_BYTES + 3) refRejected('image exceeds the size cap');
+  const bytes = Buffer.from(b64, 'base64');
+  if (!bytes.length) refRejected('empty image payload');
+  if (bytes.length > REF_MAX_BYTES) refRejected('image exceeds the size cap');
+  return { mime, bytes };
+}
+
+export async function downloadRef(url, dir, index) {
+  if (String(url).startsWith('data:image/')) {
+    const { mime, bytes } = parseDataImageUrl(url);
+    const inline = path.join(dir, `ref-${index}.${DATA_IMAGE_EXT[mime]}`);
+    await fs.writeFile(inline, bytes);
+    return inline;
+  }
+  // SSRF guard: only nous' own API may be fetched by this daemon. Typed as
+  // ref_rejected — nothing about codex or the user's machine is broken, the
+  // request just has to carry a different attachment.
   if (!url.startsWith(`${API_BASE}/`)) {
-    throw new Error(`refusing to fetch a non-nous url: ${url.slice(0, 80)}`);
+    refRejected(`refusing to fetch a non-nous url: ${String(url).slice(0, 80)}`);
   }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`ref download failed (${res.status})`);
@@ -386,17 +430,15 @@ export function chunkText(text, size = CHUNK_BYTES) {
  *  empty list — the model then answered confidently about images it never
  *  saw. Every rejection is typed and loud instead. */
 export function normalizeImageUrls(payload) {
-  const refuse = (why) => {
-    throw Object.assign(new Error(`ref_rejected: ${why}`), { code: 'ref_rejected' });
-  };
   const raw = payload?.image_urls;
   if (raw == null) {
-    if (payload?.ref_urls != null) refuse('refs must be sent as image_urls, not ref_urls');
+    if (payload?.ref_urls != null) refRejected('refs must be sent as image_urls, not ref_urls');
     return [];
   }
   if (!Array.isArray(raw) || raw.some((u) => typeof u !== 'string')) {
-    refuse('image_urls must be an array of strings');
+    refRejected('image_urls must be an array of strings');
   }
+  // Items may be a nous URL or an inline data:image — downloadRef tells them apart.
   return raw.slice(0, 9);
 }
 

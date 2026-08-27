@@ -554,3 +554,74 @@ test('parseCodexExecOutput: the no-output failure carries a structured code', ()
   assert.equal(err.code, 'codex_no_output');
   assert.equal(classifyJobError(err), 'codex_no_output');
 });
+
+// ── inline data:image refs + typed ref refusals ───────────────────────────
+
+import { downloadRef, parseDataImageUrl, REF_MAX_BYTES } from './index.mjs';
+
+const PNG_B64 = Buffer.from('\x89PNG\r\n\x1a\n-pretend-pixels-', 'binary').toString('base64');
+
+test('parseDataImageUrl: a base64 png yields its mime and exact bytes', () => {
+  const { mime, bytes } = parseDataImageUrl(`data:image/png;base64,${PNG_B64}`);
+  assert.equal(mime, 'image/png');
+  assert.equal(bytes.toString('base64'), PNG_B64);
+});
+
+test('parseDataImageUrl: a non-image mime is refused', () => {
+  for (const mime of ['text/plain', 'application/pdf', 'text/html']) {
+    const err = thrownBy(() => parseDataImageUrl(`data:${mime};base64,${PNG_B64}`));
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+// SVG is image/* but carries script; codex would be reading an attacker-
+// supplied document, so it stays off the allowlist with the rest.
+test('parseDataImageUrl: image/svg+xml is refused despite being image/*', () => {
+  const err = thrownBy(() => parseDataImageUrl(`data:image/svg+xml;base64,${PNG_B64}`));
+  assert.equal(err.code, 'ref_rejected');
+});
+
+test('parseDataImageUrl: malformed base64 is refused, not silently half-decoded', () => {
+  // Buffer.from(..., 'base64') is lenient: it drops junk and returns bytes.
+  // Without an explicit check these would sail through as a corrupt image.
+  for (const bad of ['not*base64!!', 'AAAA===', 'AAA', '', '@@@@']) {
+    const err = thrownBy(() => parseDataImageUrl(`data:image/png;base64,${bad}`));
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+test('parseDataImageUrl: a payload over the size cap is refused', () => {
+  const big = Buffer.alloc(REF_MAX_BYTES + 1, 0x41).toString('base64');
+  const err = thrownBy(() => parseDataImageUrl(`data:image/png;base64,${big}`));
+  assert.equal(err.code, 'ref_rejected');
+  // and exactly at the cap is still fine
+  const atCap = Buffer.alloc(REF_MAX_BYTES, 0x41).toString('base64');
+  assert.equal(parseDataImageUrl(`data:image/png;base64,${atCap}`).bytes.length, REF_MAX_BYTES);
+});
+
+test('parseDataImageUrl: a non-base64 data URL is refused', () => {
+  assert.equal(thrownBy(() => parseDataImageUrl('data:image/png,rawbytes')).code, 'ref_rejected');
+});
+
+test('downloadRef: a data:image ref is written locally with the mime-derived extension', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'refs-'));
+  const file = await downloadRef(`data:image/webp;base64,${PNG_B64}`, dir, 3);
+  assert.equal(path.basename(file), 'ref-3.webp');
+  assert.equal((await fs.readFile(file)).toString('base64'), PNG_B64);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+// "Local Codex failed to produce a reply" is a lie when the daemon simply
+// refused an off-host image — nothing about codex or the user's machine
+// is broken, the request just has to carry a different attachment.
+test('downloadRef: an off-host http url is a typed ref_rejected, not a generic failure', async () => {
+  const err = await downloadRef('https://evil.example/pic.png', '/tmp', 0).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.code, 'ref_rejected');
+  assert.equal(classifyJobError(err), 'ref_rejected');
+});
+
+test('normalizeImageUrls: inline data:image refs pass the payload check', () => {
+  const urls = [`data:image/png;base64,${PNG_B64}`, 'https://api.nous.ink/x.png'];
+  assert.deepEqual(normalizeImageUrls({ image_urls: urls }), urls);
+});
