@@ -47,7 +47,7 @@ import { selectCoverFrame } from '../../../services/distributionService';
 import { uploadResource } from '../../../services/resourceService';
 import { importCanvasMedia } from '../../../features/canvas-core/smart/mediaImport';
 import type { LibraryVideo } from '../../../types';
-import type { CoverPair } from '../CoverPicker';
+import type { CoverPair } from '../CoverSlots';
 import {
   addReference,
   personReference,
@@ -86,6 +86,8 @@ interface Props {
   onClose: () => void;
   /** A video picked inside the studio (the publish page had none selected). */
   onPickSource?: (video: LibraryVideo) => void;
+  /** Which cover tab to start on — the slot the user clicked. */
+  initialOrientation?: Orientation;
   /**
    * The cover as a RESOURCE id, in the slot the active tab was setting. One
    * slot per apply: the vertical tab gives `{ vertical }` (an AI cover or a
@@ -102,6 +104,7 @@ export function CoverStudioOverlay({
   onClose,
   onApply,
   onPickSource,
+  initialOrientation = 'vertical',
 }: Props): React.JSX.Element | null {
   const { t } = useTranslation();
 
@@ -148,6 +151,14 @@ export function CoverStudioOverlay({
   const selected = round?.selected ?? null;
   const finalUrl = round?.finalUrl;
   const finalGenId = round?.finalGenId;
+
+  // Land on the tab of the slot that was clicked, every time the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    setOrientation(initialOrientation);
+    setActiveRound(null);
+    setStage('idle');
+  }, [open, initialOrientation]);
 
   useEffect(() => {
     if (!open) return;

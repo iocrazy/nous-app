@@ -26,7 +26,7 @@ import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublis
 import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
-import { CoverPicker, CoverPair } from './CoverPicker';
+import { CoverSlots, type CoverOrientation, type CoverPair } from './CoverSlots';
 import { CoverStudioOverlay } from './CoverStudio/CoverStudioOverlay';
 import { PublishPreview, type PreviewSoundtrack } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
@@ -589,7 +589,8 @@ export const PublishPage: React.FC = () => {
   // The 3:4 / 4:3 pair derived from a video frame. Null = let the platform
   // pick its own frame at publish time.
   const [covers, setCovers] = useState<CoverPair | null>(null);
-  const [coverStudioOpen, setCoverStudioOpen] = useState(false);
+  // Which tab Cover Studio opens on; null = closed. Each slot opens its own.
+  const [coverStudioTab, setCoverStudioTab] = useState<CoverOrientation | null>(null);
   const [aiContent, setAiContent] = useState(false);
   // '' = leave the platform's declaration control alone. Deliberately NOT the
   // same as '无需添加自主声明', which is a declaration the user chose and the
@@ -2623,47 +2624,42 @@ export const PublishPage: React.FC = () => {
             <div className="fcard">
               <h4>
                 {t('distribution.publish.cover', 'Cover')}
-                <span className="aux">
-                  {covers
+                <span className="aux" data-testid="cover-status">
+                  {covers?.vertical && covers?.horizontal
                     ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')
-                    : t('distribution.publish.notSetYet', 'Not set yet')}
+                    : covers?.vertical
+                      ? t('distribution.publish.coverSetV', 'Vertical ready')
+                      : covers?.horizontal
+                        ? t('distribution.publish.coverSetH', 'Horizontal ready')
+                        : t('distribution.publish.notSetYet', 'Not set yet')}
                 </span>
               </h4>
               <div className="cover-wrap">
-                {/* Covers come from a frame of the video being published, so the
-                    picker needs the same selection the content card holds. */}
-                <CoverPicker
-                  sources={selectedVideoObjs}
+                {/* Two slots, nothing else: every way of making a cover (frame
+                    crop, upload, the model) lives in Cover Studio, and each
+                    slot opens it on its own tab. The frame-sampler card and
+                    the separate "AI covers" card that used to sit here were
+                    two more ways of saying "open the studio". */}
+                <CoverSlots
                   value={covers}
-                  onChange={setCovers}
-                  onOpenStudio={() => setCoverStudioOpen(true)}
+                  onOpen={(o) => setCoverStudioTab(o)}
+                  onClear={(o) => setCovers((prev) => {
+                    const next = { ...(prev ?? {}) };
+                    delete next[o];
+                    return next.vertical || next.horizontal ? next : null;
+                  })}
                 />
-                <div className="cover-ai">
-                  <div className="head">
-                    <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
-                    {/* A real button at last — the dead `aria-disabled` anchor
-                        ("Coming in D4") lived here until 2026-08-23. Opens a
-                        full-screen LAYER, not a route: this page holds ~75
-                        pieces of un-persisted form state, and navigating away
-                        would wipe everything the user just filled in. */}
-                    <button
-                      type="button"
-                      className="open-studio"
-                      onClick={() => setCoverStudioOpen(true)}
-                      data-testid="open-cover-studio"
-                    >
-                      {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
-                    </button>
-                  </div>
-                  <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
-                </div>
+                <p className="cover-hint">
+                  {t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')}
+                </p>
               </div>
               <CoverStudioOverlay
-                open={coverStudioOpen}
+                open={coverStudioTab !== null}
+                initialOrientation={coverStudioTab ?? 'vertical'}
                 scopeId={scopeId ?? ''}
                 sources={selectedVideoObjs}
                 topic={title}
-                onClose={() => setCoverStudioOpen(false)}
+                onClose={() => setCoverStudioTab(null)}
                 onPickSource={(v) => {
                   // A video chosen inside the studio is the video being
                   // published — select it here too, so covers and content

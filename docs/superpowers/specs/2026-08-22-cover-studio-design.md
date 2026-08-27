@@ -399,3 +399,9 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - **多风格 = 封面 skill**：`GET /covers/styles` 列出内置风格 + 用户可见的 `category='cover'` 的 skill（可见性借 AI Library 的口径）。非内置风格走**通用骨架驱动**（`cover_styles.build_from_skill`）：从 SKILL.md 抠 `## Prompt Skeleton` / `## Four-Draft Preview Prompt Skeleton` 的围栏文本，填 `[topic]`/`[headline]`，其余占位行整行丢弃并明说"细节你定"，按画幅换词，小标签开关打开时摘掉骨架里的禁令（空白宽容匹配）。缺骨架的 skill 生成时 422 点名，不静默退回内置。`requires_person` 由正文是否点名 character reference 决定，前端据此决定人物槽和阻断。
 
 地面真值：生产库里用户导入的 `viral-video-cover` 行 `category='cover'`，正文两段骨架都在 ```text 围栏里 —— 通用驱动的抽取规则就是照它定的。
+
+## 补记 2026-08-27：三处用户反馈的收口
+
+- **模型下拉跟随 Settings 平台模型卡**（#2027）：`/canvases/generation-models` 服务端套用户的总开关 + 逐模型黑名单（`platform_model_visibility`）。故意不套管理员治理总开关——它默认关、库读不到也判关，接进下拉会让抖动变成"下拉空了"；成本闸门在派发层。
+- **参考图与模板库并成一张卡；工作室里直接选视频**（#2029）：上半「发给模型的图 N/9」、下半「模板库 · 点一张加入」；舞台没视频时列出素材库视频，选中回填到发布页已选视频。
+- **发布页封面区只剩两个磁贴**（本次）：竖 3:4 / 横 4:3 都是按钮，各自打开工作室并落到对应 tab（`initialOrientation`）；「从视频帧生成封面」卡与「AI 封面 · Canvas」卡删除（它们只是"打开工作室"的另两种说法）；`CoverPicker` 及其抽帧候选流程整体移除（后端 `covers/extract` 端点保留）；已填的磁贴可单独清除；状态文案分竖/横。
