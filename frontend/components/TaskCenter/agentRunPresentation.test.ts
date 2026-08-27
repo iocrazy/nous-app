@@ -3,6 +3,8 @@ import {
   AGENT_RUN_SELECT,
   agentDisplayName,
   agentRunToTask,
+  retryProgress,
+  todoProgress,
   turnEndSubtitle,
   type AgentRunRow,
 } from './agentRunPresentation';
@@ -212,5 +214,65 @@ describe('turnEndSubtitle', () => {
 
   it('selects metadata_json so the mirror actually reaches the row', () => {
     expect(AGENT_RUN_SELECT).toContain('metadata_json');
+  });
+});
+
+describe('todoProgress', () => {
+  const snap = {
+    todos: [
+      { id: 1, content: 'step A', status: 'completed', active_form: null },
+      { id: 2, content: 'step B', status: 'in_progress', active_form: 'doing B' },
+    ],
+    counts: { total: 7, completed: 3, in_progress: 1 },
+  };
+
+  it('renders "3/7 · doing B" from the todo snapshot', () => {
+    expect(todoProgress({ todos: snap })).toEqual({ label: 'doing B', done: 3, total: 7 });
+  });
+
+  it('falls back to content when active_form is null', () => {
+    const s = { ...snap, todos: [{ ...snap.todos[1], active_form: null }] };
+    expect(todoProgress({ todos: s })?.label).toBe('step B');
+  });
+
+  it('has no label when nothing is in progress', () => {
+    const s = { ...snap, todos: [snap.todos[0]] };
+    expect(todoProgress({ todos: s })?.label).toBeNull();
+  });
+
+  it('returns null when no snapshot ever landed', () => {
+    expect(todoProgress({})).toBeNull();
+    expect(todoProgress(null)).toBeNull();
+    expect(todoProgress(undefined)).toBeNull();
+  });
+
+  it('malformed counts render nothing rather than NaN/7', () => {
+    expect(todoProgress({ todos: { todos: [], counts: { completed: 3 } } })).toBeNull();
+    expect(todoProgress({ todos: { todos: [], counts: { total: '7', completed: 3 } } })).toBeNull();
+  });
+
+  it('reaches the task through agentRunToTask metadata', () => {
+    const t = agentRunToTask(baseRow({ metadata_json: { todos: snap } }));
+    expect(todoProgress(t.metadata)).toEqual({ label: 'doing B', done: 3, total: 7 });
+  });
+});
+
+describe('retryProgress', () => {
+  const at = '2026-08-27T06:00:00.000Z';
+  const atMs = Date.parse(at);
+  const meta = { last_retry: { attempt: 2, max_retries: 4, delay_ms: 3200, at, model: 'm' } };
+
+  it('reports the remaining wait against the caller clock', () => {
+    const p = retryProgress(meta, atMs + 1000);
+    expect(p).toEqual({ attempt: 2, max: 4, waitingSeconds: 2.2 });
+  });
+
+  it('reads as no wait once the backoff has elapsed', () => {
+    expect(retryProgress(meta, atMs + 60_000)?.waitingSeconds).toBe(0);
+  });
+
+  it('is null when the run never retried', () => {
+    expect(retryProgress({}, atMs)).toBeNull();
+    expect(retryProgress({ last_retry: { attempt: '2' } }, atMs)).toBeNull();
   });
 });

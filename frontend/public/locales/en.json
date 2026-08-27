@@ -1134,6 +1134,7 @@
     "resSize": "Size",
     "agentPrompt": "Prompt",
     "agentResponse": "Response",
+    "agentSteps": "Steps",
     "agentModel": "Model",
     "visionDescription": "Description",
     "visionText": "Detected text"
