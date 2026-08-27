@@ -49,6 +49,23 @@ from app.services.ai.providers.embedding_config import _is_multimodal
 # type's protocol (test_mediahub_probe_not_probed.py pins the two together).
 PROBEABLE_TYPES = frozenset({"llm", "embedding", "asr"})
 
+# Providers whose work runs on the USER's OWN machine via their paired daemon,
+# not on any server this process can reach (spec 2026-08-27). There is no
+# base_url to probe — the credential and the runtime both live on the user's
+# device — so an HTTP probe is not "failing", it is not applicable.
+#
+# Same failure shape as the image/video rows above, one layer over: a
+# ``codex-local`` row is type=llm, so it sails past PROBEABLE_TYPES and lands on
+# the ``/chat/completions`` branch, where a NULL base_url builds an invalid URL
+# and the row goes permanently red — a red light the admin CANNOT clear, on a
+# model that is perfectly healthy whenever its owner's daemon is online.
+#
+# Deliberately NOT a new status: "we can't check this from here" is exactly what
+# ``not_probed`` already means (mig 428). Liveness of a personal daemon is a
+# per-user, per-moment fact; the catalog row is global, so no single value on it
+# could be true for every user at once.
+LOCAL_ENGINE_PROVIDERS = frozenset({"codex-local", "jimeng-local"})
+
 # Values ``mediahub_models.last_test_status`` may hold. Twin of the DB CHECK in
 # migration 428 / ``models/ai.py`` — both sides must change together, and
 # test_mediahub_probe_not_probed.py::test_probe_statuses_matches_the_orm_check_constraint
@@ -153,11 +170,30 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
     a ``PROBE_FAILURE_CODES`` value. ``code`` is ``None`` on success, so writing
     it on every probe clears a previous failure's code.
 
-    A type outside ``PROBEABLE_TYPES`` returns ``not_probed=True`` without
-    sending anything. ``ok`` stays False there — it did not succeed — so the
-    only way to read it as healthy is to look at ``not_probed`` deliberately.
+    A type outside ``PROBEABLE_TYPES``, or a provider in
+    ``LOCAL_ENGINE_PROVIDERS`` (the work runs on the user's own machine),
+    returns ``not_probed=True`` without sending anything. ``ok`` stays False
+    there — it did not succeed — so the only way to read it as healthy is to
+    look at ``not_probed`` deliberately.
     """
     typ = (row.get("type") or "").strip()
+    prov = (row.get("actual_provider") or "").strip().lower()
+
+    if prov in LOCAL_ENGINE_PROVIDERS:
+        # Checked BEFORE the type gate: a local row may be a probeable type
+        # (codex-local is type=llm) and would otherwise be dialled. Same
+        # "don't make the call" reasoning as below — here the call could not
+        # succeed even in principle, because the endpoint is someone's laptop.
+        return {
+            "ok": False,
+            "not_probed": True,
+            # Names the boundary, no host / base_url / credential — same
+            # safe-anywhere guarantee as the type branch.
+            "detail": f"runs on the user's own machine (provider={prov})",
+            "error": None,
+            "code": None,
+            "dims": None,
+        }
 
     if typ not in PROBEABLE_TYPES:
         # Before the try block, and before any client is built: the point is not

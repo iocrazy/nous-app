@@ -888,7 +888,9 @@ class AILibraryChatService:
         # threshold. Compactor preserves tool_use/result pairs so the
         # next API call won't 400. Failure degrades to "send full history
         # and let the model deal with it" — never breaks the chat.
-        user_messages = await self._maybe_compact(user_messages, session_id=session_id)
+        user_messages = await self._maybe_compact(
+            user_messages, session_id=session_id, user_id=user_id
+        )
 
         model = composed.model or ""
         try:
@@ -1214,7 +1216,14 @@ class AILibraryChatService:
                     )
 
                     cheap_model = await get_maintenance_model()
-                    adapter = await resolve_db_adapter(cheap_model, "chat")
+                    # user_id is routing context, not a credential: if the
+                    # maintenance model is a codex-local row, the call has to
+                    # reach THIS user's own paired machine.
+                    adapter = await resolve_db_adapter(
+                        cheap_model,
+                        "chat",
+                        user_id=str(user_id) if user_id else None,
+                    )
                     cs = ComposedSystemPrompt(
                         agent_id=composed.agent_id,
                         agent_slug="commitment_harvester",
@@ -1299,6 +1308,7 @@ class AILibraryChatService:
         messages: List[Dict[str, Any]],
         *,
         session_id: Optional[Any] = None,
+        user_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """Compact long histories. Failure → return original messages.
 
@@ -1350,7 +1360,11 @@ class AILibraryChatService:
                 )
 
                 cheap_model = await get_maintenance_model()
-                adapter = await resolve_db_adapter(cheap_model, "chat")
+                # Routing context (see the harvester above): a codex-local
+                # maintenance model must dial this user's own machine.
+                adapter = await resolve_db_adapter(
+                    cheap_model, "chat", user_id=str(user_id) if user_id else None
+                )
                 from uuid import UUID as _UUID
 
                 from app.schemas.ai_library import ComposedSystemPrompt
