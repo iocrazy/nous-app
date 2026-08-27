@@ -47,3 +47,4 @@ async def test_llm_retry_mirrors_last_retry(monkeypatch):
     assert (
         "policy_key" not in blob and "failure" not in blob
     ), "only what the card renders"
+    assert '"at": "20' in blob, "the card needs a timestamp to age the wait"
