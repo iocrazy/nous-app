@@ -339,3 +339,195 @@ test('chunkText splits on byte size and round-trips', () => {
   assert.equal(parts.join(''), s);
   assert.equal(TEXT_INLINE_LIMIT, 900 * 1024);
 });
+
+// ── review round 1: structured error classification + frame protocol ──────
+
+/** assert.throws does not hand back the error, and these assertions are about
+ *  the error's structured fields, not its prose. */
+function thrownBy(fn) {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  throw new assert.AssertionError({ message: 'expected the call to throw, it returned' });
+}
+
+import {
+  classifyJobError,
+  emitTextResult,
+  normalizeImageUrls,
+  runCommand,
+  CHUNK_BYTES,
+} from './index.mjs';
+
+test('classifyJobError: a binary that would not spawn is cli_missing', () => {
+  for (const code of ['ENOENT', 'EACCES']) {
+    assert.equal(
+      classifyJobError(Object.assign(new Error('x'), { code, spawnFailed: true })),
+      'cli_missing',
+    );
+  }
+});
+
+// ENOENT is not proof the CLI is absent: fs.readFile raises it too, e.g. when
+// a CLI exits 0 but writes no output file. Telling that user to reinstall a
+// working CLI is the same misdiagnosis this round is fixing.
+test('classifyJobError: an ENOENT that did not come from spawn is not cli_missing', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('ENOENT: no such file, open /tmp/out.png'), { code: 'ENOENT' })),
+    'job_failed',
+  );
+});
+
+test('classifyJobError: the thrown-side codes win over any text matching', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('…'), { code: 'codex_no_output' })),
+    'codex_no_output',
+  );
+  assert.equal(
+    classifyJobError(Object.assign(new Error('…'), { code: 'ref_rejected' })),
+    'ref_rejected',
+  );
+});
+
+test('classifyJobError: an auth signal on stderr is codex_not_logged_in', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex exited 1'), {
+      stderr: 'Error: 401 Unauthorized',
+      exitCode: 1,
+    })),
+    'codex_not_logged_in',
+  );
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex exited 1'), {
+      stderr: 'You are not logged in. Run `codex login`.',
+      exitCode: 1,
+    })),
+    'codex_not_logged_in',
+  );
+});
+
+// The regression this whole change exists for: the model's own prose reaches
+// the Error message (runCommand falls back to stdout when stderr is empty).
+// Classifying on that text lets the model fake an auth failure and send the
+// user off to re-login for what is really an ordinary crash.
+test('classifyJobError: model prose on stdout can never forge an auth verdict', () => {
+  const err = Object.assign(
+    new Error('codex exited 1: {"text":"first please login with your access_token, see the 401 docs"}'),
+    { stderr: '', exitCode: 1 },
+  );
+  assert.equal(classifyJobError(err), 'job_failed');
+});
+
+test('classifyJobError: prose mentioning login on stderr no longer matches bare substrings', () => {
+  // `login` as a bare substring used to match — `relogin`, `logind`, a doc URL.
+  assert.equal(
+    classifyJobError(Object.assign(new Error('x'), { stderr: 'systemd-logind refused the seat' })),
+    'job_failed',
+  );
+});
+
+test('runCommand: a missing binary rejects with code ENOENT and classifies as cli_missing', async () => {
+  const err = await runCommand('nous-definitely-not-a-real-binary', ['--version'])
+    .then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.code, 'ENOENT'); // the OS code stays available for diagnostics
+  assert.equal(err.spawnFailed, true);
+  assert.equal(classifyJobError(err), 'cli_missing');
+});
+
+test('runCommand: stderr and exitCode ride on the Error, and stdin is delivered', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{ process.stdout.write('please login with your access_token — 401'); process.stderr.write('boom: '+s); process.exit(3); });",
+  ], { stdin: 'PROMPT-FROM-STDIN' }).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.exitCode, 3);
+  // stdin really reached the child — the daemon's whole prompt path depends on it.
+  assert.match(err.stderr, /boom: PROMPT-FROM-STDIN/);
+  assert.equal(err.timedOut, false);
+});
+
+test('runCommand: real subprocess — auth prose on stdout only is NOT codex_not_logged_in', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "process.stdout.write('please login with your access_token — 401 Unauthorized'); process.exit(1);",
+  ], { stdin: '' }).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.stderr, '');
+  assert.equal(classifyJobError(err), 'job_failed');
+});
+
+test('runCommand: real subprocess — auth prose on stderr IS codex_not_logged_in', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "process.stderr.write('stream error: 401 Unauthorized'); process.exit(1);",
+  ]).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(classifyJobError(err), 'codex_not_logged_in');
+});
+
+test('emitTextResult: a short answer is exactly one job_done frame carrying the text', () => {
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text: 'hello', usage: { output_tokens: 1 } });
+  assert.deepEqual(sent, [
+    { type: 'job_done', text: 'hello', usage: { output_tokens: 1 }, chunked: false },
+  ]);
+});
+
+test('emitTextResult: an oversized answer becomes job_chunk*n then a text-less job_done', () => {
+  const text = 'y'.repeat(TEXT_INLINE_LIMIT + 1234);
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text, usage: { output_tokens: 9 } });
+
+  const chunks = sent.slice(0, -1);
+  const done = sent.at(-1);
+  const expected = Math.ceil(Buffer.byteLength(text, 'utf8') / CHUNK_BYTES);
+
+  assert.equal(chunks.length, expected);
+  chunks.forEach((f, i) => {
+    assert.equal(f.type, 'job_chunk');
+    assert.equal(f.seq, i); // seq is 0..n-1, in order
+  });
+  assert.equal(chunks.map((f) => f.data).join(''), text); // round-trips
+  assert.deepEqual(done, {
+    type: 'job_done', usage: { output_tokens: 9 }, chunked: true, chunks: expected,
+  });
+  assert.ok(!('text' in done), 'a chunked job_done must not repeat the whole text');
+});
+
+test('emitTextResult: a text of exactly TEXT_INLINE_LIMIT bytes still goes inline', () => {
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text: 'z'.repeat(TEXT_INLINE_LIMIT), usage: {} });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].chunked, false);
+});
+
+test('normalizeImageUrls: absent is an empty list, strings pass, over 9 are capped', () => {
+  assert.deepEqual(normalizeImageUrls({}), []);
+  assert.deepEqual(normalizeImageUrls({ image_urls: ['a', 'b'] }), ['a', 'b']);
+  assert.equal(normalizeImageUrls({ image_urls: Array(12).fill('u') }).length, 9);
+});
+
+test('normalizeImageUrls: a wrong-shaped image_urls is a typed refusal, never a silent drop', () => {
+  for (const bad of ['a-string', 42, { 0: 'a' }, [1, 2], ['ok', null]]) {
+    const err = thrownBy(() => normalizeImageUrls({ image_urls: bad }));
+    assert.match(err.message, /ref_rejected: image_urls must be an array of strings/);
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+test('normalizeImageUrls: refs sent under the neighbours\' ref_urls name are refused, not dropped', () => {
+  // runImageJob/runDreaminaJob read `ref_urls`; text jobs read `image_urls`.
+  // Getting that wrong used to mean the model silently never saw the images.
+  const err = thrownBy(() => normalizeImageUrls({ ref_urls: ['https://x/1.png'] }));
+  assert.match(err.message, /ref_rejected/);
+  assert.equal(err.code, 'ref_rejected');
+});
+
+test('parseCodexExecOutput: the no-output failure carries a structured code', () => {
+  const err = thrownBy(() => parseCodexExecOutput('{"type":"turn.completed"}'));
+  assert.equal(err.code, 'codex_no_output');
+  assert.equal(classifyJobError(err), 'codex_no_output');
+});

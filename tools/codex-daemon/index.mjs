@@ -177,7 +177,17 @@ async function pair(argv) {
 
 // ── job execution (WHITELIST — the only commands this process ever runs) ──
 
-function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } = {}) {
+/** Failure signals travel as fields, never as prose to be re-parsed.
+ *  `message` still falls back to stdout so a human reading the log sees
+ *  something, but classifyJobError reads `stderr` / `code` / `exitCode` —
+ *  stdout is the model's own output and must never steer a verdict. */
+function failure(message, fields) {
+  return Object.assign(new Error(message), {
+    stderr: '', exitCode: null, timedOut: false, ...fields,
+  });
+}
+
+export function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } = {}) {
   return new Promise((resolve, reject) => {
     // argv array, never a shell string: nothing the server sends can be
     // interpreted as shell syntax.
@@ -186,18 +196,30 @@ function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } = {}) {
     let err = '';
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`));
+      reject(failure(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`, {
+        stderr: err, timedOut: true,
+      }));
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(new Error(`${bin} not found or not executable: ${e.message}`));
+      // e.code is ENOENT (absent) / EACCES (present but not runnable). Keep it
+      // for diagnostics, but classify on `spawnFailed`: a bare ENOENT also
+      // comes from fs.readFile elsewhere, and "the CLI is missing" is the
+      // wrong thing to tell a user whose CLI ran fine but wrote no file.
+      reject(failure(`${bin} not found or not executable: ${e.message}`, {
+        code: e.code, spawnFailed: true, stderr: err,
+      }));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve({ out, err });
-      else reject(new Error(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`));
+      else {
+        reject(failure(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`, {
+          stderr: err, exitCode: code,
+        }));
+      }
     });
     if (stdin != null) {
       child.stdin.on('error', () => { /* EPIPE when codex exits early — the close handler reports it */ });
@@ -335,7 +357,12 @@ export function parseCodexExecOutput(jsonl) {
     }
     if (ev?.type === 'turn.completed' && ev.usage && typeof ev.usage === 'object') usage = ev.usage;
   }
-  if (text == null) throw new Error('codex_no_output: codex exec finished without an agent_message');
+  if (text == null) {
+    throw Object.assign(
+      new Error('codex_no_output: codex exec finished without an agent_message'),
+      { code: 'codex_no_output' },
+    );
+  }
   return { text, usage, threadId };
 }
 
@@ -353,8 +380,55 @@ export function chunkText(text, size = CHUNK_BYTES) {
   return parts;
 }
 
+/** Text jobs carry refs under `image_urls`; the image/dreamina jobs next door
+ *  use `ref_urls`. A payload that gets that wrong, or ships a non-string
+ *  array, used to fall through `Array.isArray(...) ? ... : []` and produce an
+ *  empty list — the model then answered confidently about images it never
+ *  saw. Every rejection is typed and loud instead. */
+export function normalizeImageUrls(payload) {
+  const refuse = (why) => {
+    throw Object.assign(new Error(`ref_rejected: ${why}`), { code: 'ref_rejected' });
+  };
+  const raw = payload?.image_urls;
+  if (raw == null) {
+    if (payload?.ref_urls != null) refuse('refs must be sent as image_urls, not ref_urls');
+    return [];
+  }
+  if (!Array.isArray(raw) || raw.some((u) => typeof u !== 'string')) {
+    refuse('image_urls must be an array of strings');
+  }
+  return raw.slice(0, 9);
+}
+
+/** The wire contract Task 2 reassembles. Kept as a pure function over `send`
+ *  so both branches are testable: the chunked one is otherwise near-dead code
+ *  that would first execute in production. */
+export function emitTextResult(send, { text, usage }) {
+  if (Buffer.byteLength(text, 'utf8') <= TEXT_INLINE_LIMIT) {
+    send({ type: 'job_done', text, usage, chunked: false });
+    return;
+  }
+  const parts = chunkText(text);
+  parts.forEach((data, seq) => send({ type: 'job_chunk', seq, data }));
+  send({ type: 'job_done', usage, chunked: true, chunks: parts.length });
+}
+
+/** Auth signals only ever appear on stderr. Deliberately narrow: a bare
+ *  `login` substring matched `systemd-logind` and any doc URL. */
+const AUTH_RE = /\bnot logged in\b|\bplease log ?in\b|\b401\b|unauthori[sz]ed/i;
+
+/** Map a thrown error to a wire `code`, using structured fields only — the
+ *  Error message contains codex stdout, i.e. text the model controls. */
+export function classifyJobError(err) {
+  if (err?.spawnFailed) return 'cli_missing';
+  const thrown = err?.code;
+  if (thrown === 'codex_no_output' || thrown === 'ref_rejected') return thrown;
+  if (AUTH_RE.test(String(err?.stderr ?? ''))) return 'codex_not_logged_in';
+  return 'job_failed';
+}
+
 async function runTextJob(payload, workDir) {
-  const refs = Array.isArray(payload.image_urls) ? payload.image_urls.slice(0, 9) : [];
+  const refs = normalizeImageUrls(payload);
   const imagePaths = [];
   for (let i = 0; i < refs.length; i += 1) imagePaths.push(await downloadRef(refs[i], workDir, i));
   const args = buildCodexExecArgs({ model: payload.model, imagePaths, workDir });
@@ -447,26 +521,13 @@ async function connect(cfg) {
         const genId = await uploadResult(file, msg.payload?.upload_ticket);
         send({ type: 'job_done', gen_id: String(genId) });
       } else if (msg.kind === 'text') {
-        const { text, usage } = await runTextJob(msg.payload ?? {}, workDir);
-        if (Buffer.byteLength(text, 'utf8') <= TEXT_INLINE_LIMIT) {
-          send({ type: 'job_done', text, usage, chunked: false });
-        } else {
-          const parts = chunkText(text);
-          parts.forEach((data, seq) => send({ type: 'job_chunk', seq, data }));
-          send({ type: 'job_done', usage, chunked: true, chunks: parts.length });
-        }
+        emitTextResult(send, await runTextJob(msg.payload ?? {}, workDir));
       } else {
         send({ type: 'job_failed', code: 'unsupported_kind', message: String(msg.kind) });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const code = /codex_no_output/.test(message)
-        ? 'codex_no_output'
-        : /not found or not executable/.test(message)
-          ? 'cli_missing'
-          : /not logged in|login|\b401\b|unauthori[sz]ed|access[_ -]?token/i.test(message)
-            ? 'codex_not_logged_in'
-            : 'job_failed';
+      const code = classifyJobError(err);
       log(`job ${jobId} failed: ${message}`);
       send({ type: 'job_failed', code, message: message.slice(0, 400) });
     } finally {
