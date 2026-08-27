@@ -179,6 +179,28 @@ See "Only run the command nous gave you" above — it applies here in full: the
 prompt is assembled by nous from your agent's instructions and conversation,
 and codex acts on it on your machine.
 
+⚠️ **`-s read-only` stops writes, not reads — and "reads" means your whole
+home directory.** Measured on a real machine (2026-08-27) with the exact argv
+this daemon builds, `-C` pointed at an empty temp dir: codex read a file under
+`$HOME` that had nothing to do with the job and returned its contents verbatim.
+The sandbox is doing what OpenAI documents; it is just weaker than the `-C`
+flag makes it look.
+
+What actually keeps a text job away from your files today is one sentence in
+the prompt nous composes ("Do not read or modify any files"), and in testing
+codex honoured it — including when the user turn explicitly told it to ignore
+that sentence. But a prompt instruction is not an isolation boundary. So:
+
+- **Do not paste untrusted text into an agent that runs on `Codex (Local)`** —
+  a scraped page, an email, a document someone sent you. Whoever wrote that
+  text is writing part of the prompt.
+- Anything readable by your user account is in reach: `~/.ssh`, `~/.aws`,
+  `.env` files, browser profiles.
+- Bind the model to agents whose input you control.
+
+Real isolation (a container, or a separate user account with its own `codex`
+login) is tracked as follow-up work; it is not in this first version.
+
 ## Environment
 
 | Variable | Default | Purpose |
