@@ -97,6 +97,9 @@ export interface AIGovernanceSettings {
   summarization: AIGovernanceTaskSettings
   topic_scorer: AIGovernanceTaskSettings
   embedding: AIGovernanceTaskSettings
+  /** system_settings.maintenance_llm_model — null means "use the default". */
+  maintenance_llm_model: string | null
+  maintenance_llm_model_default: string
 }
 
 export interface AIGovernanceModuleUpdate {
@@ -119,6 +122,8 @@ export interface AIGovernanceUpdate {
   summarization?: AIGovernanceModuleUpdate
   topic_scorer?: AIGovernanceModuleUpdate
   embedding?: AIGovernanceModuleUpdate
+  /** Catalog model name; '' resets to the default; omit to keep. */
+  maintenance_llm_model?: string
 }
 
 const AI_GOVERNANCE_URL = '/api/v1/admin/settings/ai-governance'

@@ -452,3 +452,95 @@ async def test_update_writes_global_nous_and_per_module_nous_allowed():
     assert ("nous.user_enabled", True) in writes
     assert ("ai_module.chat.nous_allowed", False) in writes
     assert ("ai_module.transcription.nous_allowed", True) in writes
+
+
+# ---------------------------------------------------------------------------
+# Maintenance model (system_settings.maintenance_llm_model) — exposed in the
+# governance bundle so admins get a UI instead of a bare DB key.
+# ---------------------------------------------------------------------------
+
+
+def _governance_patches(repo):
+    async def _fake_audit(**kwargs):
+        return None
+
+    return (
+        patch(
+            "app.api.admin.settings_router.get_system_settings_repository",
+            return_value=repo,
+        ),
+        patch(
+            "app.api.admin.settings_router.create_audit_log",
+            side_effect=_fake_audit,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_governance_maintenance_model_absent_is_none():
+    """No row → None (the resolver falls back to DEFAULT_MAINTENANCE_MODEL)."""
+    from app.api.admin.settings_router import _read_governance_settings
+
+    repo = _make_repo_with_rows([])
+    with patch(
+        "app.api.admin.settings_router.get_system_settings_repository",
+        return_value=repo,
+    ):
+        resp = await _read_governance_settings()
+    assert resp.maintenance_llm_model is None
+    assert resp.maintenance_llm_model_default == "mediahub-doubao-seed-2-0-lite"
+
+
+@pytest.mark.asyncio
+async def test_get_governance_maintenance_model_reads_row():
+    """The stored (non ai_module.*-prefixed) key is surfaced verbatim."""
+    from app.api.admin.settings_router import _read_governance_settings
+
+    repo = _make_repo_with_rows(
+        _make_rows(("maintenance_llm_model", "mediahub-deepseek-v4-flash"))
+    )
+    with patch(
+        "app.api.admin.settings_router.get_system_settings_repository",
+        return_value=repo,
+    ):
+        resp = await _read_governance_settings()
+    assert resp.maintenance_llm_model == "mediahub-deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_put_governance_maintenance_model_written_and_blank_resets():
+    """Sent value → written as-is; blank → written as "" (resolver → default);
+    omitted → untouched."""
+    from app.api.admin.settings_router import update_ai_governance_settings
+    from app.schemas.admin import AIGovernanceUpdate
+
+    fake_request = MagicMock()
+    fake_request.client.host = "127.0.0.1"
+    fake_auth = MagicMock()
+    fake_auth.user_id = "admin-1"
+
+    for sent, expected in (
+        ("mediahub-deepseek-v4-flash", "mediahub-deepseek-v4-flash"),
+        ("  mediahub-x  ", "mediahub-x"),
+        ("", ""),
+    ):
+        repo = _make_repo_with_rows([])
+        p1, p2 = _governance_patches(repo)
+        with p1, p2:
+            await update_ai_governance_settings(
+                AIGovernanceUpdate(maintenance_llm_model=sent),
+                fake_auth,
+                fake_request,
+            )
+        keys = {c.args[0]: c.args[1] for c in repo.upsert_setting.call_args_list}
+        assert keys == {"maintenance_llm_model": expected}, (sent, keys)
+
+    repo = _make_repo_with_rows([])
+    p1, p2 = _governance_patches(repo)
+    with p1, p2:
+        await update_ai_governance_settings(
+            AIGovernanceUpdate(nous_user_enabled=True), fake_auth, fake_request
+        )
+    assert "maintenance_llm_model" not in {
+        c.args[0] for c in repo.upsert_setting.call_args_list
+    }

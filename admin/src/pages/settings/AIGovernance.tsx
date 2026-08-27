@@ -27,6 +27,7 @@ import {
   IconEye,
   IconFire,
   IconMessage,
+  IconTool,
 } from '@arco-design/web-react/icon'
 import { useAuth } from '../../auth/AuthProvider'
 import { SectionHeader } from './SectionHeader'
@@ -38,7 +39,7 @@ const MODULE_CATALOG_TYPE: Record<string, string> = {
   transcription: 'asr',
 }
 
-type CatalogModel = { name: string; display_name: string; type: string }
+type CatalogModel = { name: string; display_name: string; type: string; is_enabled?: boolean }
 
 // Per-section icon, mirroring the user app's section-header pattern so titles
 // read clearly above their content.
@@ -98,6 +99,8 @@ interface LocalState {
   summarization: TaskModuleLocalState
   topic_scorer: TaskModuleLocalState
   embedding: TaskModuleLocalState
+  /** '' = platform default (mirrors the wire contract). */
+  maintenance_llm_model: string
 }
 
 const TASK_MODULES: ReadonlyArray<{ key: TaskModuleKey; label: string; hint: string }> = [
@@ -167,6 +170,7 @@ function defaultLocalState(): LocalState {
     summarization: defaultTaskState(),
     topic_scorer: defaultTaskState(),
     embedding: defaultTaskState(),
+    maintenance_llm_model: '',
   }
 }
 
@@ -255,6 +259,7 @@ export function AIGovernance() {
         model: data.embedding.model ?? '',
         api_key: '',
       },
+      maintenance_llm_model: data.maintenance_llm_model ?? '',
     })
   }, [data])
 
@@ -291,6 +296,7 @@ export function AIGovernance() {
       summarization: taskUpdate(state.summarization),
       topic_scorer: taskUpdate(state.topic_scorer),
       embedding: taskUpdate(state.embedding),
+      maintenance_llm_model: state.maintenance_llm_model,
     }
 
     updateMutation.mutate(payload, {
@@ -361,6 +367,34 @@ export function AIGovernance() {
       {/* "Allow MediaHub models (chat)" removed — chat resolves its model via
           get_adapter_for_user, never resolve_nous_model("chat"), so the toggle
           had no effect. */}
+
+      {/* ── Maintenance tier ─────────────────────────────────────────────── */}
+      <Divider />
+      <SectionHeader
+        icon={<IconTool />}
+        title="Maintenance model"
+        subtitle="Platform-catalog LLM for background upkeep: conversation compaction, session memory, distillation. Not user-facing; never BYOK."
+      />
+      <Row
+        label="Model"
+        hint={`Only enabled LLM catalog entries are listed. Default: ${data?.maintenance_llm_model_default || '—'}.`}
+      >
+        <Select
+          value={state.maintenance_llm_model}
+          style={{ width: 320 }}
+          disabled={updateMutation.isPending}
+          onChange={(v) => setState((prev) => ({ ...prev, maintenance_llm_model: String(v ?? '') }))}
+        >
+          <Select.Option value="">Default ({data?.maintenance_llm_model_default || '…'})</Select.Option>
+          {catalog
+            .filter((c) => (c.type || 'llm') === 'llm' && c.is_enabled !== false)
+            .map((c) => (
+              <Select.Option key={c.name} value={c.name}>
+                {c.display_name || c.name}
+              </Select.Option>
+            ))}
+        </Select>
+      </Row>
 
       {/* ── Task modules ─────────────────────────────────────────────────── */}
       {TASK_MODULES.map(({ key, label, hint }) => {
