@@ -281,3 +281,61 @@ test('renderLaunchdPlist: an & in a path does not produce invalid XML', () => {
   // A bare & anywhere would make launchd reject the plist.
   assert.doesNotMatch(plist, /&(?!amp;|lt;|gt;|quot;|apos;)/);
 });
+
+import {
+  buildCodexExecArgs,
+  chunkText,
+  parseCodexExecOutput,
+  TEXT_INLINE_LIMIT,
+} from './index.mjs';
+
+test('buildCodexExecArgs pins the read-only ephemeral sandbox and reads the prompt from stdin', () => {
+  const args = buildCodexExecArgs({ model: 'gpt-5', imagePaths: ['/tmp/a.png'], workDir: '/tmp/w' });
+  assert.deepEqual(args, [
+    'exec', '--json', '--ephemeral', '--skip-git-repo-check',
+    '-s', 'read-only', '-C', '/tmp/w', '--model', 'gpt-5', '--image', '/tmp/a.png', '-',
+  ]);
+  const noModel = buildCodexExecArgs({ model: '', imagePaths: [], workDir: '/tmp/w' });
+  assert.ok(!noModel.includes('--model'));
+  assert.equal(noModel.at(-1), '-');
+});
+
+test('parseCodexExecOutput takes the LAST agent_message and the turn usage', () => {
+  const jsonl = [
+    '{"type":"thread.started","thread_id":"t1"}',
+    '{"type":"turn.started"}',
+    '{"type":"item.completed","item":{"id":"i0","type":"reasoning","text":"thinking"}}',
+    '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"draft"}}',
+    '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"final answer"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7,"reasoning_output_tokens":2}}',
+    'not json at all',
+  ].join('\n');
+  const out = parseCodexExecOutput(jsonl);
+  assert.equal(out.text, 'final answer');
+  assert.equal(out.threadId, 't1');
+  assert.deepEqual(out.usage, {
+    input_tokens: 100, cached_input_tokens: 40, output_tokens: 7, reasoning_output_tokens: 2,
+  });
+});
+
+test('parseCodexExecOutput throws codex_no_output when no agent_message exists', () => {
+  assert.throws(
+    () => parseCodexExecOutput('{"type":"turn.completed","usage":{}}'),
+    /codex_no_output/,
+  );
+});
+
+test('parseCodexExecOutput tolerates missing usage', () => {
+  const out = parseCodexExecOutput('{"type":"item.completed","item":{"type":"agent_message","text":"x"}}');
+  assert.equal(out.text, 'x');
+  assert.deepEqual(out.usage, {});
+});
+
+test('chunkText splits on byte size and round-trips', () => {
+  const s = '汉'.repeat(1000) + 'abc';
+  const parts = chunkText(s, 1000);
+  assert.ok(parts.length > 1);
+  assert.ok(parts.every((p) => Buffer.byteLength(p, 'utf8') <= 1000));
+  assert.equal(parts.join(''), s);
+  assert.equal(TEXT_INLINE_LIMIT, 900 * 1024);
+});

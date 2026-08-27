@@ -177,11 +177,11 @@ async function pair(argv) {
 
 // ── job execution (WHITELIST — the only commands this process ever runs) ──
 
-function runCommand(bin, args, { timeoutMs = 15 * 60_000 } = {}) {
+function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } = {}) {
   return new Promise((resolve, reject) => {
     // argv array, never a shell string: nothing the server sends can be
     // interpreted as shell syntax.
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { stdio: [stdin == null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
@@ -199,6 +199,10 @@ function runCommand(bin, args, { timeoutMs = 15 * 60_000 } = {}) {
       if (code === 0) resolve({ out, err });
       else reject(new Error(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`));
     });
+    if (stdin != null) {
+      child.stdin.on('error', () => { /* EPIPE when codex exits early — the close handler reports it */ });
+      child.stdin.end(stdin);
+    }
   });
 }
 
@@ -299,12 +303,67 @@ async function runDreaminaJob(payload, workDir) {
   return path.join(workDir, media);
 }
 
-async function runTextJob(payload) {
-  const args = ['exec', '--json'];
-  if (payload.model) args.push('--model', String(payload.model));
-  args.push(String(payload.prompt ?? ''));
-  const { out } = await runCommand('codex', args, { timeoutMs: 10 * 60_000 });
-  return out;
+export const TEXT_INLINE_LIMIT = 900 * 1024; // uvicorn's default WS frame cap is 1 MiB
+export const CHUNK_BYTES = 256 * 1024;
+const TEXT_TIMEOUT_DEFAULT_MS = 180_000;
+const TEXT_TIMEOUT_MAX_MS = 600_000;
+
+/** Fixed sandbox: read-only, ephemeral, cwd = an empty temp dir. IC ran
+ *  `--sandbox workspace-write --cd <app dir>` and then asked the model in the
+ *  prompt not to write files — we do not repeat that. */
+export function buildCodexExecArgs({ model, imagePaths, workDir }) {
+  const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only', '-C', workDir];
+  if (model) args.push('--model', String(model));
+  for (const p of imagePaths ?? []) args.push('--image', p);
+  args.push('-'); // prompt from stdin: long prompts never hit argv / ps
+  return args;
+}
+
+/** `codex exec --json` prints JSONL. The answer is the LAST
+ *  item.completed whose item.type is agent_message; turn.completed.usage
+ *  carries real token counts. Non-JSON lines are ignored. */
+export function parseCodexExecOutput(jsonl) {
+  let text = null;
+  let usage = {};
+  let threadId = null;
+  for (const line of String(jsonl).split('\n')) {
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (ev?.type === 'thread.started' && ev.thread_id) threadId = ev.thread_id;
+    if (ev?.type === 'item.completed' && ev.item?.type === 'agent_message' && typeof ev.item.text === 'string') {
+      text = ev.item.text;
+    }
+    if (ev?.type === 'turn.completed' && ev.usage && typeof ev.usage === 'object') usage = ev.usage;
+  }
+  if (text == null) throw new Error('codex_no_output: codex exec finished without an agent_message');
+  return { text, usage, threadId };
+}
+
+export function chunkText(text, size = CHUNK_BYTES) {
+  const buf = Buffer.from(text, 'utf8');
+  const parts = [];
+  let start = 0;
+  while (start < buf.length) {
+    let end = Math.min(start + size, buf.length);
+    // never cut inside a UTF-8 sequence: back up to a char boundary
+    while (end < buf.length && (buf[end] & 0xc0) === 0x80) end -= 1;
+    parts.push(buf.subarray(start, end).toString('utf8'));
+    start = end;
+  }
+  return parts;
+}
+
+async function runTextJob(payload, workDir) {
+  const refs = Array.isArray(payload.image_urls) ? payload.image_urls.slice(0, 9) : [];
+  const imagePaths = [];
+  for (let i = 0; i < refs.length; i += 1) imagePaths.push(await downloadRef(refs[i], workDir, i));
+  const args = buildCodexExecArgs({ model: payload.model, imagePaths, workDir });
+  const timeoutMs = Math.min(
+    Number(payload.timeout_s) > 0 ? Number(payload.timeout_s) * 1000 : TEXT_TIMEOUT_DEFAULT_MS,
+    TEXT_TIMEOUT_MAX_MS,
+  );
+  const { out } = await runCommand('codex', args, { timeoutMs, stdin: String(payload.prompt ?? '') });
+  return parseCodexExecOutput(out);
 }
 
 const MIME_BY_EXT = {
@@ -388,18 +447,26 @@ async function connect(cfg) {
         const genId = await uploadResult(file, msg.payload?.upload_ticket);
         send({ type: 'job_done', gen_id: String(genId) });
       } else if (msg.kind === 'text') {
-        const text = await runTextJob(msg.payload ?? {});
-        send({ type: 'job_done', text });
+        const { text, usage } = await runTextJob(msg.payload ?? {}, workDir);
+        if (Buffer.byteLength(text, 'utf8') <= TEXT_INLINE_LIMIT) {
+          send({ type: 'job_done', text, usage, chunked: false });
+        } else {
+          const parts = chunkText(text);
+          parts.forEach((data, seq) => send({ type: 'job_chunk', seq, data }));
+          send({ type: 'job_done', usage, chunked: true, chunks: parts.length });
+        }
       } else {
         send({ type: 'job_failed', code: 'unsupported_kind', message: String(msg.kind) });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const code = /not found or not executable/.test(message)
-        ? 'cli_missing'
-        : /not logged in|login/i.test(message)
-          ? 'codex_not_logged_in'
-          : 'job_failed';
+      const code = /codex_no_output/.test(message)
+        ? 'codex_no_output'
+        : /not found or not executable/.test(message)
+          ? 'cli_missing'
+          : /not logged in|login|\b401\b|unauthori[sz]ed|access[_ -]?token/i.test(message)
+            ? 'codex_not_logged_in'
+            : 'job_failed';
       log(`job ${jobId} failed: ${message}`);
       send({ type: 'job_failed', code, message: message.slice(0, 400) });
     } finally {
