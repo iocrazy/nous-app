@@ -45,7 +45,7 @@ daemon 无 DB / API 写能力，只回 WS 帧。
   - 解析 JSONL：`parseCodexExecOutput(text) -> {text, usage, thread_id}`（纯函数，可测）。没有 `agent_message` 时抛 `codex_no_output`；stderr / 非零退出按 §5 分类
   - 超时 180s（可由 payload.timeout_s 覆盖，上限 600）
   - 返回 `{text, usage}`；`send({type:'job_done', text, usage, chunked:false})`（`send` 闭包已自动带 `job_id`）
-  - 结果超过 **900 KB**（留 uvicorn 1 MB 帧上限余量）→ 按 256 KB 切成 `{type:'job_chunk', seq, data}` 帧序列，末尾 `{type:'job_done', chunked:true, chunks:n, usage}`；ws router 拼接后一次发布。不走 upload ticket——那个端点只收 `image/*|video/*`，改它牵涉 generated_media 登记。单测钉住阈值与 UTF-8 边界；真链验证用一个 1 MB 的 prompt 让 codex 原样复述
+  - 结果超过 **900 KB**（留 uvicorn 1 MB 帧上限余量）→ 按 256 KB 切成 `{type:'job_chunk', seq, data}` 帧序列，末尾 `{type:'job_done', chunked:true, chunks:n, usage}`；ws router 拼接后一次发布。不走 upload ticket——那个端点只收 `image/*|video/*`，改它牵涉 generated_media 登记。**`MAX_TEXT_CHUNKS=64`（≈16 MiB）是单次文本结果的产品上限**：超过即 `chunk_mismatch` 类型化失败，不返回截断的答案（另有 `MAX_BUFFERED_JOBS=8` 限制同时在拼的任务数）。单测钉住阈值与 UTF-8 边界；真链验证用一个 1 MB 的 prompt 让 codex 原样复述
 - 单测：`parseCodexExecOutput`（正常 / 无 agent_message / usage 缺失 / 多条 agent_message 取最后）、超长分流阈值、argv 构造（含 `-s read-only`、`-C`）
 
 ### 3.2 后端
@@ -93,9 +93,15 @@ messages 里 `content` 为多段且含 `image_url` 的，抽出 URL 进 `image_u
 | stderr 命中 `\b401\b|unauthori[sz]ed|access[_ -]?token|api[_ -]?key`（借 IC `main.py:5347`）或 `~/.codex/auth.json` 缺失 | `codex_not_logged_in` | 本机 codex 未登录，请运行 `codex login` |
 | 无 `agent_message` | `codex_no_output` | codex 没有返回文本 |
 | 超时 | `timeout` | 本机 codex 超过 N 秒未响应 |
+| 参考图 URL 非 nous 主机（SSRF 守卫拒绝） | `ref_rejected` | 图片附件的地址不被本机 daemon 接受 |
 | 其它非零退出 | `codex_failed` + stderr 前 400 字 | — |
 | 后端：无在线 daemon | `daemon_offline` | 你的本机 codex daemon 不在线 |
 | 后端：`composed.tools` 非空 | `tools_unsupported` | 本机 Codex 不支持工具调用；请解绑 Skill 或换模型 |
+
+后端把上表的 daemon 码前缀成 `local_*` 落进 `error_catalog`（`local_daemon_offline` / `local_cli_missing` /
+`local_tools_unsupported` / `local_codex_not_logged_in` / `local_ref_rejected` / `local_codex_failed`）。
+**唯一的例外是 `timeout`：它复用既有的 `TASK_TIMEOUT` 码**，不新造 `local_timeout` —— 前端对
+`TASK_TIMEOUT` 已有真话文案，而"daemon 离线"的文案套在超时上是假话。
 
 ## 6. 安全
 
@@ -115,7 +121,7 @@ messages 里 `content` 为多段且含 `image_url` 的，抽出 URL 进 `image_u
   3. 停掉 `nous-codex.service` 再发消息 → `daemon_offline`，且**没有**回退到服务器模型
   4. 图片附件对话 → daemon 日志出现 `--image`，回复内容确实描述了图片
   5. §6 沙箱读文件实测
-  6. 1 MB 复述 prompt → 走 upload ticket 分支，回复完整
+  6. 1 MB 复述 prompt → 走 `job_chunk` 分片帧分支（非 upload ticket），回复完整
 
 ## 8. 不做（本期）
 

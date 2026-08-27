@@ -982,7 +982,7 @@
     },
     "localCli": {
       "codexTitle": "GPT CLI (codex)",
-      "codexDesc": "Run canvas generations on your own machine with your own codex login. Your credentials never leave your computer — nous only sends the job.",
+      "codexDesc": "Run canvas generations on your own machine with your own codex login. Your credentials never leave your computer — nous only sends the job. Also usable as an agent model (Codex (Local)) — plain text only.",
       "notPaired": "Not paired",
       "allOffline": "All offline",
       "nOnline": "{{count}} online",
