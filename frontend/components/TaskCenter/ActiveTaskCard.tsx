@@ -9,6 +9,7 @@ import {
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { AgentNameBadge } from './AgentNameBadge';
 import { formatElapsed } from './taskElapsed';
+import { retryProgress, todoProgress } from './agentRunPresentation';
 
 interface ActiveTaskCardProps {
   task: UnifiedTask;
@@ -29,6 +30,8 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
   const startedMs = startedRaw ? Date.parse(startedRaw) : now;
   const elapsed = formatElapsed(now - startedMs);
   const pct = Math.max(task.progress || 0, 2);
+  const todo = task.task_type === 'agent' ? todoProgress(task.metadata) : null;
+  const retry = task.task_type === 'agent' ? retryProgress(task.metadata, now) : null;
 
   return (
     <div className="mx-3 my-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
@@ -67,6 +70,26 @@ export const ActiveTaskCard: React.FC<ActiveTaskCardProps> = ({ task, now, onCan
               <X size={12} />
             </button>
           </div>
+
+          {/* Agent step progress — only when the agent actually keeps a list.
+              A run without one draws nothing here, not "0/0". */}
+          {(todo || retry) && (
+            <div className="mt-1 flex items-center gap-2 min-w-0" data-testid="agent-progress">
+              {todo && (
+                <span className="text-[10px] text-ink-400 truncate" data-testid="todo-progress">
+                  <span className="tabular-nums">{todo.done}/{todo.total}</span>
+                  {todo.label && <span className="text-ink-500"> · {todo.label}</span>}
+                </span>
+              )}
+              {retry && (
+                <span className="text-[10px] text-warn shrink-0 tabular-nums" data-testid="retry-progress">
+                  {retry.waitingSeconds > 0
+                    ? `Retry ${retry.attempt}/${retry.max} · waiting ${retry.waitingSeconds.toFixed(1)}s`
+                    : `Retried ${retry.attempt}/${retry.max}`}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Progress */}
           <div className="mt-2 flex items-center gap-2">

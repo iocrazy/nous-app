@@ -92,6 +92,73 @@ export function turnEndSubtitle(metadata: Record<string, unknown> | null | undef
   }
 }
 
+/** One row of the agent's todo list, as the backend snapshots it (whole
+ * value per write — never a delta, so a missed event cannot corrupt it). */
+export interface AgentTodoItem {
+  id: number;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  active_form: string | null;
+}
+
+export interface AgentTodoSnapshot {
+  todos: AgentTodoItem[];
+  counts: { total: number; completed: number; in_progress: number };
+}
+
+export interface TodoProgress {
+  /** What the agent is doing right now — active_form, else the item's content. */
+  label: string | null;
+  done: number;
+  total: number;
+}
+
+/**
+ * "3/7 · doing B" from `metadata_json.todos`. Null when no snapshot ever landed
+ * (older runs, agents that never wrote a list) — the card then draws nothing
+ * rather than "0/0". Malformed counts are also null: a NaN in the UI is worse
+ * than silence.
+ */
+export function todoProgress(metadata: Record<string, unknown> | null | undefined): TodoProgress | null {
+  const snap = metadata?.todos as Partial<AgentTodoSnapshot> | undefined;
+  const counts = snap?.counts;
+  if (!snap || !counts || typeof counts.total !== 'number' || typeof counts.completed !== 'number') {
+    return null;
+  }
+  if (!Number.isFinite(counts.total) || !Number.isFinite(counts.completed)) return null;
+  const todos = Array.isArray(snap.todos) ? snap.todos : [];
+  const active = todos.find((t) => t?.status === 'in_progress');
+  const label = active ? active.active_form || active.content || null : null;
+  return { label, done: counts.completed, total: counts.total };
+}
+
+export interface RetryProgress {
+  attempt: number;
+  max: number;
+  /** Seconds still to wait at `now`; 0 once the backoff has elapsed. */
+  waitingSeconds: number;
+}
+
+/**
+ * "Retry 2/4 · waiting 3.2s" from `metadata_json.last_retry`. The backend
+ * stamps `at` when it files the retry; the wait is aged against the caller's
+ * clock so a retry that already happened reads "Retried 2/4", not a wait that
+ * never ends. Null when the run never retried.
+ */
+export function retryProgress(
+  metadata: Record<string, unknown> | null | undefined,
+  now: number,
+): RetryProgress | null {
+  const r = metadata?.last_retry as
+    | { attempt?: unknown; max_retries?: unknown; delay_ms?: unknown; at?: unknown }
+    | undefined;
+  if (!r || typeof r.attempt !== 'number' || typeof r.max_retries !== 'number') return null;
+  const delayMs = typeof r.delay_ms === 'number' ? r.delay_ms : 0;
+  const atMs = typeof r.at === 'string' ? Date.parse(r.at) : NaN;
+  const remaining = Number.isFinite(atMs) ? atMs + delayMs - now : 0;
+  return { attempt: r.attempt, max: r.max_retries, waitingSeconds: Math.max(0, remaining / 1000) };
+}
+
 /** agent_runs has no "queued" state — a run is executing or terminal. */
 function mapStatus(status: AgentRunRow['status']): TaskStatus {
   switch (status) {
@@ -138,6 +205,11 @@ export function agentRunToTask(run: AgentRunRow, cachedAgentName?: string): Unif
       // cache is keyed by agent_id.
       agent_id: run.agent_id ?? null,
       agent_name: agentName ?? null,
+      // Phase 2 mirrors (todo snapshot / last retry / turn end). Passed through
+      // whole so todoProgress()/retryProgress() read one shape everywhere.
+      todos: run.metadata_json?.todos ?? null,
+      last_retry: run.metadata_json?.last_retry ?? null,
+      turn_end_reason: run.metadata_json?.turn_end_reason ?? null,
     },
     created_at: run.created_at,
     started_at: run.started_at || undefined,

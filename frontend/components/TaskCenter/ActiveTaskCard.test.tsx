@@ -54,3 +54,47 @@ describe('ActiveTaskCard — agent attribution while the run is executing', () =
     expect(container.querySelector('[data-testid="agent-name-badge"]')).toBeNull();
   });
 });
+
+describe('ActiveTaskCard — agent step progress (harness phase 2)', () => {
+  const snap = {
+    todos: [
+      { id: 1, content: 'Outline', status: 'completed', active_form: null },
+      { id: 2, content: 'Draft scene 2', status: 'in_progress', active_form: 'Drafting scene 2' },
+    ],
+    counts: { total: 7, completed: 3, in_progress: 1 },
+  };
+
+  it('renders "3/7 · Drafting scene 2" from the todo snapshot', () => {
+    const { container } = renderCard(
+      runningAgentTask({ metadata: { agent_name: 'Analyze', todos: snap } }),
+    );
+    const el = container.querySelector('[data-testid="todo-progress"]');
+    expect(el).not.toBeNull();
+    expect(el!.textContent).toBe('3/7 · Drafting scene 2');
+  });
+
+  it('draws nothing for a run that never kept a list', () => {
+    const { container } = renderCard(runningAgentTask());
+    expect(container.querySelector('[data-testid="agent-progress"]')).toBeNull();
+  });
+
+  it('shows the live retry wait, then the past-tense form once elapsed', () => {
+    const started = '2026-08-19T03:15:37.852624+00:00';
+    const at = new Date(Date.parse(started) + 1000).toISOString();
+    const task = runningAgentTask({
+      metadata: { agent_name: 'Analyze', last_retry: { attempt: 2, max_retries: 4, delay_ms: 5000, at } },
+    });
+    // now = started + 4000 → 2.0s of the 5s backoff remain
+    const live = renderCard(task);
+    expect(live.container.querySelector('[data-testid="retry-progress"]')!.textContent).toBe(
+      'Retry 2/4 · waiting 2.0s',
+    );
+    cleanup();
+    const later = render(
+      <ActiveTaskCard task={task} now={Date.parse(started) + 60_000} onCancel={() => {}} />,
+    );
+    expect(later.container.querySelector('[data-testid="retry-progress"]')!.textContent).toBe(
+      'Retried 2/4',
+    );
+  });
+});

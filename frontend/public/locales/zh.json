@@ -1142,6 +1142,7 @@
     "resSize": "大小",
     "agentPrompt": "输入",
     "agentResponse": "回复",
+    "agentSteps": "步骤",
     "agentModel": "模型",
     "visionDescription": "描述",
     "visionText": "识别文字"

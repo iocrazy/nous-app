@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
+import type { AgentTodoSnapshot } from '../agentRunPresentation';
 
 export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
@@ -11,13 +12,54 @@ export const AgentResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
     agent_completion_tokens?: number | null;
     agent_cost_cents?: number | null;
     agent_model?: string | null;
+    todos?: AgentTodoSnapshot | null;
   };
   const total = (m.agent_prompt_tokens ?? 0) + (m.agent_completion_tokens ?? 0);
+  const todos = Array.isArray(m.todos?.todos) ? m.todos!.todos : [];
 
   return (
     <div className="p-4 space-y-3">
       {m.agent_input && <Block label={t('topbar.agentPrompt')} text={m.agent_input} tone="plain" />}
       <Block label={t('topbar.agentResponse')} text={m.agent_output || task.error_msg || ''} tone="accent" />
+
+      {todos.length > 0 && (
+        <div data-testid="agent-todo-list">
+          <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">
+            {t('topbar.agentSteps', 'Steps')}
+            {m.todos?.counts && (
+              <span className="ml-1 tabular-nums normal-case tracking-normal">
+                {m.todos.counts.completed}/{m.todos.counts.total}
+              </span>
+            )}
+          </div>
+          <ul className="space-y-1 rounded border border-ink-800 bg-ink-950/40 p-2">
+            {todos.map((item) => (
+              <li key={item.id} className="flex items-start gap-2 text-[12px]" data-status={item.status}>
+                <span
+                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                    item.status === 'completed'
+                      ? 'bg-ok'
+                      : item.status === 'in_progress'
+                        ? 'bg-info animate-pulse'
+                        : 'bg-ink-600'
+                  }`}
+                />
+                <span
+                  className={
+                    item.status === 'completed'
+                      ? 'text-ink-500 line-through'
+                      : item.status === 'in_progress'
+                        ? 'text-ink-100'
+                        : 'text-ink-400'
+                  }
+                >
+                  {item.status === 'in_progress' && item.active_form ? item.active_form : item.content}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-4 pt-1">
         {m.agent_model && <Stat label={t('topbar.agentModel')} value={m.agent_model} />}
