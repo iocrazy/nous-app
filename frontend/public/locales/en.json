@@ -741,6 +741,7 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "modelNote": "Same list as Settings → platform models: switch a model off there and it leaves this menu.",
       "cropBox": "Crop box — drag or use the arrow keys",
       "willFillPublishH": "Fills the horizontal cover slot on the publish page",
       "coverTabs": "Cover",
