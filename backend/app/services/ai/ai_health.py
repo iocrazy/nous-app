@@ -496,8 +496,9 @@ async def _system_capability_rows(
                     "origin": "platform",
                     "status": "not_configured",
                     "hint": f"Maintenance model '{m}' is not an enabled platform "
-                    "catalog entry — fix system_settings.maintenance_llm_model "
-                    "or enable the model in Admin → AI Models.",
+                    "catalog entry — pick another in Admin → Settings → "
+                    "AI Governance (Maintenance model), or enable it in "
+                    "Admin → AI Models.",
                 }
             )
     except Exception:  # noqa: BLE001

@@ -219,7 +219,8 @@ async def test_maintenance_not_configured_on_catalog_miss(monkeypatch):
     rows = await _rows(monkeypatch, resolve_mediahub_model=AsyncMock(return_value=None))
     m = rows["maintenance"]
     assert m["status"] == "not_configured"
-    assert "maintenance_llm_model" in m["hint"]
+    # The fix path is the admin UI now, not a bare DB key.
+    assert "AI Governance" in m["hint"]
 
 
 async def test_system_row_failure_is_isolated(monkeypatch):

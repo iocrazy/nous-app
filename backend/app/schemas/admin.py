@@ -335,6 +335,11 @@ class AIGovernanceResponse(BaseModel):
     summarization: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
     topic_scorer: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
     embedding: TaskModuleGovernanceResponse = TaskModuleGovernanceResponse()
+    # Maintenance tier (compaction / session memory / distillation):
+    # ``system_settings.maintenance_llm_model``. None = row absent/blank →
+    # the resolver uses ``maintenance_llm_model_default``.
+    maintenance_llm_model: Optional[str] = None
+    maintenance_llm_model_default: str = ""
 
 
 class ChatModuleGovernanceUpdate(BaseModel):
@@ -369,6 +374,8 @@ class AIGovernanceUpdate(BaseModel):
     summarization: Optional[TaskModuleGovernanceUpdate] = None
     topic_scorer: Optional[TaskModuleGovernanceUpdate] = None
     embedding: Optional[TaskModuleGovernanceUpdate] = None
+    # Catalog model name; blank string resets to the default. Omit to keep.
+    maintenance_llm_model: Optional[str] = None
 
 
 # ============================================

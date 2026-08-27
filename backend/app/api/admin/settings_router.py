@@ -437,9 +437,26 @@ async def _read_governance_settings() -> AIGovernanceResponse:
     nous_global_on = any(
         r.get("key") == "nous.user_enabled" and r.get("value") is True for r in rows
     )
+    # maintenance_llm_model is likewise un-prefixed (read by
+    # get_maintenance_model). Blank/absent → None so the UI shows "Default".
+    from app.services.ai.providers.ai_provider_helpers import (
+        DEFAULT_MAINTENANCE_MODEL,
+    )
+
+    maintenance_raw = next(
+        (r.get("value") for r in rows if r.get("key") == "maintenance_llm_model"),
+        None,
+    )
+    maintenance_model = (
+        maintenance_raw.strip()
+        if isinstance(maintenance_raw, str) and maintenance_raw.strip()
+        else None
+    )
 
     return AIGovernanceResponse(
         nous_user_enabled=nous_global_on,
+        maintenance_llm_model=maintenance_model,
+        maintenance_llm_model_default=DEFAULT_MAINTENANCE_MODEL,
         chat=ChatModuleGovernanceResponse(
             user_allowed=get_bool("ai_module.chat.user_allowed"),
             nous_allowed=get_nous("chat"),
@@ -535,8 +552,18 @@ async def update_ai_governance_settings(
         )
         written.append("nous.user_enabled")
 
+    # Maintenance-tier model (top-level, not under a module). Blank = reset to
+    # the default (get_maintenance_model treats "" as unset).
+    if data.get("maintenance_llm_model") is not None:
+        await repo.upsert_setting(
+            "maintenance_llm_model",
+            data["maintenance_llm_model"].strip(),
+            auth.user_id,
+        )
+        written.append("maintenance_llm_model")
+
     for module, module_data in data.items():
-        if module == "nous_user_enabled":
+        if module in ("nous_user_enabled", "maintenance_llm_model"):
             continue  # handled above; not a per-module dict
         if not module_data:
             continue
