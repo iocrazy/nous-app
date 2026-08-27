@@ -1,14 +1,19 @@
-"""Data access for cover_templates (封面工作室的样图模板库, migration 435).
+"""Cover template library = a system folder in the resource library (mig 441).
 
-ORM-model style (read_scope/write_scope + select on ``CoverTemplates``), same
-shape as generated_media_repository: every returned dict has its snowflake /
-UUID columns stringified so JSON serialisation is lossless on the JS side.
+Three responsibilities, nothing else:
 
-列表只有一种形状：某 scope 下的模板，用得多的排前面。索引
-``idx_cover_templates_scope_usage`` 就是照这个形状建的。
+1. ``ensure_folder`` — find the scope's cover-template folder by ``system_key``;
+   failing that, ADOPT a top-level folder the user already named for the job;
+   failing that, create one. Adoption exists because users build this folder
+   before the feature does (a "封面" folder full of samples showed up in prod
+   the day before this shipped), and silently creating a second one beside it
+   would be the "two libraries" problem all over again.
+2. ``list_images`` — the folder's image resources joined with usage, most-used
+   first. Membership is the folder; this repo never stores membership.
+3. ``bump_usage`` — the "used N×" counter, keyed by (scope, resource).
 
-删除是硬删除 —— 软删除会让归档行继续握着 ``ON DELETE RESTRICT`` 外键，于是用户
-将来删那张图时被一条他明明已经删掉、界面上也看不见的模板挡住。全文见迁移 435。
+Every returned dict has its snowflake / UUID columns stringified so JSON
+serialisation is lossless on the JS side.
 """
 
 from __future__ import annotations
@@ -16,226 +21,194 @@ from __future__ import annotations
 import datetime
 from typing import Optional
 
-from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
-from sqlalchemy import update as sa_update
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
-from app.models import CoverTemplates
+from app.models import CoverTemplateUsage, Folders, ResourceItems, Resources
 
-_CT_COLS = (
-    CoverTemplates.id,
-    CoverTemplates.scope_id,
-    CoverTemplates.creator_id,
-    CoverTemplates.name,
-    CoverTemplates.generated_media_id,
-    CoverTemplates.source_kind,
-    CoverTemplates.source_resource_id,
-    CoverTemplates.usage_count,
-    CoverTemplates.last_used_at,
-    CoverTemplates.created_at,
-    CoverTemplates.updated_at,
-)
+COVER_TEMPLATE_SYSTEM_KEY = "cover_templates"
 
-# Snowflake BIGINT columns: str() before they reach the frontend or JS loses
-# precision above 2^53 (same guard as generated_media_repository).
-_BIGINT_COLS = ("id", "scope_id", "generated_media_id", "source_resource_id")
-_UUID_COLS = ("creator_id",)
+# Names a user is likely to have given the folder before the feature existed.
+# Matched exactly (after strip), top level of the personal library only, so a
+# nested "封面" under some project cannot be captured by accident.
+ADOPTABLE_NAMES = ("封面", "封面模板", "Covers", "Cover Templates", "covers")
+
+DEFAULT_FOLDER_NAME = "Covers"
 
 
-def _normalize(row: Optional[dict]) -> Optional[dict]:
-    """Stringify bigint and UUID fields so JSON serialisation is lossless."""
-    if not row:
-        return row
-    out = dict(row)
-    for c in _BIGINT_COLS + _UUID_COLS:
-        if out.get(c) is not None:
-            out[c] = str(out[c])
-    return out
+def _s(v):
+    return None if v is None else str(v)
 
 
 class CoverTemplatesRepository:
-    async def list_for_scope(self, scope_id: int) -> list[dict]:
-        """Templates for a scope, most-used first.
+    async def find_folder(self, scope_id: int) -> Optional[dict]:
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(Folders.id, Folders.name, Folders.is_system).where(
+                            Folders.scope_id == scope_id,
+                            Folders.system_key == COVER_TEMPLATE_SYSTEM_KEY,
+                            Folders.is_trashed.is_(False),
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return (
+            {"id": _s(row["id"]), "name": row["name"], "adopted": False}
+            if row
+            else None
+        )
 
-        Ordering is usage_count DESC then created_at DESC — not created_at
-        alone. Sorting purely by age buries the first templates a user ever
-        saved, which are exactly the ones they kept because they work.
+    async def ensure_folder(self, scope_id: int, user_id: str) -> dict:
+        """The scope's cover-template folder, creating or adopting as needed.
+
+        Returns ``{id, name, adopted}`` — ``adopted`` is True on the one call
+        that claimed a pre-existing user folder, so the caller can say so.
         """
+        found = await self.find_folder(scope_id)
+        if found:
+            return found
+
+        async with write_scope() as session:
+            # Adopt: a live, top-level, personal-library folder with one of the
+            # expected names. Ordered oldest-first so a user who somehow has two
+            # gets the one they made first, deterministically.
+            cand = (
+                (
+                    await session.execute(
+                        select(Folders.id, Folders.name)
+                        .where(
+                            Folders.scope_id == scope_id,
+                            Folders.is_trashed.is_(False),
+                            Folders.parent_id.is_(None),
+                            Folders.library_id.is_(None),
+                            Folders.system_key.is_(None),
+                            func.btrim(Folders.name).in_(ADOPTABLE_NAMES),
+                        )
+                        .order_by(Folders.created_at.asc())
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            now = datetime.datetime.now(datetime.UTC)
+            if cand:
+                await session.execute(
+                    Folders.__table__.update()
+                    .where(Folders.id == cand["id"])
+                    .values(
+                        is_system=True,
+                        system_key=COVER_TEMPLATE_SYSTEM_KEY,
+                        updated_at=now,
+                    )
+                )
+                return {"id": _s(cand["id"]), "name": cand["name"], "adopted": True}
+
+            created = (
+                (
+                    await session.execute(
+                        Folders.__table__.insert()
+                        .values(
+                            name=DEFAULT_FOLDER_NAME,
+                            scope_id=scope_id,
+                            created_by=user_id,
+                            is_system=True,
+                            system_key=COVER_TEMPLATE_SYSTEM_KEY,
+                        )
+                        .returning(Folders.id, Folders.name)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return {"id": _s(created["id"]), "name": created["name"], "adopted": False}
+
+    async def list_images(self, scope_id: int, folder_id: int) -> list[dict]:
+        """Image resources filed in the folder, most-used first, then newest."""
         async with read_scope() as session:
             rows = (
                 (
                     await session.execute(
-                        select(*_CT_COLS)
-                        .where(CoverTemplates.scope_id == scope_id)
+                        select(
+                            Resources.id,
+                            Resources.filename,
+                            Resources.mime_type,
+                            Resources.updated_at,
+                            Resources.created_at,
+                            func.coalesce(CoverTemplateUsage.usage_count, 0).label(
+                                "usage_count"
+                            ),
+                            CoverTemplateUsage.last_used_at,
+                        )
+                        .select_from(ResourceItems)
+                        .join(Resources, Resources.id == ResourceItems.resource_id)
+                        .outerjoin(
+                            CoverTemplateUsage,
+                            (CoverTemplateUsage.resource_id == Resources.id)
+                            & (CoverTemplateUsage.scope_id == scope_id),
+                        )
+                        .where(
+                            ResourceItems.scope_id == scope_id,
+                            ResourceItems.folder_id == folder_id,
+                            Resources.is_trashed.is_(False),
+                            Resources.mime_type.ilike("image/%"),
+                        )
                         .order_by(
-                            CoverTemplates.usage_count.desc(),
-                            CoverTemplates.created_at.desc(),
+                            func.coalesce(CoverTemplateUsage.usage_count, 0).desc(),
+                            Resources.created_at.desc(),
                         )
                     )
                 )
                 .mappings()
                 .all()
             )
-        return [_normalize(dict(r)) for r in rows]
+        return [
+            {
+                "resource_id": _s(r["id"]),
+                "name": r["filename"] or "",
+                "mime_type": r["mime_type"],
+                "usage_count": int(r["usage_count"] or 0),
+                "last_used_at": r["last_used_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]
 
-    async def get(self, template_id: int, scope_id: int) -> Optional[dict]:
-        async with read_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(*_CT_COLS).where(
-                            CoverTemplates.id == template_id,
-                            CoverTemplates.scope_id == scope_id,
-                        )
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        return _normalize(dict(row)) if row else None
-
-    async def find_by_media(
-        self, scope_id: int, generated_media_id: int
-    ) -> Optional[dict]:
-        """The template citing this image in this scope, if any.
-
-        Backs the idempotent add: re-adding the same picture returns the row
-        that already exists rather than tripping ``ux_cover_templates_scope_media``
-        or accumulating identical cards under different names.
-        """
-        async with read_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(*_CT_COLS).where(
-                            CoverTemplates.scope_id == scope_id,
-                            CoverTemplates.generated_media_id == generated_media_id,
-                        )
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        return _normalize(dict(row)) if row else None
-
-    async def create(
-        self,
-        *,
-        scope_id: int,
-        creator_id: str,
-        name: str,
-        generated_media_id: int,
-        source_kind: str,
-        source_resource_id: Optional[int] = None,
-    ) -> dict:
-        async with write_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        CoverTemplates.__table__.insert()
-                        .values(
-                            scope_id=scope_id,
-                            creator_id=creator_id,
-                            name=name,
-                            generated_media_id=generated_media_id,
-                            source_kind=source_kind,
-                            source_resource_id=source_resource_id,
-                        )
-                        .returning(*_CT_COLS)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        return _normalize(dict(row))
-
-    async def rename(
-        self, template_id: int, scope_id: int, name: str
-    ) -> Optional[dict]:
-        async with write_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        sa_update(CoverTemplates)
-                        .where(
-                            CoverTemplates.id == template_id,
-                            CoverTemplates.scope_id == scope_id,
-                        )
-                        .values(
-                            name=name, updated_at=datetime.datetime.now(datetime.UTC)
-                        )
-                        .returning(*_CT_COLS)
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        return _normalize(dict(row)) if row else None
-
-    async def delete(self, template_id: int, scope_id: int) -> bool:
-        """Hard-delete the template row.
-
-        The picture itself is untouched — the row only cited it. Removing a
-        template must also release the RESTRICT foreign key, otherwise the
-        image becomes undeletable forever and the thing blocking it is
-        invisible in every UI the user has.
-        """
-        async with write_scope() as session:
-            result = await session.execute(
-                sa_delete(CoverTemplates).where(
-                    CoverTemplates.id == template_id,
-                    CoverTemplates.scope_id == scope_id,
-                )
-            )
-            return bool(result.rowcount)
-
-    async def bump_usage(self, template_ids: list[int], scope_id: int) -> None:
-        """Record that these templates were just handed to the model.
-
-        Called once per generation, not once per rendered draft: the count is
-        "how often did I reach for this", and a two-stage run that reuses the
-        same references twice did not make the template twice as useful.
-        """
-        if not template_ids:
+    async def bump_usage(self, resource_ids: list[int], scope_id: int) -> None:
+        """Once per generation, not once per rendered draft."""
+        if not resource_ids:
             return
         now = datetime.datetime.now(datetime.UTC)
         async with write_scope() as session:
+            stmt = pg_insert(CoverTemplateUsage).values(
+                [
+                    {
+                        "scope_id": scope_id,
+                        "resource_id": rid,
+                        "usage_count": 1,
+                        "last_used_at": now,
+                    }
+                    for rid in resource_ids
+                ]
+            )
             await session.execute(
-                sa_update(CoverTemplates)
-                .where(
-                    CoverTemplates.id.in_(template_ids),
-                    CoverTemplates.scope_id == scope_id,
-                )
-                .values(
-                    usage_count=CoverTemplates.usage_count + 1,
-                    last_used_at=now,
-                    updated_at=now,
+                stmt.on_conflict_do_update(
+                    index_elements=[
+                        CoverTemplateUsage.scope_id,
+                        CoverTemplateUsage.resource_id,
+                    ],
+                    set_={
+                        "usage_count": CoverTemplateUsage.usage_count + 1,
+                        "last_used_at": now,
+                        "updated_at": now,
+                    },
                 )
             )
-
-    async def names_blocking_media(self, generated_media_id: int) -> list[str]:
-        """Template names citing this image, across every scope.
-
-        Deliberately NOT scope-filtered: this answers "may this generated_media
-        row be deleted", and the RESTRICT foreign key does not care whose scope
-        the citing row is in. Filtering by scope here would report "no
-        templates" and then let the DELETE fail anyway with a 500 — the exact
-        mismatch this lookup exists to prevent.
-        """
-        async with read_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(CoverTemplates.name).where(
-                            CoverTemplates.generated_media_id == generated_media_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        return [str(r) for r in rows]
 
 
 def get_cover_templates_repository() -> CoverTemplatesRepository:

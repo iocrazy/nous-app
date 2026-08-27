@@ -78,6 +78,12 @@ export interface CoverPickerProps {
    *  create-task payload. */
   value: CoverPair | null;
   onChange: (pair: CoverPair | null) => void;
+  /**
+   * When given, the VERTICAL slot becomes the entry to Cover Studio — the
+   * platform's own publish form works this way (its two "选择封面" tiles open
+   * the cover editor). Only the vertical one: the studio's style is 3:4 only.
+   */
+  onOpenStudio?: () => void;
 }
 
 type Status = 'idle' | 'starting' | 'sampling' | 'ready' | 'failed';
@@ -92,7 +98,7 @@ const formatStamp = (seconds: number | null | undefined): string | null => {
 };
 
 export const CoverPicker: React.FC<CoverPickerProps> = ({
-  sources, value, onChange,
+  sources, value, onChange, onOpenStudio,
 }) => {
   const { t } = useTranslation();
 
@@ -349,14 +355,33 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
    * captioning underneath is what the platform's own uploader does, and it
    * makes the two cells align on their top edge for free.
    */
-  const slot = (kind: 'v' | 'h', resourceId: string | undefined, label: string) => (
-    <div className="cover-cell">
-      <div className={`cover-slot ${kind} ${resourceId ? 'filled' : ''}`}>
-        {resourceId ? <img src={frameUrl(resourceId)} alt={label} /> : <Film />}
+  const slot = (kind: 'v' | 'h', resourceId: string | undefined, label: string) => {
+    const clickable = kind === 'v' && !!onOpenStudio;
+    const body = resourceId ? <img src={frameUrl(resourceId)} alt={label} /> : <Film />;
+    return (
+      <div className="cover-cell">
+        {clickable ? (
+          // A real button, so the tile is reachable by keyboard and reads as
+          // an action — an empty tile that only LOOKS clickable is the
+          // "Coming in D4" mistake again.
+          <button
+            type="button"
+            className={`cover-slot ${kind} pick ${resourceId ? 'filled' : ''}`}
+            onClick={onOpenStudio}
+            data-testid="cover-slot-open-studio"
+          >
+            {body}
+            {!resourceId && (
+              <span>{t('distribution.publish.chooseCover', 'Choose cover')}</span>
+            )}
+          </button>
+        ) : (
+          <div className={`cover-slot ${kind} ${resourceId ? 'filled' : ''}`}>{body}</div>
+        )}
+        <span className="cover-cap">{label}</span>
       </div>
-      <span className="cover-cap">{label}</span>
-    </div>
-  );
+    );
+  };
 
   return (
     <>

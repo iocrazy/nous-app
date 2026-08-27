@@ -87,7 +87,7 @@ from app.models.codex_daemon import (  # noqa: F401
     CodexDaemons,
 )
 from app.models.cover_templates import (  # noqa: F401
-    CoverTemplates,
+    CoverTemplateUsage,
 )
 from app.models.distribution import (  # noqa: F401
     AccountEnvironments,
@@ -313,7 +313,7 @@ __all__ = [
     # media
     "Folders",
     "GalleryItems",
-    "CoverTemplates",
+    "CoverTemplateUsage",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",

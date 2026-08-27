@@ -367,3 +367,15 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
   `=== false` 字面量比较（`CoverStudioOverlay` 里有注释）。
 
 **全部六波完成。** 剩余为真机验收（走查 npm run e2e:prod 范式）与发布。
+
+## 补记 2026-08-26：模板库 = 素材库里的系统文件夹（migration 441，取代 435）
+
+用户问的三件事——「模板库是哪里？我上传创建的『封面』文件夹能不能保护起来？工作室里上传的是不是也默认存到那里？」——答案统一成一个模型：
+
+- **模板库就是素材库里的一个文件夹**。`folders.system_key='cover_templates'`（新列，同 scope 内活着的只能有一个，部分唯一索引 `ux_folders_scope_system_key`）。首次访问时先按 key 找；找不到就**认领**用户已有的顶层「封面 / 封面模板 / Covers / Cover Templates」文件夹（最老的那个）；再没有就新建 `Covers`。只认顶层——某个项目下嵌套的「封面」不是模板库。
+- **`cover_templates` 表删掉**。模板 = 文件夹里的图片资源，id 就是 resource id；只留 `cover_template_usage(scope_id, resource_id)` 记「用过 N 次」做排序。
+- **系统文件夹受保护**：重命名 / 移动 / 放入回收站 / 永久删除一律 409 `system_folder`（`resources_folders_router._refuse_if_system`）。只改 icon / color 这类外观仍允许。前端右键菜单与批量删除对 `is_system` 文件夹不再提供这些动作，显示「System folder — cannot be renamed, moved or trashed」。
+- **工作室里的两条添加路径都落进这个文件夹**：上传 = `uploadResource(file, scope, folder_id)`；从素材库挑 = `link-existing`（只加一层归属，不复制不搬家）。「Save as template」= promote 一次得到 resource → link 进文件夹；同一张图「Use this cover」不再二次 promote（overlay 记住 `promotedId`）。
+- **模型侧的绕路只在进池那一刻发生**：`resolveCoverTemplateReference(resource_id)` 走 `/generated-media/import-from-resource` 拿 durable ref，因为出图桥只认 `/api/v1/generated-media/{id}/…`。AVIF/HEIC/TIFF/BMP 在 import 时转成 PNG（上游只收 jpeg/png/gif/webp）。
+
+可证伪的证据（本地）：一次性库对全链迁移 `drift 8/8`；真库集成测试 `tests/integration/test_cover_template_folder_db.py` 5 条（认领 / 幂等 / 只认顶层 / 唯一索引拦第二个 / 回收站不占坑）；后端全量 9597 过；前端 5692 过。

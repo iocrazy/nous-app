@@ -164,27 +164,6 @@ async def test_get_detail_returns_data_envelope(monkeypatch, client):
     assert body["data"]["media_kind"] == "image"
 
 
-def _no_blocking_templates(monkeypatch) -> None:
-    """Stub the cover-template FK pre-check (mig 435).
-
-    ``delete_generation`` now asks whether any cover template still cites the
-    image before deleting it. That is a real DB read, so the engine-less unit
-    suite has to stub it; the 409 path it guards is proved for real against
-    Postgres in tests/integration/test_cover_templates_api.py. Patched on the
-    repository class rather than on ``r`` because the endpoint imports it
-    lazily inside the function body.
-    """
-
-    async def _none(self, generated_media_id: int) -> list[str]:
-        return []
-
-    monkeypatch.setattr(
-        "app.repositories.cover_templates_repository."
-        "CoverTemplatesRepository.names_blocking_media",
-        _none,
-    )
-
-
 @pytest.mark.asyncio
 async def test_delete_returns_deleted_bool(monkeypatch, client):
     """DELETE /{id} returns {data: {deleted: bool}}."""
@@ -197,7 +176,6 @@ async def test_delete_returns_deleted_bool(monkeypatch, client):
 
     monkeypatch.setattr(r, "_resolve_personal_team_id", _fake_scope)
     monkeypatch.setattr(r.GeneratedMediaRepository, "delete", _fake_delete)
-    _no_blocking_templates(monkeypatch)
 
     resp = await client.delete("/api/v1/generated-media/7")
     assert resp.status_code == 200, resp.text

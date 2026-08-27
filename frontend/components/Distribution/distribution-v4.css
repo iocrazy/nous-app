@@ -337,6 +337,11 @@
 /* Frame-sampled covers. The two slots above render the derived crops; this
    panel is the sampling flow (button → progress → candidate strip → errors). */
 .dist-v4 .cover-slot.filled { cursor: default; }
+/* The vertical tile is the entry to Cover Studio (the platform's own form
+   opens its cover editor from exactly these tiles). */
+.dist-v4 .cover-slot.pick { cursor: pointer; }
+.dist-v4 .cover-slot.pick:hover { border-color: var(--accent); color: var(--accent); }
+.dist-v4 .cover-slot.pick.filled:hover img { opacity: .85; }
 .dist-v4 .cover-slot.filled img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .dist-v4 .cover-frames { flex: 1; min-width: 240px; border: 1px solid var(--line); background: var(--card-2); border-radius: 13px; padding: 13px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
 .dist-v4 .cover-frames .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
