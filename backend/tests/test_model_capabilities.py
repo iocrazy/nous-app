@@ -18,9 +18,11 @@ from app.services.ai import model_capabilities as m
 def _reset_cache():
     """Each test gets a fresh cache so previous state can't leak in."""
     m._cache.clear()
+    m._local_vision_models.clear()
     m._cache_loaded = False
     yield
     m._cache.clear()
+    m._local_vision_models.clear()
     m._cache_loaded = False
 
 
@@ -256,3 +258,84 @@ async def test_capabilities_select_stmt_yields_column_keyed_row_against_real_sql
     assert row["model"] == "gpt-4o"
     assert row["provider"] == "openai"
     assert bool(row["supports_vision"]) is True
+
+
+# ── codex-local: a real vision model with no ai_model_prices row ──────────
+#
+# 真链验收第 4 项: "Codex (Local)" 有 ai_model_prices 行、也不匹配任何
+# _FALLBACK_PREFIXES,于是 model_supports_vision 返回 False,图片在进 adapter
+# 之前就被 build_user_message 摊成文字占位符 —— 而 codex exec --image 是真实
+# 存在的能力。返回 False 在这里不是"安全降级",是静默丢用户的图。
+
+
+@pytest.mark.asyncio
+async def test_local_catalog_model_supports_vision(monkeypatch):
+    monkeypatch.setattr(m, "_fetch_capabilities", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        m, "_fetch_local_vision_models", AsyncMock(return_value={"codex (local)"})
+    )
+    assert await m.model_supports_vision("Codex (Local)") is True
+
+
+@pytest.mark.asyncio
+async def test_unknown_model_still_false(monkeypatch):
+    """反向对照 —— 没有它,一个"永远返回 True"的实现同样会绿。"""
+    monkeypatch.setattr(m, "_fetch_capabilities", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        m, "_fetch_local_vision_models", AsyncMock(return_value={"codex (local)"})
+    )
+    assert await m.model_supports_vision("some-unknown-model") is False
+    assert await m.model_supports_vision("") is False
+    assert await m.model_supports_vision(None) is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_price_row_still_wins_over_local_provider(monkeypatch):
+    """管理员用 ai_model_prices 行显式 supports_vision=FALSE 关掉某个模型的视觉,
+    这条约定(模块 docstring 写着的)不能被本机分支绕过 —— 所以本机判定放在显式
+    查表之后、前缀启发式之前。"""
+    monkeypatch.setattr(
+        m,
+        "_fetch_capabilities",
+        AsyncMock(
+            return_value=[
+                {
+                    "model": "codex (local)",
+                    "provider": "",
+                    "supports_vision": False,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        m, "_fetch_local_vision_models", AsyncMock(return_value={"codex (local)"})
+    )
+    assert await m.model_supports_vision("Codex (Local)") is False
+
+
+@pytest.mark.asyncio
+async def test_local_vision_load_failure_degrades_without_killing_price_cache(
+    monkeypatch,
+):
+    """两次加载各自 try —— 目录查询炸了不能顺手把已经加载好的能力表也丢掉。"""
+    monkeypatch.setattr(
+        m,
+        "_fetch_capabilities",
+        AsyncMock(
+            return_value=[
+                {"model": "gpt-4o", "provider": "openai", "supports_vision": True}
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        m,
+        "_fetch_local_vision_models",
+        AsyncMock(side_effect=RuntimeError("catalog down")),
+    )
+    assert await m.model_supports_vision("gpt-4o", "openai") is True
+    assert await m.model_supports_vision("Codex (Local)") is False
+
+
+def test_local_vision_providers_excludes_image_generators():
+    """jimeng-local 是出图引擎不是聊天模型,不该出现在"接受图片输入"的集合里。"""
+    assert m._LOCAL_VISION_PROVIDERS == frozenset({"codex-local"})

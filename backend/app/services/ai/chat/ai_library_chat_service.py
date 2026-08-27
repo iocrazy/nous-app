@@ -831,6 +831,7 @@ class AILibraryChatService:
                 from app.schemas.ai_library_chat import AttachmentRequest
                 from app.services.ai.chat.chat_attachment_resolver import (
                     resolve_attachments,
+                    vision_gate_failures,
                 )
 
                 # resolve_attachments reads `.kind`/`.url`/... as attributes —
@@ -841,6 +842,16 @@ class AILibraryChatService:
                     [AttachmentRequest.model_validate(a) for a in binary_atts]
                 )
                 attachment_failures = list(resolved.failures)
+                # The vision gate drops attachments SILENTLY (see
+                # vision_gate_failures) — record one typed failure per
+                # dropped request so the user is told, instead of the
+                # image simply never arriving.
+                attachment_failures.extend(
+                    vision_gate_failures(
+                        binary_atts, resolved, supports_vision=supports_vision
+                    )
+                )
+
                 new_user_msg = build_user_message(
                     effective_content,
                     resolved.attachments,
