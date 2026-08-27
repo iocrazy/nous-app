@@ -436,6 +436,16 @@ class RunRecorder:
             await self._mirror_todos(payload)
         elif event_type == "turn_end":
             await self._mirror_metadata_key("turn_end_reason", payload.get("reason"))
+        elif event_type == "llm_retry":
+            # Only what the Task Center card renders ("Retry 2/4 · waiting
+            # 3.2s"); the failure text stays in the event, not on the row.
+            await self._mirror_metadata_key(
+                "last_retry",
+                {
+                    k: payload.get(k)
+                    for k in ("attempt", "max_retries", "delay_ms", "model")
+                },
+            )
 
     async def _mirror_todos(self, payload: dict[str, Any]) -> None:
         """Mirror the todo snapshot into agent_runs.metadata_json.todos."""
