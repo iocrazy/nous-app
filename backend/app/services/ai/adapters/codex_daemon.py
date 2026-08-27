@@ -43,6 +43,30 @@ DISPATCH_GRACE_S = 30
 # about pictures it never received and nothing else would say why.
 _MAX_IMAGES = 9
 
+# Inline (``data:``) images travel INSIDE the job frame: through Redis pub/sub
+# and over the daemon's WebSocket. Past the dispatch call the bytes are already
+# on both, and blowing a frame limit there surfaces as a transport error with
+# no actionable code — so the budget is enforced here, before anything is sent.
+# Only ``data:`` URLs count: an ``https://`` reference is a few dozen bytes on
+# the wire and the daemon fetches the image itself.
+MAX_INLINE_IMAGE_BYTES = 6 * 1024 * 1024
+
+
+def _inline_bytes(urls: List[str]) -> int:
+    """Decoded size of the ``data:`` URLs in ``urls``, estimated.
+
+    base64 carries 3 bytes per 4 characters — close enough to decide a 6 MB
+    budget, and far cheaper than decoding several megabytes just to measure
+    them. Non-``data:`` URLs contribute nothing: the daemon fetches those
+    itself, so all that crosses the wire is the reference."""
+    total = 0
+    for url in urls:
+        if not url.startswith("data:"):
+            continue
+        _head, _, payload = url.partition(",")
+        total += len(payload) * 3 // 4
+    return total
+
 
 class CodexDaemonAdapter:
     def __init__(
@@ -87,6 +111,14 @@ class CodexDaemonAdapter:
                 self.user_id,
                 _MAX_IMAGES,
             )
+        kept_images = image_urls[:_MAX_IMAGES]
+        inline_bytes = _inline_bytes(kept_images)
+        if inline_bytes > MAX_INLINE_IMAGE_BYTES:
+            raise CodexLocalError(
+                "ref_rejected",
+                f"inline images exceed 6 MB ({inline_bytes} bytes across "
+                f"{len(kept_images)} attachments)",
+            )
         scope_id = await self._scope(self.user_id)
         payload = {
             "prompt": prompt,
@@ -99,7 +131,7 @@ class CodexDaemonAdapter:
             # to", which is a valid answer here in a way it is not for a
             # hosted provider.
             "model": (self.model or "").strip(),
-            "image_urls": image_urls[:_MAX_IMAGES],
+            "image_urls": kept_images,
             "timeout_s": self.timeout_s,
         }
         try:
@@ -151,4 +183,9 @@ class CodexDaemonAdapter:
         }
 
 
-__all__ = ["CodexDaemonAdapter", "DEFAULT_TEXT_TIMEOUT_S", "DISPATCH_GRACE_S"]
+__all__ = [
+    "CodexDaemonAdapter",
+    "DEFAULT_TEXT_TIMEOUT_S",
+    "DISPATCH_GRACE_S",
+    "MAX_INLINE_IMAGE_BYTES",
+]

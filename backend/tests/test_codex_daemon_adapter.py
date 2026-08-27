@@ -159,6 +159,60 @@ async def test_images_over_the_backstop_cap_are_trimmed_and_logged():
     assert any("dropping 1 of 10 images" in r for r in records), records
 
 
+def _data_url(decoded_bytes: int) -> str:
+    """A base64 data URL whose payload decodes to roughly ``decoded_bytes``."""
+    return "data:image/png;base64," + "A" * ((decoded_bytes * 4 + 2) // 3)
+
+
+def _image_message(*urls: str) -> list[dict]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe these"},
+                *({"type": "image_url", "image_url": {"url": u}} for u in urls),
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_one_small_inline_image_passes_through_untouched():
+    seen: dict = {}
+
+    async def fake_dispatch(**kw):
+        seen.update(kw)
+        return {"text": "ok", "usage": {}}
+
+    url = _data_url(1024 * 1024)
+    a = CodexDaemonAdapter(user_id="u1", dispatch=fake_dispatch, scope_resolver=_scope)
+    await a.call(_composed(), _image_message(url, "https://api.nous.ink/x.png"))
+
+    # http(s) URLs are not weighed at all — the daemon streams those itself;
+    # only what we inline into the job counts against the budget.
+    assert seen["payload"]["image_urls"] == [url, "https://api.nous.ink/x.png"]
+
+
+@pytest.mark.asyncio
+async def test_inline_images_over_the_byte_budget_are_rejected_before_dispatch():
+    """The chat layer hands us `data:image/...;base64` URLs, so the job frame
+    carries the pixels themselves. Oversized frames have to die HERE: past this
+    point the bytes are already in Redis and on the socket, and the failure
+    would surface as a transport error with no actionable code."""
+
+    async def never(**_):
+        raise AssertionError("must not dispatch")
+
+    a = CodexDaemonAdapter(user_id="u1", dispatch=never, scope_resolver=_scope)
+    with pytest.raises(CodexLocalError) as ei:
+        await a.call(
+            _composed(),
+            _image_message(*(_data_url(1024 * 1024) for _ in range(7))),
+        )
+    assert ei.value.code == "ref_rejected"
+    assert ei.value.status_code == 400
+
+
 @pytest.mark.asyncio
 async def test_row_model_wins_and_the_composed_display_name_is_ignored():
     """``composed.model`` is ``agents.model``, which on this path is the
