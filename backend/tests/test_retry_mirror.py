@@ -16,7 +16,9 @@ async def test_llm_retry_mirrors_last_retry(monkeypatch):
 
     class _S:
         async def execute(self, stmt, *a, **k):
-            c = stmt.compile()
+            from sqlalchemy.dialects import postgresql
+
+            c = stmt.compile(dialect=postgresql.dialect())  # the real target
             executed.append((str(c), dict(getattr(c, "params", {}))))
 
     @contextlib.asynccontextmanager
@@ -41,7 +43,11 @@ async def test_llm_retry_mirrors_last_retry(monkeypatch):
     mirrors = [(s, p) for s, p in executed if "jsonb_set" in s]
     assert len(mirrors) == 1, executed
     sql, params = mirrors[0]
-    assert "{last_retry}" in params.values()
+    assert "last_retry" in params.values()
+    # jsonb_set(jsonb, text[], jsonb, bool): a bare string binds as varchar
+    # and PG finds no matching function. Seen live 2026-08-27 — the mock
+    # boundary hid it. The path must be cast to text[].
+    assert "AS TEXT[]" in sql, sql
     blob = next(v for v in params.values() if isinstance(v, str) and "attempt" in v)
     assert '"attempt": 2' in blob and '"delay_ms": 3200' in blob
     assert (

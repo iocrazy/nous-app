@@ -471,8 +471,8 @@ class RunRecorder:
         try:
             import json as _json
 
-            from sqlalchemy import cast, func, update
-            from sqlalchemy.dialects.postgresql import JSONB
+            from sqlalchemy import ARRAY, Text, cast, func, update
+            from sqlalchemy.dialects.postgresql import JSONB, array
 
             from app.db.session import write_scope
             from app.models.agents import AgentRuns
@@ -484,7 +484,10 @@ class RunRecorder:
                     .values(
                         metadata_json=func.jsonb_set(
                             func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB)),
-                            "{" + key + "}",
+                            # jsonb_set wants text[]; a bare string binds as
+                            # varchar and PG finds no matching function (seen
+                            # live 2026-08-27 — the mock boundary hid it).
+                            cast(array([key]), ARRAY(Text)),
                             cast(_json.dumps(value, ensure_ascii=False), JSONB),
                             True,
                         )
