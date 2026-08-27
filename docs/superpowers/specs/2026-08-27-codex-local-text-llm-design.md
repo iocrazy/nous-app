@@ -121,7 +121,11 @@ messages 里 `content` 为多段且含 `image_url` 的，抽出 URL 进 `image_u
   3. 停掉 `nous-codex.service` 再发消息 → `daemon_offline`，且**没有**回退到服务器模型
   4. 图片附件对话 → daemon 日志出现 `--image`，回复内容确实描述了图片
   5. §6 沙箱读文件实测
-  6. 1 MB 复述 prompt → 走 `job_chunk` 分片帧分支（非 upload ticket），回复完整
+  6. 超长结果 → 走 `job_chunk` 分片帧分支（非 upload ticket），重组后逐字节相同。
+     ⚠️ **验收用传输层探针，不是「让 codex 复述 1 MB」**：分片阈值管的是*回复*，而没有模型能一次吐出 >900 KB
+     （≈27 万输出 token）；1 MB 的 *prompt* 则在进 daemon 前就被上下文窗口守卫挡下。探针用真实设备 token 连
+     真实 WS，调 daemon 导出的真 `emitTextResult` 发帧，下游（ws router 拼接 → adapter → chat）全是生产代码——
+     只有 `codex exec` 本身被替掉。
 
 ## 8. 不做（本期）
 
