@@ -25,6 +25,7 @@ Protocol (spec §4/§5):
   daemon → {"type":"ping"}                  every 30s
   server → {"type":"pong"}
   server → {"type":"job", ...}              dispatch
+  daemon → {"type":"job_chunk", ...}         one slice of an oversized text
   daemon → {"type":"job_done"|"job_failed"} result
 """
 
@@ -46,6 +47,36 @@ router = APIRouter(tags=["Codex Daemon"])
 # 90s without a frame (3 missed heartbeats) ⇒ the device is gone. Enforced
 # via receive timeout — a half-dead TCP session cannot squat the registry.
 HEARTBEAT_TIMEOUT_SECONDS = 90
+
+
+def take_chunk(chunks: dict[str, list[str]], message: dict) -> None:
+    """Buffer one job_chunk frame. Chunks may arrive out of order only in
+    theory (single socket, in-order), but seq is honoured anyway."""
+    job_id = str(message.get("job_id") or "")
+    seq = int(message.get("seq") or 0)
+    buf = chunks.setdefault(job_id, [])
+    while len(buf) <= seq:
+        buf.append("")
+    buf[seq] = str(message.get("data") or "")
+
+
+def assemble_job_result(message: dict, chunks: dict[str, list[str]]) -> dict:
+    """Turn a job_done frame (+ any buffered chunks) into the pub/sub result.
+    Always pops the job's buffer so a mismatch can't leak memory."""
+    job_id = str(message.get("job_id") or "")
+    usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+    if message.get("chunked"):
+        parts = chunks.pop(job_id, [])
+        expected = int(message.get("chunks") or 0)
+        if expected != len(parts) or any(p == "" for p in parts):
+            return {"error": f"chunk_mismatch: expected {expected}, got {len(parts)}"}
+        return {"gen_id": None, "text": "".join(parts), "usage": usage}
+    chunks.pop(job_id, None)
+    return {
+        "gen_id": message.get("gen_id"),
+        "text": message.get("text"),
+        "usage": usage,
+    }
 
 
 async def _save_env_report(device_id: str, report: dict) -> None:
@@ -151,6 +182,7 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
     await daemon_presence.mark_online(user_id, device_id)
     await _touch_last_seen(device_id)
     forwarder = asyncio.create_task(_forward_jobs(websocket, user_id, device_id))
+    chunks: dict[str, list[str]] = {}
 
     try:
         while True:
@@ -170,6 +202,8 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                 await _touch_last_seen(device_id)
             elif kind == "env_report":
                 await handle_env_report(device_id, message)
+            elif kind == "job_chunk":
+                take_chunk(chunks, message)
             elif kind in ("job_done", "job_failed", "job_progress"):
                 job_id = str(message.get("job_id") or "")
                 logger.info(
@@ -177,13 +211,10 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                 )
                 if kind == "job_done":
                     await daemon_presence.publish_result(
-                        job_id,
-                        {
-                            "gen_id": message.get("gen_id"),
-                            "text": message.get("text"),
-                        },
+                        job_id, assemble_job_result(message, chunks)
                     )
                 elif kind == "job_failed":
+                    chunks.pop(job_id, None)
                     code = str(message.get("code") or "job_failed")
                     await daemon_presence.publish_result(
                         job_id,
