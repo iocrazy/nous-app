@@ -4717,7 +4717,9 @@
       "localDaemonOffline": "你的本机 codex daemon 未连接。请在你的电脑上启动它（设置 → AI → 本地 CLI）后重试。",
       "localToolsUnsupported": "本机 Codex 不支持工具调用与 Skill。请解绑后再试，或换一个模型。",
       "localCodexNotLoggedIn": "本机 codex CLI 未登录。请在你的电脑上运行 `codex login`。",
-      "localCodexFailed": "本机 Codex 没有返回内容。请查看你电脑上的 daemon 日志。"
+      "localCodexFailed": "本机 Codex 没有返回内容。请查看你电脑上的 daemon 日志。",
+      "localRefRejected": "有一张附图无法被你的本机 daemon 使用。请改用 nous 素材库中的图片后重试。",
+      "localCliMissing": "你的电脑上没有安装 codex CLI。请运行 `npm i -g @openai/codex` 后重启 daemon。"
     }
   },
   "issueDetail": {

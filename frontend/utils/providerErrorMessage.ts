@@ -30,6 +30,8 @@ export function providerErrorMessage(
     'local_tools_unsupported',
     'local_codex_not_logged_in',
     'local_codex_failed',
+    'local_ref_rejected',
+    'local_cli_missing',
   ];
   if (typeof code !== 'string' || !KNOWN.includes(code)) return null;
   const key = code

@@ -27,6 +27,10 @@ describe('providerErrorMessage', () => {
     ['local_tools_unsupported', 'errors.provider.localToolsUnsupported'],
     ['local_codex_not_logged_in', 'errors.provider.localCodexNotLoggedIn'],
     ['local_codex_failed', 'errors.provider.localCodexFailed'],
+    // 后端审查追加的两个(同一份 error_catalog)。这两条的修复动作同样落在用户
+    // 自己的电脑上,而且比其余四条更具体——装 CLI、换图片来源。
+    ['local_ref_rejected', 'errors.provider.localRefRejected'],
+    ['local_cli_missing', 'errors.provider.localCliMissing'],
   ])('maps known code %s to i18n key %s', (code, expectedKey) => {
     expect(providerErrorMessage(code, t)).toBe(`${expectedKey}|${code}`);
   });
