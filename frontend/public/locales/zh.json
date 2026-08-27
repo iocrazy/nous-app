@@ -4708,6 +4708,34 @@
     "UNKNOWN": {
       "title": "任务失败"
     },
+    "local_daemon_offline": {
+      "title": "你的本机 codex daemon 当时没有连接",
+      "hint": "在你的电脑上启动它（设置 → AI → 本地 CLI 有说明），然后重试。"
+    },
+    "local_daemon_outdated": {
+      "title": "你的本机 codex daemon 版本过旧",
+      "hint": "到 设置 → AI → 本地 CLI 重新执行安装命令以更新，然后重试。"
+    },
+    "local_cli_missing": {
+      "title": "你的电脑上没有安装 codex CLI",
+      "hint": "在那台机器上运行 `npm i -g @openai/codex`，然后重启 daemon。"
+    },
+    "local_tools_unsupported": {
+      "title": "本机 Codex 不能运行工具或 Skill",
+      "hint": "把该 agent 上绑定的 Skill 解绑，或在 设置 → AI 里改用托管模型。"
+    },
+    "local_codex_not_logged_in": {
+      "title": "你的本机 codex CLI 未登录",
+      "hint": "在那台机器上运行 `codex login`，然后重试。"
+    },
+    "local_ref_rejected": {
+      "title": "有一张附图无法被你的本机 daemon 使用",
+      "hint": "请改用 nous 素材库中的图片后重试。"
+    },
+    "local_codex_failed": {
+      "title": "本机 Codex 没有返回内容",
+      "hint": "请查看你电脑上的 daemon 日志，然后重试。"
+    },
     "provider": {
       "providerRateLimit": "AI 模型服务商正在限流，请一分钟后重试。",
       "providerUnreachable": "AI 模型服务商暂时无法访问，请稍后重试。",

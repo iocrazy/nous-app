@@ -4708,6 +4708,34 @@
     "UNKNOWN": {
       "title": "The task failed"
     },
+    "local_daemon_offline": {
+      "title": "Your local codex daemon was not connected",
+      "hint": "Start it on your machine (Settings → AI → Local CLI shows how), then retry."
+    },
+    "local_daemon_outdated": {
+      "title": "Your local codex daemon is out of date",
+      "hint": "Re-run the install command from Settings → AI → Local CLI to update it, then retry."
+    },
+    "local_cli_missing": {
+      "title": "The codex CLI is not installed on your machine",
+      "hint": "Run `npm i -g @openai/codex` on that machine and restart the daemon."
+    },
+    "local_tools_unsupported": {
+      "title": "Local Codex cannot run tools or Skills",
+      "hint": "Unbind the Skills from this agent, or point it at a hosted model in Settings → AI."
+    },
+    "local_codex_not_logged_in": {
+      "title": "Your local codex CLI is not logged in",
+      "hint": "Run `codex login` on that machine, then retry."
+    },
+    "local_ref_rejected": {
+      "title": "An attached image could not be used by your local daemon",
+      "hint": "Attach images from your nous library and try again."
+    },
+    "local_codex_failed": {
+      "title": "Local Codex did not produce a reply",
+      "hint": "Check the daemon log on your machine, then retry."
+    },
     "provider": {
       "providerRateLimit": "The AI model provider is rate-limiting requests. Try again in a minute.",
       "providerUnreachable": "The AI model provider is unreachable. Try again shortly.",
