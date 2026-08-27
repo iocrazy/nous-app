@@ -36,6 +36,7 @@ const svc = vi.hoisted(() => ({
   resolveCoverTemplateReference: vi.fn(),
   saveGeneratedCoverAsTemplate: vi.fn(),
   listGenerationModels: vi.fn(),
+  listCoverStyles: vi.fn(),
   selectCoverFrame: vi.fn(),
   uploadResource: vi.fn(),
   importCanvasMedia: vi.fn(),
@@ -51,10 +52,29 @@ vi.mock('../../../features/canvas-core/smart/mediaImport', () => ({
 }));
 
 vi.mock('../../../services/coverStudioService', () => ({
+  BUILTIN_COVER_STYLE: 'viral-video-cover',
   generateCoverDrafts: svc.generateCoverDrafts,
   refineCoverDraft: svc.refineCoverDraft,
   awaitCoverGeneration: svc.awaitCoverGeneration,
+  listCoverStyles: svc.listCoverStyles,
 }));
+
+const BUILTIN_STYLE = {
+  slug: 'viral-video-cover',
+  name: 'Viral Video Cover',
+  description: 'Dark background, one huge headline, one strong face.',
+  requires_person: true,
+  aspects: ['3:4', '4:3'],
+  builtin: true,
+};
+const NEON_STYLE = {
+  slug: 'neon-cover',
+  name: 'Neon Cover',
+  description: 'Neon palette, no person needed.',
+  requires_person: false,
+  aspects: ['3:4', '4:3'],
+  builtin: false,
+};
 vi.mock('../../../services/generatedMediaService', () => ({
   promoteGeneration: svc.promoteGeneration,
 }));
@@ -77,7 +97,7 @@ vi.mock('./CoverFrameGrabber', () => ({
     aspect,
   }: {
     onGrabbed: (f: unknown) => void;
-    onUseAsCover?: (sourceId: string, at: number) => Promise<void>;
+    onUseAsCover?: (sourceId: string, at: number, focus: { x: number; y: number }) => Promise<void>;
     aspect?: string;
   }) => (
     <>
@@ -85,7 +105,7 @@ vi.mock('./CoverFrameGrabber', () => ({
       type="button"
       data-testid="stub-use-frame"
       data-aspect={aspect}
-      onClick={() => void onUseAsCover?.('900', 3.1)}
+      onClick={() => void onUseAsCover?.('900', 3.1, { x: 0.25, y: 0.75 })}
     >
       use
     </button>
@@ -170,6 +190,7 @@ function setPerson() {
 beforeEach(() => {
   vi.clearAllMocks();
   svc.listGenerationModels.mockResolvedValue([]);
+  svc.listCoverStyles.mockResolvedValue([BUILTIN_STYLE, NEON_STYLE]);
   svc.generateCoverDrafts.mockResolvedValue({
     task_id: 't1',
     prompt: 'STAGE1 PROMPT',
@@ -463,25 +484,96 @@ describe('CoverStudioOverlay — v4 layout', () => {
       expect(svc.selectCoverFrame).toHaveBeenCalledWith({
         source_resource_id: '900',
         timestamp_seconds: 3.1,
+        focus_x: 0.25,
+        focus_y: 0.75,
       }),
     );
     await waitFor(() => expect(onApply).toHaveBeenCalledWith({ vertical: '7001' }));
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('the horizontal tab has no AI, crops 4:3, and fills the HORIZONTAL slot', async () => {
+  it('the horizontal tab crops 4:3 and fills the HORIZONTAL slot', async () => {
     const { onApply } = renderOverlay();
 
     fireEvent.click(screen.getByTestId('cover-tab-horizontal'));
-
-    expect(screen.queryByTestId('cover-generate')).toBeNull();
-    expect(screen.getByTestId('cover-horizontal-note').textContent).toMatch(/does not go through AI/);
     expect(screen.getByTestId('stub-use-frame').getAttribute('data-aspect')).toBe('4:3');
 
     fireEvent.click(screen.getByTestId('stub-use-frame'));
 
     await waitFor(() => expect(onApply).toHaveBeenCalledWith({ horizontal: '7002' }));
-    expect(svc.generateCoverDrafts).not.toHaveBeenCalled();
+  });
+
+  it('the horizontal tab ALSO goes through the model, as 4:3, and "Done" fills the horizontal slot', async () => {
+    const { onApply } = renderOverlay();
+    fireEvent.click(screen.getByTestId('cover-tab-horizontal'));
+    setPerson();
+
+    fireEvent.click(screen.getByTestId('cover-generate'));
+
+    await waitFor(() =>
+      expect(svc.generateCoverDrafts).toHaveBeenCalledWith(
+        expect.objectContaining({ aspect: '4:3', style: 'viral-video-cover' }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByTestId('cover-draft-2')).toBeTruthy());
+    expect(screen.getByTestId('cover-draft-grid').getAttribute('data-aspect')).toBe('4:3');
+
+    fireEvent.click(screen.getByTestId('cover-draft-2'));
+    svc.awaitCoverGeneration.mockResolvedValueOnce({
+      ok: true,
+      url: '/api/v1/generated-media/600/cover',
+      generatedMediaId: '600',
+    });
+    fireEvent.click(screen.getByTestId('cover-make-final'));
+    await screen.findByTestId('cover-apply');
+    expect(svc.refineCoverDraft).toHaveBeenCalledWith(expect.objectContaining({ aspect: '4:3' }));
+
+    fireEvent.click(screen.getByTestId('cover-apply'));
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({ horizontal: '9000' }));
+  });
+
+  it('rounds are kept per tab — a vertical round does not show under horizontal', async () => {
+    renderOverlay();
+    setPerson();
+    fireEvent.click(screen.getByTestId('cover-generate'));
+    await waitFor(() => expect(screen.queryByTestId('cover-history-round-1')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('cover-tab-horizontal'));
+    expect(screen.queryByTestId('cover-history-round-1')).toBeNull();
+    expect(screen.getByTestId('cover-history-empty')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('cover-tab-vertical'));
+    expect(screen.getByTestId('cover-history-round-1')).toBeTruthy();
+  });
+
+  it('lists the styles from the server and sends the chosen slug', async () => {
+    renderOverlay();
+    setPerson();
+    const select = (await screen.findByTestId('cover-style')) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBe(2));
+    expect(select.options[0].value).toBe('viral-video-cover');
+
+    fireEvent.change(select, { target: { value: 'neon-cover' } });
+    expect(screen.getByTestId('cover-style-note').textContent).toContain('Neon palette');
+    fireEvent.click(screen.getByTestId('cover-generate'));
+
+    await waitFor(() =>
+      expect(svc.generateCoverDrafts).toHaveBeenCalledWith(
+        expect.objectContaining({ style: 'neon-cover' }),
+      ),
+    );
+  });
+
+  it('a style that needs no person is not blocked by the missing person', async () => {
+    renderOverlay();
+    const select = (await screen.findByTestId('cover-style')) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBe(2));
+    expect((screen.getByTestId('cover-generate') as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(select, { target: { value: 'neon-cover' } });
+
+    expect((screen.getByTestId('cover-generate') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('cover-ref-person')).toBeNull();
   });
 
   it('keeps every round and goes back to an earlier one without regenerating', async () => {

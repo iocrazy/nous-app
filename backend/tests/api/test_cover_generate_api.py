@@ -223,3 +223,67 @@ class TestInstructions:
         resp = _post(TestClient(_make_app()), instructions="x" * 501)
         assert resp.status_code == 422
         assert spy.started == []
+
+
+class TestAspectAndStyle:
+    def test_4_3_goes_into_ratio_and_the_prompt(self, spy):
+        resp = _post(TestClient(_make_app()), aspect="4:3")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["aspect"] == "4:3"
+        assert "4:3 horizontal" in resp.json()["prompt"]
+        assert spy.started[0]["dbos_workflow_kwargs"]["params"]["ratio"] == "4:3"
+
+    def test_an_unsupported_aspect_is_422(self, spy):
+        assert _post(TestClient(_make_app()), aspect="16:9").status_code == 422
+        assert spy.started == []
+
+    def test_an_unknown_style_is_404_and_dispatches_nothing(self, spy, monkeypatch):
+        async def _none(user_id, slug):
+            return None
+
+        monkeypatch.setattr(
+            "app.services.distribution.cover_styles.resolve_cover_style", _none
+        )
+        resp = _post(TestClient(_make_app()), style="nope")
+        assert resp.status_code == 404
+        assert spy.started == []
+
+    def test_a_skill_style_drives_the_prompt_from_its_skeleton(self, spy, monkeypatch):
+        from app.services.distribution.cover_styles import style_from_skill
+
+        body = (
+            "## Four-Draft Preview Prompt Skeleton\n\n```text\nGrid of four neon "
+            "covers about [topic].\n```\n"
+        )
+
+        async def _neon(user_id, slug):
+            return style_from_skill(
+                {"slug": "neon", "name": "Neon", "category": "cover", "body_md": body}
+            )
+
+        monkeypatch.setattr(
+            "app.services.distribution.cover_styles.resolve_cover_style", _neon
+        )
+        resp = _post(TestClient(_make_app()), style="neon")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["prompt"].startswith("Grid of four neon covers about 三分钟")
+
+
+class TestStylesEndpoint:
+    def test_lists_builtin_first_plus_visible_cover_skills(self, monkeypatch):
+        from app.services.distribution.cover_styles import merge_styles
+
+        async def _list(user_id):
+            return merge_styles(
+                [{"slug": "neon", "name": "Neon", "category": "cover", "body_md": "x"}]
+            )
+
+        monkeypatch.setattr(
+            "app.services.distribution.cover_styles.list_cover_styles", _list
+        )
+        resp = TestClient(_make_app()).get("/api/v1/distribution/covers/styles")
+        assert resp.status_code == 200, resp.text
+        slugs = [s["slug"] for s in resp.json()["styles"]]
+        assert slugs == ["viral-video-cover", "neon"]
+        assert resp.json()["styles"][0]["builtin"] is True
+        assert resp.json()["styles"][0]["aspects"] == ["3:4", "4:3"]

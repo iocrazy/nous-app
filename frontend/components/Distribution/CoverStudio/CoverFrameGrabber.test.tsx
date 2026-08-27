@@ -224,7 +224,7 @@ describe('CoverFrameGrabber — stage mode (v4)', () => {
     expect(screen.getByTestId('cover-crop-guide').className).toContain('h');
     fireEvent.click(screen.getByTestId('cover-use-frame'));
 
-    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1));
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0.5, y: 0.5 }));
     // The AI grab is still there too — the two paths are not either/or.
     expect(screen.getByTestId('cover-grab-button')).toBeTruthy();
   });
@@ -272,5 +272,46 @@ describe('CoverFrameGrabber — stage mode (v4)', () => {
     expect(screen.queryByTestId('cover-use-frame')).toBeNull();
     expect(screen.queryByTestId('cover-upload-cover')).toBeNull();
     expect(screen.queryByTestId('cover-crop-guide')).toBeNull();
+  });
+});
+
+
+describe('CoverFrameGrabber — the crop box moves', () => {
+  it('starts centred and the arrow keys nudge the anchor, clamped to the picture', async () => {
+    const onUseAsCover = vi.fn().mockResolvedValue(undefined);
+    renderGrabber({ embedded: true, onUseAsCover });
+    primeVideo(3.1);
+    const box = screen.getByTestId('cover-crop-guide');
+    expect(box.getAttribute('data-focus-x')).toBe('0.50');
+
+    fireEvent.keyDown(box, { key: 'ArrowRight' });
+    fireEvent.keyDown(box, { key: 'ArrowRight' });
+    fireEvent.keyDown(box, { key: 'ArrowUp' });
+    expect(box.getAttribute('data-focus-x')).toBe('0.60');
+    expect(box.getAttribute('data-focus-y')).toBe('0.45');
+
+    for (let i = 0; i < 20; i += 1) fireEvent.keyDown(box, { key: 'ArrowLeft' });
+    expect(box.getAttribute('data-focus-x')).toBe('0.00');
+
+    fireEvent.click(screen.getByTestId('cover-use-frame'));
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0, y: 0.45 }));
+  });
+
+  it('resets the anchor when the source video changes', () => {
+    const { rerender } = render(
+      <I18nextProvider i18n={makeI18n()}>
+        <CoverFrameGrabber sources={[VIDEO]} grabbedAt={[]} onGrabbed={vi.fn()} embedded />
+      </I18nextProvider>,
+    );
+    const box = screen.getByTestId('cover-crop-guide');
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    expect(box.getAttribute('data-focus-y')).toBe('0.55');
+
+    rerender(
+      <I18nextProvider i18n={makeI18n()}>
+        <CoverFrameGrabber sources={[{ ...VIDEO, id: '901' }]} grabbedAt={[]} onGrabbed={vi.fn()} embedded />
+      </I18nextProvider>,
+    );
+    expect(screen.getByTestId('cover-crop-guide').getAttribute('data-focus-y')).toBe('0.50');
   });
 });

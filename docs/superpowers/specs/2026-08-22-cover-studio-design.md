@@ -391,3 +391,11 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - `CoverPair` 两个槽位都可选：工作室一次只填当前 tab 的槽，发布页按补丁合并（`setCovers(prev => ({...prev, ...patch}))`）。
 
 有意没做：可拖动裁切框（服务端不支持偏移）；横封面 AI；多风格（skill 只有一个）。
+
+## 补记 2026-08-26（三）：用户要的"有意没做"三项全部做了
+
+- **可拖动裁切框**：`covers/select` 新增 `focus_x/focus_y`（归一化 0..1，框中心），`center_crop_region` 以它为锚点、到边界钳住；缺省 0.5/0.5 = 老的居中，一个字节不变。前端裁切框在视频画面（object-fit contain 的实际区域）内按画幅算尺寸，可拖、可用方向键微调（每步 5%），换源视频时归中。
+- **横封面走 AI**：`covers/generate` 新增 `aspect: '3:4'|'4:3'`；prompt 两阶段的画幅词随之变，4:3 用**横版构图句**（大标题占一侧、人物占另一侧，明说"不是竖版转过来"）而不是把竖版语法硬塞进横框；`params.ratio` 跟着走。两个 tab 的轮次历史各自独立；「完成」按该轮的画幅回填对应槽位。
+- **多风格 = 封面 skill**：`GET /covers/styles` 列出内置风格 + 用户可见的 `category='cover'` 的 skill（可见性借 AI Library 的口径）。非内置风格走**通用骨架驱动**（`cover_styles.build_from_skill`）：从 SKILL.md 抠 `## Prompt Skeleton` / `## Four-Draft Preview Prompt Skeleton` 的围栏文本，填 `[topic]`/`[headline]`，其余占位行整行丢弃并明说"细节你定"，按画幅换词，小标签开关打开时摘掉骨架里的禁令（空白宽容匹配）。缺骨架的 skill 生成时 422 点名，不静默退回内置。`requires_person` 由正文是否点名 character reference 决定，前端据此决定人物槽和阻断。
+
+地面真值：生产库里用户导入的 `viral-video-cover` 行 `category='cover'`，正文两段骨架都在 ```text 围栏里 —— 通用驱动的抽取规则就是照它定的。

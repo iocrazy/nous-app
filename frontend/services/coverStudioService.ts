@@ -88,6 +88,35 @@ export interface CoverGenerateInput {
   allowSmallLabels?: boolean;
   /** The creator's own sentence for the model — the prompt box. */
   instructions?: string;
+  /** 3:4 vertical (default) or 4:3 horizontal — both go through the model. */
+  aspect?: CoverAspect;
+  /** A cover style = the slug of a `category: cover` skill. */
+  style?: string;
+}
+
+export type CoverAspect = '3:4' | '4:3';
+
+/** One entry of GET /distribution/covers/styles. */
+export interface CoverStyle {
+  slug: string;
+  name: string;
+  description: string;
+  /** The style demands a person reference; the studio blocks without one. */
+  requires_person: boolean;
+  aspects: string[];
+  builtin: boolean;
+}
+
+export const BUILTIN_COVER_STYLE = 'viral-video-cover';
+
+/**
+ * The styles this user can pick: the built-in one first, then every
+ * `category: cover` skill visible to them (own / team / project / public).
+ */
+export async function listCoverStyles(): Promise<CoverStyle[]> {
+  const res = await apiFetch('/api/v1/distribution/covers/styles');
+  const json = (await res.json()) as { styles?: CoverStyle[] };
+  return json.styles ?? [];
 }
 
 /** Stage 1 — the 2x2 grid of four drafts. */
@@ -102,6 +131,8 @@ export async function generateCoverDrafts(
     source_urls: input.sourceUrls,
     allow_small_labels: input.allowSmallLabels ?? false,
     instructions: input.instructions ?? '',
+    aspect: input.aspect ?? '3:4',
+    style: input.style ?? BUILTIN_COVER_STYLE,
   });
 }
 
@@ -117,6 +148,8 @@ export async function refineCoverDraft(
     source_urls: input.sourceUrls,
     allow_small_labels: input.allowSmallLabels ?? false,
     instructions: input.instructions ?? '',
+    aspect: input.aspect ?? '3:4',
+    style: input.style ?? BUILTIN_COVER_STYLE,
     selected_draft: input.selectedDraft,
     headline: input.headline ?? '',
   });

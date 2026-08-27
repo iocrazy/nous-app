@@ -233,11 +233,17 @@ class SourceVideo:
 
 
 def center_crop_region(
-    source_width: int, source_height: int, target_aspect: float
+    source_width: int,
+    source_height: int,
+    target_aspect: float,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
 ) -> CropRegion:
-    """求"能塞进源图的最大 target_aspect 矩形"，居中。
+    """求"能塞进源图的最大 target_aspect 矩形"，以 ``(focus_x, focus_y)`` 为锚点。
 
-    返回归一化 ``[0,1]`` 区域，直接喂给 ``crop_normalized``。
+    返回归一化 ``[0,1]`` 区域，直接喂给 ``crop_normalized``。锚点默认 0.5/0.5 =
+    居中；用户在工作室里拖动裁切框时传的是框中心的归一化坐标，窗口跟着它走，
+    到边界就钳住（永远不会裁到图外）。
 
     为什么是居中裁切
     ===============
@@ -251,14 +257,18 @@ def center_crop_region(
        （人脸常在上三分之一，而 4:3 从 9:16 里只能保住 42% 的高度，居中确实
        可能切到头顶），但那个数字无法验证，把猜测伪装成决策比居中更糟。
 
-    **真正的解法是显著性/人脸检测来定锚点**，那是这个函数的自然升级位：签名
-    不用变，只是 anchor 从固定 0.5 变成检测出来的值。在那之前，用户想要别的
-    构图有现成出口 —— 选出来的两张封面本身就是普通 resources 行，canvas 已有
-    的 crop-derive 链路（``/api/v1/canvas/derive/crop``）可以任意重裁。
+    2026-08-26 起锚点由用户决定：封面工作室的裁切框可以拖，框中心作为
+    ``focus`` 传进来。居中仍是没人拖时的默认值，理由如上不变。显著性/人脸检测
+    仍是自然升级位 —— 只是把"默认 0.5"换成检测值，签名不用再动。
 
     Raises:
-        CoverFrameError: 源尺寸不合法（400）。
+        CoverFrameError: 源尺寸不合法或锚点越界（400）。
     """
+    if not (0.0 <= focus_x <= 1.0 and 0.0 <= focus_y <= 1.0):
+        raise CoverFrameError(
+            status_code=400,
+            detail=f"crop focus out of range: ({focus_x}, {focus_y})",
+        )
     if source_width <= 0 or source_height <= 0:
         raise CoverFrameError(
             status_code=400,
@@ -271,12 +281,14 @@ def center_crop_region(
 
     source_aspect = source_width / source_height
     if source_aspect > target_aspect:
-        # 源比目标更宽 → 保满高度，裁两侧。
+        # 源比目标更宽 → 保满高度，窗口沿 x 跟着锚点走。
         width = target_aspect / source_aspect
-        return CropRegion(x=(1.0 - width) / 2.0, y=0.0, width=width, height=1.0)
-    # 源比目标更高（或恰好相等）→ 保满宽度，裁上下。
-    height = source_aspect / target_aspect
-    return CropRegion(x=0.0, y=(1.0 - height) / 2.0, width=1.0, height=min(height, 1.0))
+        x = min(max(focus_x - width / 2.0, 0.0), 1.0 - width)
+        return CropRegion(x=x, y=0.0, width=width, height=1.0)
+    # 源比目标更高（或恰好相等）→ 保满宽度，窗口沿 y 跟着锚点走。
+    height = min(source_aspect / target_aspect, 1.0)
+    y = min(max(focus_y - height / 2.0, 0.0), 1.0 - height)
+    return CropRegion(x=0.0, y=y, width=1.0, height=height)
 
 
 def _decode_data_url(data_url: str) -> Optional[bytes]:
@@ -627,8 +639,11 @@ async def _crop_and_persist_pair(
     folder_id: Optional[str],
     library_id: Optional[str],
     stem: str,
+    focus: tuple[float, float] = (0.5, 0.5),
 ) -> dict[str, str]:
     """一帧 → 竖版 3:4 + 横版 4:3，各落成一个 resources 行，返回两个 id。
+
+    ``focus`` 是用户拖出来的裁切锚点（归一化，默认居中），两个画幅共用同一个。
 
     这两行**是**真素材：``publish_tasks.cover_*_resource_id`` 按 id 引用它们，
     浏览器侧发布时要真去取那个文件。归属跟随源视频的 scope / folder /
@@ -641,7 +656,7 @@ async def _crop_and_persist_pair(
         ("vertical", COVER_VERTICAL_ASPECT),
         ("horizontal", COVER_HORIZONTAL_ASPECT),
     ):
-        region = center_crop_region(width, height, aspect)
+        region = center_crop_region(width, height, aspect, focus[0], focus[1])
         try:
             cropped = crop_normalized(frame_bytes, region, mime_type=_COVER_MIME)
         except CropError as exc:
@@ -668,8 +683,10 @@ async def derive_cover_pair(
     timestamp_seconds: float,
     user_id: str,
     repo: Optional[ResourceRepoProtocol] = None,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
 ) -> CoverPair:
-    """按时间点重抽那一帧，居中裁成 3:4 与 4:3 两张封面。
+    """按时间点重抽那一帧，以 ``(focus_x, focus_y)`` 为锚点裁成 3:4 与 4:3 两张封面。
 
     用户挑的是**一个时间点**，不是一个已存在的图片 —— 候选帧从不落库。所以这
     一步要回到源视频、在同一秒重抽一次（这次按 COVER_FRAME_WIDTH，全尺寸）。
@@ -710,6 +727,7 @@ async def derive_cover_pair(
         folder_id=source.folder_id,
         library_id=source.library_id,
         stem=stem,
+        focus=(focus_x, focus_y),
     )
     return CoverPair(
         vertical_resource_id=ids["vertical"],
