@@ -11,9 +11,9 @@
 //
 // The rules live in coverReferences.ts so they can be tested without rendering.
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, User, X } from 'lucide-react';
+import { Plus, Upload, User, X } from 'lucide-react';
 
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
@@ -32,6 +32,8 @@ interface Props {
   onAddFromTemplates: () => void;
   /** Set when the last add was refused, so the card can say which reason. */
   refusal?: 'full' | 'duplicate' | null;
+  /** A picture from disk straight into the pool (the design's "上传"). */
+  onUpload?: (file: File) => void;
 }
 
 export function CoverReferencePool({
@@ -40,8 +42,10 @@ export function CoverReferencePool({
   onRemove,
   onAddFromTemplates,
   refusal = null,
+  onUpload,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
+  const uploadRef = useRef<HTMLInputElement>(null);
   const person = refs.find((r) => r.kind === 'person');
   const rest = refs.filter((r) => r.kind !== 'person');
   const full = isFull(refs);
@@ -127,6 +131,32 @@ export function CoverReferencePool({
             <Plus size={14} />
             {t('distribution.coverStudio.refFromTemplates', 'From templates')}
           </button>
+          {onUpload && (
+            <>
+              <button
+                type="button"
+                className="rf add"
+                disabled={full}
+                onClick={() => uploadRef.current?.click()}
+                data-testid="cover-ref-upload"
+              >
+                <Upload size={14} />
+                {t('distribution.coverStudio.refUpload', 'Upload')}
+              </button>
+              <input
+                ref={uploadRef}
+                type="file"
+                accept="image/*"
+                hidden
+                data-testid="cover-ref-upload-input"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUpload(f);
+                  e.target.value = '';
+                }}
+              />
+            </>
+          )}
         </div>
 
         {/* A refused click has to say which refusal it was. "Nothing happened"

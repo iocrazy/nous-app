@@ -214,3 +214,63 @@ describe('CoverFrameGrabber', () => {
     expect(screen.queryByLabelText('Grab from')).toBeNull();
   });
 });
+
+describe('CoverFrameGrabber — stage mode (v4)', () => {
+  it('draws a crop guide in the cover’s aspect and offers the no-AI path', async () => {
+    const onUseAsCover = vi.fn().mockResolvedValue(undefined);
+    renderGrabber({ embedded: true, aspect: '4:3', onUseAsCover });
+    primeVideo(3.1);
+
+    expect(screen.getByTestId('cover-crop-guide').className).toContain('h');
+    fireEvent.click(screen.getByTestId('cover-use-frame'));
+
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1));
+    // The AI grab is still there too — the two paths are not either/or.
+    expect(screen.getByTestId('cover-grab-button')).toBeTruthy();
+  });
+
+  it('says so when the frame cannot become a cover, and stays usable', async () => {
+    const onUseAsCover = vi.fn().mockRejectedValue(new Error('504'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderGrabber({ embedded: true, onUseAsCover });
+    primeVideo(3.1);
+
+    fireEvent.click(screen.getByTestId('cover-use-frame'));
+
+    expect(await screen.findByTestId('cover-grab-error')).toBeTruthy();
+    expect((screen.getByTestId('cover-use-frame') as HTMLButtonElement).disabled).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('refuses a non-image upload before calling anyone', () => {
+    const onUploadCover = vi.fn().mockResolvedValue(undefined);
+    renderGrabber({ embedded: true, onUploadCover });
+
+    const input = screen.getByTestId('cover-upload-cover-input') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'clip.mp4', { type: 'video/mp4' })] },
+    });
+
+    expect(onUploadCover).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cover-grab-error')).toBeTruthy();
+  });
+
+  it('hands an image upload straight through', async () => {
+    const onUploadCover = vi.fn().mockResolvedValue(undefined);
+    renderGrabber({ embedded: true, onUploadCover });
+    const file = new File(['x'], 'cover.png', { type: 'image/png' });
+
+    fireEvent.change(screen.getByTestId('cover-upload-cover-input'), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(onUploadCover).toHaveBeenCalledWith(file));
+  });
+
+  it('shows neither extra button in card mode', () => {
+    renderGrabber();
+    expect(screen.queryByTestId('cover-use-frame')).toBeNull();
+    expect(screen.queryByTestId('cover-upload-cover')).toBeNull();
+    expect(screen.queryByTestId('cover-crop-guide')).toBeNull();
+  });
+});

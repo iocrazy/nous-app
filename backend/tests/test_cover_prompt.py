@@ -181,3 +181,19 @@ class TestSmallLabelsToggle:
         assert "no copied sample faces" in p
         assert "no copyrighted characters" in p
         assert "no unrelated brand logos" in p
+
+
+class TestInstructions:
+    """设计稿的「提示词」框：创作者的一句话进两个阶段，放在末尾且不覆盖安全句。"""
+
+    def test_reaches_both_stages_after_the_safety_clause(self):
+        note = "标题用「内容差的真相」，人物指向右侧的大屏幕"
+        for p in (_s1(instructions=note), _s2(instructions=note)):
+            assert note in p
+            assert p.index("Safety/IP") < p.index(note), "自由文本必须在安全句之后"
+            assert "unless it conflicts with the rules above" in p
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\n"])
+    def test_blank_adds_nothing(self, blank):
+        assert "Extra direction" not in _s1(instructions=blank)
+        assert "Extra direction" not in _s2(instructions=blank)

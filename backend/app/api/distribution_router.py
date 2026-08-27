@@ -1718,6 +1718,7 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
         allow_small_labels=body.allow_small_labels,
         selected_draft=body.selected_draft,
         headline=body.headline,
+        instructions=body.instructions,
     )
     try:
         prompt = (

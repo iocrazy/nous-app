@@ -169,3 +169,28 @@ describe('CoverReferencePool', () => {
     expect(screen.queryByTestId('cover-ref-dup')).toBeNull();
   });
 });
+
+describe('CoverReferencePool — upload (v4)', () => {
+  it('offers Upload only when the parent can take a file, and hands it over', () => {
+    const onUpload = vi.fn();
+    renderPool({ refs: [], onUpload });
+    const file = new File(['x'], 'ref.png', { type: 'image/png' });
+
+    fireEvent.change(screen.getByTestId('cover-ref-upload-input'), {
+      target: { files: [file] },
+    });
+
+    expect(onUpload).toHaveBeenCalledWith(file);
+  });
+
+  it('disables Upload at nine, like the template tile', () => {
+    const refs = Array.from({ length: MAX_REFERENCES }, (_, i) => frame(i));
+    renderPool({ refs, onUpload: vi.fn() });
+    expect((screen.getByTestId('cover-ref-upload') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('shows no Upload tile without a handler', () => {
+    renderPool({ refs: [] });
+    expect(screen.queryByTestId('cover-ref-upload')).toBeNull();
+  });
+});
