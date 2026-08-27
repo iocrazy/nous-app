@@ -287,6 +287,29 @@ export function parseDataImageUrl(url) {
   return { mime, bytes };
 }
 
+/** How many hops a nous URL may take before we stop believing it is one.
+ *  Real nous redirects are one hop (an object-storage presign); 3 leaves
+ *  room without letting a loop run forever. */
+export const REF_MAX_REDIRECTS = 3;
+
+/** SSRF guard: only nous' own API may be fetched by this daemon. Typed as
+ *  ref_rejected — nothing about codex or the user's machine is broken, the
+ *  request just has to carry a different attachment.
+ *
+ *  A function, not an inline check, because it has to be applied to EVERY
+ *  hop. `fetch` defaults to `redirect: 'follow'`, which made the old
+ *  string test govern the first request only: any nous endpoint that
+ *  redirects (`/api/v1/generated-media/<id>` presigns exactly that way) was
+ *  a way out of the allowlist, and this branch now takes user-controlled
+ *  chat-attachment URLs, not just server-built ones. */
+export function assertNousUrl(url) {
+  const s = String(url);
+  if (!s.startsWith(`${API_BASE}/`)) {
+    refRejected(`refusing to fetch a non-nous url: ${s.slice(0, 80)}`);
+  }
+  return s;
+}
+
 export async function downloadRef(url, dir, index) {
   if (String(url).startsWith('data:image/')) {
     const { mime, bytes } = parseDataImageUrl(url);
@@ -294,13 +317,28 @@ export async function downloadRef(url, dir, index) {
     await fs.writeFile(inline, bytes);
     return inline;
   }
-  // SSRF guard: only nous' own API may be fetched by this daemon. Typed as
-  // ref_rejected — nothing about codex or the user's machine is broken, the
-  // request just has to carry a different attachment.
-  if (!url.startsWith(`${API_BASE}/`)) {
-    refRejected(`refusing to fetch a non-nous url: ${String(url).slice(0, 80)}`);
+  let target = assertNousUrl(url);
+  let res;
+  // `redirect: 'manual'` so the allowlist — not fetch — decides where this
+  // goes next. Every Location is resolved against the URL it came from
+  // (relative redirects are legal) and re-checked before it is followed.
+  for (let hop = 0; ; hop += 1) {
+    res = await fetch(target, { redirect: 'manual' });
+    const status = Number(res.status);
+    if (!(status >= 300 && status < 400)) break;
+    if (hop >= REF_MAX_REDIRECTS) {
+      refRejected(`too many redirects (over ${REF_MAX_REDIRECTS}) fetching a ref`);
+    }
+    const location = res.headers?.get?.('location');
+    if (!location) refRejected(`redirect ${status} without a Location header`);
+    let resolved;
+    try {
+      resolved = new URL(location, target).toString();
+    } catch {
+      refRejected(`redirect to an unparseable Location: ${String(location).slice(0, 80)}`);
+    }
+    target = assertNousUrl(resolved);
   }
-  const res = await fetch(url);
   if (!res.ok) throw new Error(`ref download failed (${res.status})`);
   const file = path.join(dir, `ref-${index}.png`);
   await fs.writeFile(file, Buffer.from(await res.arrayBuffer()));

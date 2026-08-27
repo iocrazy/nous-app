@@ -625,3 +625,130 @@ test('normalizeImageUrls: inline data:image refs pass the payload check', () => 
   const urls = [`data:image/png;base64,${PNG_B64}`, 'https://api.nous.ink/x.png'];
   assert.deepEqual(normalizeImageUrls({ image_urls: urls }), urls);
 });
+
+// ── SSRF guard applies to redirects, not just the URL we were handed ──────
+//
+// `fetch` follows redirects by default, so checking only the initial string
+// left the allowlist governing the first request alone — a nous endpoint
+// that 302s (generated-media presigns that way) was the way out. These use a
+// stub fetch, which cannot itself follow anything; that is exactly why the
+// first test below asserts the `redirect: 'manual'` option is passed. Without
+// that assertion every test here stays green on code that follows redirects
+// blind, because the stub hands back the 3xx either way.
+
+import { assertNousUrl, REF_MAX_REDIRECTS } from './index.mjs';
+
+const NOUS = 'https://api.nous.ink';
+
+function redirectRes(location, status = 302) {
+  return {
+    status,
+    ok: false,
+    headers: { get: (k) => (String(k).toLowerCase() === 'location' ? location : null) },
+  };
+}
+
+function okRes(buf) {
+  return {
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+  };
+}
+
+/** Installs a scripted fetch; returns the call log and a restore fn. */
+function stubFetch(responses) {
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    calls.push({ url: String(url), opts });
+    if (!responses.length) throw new Error(`unscripted fetch: ${url}`);
+    return responses.shift();
+  };
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+async function withTmpDir(fn) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'refs-'));
+  try {
+    return await fn(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('assertNousUrl: off-host is a typed ref_rejected, a nous url passes through', () => {
+  const err = thrownBy(() => assertNousUrl('https://evil.example/pic.png'));
+  assert.equal(err.code, 'ref_rejected');
+  assert.equal(assertNousUrl(`${NOUS}/api/v1/x.png`), `${NOUS}/api/v1/x.png`);
+});
+
+test('downloadRef: a same-host redirect is followed, and fetch is asked NOT to follow it itself', async () => {
+  const bytes = Buffer.from('\x89PNG\r\n\x1a\npixels');
+  const stub = stubFetch([redirectRes(`${NOUS}/api/v1/presigned/abc.png`), okRes(bytes)]);
+  try {
+    const file = await withTmpDir((dir) => downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 0));
+    assert.equal(path.basename(file), 'ref-0.png');
+    assert.equal(stub.calls.length, 2);
+    assert.equal(stub.calls[1].url, `${NOUS}/api/v1/presigned/abc.png`);
+    // The load-bearing assertion: a stub cannot follow redirects, so nothing
+    // else here would notice if this option went away.
+    for (const call of stub.calls) assert.equal(call.opts?.redirect, 'manual');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a redirect to another host is refused, not followed', async () => {
+  const stub = stubFetch([redirectRes('https://evil.example/steal.png')]);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 0).then(() => null, (e) => e));
+    assert.ok(err, 'expected a rejection');
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /non-nous url/);
+    // and it never issued the off-host request
+    assert.equal(stub.calls.length, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a relative Location resolves against the current url and stays on-host', async () => {
+  const bytes = Buffer.from('pix');
+  const stub = stubFetch([redirectRes('/api/v1/other.png'), okRes(bytes)]);
+  try {
+    await withTmpDir((dir) => downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 1));
+    assert.equal(stub.calls[1].url, `${NOUS}/api/v1/other.png`);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a redirect loop stops at the hop cap instead of spinning', async () => {
+  const hops = Array.from({ length: REF_MAX_REDIRECTS + 2 }, () =>
+    redirectRes(`${NOUS}/api/v1/loop.png`));
+  const stub = stubFetch(hops);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/loop.png`, dir, 0).then(() => null, (e) => e));
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /too many redirects/);
+    assert.equal(stub.calls.length, REF_MAX_REDIRECTS + 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a 3xx with no Location is a typed refusal, not a crash on null', async () => {
+  const stub = stubFetch([redirectRes(null)]);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/x.png`, dir, 0).then(() => null, (e) => e));
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /Location/);
+  } finally {
+    stub.restore();
+  }
+});
