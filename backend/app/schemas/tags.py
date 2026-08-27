@@ -16,6 +16,23 @@ from pydantic import BaseModel, BeforeValidator, Field
 SnowflakeId = Annotated[str, BeforeValidator(lambda v: str(v) if v is not None else v)]
 
 
+def _digits_only(v):
+    """Reject a non-numeric BIGINT id at validation instead of letting it reach
+    asyncpg, where it surfaces as an opaque 500. ``None`` passes through — for
+    ``group_id`` a null is a real instruction ("move to Uncategorized")."""
+    if v is None:
+        return None
+    text = str(v).strip()
+    if not text.isdigit():
+        raise ValueError("must be a numeric tag group id")
+    return text
+
+
+# A Snowflake id arriving FROM a client (vs SnowflakeId, which normalises one
+# on the way out).
+GroupIdIn = Annotated[str, BeforeValidator(_digits_only)]
+
+
 class TagBase(BaseModel):
     """Base tag schema with common fields."""
 
@@ -36,6 +53,12 @@ class TagCreate(TagBase):
         False,
         description="Assets with this tag surface the Prompt panel/badge",
     )
+    group_id: Optional[GroupIdIn] = Field(
+        None,
+        description="Create the tag straight into this tag group. Omit for "
+        "uncategorized. The repo already supported it; wiring it here removes "
+        "the chrome extension's POST-then-PUT dance.",
+    )
 
 
 class TagUpdate(BaseModel):
@@ -52,9 +75,10 @@ class TagUpdate(BaseModel):
     color: Optional[str] = Field(None, description="Hex color code")
     icon: Optional[str] = Field(None, description="Emoji or icon identifier")
     enabled: Optional[bool] = Field(None, description="Whether visible in frontend API")
-    group_id: Optional[str] = Field(
+    group_id: Optional[GroupIdIn] = Field(
         None,
-        description="Reassign to a tag group (or null to leave uncategorized)",
+        description="Reassign to a tag group. Explicit null moves the tag to "
+        "the uncategorized bucket; omit the field to leave the group alone.",
     )
     origin: Optional[Literal["curated"]] = Field(
         None,

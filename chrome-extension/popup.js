@@ -16,14 +16,33 @@ const pushBtn = document.getElementById('pushBtn');
 const pushStatus = document.getElementById('pushStatus');
 const settingsToggle = document.getElementById('settingsToggle');
 
+// Elements — search-or-create bar (static, outside the re-rendered tag list)
+const quickCreateBar = document.getElementById('quickCreateBar');
+const quickCreateBtn = document.getElementById('quickCreateBtn');
+const quickTranslateLabel = document.getElementById('quickTranslateLabel');
+const quickTranslateInput = document.getElementById('quickTranslateInput');
+const quickTranslateSameBtn = document.getElementById('quickTranslateSameBtn');
+const quickCreateErrorEl = document.getElementById('quickCreateError');
+
 let selectedTags = new Set();
 let allTags = [];
+// Real tag groups from GET /tags/groups. The "+" form's group dropdown used to
+// reverse-engineer groups out of allTags, so a group with zero tags (a freshly
+// created one — exactly when you want to file something into it) never
+// appeared as an option.
+let allGroups = [];
 let currentTabUrl = '';
 let tagQuery = '';
 // Search-or-create state: an in-flight quick-create keeps the affordance in a
 // disabled "Creating..." state; a failure surfaces inline (never silent).
 let isCreatingQuick = false;
 let quickCreateError = '';
+// Search-or-create translation state. `quickTranslateTouched` stops a late
+// auto-translate response (or a re-render) from stomping on what the user
+// typed or on an "=" they just pressed.
+let quickTranslateTouched = false;
+let quickTranslateQuery = '';
+let quickTranslateTimer = null;
 // Did the tag list actually load? `allTags` is [] both when the user has no
 // tags and when the fetch failed, and the two must not behave alike: create-on-
 // push keys on "the search found nothing", which is only a real signal if we
@@ -128,6 +147,28 @@ async function loadTags(config) {
   }
 
   tagsLoading.style.display = 'none';
+  // Non-blocking: the group list only feeds the create form's dropdown, so a
+  // failure there must not take the tag picker down with it.
+  loadGroups(config);
+}
+
+// Real group list for the create form's dropdown. Empty groups included —
+// that's the whole point (see the allGroups declaration).
+async function loadGroups(config) {
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/tags/groups`, {
+      headers: { 'X-API-Key': config.apiKey },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    allGroups = data.groups || [];
+  } catch (err) {
+    // Fall back to the old tag-derived list rather than showing no groups at
+    // all; populateGroupDropdown handles the empty case.
+    console.warn('[nous] failed to load tag groups:', err.message);
+    allGroups = [];
+  }
+  populateGroupDropdown();
 }
 
 // Re-render on every keystroke — the tag list is small, no debounce needed.
@@ -135,8 +176,19 @@ async function loadTags(config) {
 tagSearch.addEventListener('input', () => {
   tagQuery = tagSearch.value;
   quickCreateError = '';
+  // A new term invalidates the old counterpart, including a hand-typed one —
+  // otherwise "ComfyUI" + "=" would leave "ComfyUI" glued to whatever you
+  // type next.
+  resetQuickTranslate();
   renderTags(allTags);
 });
+
+function resetQuickTranslate() {
+  if (quickTranslateTimer) clearTimeout(quickTranslateTimer);
+  quickTranslateTouched = false;
+  quickTranslateQuery = '';
+  quickTranslateInput.value = '';
+}
 
 // Enter in the search box creates the typed tag when it matches nothing
 // exactly — the same fast path the "Create" affordance offers. The
@@ -149,7 +201,7 @@ tagSearch.addEventListener('keydown', (e) => {
   const query = tagSearch.value.trim();
   if (query && !hasExactMatch(query)) {
     e.preventDefault();
-    quickCreateTag(query);
+    quickCreateTag(query, quickTranslateInput.value.trim());
   }
 });
 
@@ -187,14 +239,11 @@ function renderTags(tags) {
   const filtered = tags.filter(tag => matchesQuery(tag, q));
 
   // Search-or-create: when the query matches no tag exactly, offer a
-  // "Create <query>" affordance. It sits atop any partial-match results and
-  // fully replaces the "No tags match" empty state — mirroring the web app's
-  // Settings behavior. Enter in the search box triggers the same create.
+  // "Create <query>" affordance. It sits above the results and fully replaces
+  // the "No tags match" empty state — mirroring the web app's Settings
+  // behavior. Enter in the search box triggers the same create.
   const showCreate = rawQuery.length > 0 && !hasExactMatch(rawQuery);
-  if (showCreate) {
-    tagsContainer.appendChild(createAffordanceRow(rawQuery));
-    if (quickCreateError) tagsContainer.appendChild(createErrorRow(quickCreateError));
-  }
+  syncQuickCreateBar(showCreate ? rawQuery : '');
 
   if (filtered.length === 0) {
     if (!showCreate) {
@@ -278,38 +327,93 @@ function createTagPill(tag) {
   return pill;
 }
 
-// Full-width "Create <query>" row shown atop the tag list. Disabled while a
-// create is in flight so a double-click can't fire two POSTs.
-function createAffordanceRow(query) {
-  const row = document.createElement('button');
-  row.type = 'button';
-  row.className = 'tag-create-affordance';
-  row.disabled = isCreatingQuick;
-  row.textContent = isCreatingQuick
+// Drive the static search-or-create bar. `query` is '' when the bar should be
+// hidden (blank search, or the query already exists as a tag).
+//
+// The bar carries a second line — "EN:"/"ZH:" + editable translation + "=" —
+// so a proper noun stays identical in both languages. Without it, creating
+// "ComfyUI" from the search box left name_zh null (and typing a Chinese term
+// stuffed Chinese into the English `name` column), which is precisely what
+// the "+" form's "=" button already avoided.
+function syncQuickCreateBar(query) {
+  if (!query) {
+    quickCreateBar.style.display = 'none';
+    if (quickTranslateTimer) clearTimeout(quickTranslateTimer);
+    quickTranslateQuery = '';
+    return;
+  }
+
+  quickCreateBar.style.display = 'flex';
+  quickCreateBtn.disabled = isCreatingQuick;
+  quickCreateBtn.textContent = isCreatingQuick
     ? `Creating "${query}"...`
     : `Create "${query}"`;
-  row.addEventListener('click', () => quickCreateTag(query));
-  return row;
+  quickTranslateLabel.textContent = isChinese(query) ? 'EN:' : 'ZH:';
+
+  quickCreateErrorEl.style.display = quickCreateError ? 'block' : 'none';
+  quickCreateErrorEl.textContent = quickCreateError;
+
+  // New query → drop the previous suggestion and ask for a fresh one. An
+  // edited/"="-ed value is the user's, so it survives.
+  if (query !== quickTranslateQuery) {
+    quickTranslateQuery = query;
+    if (!quickTranslateTouched) {
+      quickTranslateInput.value = '';
+      scheduleQuickTranslate(query);
+    }
+  }
 }
 
-// Inline error line for a failed quick-create (403 scope hint, 409 duplicate,
-// network, etc.) — never silent.
-function createErrorRow(message) {
-  const el = document.createElement('div');
-  el.className = 'tag-create-error';
-  el.textContent = message;
-  return el;
+function scheduleQuickTranslate(query) {
+  if (quickTranslateTimer) clearTimeout(quickTranslateTimer);
+  quickTranslateTimer = setTimeout(async () => {
+    const translated = await fetchTranslation(query);
+    // Bail if the user moved on or typed their own in the meantime.
+    if (!translated) return;
+    if (quickTranslateTouched) return;
+    if (quickTranslateQuery !== query) return;
+    quickTranslateInput.value = translated;
+  }, 600);
 }
 
-// Search-or-create fast path: POST /tags {name} (default color), then select
-// the new tag and clear the search so it surfaces as a selected pill. Mirrors
-// the web app's handleQuickCreate (optimistic append, no auto-translate detour).
+quickTranslateInput.addEventListener('input', () => {
+  quickTranslateTouched = true;
+});
+
+// "=" — force the other language to match the input verbatim (ComfyUI, Lora,
+// LLM… terms that shouldn't be translated at all).
+quickTranslateSameBtn.addEventListener('click', () => {
+  quickTranslateTouched = true;
+  quickTranslateInput.value = tagSearch.value.trim();
+  quickTranslateInput.focus();
+});
+
+quickCreateBtn.addEventListener('click', () => {
+  quickCreateTag(tagSearch.value.trim(), quickTranslateInput.value.trim());
+});
+
+// Split one typed term plus its counterpart into the {name, name_zh} pair the
+// API wants. Chinese input → the term IS name_zh and the counterpart is the
+// English name; otherwise the term is the English name. A blank counterpart
+// falls back to the term itself, so a tag never lands with a null side that
+// the UI would then render as the other language.
+function splitNamePair(term, counterpart) {
+  const other = (counterpart || '').trim();
+  return isChinese(term)
+    ? { name: other || term, name_zh: term }
+    : { name: term, name_zh: other || null };
+}
+
+// Search-or-create fast path: POST /tags, then select the new tag and clear
+// the search so it surfaces as a selected pill. `counterpart` is the other
+// language from the create bar ('' → English-only tag, same as before).
 // Returns the created tag on success, null otherwise, so callers that need to
 // branch on the outcome (the push handler) can tell "created" from "failed"
 // instead of guessing from quickCreateError.
-async function quickCreateTag(rawQuery) {
-  const name = (rawQuery || '').trim();
-  if (!name || isCreatingQuick) return null;
+async function quickCreateTag(rawQuery, counterpart = '') {
+  const term = (rawQuery || '').trim();
+  if (!term || isCreatingQuick) return null;
+  const { name, name_zh } = splitNamePair(term, counterpart);
 
   isCreatingQuick = true;
   quickCreateError = '';
@@ -324,7 +428,7 @@ async function quickCreateTag(rawQuery) {
         'Content-Type': 'application/json',
         'X-API-Key': config.apiKey,
       },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, name_zh }),
     });
 
     if (!res.ok) {
@@ -350,6 +454,7 @@ async function quickCreateTag(rawQuery) {
     updatePushBtn();
     tagQuery = '';
     tagSearch.value = '';
+    resetQuickTranslate();
     renderTags(allTags);
     return created;
   } catch (err) {
@@ -396,7 +501,11 @@ pushBtn.addEventListener('click', async () => {
   const pendingHasMatch = allTags.some((t) => matchesQuery(t, pendingTag.toLowerCase()));
   if (tagsLoaded && pendingTag && !pendingHasMatch) {
     pushBtn.textContent = `Creating "${pendingTag}"...`;
-    const created = await quickCreateTag(pendingTag);
+    // Carry the create bar's counterpart through: if the user pressed "=" (or
+    // typed a translation) and then went straight for Push, honouring it here
+    // is the difference between "ComfyUI/ComfyUI" and a tag that silently
+    // loses the half they just set.
+    const created = await quickCreateTag(pendingTag, quickTranslateInput.value.trim());
     if (!created) {
       // Creating failed (403 missing tags:write, 409, network). Stop rather
       // than pushing without the tag the user asked for — a silent drop would
@@ -520,19 +629,47 @@ function populateGroupDropdown() {
   defaultOpt.addEventListener('click', () => selectGroup('', 'Select group (optional)'));
   newTagGroupOptions.appendChild(defaultOpt);
 
-  for (const tag of allTags) {
-    if (tag.group_name && tag.group_id && !seen.has(tag.group_id)) {
-      seen.add(tag.group_id);
-      const opt = document.createElement('div');
-      opt.className = 'custom-select-option';
-      opt.textContent = tag.group_name;
-      opt.addEventListener('click', () => selectGroup(tag.group_id, tag.group_name));
-      newTagGroupOptions.appendChild(opt);
-    }
+  // Real groups first (includes empty ones). If /tags/groups failed, fall back
+  // to the names reachable through the loaded tags so the dropdown degrades
+  // instead of going blank.
+  const source = allGroups.length
+    ? allGroups.map((g) => ({ id: String(g.id), name: g.name }))
+    : allTags
+        .filter((t) => t.group_name && t.group_id)
+        .map((t) => ({ id: String(t.group_id), name: t.group_name }));
+
+  for (const group of source) {
+    if (seen.has(group.id)) continue;
+    seen.add(group.id);
+    const opt = document.createElement('div');
+    opt.className = 'custom-select-option';
+    opt.textContent = group.name;
+    opt.addEventListener('click', () => selectGroup(group.id, group.name));
+    newTagGroupOptions.appendChild(opt);
   }
 }
 
 const isChinese = (text) => /[\u4e00-\u9fff]/.test(text);
+
+// One-shot machine translation of `value` into the other language. Returns ''
+// on any failure (offline, rate-limited, echoed input) \u2014 callers treat that as
+// "no suggestion", never as an error worth surfacing.
+async function fetchTranslation(value) {
+  const term = (value || '').trim();
+  if (!term) return '';
+  try {
+    const langPair = isChinese(term) ? 'zh|en' : 'en|zh';
+    const res = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(term)}&langpair=${langPair}&de=8512939@qq.com`
+    );
+    if (!res.ok) return '';
+    const data = await res.json();
+    const translated = data?.responseData?.translatedText;
+    return translated && translated !== term ? translated : '';
+  } catch {
+    return '';
+  }
+}
 
 // Show the translation row with a label matching the current direction.
 // Kept in sync with the input direction even before auto-translate lands.
@@ -554,18 +691,10 @@ newTagInput.addEventListener('input', () => {
   // translation input is currently empty.
   translateTimer = setTimeout(async () => {
     if (translateInput.value.trim()) return;
-    try {
-      const langPair = isChinese(value) ? 'zh|en' : 'en|zh';
-      const res = await fetch(
-        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(value)}&langpair=${langPair}&de=8512939@qq.com`
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      const translated = data?.responseData?.translatedText;
-      if (translated && translated !== value && !translateInput.value.trim()) {
-        translateInput.value = translated;
-      }
-    } catch {}
+    const translated = await fetchTranslation(value);
+    if (translated && !translateInput.value.trim()) {
+      translateInput.value = translated;
+    }
   }, 600);
 });
 
@@ -580,12 +709,8 @@ createTagBtn.addEventListener('click', async () => {
   const input = newTagInput.value.trim();
   if (!input) return;
 
-  const inputIsChinese = isChinese(input);
-  const translated = translateInput.value.trim();
-  // If user left the translation blank, fall back to the input itself so the
-  // tag still has a non-null name / name_zh rather than crashing.
-  const name = inputIsChinese ? (translated || input) : input;
-  const name_zh = inputIsChinese ? input : (translated || null);
+  const { name, name_zh } = splitNamePair(input, translateInput.value);
+  const groupId = newTagGroup.value || null;
 
   createTagBtn.disabled = true;
   createTagBtn.textContent = 'Creating...';
@@ -600,7 +725,11 @@ createTagBtn.addEventListener('click', async () => {
         'Content-Type': 'application/json',
         'X-API-Key': config.apiKey,
       },
-      body: JSON.stringify({ name, name_zh }),
+      // POST carries group_id directly. This used to be POST-then-PUT, and
+      // that PUT both 500'd (str group_id into a BIGINT column) and was
+      // wrapped in `.catch(() => {})` — so the tag was created outside the
+      // chosen group while the UI still said "Created!".
+      body: JSON.stringify({ name, name_zh, group_id: groupId }),
     });
 
     if (!res.ok) {
@@ -608,18 +737,11 @@ createTagBtn.addEventListener('click', async () => {
       throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
     }
 
-    // Set group_id if selected (PUT /tags/:id)
     const created = await res.json();
-    const groupId = newTagGroup.value;
-    if (groupId && created.id) {
-      await fetch(`${config.apiUrl}/api/v1/tags/${created.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': config.apiKey,
-        },
-        body: JSON.stringify({ group_id: groupId }),
-      }).catch(() => {});
+    // The group is part of what the user asked for — if the server filed the
+    // tag somewhere else, say so instead of reporting a clean success.
+    if (groupId && String(created.group_id ?? '') !== String(groupId)) {
+      throw new Error('Tag created, but the group was not applied');
     }
 
     // Reload tags

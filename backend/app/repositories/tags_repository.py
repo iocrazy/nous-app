@@ -98,6 +98,31 @@ def _parity(out: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# Columns where an explicit None is a real instruction ("clear it"), not the
+# caller's way of saying "leave this alone".
+_NULLABLE_TAG_ATTRS = {"group_id"}
+# BIGINT columns. JSON carries these as strings (Snowflake ids overflow JS
+# numbers), and asyncpg refuses a str for a BIGINT bind param —
+# ``DataError: 'str' object cannot be interpreted as an integer`` → 500.
+# ``create_tag`` and the admin repo already coerced; ``update_tag`` did not,
+# which killed every tag→group assignment in prod until 2026-08-26.
+_BIGINT_TAG_ATTRS = {"group_id"}
+
+
+def _tag_update_values(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Column values for an UPDATE, from loose keyword args."""
+    values: Dict[str, Any] = {}
+    for key, value in kwargs.items():
+        if key not in _TAG_ATTRS:
+            continue
+        if value is None and key not in _NULLABLE_TAG_ATTRS:
+            continue
+        if value is not None and key in _BIGINT_TAG_ATTRS:
+            value = int(value)
+        values[key] = value
+    return values
+
+
 def _tag_row(obj: Any) -> Dict[str, Any]:
     """SELECT *-shaped, strategy-C-parity dict for one full Tags row."""
     return _parity(_orm_obj_to_dict(obj, _TAG_N2A))
@@ -443,11 +468,14 @@ class TagsRepository:
         return out
 
     async def update_tag(self, tag_id: str, user_id: str, **kwargs) -> Optional[dict]:
-        """Update a user tag (scoped to user_id). Mirrors the legacy: drop None
-        values, no-op (return current) when nothing to write."""
-        update_data = {
-            k: v for k, v in kwargs.items() if v is not None and k in _TAG_ATTRS
-        }
+        """Update a user tag (scoped to user_id). Drops keys whose value is
+        None — EXCEPT the nullable ones, where an explicit None is the whole
+        point (``group_id=None`` = move to Uncategorized). Callers must
+        therefore pass a nullable key only when the client actually sent it;
+        ``update_tag`` cannot tell "omitted" from "null" on its own.
+
+        No-op (return current) when nothing is left to write."""
+        update_data = _tag_update_values(kwargs)
         if not update_data:
             return await self.get_tag_by_id(tag_id)
 
@@ -499,10 +527,8 @@ class TagsRepository:
 
     async def update_tag_admin(self, tag_id: str, **kwargs) -> Optional[dict]:
         """Update any tag (no user_id check). Used for toggling enabled on
-        system tags."""
-        update_data = {
-            k: v for k, v in kwargs.items() if v is not None and k in _TAG_ATTRS
-        }
+        system tags. Same value rules as ``update_tag``."""
+        update_data = _tag_update_values(kwargs)
         if not update_data:
             return await self.get_tag_by_id(tag_id)
 

@@ -139,6 +139,34 @@ class TagGroupUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
 
 
+# ⚠️ Declared BEFORE ``/groups/{group_id}``. Starlette matches routes in
+# registration order, so with the literal route second every
+# ``PUT /groups/reorder`` was swallowed by the rename route as
+# ``group_id="reorder"`` and died at body validation (422 "name required").
+# Group drag-reorder was dead in prod until 2026-08-26. Keep literal paths
+# above their parameterised siblings.
+class TagGroupReorderRequest(BaseModel):
+    group_ids: List[str] = Field(..., description="Ordered list of group IDs")
+
+
+@router.put("/groups/reorder")
+async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
+    """Update sort_order for all groups based on the provided order."""
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TagGroups
+
+    async with write_scope() as session:
+        for idx, group_id in enumerate(body.group_ids):
+            await session.execute(
+                update(TagGroups)
+                .where(TagGroups.id == int(group_id))
+                .values(sort_order=idx)
+            )
+    return {"success": True}
+
+
 @router.put("/groups/{group_id}", response_model=TagGroupItem)
 async def rename_tag_group(auth: AuthDep, group_id: str, body: TagGroupUpdate):
     """Rename a tag group."""
@@ -181,28 +209,6 @@ async def delete_tag_group(auth: AuthDep, group_id: str):
         )
         # Delete the group
         await session.execute(delete(TagGroups).where(TagGroups.id == int(group_id)))
-    return {"success": True}
-
-
-class TagGroupReorderRequest(BaseModel):
-    group_ids: List[str] = Field(..., description="Ordered list of group IDs")
-
-
-@router.put("/groups/reorder")
-async def reorder_tag_groups(auth: AuthDep, body: TagGroupReorderRequest):
-    """Update sort_order for all groups based on the provided order."""
-    from sqlalchemy import update
-
-    from app.db.session import write_scope
-    from app.models import TagGroups
-
-    async with write_scope() as session:
-        for idx, group_id in enumerate(body.group_ids):
-            await session.execute(
-                update(TagGroups)
-                .where(TagGroups.id == int(group_id))
-                .values(sort_order=idx)
-            )
     return {"success": True}
 
 
@@ -326,6 +332,7 @@ async def create_tag(
         color=tag.color,
         icon=tag.icon,
         name_zh=tag.name_zh,
+        group_id=tag.group_id,
         prompt_trigger=tag.prompt_trigger,
     )
 
@@ -432,6 +439,15 @@ async def update_tag(
             status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
         )
 
+    # ``group_id`` is nullable-with-meaning: null = "move to Uncategorized".
+    # Forwarding it unconditionally would make an omitted field look identical
+    # to an explicit null, so only pass it through when the client set it.
+    group_kwargs = (
+        {"group_id": tag_update.group_id}
+        if "group_id" in tag_update.model_fields_set
+        else {}
+    )
+
     updated = await repo.update_tag(
         tag_id=tag_id,
         user_id=user_id,
@@ -440,11 +456,11 @@ async def update_tag(
         color=tag_update.color,
         icon=tag_update.icon,
         enabled=tag_update.enabled,
-        group_id=tag_update.group_id,
         # Promote-only: schema restricts this to "curated"; the repo's
         # _TAG_ATTRS whitelist already admits the ``origin`` column.
         origin=tag_update.origin,
         prompt_trigger=tag_update.prompt_trigger,
+        **group_kwargs,
     )
 
     return updated

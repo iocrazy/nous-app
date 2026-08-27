@@ -326,3 +326,58 @@ def test_factory_returns_collapsed_repo():
     from app.repositories.tags_repository import TagsRepository, get_tags_repository
 
     assert type(get_tags_repository()) is TagsRepository
+
+
+# ─── group assignment against real PG (2026-08-26 regression) ───────────
+
+
+async def test_update_tag_group_id_str_reaches_bigint_column(
+    patched_engine, cleanup, auth_user
+):
+    """A str group_id must be coerced before it hits the BIGINT column.
+
+    Prod ran the uncoerced version and asyncpg refused every tag→group move:
+    ``DataError: 'str' object cannot be interpreted as an integer`` → 500 on
+    both the drag path and the edit dialog. Unit tests can only assert the
+    bound param; only a real driver proves the write lands.
+    """
+    conn = await asyncpg.connect(_TEST_DSN)
+    try:
+        group_id = await conn.fetchval("SELECT id FROM tag_groups ORDER BY id LIMIT 1")
+    finally:
+        await conn.close()
+    if group_id is None:
+        pytest.skip("no tag_groups rows in the target DB")
+
+    created = await _repo().create_tag(name=_name(), user_id=str(auth_user))
+    updated = await _repo().update_tag(
+        str(created["id"]), str(auth_user), group_id=str(group_id)
+    )
+    assert updated is not None
+    assert updated["group_id"] == group_id
+    assert type(updated["group_id"]) is int
+
+
+async def test_update_tag_explicit_null_clears_group(
+    patched_engine, cleanup, auth_user
+):
+    """group_id=None must write NULL ("move to Uncategorized"), not be filtered
+    out into a 200-with-no-change silent no-op."""
+    conn = await asyncpg.connect(_TEST_DSN)
+    try:
+        group_id = await conn.fetchval("SELECT id FROM tag_groups ORDER BY id LIMIT 1")
+    finally:
+        await conn.close()
+    if group_id is None:
+        pytest.skip("no tag_groups rows in the target DB")
+
+    created = await _repo().create_tag(
+        name=_name(), user_id=str(auth_user), group_id=str(group_id)
+    )
+    assert created["group_id"] == group_id
+
+    cleared = await _repo().update_tag(
+        str(created["id"]), str(auth_user), group_id=None
+    )
+    assert cleared is not None
+    assert cleared["group_id"] is None
