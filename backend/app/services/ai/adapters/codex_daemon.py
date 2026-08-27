@@ -90,7 +90,15 @@ class CodexDaemonAdapter:
         scope_id = await self._scope(self.user_id)
         payload = {
             "prompt": prompt,
-            "model": (composed.model or self.model or "").strip(),
+            # ``self.model`` ONLY — never ``composed.model``. The latter is
+            # ``agents.model``, which for this path holds the catalog row's
+            # display name ("Codex (Local)"), not something codex can run:
+            # letting it win would ship `codex exec --model "Codex (Local)"`.
+            # ``self.model`` is the row's ``actual_model``, threaded in at
+            # construction; "" means "whatever the user's own codex defaults
+            # to", which is a valid answer here in a way it is not for a
+            # hosted provider.
+            "model": (self.model or "").strip(),
             "image_urls": image_urls[:_MAX_IMAGES],
             "timeout_s": self.timeout_s,
         }

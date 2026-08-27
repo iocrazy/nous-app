@@ -160,16 +160,32 @@ async def test_images_over_the_backstop_cap_are_trimmed_and_logged():
 
 
 @pytest.mark.asyncio
-async def test_composed_model_wins_over_adapter_default_and_no_stream():
+async def test_row_model_wins_and_the_composed_display_name_is_ignored():
+    """``composed.model`` is ``agents.model``, which on this path is the
+    catalog row's DISPLAY name ("Codex (Local)") — a label, not a model codex
+    can run. If it reached the payload the daemon would shell out
+    ``codex exec --model "Codex (Local)"``. Only the row's ``actual_model``
+    (passed at construction) may reach the payload; "" means "the user's own
+    codex default", which is a legitimate answer for a local CLI."""
     seen: dict = {}
 
     async def fake_dispatch(**kw):
         seen.update(kw)
         return {"text": "ok", "usage": {}}
 
-    a = CodexDaemonAdapter(
-        user_id="u1", model="row-model", dispatch=fake_dispatch, scope_resolver=_scope
+    blank = CodexDaemonAdapter(
+        user_id="u1", model="", dispatch=fake_dispatch, scope_resolver=_scope
     )
-    await a.call(_composed(model="composed-model"), [{"role": "user", "content": "x"}])
-    assert seen["payload"]["model"] == "composed-model"
-    assert not hasattr(a, "stream")
+    await blank.call(
+        _composed(model="Codex (Local)"), [{"role": "user", "content": "x"}]
+    )
+    assert seen["payload"]["model"] == ""
+
+    pinned = CodexDaemonAdapter(
+        user_id="u1", model="gpt-5", dispatch=fake_dispatch, scope_resolver=_scope
+    )
+    await pinned.call(
+        _composed(model="Codex (Local)"), [{"role": "user", "content": "x"}]
+    )
+    assert seen["payload"]["model"] == "gpt-5"
+    assert not hasattr(pinned, "stream")
