@@ -3,6 +3,7 @@ import {
   AGENT_RUN_SELECT,
   agentDisplayName,
   agentRunToTask,
+  turnEndSubtitle,
   type AgentRunRow,
 } from './agentRunPresentation';
 
@@ -171,5 +172,45 @@ describe('agentRunToTask — agent attribution', () => {
     // disagree on the type; two shapes for one run would double the row.
     expect(agentRunToTask(wireRow({ id: 340140596649215 })).id).toBe('340140596649215');
     expect(agentRunToTask(wireRow({ id: '3401405966492150' })).id).toBe('3401405966492150');
+  });
+});
+
+describe('turnEndSubtitle', () => {
+  it('names the silent endings a "completed" run can hide', () => {
+    expect(turnEndSubtitle({ turn_end_reason: 'max_iterations' })).toBe('Stopped at tool limit');
+    expect(turnEndSubtitle({ turn_end_reason: 'provider_length' })).toBe('Cut off by model limit');
+  });
+
+  it('stays quiet for a natural finish and for rows without the mirror', () => {
+    expect(turnEndSubtitle({ turn_end_reason: 'completed' })).toBeNull();
+    expect(turnEndSubtitle({})).toBeNull();
+    expect(turnEndSubtitle(null)).toBeNull();
+    expect(turnEndSubtitle(undefined)).toBeNull();
+  });
+
+  it('wins over output_summary on a completed run — the stop reason is the news', () => {
+    const t = agentRunToTask(
+      baseRow({
+        status: 'completed',
+        output_summary: 'Drafted three scenes',
+        metadata_json: { turn_end_reason: 'max_iterations' },
+      }),
+    );
+    expect(t.subtitle).toBe('Stopped at tool limit');
+  });
+
+  it('falls back to output_summary when the turn ended naturally', () => {
+    const t = agentRunToTask(
+      baseRow({
+        status: 'completed',
+        output_summary: 'Drafted three scenes',
+        metadata_json: { turn_end_reason: 'completed' },
+      }),
+    );
+    expect(t.subtitle).toBe('Drafted three scenes');
+  });
+
+  it('selects metadata_json so the mirror actually reaches the row', () => {
+    expect(AGENT_RUN_SELECT).toContain('metadata_json');
   });
 });
