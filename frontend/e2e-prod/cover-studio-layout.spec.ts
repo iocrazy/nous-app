@@ -67,14 +67,29 @@ for (const vp of [
   { width: 1280, height: 800 },
 ]) {
   test(`cover studio fits its three columns at ${vp.width}×${vp.height}`, async ({ page }) => {
+    // Cold load + login + library picker + the studio's own loads on the real
+    // stack: the default 45s is too tight for one honest pass.
+    test.setTimeout(120_000);
     await page.setViewportSize(vp);
     await login(page);
     await page.goto(`/team/${WALKTHROUGH_IDS.teamId}/distribution/publish`);
 
     // A cold load of the publish page on the real stack can take well over
     // the 15s click default (seen 2026-08-27; the retry passed in 5s).
+    const addTile = page.locator('.thumb.add').first();
+    await expect(addTile).toBeVisible({ timeout: 45_000 });
+
+    // Since #2037 the cover slots are blocked until a video is selected —
+    // pick the first library video the way a user would.
+    await addTile.click();
+    const firstVideo = page.locator('.picker-item').first();
+    await expect(firstVideo).toBeVisible({ timeout: 30_000 });
+    await firstVideo.click();
+    await page.locator('.btn.btn-solid', { hasText: /Done|完成/ }).first().click();
+
     const open = page.getByTestId('open-cover-studio');
-    await expect(open).toBeVisible({ timeout: 45_000 });
+    await expect(open).toBeVisible();
+    await expect(open).not.toHaveClass(/blocked/);
     await open.click();
     const modal = page.getByTestId('cover-studio-overlay');
     await expect(modal).toBeVisible();
