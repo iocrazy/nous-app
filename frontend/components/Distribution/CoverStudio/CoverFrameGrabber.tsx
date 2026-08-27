@@ -18,7 +18,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Camera } from 'lucide-react';
+import { Camera, Check, Upload } from 'lucide-react';
 
 import { getSupabaseClient } from '../../../supabaseClient';
 import { getResourceFileUrl } from '../../../services/resourceService';
@@ -41,6 +41,18 @@ interface Props {
   onGrabbed: (frame: GrabbedFrame) => void;
   /** True when the pool cannot take another frame (9/9). */
   poolFull?: boolean;
+  /**
+   * Stage mode (the v4 layout): no card chrome, a crop guide drawn over the
+   * video in the cover's aspect, and two more ways out of the frame —
+   * "use this frame as the cover" (no AI) and "upload a picture instead".
+   */
+  embedded?: boolean;
+  /** Aspect of the cover being set; drives the crop guide. */
+  aspect?: '3:4' | '4:3';
+  /** No-AI path: the server centre-crops this exact frame into the cover. */
+  onUseAsCover?: (sourceId: string, timestampSeconds: number) => Promise<void>;
+  /** A picture from disk becomes the cover as-is. */
+  onUploadCover?: (file: File) => Promise<void>;
 }
 
 export function CoverFrameGrabber({
@@ -48,6 +60,10 @@ export function CoverFrameGrabber({
   grabbedAt,
   onGrabbed,
   poolFull = false,
+  embedded = false,
+  aspect = '3:4',
+  onUseAsCover,
+  onUploadCover,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -57,6 +73,8 @@ export function CoverFrameGrabber({
   const [current, setCurrent] = useState(0);
   const [grabbing, setGrabbing] = useState(false);
   const [grabError, setGrabError] = useState<string | null>(null);
+  const [using, setUsing] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
 
   const active = sources.find((s) => s.id === sourceId) ?? sources[0] ?? null;
 
@@ -122,6 +140,55 @@ export function CoverFrameGrabber({
     }
   }, [active, grabbing, poolFull, current, onGrabbed, t]);
 
+  const applyFrameAsCover = useCallback(async () => {
+    if (!active || !onUseAsCover || using) return;
+    videoRef.current?.pause();
+    const at = videoRef.current?.currentTime ?? current;
+    setUsing(true);
+    setGrabError(null);
+    try {
+      await onUseAsCover(active.id, at);
+    } catch (err) {
+      console.error('[CoverFrameGrabber] use-as-cover failed:', err);
+      setGrabError(
+        t(
+          'distribution.coverStudio.useFrameFailed',
+          'That frame could not be turned into a cover. Try another moment.',
+        ),
+      );
+    } finally {
+      setUsing(false);
+    }
+  }, [active, onUseAsCover, using, current, t]);
+
+  const uploadCover = useCallback(
+    async (file: File) => {
+      if (!onUploadCover) return;
+      if (!(file.type || '').toLowerCase().startsWith('image/')) {
+        setGrabError(
+          t('distribution.coverStudio.templateNeedsImage', 'A cover template has to be an image.'),
+        );
+        return;
+      }
+      setUsing(true);
+      setGrabError(null);
+      try {
+        await onUploadCover(file);
+      } catch (err) {
+        console.error('[CoverFrameGrabber] upload cover failed:', err);
+        setGrabError(
+          t(
+            'distribution.coverStudio.uploadCoverFailed',
+            'That picture could not be uploaded as the cover. Try again.',
+          ),
+        );
+      } finally {
+        setUsing(false);
+      }
+    },
+    [onUploadCover, t],
+  );
+
   if (!active) {
     // No button here on purpose: an enabled control that cannot work is worse
     // than saying what is missing (CoverPicker's own rule).
@@ -142,10 +209,21 @@ export function CoverFrameGrabber({
   const progress = duration > 0 ? (current / duration) * 100 : 0;
 
   return (
-    <div className="cs-card">
+    <div className={embedded ? 'cs-stagewrap' : 'cs-card'}>
       <h4>
-        {t('distribution.coverStudio.grabFrame', 'Grab a frame')}
-        <span className="aux">{formatTimestamp(current)}</span>
+        {embedded
+          ? t('distribution.coverStudio.stageFrame', {
+              defaultValue: 'Video frame {{at}}',
+              at: formatTimestamp(current),
+            })
+          : t('distribution.coverStudio.grabFrame', 'Grab a frame')}
+        <span className="aux">
+          {embedded
+            ? aspect === '4:3'
+              ? t('distribution.coverStudio.cropGuideH', 'Centre crop · horizontal 4:3')
+              : t('distribution.coverStudio.cropGuideV', 'Centre crop · vertical 3:4')
+            : formatTimestamp(current)}
+        </span>
       </h4>
       <div className="cs-body">
         {sources.length > 1 && (
@@ -181,6 +259,12 @@ export function CoverFrameGrabber({
               else v.pause();
             }}
           />
+          {/* The crop guide — what the server keeps. It is a CENTRE crop
+              (covers/select), so the guide is not draggable; drawing a box
+              that could be moved would promise an offset the server ignores. */}
+          {embedded && (
+            <div className={`cs-cropguide ${aspect === '4:3' ? 'h' : 'v'}`} data-testid="cover-crop-guide" aria-hidden="true" />
+          )}
         </div>
 
         <div
@@ -218,20 +302,64 @@ export function CoverFrameGrabber({
             ))}
         </div>
 
-        <button
-          type="button"
-          className="cs-grab"
-          disabled={grabbing || poolFull}
-          onClick={() => void grab()}
-          data-testid="cover-grab-button"
-        >
-          <Camera size={14} />
-          {grabbing
-            ? t('distribution.coverStudio.grabbing', 'Grabbing…')
-            : poolFull
-              ? t('distribution.coverStudio.grabPoolFull', 'Pool is full (9/9)')
-              : t('distribution.coverStudio.grabThis', 'Grab this frame')}
-        </button>
+        <div className="cs-stage-actions">
+          <button
+            type="button"
+            className="cs-grab"
+            disabled={grabbing || poolFull}
+            onClick={() => void grab()}
+            data-testid="cover-grab-button"
+          >
+            <Camera size={14} />
+            {grabbing
+              ? t('distribution.coverStudio.grabbing', 'Grabbing…')
+              : poolFull
+                ? t('distribution.coverStudio.grabPoolFull', 'Pool is full (9/9)')
+                : t('distribution.coverStudio.grabThis', 'Grab this frame')}
+          </button>
+          {onUseAsCover && (
+            <button
+              type="button"
+              className="cs-grab alt"
+              disabled={using || grabbing}
+              onClick={() => void applyFrameAsCover()}
+              data-testid="cover-use-frame"
+            >
+              <Check size={14} />
+              {using
+                ? t('distribution.coverStudio.applying', 'Saving…')
+                : aspect === '4:3'
+                  ? t('distribution.coverStudio.useFrameH', 'Use this crop as the horizontal cover')
+                  : t('distribution.coverStudio.useFrameV', 'Use this crop as the vertical cover')}
+            </button>
+          )}
+          {onUploadCover && (
+            <>
+              <button
+                type="button"
+                className="cs-grab alt"
+                disabled={using}
+                onClick={() => uploadRef.current?.click()}
+                data-testid="cover-upload-cover"
+              >
+                <Upload size={14} />
+                {t('distribution.coverStudio.uploadCover', 'Upload a cover')}
+              </button>
+              <input
+                ref={uploadRef}
+                type="file"
+                accept="image/*"
+                hidden
+                data-testid="cover-upload-cover-input"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadCover(f);
+                  e.target.value = '';
+                }}
+              />
+            </>
+          )}
+        </div>
 
         {grabError && (
           <div className="cs-error" style={{ margin: '10px 0 0' }} data-testid="cover-grab-error">

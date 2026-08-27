@@ -36,6 +36,18 @@ const svc = vi.hoisted(() => ({
   resolveCoverTemplateReference: vi.fn(),
   saveGeneratedCoverAsTemplate: vi.fn(),
   listGenerationModels: vi.fn(),
+  selectCoverFrame: vi.fn(),
+  uploadResource: vi.fn(),
+  importCanvasMedia: vi.fn(),
+}));
+vi.mock('../../../services/distributionService', () => ({
+  selectCoverFrame: svc.selectCoverFrame,
+}));
+vi.mock('../../../services/resourceService', () => ({
+  uploadResource: svc.uploadResource,
+}));
+vi.mock('../../../features/canvas-core/smart/mediaImport', () => ({
+  importCanvasMedia: svc.importCanvasMedia,
 }));
 
 vi.mock('../../../services/coverStudioService', () => ({
@@ -59,7 +71,24 @@ vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test'
 // The grabber and template grid have their own suites; here they are reduced
 // to the one signal each feeds the shell.
 vi.mock('./CoverFrameGrabber', () => ({
-  CoverFrameGrabber: ({ onGrabbed }: { onGrabbed: (f: unknown) => void }) => (
+  CoverFrameGrabber: ({
+    onGrabbed,
+    onUseAsCover,
+    aspect,
+  }: {
+    onGrabbed: (f: unknown) => void;
+    onUseAsCover?: (sourceId: string, at: number) => Promise<void>;
+    aspect?: string;
+  }) => (
+    <>
+    <button
+      type="button"
+      data-testid="stub-use-frame"
+      data-aspect={aspect}
+      onClick={() => void onUseAsCover?.('900', 3.1)}
+    >
+      use
+    </button>
     <button
       type="button"
       data-testid="stub-grab"
@@ -73,6 +102,7 @@ vi.mock('./CoverFrameGrabber', () => ({
     >
       grab
     </button>
+    </>
   ),
 }));
 vi.mock('./CoverTemplateGrid', () => ({
@@ -167,6 +197,10 @@ beforeEach(() => {
     template: { resource_id: '9000', name: 'Cover', mime_type: 'image/png', thumb_url: '/api/v1/resources/9000/cover', usage_count: 0, last_used_at: null },
   });
   svc.markCoverTemplatesUsed.mockResolvedValue(undefined);
+  svc.selectCoverFrame.mockResolvedValue({
+    cover_vertical_resource_id: '7001',
+    cover_horizontal_resource_id: '7002',
+  });
 });
 
 describe('CoverStudioOverlay — gating', () => {
@@ -338,7 +372,7 @@ describe('CoverStudioOverlay — apply', () => {
     await waitFor(() => expect(svc.promoteGeneration).toHaveBeenCalledWith('600'));
     // The RESOURCE id — the publish task references resources rows; the gen
     // id would 404 at publish time.
-    await waitFor(() => expect(onApply).toHaveBeenCalledWith('9000'));
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({ vertical: '9000' }));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -398,5 +432,81 @@ describe('CoverStudioOverlay — dialog chrome', () => {
     fireEvent.click(screen.getByTestId('cover-studio-back'));
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('CoverStudioOverlay — v4 layout', () => {
+  it('sends the creator’s prompt-box sentence with stage 1', async () => {
+    renderOverlay();
+    setPerson();
+    fireEvent.change(screen.getByTestId('cover-instructions'), {
+      target: { value: '  人物指向右侧的大屏幕  ' },
+    });
+
+    fireEvent.click(screen.getByTestId('cover-generate'));
+
+    await waitFor(() =>
+      expect(svc.generateCoverDrafts).toHaveBeenCalledWith(
+        expect.objectContaining({ instructions: '人物指向右侧的大屏幕' }),
+      ),
+    );
+  });
+
+  it('the vertical tab’s frame button fills the VERTICAL slot from the 3:4 crop', async () => {
+    const { onApply, onClose } = renderOverlay();
+    expect(screen.getByTestId('stub-use-frame').getAttribute('data-aspect')).toBe('3:4');
+
+    fireEvent.click(screen.getByTestId('stub-use-frame'));
+
+    await waitFor(() =>
+      expect(svc.selectCoverFrame).toHaveBeenCalledWith({
+        source_resource_id: '900',
+        timestamp_seconds: 3.1,
+      }),
+    );
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({ vertical: '7001' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('the horizontal tab has no AI, crops 4:3, and fills the HORIZONTAL slot', async () => {
+    const { onApply } = renderOverlay();
+
+    fireEvent.click(screen.getByTestId('cover-tab-horizontal'));
+
+    expect(screen.queryByTestId('cover-generate')).toBeNull();
+    expect(screen.getByTestId('cover-horizontal-note').textContent).toMatch(/does not go through AI/);
+    expect(screen.getByTestId('stub-use-frame').getAttribute('data-aspect')).toBe('4:3');
+
+    fireEvent.click(screen.getByTestId('stub-use-frame'));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({ horizontal: '7002' }));
+    expect(svc.generateCoverDrafts).not.toHaveBeenCalled();
+  });
+
+  it('keeps every round and goes back to an earlier one without regenerating', async () => {
+    renderOverlay();
+    setPerson();
+
+    fireEvent.click(screen.getByTestId('cover-generate'));
+    await waitFor(() => expect(screen.queryByTestId('cover-draft-1')).toBeTruthy());
+    expect(screen.getByTestId('cover-history-round-1')).toBeTruthy();
+
+    // A second round replaces the stage but not the history.
+    svc.awaitCoverGeneration.mockResolvedValueOnce({
+      ok: true,
+      url: '/api/v1/generated-media/501/cover',
+      generatedMediaId: '501',
+    });
+    fireEvent.click(screen.getByTestId('cover-generate'));
+    await waitFor(() => expect(screen.queryByTestId('cover-history-round-2')).toBeTruthy());
+    expect(svc.generateCoverDrafts).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByTestId('cover-history-round-1'));
+
+    // Back on round 1's grid, and nothing was generated again.
+    expect(screen.getByTestId('cover-draft-1')).toBeTruthy();
+    expect(svc.generateCoverDrafts).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('cover-history-round-1').className).toContain('on');
   });
 });

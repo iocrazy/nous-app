@@ -186,6 +186,8 @@ class CoverGenerateRequest(BaseModel):
     # Stage 2 only.
     selected_draft: Optional[int] = Field(default=None, ge=1, le=4)
     headline: str = Field(default="", max_length=120)
+    # 创作者写给模型的一句话（提示词框）。空串 = 不加。
+    instructions: str = Field(default="", max_length=500)
 
     @field_validator("topic")
     @classmethod

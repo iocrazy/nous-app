@@ -379,3 +379,15 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - **模型侧的绕路只在进池那一刻发生**：`resolveCoverTemplateReference(resource_id)` 走 `/generated-media/import-from-resource` 拿 durable ref，因为出图桥只认 `/api/v1/generated-media/{id}/…`。AVIF/HEIC/TIFF/BMP 在 import 时转成 PNG（上游只收 jpeg/png/gif/webp）。
 
 可证伪的证据（本地）：一次性库对全链迁移 `drift 8/8`；真库集成测试 `tests/integration/test_cover_template_folder_db.py` 5 条（认领 / 幂等 / 只认顶层 / 唯一索引拦第二个 / 回收站不占坑）；后端全量 9597 过；前端 5692 过。
+
+## 补记 2026-08-26（二）：工作室内部按 v4.4 设计稿重排
+
+设计稿 artifact `e7cbad0b…`（Main / Drafts / Final / Landscape 四块画板）落成代码，三栏 260 / 1fr / 220：
+
+- **顶部两个 tab**：「设置竖封面 3:4」「设置横封面 4:3」。横封面 **不走 AI**（这套风格只做 3:4），只做帧裁切或上传，左栏直说这一点。
+- **左栏 = 进模型的东西**：提示词框（标题固定一行 + 创作者自由文本，后端新字段 `instructions`，挂在 Safety 句之后并明说不覆盖安全规则）；参考图池（新增「上传」直接进池）；生成按钮 + 阻断原因；**「AI 生成的封面」轮次历史**——每一轮的网格/成品都留着，点缩略图回到那一轮，不再花额度。
+- **中栏 = 舞台**：步骤条（选帧·设人物 → 四草案 → 定稿）；idle 时是视频帧 + **居中裁切引导框**（不可拖：`covers/select` 是服务端居中裁，画一个能拖的框等于承诺一个没人理的偏移）+ 「用这个裁切当竖/横封面」（不走 AI，复用 `covers/select`）+ 「上传封面」；出草案后是 2×2 网格；定稿后是成品 + 发给模型的原文。
+- **右栏**：竖/横封面预览、模型与风格（模型下拉、风格下拉——目前只有 `viral-video-cover` 一项，文案如实写「目前只有一种」、小标签开关）、当前步骤的动作（完成 / 存为模板 / 换一个草案）。
+- `CoverPair` 两个槽位都可选：工作室一次只填当前 tab 的槽，发布页按补丁合并（`setCovers(prev => ({...prev, ...patch}))`）。
+
+有意没做：可拖动裁切框（服务端不支持偏移）；横封面 AI；多风格（skill 只有一个）。

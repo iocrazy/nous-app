@@ -1035,3 +1035,266 @@
   opacity: 0.55;
   cursor: default;
 }
+
+/* ── v4 layout: two cover tabs, three columns ───────────────────────────── */
+
+.cover-studio .cs-modal-v4 {
+  max-width: 1152px;
+  height: min(86vh, 820px);
+}
+
+.cover-studio .cs-top-title {
+  width: 220px;
+  flex: 0 0 auto;
+}
+
+.cover-studio .cs-tabs {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cover-studio .cs-tabs button {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--content-2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cover-studio .cs-tabs button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--island);
+  font-weight: 600;
+}
+
+.cover-studio .cs-cols-v4 {
+  grid-template-columns: 260px minmax(0, 1fr) 220px;
+  gap: 16px;
+  padding: 12px 20px 20px;
+}
+
+@media (max-width: 1100px) {
+  .cover-studio .cs-cols-v4 {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .cover-studio .cs-cols-v4 .cs-col-side {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 800px) {
+  .cover-studio .cs-cols-v4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cover-studio .cs-col-left > * + *,
+.cover-studio .cs-col-stage > * + *,
+.cover-studio .cs-col-side > * + * {
+  margin-top: 12px;
+}
+
+.cover-studio .cs-topicline {
+  font-size: 12.5px;
+  font-weight: 550;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-studio .cs-instructions {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  background: var(--island-2);
+  color: var(--content);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cover-studio .cs-instructions:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.cover-studio .cs-history {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cover-studio .cs-round {
+  position: relative;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 64px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--island-2);
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.cover-studio .cs-round img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-studio .cs-round span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-size: 9px;
+  padding: 1px 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  text-align: center;
+}
+
+.cover-studio .cs-round.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.cover-studio .cs-round:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cover-studio .cs-steps-v4 {
+  padding: 4px 2px 0;
+}
+
+.cover-studio .cs-stagecard > .cs-stagewrap > h4 {
+  margin: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cover-studio .cs-stagewrap > h4 .aux {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 11.5px;
+  color: var(--content-3);
+}
+
+.cover-studio .cs-cropguide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(28, 27, 24, 0.45);
+  pointer-events: none;
+}
+
+.cover-studio .cs-cropguide.v {
+  aspect-ratio: 3 / 4;
+}
+
+.cover-studio .cs-cropguide.h {
+  aspect-ratio: 4 / 3;
+}
+
+.cover-studio .cs-stage-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.cover-studio .cs-stage-actions .cs-grab {
+  margin-top: 0;
+  flex: 1 1 auto;
+}
+
+.cover-studio .cs-grab.alt {
+  background: transparent;
+  color: var(--content-2);
+  border: 1px solid var(--line-strong);
+}
+
+.cover-studio .cs-grab.alt:hover:not(:disabled) {
+  color: var(--content);
+  border-color: var(--content-4);
+}
+
+.cover-studio .cs-finalstage {
+  display: grid;
+  gap: 12px;
+}
+
+.cover-studio .cs-finalstage .cs-final {
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+.cover-studio .cs-preview {
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--island-2);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--content-4);
+  font-size: 11.5px;
+  text-align: center;
+  padding: 6px;
+}
+
+.cover-studio .cs-preview.v {
+  aspect-ratio: 3 / 4;
+}
+
+.cover-studio .cs-preview.h {
+  aspect-ratio: 4 / 3;
+}
+
+.cover-studio .cs-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-studio .cs-field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.cover-studio .cs-field > span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--content-3);
+  margin-bottom: 4px;
+}
+
+.cover-studio .cs-actions-col {
+  flex-direction: column;
+}
+
+.cover-studio .cs-actions-col > * {
+  width: 100%;
+}

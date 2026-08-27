@@ -47,6 +47,9 @@ class CoverPromptInput:
     # 阶段二：从阶段一那张网格图上，用户看到的那格的标题。可空 —— 用户不一定读得清
     # 网格里的小字，逼他抄一遍不如让模型自己从参考图上读。
     headline: str = ""
+    # 创作者写给模型的一句话（设计稿的「提示词」框）。可空。放在骨架末尾、Safety
+    # 句之后，并明说不得覆盖安全条款 —— 自由文本进 prompt 的唯一入口。
+    instructions: str = ""
 
 
 def _labels_clause(allow: bool) -> str:
@@ -75,42 +78,41 @@ def build_stage1_prompt(data: CoverPromptInput) -> str:
         # "Ask a question only if the topic is empty"。
         raise ValueError("cover prompt needs a topic")
 
-    return "\n\n".join(
-        [
-            (
-                "Create one 2x2 preview grid image. The overall image is 3:4 "
-                "vertical. Each cell is a complete 3:4 Chinese viral short-video "
-                f"cover draft for the same topic: {topic}."
-            ),
-            (
-                "Label the four cells only with clear numbers 1, 2, 3, and 4 for "
-                f"selection. {_labels_clause(data.allow_small_labels)}"
-            ),
-            (
-                "All four drafts must preserve the same reference character from "
-                "the supplied image: the same person and core facial features. "
-                "Change expression, gesture, lighting, and scene per draft."
-            ),
-            (
-                "Invent the four directions yourself: make the four drafts clearly "
-                "different in headline wording, character expression, gesture, "
-                "composition, background mood, and color accents."
-            ),
-            (
-                "Default to black or dark backgrounds, white/yellow main "
-                "typography, bold strokes, strong shadows, crisp cutouts, and "
-                "mobile-first readability. Use concrete cinematic scenes instead "
-                "of generic vector cards, flat template illustrations, or "
-                "decorative abstract panels. Keep the biggest headline to 4-12 "
-                "Chinese characters and at most 3 visual layers."
-            ),
-            (
-                "Safety/IP: no copied sample faces, no copyrighted characters, no "
-                "exact UI screenshots, no unrelated brand logos or trademarked "
-                "marks; use generic original symbols."
-            ),
-        ]
-    )
+    parts = [
+        (
+            "Create one 2x2 preview grid image. The overall image is 3:4 "
+            "vertical. Each cell is a complete 3:4 Chinese viral short-video "
+            f"cover draft for the same topic: {topic}."
+        ),
+        (
+            "Label the four cells only with clear numbers 1, 2, 3, and 4 for "
+            f"selection. {_labels_clause(data.allow_small_labels)}"
+        ),
+        (
+            "All four drafts must preserve the same reference character from "
+            "the supplied image: the same person and core facial features. "
+            "Change expression, gesture, lighting, and scene per draft."
+        ),
+        (
+            "Invent the four directions yourself: make the four drafts clearly "
+            "different in headline wording, character expression, gesture, "
+            "composition, background mood, and color accents."
+        ),
+        (
+            "Default to black or dark backgrounds, white/yellow main "
+            "typography, bold strokes, strong shadows, crisp cutouts, and "
+            "mobile-first readability. Use concrete cinematic scenes instead "
+            "of generic vector cards, flat template illustrations, or "
+            "decorative abstract panels. Keep the biggest headline to 4-12 "
+            "Chinese characters and at most 3 visual layers."
+        ),
+        (
+            "Safety/IP: no copied sample faces, no copyrighted characters, no "
+            "exact UI screenshots, no unrelated brand logos or trademarked "
+            "marks; use generic original symbols."
+        ),
+    ]
+    return "\n\n".join(_with_instructions(parts, data))
 
 
 def build_stage2_prompt(data: CoverPromptInput) -> str:
@@ -135,47 +137,43 @@ def build_stage2_prompt(data: CoverPromptInput) -> str:
         )
     )
 
-    return "\n\n".join(
-        [
-            (
-                "Create an original 3:4 vertical Chinese viral short-video cover "
-                "image."
-            ),
-            f"Topic: {topic}.",
-            (
-                "The supplied 2x2 grid image is a set of four drafts. Redraw "
-                f"draft number {draft} — the one labelled {draft} — as a single "
-                "full-size cover. Preserve that draft's headline direction, "
-                "character emotion, composition, background mood, and colour "
-                "logic."
-            ),
-            (
-                "Remove the selection number from the final cover. The final "
-                "image is one cover, not a grid."
-            ),
-            headline_line,
-            (
-                "Character reference: use the supplied character image; preserve "
-                "the same person and core facial features while changing "
-                "expression and gesture for the topic."
-            ),
-            (
-                "Composition: huge bold headline in the top third, expressive "
-                "human/character cutout in the lower half, oversized symbolic "
-                "object or dramatic scene behind them, strong depth, clean "
-                "readable layout."
-            ),
-            (
-                "Style: black or dark cinematic background, high contrast, bold "
-                "white/yellow Chinese display typography, thick black/white "
-                "strokes, strong drop shadows, crisp edges, mobile-first "
-                "readability, energetic short-video thumbnail, concrete "
-                "photographic/cinematic background instead of flat vector "
-                "templates."
-            ),
-            _safety_clause(data.allow_small_labels),
-        ]
-    )
+    parts = [
+        ("Create an original 3:4 vertical Chinese viral short-video cover " "image."),
+        f"Topic: {topic}.",
+        (
+            "The supplied 2x2 grid image is a set of four drafts. Redraw "
+            f"draft number {draft} — the one labelled {draft} — as a single "
+            "full-size cover. Preserve that draft's headline direction, "
+            "character emotion, composition, background mood, and colour "
+            "logic."
+        ),
+        (
+            "Remove the selection number from the final cover. The final "
+            "image is one cover, not a grid."
+        ),
+        headline_line,
+        (
+            "Character reference: use the supplied character image; preserve "
+            "the same person and core facial features while changing "
+            "expression and gesture for the topic."
+        ),
+        (
+            "Composition: huge bold headline in the top third, expressive "
+            "human/character cutout in the lower half, oversized symbolic "
+            "object or dramatic scene behind them, strong depth, clean "
+            "readable layout."
+        ),
+        (
+            "Style: black or dark cinematic background, high contrast, bold "
+            "white/yellow Chinese display typography, thick black/white "
+            "strokes, strong drop shadows, crisp edges, mobile-first "
+            "readability, energetic short-video thumbnail, concrete "
+            "photographic/cinematic background instead of flat vector "
+            "templates."
+        ),
+        _safety_clause(data.allow_small_labels),
+    ]
+    return "\n\n".join(_with_instructions(parts, data))
 
 
 def _safety_clause(allow_small_labels: bool) -> str:
@@ -199,3 +197,19 @@ def _safety_clause(allow_small_labels: bool) -> str:
         "no unrelated brand logos or trademarked marks; use generic original "
         "symbols."
     )
+
+
+def _with_instructions(parts: list[str], data: CoverPromptInput) -> list[str]:
+    """把创作者的自由文本挂在骨架末尾。
+
+    放在 Safety 句**之后**并明说优先级：模型收到的最后一句是"照创作者说的做，
+    但别越过上面的安全规则"，而不是让一句自由文本有机会读成对安全条款的覆盖。
+    空白即不加 —— 不为空指令多发一句话。
+    """
+    text = (data.instructions or "").strip()
+    if not text:
+        return parts
+    return parts + [
+        "Extra direction from the creator (follow it unless it conflicts with "
+        f"the rules above): {text}"
+    ]

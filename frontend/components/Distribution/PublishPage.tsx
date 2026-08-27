@@ -2664,11 +2664,11 @@ export const PublishPage: React.FC = () => {
                 sources={selectedVideoObjs}
                 topic={title}
                 onClose={() => setCoverStudioOpen(false)}
-                onApply={(verticalResourceId) => {
-                  // The studio's cover is 3:4 only; CoverPair allows a missing
-                  // horizontal precisely for this path, and publishing uses
-                  // vertical first anyway.
-                  setCovers({ vertical: verticalResourceId });
+                onApply={(patch) => {
+                  // The studio fills ONE slot per apply (the vertical tab an
+                  // AI cover or a 3:4 crop, the horizontal tab a 4:3 crop);
+                  // the other slot keeps whatever it already had.
+                  setCovers((prev) => ({ ...(prev ?? {}), ...patch }));
                 }}
               />
             </div>

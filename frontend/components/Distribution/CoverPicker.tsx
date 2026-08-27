@@ -58,14 +58,14 @@ const TERMINAL_PHASES: ReadonlySet<string> = new Set([
 const SAMPLING_TIMEOUT_MS = 11 * 60 * 1000;
 
 export interface CoverPair {
-  vertical: string;
   /**
-   * Optional since Cover Studio: the AI cover is 3:4 only, and center-cropping
-   * a portrait into 4:3 would cut the face out — so that path genuinely has no
-   * horizontal. Publishing only ever uses one of the two anyway
+   * Both optional since Cover Studio: its AI cover is 3:4 only, and its
+   * horizontal tab derives a 4:3 frame crop on its own — so either slot can be
+   * filled without the other. Publishing only ever uses one of the two anyway
    * (publish_distribution.py: vertical first, horizontal as fallback), and the
    * gate requires "either", not "both".
    */
+  vertical?: string;
   horizontal?: string;
 }
 

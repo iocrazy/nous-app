@@ -208,3 +208,18 @@ class TestGates:
 
         assert resp.status_code in (401, 403, 422)
         assert spy.started == []
+
+
+class TestInstructions:
+    def test_the_creators_note_rides_into_the_prompt(self, spy):
+        resp = _post(TestClient(_make_app()), instructions="人物指向右侧的大屏幕")
+        assert resp.status_code == 200, resp.text
+        assert "人物指向右侧的大屏幕" in resp.json()["prompt"]
+        assert (
+            "人物指向右侧的大屏幕" in spy.started[0]["dbos_workflow_kwargs"]["prompt"]
+        )
+
+    def test_too_long_is_422(self, spy):
+        resp = _post(TestClient(_make_app()), instructions="x" * 501)
+        assert resp.status_code == 422
+        assert spy.started == []

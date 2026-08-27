@@ -86,6 +86,8 @@ export interface CoverGenerateInput {
   model?: string;
   quality?: string;
   allowSmallLabels?: boolean;
+  /** The creator's own sentence for the model — the prompt box. */
+  instructions?: string;
 }
 
 /** Stage 1 — the 2x2 grid of four drafts. */
@@ -99,6 +101,7 @@ export async function generateCoverDrafts(
     quality: input.quality ?? 'high',
     source_urls: input.sourceUrls,
     allow_small_labels: input.allowSmallLabels ?? false,
+    instructions: input.instructions ?? '',
   });
 }
 
@@ -113,6 +116,7 @@ export async function refineCoverDraft(
     quality: input.quality ?? 'high',
     source_urls: input.sourceUrls,
     allow_small_labels: input.allowSmallLabels ?? false,
+    instructions: input.instructions ?? '',
     selected_draft: input.selectedDraft,
     headline: input.headline ?? '',
   });

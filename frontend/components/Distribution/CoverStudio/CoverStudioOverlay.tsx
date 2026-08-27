@@ -1,18 +1,23 @@
 // components/Distribution/CoverStudio/CoverStudioOverlay.tsx
 //
-// Cover Studio itself: a full-screen layer over the publish page, NOT a route.
+// Cover Studio — the v4 layout: a centred dialog over the publish page with
+// two cover tabs (vertical 3:4 / horizontal 4:3) and three columns.
 //
-// ★ Why a layer: PublishPage holds ~75 useState with zero persistence — no URL
-// params, no sessionStorage. Navigating away and back would wipe the whole
-// form the user just filled (title, topics, accounts, music, schedule). A
-// layer keeps that state alive underneath, and "Back to publish" is honest:
-// the page is literally still there.
+//   left    what goes INTO the model: the prompt box, the reference pool, the
+//           generate button, and the rounds already generated (click to go back)
+//   stage   what the user is looking at right now: the video frame with a
+//           crop guide, then the 2x2 drafts, then the final cover
+//   side    the cover as it will be seen (preview), model + style, and the
+//           actions for the current step
 //
-// The pieces are the container-agnostic cards built earlier; this file owns
-// only the assembly: the reference pool's state, the two-stage run, and the
-// apply step (fill the publish page's vertical slot + the cover is already in
-// the library via promote — both named on the card, because a file appearing
-// in the library unasked is a surprise this app has caused before).
+// Two things are deliberately NOT here:
+//   - a draggable crop box. `covers/select` centre-crops on the server; a box
+//     the user could move would promise an offset nothing honours.
+//   - AI for the horizontal cover. The style is 3:4 only (cover_prompt.py);
+//     that tab crops a frame or takes an upload, and says so.
+//
+// Every generated round is kept (`rounds`) so the user can go back to an
+// earlier grid or final without paying for it again.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -35,7 +40,11 @@ import {
   saveGeneratedCoverAsTemplate,
   type CoverTemplate,
 } from '../../../services/coverTemplateService';
+import { selectCoverFrame } from '../../../services/distributionService';
+import { uploadResource } from '../../../services/resourceService';
+import { importCanvasMedia } from '../../../features/canvas-core/smart/mediaImport';
 import type { LibraryVideo } from '../../../types';
+import type { CoverPair } from '../CoverPicker';
 import {
   addReference,
   personReference,
@@ -50,6 +59,18 @@ import { CoverFrameGrabber, type GrabbedFrame } from './CoverFrameGrabber';
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import './cover-studio.css';
 
+type Orientation = 'vertical' | 'horizontal';
+
+/** One generation round: the grid, and the final it produced, if any. */
+interface Round {
+  id: number;
+  gridUrl: string;
+  prompt: string;
+  selected: number | null;
+  finalUrl?: string;
+  finalGenId?: string;
+}
+
 interface Props {
   open: boolean;
   scopeId: string;
@@ -59,11 +80,11 @@ interface Props {
   topic: string;
   onClose: () => void;
   /**
-   * The finished cover as a RESOURCE id (already promoted). The parent puts it
-   * into the vertical cover slot; there is no horizontal — the style is 3:4
-   * only and cropping a portrait to 4:3 would cut the face out.
+   * The cover as a RESOURCE id, in the slot the active tab was setting. One
+   * slot per apply: the vertical tab gives `{ vertical }` (an AI cover or a
+   * 3:4 crop), the horizontal tab `{ horizontal }` (a 4:3 crop or upload).
    */
-  onApply: (verticalResourceId: string) => void;
+  onApply: (patch: CoverPair) => void;
 }
 
 export function CoverStudioOverlay({
@@ -76,31 +97,41 @@ export function CoverStudioOverlay({
 }: Props): React.JSX.Element | null {
   const { t } = useTranslation();
 
+  const [orientation, setOrientation] = useState<Orientation>('vertical');
+  const [instructions, setInstructions] = useState('');
   const [refs, setRefs] = useState<CoverReference[]>([]);
   const [refusal, setRefusal] = useState<'full' | 'duplicate' | null>(null);
   const [grabAsPerson, setGrabAsPerson] = useState(false);
   const [allowSmallLabels, setAllowSmallLabels] = useState(false);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [model, setModel] = useState('');
+  const [poolError, setPoolError] = useState<string | null>(null);
 
   const [stage, setStage] = useState<CoverStage>('idle');
-  const [gridUrl, setGridUrl] = useState<string | undefined>(undefined);
-  const [prompt, setPrompt] = useState<string | undefined>(undefined);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [finalUrl, setFinalUrl] = useState<string | undefined>(undefined);
-  const [finalGenId, setFinalGenId] = useState<string | undefined>(undefined);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [activeRound, setActiveRound] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
-  // The final cover's resource id once it has been promoted — by "Use this
-  // cover" OR by "Save as template" — so the other button never promotes the
-  // same picture a second time.
+  // The final cover's resource id once it has been promoted — by "Done" OR by
+  // "Save as template" — so the other button never promotes the same picture
+  // a second time.
   const [promotedId, setPromotedId] = useState<string | undefined>(undefined);
   // Which template tile is being turned into a reference right now (the
   // generated-media import is a round-trip), and why the last one failed.
   const [templateBusyId, setTemplateBusyId] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  // The last frame grabbed, so the preview has something to show before any
+  // generation has happened.
+  const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
+
+  const round = activeRound === null ? null : rounds.find((r) => r.id === activeRound) ?? null;
+  const gridUrl = round?.gridUrl;
+  const prompt = round?.prompt;
+  const selected = round?.selected ?? null;
+  const finalUrl = round?.finalUrl;
+  const finalGenId = round?.finalGenId;
 
   useEffect(() => {
     if (!open) return;
@@ -128,6 +159,10 @@ export function CoverStudioOverlay({
     [refs],
   );
 
+  const patchRound = useCallback((id: number, patch: Partial<Round>) => {
+    setRounds((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }, []);
+
   const addRef = useCallback((next: CoverReference) => {
     setRefs((prev) => {
       const result = addReference(prev, next);
@@ -143,39 +178,63 @@ export function CoverStudioOverlay({
 
   const onGrabbed = useCallback(
     (frame: GrabbedFrame) => {
+      setLastFrameUrl(frame.url);
       addRef({
         kind: grabAsPerson ? 'person' : 'frame',
         genId: frame.generatedMediaId,
         url: frame.url,
         timestampSeconds: frame.timestampSeconds,
       });
-      // One person is the point; leaving the box ticked would turn every next
-      // grab into a person swap the user did not ask for.
-      if (grabAsPerson) setGrabAsPerson(false);
+      // One-shot: the next grab is an ordinary frame again unless re-armed.
+      setGrabAsPerson(false);
     },
     [addRef, grabAsPerson],
   );
 
+  const uploadReference = useCallback(
+    async (file: File) => {
+      setPoolError(null);
+      try {
+        const ref = await importCanvasMedia(file, null, null);
+        if (ref.kind !== 'image' || !ref.id) {
+          throw new Error('uploaded reference is not an image');
+        }
+        addRef({ kind: 'template', genId: ref.id, url: ref.url, label: file.name });
+      } catch (err) {
+        console.error('[CoverStudio] upload reference failed:', err);
+        setPoolError(
+          t(
+            'distribution.coverStudio.refUploadFailed',
+            'That picture could not be added as a reference. Try again.',
+          ),
+        );
+      }
+    },
+    [addRef, t],
+  );
+
   const canGenerate =
-    stage !== 'drafting' && stage !== 'refining' && !!topic.trim() && !!person;
+    orientation === 'vertical' &&
+    stage !== 'drafting' &&
+    stage !== 'refining' &&
+    !!topic.trim() &&
+    !!person;
 
   const runDrafts = useCallback(async () => {
     if (!canGenerate) return;
     setStage('drafting');
     setRunError(null);
-    setSelected(null);
-    setFinalUrl(undefined);
-    setFinalGenId(undefined);
     setSavedAsTemplate(false);
     setPromotedId(undefined);
+    setActiveRound(null);
     try {
       const dispatched = await generateCoverDrafts({
         topic: topic.trim(),
         sourceUrls: sourceUrls(refs),
         model,
         allowSmallLabels,
+        instructions: instructions.trim(),
       });
-      setPrompt(dispatched.prompt);
       // Usage ticks AFTER a successful dispatch, once per run — and it can
       // never fail the generation (the service swallows its own errors).
       void markCoverTemplatesUsed(templateIds(refs));
@@ -185,17 +244,23 @@ export function CoverStudioOverlay({
         setStage('idle');
         return;
       }
-      setGridUrl(outcome.url);
+      const id = Date.now();
+      setRounds((prev) => [
+        ...prev,
+        { id, gridUrl: outcome.url as string, prompt: dispatched.prompt, selected: null },
+      ]);
+      setActiveRound(id);
       setStage('picking');
     } catch (err) {
       console.error('[CoverStudio] stage 1 failed:', err);
       setRunError((err as Error).message);
       setStage('idle');
     }
-  }, [canGenerate, topic, refs, model, allowSmallLabels]);
+  }, [canGenerate, topic, refs, model, allowSmallLabels, instructions]);
 
   const runRefine = useCallback(async () => {
-    if (!gridUrl || selected === null) return;
+    if (!round || !gridUrl || selected === null) return;
+    const id = round.id;
     setStage('refining');
     setRunError(null);
     try {
@@ -209,17 +274,17 @@ export function CoverStudioOverlay({
         sourceUrls: [...(person ? [person.url] : []), gridUrl],
         model,
         allowSmallLabels,
+        instructions: instructions.trim(),
         selectedDraft: selected,
       });
-      setPrompt(dispatched.prompt);
+      patchRound(id, { prompt: dispatched.prompt });
       const outcome = await awaitCoverGeneration(dispatched.task_id);
       if (!outcome.ok || !outcome.url) {
         setRunError(outcome.error ?? 'generation failed');
         setStage('picking');
         return;
       }
-      setFinalUrl(outcome.url);
-      setFinalGenId(outcome.generatedMediaId);
+      patchRound(id, { finalUrl: outcome.url, finalGenId: outcome.generatedMediaId });
       setSavedAsTemplate(false);
       setPromotedId(undefined);
       setStage('done');
@@ -228,7 +293,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('picking');
     }
-  }, [gridUrl, selected, topic, person, model, allowSmallLabels]);
+  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, patchRound]);
 
   const apply = useCallback(async () => {
     if (!finalGenId || applying) return;
@@ -237,11 +302,11 @@ export function CoverStudioOverlay({
     try {
       // Promote = the "saved to your library" half; the returned resource id
       // is the "filled in on the publish page" half. One call, both effects —
-      // and both are NAMED on the card below.
+      // and both are NAMED on the card.
       const resourceId =
         promotedId ?? (await promoteGeneration(finalGenId)).promoted_resource_id;
       setPromotedId(resourceId);
-      onApply(resourceId);
+      onApply({ vertical: resourceId });
       onClose();
     } catch (err) {
       console.error('[CoverStudio] apply failed:', err);
@@ -315,14 +380,65 @@ export function CoverStudioOverlay({
     [refs, templateBusyId, addRef, t],
   );
 
+  // ── The no-AI paths: a centre-cropped frame, or an upload ───────────────
+  const slot = orientation === 'vertical' ? 'vertical' : 'horizontal';
+
+  const useFrameAsCover = useCallback(
+    async (sourceId: string, timestampSeconds: number) => {
+      const res = await selectCoverFrame({
+        source_resource_id: sourceId,
+        timestamp_seconds: timestampSeconds,
+      });
+      // The server derives BOTH crops from one frame; only the slot this tab
+      // is setting is applied. The other keeps whatever it had.
+      onApply({
+        [slot]:
+          slot === 'vertical'
+            ? res.cover_vertical_resource_id
+            : res.cover_horizontal_resource_id,
+      });
+      onClose();
+    },
+    [slot, onApply, onClose],
+  );
+
+  const uploadAsCover = useCallback(
+    async (file: File) => {
+      const res = await uploadResource(file, scopeId);
+      onApply({ [slot]: String(res.id) });
+      onClose();
+    },
+    [slot, scopeId, onApply, onClose],
+  );
+
+  const restoreRound = useCallback(
+    (r: Round) => {
+      setActiveRound(r.id);
+      setRunError(null);
+      setSavedAsTemplate(false);
+      setPromotedId(undefined);
+      setStage(r.finalUrl ? 'done' : 'picking');
+    },
+    [],
+  );
+
   if (!open) return null;
+
+  const busy = stage === 'drafting' || stage === 'refining';
+  const aspect: '3:4' | '4:3' = orientation === 'vertical' ? '3:4' : '4:3';
+  const previewUrl =
+    orientation === 'vertical' ? finalUrl ?? lastFrameUrl : lastFrameUrl;
+  const generateHint = !topic.trim()
+    ? t('distribution.coverStudio.needsTopic', 'Blocked: give the publish a title first — the cover is about it.')
+    : !person
+      ? t('distribution.coverStudio.needsPerson', 'Blocked: add the person picture first. Without it every draft is a different face.')
+      : null;
 
   return (
     // Same chrome as SettingsModal: dimmed, blurred backdrop that closes on
-    // click, and a centred rounded panel. Cover Studio used to take the whole
-    // viewport, which read as "I navigated to another page" — the platform's
-    // own cover editor is a dialog over the publish form, and that is the
-    // mental model the user already has.
+    // click, and a centred rounded panel — the platform's own cover editor is
+    // a dialog over the publish form, and that is the mental model the user
+    // already has.
     <div
       className="cover-studio cs-backdrop"
       role="dialog"
@@ -331,259 +447,437 @@ export function CoverStudioOverlay({
       data-testid="cover-studio-overlay"
     >
       <div className="cs-scrim" onClick={onClose} data-testid="cover-studio-scrim" />
-      <div className="cs-modal">
-      <div className="cs-top">
-        <div>
-          <h1>
-            <Sparkles size={16} />
-            {t('distribution.coverStudio.title', 'Cover Studio')}
-          </h1>
-          <div className="ctx">
-            {sources[0]
-              ? t('distribution.coverStudio.forVideo', {
-                  defaultValue: 'For {{name}}',
-                  name: sources[0].filename,
-                })
-              : null}
-            {topic.trim() ? ` · ${topic.trim()}` : null}
+      <div className="cs-modal cs-modal-v4">
+        <div className="cs-top">
+          <div className="cs-top-title">
+            <h1>
+              <Sparkles size={16} />
+              {t('distribution.coverStudio.title', 'Cover Studio')}
+            </h1>
+            <div className="ctx">
+              {sources[0]
+                ? t('distribution.coverStudio.forVideo', {
+                    defaultValue: 'For {{name}}',
+                    name: sources[0].filename,
+                  })
+                : null}
+              {topic.trim() ? ` · ${topic.trim()}` : null}
+            </div>
           </div>
+
+          <div className="cs-tabs" role="tablist" aria-label={t('distribution.coverStudio.coverTabs', 'Cover')}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orientation === 'vertical'}
+              className={orientation === 'vertical' ? 'on' : ''}
+              onClick={() => setOrientation('vertical')}
+              data-testid="cover-tab-vertical"
+            >
+              {t('distribution.coverStudio.tabVertical', 'Vertical cover 3:4')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orientation === 'horizontal'}
+              className={orientation === 'horizontal' ? 'on' : ''}
+              onClick={() => setOrientation('horizontal')}
+              data-testid="cover-tab-horizontal"
+            >
+              {t('distribution.coverStudio.tabHorizontal', 'Horizontal cover 4:3')}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="cs-close"
+            onClick={onClose}
+            aria-label={t('common.close', 'Close')}
+            data-testid="cover-studio-back"
+          >
+            <X size={20} />
+          </button>
         </div>
-        <button
-          type="button"
-          className="cs-close"
-          onClick={onClose}
-          aria-label={t('common.close', 'Close')}
-          data-testid="cover-studio-back"
-        >
-          <X size={20} />
-        </button>
-      </div>
 
-      <div className="cs-cols">
-        <div className="cs-col-controls">
-          <div className="cs-card">
-            <h4>{t('distribution.coverStudio.model', 'Model')}</h4>
-            <div className="cs-body">
-              <select
-                className="cs-source"
-                style={{ marginBottom: 0 }}
-                aria-label={t('distribution.coverStudio.model', 'Model')}
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                <option value="">
-                  {t('distribution.coverStudio.modelDefault', 'Catalog default')}
-                </option>
-                {models.map((m) => (
-                  <option key={m.name} value={m.name}>
-                    {m.display_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="cs-card">
-            <h4>{t('distribution.coverStudio.style', 'Style')}</h4>
-            <div className="cs-body">
-              {/* Single-select by decision — and there is one style. A radio
-                  group of one would be theatre; the card states what the style
-                  is and what it demands. */}
-              <div className="cs-style-name">Viral Video Cover</div>
-              <p className="cs-hint">
-                {t(
-                  'distribution.coverStudio.styleDesc',
-                  'Dark background, one huge headline, one strong face. 3:4 only — this grammar is written for the vertical phone feed; a horizontal cover needs a different style, not a crop.',
-                )}
-              </p>
-              <label className="cs-toggle">
-                <input
-                  type="checkbox"
-                  checked={allowSmallLabels}
-                  onChange={(e) => setAllowSmallLabels(e.target.checked)}
-                  data-testid="cover-small-labels"
-                />
-                <span>
-                  {t(
-                    'distribution.coverStudio.smallLabels',
-                    'Platform-style labels — "REC", a search bar, corner tags.',
-                  )}
-                  <em>
-                    {/* ⚠️ NOT the design mock's wording — that said "Off follows
-                        the newer file", which is backwards: the newer file
-                        (cover-grammar.md) is the one that ALLOWS them. */}
-                    {t(
-                      'distribution.coverStudio.smallLabelsWhy',
-                      'Your two files disagree: SKILL.md forbids them, cover-grammar.md allows them. Off follows SKILL.md.',
-                    )}
-                  </em>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <CoverFrameGrabber
-            sources={sources}
-            grabbedAt={frameTimestamps}
-            onGrabbed={onGrabbed}
-            poolFull={refs.length >= 9 && !grabAsPerson}
-          />
-
-          <label className="cs-toggle cs-person-toggle">
-            <input
-              type="checkbox"
-              checked={grabAsPerson}
-              onChange={(e) => setGrabAsPerson(e.target.checked)}
-              data-testid="cover-grab-as-person"
-            />
-            <span>
-              {t(
-                'distribution.coverStudio.grabAsPerson',
-                'Next grab is the person reference',
-              )}
-              <em>
-                {t(
-                  'distribution.coverStudio.grabAsPersonWhy',
-                  'The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.',
-                )}
-              </em>
-            </span>
-          </label>
-
-          <CoverReferencePool
-            refs={refs}
-            requiresPerson
-            onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
-            onAddFromTemplates={() => {
-              /* templates are on the right column; the tile scrolls there */
-              document
-                .querySelector('[data-testid="cover-template-grid"]')
-                ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }}
-            refusal={refusal}
-          />
-
-          <div className="cs-card">
-            <div className="cs-body">
-              <button
-                type="button"
-                className="cs-primary"
-                disabled={!canGenerate}
-                onClick={() => void runDrafts()}
-                data-testid="cover-generate"
-              >
-                {stage === 'drafting'
-                  ? t('distribution.coverStudio.drafting', 'Drawing four drafts…')
-                  : t('distribution.coverStudio.generateDrafts', 'Generate 4 drafts')}
-              </button>
-              <p className="cs-hint" style={{ marginTop: 8 }} data-testid="cover-generate-hint">
-                {!topic.trim()
-                  ? t(
-                      'distribution.coverStudio.needsTopic',
-                      'Blocked: give the publish a title first — the cover is about it.',
-                    )
-                  : !person
-                    ? t(
-                        'distribution.coverStudio.needsPerson',
-                        'Blocked: add the person picture first. Without it every draft is a different face.',
-                      )
-                    : t(
-                        'distribution.coverStudio.costNote',
-                        'One image, four drafts — a round of ideas costs one generation.',
+        <div className="cs-cols cs-cols-v4">
+          {/* ── left: what goes into the model ─────────────────────────── */}
+          <div className="cs-col-left">
+            {orientation === 'vertical' ? (
+              <>
+                <div className="cs-card">
+                  <h4>
+                    {t('distribution.coverStudio.prompt', 'Prompt')}
+                    <span className="aux">
+                      {t('distribution.coverStudio.promptAux', 'one line for the model')}
+                    </span>
+                  </h4>
+                  <div className="cs-body">
+                    <div className="cs-topicline" data-testid="cover-topic">
+                      {topic.trim() ||
+                        t('distribution.coverStudio.needsTopicShort', 'No title yet')}
+                    </div>
+                    <textarea
+                      className="cs-instructions"
+                      rows={3}
+                      maxLength={500}
+                      value={instructions}
+                      onChange={(e) => setInstructions(e.target.value)}
+                      placeholder={t(
+                        'distribution.coverStudio.promptPlaceholder',
+                        'e.g. headline “内容差的真相”, the person points at a big screen on the right',
                       )}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="cs-col-results">
-          <CoverDrafts
-            stage={stage}
-            gridUrl={gridUrl}
-            selected={selected}
-            onSelect={setSelected}
-            onRefine={() => void runRefine()}
-            prompt={prompt}
-            error={runError}
-          />
-
-          {stage === 'done' && finalUrl && (
-            <div className="cs-card">
-              <h4>{t('distribution.coverStudio.finalCover', 'Final cover')}</h4>
-              <div className="cs-finalwrap">
-                <div className="cs-final">
-                  <img src={`${getApiUrl()}${finalUrl}`} alt="" />
+                      data-testid="cover-instructions"
+                    />
+                  </div>
                 </div>
-                <div className="cs-chosen">
-                  <b>{t('distribution.coverStudio.thisIsYourCover', 'This is your cover.')}</b>
-                  {/* Both effects of Apply, named up front: a file appearing in
-                      the library unasked is a surprise this app has caused
-                      before. */}
-                  <ul>
-                    <li>
-                      {t(
-                        'distribution.coverStudio.willFillSlot',
-                        'Fills the vertical cover slot on the publish page',
-                      )}
-                    </li>
-                    <li>
-                      {t(
-                        'distribution.coverStudio.willSaveLibrary',
-                        'Saves the file to your library',
-                      )}
-                    </li>
-                  </ul>
-                  {applyError && <div className="cs-error" style={{ margin: '8px 0' }}>{applyError}</div>}
-                  <div className="cs-actions">
+
+                <CoverReferencePool
+                  refs={refs}
+                  requiresPerson
+                  onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
+                  onAddFromTemplates={() => {
+                    document
+                      .querySelector('[data-testid="cover-template-grid"]')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                  onUpload={(file) => void uploadReference(file)}
+                  refusal={refusal}
+                />
+                {poolError && (
+                  <div className="cs-error" data-testid="cover-ref-upload-error">
+                    {poolError}
+                  </div>
+                )}
+
+                <label className="cs-toggle cs-person-toggle">
+                  <input
+                    type="checkbox"
+                    checked={grabAsPerson}
+                    onChange={(e) => setGrabAsPerson(e.target.checked)}
+                    data-testid="cover-grab-as-person"
+                  />
+                  <span>
+                    {t('distribution.coverStudio.grabAsPerson', 'Next grab is the person reference')}
+                    <em>
+                      {person
+                        ? t('distribution.coverStudio.personSetAt', {
+                            defaultValue: 'Person = the frame at {{at}}; grabbing again replaces it.',
+                            at: person.label ?? (typeof person.timestampSeconds === 'number' ? `${person.timestampSeconds.toFixed(1)}s` : ''),
+                          })
+                        : t('distribution.coverStudio.grabAsPersonWhy', 'The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.')}
+                    </em>
+                  </span>
+                </label>
+
+                <div className="cs-card">
+                  <div className="cs-body">
                     <button
                       type="button"
                       className="cs-primary"
-                      style={{ width: 'auto' }}
-                      disabled={applying}
-                      onClick={() => void apply()}
-                      data-testid="cover-apply"
+                      disabled={!canGenerate}
+                      onClick={() => void runDrafts()}
+                      data-testid="cover-generate"
                     >
-                      {applying
-                        ? t('distribution.coverStudio.applying', 'Saving…')
-                        : t('distribution.coverStudio.useThisCover', 'Use this cover')}
+                      {stage === 'drafting'
+                        ? t('distribution.coverStudio.drafting', 'Drawing four drafts…')
+                        : rounds.length > 0
+                          ? t('distribution.coverStudio.regenerateDrafts', 'Generate 4 new drafts')
+                          : t('distribution.coverStudio.generateDrafts', 'Generate 4 drafts')}
                     </button>
-                    <button
-                      type="button"
-                      className="cs-ghost"
-                      disabled={savedAsTemplate}
-                      onClick={() => void saveAsTemplate()}
-                      data-testid="cover-save-template"
-                    >
-                      {savedAsTemplate
-                        ? t('distribution.coverStudio.savedAsTemplate', 'Saved as template')
-                        : t('distribution.coverStudio.saveAsTemplate', 'Save as template')}
-                    </button>
-                    <button
-                      type="button"
-                      className="cs-ghost"
-                      onClick={() => setStage('picking')}
-                    >
-                      {t('distribution.coverStudio.tryAnother', 'Try another draft')}
-                    </button>
+                    <p className="cs-hint" data-testid="cover-generate-hint">
+                      {generateHint ??
+                        t('distribution.coverStudio.costNote', 'One image, four drafts — a round of ideas costs one generation.')}
+                    </p>
+                    {runError && stage === 'idle' && (
+                      <div className="cs-error" data-testid="cover-drafts-error">
+                        {runError}
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                <div className="cs-card">
+                  <h4>
+                    {t('distribution.coverStudio.generatedCovers', 'AI covers')}
+                    <span className="aux">{rounds.length}</span>
+                  </h4>
+                  <div className="cs-body">
+                    {rounds.length === 0 ? (
+                      <div className="cs-empty" data-testid="cover-history-empty">
+                        {t('distribution.coverStudio.historyEmpty', 'Generated covers appear here; you can go back to any earlier round.')}
+                      </div>
+                    ) : (
+                      <div className="cs-history" data-testid="cover-history">
+                        {rounds.map((r, i) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            className={`cs-round ${r.id === activeRound ? 'on' : ''}`}
+                            onClick={() => restoreRound(r)}
+                            disabled={busy}
+                            data-testid={`cover-history-round-${i + 1}`}
+                            title={t('distribution.coverStudio.roundN', { defaultValue: 'Round {{n}}', n: i + 1 })}
+                          >
+                            <img
+                              src={`${getApiUrl()}${r.finalUrl ?? r.gridUrl}`}
+                              alt={t('distribution.coverStudio.roundN', { defaultValue: 'Round {{n}}', n: i + 1 })}
+                            />
+                            <span>
+                              {r.finalUrl
+                                ? t('distribution.coverStudio.roundFinal', 'final')
+                                : t('distribution.coverStudio.roundDrafts', 'drafts')}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <p className="cs-hint" style={{ marginTop: 8 }}>
+                      {t('distribution.coverStudio.historyHint', 'Click a thumbnail to go back to that round.')}
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="cs-card">
+                <h4>{t('distribution.coverStudio.references', 'References')}</h4>
+                <div className="cs-body">
+                  <p className="cs-hint" data-testid="cover-horizontal-note">
+                    {t(
+                      'distribution.coverStudio.horizontalNoAi',
+                      'This style only draws vertical 3:4 — the horizontal cover does not go through AI. Crop a frame below, or upload a picture.',
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── stage: what the user is looking at ─────────────────────── */}
+          <div className="cs-col-stage">
+            <div className="cs-steps cs-steps-v4">
+              <span className={`cs-step ${stage !== 'idle' || orientation === 'horizontal' ? 'done' : 'now'}`}>
+                <span className="num">1</span>
+                {t('distribution.coverStudio.stepFrame', 'Frame · person')}
+              </span>
+              <span className="bar" />
+              <span className={`cs-step ${stage === 'done' ? 'done' : stage === 'drafting' || stage === 'picking' || stage === 'refining' ? 'now' : ''}`}>
+                <span className="num">2</span>
+                {t('distribution.coverStudio.stepDrafts', 'Four drafts')}
+              </span>
+              <span className="bar" />
+              <span className={`cs-step ${stage === 'done' ? 'now' : ''}`}>
+                <span className="num">3</span>
+                {t('distribution.coverStudio.stepFinal', 'Final cover')}
+              </span>
+            </div>
+
+            {orientation === 'horizontal' || stage === 'idle' ? (
+              <div className="cs-card cs-stagecard">
+                <CoverFrameGrabber
+                  embedded
+                  aspect={aspect}
+                  sources={sources}
+                  grabbedAt={frameTimestamps}
+                  onGrabbed={onGrabbed}
+                  poolFull={refs.length >= 9 && !grabAsPerson}
+                  onUseAsCover={useFrameAsCover}
+                  onUploadCover={uploadAsCover}
+                />
+              </div>
+            ) : stage === 'done' && finalUrl ? (
+              <div className="cs-card">
+                <h4>
+                  {t('distribution.coverStudio.finalCover', 'Final cover')}
+                  <span className="aux">
+                    {t('distribution.coverStudio.finalFrom', {
+                      defaultValue: '3:4 · redrawn from draft #{{n}}',
+                      n: selected ?? 1,
+                    })}
+                  </span>
+                </h4>
+                <div className="cs-body cs-finalstage">
+                  <div className="cs-final">
+                    <img src={`${getApiUrl()}${finalUrl}`} alt={t('distribution.coverStudio.finalCover', 'Final cover')} data-testid="cover-final-image" />
+                  </div>
+                  {prompt && (
+                    <details className="cs-prompt">
+                      <summary>{t('distribution.coverStudio.whatWasSent', 'What was sent to the model')}</summary>
+                      <div className="cs-promptbox">
+                        <pre data-testid="cover-prompt-text">{prompt}</pre>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <CoverDrafts
+                stage={stage}
+                gridUrl={gridUrl}
+                selected={selected}
+                onSelect={(n) => {
+                  if (round) patchRound(round.id, { selected: n });
+                }}
+                onRefine={() => void runRefine()}
+                prompt={prompt}
+                error={runError}
+              />
+            )}
+
+            {orientation === 'vertical' && (
+              <>
+                {templateError && (
+                  <div className="cs-error" data-testid="cover-template-ref-error">
+                    {templateError}
+                  </div>
+                )}
+                <CoverTemplateGrid
+                  scopeId={scopeId}
+                  selectedIds={templateIds(refs)}
+                  busyId={templateBusyId}
+                  onToggle={(tpl) => void toggleTemplate(tpl)}
+                />
+              </>
+            )}
+          </div>
+
+          {/* ── side: preview, model + style, actions ─────────────────── */}
+          <div className="cs-col-side">
+            <div className="cs-card">
+              <h4>
+                {orientation === 'vertical'
+                  ? t('distribution.coverStudio.previewV', 'Vertical preview 3:4')
+                  : t('distribution.coverStudio.previewH', 'Horizontal preview 4:3')}
+              </h4>
+              <div className="cs-body">
+                <div className={`cs-preview ${aspect === '4:3' ? 'h' : 'v'}`} data-testid="cover-preview">
+                  {previewUrl ? (
+                    <img src={`${getApiUrl()}${previewUrl}`} alt="" />
+                  ) : (
+                    <span>{t('distribution.coverStudio.previewEmpty', 'How it will look in the feed.')}</span>
+                  )}
+                </div>
+                <p className="cs-hint" style={{ marginTop: 8 }}>
+                  {stage === 'done'
+                    ? t('distribution.coverStudio.previewFinal', 'The finished cover as it will appear.')
+                    : t('distribution.coverStudio.previewHint', 'Switch between vertical and horizontal at the top.')}
+                </p>
               </div>
             </div>
-          )}
 
-          {templateError && (
-            <div className="cs-error" data-testid="cover-template-ref-error">
-              {templateError}
+            <div className="cs-card">
+              <h4>{t('distribution.coverStudio.modelAndStyle', 'Model & style')}</h4>
+              <div className="cs-body">
+                <label className="cs-field">
+                  <span>{t('distribution.coverStudio.model', 'Model')}</span>
+                  <select
+                    className="cs-source"
+                    style={{ marginBottom: 0 }}
+                    aria-label={t('distribution.coverStudio.model', 'Model')}
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    disabled={orientation === 'horizontal'}
+                  >
+                    <option value="">{t('distribution.coverStudio.modelDefault', 'Catalog default')}</option>
+                    {models.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="cs-field">
+                  <span>{t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}</span>
+                  <select
+                    className="cs-source"
+                    style={{ marginBottom: 0 }}
+                    aria-label={t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}
+                    value="viral-video-cover"
+                    onChange={() => {}}
+                    disabled={orientation === 'horizontal'}
+                    data-testid="cover-style"
+                  >
+                    <option value="viral-video-cover">Viral Video Cover</option>
+                  </select>
+                </label>
+                <p className="cs-hint">
+                  {t('distribution.coverStudio.styleNote', 'Vertical 3:4 only. One style for now — the list is the cover skills you have imported.')}
+                </p>
+                <label className="cs-toggle">
+                  <input
+                    type="checkbox"
+                    checked={allowSmallLabels}
+                    onChange={(e) => setAllowSmallLabels(e.target.checked)}
+                    disabled={orientation === 'horizontal'}
+                    data-testid="cover-small-labels"
+                  />
+                  <span>
+                    {t('distribution.coverStudio.smallLabels', 'Platform-style labels — "REC", a search bar, corner tags.')}
+                    <em>
+                      {t('distribution.coverStudio.smallLabelsWhy', 'Your two files disagree: SKILL.md forbids them, cover-grammar.md allows them. Off follows SKILL.md.')}
+                    </em>
+                  </span>
+                </label>
+              </div>
             </div>
-          )}
-          <CoverTemplateGrid
-            scopeId={scopeId}
-            selectedIds={templateIds(refs)}
-            busyId={templateBusyId}
-            onToggle={(tpl) => void toggleTemplate(tpl)}
-          />
+
+            <div className="cs-card">
+              <div className="cs-body">
+                {orientation === 'horizontal' || stage === 'idle' ? (
+                  <p className="cs-hint" data-testid="cover-side-hint">
+                    {t('distribution.coverStudio.noAiHint', 'No AI needed: the frame on the stage can be the cover as it is — use the button under it.')}
+                  </p>
+                ) : stage !== 'done' ? (
+                  <p className="cs-hint" data-testid="cover-side-hint">
+                    {t('distribution.coverStudio.refineNote', 'A second pass redraws it full size and drops the number.')}
+                  </p>
+                ) : (
+                  <>
+                    <div className="cs-chosen">
+                      <b>{t('distribution.coverStudio.thisIsYourCover', 'This is your cover.')}</b>
+                      <ul>
+                        <li>{t('distribution.coverStudio.willFillPublish', 'Fills the vertical cover slot on the publish page')}</li>
+                        <li>{t('distribution.coverStudio.willSaveLibrary', 'Saves the file to your library')}</li>
+                      </ul>
+                    </div>
+                    {applyError && <div className="cs-error" style={{ margin: '8px 0' }}>{applyError}</div>}
+                    <div className="cs-actions cs-actions-col">
+                      <button
+                        type="button"
+                        className="cs-primary"
+                        disabled={applying}
+                        onClick={() => void apply()}
+                        data-testid="cover-apply"
+                      >
+                        {applying
+                          ? t('distribution.coverStudio.applying', 'Saving…')
+                          : t('distribution.coverStudio.done', 'Done')}
+                      </button>
+                      <button
+                        type="button"
+                        className="cs-ghost"
+                        disabled={savedAsTemplate}
+                        onClick={() => void saveAsTemplate()}
+                        data-testid="cover-save-template"
+                      >
+                        {savedAsTemplate
+                          ? t('distribution.coverStudio.savedAsTemplate', 'Saved as template')
+                          : t('distribution.coverStudio.saveAsTemplate', 'Save as template')}
+                      </button>
+                      <button
+                        type="button"
+                        className="cs-ghost"
+                        onClick={() => setStage('picking')}
+                        data-testid="cover-try-another"
+                      >
+                        {t('distribution.coverStudio.tryAnother', 'Try another draft')}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );
