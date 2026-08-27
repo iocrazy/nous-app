@@ -9,6 +9,7 @@ from app.api.codex_daemon_ws_router import (
     MAX_BUFFERED_JOBS,
     MAX_TEXT_BYTES,
     MAX_TEXT_CHUNKS,
+    _Poisoned,
     assemble_job_result,
     take_chunk,
 )
@@ -73,10 +74,14 @@ def test_chunk_count_mismatch_is_an_error_result():
         {"job_id": "j1", "seq": 5_000_000, "data": "x"},  # allocation amplifier
         {"job_id": "j1", "seq": 0, "data": 123},  # data not a str
         {"job_id": "j1", "seq": 0, "data": None},
+        # A lone surrogate is legal JSON — json.loads returns it as a str,
+        # but .encode("utf-8") on it raises. Before the guard, that
+        # exception escaped the receive loop and killed the socket.
+        {"job_id": "j1", "seq": 0, "data": "\ud800"},
     ],
 )
 def test_malformed_chunk_frames_poison_the_job_instead_of_raising(bad_frame):
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     take_chunk(chunks, bad_frame)  # must not raise
     out = assemble_job_result(
         {"type": "job_done", "job_id": "j1", "usage": {}, "chunked": True, "chunks": 1},
@@ -91,7 +96,7 @@ def test_a_poisoned_job_ignores_the_rest_of_its_stream():
     """Once poisoned, later well-formed frames must not resurrect the job —
     otherwise the surviving parts assemble into a short text that passes both
     guards and publishes as a success."""
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     take_chunk(chunks, {"job_id": "j1", "seq": -1, "data": "HACK"})
     take_chunk(chunks, {"job_id": "j1", "seq": 0, "data": "AAA"})
     take_chunk(chunks, {"job_id": "j1", "seq": 1, "data": "BBB"})
@@ -99,13 +104,13 @@ def test_a_poisoned_job_ignores_the_rest_of_its_stream():
         {"type": "job_done", "job_id": "j1", "usage": {}, "chunked": True, "chunks": 2},
         chunks=chunks,
     )
-    assert out == {"error": "chunk_mismatch: invalid chunk frame"}
+    assert out["error"].startswith("chunk_mismatch: invalid chunk frame (")
     assert "j1" not in chunks
 
 
 @pytest.mark.unit
 def test_duplicate_seq_poisons_rather_than_silently_dropping_a_slice():
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     take_chunk(chunks, {"job_id": "j1", "seq": 0, "data": "a"})
     take_chunk(chunks, {"job_id": "j1", "seq": 1, "data": "b"})
     take_chunk(chunks, {"job_id": "j1", "seq": 1, "data": "OVERWRITE"})
@@ -113,16 +118,16 @@ def test_duplicate_seq_poisons_rather_than_silently_dropping_a_slice():
         {"type": "job_done", "job_id": "j1", "usage": {}, "chunked": True, "chunks": 2},
         chunks=chunks,
     )
-    assert out == {"error": "chunk_mismatch: invalid chunk frame"}
+    assert out["error"] == "chunk_mismatch: invalid chunk frame (duplicate seq 1)"
 
 
 @pytest.mark.unit
 def test_text_over_the_byte_cap_poisons_the_job():
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     big = "x" * (MAX_TEXT_BYTES // 2 + 1)
     take_chunk(chunks, {"job_id": "j1", "seq": 0, "data": big})
     take_chunk(chunks, {"job_id": "j1", "seq": 1, "data": big})
-    assert chunks["j1"] is None
+    assert isinstance(chunks["j1"], _Poisoned)
     out = assemble_job_result(
         {"type": "job_done", "job_id": "j1", "usage": {}, "chunked": True, "chunks": 2},
         chunks=chunks,
@@ -133,17 +138,17 @@ def test_text_over_the_byte_cap_poisons_the_job():
 @pytest.mark.unit
 def test_byte_cap_counts_utf8_bytes_not_characters():
     """A CJK char is 3 UTF-8 bytes; counting characters would let ~3x through."""
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     take_chunk(chunks, {"job_id": "j1", "seq": 0, "data": "中" * (MAX_TEXT_BYTES // 3)})
     take_chunk(chunks, {"job_id": "j1", "seq": 1, "data": "xx"})
-    assert chunks["j1"] is None
+    assert isinstance(chunks["j1"], _Poisoned)
 
 
 @pytest.mark.unit
 def test_buffered_job_count_is_hard_bounded_per_socket():
     """The 9th concurrent job gets no buffer at all — the key count stays
     bounded, and that job still fails typed (its job_done finds 0 parts)."""
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     for i in range(MAX_BUFFERED_JOBS):
         take_chunk(chunks, {"job_id": f"j{i}", "seq": 0, "data": "a"})
     take_chunk(chunks, {"job_id": "overflow", "seq": 0, "data": "a"})
@@ -172,7 +177,7 @@ def test_chunked_frame_without_a_usable_count_is_an_error_not_empty_text(declare
 def test_a_hole_padded_to_the_right_length_is_still_a_mismatch():
     """Guard cross-check: the count matches (3 == 3) and only the hole check
     catches it. Deleting either guard must fail one of these two tests."""
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
     take_chunk(chunks, {"job_id": "j1", "seq": 0, "data": "a"})
     take_chunk(chunks, {"job_id": "j1", "seq": 2, "data": "c"})
     out = assemble_job_result(
@@ -249,6 +254,7 @@ async def _run_loop(monkeypatch, frames: list[dict]) -> list[tuple[str, dict]]:
     return published
 
 
+@pytest.mark.unit
 async def test_loop_buffers_job_chunks_and_publishes_one_joined_result(monkeypatch):
     published = await _run_loop(
         monkeypatch,
@@ -274,6 +280,7 @@ async def test_loop_buffers_job_chunks_and_publishes_one_joined_result(monkeypat
     }
 
 
+@pytest.mark.unit
 async def test_loop_drops_buffered_chunks_when_the_job_fails(monkeypatch):
     """The follow-up job_done is the probe: if job_failed had left the two
     slices buffered, it would assemble 'ab' and publish a success."""
@@ -299,6 +306,7 @@ async def test_loop_drops_buffered_chunks_when_the_job_fails(monkeypatch):
     assert published[1][1]["error"] == "chunk_mismatch: expected 2, got 0"
 
 
+@pytest.mark.unit
 async def test_loop_survives_a_malformed_chunk_and_still_answers(monkeypatch):
     """A bad frame must not kill the socket: the daemon keeps talking and the
     job gets a typed failure instead of the 600s hang a raise would cause."""
@@ -324,5 +332,34 @@ async def test_loop_survives_a_malformed_chunk_and_still_answers(monkeypatch):
             },
         ],
     )
-    assert published[0][1] == {"error": "chunk_mismatch: invalid chunk frame"}
+    assert published[0][1] == {
+        "error": "chunk_mismatch: invalid chunk frame (seq -1 out of range)"
+    }
     assert published[1] == ("j2", {"gen_id": None, "text": "fine", "usage": {}})
+
+
+@pytest.mark.unit
+async def test_loop_survives_a_lone_surrogate_in_chunk_data(monkeypatch):
+    """`'\\ud800'` is legal JSON and json.loads hands it back as a str with no
+    UTF-8 encoding. Counting its bytes used to raise UnicodeEncodeError out of
+    the receive loop: socket dead, job published NOTHING, caller hung 600s."""
+    published = await _run_loop(
+        monkeypatch,
+        [
+            {"type": "job_chunk", "job_id": "j1", "seq": 0, "data": "\ud800"},
+            {
+                "type": "job_done",
+                "job_id": "j1",
+                "usage": {},
+                "chunked": True,
+                "chunks": 1,
+            },
+            {"type": "job_done", "job_id": "j2", "text": "still alive", "usage": {}},
+        ],
+    )
+    assert published[0] == (
+        "j1",
+        {"error": "chunk_mismatch: invalid chunk frame (undecodable chunk data)"},
+    )
+    # the socket kept serving after the bad frame
+    assert published[1][1]["text"] == "still alive"

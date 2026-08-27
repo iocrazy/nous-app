@@ -59,14 +59,26 @@ MAX_TEXT_CHUNKS = 64
 MAX_TEXT_BYTES = 16 * 1024 * 1024
 MAX_BUFFERED_JOBS = 8
 
-# A job whose chunk stream is unusable. Kept as a key (not deleted) so later
-# frames of the same job are ignored instead of starting a fresh buffer, and
-# so job_done can publish a typed failure instead of a plausible-looking
-# short text. Popped like any other buffer.
-_POISONED = None
+
+class _Poisoned:
+    """Marker for a job whose chunk stream is unusable.
+
+    Kept as the job's value (not deleted) so later frames of the same job are
+    ignored instead of starting a fresh buffer, and so job_done can publish a
+    typed failure instead of a plausible-looking short text. Popped like any
+    other buffer. Carries `reason` so the published error says WHICH frame
+    invariant broke — the daemon and this backend version-skew independently,
+    and "invalid chunk frame" alone cannot tell a truncated stream from a
+    daemon that started numbering at 1.
+    """
+
+    __slots__ = ("reason",)
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
 
 
-def take_chunk(chunks: dict[str, list[str] | None], message: dict) -> None:
+def take_chunk(chunks: dict[str, list[str] | _Poisoned], message: dict) -> None:
     """Buffer one job_chunk frame.
 
     Every field here comes off the wire from a daemon that runs on the user's
@@ -82,7 +94,7 @@ def take_chunk(chunks: dict[str, list[str] | None], message: dict) -> None:
         logger.debug("[codex-daemon] dropping job_chunk without job_id")
         return
     buf = chunks.get(job_id, [])
-    if buf is _POISONED:
+    if isinstance(buf, _Poisoned):
         return  # already unusable; ignore the rest of this job's stream
     if job_id not in chunks and len(chunks) >= MAX_BUFFERED_JOBS:
         # Refuse to open a 9th buffer rather than recording a poison key —
@@ -91,27 +103,29 @@ def take_chunk(chunks: dict[str, list[str] | None], message: dict) -> None:
         logger.debug("[codex-daemon] too many buffered jobs; dropping chunk")
         return
 
+    def poison(reason: str) -> None:
+        logger.debug("[codex-daemon] poisoning job={} — {}", job_id, reason)
+        chunks[job_id] = _Poisoned(reason)
+
     seq = message.get("seq")
     data = message.get("data")
     # bool is an int subclass — `True` must not be read as seq 1.
     if not isinstance(seq, int) or isinstance(seq, bool) or not isinstance(data, str):
-        logger.debug("[codex-daemon] poisoning job={} — malformed chunk frame", job_id)
-        chunks[job_id] = _POISONED
-        return
+        return poison("malformed chunk frame")
     if not 0 <= seq < MAX_TEXT_CHUNKS:
-        logger.debug(
-            "[codex-daemon] poisoning job={} — seq {} out of range", job_id, seq
-        )
-        chunks[job_id] = _POISONED
-        return
+        return poison(f"seq {seq} out of range")
     if seq < len(buf) and buf[seq] != "":
-        logger.debug("[codex-daemon] poisoning job={} — duplicate seq {}", job_id, seq)
-        chunks[job_id] = _POISONED
-        return
-    if _buffered_bytes(buf) + len(data.encode("utf-8")) > MAX_TEXT_BYTES:
-        logger.debug("[codex-daemon] poisoning job={} — text over byte cap", job_id)
-        chunks[job_id] = _POISONED
-        return
+        return poison(f"duplicate seq {seq}")
+    try:
+        incoming = len(data.encode("utf-8"))
+    except UnicodeEncodeError:
+        # A lone surrogate ('\ud800') is legal JSON and json.loads hands it
+        # back as a str, but it has no UTF-8 encoding. Letting this raise
+        # would kill the socket and publish nothing — the exact 600s hang
+        # every other guard here exists to prevent.
+        return poison("undecodable chunk data")
+    if _buffered_bytes(buf) + incoming > MAX_TEXT_BYTES:
+        return poison("text over byte cap")
 
     chunks[job_id] = buf
     while len(buf) <= seq:
@@ -122,11 +136,19 @@ def take_chunk(chunks: dict[str, list[str] | None], message: dict) -> None:
 def _buffered_bytes(buf: list[str]) -> int:
     """UTF-8 size of what is buffered so far. Re-encodes each frame, which is
     bounded by MAX_TEXT_BYTES × MAX_TEXT_CHUNKS of work per job — cheap at the
-    real chunk counts (a handful) and self-limiting at the adversarial one."""
-    return sum(len(p.encode("utf-8")) for p in buf)
+    real chunk counts (a handful) and self-limiting at the adversarial one.
+
+    ``surrogatepass`` is belt-and-braces: take_chunk already refuses data that
+    has no UTF-8 encoding, so nothing here should contain a lone surrogate.
+    It is here so that reordering the guards can never turn this sum — which
+    runs on every frame — back into a socket-killing raise.
+    """
+    return sum(len(p.encode("utf-8", "surrogatepass")) for p in buf)
 
 
-def assemble_job_result(message: dict, chunks: dict[str, list[str] | None]) -> dict:
+def assemble_job_result(
+    message: dict, chunks: dict[str, list[str] | _Poisoned]
+) -> dict:
     """Turn a job_done frame (+ any buffered chunks) into the pub/sub result.
 
     Pops this job's buffer on every path — success, mismatch and poison alike
@@ -138,9 +160,10 @@ def assemble_job_result(message: dict, chunks: dict[str, list[str] | None]) -> d
     """
     job_id = str(message.get("job_id") or "")
     usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
-    if job_id in chunks and chunks[job_id] is _POISONED:
+    marker = chunks.get(job_id)
+    if isinstance(marker, _Poisoned):
         chunks.pop(job_id, None)
-        return {"error": "chunk_mismatch: invalid chunk frame"}
+        return {"error": f"chunk_mismatch: invalid chunk frame ({marker.reason})"}
     if message.get("chunked"):
         parts = chunks.pop(job_id, []) or []
         try:
@@ -272,7 +295,7 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
     await daemon_presence.mark_online(user_id, device_id)
     await _touch_last_seen(device_id)
     forwarder = asyncio.create_task(_forward_jobs(websocket, user_id, device_id))
-    chunks: dict[str, list[str] | None] = {}
+    chunks: dict[str, list[str] | _Poisoned] = {}
 
     try:
         while True:
