@@ -63,6 +63,19 @@
 
       <input type="text" id="tagSearch" class="tag-search" placeholder="Search tags..." spellcheck="false" autocomplete="off" />
 
+      <!-- Search-or-create bar. Lives OUTSIDE #tagsContainer on purpose: that
+           container is wiped and rebuilt on every keystroke, which would blow
+           away this input's value and focus mid-typing. -->
+      <div id="quickCreateBar" class="quick-create-bar" style="display:none;">
+        <button type="button" id="quickCreateBtn" class="tag-create-affordance"></button>
+        <div class="translate-wrapper">
+          <span id="quickTranslateLabel" class="translate-label"></span>
+          <input type="text" id="quickTranslateInput" class="translate-input" placeholder="Translation (editable)" spellcheck="false" autocomplete="off">
+          <button type="button" id="quickTranslateSameBtn" class="translate-same-btn" title="Use same as input (for technical terms like ComfyUI, Lora, LLM)">=</button>
+        </div>
+        <div id="quickCreateError" class="tag-create-error" style="display:none;"></div>
+      </div>
+
       <div id="tagsLoading" class="tags-loading">Loading tags...</div>
       <div id="tagsContainer" class="tags-container"></div>
 

@@ -369,6 +369,19 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+/* Search-or-create bar: the "Create <query>" button plus the EN/ZH line that
+   lets a proper noun (ComfyUI, Lora, LLM) keep the same text in both
+   languages instead of getting a nonsense auto-translation. */
+.quick-create-bar {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.quick-create-bar .tag-create-affordance {
+  margin-bottom: 2px;
+}
+
 .tags-container {
   display: flex;
   flex-wrap: wrap;
