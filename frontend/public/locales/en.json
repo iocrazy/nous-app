@@ -984,7 +984,11 @@
       "loginLink": "Open this link on any device and approve (expires in ~10 minutes):",
       "loginDone": "I've approved — check status",
       "errStatus": "Could not reach the server CLI",
-      "errLogin": "Login flow failed to start"
+      "errLogin": "Login flow failed to start",
+      "serverBadge": "Server",
+      "upToDate": "(latest)",
+      "updateAvailable": "(update available: {{version}})",
+      "detectNote": "Checks the SERVER runtime. Your own machine's CLIs appear on its device row after pairing."
     },
     "nav": {
       "account": "ACCOUNT",

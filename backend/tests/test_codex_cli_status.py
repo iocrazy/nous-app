@@ -42,6 +42,7 @@ async def test_status_reports_all_three_facets(monkeypatch, client):
                 "installed": True,
                 "version": "0.7.3",
                 "path": "/usr/local/bin/gpt-image-2-skill",
+                "latest": "0.7.3",
             },
             "codex": {"installed": False, "version": None, "path": None},
             "auth_ok": True,
@@ -53,5 +54,6 @@ async def test_status_reports_all_three_facets(monkeypatch, client):
     data = resp.json()["data"]
     assert data["skill"]["installed"] is True
     assert data["skill"]["version"] == "0.7.3"
+    assert data["skill"]["latest"] == "0.7.3"
     assert data["codex"]["installed"] is False
     assert data["auth_ok"] is True
