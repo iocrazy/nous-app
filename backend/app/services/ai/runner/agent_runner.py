@@ -405,6 +405,18 @@ class AgentRunner:
             _todo_slot = recorder is not None and hasattr(self.skill_tool, "recorder")
             if _todo_slot:
                 self.skill_tool.recorder = recorder
+            # Phase 2: one typed ``turn_end`` per turn. The last chunk that
+            # carried a finish_reason is the outcome; none at all means a
+            # cooperative cancel returned silently. GeneratorExit (consumer
+            # went away) cannot await, so that path records nothing — the
+            # run's own status already says cancelled.
+            from app.services.ai.runner.turn_end import (
+                classify_exception,
+                classify_stream_end,
+                emit_turn_end,
+            )
+
+            _last_terminal = None
             try:
                 async for _chunk in self._stream_turn_inner(
                     composed,
@@ -412,7 +424,18 @@ class AgentRunner:
                     recorder=recorder,
                     abort=abort,
                 ):
+                    if getattr(_chunk, "finish_reason", None):
+                        _last_terminal = _chunk
                     yield _chunk
+            except GeneratorExit:
+                raise
+            except BaseException as exc:
+                reason, extra = classify_exception(exc)
+                await emit_turn_end(recorder, reason, extra)
+                raise
+            else:
+                reason, extra = classify_stream_end(_last_terminal)
+                await emit_turn_end(recorder, reason, extra)
             finally:
                 if _todo_slot:
                     self.skill_tool.recorder = None
@@ -465,16 +488,28 @@ class AgentRunner:
             # recorder itself (no _record_buffered_usage — that would
             # double-count).
             result = await self.run_turn(
-                composed, user_messages, recorder=recorder, abort=abort
+                composed,
+                user_messages,
+                recorder=recorder,
+                abort=abort,
+                _emit_turn_end=False,  # stream_turn classifies this turn
             )
             if result.get("cancelled"):
                 return
             raw = result.get("raw") or {}
             raw_choices = raw.get("choices") or [{}]
+            usage = raw.get("usage")
+            # Phase 2: keep the error marker on the terminal chunk so the
+            # typed turn_end does not read a loop-ceiling/timeout as "stop".
+            _err_code = result.get("error_code") or (
+                result.get("error") if "error" in result else None
+            )
+            if _err_code:
+                usage = {**(usage or {}), "error_code": str(_err_code)[:80]}
             yield StreamChunk(
                 delta_text=result.get("content") or "",
                 finish_reason=(raw_choices[0].get("finish_reason") or "stop"),
-                usage=raw.get("usage"),
+                usage=usage,
                 tool_call_trace=result.get("tool_calls") or [],
             )
             return
@@ -1161,8 +1196,14 @@ class AgentRunner:
         *,
         recorder: Optional[RunRecorder] = None,
         abort: Optional["AbortController"] = None,
+        _emit_turn_end: bool = True,
     ) -> dict[str, Any]:
         """Run one turn, with retry telemetry attached for its duration.
+
+        ``_emit_turn_end=False`` is for stream_turn's buffered fallback only:
+        that path delegates here and then classifies the turn itself from
+        the terminal chunk — two wrappers each filing a ``turn_end`` would
+        double-count every buffered turn.
 
         W1: the adapter is built during wiring, before this run exists, so a
         recorder cannot be constructor-injected into the retry middleware.
@@ -1185,10 +1226,28 @@ class AgentRunner:
         todo_slot = recorder is not None and hasattr(self.skill_tool, "recorder")
         if todo_slot:
             self.skill_tool.recorder = recorder
+        # Phase 2: one typed ``turn_end`` per turn, classified from the
+        # outcome in one place (see turn_end.py for why not per-exit tags).
+        from app.services.ai.runner.turn_end import (
+            classify_exception,
+            classify_run_result,
+            emit_turn_end,
+        )
+
         try:
-            return await self._run_turn_inner(
+            result = await self._run_turn_inner(
                 composed, user_messages, recorder=recorder, abort=abort
             )
+        except BaseException as exc:
+            if _emit_turn_end:
+                reason, extra = classify_exception(exc)
+                await emit_turn_end(recorder, reason, extra)
+            raise
+        else:
+            if _emit_turn_end:
+                reason, extra = classify_run_result(result)
+                await emit_turn_end(recorder, reason, extra)
+            return result
         finally:
             if has_slot:
                 self.adapter.on_retry = None
