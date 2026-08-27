@@ -71,7 +71,11 @@ for (const vp of [
     await login(page);
     await page.goto(`/team/${WALKTHROUGH_IDS.teamId}/distribution/publish`);
 
-    await page.getByTestId('open-cover-studio').click();
+    // A cold load of the publish page on the real stack can take well over
+    // the 15s click default (seen 2026-08-27; the retry passed in 5s).
+    const open = page.getByTestId('open-cover-studio');
+    await expect(open).toBeVisible({ timeout: 45_000 });
+    await open.click();
     const modal = page.getByTestId('cover-studio-overlay');
     await expect(modal).toBeVisible();
     // Real data must have arrived: the template grid says "N saved".
@@ -83,7 +87,10 @@ for (const vp of [
     expect(vertical, JSON.stringify(vertical, null, 1)).toEqual([]);
 
     await page.getByTestId('cover-tab-horizontal').click();
-    await expect(page.getByTestId('cover-horizontal-note')).toBeVisible();
+    // Since #2023 the horizontal cover goes through the model too: the
+    // generate button stays, and the preview switches to 4:3.
+    await expect(page.getByTestId('cover-generate')).toBeVisible();
+    await expect(page.getByTestId('cover-preview')).toHaveClass(/\bh\b/);
     await page.screenshot({ path: `test-results/cover-studio-${vp.width}-horizontal.png` });
     const horizontal = await measureOverflow(page);
     expect(horizontal, JSON.stringify(horizontal, null, 1)).toEqual([]);
