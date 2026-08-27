@@ -21,6 +21,16 @@ from app.services.codex.personal_scope import resolve_personal_scope_id
 
 DEFAULT_TEXT_TIMEOUT_S = 180
 
+# The backend waits LONGER than the daemon runs, on purpose. Both legs get a
+# timeout: the daemon caps ``codex exec`` with the payload's ``timeout_s``,
+# the backend caps the result subscription with the dispatch's. Setting them
+# equal makes them race — and the backend winning is the bad outcome: the
+# caller gets a generic ``timeout`` instead of the typed code the daemon was
+# about to publish (``codex_not_logged_in``, ``codex_no_output``, …). The
+# grace period keeps the daemon's answer first, so the fallback only fires
+# when the daemon really has gone silent.
+DISPATCH_GRACE_S = 30
+
 # codex takes image *paths*; the daemon downloads them first. Cap matches the
 # picker's own limit so a runaway history can't turn one reply into a hundred
 # downloads on the user's machine.
@@ -74,7 +84,7 @@ class CodexDaemonAdapter:
                 scope_id=scope_id,
                 kind="text",
                 payload=payload,
-                timeout_s=self.timeout_s,
+                timeout_s=self.timeout_s + DISPATCH_GRACE_S,
             )
         except DaemonOfflineError as exc:
             raise CodexLocalError("daemon_offline", str(exc)) from exc
@@ -112,4 +122,4 @@ class CodexDaemonAdapter:
         }
 
 
-__all__ = ["CodexDaemonAdapter", "DEFAULT_TEXT_TIMEOUT_S"]
+__all__ = ["CodexDaemonAdapter", "DEFAULT_TEXT_TIMEOUT_S", "DISPATCH_GRACE_S"]

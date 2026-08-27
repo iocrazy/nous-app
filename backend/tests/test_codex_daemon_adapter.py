@@ -49,7 +49,11 @@ async def test_call_dispatches_text_job_and_returns_openai_shape():
     resp = await a.call(_composed(), [{"role": "user", "content": "hi"}])
 
     assert seen["user_id"] == "u1" and seen["scope_id"] == 42 and seen["kind"] == "text"
-    assert seen["timeout_s"] == 180
+    # The two legs are deliberately unequal: the daemon caps `codex exec` at
+    # 180s (payload), the backend waits 210s for the result. The daemon must
+    # time out FIRST so its typed code arrives instead of a generic timeout.
+    assert seen["timeout_s"] == 210
+    assert seen["payload"]["timeout_s"] == 180
     assert seen["payload"]["model"] == "gpt-5"
     assert seen["payload"]["prompt"].startswith("[System]\nbe brief")
     assert seen["payload"]["image_urls"] == []
