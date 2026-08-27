@@ -55,3 +55,38 @@ class TestRouterWiring:
             "dry_run": True,
             "limit": 10,
         }
+
+
+class TestGenerationRowSource:
+    """Second backfill source: resources promoted from generated_media before
+    migration 440 (the PNG carries no chunks; the provenance is in the row)."""
+
+    def test_promoted_row_yields_params(self):
+        from app.workflows.backfill_resource_gen_params import extracted_from_generation
+
+        out = extracted_from_generation(
+            {
+                "model": "gpt-5.4",
+                "provider": "codex",
+                "params": {"ratio": "16:9", "quality": "high"},
+            }
+        )
+        assert out == {
+            "positive": None,
+            "negative": None,
+            "params": {
+                "tool": "nous",
+                "model": "gpt-5.4",
+                "provider": "codex",
+                "aspect_ratio": "16:9",
+            },
+        }
+
+    def test_row_without_provenance_is_none(self):
+        from app.workflows.backfill_resource_gen_params import extracted_from_generation
+
+        assert (
+            extracted_from_generation({"model": "", "provider": None, "params": {}})
+            is None
+        )
+        assert extracted_from_generation(None) is None
