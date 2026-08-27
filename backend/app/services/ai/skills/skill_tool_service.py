@@ -47,6 +47,10 @@ def _cap_skill_content(text: str) -> str:
 class SkillToolService:
     def __init__(self, skill_repo: SkillRepository) -> None:
         self.skill_repo = skill_repo
+        # Phase-2 (443): the run's recorder, attached by AgentRunner for the
+        # duration of one turn so Skill(todo) mutations can append their
+        # whole-list snapshot. None on paths that never had a recorder.
+        self.recorder: Optional[Any] = None
         # Phase L (L2): per-instance AgentTodoList. AgentRunner builds
         # a fresh SkillToolService per run — its todo_list lives only for
         # that run and is reset at run start. Set lazily on first use.
@@ -212,7 +216,15 @@ def _execute_todo_impl(svc, args: dict) -> dict:
 # Method binding — patch onto SkillToolService so the dispatcher
 # can call self._execute_todo() like other built-ins.
 async def _execute_todo(self, args: dict) -> dict:
-    return _execute_todo_impl(self, args)
+    result = _execute_todo_impl(self, args)
+    # Emit AFTER a successful mutation only: reads (`show`) would flood the
+    # log with identical frames, and a rejected op left the list unchanged —
+    # unchanged state is not a new frame.
+    if (args or {}).get("op") != "show" and "error" not in result:
+        from app.services.ai.runner.todo_events import emit_todo_snapshot
+
+        await emit_todo_snapshot(self.recorder, self.todo_list)
+    return result
 
 
 SkillToolService._execute_todo = _execute_todo  # type: ignore[attr-defined]
