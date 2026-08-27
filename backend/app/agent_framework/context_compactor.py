@@ -84,6 +84,16 @@ class CompactionStats:
     notes: tuple[str, ...] = ()
 
 
+async def _emit(recorder: Any, event_type: str, payload: dict[str, Any]) -> None:
+    """Best-effort transcript event. Telemetry never fails a turn."""
+    if recorder is None or not hasattr(recorder, "record_event"):
+        return
+    try:
+        await recorder.record_event(event_type, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[compactor] {} event not recorded: {}", event_type, exc)
+
+
 class ContextCompactor:
     """Tiered token-budget enforcer. Holds no per-run state — safe to
     instantiate once or per-turn.
@@ -129,8 +139,14 @@ class ContextCompactor:
         model: str,
         adapter: Any = None,
         tools: Optional[list] = None,
+        recorder: Any = None,
     ) -> tuple[list[dict], CompactionStats]:
         """Return possibly-compacted messages + stats.
+
+        ``recorder`` (anything with ``async record_event(type, payload)``)
+        receives the compaction bracket — ``compaction_start`` /
+        ``compaction_summary`` / ``compaction_end`` — on the orange/red path
+        only. Telemetry: ``None`` is silent, a throwing recorder is a warning.
 
         Async because Phase 2 may make an LLM call to summarize the
         head when the budget is tight. The yellow path is still
@@ -229,33 +245,62 @@ class ContextCompactor:
         notes: list[str] = list(window_notes)
         capped: list[dict]
         dropped_chars = 0
-
+        # The bracket: start lands BEFORE the summarizer is awaited, end lands
+        # in ``finally``. A crash in between leaves an orphan start — the
+        # crash scene — never an end that claims a completion it did not see.
+        await _emit(
+            recorder,
+            "compaction_start",
+            {"tier": tier.value, "tokens_before": total, "window": window},
+        )
+        end_payload: dict[str, Any] = {}
         try:
-            capped = await self._compact_with_summary(
-                messages=pruned,
-                keep_recent_turns=keep,
-                model=model,
-                system_message=system_message,
-                tools=tools,
-                adapter=adapter,
-            )
-            notes.append("compacted via LLM head summary")
-        except Exception as exc:
-            logger.warning(
-                "[compactor] summarizer failed, falling back to "
-                "emergency-cap truncation: {}",
-                exc,
-            )
-            capped, dropped_chars = self._emergency_cap(
-                messages=pruned,
-                model=model,
-                window=window,
-                sys_tokens=sys_tokens,
-                keep_recent_turns=keep,
-            )
-            notes.append(f"emergency-cap fallback (summarizer failed: {exc!s:.120})")
-
-        final_total = sys_tokens + count_messages_tokens(capped, model)
+            try:
+                capped = await self._compact_with_summary(
+                    messages=pruned,
+                    keep_recent_turns=keep,
+                    model=model,
+                    system_message=system_message,
+                    tools=tools,
+                    adapter=adapter,
+                    recorder=recorder,
+                )
+                notes.append("compacted via LLM head summary")
+            except Exception as exc:
+                logger.warning(
+                    "[compactor] summarizer failed, falling back to "
+                    "emergency-cap truncation: {}",
+                    exc,
+                )
+                await _emit(
+                    recorder,
+                    "compaction_summary",
+                    {
+                        "path": "emergency_cap",
+                        "attempts": self.SUMMARY_ATTEMPTS,
+                        "error": f"{exc!s:.200}",
+                    },
+                )
+                capped, dropped_chars = self._emergency_cap(
+                    messages=pruned,
+                    model=model,
+                    window=window,
+                    sys_tokens=sys_tokens,
+                    keep_recent_turns=keep,
+                )
+                notes.append(
+                    f"emergency-cap fallback (summarizer failed: {exc!s:.120})"
+                )
+            final_total = sys_tokens + count_messages_tokens(capped, model)
+            end_payload = {
+                "tokens_after": final_total,
+                "tokens_saved": total - final_total,
+            }
+        except BaseException as exc:
+            end_payload = {"error": f"{type(exc).__name__}: {exc!s:.200}"}
+            raise
+        finally:
+            await _emit(recorder, "compaction_end", end_payload)
         if final_total / window > self.EMERGENCY_FLOOR_PCT:
             notes.append(
                 f"still over emergency floor {self.EMERGENCY_FLOOR_PCT:.0%} "
@@ -291,6 +336,7 @@ class ContextCompactor:
         system_message: Optional[str] = None,
         tools: Optional[list] = None,
         adapter: Any = None,
+        recorder: Any = None,
     ) -> list[dict]:
         """Replace messages[:-keep_recent_turns] with a single
         [Earlier conversation summary] system message produced by the
@@ -316,7 +362,7 @@ class ContextCompactor:
 
         last_summary_tokens: Optional[int] = None
         for attempt in range(1, self.SUMMARY_ATTEMPTS + 1):
-            summary_text = await self._produce_summary(
+            summary_text, summary_path = await self._produce_summary(
                 head,
                 system_message=system_message,
                 tools=tools,
@@ -329,6 +375,16 @@ class ContextCompactor:
             }
             summary_tokens = count_messages_tokens([summary_message], model)
             if summary_tokens < head_tokens:
+                await _emit(
+                    recorder,
+                    "compaction_summary",
+                    {
+                        "summary_tokens": summary_tokens,
+                        "head_tokens": head_tokens,
+                        "attempts": attempt,
+                        "path": summary_path,
+                    },
+                )
                 if attempt > 1:
                     logger.info(
                         "[compactor] summary accepted on attempt {} "
@@ -362,8 +418,11 @@ class ContextCompactor:
         tools: Optional[list],
         adapter: Any,
         model: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         """Warm-prefix first, legacy cheap-model second.
+
+        Returns ``(summary_text, path)`` with ``path`` in ``{"warm", "legacy"}``
+        so the transcript can say which one actually produced the summary.
 
         W3-1 (user-approved cost shift): replaying the conversation's own
         prefix on its own adapter lets the provider's KV cache cover every
@@ -380,20 +439,21 @@ class ContextCompactor:
 
         if adapter is not None and system_message:
             try:
-                return await summarizer.summarize_warm_prefix(
+                text = await summarizer.summarize_warm_prefix(
                     adapter=adapter,
                     system_message=system_message,
                     tools=tools,
                     head=head,
                     model=model,
                 )
+                return text, "warm"
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "[compactor] warm-prefix summarize failed, falling back "
                     "to the maintenance model: {}",
                     exc,
                 )
-        return await summarizer.summarize(head)
+        return await summarizer.summarize(head), "legacy"
 
     def _tier_for(self, used_pct: float) -> CompactionTier:
         if used_pct >= self.thresholds.red_pct:
