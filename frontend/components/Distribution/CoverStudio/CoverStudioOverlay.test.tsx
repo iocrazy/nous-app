@@ -97,7 +97,7 @@ vi.mock('./CoverFrameGrabber', () => ({
     aspect,
     onPickSource,
   }: {
-    onGrabbed: (f: unknown) => void;
+    onGrabbed: (f: unknown, asPerson: boolean) => void;
     onUseAsCover?: (sourceId: string, at: number, focus: { x: number; y: number }) => Promise<void>;
     aspect?: string;
     onPickSource?: (v: unknown) => void;
@@ -126,10 +126,23 @@ vi.mock('./CoverFrameGrabber', () => ({
           generatedMediaId: '111',
           url: '/api/v1/generated-media/111/cover',
           timestampSeconds: 3.1,
-        })
+        }, false)
       }
     >
       grab
+    </button>
+    <button
+      type="button"
+      data-testid="stub-grab-person"
+      onClick={() =>
+        onGrabbed({
+          generatedMediaId: '111',
+          url: '/api/v1/generated-media/111/cover',
+          timestampSeconds: 3.1,
+        }, true)
+      }
+    >
+      person
     </button>
     </>
   ),
@@ -190,10 +203,9 @@ function renderOverlay(over: Partial<React.ComponentProps<typeof CoverStudioOver
   return { onClose, onApply };
 }
 
-/** Tick the person checkbox, then grab — the shortest path to "person set". */
+/** "Set as person" on the stage — the shortest path to "person set". */
 function setPerson() {
-  fireEvent.click(screen.getByTestId('cover-grab-as-person'));
-  fireEvent.click(screen.getByTestId('stub-grab'));
+  fireEvent.click(screen.getByTestId('stub-grab-person'));
 }
 
 beforeEach(() => {
@@ -267,18 +279,6 @@ describe('CoverStudioOverlay — gating', () => {
   });
 });
 
-describe('CoverStudioOverlay — the person checkbox', () => {
-  it('unticks itself after the person grab', () => {
-    // Leaving it ticked would turn every next grab into a person swap the
-    // user did not ask for.
-    renderOverlay();
-    setPerson();
-
-    expect(
-      (screen.getByTestId('cover-grab-as-person') as HTMLInputElement).checked,
-    ).toBe(false);
-  });
-});
 
 describe('CoverStudioOverlay — the two-stage run', () => {
   it('sends the pool with the person first, then shows the grid', async () => {
@@ -563,7 +563,9 @@ describe('CoverStudioOverlay — v4 layout', () => {
     expect(select.options[0].value).toBe('viral-video-cover');
 
     fireEvent.change(select, { target: { value: 'neon-cover' } });
-    expect(screen.getByTestId('cover-style-note').textContent).toContain('Neon palette');
+    // The description lives in the (?) tip next to the label now.
+    const tips = screen.getAllByTestId('cs-help').map((el) => el.getAttribute('title') ?? '');
+    expect(tips.some((tip) => tip.includes('Neon palette'))).toBe(true);
     fireEvent.click(screen.getByTestId('cover-generate'));
 
     await waitFor(() =>
@@ -630,5 +632,22 @@ describe('CoverStudioOverlay — merged references card and in-studio video pick
     fireEvent.click(screen.getByTestId('stub-pick-source'));
 
     expect(onPickSource).toHaveBeenCalledWith(expect.objectContaining({ id: '902' }));
+  });
+});
+
+
+describe('CoverStudioOverlay — the person card', () => {
+  it('is its own card, filled by "Set as person" on the stage, not one of the nine slots', () => {
+    renderOverlay();
+    const card = screen.getByTestId('cover-person-card');
+    expect(card.querySelector('[data-testid="cover-ref-person"]')?.className).toContain('missing');
+    expect(screen.getByTestId('cover-ref-count').textContent).toContain('0 / 9');
+
+    setPerson();
+
+    expect(card.querySelector('img')).toBeTruthy();
+    // The person is sent too (the server cap of nine includes it), so the
+    // pool's budget shrinks by one instead of showing the person as a slot.
+    expect(screen.getByTestId('cover-ref-count').textContent).toContain('0 / 8');
   });
 });

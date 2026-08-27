@@ -349,3 +349,38 @@ async def test_import_from_resource_bad_mime_400(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_import_from_resource_reads_the_resource_INSIDE_a_tenant_scope(
+    monkeypatch, tmp_path
+):
+    """2026-08-27 生产：resources 是受 scope 保护的表，端点在 scope 外查它 →
+    UnscopedQueryError，封面工作室里每一张模板都"没能准备成参考图"。钉住：
+    仓库调用发生时必须已经开了 scope。"""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.db.scope import current_scope
+    from app.repositories import resources_repository as resources_repo_mod
+
+    seen: dict = {}
+
+    async def _fake_get_resource_by_id(self, resource_id):
+        seen["scope"] = current_scope()
+        return None  # → 404, we only care about the scope at call time
+
+    monkeypatch.setattr(
+        resources_repo_mod.ResourcesRepository,
+        "get_resource_by_id",
+        _fake_get_resource_by_id,
+    )
+    router_mod = _router_mod()
+    auth = SimpleNamespace(user_id="8e1584e3-9c29-4a5b-90fe-125b74259f7f")
+    with pytest.raises(HTTPException) as ei:
+        await router_mod.import_from_resource(
+            ResourceImportRequest(resource_id="342622652031665"), auth
+        )
+    assert ei.value.status_code == 404
+    assert seen["scope"] is not None, "resources 必须在 request_scope 内读"

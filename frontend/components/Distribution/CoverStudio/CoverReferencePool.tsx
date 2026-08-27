@@ -15,6 +15,8 @@ import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Upload, User, X } from 'lucide-react';
 
+import { HelpTip } from './HelpTip';
+
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
   MAX_REFERENCES,
@@ -79,11 +81,22 @@ export function CoverReferencePool({
     <div className={embedded ? 'cs-embedded' : 'cs-card'}>
       <Heading className={embedded ? 'cs-subhead' : undefined}>
         {t('distribution.coverStudio.references', 'Sent to the model')}
+        {embedded && (
+          <HelpTip
+            text={t(
+              'distribution.coverStudio.refExplainerMerged',
+              'These nine slots are what the model receives. The library below is where you pick from — click a template to add it here.',
+            )}
+          />
+        )}
         <span className={`aux ${full ? 'bad' : ''}`} data-testid="cover-ref-count">
+          {/* The person rides in the same nine the server accepts, but it is
+              not a slot the user fills here — so when the pool is drawn
+              without the person tile, its budget is nine minus the person. */}
           {t('distribution.coverStudio.refCount', {
             defaultValue: '{{used}} / {{max}}',
-            used: refs.length,
-            max: MAX_REFERENCES,
+            used: requiresPerson ? refs.length : rest.length,
+            max: requiresPerson ? MAX_REFERENCES : MAX_REFERENCES - (person ? 1 : 0),
           })}
         </span>
       </Heading>
@@ -187,17 +200,14 @@ export function CoverReferencePool({
           </div>
         )}
 
-        <p className="cs-hint" style={{ marginTop: 9 }}>
-          {embedded
-            ? t(
-                'distribution.coverStudio.refExplainerMerged',
-                'These nine slots are what the model receives. The library below is where you pick from — click a template to add it here.',
-              )
-            : t(
-                'distribution.coverStudio.refExplainer',
-                'One list of nine, shared. Frames say what is in your video; templates say what it should look like.',
-              )}
-        </p>
+        {!embedded && (
+          <p className="cs-hint" style={{ marginTop: 9 }}>
+            {t(
+              'distribution.coverStudio.refExplainer',
+              'One list of nine, shared. Frames say what is in your video; templates say what it should look like.',
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

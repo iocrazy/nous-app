@@ -468,6 +468,7 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
+      "coverNeedsVideo": "Select a video above first — the cover comes from it.",
       "coverSetV": "Vertical ready",
       "coverSetH": "Horizontal ready",
       "coverHint": "Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.",
@@ -747,6 +748,13 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "setAsPerson": "Set as person",
+      "personSet": "set",
+      "personHow": "On the stage, find a frame of yourself and press “Set as person”.",
+      "useFrameShort": "Use this crop as the cover",
+      "uploadCoverShort": "Upload",
+      "sampling": "Sampling frames…",
+      "grabThisWhy": "Adds this frame to the pictures sent to the model. Re-read from the source file at full quality — not a screenshot of the player.",
       "refExplainerMerged": "These nine slots are what the model receives. The library below is where you pick from — click a template to add it here.",
       "templateLibrary": "Template library · click to add",
       "templateExplainerMerged": "The library is the shelf; the slots above are what is sent. A template is a picture you liked, handed to the model as a reference — it does not replace the style.",

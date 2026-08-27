@@ -2642,6 +2642,10 @@ export const PublishPage: React.FC = () => {
                     two more ways of saying "open the studio". */}
                 <CoverSlots
                   value={covers}
+                  blockedReason={selectedVideoObjs.length === 0
+                    ? t('distribution.publish.coverNeedsVideo', 'Select a video above first — the cover comes from it.')
+                    : null}
+                  onBlocked={(reason) => addToast(reason, 'info')}
                   onOpen={(o) => setCoverStudioTab(o)}
                   onClear={(o) => setCovers((prev) => {
                     const next = { ...(prev ?? {}) };
@@ -2650,7 +2654,9 @@ export const PublishPage: React.FC = () => {
                   })}
                 />
                 <p className="cover-hint">
-                  {t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')}
+                  {selectedVideoObjs.length === 0
+                    ? t('distribution.publish.coverNeedsVideo', 'Select a video above first — the cover comes from it.')
+                    : t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')}
                 </p>
               </div>
               <CoverStudioOverlay
