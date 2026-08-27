@@ -144,6 +144,8 @@ gh pr create --base master --title "feat(compaction): W3-1 摘要复用 warm pre
 
 ### Task 2: migration 439 —— 本期事件类型一次放行
 
+> **✅ 已完成（2026-08-27，PR #2030）**。取号时 439 已被占，实际为 **mig 443**。生产验证：5 个新类型 INSERT+ROLLBACK 零泄漏，`bogus_type` 被 CHECK 拒（反向对照）。
+
 **Files:**
 - Create: `supabase/migrations/439_transcript_event_types_phase2.sql`
 - Modify: `backend/app/models/agents.py`（`AgentRunTranscriptEvents.__table_args__` 的
@@ -193,6 +195,8 @@ COMMIT;
 ---
 
 ### Task 3: todo 事件 + 快照镜像（后端）
+
+> **✅ 已完成（2026-08-27，PR #2031）**。`runner/todo_events.py` + `SkillToolService.recorder` 槽位 + `RunRecorder._mirror_todos`。⚠️ 镜像的 `jsonb_set` 路径类型缺陷（varchar→需 text[]）在真栈验收时发现，PR #2035 修。
 
 **Files:**
 - Modify: `backend/app/services/ai/skills/skill_tool_service.py`
@@ -303,6 +307,8 @@ async def emit_todo_snapshot(recorder, todo_list) -> None:
 
 ### Task 4: 完成度上 UI（前端）
 
+> **✅ 已完成（2026-08-27，PR #2036，与 Task 7 前端合一个 PR）**。`todoProgress()` / `retryProgress()` / `AgentResultBody` todo 整表；`AGENT_RUN_SELECT` 补 `metadata_json`。
+
 **Files:**
 - Modify: `frontend/components/TaskCenter/agentRunPresentation.ts`（+ 其 test）
 - Modify: `frontend/components/TaskCenter/ActiveTaskCard.tsx`（+ 其 test）
@@ -337,6 +343,8 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 
 ### Task 5: 压缩事件括号
 
+> **✅ 已完成（2026-08-27，PR #2032）**。`_produce_summary` 改回 `(text, path)` 让 `compaction_summary.path` 由真实分支决定；四次突变转红。
+
 **Files:**
 - Modify: `backend/app/agent_framework/context_compactor.py`（`maybe_compact` 增可选
   `recorder=None`；orange/red 分支落三事件）
@@ -360,6 +368,8 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 
 ### Task 6: TurnEndReason
 
+> **✅ 已完成（2026-08-27，PR #2034）**。**改判**：不逐出口打标（~25 个终点已自带标记），包装层按结果分类 + 源码扫描穷尽守卫；多加第七值 `awaiting_approval`。实测挖出 stream buffered fallback 内调 `run_turn` 双发 `turn_end`，用 `_emit_turn_end=False` 只给 fallback。
+
 **Files:**
 - Create: `backend/app/services/ai/runner/turn_end.py`（spec §4 的枚举原文）
 - Modify: `backend/app/services/ai/runner/agent_runner.py`（每个出口标定 + 落
@@ -382,6 +392,8 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 ---
 
 ### Task 7: W1 读侧 —— 事件端点 + 重试进度 + errorChain
+
+> **✅ 已完成（2026-08-27，后端 PR #2035 / 前端并入 #2036）**。`last_retry` 镜像多带 `at` 时间戳（否则前端 waiting 无法老化）。附带修复 `_mirror_metadata_key` 的 jsonb_set text[] 类型缺陷（影响 #2031/#2034 两个镜像，生产上曾静默失败）。
 
 **改判（2026-08-25 复核）：事件端点已存在**（`ai_library_router.py:2335`
 `list_run_events`，after_seq/limit、外人 404）。本任务不建新端点。
@@ -416,6 +428,8 @@ it('malformed counts render nothing rather than NaN/7', () => { /* counts 缺 to
 ---
 
 ### Task 8: Issues 详情页消费（spec §9）
+
+> **⏸ 未做**：用户 2026-08-26 拍板「issue 往后放一放」，与 issue 页产品 spec 一起另立。
 
 **Files:**
 - Modify: `frontend/components/Todolist/IssueDetailView.tsx`
@@ -456,6 +470,29 @@ it('no reason recorded renders nothing — never an empty label', () => { /* exe
 
 ⚠️ blocked 写入方核对（spec §9 不确定点）：`grep -rn "'blocked'" backend/app | grep -v test`
 ——若来源是依赖谓词，reason 行改落依赖名，测试相应换形。
+
+## 完成账（2026-08-27）
+
+| Task | PR | 备注 |
+|---|---|---|
+| 1 | #2008 | W3-1 warm-prefix |
+| 2 | #2030 | mig **443**（计划写 439，取号时已被占） |
+| 3 | #2031 | todo_write 整表快照 + 镜像 |
+| 5 | #2032 | 压缩括号，`_produce_summary` 回 `(text, path)` |
+| 6 | #2034 | turn_end；改判为包装层分类 + 穷尽守卫；修 fallback 双发 |
+| 7 | #2035 | `types` 过滤 / last_retry(+`at`) / cause 链；**附带修 jsonb_set text[] 类型缺陷** |
+| 4+7 前端 | #2036 | n/m 完成度、Retry 进度、详情页 Steps |
+| 8 | — | 用户拍板往后放 |
+
+**真栈验收（gpupc，调试账号）**：一次真实 turn 撞 doubao 429 配额，正好覆盖失败路径——
+转录 `user → llm_retry×3 → turn_end`；`agent_runs.metadata_json.turn_end_reason="error"`、
+`last_retry={attempt:3,max_retries:3,delay_ms,model,at}` 均落列；`GET …/events?types=llm_retry,turn_end`
+精确回 4/5。mig 443：5 个新类型 INSERT+ROLLBACK 零泄漏，`bogus_type` 被 CHECK 拒。
+前端 version.json = 77c4453。
+
+**教训**：镜像的 `jsonb_set` 路径裸字符串绑成 varchar，PG 报 UndefinedFunction，两个 PR 单测全绿上线后
+镜像列一直为空——mock 掉 `write_scope` 的测试抓不到"SQL 到 PG 才炸"；回归改用 postgresql 方言编译钉 `AS TEXT[]`。
+**仍待真栈验**：一个真用 todo 工具的 agent 跑完 → Active 卡 `n/m · …` 跳动、详情页 Steps 三态（本次配额受限未跑到工具阶段）。
 
 ## 波次与 PR 依赖
 
