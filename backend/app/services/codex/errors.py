@@ -22,6 +22,11 @@ _STATUS_BY_CODE: dict[str, int] = {
     "cli_missing": 424,
     "codex_no_output": 424,
     "codex_failed": 424,
+    # The daemon rejects image URLs that are not on a nous host (spec §4.3,
+    # ``index.mjs`` ``ref_rejected``). 400 because the request itself is what
+    # is wrong — nothing about the user's machine needs fixing, they just have
+    # to attach a different image.
+    "ref_rejected": 400,
 }
 
 

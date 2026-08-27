@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from loguru import logger
+
 from app.schemas.ai_library import ComposedSystemPrompt
 from app.services.codex.daemon_dispatch import DaemonOfflineError, dispatch_to_daemon
 from app.services.codex.errors import CodexLocalError, from_daemon_error
@@ -31,9 +33,14 @@ DEFAULT_TEXT_TIMEOUT_S = 180
 # when the daemon really has gone silent.
 DISPATCH_GRACE_S = 30
 
-# codex takes image *paths*; the daemon downloads them first. Cap matches the
-# picker's own limit so a runaway history can't turn one reply into a hundred
-# downloads on the user's machine.
+# codex takes image *paths*; the daemon downloads every one of them before it
+# can start. This is a LAST-RESORT backstop, not the real budget: the chat path
+# already caps images upstream at ``history_image_replay.REPLAY_MAX_IMAGES``
+# (4), so in practice this never trims anything. It exists so a caller that
+# skips that replay logic still cannot turn one reply into a hundred downloads
+# on the user's machine. Trimming here is logged, never silent — the prompt
+# text still refers to the images that were dropped, so the model would answer
+# about pictures it never received and nothing else would say why.
 _MAX_IMAGES = 9
 
 
@@ -71,6 +78,15 @@ class CodexDaemonAdapter:
                 f"codex exec has no function calling; agent binds tools {names[:5]}",
             )
         prompt, image_urls = flatten_for_codex(composed.system_message, messages)
+        if len(image_urls) > _MAX_IMAGES:
+            logger.warning(
+                "[codex-local] dropping {} of {} images for user={} "
+                "(backstop cap {}); the prompt still references them",
+                len(image_urls) - _MAX_IMAGES,
+                len(image_urls),
+                self.user_id,
+                _MAX_IMAGES,
+            )
         scope_id = await self._scope(self.user_id)
         payload = {
             "prompt": prompt,
@@ -90,6 +106,11 @@ class CodexDaemonAdapter:
             raise CodexLocalError("daemon_offline", str(exc)) from exc
         except TimeoutError as exc:
             raise CodexLocalError("timeout", str(exc)) from exc
+        except CodexLocalError:
+            # Already typed — re-wrapping through ``from_daemon_error`` below
+            # would nest one marker inside another and lose the real code
+            # (``CodexLocalError`` is itself a ``RuntimeError``).
+            raise
         except RuntimeError as exc:
             raise from_daemon_error(str(exc)) from exc
 

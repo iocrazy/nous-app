@@ -94,6 +94,11 @@ async def test_tools_present_is_rejected_before_any_dispatch():
         (RuntimeError("cli_missing: codex not found"), "cli_missing"),
         (RuntimeError("codex_no_output: nothing"), "codex_no_output"),
         (RuntimeError("weird"), "codex_failed"),
+        # Already typed: it must pass through untouched. ``CodexLocalError`` is
+        # itself a ``RuntimeError``, so without the dedicated except block it
+        # would be re-parsed by ``from_daemon_error`` into ``codex_failed``
+        # with one marker nested inside another.
+        (CodexLocalError("codex_not_logged_in", "x"), "codex_not_logged_in"),
     ],
 )
 async def test_dispatch_failures_become_typed_codes(raised, code):
@@ -104,6 +109,54 @@ async def test_dispatch_failures_become_typed_codes(raised, code):
     with pytest.raises(CodexLocalError) as ei:
         await a.call(_composed(), [{"role": "user", "content": "x"}])
     assert ei.value.code == code
+
+
+@pytest.mark.asyncio
+async def test_images_over_the_backstop_cap_are_trimmed_and_logged():
+    """Trimming must never be silent: the flattened prompt still refers to the
+    dropped images, so the model would answer about pictures it never got.
+
+    Captured through a loguru sink rather than ``caplog`` because this module
+    logs via loguru, which does not propagate into pytest's stdlib capture —
+    ``caplog`` would sit empty regardless of whether the warning fired."""
+    from loguru import logger
+
+    records: list[str] = []
+    sink_id = logger.add(records.append, level="WARNING", format="{message}")
+    seen: dict = {}
+
+    async def fake_dispatch(**kw):
+        seen.update(kw)
+        return {"text": "ok", "usage": {}}
+
+    try:
+        a = CodexDaemonAdapter(
+            user_id="u1", dispatch=fake_dispatch, scope_resolver=_scope
+        )
+        await a.call(
+            _composed(),
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "describe these"},
+                        *(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"https://api.nous.ink/{i}.png"},
+                            }
+                            for i in range(10)
+                        ),
+                    ],
+                }
+            ],
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert len(seen["payload"]["image_urls"]) == 9
+    assert seen["payload"]["image_urls"][-1] == "https://api.nous.ink/8.png"
+    assert any("dropping 1 of 10 images" in r for r in records), records
 
 
 @pytest.mark.asyncio

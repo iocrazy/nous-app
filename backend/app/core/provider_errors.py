@@ -26,6 +26,7 @@ from app.services.ai import error_catalog
 from app.services.ai.error_catalog import classify_ai_error
 from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
 from app.services.ai.llm.llm_retry_middleware import LLMCallError
+from app.services.codex.errors import CodexLocalError
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,18 @@ _MAPPING: dict[str, tuple[int, str, str]] = {
         "Your local codex daemon is not connected. Start it on your machine "
         "(Settings → AI → Local CLI) and try again.",
     ),
+    error_catalog.LOCAL_CLI_MISSING: (
+        424,
+        "local_cli_missing",
+        "The codex CLI is not installed on your machine. Run "
+        "`npm i -g @openai/codex` and restart the daemon.",
+    ),
+    error_catalog.LOCAL_REF_REJECTED: (
+        400,
+        "local_ref_rejected",
+        "One of the attached images could not be used by your local daemon. "
+        "Attach images from your nous library and try again.",
+    ),
     error_catalog.LOCAL_TOOLS_UNSUPPORTED: (
         422,
         "local_tools_unsupported",
@@ -102,7 +115,7 @@ def stream_error_data(exc: BaseException) -> dict:
     ``AILibraryChatService.chat_stream`` 的异常分支都调用这里，避免两处
     各写一份判断逻辑而其中一份漏掉 code 字段（2026-08-11 终审 Critical 1）。
     """
-    if isinstance(exc, (AllModelsFailed, LLMCallError)):
+    if isinstance(exc, (AllModelsFailed, LLMCallError, CodexLocalError)):
         _status, code, message = provider_error_payload(exc)
         return {"error": message, "code": code}
     return {"error": f"{type(exc).__name__}: {exc}", "code": "internal_error"}
@@ -133,3 +146,9 @@ def register_provider_error_handlers(app: FastAPI) -> None:
 
     app.add_exception_handler(AllModelsFailed, _handle)
     app.add_exception_handler(LLMCallError, _handle)
+    # codex-local errors can reach the HTTP/SSE face WITHOUT the retry
+    # middleware wrapping them: the ones raised before dispatch
+    # (``tools_unsupported``) are thrown by the adapter itself, so any call
+    # site that awaits ``adapter.call()`` directly would otherwise land in the
+    # catch-all and lose the typed code to a 500 internal_error.
+    app.add_exception_handler(CodexLocalError, _handle)
