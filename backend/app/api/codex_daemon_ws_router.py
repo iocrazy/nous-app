@@ -2,8 +2,14 @@
 
 The daemon dials OUT to nous (no inbound port, no public IP needed on the
 user's machine) and holds the socket open. Auth is the device token minted
-at pairing: we hash it and look the device up; unknown or revoked tokens are
-refused BEFORE accept() so a dead device never sees an open socket.
+at pairing: we hash it and look the device up. Unknown or revoked tokens are
+refused by accepting the handshake and then closing with 4001 — NOT by
+closing before accept(). Closing an unaccepted WebSocket makes uvicorn (all
+three of its ws implementations) reject the HTTP handshake with a 403, which
+throws the close code away: the client only ever sees 1006, which it must
+treat as a transient network failure and retry forever. Accepting first is
+what lets the daemon distinguish "revoked, stop for good" from "the wifi
+blinked". Costs one accepted socket that is closed microseconds later.
 
 Cross-container glue (spec §4): this handler runs in the *gateway* process,
 but jobs originate in the *worker* container. So on connect we
@@ -129,6 +135,12 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
     device_token = header[7:] if header.lower().startswith("bearer ") else ""
     device = await authenticate_device(device_token)
     if not device:
+        # accept() first — see the module docstring. A close() before accept()
+        # degrades to an HTTP 403 and the 4001 never reaches the daemon, which
+        # then reconnect-loops a revoked device forever. Note a revoked device
+        # reconnecting lands HERE, not on the 4003 path: _lookup_device
+        # filters revoked_at IS NULL, so its token no longer resolves at all.
+        await websocket.accept()
         await websocket.close(code=4001, reason="device authentication failed")
         return
 

@@ -200,13 +200,22 @@ export function CodexDaemonSettings() {
           <div>{t('settings.localCli.helpSetup')}</div>
           <code
             data-testid="codex-prereq-command"
-            className="mt-1 block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
+            className="mt-1 block whitespace-pre-line rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
           >
-            npm i -g @openai/codex gpt-image-2-skill{'\n'}codex login
+            codex login
           </code>
           <div className="mt-2">
             {t('settings.localCli.helpAfter')}
           </div>
+          <div className="mt-2">{t('settings.localCli.helpManage')}</div>
+          <code
+            data-testid="codex-manage-command"
+            className="mt-1 block whitespace-pre-line rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
+          >
+            node ~/.local/share/nous-codex/nous-codex.mjs status{'\n'}node
+            ~/.local/share/nous-codex/nous-codex.mjs uninstall-service
+          </code>
+          <div className="mt-2">{t('settings.localCli.helpRevoke')}</div>
         </div>
       )}
 
@@ -225,10 +234,13 @@ export function CodexDaemonSettings() {
             data-testid="codex-pair-command"
             className="mt-1 block rounded-lg bg-surface-2 px-3 py-2 font-mono text-xs text-content-2"
           >
-            curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs
-            -o nous-codex.mjs{'\n'}node nous-codex.mjs pair {pairCode}
-            {'\n'}node nous-codex.mjs run
+            curl -fsSL
+            https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh |
+            sh -s -- {pairCode}
           </code>
+          <div className="mt-1.5 text-[10px] text-content-3">
+            {t('settings.localCli.pairServiceNote')}
+          </div>
           <button
             type="button"
             onClick={() => void refresh()}
