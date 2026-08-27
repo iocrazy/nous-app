@@ -741,6 +741,12 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "refExplainerMerged": "上面这九格才是发给模型的。下面是仓库 —— 点一张模板就加到这里。",
+      "templateLibrary": "模板库 · 点一张加入",
+      "templateExplainerMerged": "模板库是仓库，上面的格子才是发出去的。模板是你喜欢的一张图，作为参考交给模型 —— 它不替代风格。",
+      "pickVideo": "选一个视频来抓帧",
+      "libraryNoVideos": "素材库里还没有视频。",
+      "changeVideo": "换个视频",
       "modelNote": "与 Settings → 平台模型 同一份列表：在那里关掉的模型这里就不出现。",
       "cropBox": "裁切框 —— 拖动或用方向键",
       "willFillPublishH": "回填发布页的横封面位",
@@ -805,7 +811,7 @@
       "templateGoesToFolder": "会放进素材库里的封面模板文件夹。从素材库挑的图是关联过去，不是复制一份。",
       "templateRefFailed": "这张模板没能准备成参考图，再试一次。",
       "saveTemplateFailed": "封面没能存成模板。它还在这里 —— 再试一次。",
-      "references": "参考图",
+      "references": "发给模型的图",
       "refCount": "{{used}} / {{max}}",
       "refPerson": "人物",
       "refFrame": "视频帧",

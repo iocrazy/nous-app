@@ -741,6 +741,12 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "refExplainerMerged": "These nine slots are what the model receives. The library below is where you pick from — click a template to add it here.",
+      "templateLibrary": "Template library · click to add",
+      "templateExplainerMerged": "The library is the shelf; the slots above are what is sent. A template is a picture you liked, handed to the model as a reference — it does not replace the style.",
+      "pickVideo": "Pick a video to grab frames from",
+      "libraryNoVideos": "No videos in your library yet.",
+      "changeVideo": "Change video",
       "modelNote": "Same list as Settings → platform models: switch a model off there and it leaves this menu.",
       "cropBox": "Crop box — drag or use the arrow keys",
       "willFillPublishH": "Fills the horizontal cover slot on the publish page",
@@ -805,7 +811,7 @@
       "templateGoesToFolder": "It goes into your cover-template folder in the library. Pick from the library and the picture is linked there, not copied.",
       "templateRefFailed": "That template could not be prepared as a reference. Try again.",
       "saveTemplateFailed": "The cover could not be saved as a template. It is still here — try again.",
-      "references": "References",
+      "references": "Sent to the model",
       "refCount": "{{used}} / {{max}}",
       "refPerson": "Person",
       "refFrame": "Frame",

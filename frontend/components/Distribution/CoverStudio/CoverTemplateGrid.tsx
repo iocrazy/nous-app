@@ -32,6 +32,8 @@ interface Props {
   onToggle?: (template: CoverTemplate) => void;
   /** Resource id of the tile whose reference is being resolved, if any. */
   busyId?: string | null;
+  /** Render as the bottom half of the merged references card. */
+  embedded?: boolean;
 }
 
 export function CoverTemplateGrid({
@@ -39,6 +41,7 @@ export function CoverTemplateGrid({
   selectedIds = [],
   onToggle,
   busyId = null,
+  embedded = false,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const [items, setItems] = useState<CoverTemplate[]>([]);
@@ -70,10 +73,13 @@ export function CoverTemplateGrid({
 
   const inUse = items.filter((i) => selectedIds.includes(i.resource_id)).length;
 
+  const Heading = embedded ? 'div' : 'h4';
   return (
-    <div className="cs-card">
-      <h4>
-        {t('distribution.coverStudio.templates', 'Templates')}
+    <div className={embedded ? 'cs-embedded cs-embedded-tpl' : 'cs-card'}>
+      <Heading className={embedded ? 'cs-subhead' : undefined}>
+        {embedded
+          ? t('distribution.coverStudio.templateLibrary', 'Template library · click to add')
+          : t('distribution.coverStudio.templates', 'Templates')}
         <span className="aux">
           {loading
             ? t('common.loading', 'Loading…')
@@ -83,7 +89,7 @@ export function CoverTemplateGrid({
                 inUse,
               })}
         </span>
-      </h4>
+      </Heading>
 
       {loadError && (
         <div className="cs-error">
@@ -166,7 +172,12 @@ export function CoverTemplateGrid({
 
       <div className="cs-body">
         <p className="cs-hint">
-          {t(
+          {embedded
+            ? t(
+                'distribution.coverStudio.templateExplainerMerged',
+                'The library is the shelf; the slots above are what is sent. A template is a picture you liked, handed to the model as a reference — it does not replace the style.',
+              )
+            : t(
             'distribution.coverStudio.templateExplainer',
             'A template is a picture you liked, kept as an example and handed to the model as a reference image. It does not replace the style, which is text.',
           )}

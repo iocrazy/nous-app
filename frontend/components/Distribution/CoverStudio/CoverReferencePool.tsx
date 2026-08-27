@@ -29,7 +29,11 @@ interface Props {
   /** Whether the selected style demands a character reference. */
   requiresPerson?: boolean;
   onRemove: (genId: string) => void;
-  onAddFromTemplates: () => void;
+  /** Optional: when the template library sits right under this pool (the
+   *  merged card), there is no "From templates" tile to jump to. */
+  onAddFromTemplates?: () => void;
+  /** Render without card chrome, as the top half of a merged card. */
+  embedded?: boolean;
   /** Set when the last add was refused, so the card can say which reason. */
   refusal?: 'full' | 'duplicate' | null;
   /** A picture from disk straight into the pool (the design's "上传"). */
@@ -43,6 +47,7 @@ export function CoverReferencePool({
   onAddFromTemplates,
   refusal = null,
   onUpload,
+  embedded = false,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -69,10 +74,11 @@ export function CoverReferencePool({
     return t('distribution.coverStudio.refTemplate', 'Template');
   };
 
+  const Heading = embedded ? 'div' : 'h4';
   return (
-    <div className="cs-card">
-      <h4>
-        {t('distribution.coverStudio.references', 'References')}
+    <div className={embedded ? 'cs-embedded' : 'cs-card'}>
+      <Heading className={embedded ? 'cs-subhead' : undefined}>
+        {t('distribution.coverStudio.references', 'Sent to the model')}
         <span className={`aux ${full ? 'bad' : ''}`} data-testid="cover-ref-count">
           {t('distribution.coverStudio.refCount', {
             defaultValue: '{{used}} / {{max}}',
@@ -80,7 +86,7 @@ export function CoverReferencePool({
             max: MAX_REFERENCES,
           })}
         </span>
-      </h4>
+      </Heading>
 
       <div className="cs-body">
         <div className="cs-pool" data-testid="cover-ref-pool">
@@ -121,16 +127,18 @@ export function CoverReferencePool({
             </div>
           ))}
 
-          <button
-            type="button"
-            className="rf add"
-            disabled={full}
-            onClick={onAddFromTemplates}
-            data-testid="cover-ref-add-template"
-          >
-            <Plus size={14} />
-            {t('distribution.coverStudio.refFromTemplates', 'From templates')}
-          </button>
+          {onAddFromTemplates && (
+            <button
+              type="button"
+              className="rf add"
+              disabled={full}
+              onClick={onAddFromTemplates}
+              data-testid="cover-ref-add-template"
+            >
+              <Plus size={14} />
+              {t('distribution.coverStudio.refFromTemplates', 'From templates')}
+            </button>
+          )}
           {onUpload && (
             <>
               <button
@@ -180,10 +188,15 @@ export function CoverReferencePool({
         )}
 
         <p className="cs-hint" style={{ marginTop: 9 }}>
-          {t(
-            'distribution.coverStudio.refExplainer',
-            'One list of nine, shared. Frames say what is in your video; templates say what it should look like.',
-          )}
+          {embedded
+            ? t(
+                'distribution.coverStudio.refExplainerMerged',
+                'These nine slots are what the model receives. The library below is where you pick from — click a template to add it here.',
+              )
+            : t(
+                'distribution.coverStudio.refExplainer',
+                'One list of nine, shared. Frames say what is in your video; templates say what it should look like.',
+              )}
         </p>
       </div>
     </div>

@@ -25,8 +25,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import enJson from '../../../public/locales/en.json';
 import type { LibraryVideo } from '../../../types';
 
-const { grabCoverFrame } = vi.hoisted(() => ({ grabCoverFrame: vi.fn() }));
-vi.mock('../../../services/distributionService', () => ({ grabCoverFrame }));
+const { grabCoverFrame, listLibraryMediaOrThrow } = vi.hoisted(() => ({
+  grabCoverFrame: vi.fn(),
+  listLibraryMediaOrThrow: vi.fn(),
+}));
+vi.mock('../../../services/distributionService', () => ({ grabCoverFrame, listLibraryMediaOrThrow }));
 
 vi.mock('../../../services/resourceService', () => ({
   getResourceFileUrl: (id: string, token?: string) =>
@@ -313,5 +316,46 @@ describe('CoverFrameGrabber — the crop box moves', () => {
       </I18nextProvider>,
     );
     expect(screen.getByTestId('cover-crop-guide').getAttribute('data-focus-y')).toBe('0.50');
+  });
+});
+
+
+describe('CoverFrameGrabber — picking a video inside the studio', () => {
+  it('offers the library’s videos when the publish page has none selected, and picks one', async () => {
+    listLibraryMediaOrThrow.mockResolvedValueOnce([
+      { id: '901', filename: 'b-roll.mp4', thumbnail_url: null },
+      { id: '902', filename: 'talk.mp4', thumbnail_url: 'https://api.test/t.jpg' },
+    ]);
+    const onPickSource = vi.fn();
+    renderGrabber({ sources: [], scopeId: 'scope-1', embedded: true, onPickSource });
+
+    expect(await screen.findByTestId('cover-video-pick-902')).toBeTruthy();
+    expect(listLibraryMediaOrThrow).toHaveBeenCalledWith('scope-1', { mediaType: 'video' });
+
+    fireEvent.click(screen.getByTestId('cover-video-pick-902'));
+
+    expect(onPickSource).toHaveBeenCalledWith(expect.objectContaining({ id: '902' }));
+    // The stage is now that video: the grab button appears, and a way back.
+    expect(screen.getByTestId('cover-grab-button')).toBeTruthy();
+    expect(screen.getByTestId('cover-change-video').textContent).toContain('talk.mp4');
+  });
+
+  it('without a scope it still just says what is missing', () => {
+    renderGrabber({ sources: [] });
+    expect(screen.queryByTestId('cover-video-picker')).toBeNull();
+    expect(screen.getByText(/Pick a video on the publish page first/)).toBeTruthy();
+    expect(listLibraryMediaOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('a failed library load says so and can retry', async () => {
+    listLibraryMediaOrThrow.mockRejectedValueOnce(new Error('503'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderGrabber({ sources: [], scopeId: 'scope-1' });
+
+    expect(await screen.findByText('Could not load your library.')).toBeTruthy();
+    listLibraryMediaOrThrow.mockResolvedValueOnce([{ id: '901', filename: 'b-roll.mp4', thumbnail_url: null }]);
+    fireEvent.click(screen.getByText('Retry'));
+    expect(await screen.findByTestId('cover-video-pick-901')).toBeTruthy();
+    spy.mockRestore();
   });
 });

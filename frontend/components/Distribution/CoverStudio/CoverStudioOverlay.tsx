@@ -84,6 +84,8 @@ interface Props {
   /** The topic — the publish title, which is what the cover is about. */
   topic: string;
   onClose: () => void;
+  /** A video picked inside the studio (the publish page had none selected). */
+  onPickSource?: (video: LibraryVideo) => void;
   /**
    * The cover as a RESOURCE id, in the slot the active tab was setting. One
    * slot per apply: the vertical tab gives `{ vertical }` (an AI cover or a
@@ -99,6 +101,7 @@ export function CoverStudioOverlay({
   topic,
   onClose,
   onApply,
+  onPickSource,
 }: Props): React.JSX.Element | null {
   const { t } = useTranslation();
 
@@ -566,23 +569,36 @@ export function CoverStudioOverlay({
                   </div>
                 </div>
 
-                <CoverReferencePool
-                  refs={refs}
-                  requiresPerson={requiresPerson}
-                  onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
-                  onAddFromTemplates={() => {
-                    document
-                      .querySelector('[data-testid="cover-template-grid"]')
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }}
-                  onUpload={(file) => void uploadReference(file)}
-                  refusal={refusal}
-                />
-                {poolError && (
-                  <div className="cs-error" data-testid="cover-ref-upload-error">
-                    {poolError}
-                  </div>
-                )}
+                {/* One card: the nine slots that go to the model on top, the
+                    template library to pick from underneath. Two cards read
+                    as two piles of pictures with no visible relation. */}
+                <div className="cs-card cs-refcard" data-testid="cover-ref-card">
+                  <CoverReferencePool
+                    embedded
+                    refs={refs}
+                    requiresPerson={requiresPerson}
+                    onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
+                    onUpload={(file) => void uploadReference(file)}
+                    refusal={refusal}
+                  />
+                  {poolError && (
+                    <div className="cs-error" data-testid="cover-ref-upload-error">
+                      {poolError}
+                    </div>
+                  )}
+                  {templateError && (
+                    <div className="cs-error" data-testid="cover-template-ref-error">
+                      {templateError}
+                    </div>
+                  )}
+                  <CoverTemplateGrid
+                    embedded
+                    scopeId={scopeId}
+                    selectedIds={templateIds(refs)}
+                    busyId={templateBusyId}
+                    onToggle={(tpl) => void toggleTemplate(tpl)}
+                  />
+                </div>
 
                 <label className="cs-toggle cs-person-toggle">
                   <input
@@ -706,6 +722,8 @@ export function CoverStudioOverlay({
                   poolFull={refs.length >= 9 && !grabAsPerson}
                   onUseAsCover={useFrameAsCover}
                   onUploadCover={uploadAsCover}
+                  scopeId={scopeId}
+                  onPickSource={onPickSource}
                 />
               </div>
             ) : stage === 'done' && finalUrl ? (
@@ -749,17 +767,6 @@ export function CoverStudioOverlay({
               />
             )}
 
-            {templateError && (
-              <div className="cs-error" data-testid="cover-template-ref-error">
-                {templateError}
-              </div>
-            )}
-            <CoverTemplateGrid
-              scopeId={scopeId}
-              selectedIds={templateIds(refs)}
-              busyId={templateBusyId}
-              onToggle={(tpl) => void toggleTemplate(tpl)}
-            />
           </div>
 
           {/* ── side: preview, model + style, actions ─────────────────── */}
