@@ -806,6 +806,9 @@ export function CoverStudioOverlay({
                     ))}
                   </select>
                 </label>
+                <p className="cs-hint" style={{ marginTop: -4, marginBottom: 10 }} data-testid="cover-model-note">
+                  {t('distribution.coverStudio.modelNote', 'Same list as Settings → platform models: switch a model off there and it leaves this menu.')}
+                </p>
                 <label className="cs-field">
                   <span>{t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}</span>
                   <select

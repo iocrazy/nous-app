@@ -133,6 +133,14 @@ class TestPostGenerations:
 class TestGenerationModels:
     @pytest.mark.asyncio
     async def test_lists_only_image_and_video_public_fields(self, client, monkeypatch):
+        # This test is about the type/field projection; the Settings platform
+        # gate has its own tests — let everything through here.
+        async def _allow_all(user_id):
+            return True, frozenset()
+
+        monkeypatch.setattr(
+            "app.services.ai.platform_model_visibility.platform_model_gate", _allow_all
+        )
         rows = [
             {
                 "name": "jimeng-cli-image",
@@ -310,3 +318,32 @@ class TestCancelGeneration:
         resp = await client.delete("/api/v1/canvases/generations/nope")
         assert resp.status_code == 404
         cancel.assert_not_awaited()
+
+
+class TestGenerationModelsFollowSettings:
+    """The picker must show what Settings → platform-model card shows."""
+
+    @pytest.mark.asyncio
+    async def test_models_the_user_switched_off_in_settings_are_not_listed(
+        self, client, monkeypatch
+    ):
+        from app.repositories import mediahub_model_repository as repo_mod
+
+        rows = [
+            {"name": "codex-image", "display_name": "GPT Image", "type": "image"},
+            {"name": "jimeng-cli-image", "display_name": "Dreamina", "type": "image"},
+        ]
+        repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+        monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
+
+        async def _gate(user_id):
+            return True, frozenset({"codex-image"})
+
+        monkeypatch.setattr(
+            "app.services.ai.platform_model_visibility.platform_model_gate", _gate
+        )
+
+        resp = await client.get("/api/v1/canvases/generation-models")
+
+        assert resp.status_code == 200
+        assert [m["name"] for m in resp.json()["data"]] == ["jimeng-cli-image"]

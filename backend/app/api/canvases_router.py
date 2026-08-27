@@ -223,10 +223,16 @@ async def list_generation_models(auth: AuthDep) -> dict:
     """Image/video rows from the mediahub_models catalog (public columns
     only — no api_key/base_url) for the composer's model picker."""
     from app.repositories import mediahub_model_repository as _repo_mod
+    from app.services.ai.platform_model_visibility import (
+        filter_platform_models_for_user,
+    )
 
     rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
         viewer_user_id=auth.user_id
     )
+    # The user's Settings → platform-model card (master switch + per-model
+    # blacklist) applies here too; the picker must show what Settings shows.
+    rows = await filter_platform_models_for_user(auth.user_id, rows)
     data = [
         {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
         for r in rows

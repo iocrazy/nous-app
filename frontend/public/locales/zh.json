@@ -741,6 +741,7 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "modelNote": "与 Settings → 平台模型 同一份列表：在那里关掉的模型这里就不出现。",
       "cropBox": "裁切框 —— 拖动或用方向键",
       "willFillPublishH": "回填发布页的横封面位",
       "coverTabs": "封面",
