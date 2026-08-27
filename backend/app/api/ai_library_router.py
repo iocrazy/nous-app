@@ -2357,6 +2357,13 @@ async def get_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     return row
 
 
+def _event_type_filter(te: Any, types: str) -> list:
+    """``types`` CSV → zero or one ``IN`` clause. Blank tokens are dropped;
+    all-blank means no filter (backward compatible)."""
+    wanted = [t.strip() for t in (types or "").split(",") if t.strip()]
+    return [te.event_type.in_(wanted)] if wanted else []
+
+
 @router.get(
     "/runs/{run_id}/events",
     summary="Transcript event stream for one run (mig 285, paperclip P3)",
@@ -2366,12 +2373,16 @@ async def list_run_events(
     auth: AuthDep,
     after_seq: int = 0,
     limit: int = 500,
+    types: str = "",
 ) -> Dict[str, Any]:
     """Ordered agent_run_events for the Runs detail Transcript section.
 
     Ownership enforced the same way as the run detail (a foreign run_id
     reads as 404). ``after_seq`` supports incremental polling while the
-    run is live.
+    run is live. ``types`` is an optional CSV of event types (e.g.
+    ``todo_write,llm_retry``) so a progress poller does not drag every
+    assistant body along; empty means all — the consumers that predate it
+    keep working unchanged. An unknown type is an empty result, never 500.
     """
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
@@ -2395,6 +2406,7 @@ async def list_run_events(
                     select(TE.seq, TE.event_type, TE.payload, TE.created_at)
                     .where(TE.run_id == int(run_id))
                     .where(TE.seq > after_seq)
+                    .where(*_event_type_filter(TE, types))
                     .order_by(TE.seq.asc())
                     .limit(max(1, min(limit, 1000)))
                 )

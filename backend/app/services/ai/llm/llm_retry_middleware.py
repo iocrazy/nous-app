@@ -215,7 +215,33 @@ def describe_llm_error(exc: BaseException) -> str:
     # clear. Redacting first replaces the whole secret with "***" while it is
     # still intact, and the truncation afterwards can only shorten a mask.
     detail = redact(" ".join(detail.split()))[:_BODY_SNIPPET_MAX]
-    return f"{head}: {detail}" if detail else head
+    line = f"{head}: {detail}" if detail else head
+    chain = _cause_chain(exc)
+    return f"{line} <- {chain}" if chain else line
+
+
+_CAUSE_CHAIN_MAX = _BODY_SNIPPET_MAX  # the chain gets the same budget as the body
+
+
+def _cause_chain(exc: BaseException) -> str:
+    """``__cause__`` links, outermost first, as ``Type: msg <- Type: msg``.
+
+    "fetch failed" on top hides the DNS error three levels down, and DBOS
+    keeps only ``args`` — so the chain has to be inside the string. Cycles
+    (possible when exceptions are re-raised across retries) terminate.
+    """
+    from app.boundary.log_redact import redact
+
+    parts: list[str] = []
+    seen = {id(exc)}
+    cur = exc.__cause__
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        parts.append(f"{type(cur).__name__}: {' '.join(str(cur).split())}")
+        cur = cur.__cause__
+    if not parts:
+        return ""
+    return redact(" <- ".join(parts))[:_CAUSE_CHAIN_MAX]
 
 
 # ----------------------------------------------------------------------

@@ -436,6 +436,23 @@ class RunRecorder:
             await self._mirror_todos(payload)
         elif event_type == "turn_end":
             await self._mirror_metadata_key("turn_end_reason", payload.get("reason"))
+        elif event_type == "llm_retry":
+            # Only what the Task Center card renders ("Retry 2/4 · waiting
+            # 3.2s"); the failure text stays in the event, not on the row.
+            from datetime import datetime, timezone
+
+            await self._mirror_metadata_key(
+                "last_retry",
+                {
+                    **{
+                        k: payload.get(k)
+                        for k in ("attempt", "max_retries", "delay_ms", "model")
+                    },
+                    # The card decides "still waiting" vs "retried" from
+                    # at + delay_ms against its own clock.
+                    "at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
     async def _mirror_todos(self, payload: dict[str, Any]) -> None:
         """Mirror the todo snapshot into agent_runs.metadata_json.todos."""
@@ -454,8 +471,8 @@ class RunRecorder:
         try:
             import json as _json
 
-            from sqlalchemy import cast, func, update
-            from sqlalchemy.dialects.postgresql import JSONB
+            from sqlalchemy import ARRAY, Text, cast, func, update
+            from sqlalchemy.dialects.postgresql import JSONB, array
 
             from app.db.session import write_scope
             from app.models.agents import AgentRuns
@@ -467,7 +484,10 @@ class RunRecorder:
                     .values(
                         metadata_json=func.jsonb_set(
                             func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB)),
-                            "{" + key + "}",
+                            # jsonb_set wants text[]; a bare string binds as
+                            # varchar and PG finds no matching function (seen
+                            # live 2026-08-27 — the mock boundary hid it).
+                            cast(array([key]), ARRAY(Text)),
                             cast(_json.dumps(value, ensure_ascii=False), JSONB),
                             True,
                         )

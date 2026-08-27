@@ -503,3 +503,56 @@ def test_describe_llm_error_redacts_before_truncating(pad):
     # No run of the secret long enough to be useful may appear.
     for start in range(0, len(secret) - 8):
         assert secret[start : start + 9] not in described
+
+
+# ── errorChain (harness phase 2, W1 read side) ────────────────────────────
+
+
+class TestDescribeLlmErrorCauseChain:
+    """'fetch failed' on top hides the DNS error underneath. DBOS pickles
+    ``args`` only, so the chain must be inside the string."""
+
+    def test_three_nested_causes_all_appear_in_order(self):
+        from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+        try:
+            try:
+                try:
+                    raise OSError("dns lookup failed for api.example")
+                except OSError as e1:
+                    raise ConnectionError("connect to upstream") from e1
+            except ConnectionError as e2:
+                raise RuntimeError("fetch failed") from e2
+        except RuntimeError as top:
+            text = describe_llm_error(top)
+        assert text.startswith("RuntimeError: fetch failed")
+        i_conn = text.index("ConnectionError: connect to upstream")
+        i_os = text.index("OSError: dns lookup failed")
+        assert i_conn < i_os
+
+    def test_chain_is_bounded_by_the_snippet_budget(self):
+        from app.services.ai.llm import llm_retry_middleware as m
+
+        try:
+            try:
+                raise ValueError("x" * 5000)
+            except ValueError as e1:
+                raise RuntimeError("y" * 5000) from e1
+        except RuntimeError as top:
+            text = m.describe_llm_error(top)
+        assert len(text) <= 2 * m._BODY_SNIPPET_MAX + 200, len(text)
+
+    def test_no_cause_leaves_the_line_unchanged(self):
+        from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+        assert describe_llm_error(RuntimeError("plain")) == "RuntimeError: plain"
+
+    def test_a_cycle_in_the_chain_terminates(self):
+        from app.services.ai.llm.llm_retry_middleware import describe_llm_error
+
+        a = RuntimeError("a")
+        b = RuntimeError("b")
+        a.__cause__ = b
+        b.__cause__ = a
+        text = describe_llm_error(a)
+        assert text.count("RuntimeError: b") == 1
