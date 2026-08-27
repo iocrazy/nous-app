@@ -205,8 +205,10 @@ async def test_issue_dispatch_turn_records_tokens_and_cost_when_adapter_has_no_s
     assert recorder.prompt_tokens == 100
     assert recorder.completion_tokens == 50
 
-    assert len(table.update_calls) == 1
-    finish = table.update_calls[0]
+    assert (
+        len([c for c in table.update_calls if "completion_tokens" in c]) == 1
+    )  # exactly one usage write; metadata mirrors (turn_end) are separate
+    finish = next(c for c in table.update_calls if "completion_tokens" in c)
     assert finish["prompt_tokens"] == 100
     assert finish["completion_tokens"] == 50
     assert finish["prompt_tokens"] + finish["completion_tokens"] == 150
@@ -276,7 +278,7 @@ async def test_issue_dispatch_turn_records_usage_when_stream_raises_not_supporte
 
     assert recorder.prompt_tokens == 200
     assert recorder.completion_tokens == 75
-    finish = table.update_calls[0]
+    finish = next(c for c in table.update_calls if "completion_tokens" in c)
     assert finish["prompt_tokens"] == 200
     assert finish["completion_tokens"] == 75
     assert finish.get("cost_cents") is not None
@@ -390,8 +392,10 @@ async def test_issue_dispatch_doubao_sse_trailing_usage_chunk_records_tokens_and
     assert recorder.prompt_tokens == 100
     assert recorder.completion_tokens == 50
 
-    assert len(table.update_calls) == 1
-    finish = table.update_calls[0]
+    assert (
+        len([c for c in table.update_calls if "completion_tokens" in c]) == 1
+    )  # exactly one usage write; metadata mirrors (turn_end) are separate
+    finish = next(c for c in table.update_calls if "completion_tokens" in c)
     assert finish["prompt_tokens"] == 100
     assert finish["completion_tokens"] == 50
     assert finish.get("cost_cents") is not None

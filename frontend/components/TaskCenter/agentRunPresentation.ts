@@ -22,7 +22,8 @@ export interface AgentRef {
  * next to AgentRunRow so the row type and the column list can't drift apart. */
 export const AGENT_RUN_SELECT =
   'id,user_id,status,trigger,input_summary,output_summary,error_message,started_at,ended_at,' +
-  'created_at,prompt_tokens,completion_tokens,cost_cents,model,task_id,agent_id,ai_agents(slug,name)';
+  'created_at,prompt_tokens,completion_tokens,cost_cents,model,task_id,agent_id,metadata_json,' +
+  'ai_agents(slug,name)';
 
 /** Subset of public.agent_runs the Task Center reads. */
 export interface AgentRunRow {
@@ -40,6 +41,9 @@ export interface AgentRunRow {
   input_summary: string | null;
   output_summary: string | null;
   error_message: string | null;
+  /** Backend mirrors run-level facts here (todos, turn_end_reason). Absent on
+   * older rows and on realtime payloads that predate the column selection. */
+  metadata_json?: Record<string, unknown> | null;
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
@@ -69,6 +73,25 @@ export function agentDisplayName(run: Pick<AgentRunRow, 'ai_agents'>): string | 
   return slug || undefined;
 }
 
+/**
+ * How the turn actually ended, for the completed-state subtitle. The backend
+ * files one typed `turn_end` per turn (harness phase 2) and mirrors its reason
+ * into `metadata_json.turn_end_reason`. "completed" and the reasons that already
+ * flip the run to failed/cancelled yield null — the default copy is right for
+ * them. Only the endings a "completed" run can hide get their own line: the
+ * run says done while the agent was in fact stopped short.
+ */
+export function turnEndSubtitle(metadata: Record<string, unknown> | null | undefined): string | null {
+  const reason = metadata?.turn_end_reason;
+  switch (reason) {
+    case 'max_iterations':    return 'Stopped at tool limit';
+    case 'provider_length':   return 'Cut off by model limit';
+    case 'context_rejected':  return 'Rejected: context too large';
+    case 'awaiting_approval': return 'Waiting for approval';
+    default:                  return null;
+  }
+}
+
 /** agent_runs has no "queued" state — a run is executing or terminal. */
 function mapStatus(status: AgentRunRow['status']): TaskStatus {
   switch (status) {
@@ -96,7 +119,10 @@ export function agentRunToTask(run: AgentRunRow, cachedAgentName?: string): Unif
     title: input || `Agent · ${run.trigger}`,
     // While running, the trigger ("chat" / "issue") is the most useful hint;
     // once done, surface the agent's own output summary.
-    subtitle: status === 'completed' ? run.output_summary || undefined : run.trigger,
+    subtitle:
+      status === 'completed'
+        ? turnEndSubtitle(run.metadata_json) ?? (run.output_summary || undefined)
+        : run.trigger,
     progress: 0,
     error_msg: run.error_message || undefined,
     // Stash LLM stats so the agent result card can render tokens/cost/model +

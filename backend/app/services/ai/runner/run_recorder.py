@@ -434,13 +434,20 @@ class RunRecorder:
 
         if event_type == "todo_write":
             await self._mirror_todos(payload)
+        elif event_type == "turn_end":
+            await self._mirror_metadata_key("turn_end_reason", payload.get("reason"))
 
     async def _mirror_todos(self, payload: dict[str, Any]) -> None:
-        """Mirror the todo snapshot into agent_runs.metadata_json.todos.
+        """Mirror the todo snapshot into agent_runs.metadata_json.todos."""
+        await self._mirror_metadata_key("todos", payload)
+
+    async def _mirror_metadata_key(self, key: str, value: Any) -> None:
+        """Set one top-level key of agent_runs.metadata_json.
 
         The transcript event is the truth; this is a cache for the Task
         Center, which already receives the agent_runs row over Realtime.
         Best-effort: a failed mirror never touches the event or the run.
+        ``key`` is a code literal, never user input (it lands in a jsonb path).
         """
         if self.run_id is None:
             return
@@ -460,8 +467,8 @@ class RunRecorder:
                     .values(
                         metadata_json=func.jsonb_set(
                             func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB)),
-                            "{todos}",
-                            cast(_json.dumps(payload, ensure_ascii=False), JSONB),
+                            "{" + key + "}",
+                            cast(_json.dumps(value, ensure_ascii=False), JSONB),
                             True,
                         )
                     )
