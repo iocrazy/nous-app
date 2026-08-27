@@ -84,7 +84,7 @@ import {
 } from 'lucide-react';
 
 import { getResourceFileUrl } from '../../services/resourceService';
-import type { CoverPair } from './CoverPicker';
+import type { CoverPair } from './CoverSlots';
 
 /** The three views the panel offers. */
 export type PreviewTab = 'video' | 'gallery' | 'cover';

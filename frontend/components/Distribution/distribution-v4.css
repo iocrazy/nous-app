@@ -775,3 +775,11 @@
   .dist-v4 .sess-body { flex-direction: column; align-items: center; }
   .dist-v4 .sess-info { width: 100%; }
 }
+
+/* Cover section, reduced to two slots (2026-08-27). Both are buttons that
+   open Cover Studio on their own tab; a filled slot gets a clear control. */
+.dist-v4 .cover-slot.h.pick { cursor: pointer; }
+.dist-v4 .cover-cell { position: relative; }
+.dist-v4 .cover-clear { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--island); color: var(--content-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.dist-v4 .cover-clear:hover { color: var(--danger, #b04e4e); border-color: currentColor; }
+.dist-v4 .cover-hint { flex: 1; min-width: 200px; margin: 0; align-self: center; font-size: 11.5px; line-height: 1.5; color: var(--content-4); }
