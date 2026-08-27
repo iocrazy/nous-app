@@ -27,6 +27,16 @@ import type { LibraryVideo } from '../../../types';
 import { formatTimestamp } from './coverReferences';
 import './cover-studio.css';
 
+/** Normalised crop anchor — the centre of the crop box over the frame. */
+export interface CropFocus {
+  x: number;
+  y: number;
+}
+
+const CENTRE: CropFocus = { x: 0.5, y: 0.5 };
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+const KEY_STEP = 0.05;
+
 export interface GrabbedFrame {
   generatedMediaId: string;
   url: string;
@@ -49,8 +59,13 @@ interface Props {
   embedded?: boolean;
   /** Aspect of the cover being set; drives the crop guide. */
   aspect?: '3:4' | '4:3';
-  /** No-AI path: the server centre-crops this exact frame into the cover. */
-  onUseAsCover?: (sourceId: string, timestampSeconds: number) => Promise<void>;
+  /** No-AI path: the server crops this exact frame into the cover, anchored
+   *  where the user dragged the box. */
+  onUseAsCover?: (
+    sourceId: string,
+    timestampSeconds: number,
+    focus: CropFocus,
+  ) => Promise<void>;
   /** A picture from disk becomes the cover as-is. */
   onUploadCover?: (file: File) => Promise<void>;
 }
@@ -75,6 +90,12 @@ export function CoverFrameGrabber({
   const [grabError, setGrabError] = useState<string | null>(null);
   const [using, setUsing] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
+  // Where the crop box is anchored, normalised to the VIDEO picture (not the
+  // stage box — the video is letterboxed inside it). Centre until dragged.
+  const [focus, setFocus] = useState<CropFocus>(CENTRE);
+  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ startX: number; startY: number; focus: CropFocus } | null>(null);
 
   const active = sources.find((s) => s.id === sourceId) ?? sources[0] ?? null;
 
@@ -104,7 +125,71 @@ export function CoverFrameGrabber({
     setCurrent(0);
     setDuration(0);
     setGrabError(null);
+    setFocus(CENTRE);
+    setVideoSize(null);
   }, [active?.id]);
+
+  /** The rectangle the video picture actually occupies inside the stage
+   *  (object-fit: contain), in stage-local pixels. */
+  const pictureRect = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage || !videoSize || videoSize.w === 0 || videoSize.h === 0) return null;
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    if (sw === 0 || sh === 0) return null;
+    const scale = Math.min(sw / videoSize.w, sh / videoSize.h);
+    const w = videoSize.w * scale;
+    const h = videoSize.h * scale;
+    return { left: (sw - w) / 2, top: (sh - h) / 2, width: w, height: h };
+  }, [videoSize]);
+
+  /** Crop-box geometry: the largest `aspect` box inside the picture, centred
+   *  on `focus` and clamped so it never leaves the picture. */
+  const guideStyle = (): React.CSSProperties | undefined => {
+    const pic = pictureRect();
+    if (!pic) return undefined;
+    const target = aspect === '4:3' ? 4 / 3 : 3 / 4;
+    const picAspect = pic.width / pic.height;
+    const w = picAspect > target ? pic.height * target : pic.width;
+    const h = picAspect > target ? pic.height : pic.width / target;
+    const left = pic.left + Math.min(Math.max(focus.x * pic.width - w / 2, 0), pic.width - w);
+    const top = pic.top + Math.min(Math.max(focus.y * pic.height - h / 2, 0), pic.height - h);
+    return { left, top, width: w, height: h };
+  };
+
+  const moveFocus = useCallback((dx: number, dy: number) => {
+    setFocus((f) => ({ x: clamp01(f.x + dx), y: clamp01(f.y + dy) }));
+  }, []);
+
+  const onGuidePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    drag.current = { startX: e.clientX, startY: e.clientY, focus };
+  };
+  const onGuidePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    const pic = pictureRect();
+    if (!d || !pic) return;
+    setFocus({
+      x: clamp01(d.focus.x + (e.clientX - d.startX) / pic.width),
+      y: clamp01(d.focus.y + (e.clientY - d.startY) / pic.height),
+    });
+  };
+  const onGuidePointerUp = () => {
+    drag.current = null;
+  };
+  const onGuideKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const map: Record<string, [number, number]> = {
+      ArrowLeft: [-KEY_STEP, 0],
+      ArrowRight: [KEY_STEP, 0],
+      ArrowUp: [0, -KEY_STEP],
+      ArrowDown: [0, KEY_STEP],
+    };
+    const d = map[e.key];
+    if (!d) return;
+    e.preventDefault();
+    moveFocus(d[0], d[1]);
+  };
 
   const grab = useCallback(async () => {
     if (!active || grabbing || poolFull) return;
@@ -147,7 +232,7 @@ export function CoverFrameGrabber({
     setUsing(true);
     setGrabError(null);
     try {
-      await onUseAsCover(active.id, at);
+      await onUseAsCover(active.id, at, focus);
     } catch (err) {
       console.error('[CoverFrameGrabber] use-as-cover failed:', err);
       setGrabError(
@@ -159,7 +244,7 @@ export function CoverFrameGrabber({
     } finally {
       setUsing(false);
     }
-  }, [active, onUseAsCover, using, current, t]);
+  }, [active, onUseAsCover, using, current, focus, t]);
 
   const uploadCover = useCallback(
     async (file: File) => {
@@ -220,8 +305,8 @@ export function CoverFrameGrabber({
         <span className="aux">
           {embedded
             ? aspect === '4:3'
-              ? t('distribution.coverStudio.cropGuideH', 'Centre crop · horizontal 4:3')
-              : t('distribution.coverStudio.cropGuideV', 'Centre crop · vertical 3:4')
+              ? t('distribution.coverStudio.cropGuideH', 'Drag the box · horizontal 4:3')
+              : t('distribution.coverStudio.cropGuideV', 'Drag the box · vertical 3:4')
             : formatTimestamp(current)}
         </span>
       </h4>
@@ -241,7 +326,7 @@ export function CoverFrameGrabber({
           </select>
         )}
 
-        <div className="cs-stage">
+        <div className="cs-stage" ref={stageRef}>
           {/* crossOrigin so a future canvas use never taints; preload metadata
               so duration arrives without pulling the whole file. */}
           <video
@@ -250,7 +335,10 @@ export function CoverFrameGrabber({
             preload="metadata"
             controls={false}
             data-testid="cover-grab-video"
-            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+            onLoadedMetadata={(e) => {
+              setDuration(e.currentTarget.duration || 0);
+              setVideoSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
+            }}
             onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime || 0)}
             onClick={() => {
               const v = videoRef.current;
@@ -259,11 +347,27 @@ export function CoverFrameGrabber({
               else v.pause();
             }}
           />
-          {/* The crop guide — what the server keeps. It is a CENTRE crop
-              (covers/select), so the guide is not draggable; drawing a box
-              that could be moved would promise an offset the server ignores. */}
+          {/* The crop box — what the server keeps. Drag it (or nudge it with
+              the arrow keys); its centre is sent as the crop anchor and
+              covers/select honours it. Until the video's size is known the
+              box is drawn centred by CSS. */}
           {embedded && (
-            <div className={`cs-cropguide ${aspect === '4:3' ? 'h' : 'v'}`} data-testid="cover-crop-guide" aria-hidden="true" />
+            <div
+              className={`cs-cropguide ${aspect === '4:3' ? 'h' : 'v'} ${videoSize ? 'placed' : ''}`}
+              style={guideStyle()}
+              role="slider"
+              tabIndex={0}
+              aria-label={t('distribution.coverStudio.cropBox', 'Crop box — drag or use the arrow keys')}
+              aria-valuetext={`${Math.round(focus.x * 100)}%, ${Math.round(focus.y * 100)}%`}
+              data-focus-x={focus.x.toFixed(2)}
+              data-focus-y={focus.y.toFixed(2)}
+              data-testid="cover-crop-guide"
+              onPointerDown={onGuidePointerDown}
+              onPointerMove={onGuidePointerMove}
+              onPointerUp={onGuidePointerUp}
+              onPointerCancel={onGuidePointerUp}
+              onKeyDown={onGuideKeyDown}
+            />
           )}
         </div>
 

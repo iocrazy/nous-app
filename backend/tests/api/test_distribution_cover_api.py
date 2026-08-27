@@ -260,7 +260,9 @@ SELECT_BODY: Dict[str, Any] = {"source_resource_id": "500", "timestamp_seconds":
 def _stub_derive(monkeypatch: pytest.MonkeyPatch, result) -> List[Dict[str, Any]]:
     calls: List[Dict[str, Any]] = []
 
-    async def fake_derive(*, source_resource_id, timestamp_seconds, user_id, repo=None):
+    async def fake_derive(
+        *, source_resource_id, timestamp_seconds, user_id, repo=None, **_focus
+    ):
         calls.append(
             {
                 "source_resource_id": source_resource_id,
@@ -531,3 +533,34 @@ def test_select_rejects_an_incoherent_body_without_cropping(
     assert resp.status_code == 422
     assert modern == []
     assert legacy == []
+
+
+def test_select_carries_the_crop_focus_through_and_defaults_to_centre(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """工作室里拖出来的锚点要原样到达 derive；不传就是居中（老行为）。"""
+    seen: List[Dict[str, Any]] = []
+
+    async def fake_derive(**kw):
+        seen.append(kw)
+        return _pair()
+
+    monkeypatch.setattr(
+        "app.services.distribution.cover_frames.derive_cover_pair", fake_derive
+    )
+    client = TestClient(_make_app())
+    body = {"source_resource_id": "900", "timestamp_seconds": 3.1}
+
+    r = client.post(
+        "/api/v1/distribution/covers/select",
+        json={**body, "focus_x": 0.2, "focus_y": 0.9},
+    )
+    assert r.status_code == 200, r.text
+    assert seen[-1]["focus_x"] == 0.2 and seen[-1]["focus_y"] == 0.9
+
+    r = client.post("/api/v1/distribution/covers/select", json=body)
+    assert r.status_code == 200, r.text
+    assert seen[-1]["focus_x"] == 0.5 and seen[-1]["focus_y"] == 0.5
+
+    r = client.post("/api/v1/distribution/covers/select", json={**body, "focus_x": 1.5})
+    assert r.status_code == 422

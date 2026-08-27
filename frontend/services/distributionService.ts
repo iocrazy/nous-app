@@ -729,6 +729,10 @@ export const grabCoverFrame = async (
 export const selectCoverFrame = (body: {
   source_resource_id: string;
   timestamp_seconds: number;
+  /** Crop anchor, normalised 0..1 (the centre of the box the user dragged).
+   *  Omitted = centre crop. */
+  focus_x?: number;
+  focus_y?: number;
   publish_task_id?: string;
 } | {
   /** DEPRECATED shape, for the deploy-skew window only — a backend that has

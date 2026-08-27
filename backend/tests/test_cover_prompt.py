@@ -197,3 +197,24 @@ class TestInstructions:
     def test_blank_adds_nothing(self, blank):
         assert "Extra direction" not in _s1(instructions=blank)
         assert "Extra direction" not in _s2(instructions=blank)
+
+
+class TestAspect:
+    """横封面也走 AI：4:3 换画幅词和构图句，3:4 一个字不变。"""
+
+    def test_default_is_3_4_vertical_everywhere(self):
+        assert "3:4 vertical" in _s1()
+        assert "Create an original 3:4 vertical" in _s2()
+        assert "headline in the top third" in _s2()
+
+    def test_4_3_swaps_the_words_and_uses_a_landscape_composition(self):
+        s1 = _s1(aspect="4:3")
+        s2 = _s2(aspect="4:3")
+        assert "4:3 horizontal" in s1 and "3:4" not in s1
+        assert "Create an original 4:3 horizontal" in s2 and "3:4" not in s2
+        assert "a landscape layout, not a portrait cover turned sideways" in s2
+        assert "headline in the top third" not in s2
+
+    def test_an_unknown_aspect_raises(self):
+        with pytest.raises(ValueError, match="aspect"):
+            _s1(aspect="16:9")

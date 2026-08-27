@@ -29,6 +29,8 @@ interface Props {
   prompt?: string;
   /** Set when a generation failed; carries the server's own sentence. */
   error?: string | null;
+  /** The grid's shape — 3:4 for the vertical cover, 4:3 for the horizontal. */
+  aspect?: '3:4' | '4:3';
 }
 
 const QUADRANTS = [1, 2, 3, 4] as const;
@@ -41,6 +43,7 @@ export function CoverDrafts({
   onRefine,
   prompt,
   error,
+  aspect = '3:4',
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const busy = stage === 'drafting' || stage === 'refining';
@@ -82,7 +85,7 @@ export function CoverDrafts({
       )}
 
       <div className="cs-gridwrap">
-        <div className="cs-draftgrid" data-testid="cover-draft-grid">
+        <div className={`cs-draftgrid ${aspect === '4:3' ? 'h' : ''}`} data-testid="cover-draft-grid" data-aspect={aspect}>
           {gridUrl ? (
             <>
               {/* One image, four hit areas laid over it. Slicing the picture
@@ -125,7 +128,7 @@ export function CoverDrafts({
           <p className="cs-hint">
             {t(
               'distribution.coverStudio.oneImageFourWhy',
-              'The model draws all four in a single 3:4 picture, so a round of ideas costs one generation instead of four.',
+              'The model draws all four in a single picture, so a round of ideas costs one generation instead of four.',
             )}
           </p>
 

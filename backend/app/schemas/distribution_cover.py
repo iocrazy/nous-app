@@ -107,6 +107,9 @@ class CoverSelectRequest(BaseModel):
             "resource. Kept only for the frontend/backend deploy-skew window."
         ),
     )
+    # 裁切锚点（归一化 0..1，框中心）。缺省居中。工作室里拖动裁切框就是在改它。
+    focus_x: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    focus_y: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     publish_task_id: Optional[str] = Field(
         default=None,
         description=(
@@ -174,6 +177,11 @@ class CoverGenerateRequest(BaseModel):
 
     stage: Literal[1, 2]
     topic: str = Field(..., min_length=1, max_length=200)
+    # 画幅。3:4 是竖封面，4:3 是横封面 —— 两个都走 AI（2026-08-26 用户拍板）。
+    aspect: Literal["3:4", "4:3"] = "3:4"
+    # 风格 = 一个 category='cover' 的 skill 的 slug。内置的 viral-video-cover
+    # 走代码里转录好的骨架；其余 skill 走 cover_styles.build_from_skill。
+    style: str = Field(default="viral-video-cover", max_length=120)
     # mediahub_models catalog row name; "" = let the catalog pick.
     model: str = ""
     # generated_media reference URLs, in pool order. The server re-checks the
@@ -198,6 +206,20 @@ class CoverGenerateRequest(BaseModel):
             # and then the prompt builder raises deeper in — as a 500.
             raise ValueError("topic cannot be blank")
         return trimmed
+
+
+class CoverStyleOut(BaseModel):
+    slug: str
+    name: str
+    description: str = ""
+    # 这套风格是否要求人物参考图（前端据此做阻断）。
+    requires_person: bool = False
+    aspects: list[str] = Field(default_factory=lambda: ["3:4", "4:3"])
+    builtin: bool = False
+
+
+class CoverStylesOut(BaseModel):
+    styles: list[CoverStyleOut]
 
 
 class CoverGenerateResponse(BaseModel):
@@ -225,4 +247,6 @@ __all__ = [
     "CoverExtractResponse",
     "CoverSelectRequest",
     "CoverSelectResponse",
+    "CoverStyleOut",
+    "CoverStylesOut",
 ]

@@ -1298,3 +1298,44 @@
 .cover-studio .cs-actions-col > * {
   width: 100%;
 }
+
+/* ── horizontal covers through the model + a draggable crop box ────────── */
+
+.cover-studio .cs-draftgrid.h {
+  aspect-ratio: 4 / 3;
+}
+
+.cover-studio .cs-final.h {
+  aspect-ratio: 4 / 3;
+}
+
+.cover-studio .cs-finalstage .cs-final.h {
+  max-width: 100%;
+}
+
+.cover-studio .cs-round img.h {
+  object-fit: contain;
+}
+
+.cover-studio .cs-cropguide {
+  cursor: grab;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.cover-studio .cs-cropguide:active {
+  cursor: grabbing;
+}
+
+.cover-studio .cs-cropguide:focus-visible {
+  outline: 2px solid var(--island);
+  outline-offset: -4px;
+}
+
+/* Once the video's size is known the box is positioned in pixels; the CSS
+   centring below is only the first paint. */
+.cover-studio .cs-cropguide.placed {
+  left: auto;
+  transform: none;
+  aspect-ratio: auto;
+}

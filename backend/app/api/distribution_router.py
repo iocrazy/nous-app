@@ -51,6 +51,8 @@ from app.schemas.distribution_cover import (
     CoverGrabFrameResponse,
     CoverSelectRequest,
     CoverSelectResponse,
+    CoverStyleOut,
+    CoverStylesOut,
 )
 from app.schemas.distribution_music import (
     BrowseIdentityOut,
@@ -1616,6 +1618,8 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
                     source_resource_id=str(body.source_resource_id),
                     timestamp_seconds=float(body.timestamp_seconds),
                     user_id=user["id"],
+                    focus_x=0.5 if body.focus_x is None else float(body.focus_x),
+                    focus_y=0.5 if body.focus_y is None else float(body.focus_y),
                 )
     except CoverFrameError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
@@ -1683,6 +1687,19 @@ async def grab_cover_frame(body: CoverGrabFrameRequest, user: CurrentUserDep):
     return CoverGrabFrameResponse(**grabbed.as_dict())
 
 
+@router.get(
+    "/covers/styles",
+    response_model=CoverStylesOut,
+    dependencies=[Depends(require_distribution)],
+)
+async def list_cover_styles_endpoint(user: CurrentUserDep):
+    """封面风格 = 当前用户看得见的 category='cover' 的 skill，内置的永远在最前。"""
+    from app.services.distribution.cover_styles import list_cover_styles
+
+    styles = await list_cover_styles(user["id"])
+    return CoverStylesOut(styles=[CoverStyleOut(**st.as_dict()) for st in styles])
+
+
 @router.post(
     "/covers/generate",
     response_model=CoverGenerateResponse,
@@ -1705,10 +1722,14 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
     import uuid as _uuid
 
     from app.services.distribution.cover_prompt import (
-        COVER_ASPECT,
         CoverPromptInput,
         build_stage1_prompt,
         build_stage2_prompt,
+    )
+    from app.services.distribution.cover_styles import (
+        BUILTIN_SLUG,
+        build_from_skill,
+        resolve_cover_style,
     )
     from app.services.infra import dbos_orchestrator
     from app.workflows.canvas_generation import canvas_generation_workflow
@@ -1719,11 +1740,22 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
         selected_draft=body.selected_draft,
         headline=body.headline,
         instructions=body.instructions,
+        aspect=body.aspect,
     )
     try:
-        prompt = (
-            build_stage1_prompt(data) if body.stage == 1 else build_stage2_prompt(data)
-        )
+        if body.style == BUILTIN_SLUG:
+            prompt = (
+                build_stage1_prompt(data)
+                if body.stage == 1
+                else build_stage2_prompt(data)
+            )
+        else:
+            style = await resolve_cover_style(user["id"], body.style)
+            if style is None:
+                raise HTTPException(
+                    status_code=404, detail=f"cover style not found: {body.style}"
+                )
+            prompt = build_from_skill(style, data)
     except ValueError as e:
         # 组装器的拒绝是对**输入**的判断（空主题、编号越界），是 4xx 不是 500。
         raise HTTPException(status_code=422, detail=str(e)) from e
@@ -1759,7 +1791,7 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
             # ⚠️ 图片分支读的是 params["ratio"]，不是 "aspect"（视频才读 aspect）。
             # 写错不会报错，只会静默变成正方形。
             "params": {
-                "ratio": COVER_ASPECT,
+                "ratio": body.aspect,
                 "quality": body.quality,
                 "source_urls": refs,
             },
@@ -1773,7 +1805,7 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
     return CoverGenerateResponse(
         task_id=task_id,
         prompt=prompt,
-        aspect=COVER_ASPECT,
+        aspect=body.aspect,
         reference_count=len(refs),
     )
 

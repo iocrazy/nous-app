@@ -22,9 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-# 这个 skill 只管竖版 3:4（用户已拍板）。横版不是"暂未支持"，是这套视觉语法本身
-# 就是为手机竖屏信息流写的，换个画幅整套构图规则都不成立。
+# 默认画幅。2026-08-26 起横封面也走 AI：4:3 用同一套语法，只把画幅词和构图句换成
+# 横版的（大标题占一侧、人物占另一侧），而不是把竖版构图硬塞进横框。
 COVER_ASPECT = "3:4"
+COVER_ASPECTS = ("3:4", "4:3")
+_ORIENTATION = {"3:4": "vertical", "4:3": "horizontal"}
 
 # 四个草案共用一张 2x2 网格图，所以阶段一只生成 1 张。
 STAGE1_IMAGE_COUNT = 1
@@ -50,6 +52,33 @@ class CoverPromptInput:
     # 创作者写给模型的一句话（设计稿的「提示词」框）。可空。放在骨架末尾、Safety
     # 句之后，并明说不得覆盖安全条款 —— 自由文本进 prompt 的唯一入口。
     instructions: str = ""
+    # 画幅：3:4 竖封面 / 4:3 横封面。
+    aspect: str = COVER_ASPECT
+
+
+def _aspect_words(aspect: str) -> tuple[str, str]:
+    """``("3:4", "vertical")`` / ``("4:3", "horizontal")``；别的画幅抛错。"""
+    orient = _ORIENTATION.get(aspect)
+    if not orient:
+        raise ValueError(f"aspect must be one of {COVER_ASPECTS}, got {aspect!r}")
+    return aspect, orient
+
+
+def _composition_clause(aspect: str) -> str:
+    if aspect == "4:3":
+        return (
+            "Composition: a landscape layout, not a portrait cover turned "
+            "sideways — huge bold headline filling one side (left or right), "
+            "expressive human/character cutout on the other side, oversized "
+            "symbolic object or dramatic scene behind them, strong depth, "
+            "clean readable layout."
+        )
+    return (
+        "Composition: huge bold headline in the top third, expressive "
+        "human/character cutout in the lower half, oversized symbolic "
+        "object or dramatic scene behind them, strong depth, clean "
+        "readable layout."
+    )
 
 
 def _labels_clause(allow: bool) -> str:
@@ -77,11 +106,12 @@ def build_stage1_prompt(data: CoverPromptInput) -> str:
         # 会自己编一个，而用户拿到的封面跟他的视频无关。skill 自己也说了
         # "Ask a question only if the topic is empty"。
         raise ValueError("cover prompt needs a topic")
+    aspect, orient = _aspect_words(data.aspect)
 
     parts = [
         (
-            "Create one 2x2 preview grid image. The overall image is 3:4 "
-            "vertical. Each cell is a complete 3:4 Chinese viral short-video "
+            f"Create one 2x2 preview grid image. The overall image is {aspect} "
+            f"{orient}. Each cell is a complete {aspect} Chinese viral short-video "
             f"cover draft for the same topic: {topic}."
         ),
         (
@@ -137,8 +167,9 @@ def build_stage2_prompt(data: CoverPromptInput) -> str:
         )
     )
 
+    aspect, orient = _aspect_words(data.aspect)
     parts = [
-        ("Create an original 3:4 vertical Chinese viral short-video cover " "image."),
+        f"Create an original {aspect} {orient} Chinese viral short-video cover image.",
         f"Topic: {topic}.",
         (
             "The supplied 2x2 grid image is a set of four drafts. Redraw "
@@ -157,12 +188,7 @@ def build_stage2_prompt(data: CoverPromptInput) -> str:
             "the same person and core facial features while changing "
             "expression and gesture for the topic."
         ),
-        (
-            "Composition: huge bold headline in the top third, expressive "
-            "human/character cutout in the lower half, oversized symbolic "
-            "object or dramatic scene behind them, strong depth, clean "
-            "readable layout."
-        ),
+        _composition_clause(aspect),
         (
             "Style: black or dark cinematic background, high contrast, bold "
             "white/yellow Chinese display typography, thick black/white "

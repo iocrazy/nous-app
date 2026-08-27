@@ -10,11 +10,10 @@
 //   side    the cover as it will be seen (preview), model + style, and the
 //           actions for the current step
 //
-// Two things are deliberately NOT here:
-//   - a draggable crop box. `covers/select` centre-crops on the server; a box
-//     the user could move would promise an offset nothing honours.
-//   - AI for the horizontal cover. The style is 3:4 only (cover_prompt.py);
-//     that tab crops a frame or takes an upload, and says so.
+// Both tabs go through the model (4:3 has its own composition sentence in
+// cover_prompt.py), and both can also take a dragged frame crop or an upload.
+// The style list is GET /covers/styles — the built-in one plus every
+// `category: cover` skill the user can see.
 //
 // Every generated round is kept (`rounds`) so the user can go back to an
 // earlier grid or final without paying for it again.
@@ -29,9 +28,13 @@ import {
   type GenerationModel,
 } from '../../../features/canvas-core/services/canvasGenerationService';
 import {
+  BUILTIN_COVER_STYLE,
   awaitCoverGeneration,
   generateCoverDrafts,
+  listCoverStyles,
   refineCoverDraft,
+  type CoverAspect,
+  type CoverStyle,
 } from '../../../services/coverStudioService';
 import { promoteGeneration } from '../../../services/generatedMediaService';
 import {
@@ -55,7 +58,7 @@ import {
 } from './coverReferences';
 import { CoverReferencePool } from './CoverReferencePool';
 import { CoverTemplateGrid } from './CoverTemplateGrid';
-import { CoverFrameGrabber, type GrabbedFrame } from './CoverFrameGrabber';
+import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFrameGrabber';
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import './cover-studio.css';
 
@@ -64,6 +67,8 @@ type Orientation = 'vertical' | 'horizontal';
 /** One generation round: the grid, and the final it produced, if any. */
 interface Round {
   id: number;
+  /** Which cover this round was for; decides the slot "Done" fills. */
+  aspect: CoverAspect;
   gridUrl: string;
   prompt: string;
   selected: number | null;
@@ -105,6 +110,8 @@ export function CoverStudioOverlay({
   const [allowSmallLabels, setAllowSmallLabels] = useState(false);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [model, setModel] = useState('');
+  const [styles, setStyles] = useState<CoverStyle[]>([]);
+  const [styleSlug, setStyleSlug] = useState(BUILTIN_COVER_STYLE);
   const [poolError, setPoolError] = useState<string | null>(null);
 
   const [stage, setStage] = useState<CoverStage>('idle');
@@ -126,7 +133,13 @@ export function CoverStudioOverlay({
   // generation has happened.
   const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
 
+  const aspect: CoverAspect = orientation === 'vertical' ? '3:4' : '4:3';
   const round = activeRound === null ? null : rounds.find((r) => r.id === activeRound) ?? null;
+  const style = styles.find((st) => st.slug === styleSlug);
+  // Unknown until the list arrives; the built-in style needs a person, so
+  // that is the safe default — blocking is recoverable, a faceless draft is
+  // a wasted generation.
+  const requiresPerson = style ? style.requires_person : true;
   const gridUrl = round?.gridUrl;
   const prompt = round?.prompt;
   const selected = round?.selected ?? null;
@@ -144,6 +157,15 @@ export function CoverStudioOverlay({
       .catch((err) => {
         // Degraded, not broken: '' lets the catalog pick its default.
         console.error('[CoverStudio] listGenerationModels failed:', err);
+      });
+    void listCoverStyles()
+      .then((all) => {
+        if (alive) setStyles(all);
+      })
+      .catch((err) => {
+        // The built-in style still works without the list — the select just
+        // shows that one entry.
+        console.error('[CoverStudio] listCoverStyles failed:', err);
       });
     return () => {
       alive = false;
@@ -214,11 +236,10 @@ export function CoverStudioOverlay({
   );
 
   const canGenerate =
-    orientation === 'vertical' &&
     stage !== 'drafting' &&
     stage !== 'refining' &&
     !!topic.trim() &&
-    !!person;
+    (!requiresPerson || !!person);
 
   const runDrafts = useCallback(async () => {
     if (!canGenerate) return;
@@ -234,6 +255,8 @@ export function CoverStudioOverlay({
         model,
         allowSmallLabels,
         instructions: instructions.trim(),
+        aspect,
+        style: styleSlug,
       });
       // Usage ticks AFTER a successful dispatch, once per run — and it can
       // never fail the generation (the service swallows its own errors).
@@ -247,7 +270,7 @@ export function CoverStudioOverlay({
       const id = Date.now();
       setRounds((prev) => [
         ...prev,
-        { id, gridUrl: outcome.url as string, prompt: dispatched.prompt, selected: null },
+        { id, aspect, gridUrl: outcome.url as string, prompt: dispatched.prompt, selected: null },
       ]);
       setActiveRound(id);
       setStage('picking');
@@ -256,7 +279,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('idle');
     }
-  }, [canGenerate, topic, refs, model, allowSmallLabels, instructions]);
+  }, [canGenerate, topic, refs, model, allowSmallLabels, instructions, aspect, styleSlug]);
 
   const runRefine = useCallback(async () => {
     if (!round || !gridUrl || selected === null) return;
@@ -275,6 +298,8 @@ export function CoverStudioOverlay({
         model,
         allowSmallLabels,
         instructions: instructions.trim(),
+        aspect: round.aspect,
+        style: styleSlug,
         selectedDraft: selected,
       });
       patchRound(id, { prompt: dispatched.prompt });
@@ -293,7 +318,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('picking');
     }
-  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, patchRound]);
+  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, styleSlug, patchRound]);
 
   const apply = useCallback(async () => {
     if (!finalGenId || applying) return;
@@ -306,7 +331,7 @@ export function CoverStudioOverlay({
       const resourceId =
         promotedId ?? (await promoteGeneration(finalGenId)).promoted_resource_id;
       setPromotedId(resourceId);
-      onApply({ vertical: resourceId });
+      onApply(round?.aspect === '4:3' ? { horizontal: resourceId } : { vertical: resourceId });
       onClose();
     } catch (err) {
       console.error('[CoverStudio] apply failed:', err);
@@ -319,7 +344,7 @@ export function CoverStudioOverlay({
     } finally {
       setApplying(false);
     }
-  }, [finalGenId, applying, promotedId, onApply, onClose, t]);
+  }, [finalGenId, applying, promotedId, round, onApply, onClose, t]);
 
   const saveAsTemplate = useCallback(async () => {
     if (!finalGenId || savedAsTemplate) return;
@@ -384,10 +409,12 @@ export function CoverStudioOverlay({
   const slot = orientation === 'vertical' ? 'vertical' : 'horizontal';
 
   const useFrameAsCover = useCallback(
-    async (sourceId: string, timestampSeconds: number) => {
+    async (sourceId: string, timestampSeconds: number, focus: CropFocus) => {
       const res = await selectCoverFrame({
         source_resource_id: sourceId,
         timestamp_seconds: timestampSeconds,
+        focus_x: focus.x,
+        focus_y: focus.y,
       });
       // The server derives BOTH crops from one frame; only the slot this tab
       // is setting is applied. The other keeps whatever it had.
@@ -411,6 +438,8 @@ export function CoverStudioOverlay({
     [slot, scopeId, onApply, onClose],
   );
 
+  const visibleRounds = rounds.filter((r) => r.aspect === aspect);
+
   const restoreRound = useCallback(
     (r: Round) => {
       setActiveRound(r.id);
@@ -425,12 +454,10 @@ export function CoverStudioOverlay({
   if (!open) return null;
 
   const busy = stage === 'drafting' || stage === 'refining';
-  const aspect: '3:4' | '4:3' = orientation === 'vertical' ? '3:4' : '4:3';
-  const previewUrl =
-    orientation === 'vertical' ? finalUrl ?? lastFrameUrl : lastFrameUrl;
+  const previewUrl = finalUrl ?? lastFrameUrl;
   const generateHint = !topic.trim()
     ? t('distribution.coverStudio.needsTopic', 'Blocked: give the publish a title first — the cover is about it.')
-    : !person
+    : requiresPerson && !person
       ? t('distribution.coverStudio.needsPerson', 'Blocked: add the person picture first. Without it every draft is a different face.')
       : null;
 
@@ -471,7 +498,11 @@ export function CoverStudioOverlay({
               role="tab"
               aria-selected={orientation === 'vertical'}
               className={orientation === 'vertical' ? 'on' : ''}
-              onClick={() => setOrientation('vertical')}
+              onClick={() => {
+                setOrientation('vertical');
+                setActiveRound(null);
+                setStage('idle');
+              }}
               data-testid="cover-tab-vertical"
             >
               {t('distribution.coverStudio.tabVertical', 'Vertical cover 3:4')}
@@ -481,7 +512,11 @@ export function CoverStudioOverlay({
               role="tab"
               aria-selected={orientation === 'horizontal'}
               className={orientation === 'horizontal' ? 'on' : ''}
-              onClick={() => setOrientation('horizontal')}
+              onClick={() => {
+                setOrientation('horizontal');
+                setActiveRound(null);
+                setStage('idle');
+              }}
               data-testid="cover-tab-horizontal"
             >
               {t('distribution.coverStudio.tabHorizontal', 'Horizontal cover 4:3')}
@@ -502,7 +537,7 @@ export function CoverStudioOverlay({
         <div className="cs-cols cs-cols-v4">
           {/* ── left: what goes into the model ─────────────────────────── */}
           <div className="cs-col-left">
-            {orientation === 'vertical' ? (
+            {(
               <>
                 <div className="cs-card">
                   <h4>
@@ -533,7 +568,7 @@ export function CoverStudioOverlay({
 
                 <CoverReferencePool
                   refs={refs}
-                  requiresPerson
+                  requiresPerson={requiresPerson}
                   onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
                   onAddFromTemplates={() => {
                     document
@@ -580,7 +615,7 @@ export function CoverStudioOverlay({
                     >
                       {stage === 'drafting'
                         ? t('distribution.coverStudio.drafting', 'Drawing four drafts…')
-                        : rounds.length > 0
+                        : visibleRounds.length > 0
                           ? t('distribution.coverStudio.regenerateDrafts', 'Generate 4 new drafts')
                           : t('distribution.coverStudio.generateDrafts', 'Generate 4 drafts')}
                     </button>
@@ -599,16 +634,16 @@ export function CoverStudioOverlay({
                 <div className="cs-card">
                   <h4>
                     {t('distribution.coverStudio.generatedCovers', 'AI covers')}
-                    <span className="aux">{rounds.length}</span>
+                    <span className="aux">{visibleRounds.length}</span>
                   </h4>
                   <div className="cs-body">
-                    {rounds.length === 0 ? (
+                    {visibleRounds.length === 0 ? (
                       <div className="cs-empty" data-testid="cover-history-empty">
                         {t('distribution.coverStudio.historyEmpty', 'Generated covers appear here; you can go back to any earlier round.')}
                       </div>
                     ) : (
                       <div className="cs-history" data-testid="cover-history">
-                        {rounds.map((r, i) => (
+                        {visibleRounds.map((r, i) => (
                           <button
                             key={r.id}
                             type="button"
@@ -619,6 +654,7 @@ export function CoverStudioOverlay({
                             title={t('distribution.coverStudio.roundN', { defaultValue: 'Round {{n}}', n: i + 1 })}
                           >
                             <img
+                              className={r.aspect === '4:3' ? 'h' : ''}
                               src={`${getApiUrl()}${r.finalUrl ?? r.gridUrl}`}
                               alt={t('distribution.coverStudio.roundN', { defaultValue: 'Round {{n}}', n: i + 1 })}
                             />
@@ -637,25 +673,13 @@ export function CoverStudioOverlay({
                   </div>
                 </div>
               </>
-            ) : (
-              <div className="cs-card">
-                <h4>{t('distribution.coverStudio.references', 'References')}</h4>
-                <div className="cs-body">
-                  <p className="cs-hint" data-testid="cover-horizontal-note">
-                    {t(
-                      'distribution.coverStudio.horizontalNoAi',
-                      'This style only draws vertical 3:4 — the horizontal cover does not go through AI. Crop a frame below, or upload a picture.',
-                    )}
-                  </p>
-                </div>
-              </div>
             )}
           </div>
 
           {/* ── stage: what the user is looking at ─────────────────────── */}
           <div className="cs-col-stage">
             <div className="cs-steps cs-steps-v4">
-              <span className={`cs-step ${stage !== 'idle' || orientation === 'horizontal' ? 'done' : 'now'}`}>
+              <span className={`cs-step ${stage !== 'idle' ? 'done' : 'now'}`}>
                 <span className="num">1</span>
                 {t('distribution.coverStudio.stepFrame', 'Frame · person')}
               </span>
@@ -671,7 +695,7 @@ export function CoverStudioOverlay({
               </span>
             </div>
 
-            {orientation === 'horizontal' || stage === 'idle' ? (
+            {stage === 'idle' ? (
               <div className="cs-card cs-stagecard">
                 <CoverFrameGrabber
                   embedded
@@ -690,13 +714,14 @@ export function CoverStudioOverlay({
                   {t('distribution.coverStudio.finalCover', 'Final cover')}
                   <span className="aux">
                     {t('distribution.coverStudio.finalFrom', {
-                      defaultValue: '3:4 · redrawn from draft #{{n}}',
+                      defaultValue: '{{aspect}} · redrawn from draft #{{n}}',
+                      aspect: round?.aspect ?? aspect,
                       n: selected ?? 1,
                     })}
                   </span>
                 </h4>
                 <div className="cs-body cs-finalstage">
-                  <div className="cs-final">
+                  <div className={`cs-final ${round?.aspect === '4:3' ? 'h' : ''}`}>
                     <img src={`${getApiUrl()}${finalUrl}`} alt={t('distribution.coverStudio.finalCover', 'Final cover')} data-testid="cover-final-image" />
                   </div>
                   {prompt && (
@@ -720,24 +745,21 @@ export function CoverStudioOverlay({
                 onRefine={() => void runRefine()}
                 prompt={prompt}
                 error={runError}
+                aspect={round?.aspect ?? aspect}
               />
             )}
 
-            {orientation === 'vertical' && (
-              <>
-                {templateError && (
-                  <div className="cs-error" data-testid="cover-template-ref-error">
-                    {templateError}
-                  </div>
-                )}
-                <CoverTemplateGrid
-                  scopeId={scopeId}
-                  selectedIds={templateIds(refs)}
-                  busyId={templateBusyId}
-                  onToggle={(tpl) => void toggleTemplate(tpl)}
-                />
-              </>
+            {templateError && (
+              <div className="cs-error" data-testid="cover-template-ref-error">
+                {templateError}
+              </div>
             )}
+            <CoverTemplateGrid
+              scopeId={scopeId}
+              selectedIds={templateIds(refs)}
+              busyId={templateBusyId}
+              onToggle={(tpl) => void toggleTemplate(tpl)}
+            />
           </div>
 
           {/* ── side: preview, model + style, actions ─────────────────── */}
@@ -775,7 +797,6 @@ export function CoverStudioOverlay({
                     aria-label={t('distribution.coverStudio.model', 'Model')}
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    disabled={orientation === 'horizontal'}
                   >
                     <option value="">{t('distribution.coverStudio.modelDefault', 'Catalog default')}</option>
                     {models.map((m) => (
@@ -791,23 +812,29 @@ export function CoverStudioOverlay({
                     className="cs-source"
                     style={{ marginBottom: 0 }}
                     aria-label={t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}
-                    value="viral-video-cover"
-                    onChange={() => {}}
-                    disabled={orientation === 'horizontal'}
+                    value={styleSlug}
+                    onChange={(e) => setStyleSlug(e.target.value)}
                     data-testid="cover-style"
                   >
-                    <option value="viral-video-cover">Viral Video Cover</option>
+                    {(styles.length > 0
+                      ? styles
+                      : [{ slug: BUILTIN_COVER_STYLE, name: 'Viral Video Cover' }]
+                    ).map((st) => (
+                      <option key={st.slug} value={st.slug}>
+                        {st.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                <p className="cs-hint">
-                  {t('distribution.coverStudio.styleNote', 'Vertical 3:4 only. One style for now — the list is the cover skills you have imported.')}
+                <p className="cs-hint" data-testid="cover-style-note">
+                  {style?.description ||
+                    t('distribution.coverStudio.styleNote', 'The list is the built-in style plus every cover skill you have imported (category: cover).')}
                 </p>
                 <label className="cs-toggle">
                   <input
                     type="checkbox"
                     checked={allowSmallLabels}
                     onChange={(e) => setAllowSmallLabels(e.target.checked)}
-                    disabled={orientation === 'horizontal'}
                     data-testid="cover-small-labels"
                   />
                   <span>
@@ -822,7 +849,7 @@ export function CoverStudioOverlay({
 
             <div className="cs-card">
               <div className="cs-body">
-                {orientation === 'horizontal' || stage === 'idle' ? (
+                {stage === 'idle' ? (
                   <p className="cs-hint" data-testid="cover-side-hint">
                     {t('distribution.coverStudio.noAiHint', 'No AI needed: the frame on the stage can be the cover as it is — use the button under it.')}
                   </p>
@@ -835,7 +862,11 @@ export function CoverStudioOverlay({
                     <div className="cs-chosen">
                       <b>{t('distribution.coverStudio.thisIsYourCover', 'This is your cover.')}</b>
                       <ul>
-                        <li>{t('distribution.coverStudio.willFillPublish', 'Fills the vertical cover slot on the publish page')}</li>
+                        <li>
+                          {round?.aspect === '4:3'
+                            ? t('distribution.coverStudio.willFillPublishH', 'Fills the horizontal cover slot on the publish page')
+                            : t('distribution.coverStudio.willFillPublish', 'Fills the vertical cover slot on the publish page')}
+                        </li>
                         <li>{t('distribution.coverStudio.willSaveLibrary', 'Saves the file to your library')}</li>
                       </ul>
                     </div>
