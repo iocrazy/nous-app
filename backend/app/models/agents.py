@@ -508,7 +508,9 @@ class AgentRunTranscriptEvents(Base):
         CheckConstraint(
             "event_type = ANY (ARRAY['user'::text, 'assistant'::text,"
             " 'tool_call'::text, 'error'::text, 'system'::text,"
-            " 'llm_retry'::text])",
+            " 'llm_retry'::text, 'todo_write'::text,"
+            " 'compaction_start'::text, 'compaction_summary'::text,"
+            " 'compaction_end'::text, 'turn_end'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(
