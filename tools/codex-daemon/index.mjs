@@ -421,6 +421,9 @@ const AUTH_RE = /\bnot logged in\b|\bplease log ?in\b|\b401\b|unauthori[sz]ed/i;
  *  Error message contains codex stdout, i.e. text the model controls. */
 export function classifyJobError(err) {
   if (err?.spawnFailed) return 'cli_missing';
+  // Ahead of exit code and stderr: SIGKILL races the child's own exit, so a
+  // timed-out run can still carry both, and neither is the real story.
+  if (err?.timedOut) return 'timeout';
   const thrown = err?.code;
   if (thrown === 'codex_no_output' || thrown === 'ref_rejected') return thrown;
   if (AUTH_RE.test(String(err?.stderr ?? ''))) return 'codex_not_logged_in';

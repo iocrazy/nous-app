@@ -380,6 +380,29 @@ test('classifyJobError: an ENOENT that did not come from spawn is not cli_missin
   );
 });
 
+// The backend's _STATUS_BY_CODE has a real `timeout` code (424) but no
+// `job_failed` key, so a timed-out run used to be coerced to `codex_failed` —
+// its timeout branch never fired in the one case that reaches it most.
+test('classifyJobError: a timed-out run is timeout, not a generic failure', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex timed out after 180s'), {
+      timedOut: true, exitCode: null, stderr: '',
+    })),
+    'timeout',
+  );
+});
+
+// SIGKILL races the child's own exit, so a timed-out run can still arrive
+// with an exit code and late stderr. The timeout is the true story.
+test('classifyJobError: timeout outranks a late exit code and auth-looking stderr', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex timed out after 180s'), {
+      timedOut: true, exitCode: 1, stderr: 'stream error: 401 Unauthorized',
+    })),
+    'timeout',
+  );
+});
+
 test('classifyJobError: the thrown-side codes win over any text matching', () => {
   assert.equal(
     classifyJobError(Object.assign(new Error('…'), { code: 'codex_no_output' })),
