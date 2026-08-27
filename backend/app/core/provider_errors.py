@@ -56,6 +56,32 @@ _MAPPING: dict[str, tuple[int, str, str]] = {
         "task_timeout",
         "The model took too long to respond. Try again.",
     ),
+    # codex-local: the failure is on the USER's own machine, so the copy points
+    # at what they can do there instead of at "the provider" (which for this
+    # path is their own laptop). 424 = we could not act because the dependency
+    # the request needs (their daemon) is not there.
+    error_catalog.LOCAL_DAEMON_OFFLINE: (
+        424,
+        "local_daemon_offline",
+        "Your local codex daemon is not connected. Start it on your machine "
+        "(Settings → AI → Local CLI) and try again.",
+    ),
+    error_catalog.LOCAL_TOOLS_UNSUPPORTED: (
+        422,
+        "local_tools_unsupported",
+        "Local Codex cannot run tools or Skills. Unbind them from this agent "
+        "or pick another model.",
+    ),
+    error_catalog.LOCAL_CODEX_NOT_LOGGED_IN: (
+        401,
+        "local_codex_not_logged_in",
+        "Your local codex CLI is not logged in. Run `codex login` on your machine.",
+    ),
+    error_catalog.LOCAL_CODEX_FAILED: (
+        424,
+        "local_codex_failed",
+        "Local Codex failed to produce a reply. Check the daemon log on your machine.",
+    ),
 }
 
 _FALLBACK = (500, "internal_error", "Internal server error")

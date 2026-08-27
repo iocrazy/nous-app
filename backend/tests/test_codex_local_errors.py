@@ -1,0 +1,65 @@
+"""codex-local failures are typed end to end: non-retryable for the retry
+middleware, classified by the error catalog, mapped to a user message."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.core.provider_errors import provider_error_payload, stream_error_data
+from app.services.ai import error_catalog
+from app.services.ai.llm.llm_retry_middleware import LLMCallError, classify_error
+from app.services.codex.errors import CodexLocalError
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "code,status",
+    [
+        ("daemon_offline", 424),
+        ("timeout", 424),
+        ("tools_unsupported", 422),
+        ("codex_not_logged_in", 401),
+        ("cli_missing", 424),
+        ("codex_no_output", 424),
+        ("codex_failed", 424),
+    ],
+)
+def test_every_code_is_non_retryable(code, status):
+    exc = CodexLocalError(code, "boom")
+    assert exc.status_code == status
+    assert classify_error(exc) == "non_retryable"
+    assert str(exc).startswith(f"[codex-local:{code}]")
+
+
+@pytest.mark.unit
+def test_catalog_classifies_from_message_marker():
+    assert (
+        error_catalog.classify_ai_error(CodexLocalError("daemon_offline", "x"))
+        == error_catalog.LOCAL_DAEMON_OFFLINE
+    )
+    assert (
+        error_catalog.classify_ai_error(CodexLocalError("tools_unsupported", "x"))
+        == error_catalog.LOCAL_TOOLS_UNSUPPORTED
+    )
+    assert (
+        error_catalog.classify_ai_error(CodexLocalError("codex_not_logged_in", "x"))
+        == error_catalog.LOCAL_CODEX_NOT_LOGGED_IN
+    )
+    assert (
+        error_catalog.classify_ai_error(CodexLocalError("codex_failed", "x"))
+        == error_catalog.LOCAL_CODEX_FAILED
+    )
+    # the marker survives the LLMCallError wrap the middleware applies
+    wrapped = LLMCallError("non-retryable: [codex-local:daemon_offline] x")
+    assert (
+        error_catalog.classify_ai_error(wrapped) == error_catalog.LOCAL_DAEMON_OFFLINE
+    )
+
+
+@pytest.mark.unit
+def test_payload_and_stream_data_carry_the_code():
+    exc = LLMCallError("non-retryable: [codex-local:daemon_offline] x")
+    status, code, message = provider_error_payload(exc)
+    assert (status, code) == (424, "local_daemon_offline")
+    assert "daemon" in message.lower()
+    assert stream_error_data(exc) == {"error": message, "code": "local_daemon_offline"}
