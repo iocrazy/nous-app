@@ -31,6 +31,13 @@ const { grabCoverFrame, listLibraryMediaOrThrow } = vi.hoisted(() => ({
 }));
 vi.mock('../../../services/distributionService', () => ({ grabCoverFrame, listLibraryMediaOrThrow }));
 
+// The filmstrip hook has its own contract (server sampling over Realtime);
+// here it is a controllable stub so the strip can be shown or not per test.
+const strip = vi.hoisted(() => ({ value: { status: 'idle', candidates: [], error: null, retry: () => {} } as {
+  status: string; candidates: unknown[]; error: string | null; retry: () => void;
+} }));
+vi.mock('./useCoverFrameCandidates', () => ({ useCoverFrameCandidates: () => strip.value }));
+
 vi.mock('../../../services/resourceService', () => ({
   getResourceFileUrl: (id: string, token?: string) =>
     `https://api.test/api/v1/resources/${id}/file${token ? `?token=${token}` : ''}`,
@@ -122,11 +129,11 @@ describe('CoverFrameGrabber', () => {
     // advances between the click and the read.
     expect(video.pause).toHaveBeenCalled();
     await waitFor(() =>
-      expect(onGrabbed).toHaveBeenCalledWith({
+      expect(onGrabbed).toHaveBeenCalledWith(expect.objectContaining({
         generatedMediaId: '341582104263581',
         url: '/api/v1/generated-media/341582104263581/cover',
         timestampSeconds: 3.1,
-      }),
+      }), false),
     );
   });
 
@@ -357,5 +364,43 @@ describe('CoverFrameGrabber — picking a video inside the studio', () => {
     fireEvent.click(screen.getByText('Retry'));
     expect(await screen.findByTestId('cover-video-pick-901')).toBeTruthy();
     spy.mockRestore();
+  });
+});
+
+
+describe('CoverFrameGrabber — set as person, and the filmstrip', () => {
+  it('"Set as person" grabs the same frame flagged as the person, even when the pool is full', async () => {
+    grabCoverFrame.mockResolvedValueOnce(GRAB_RESULT);
+    const onGrabbed = vi.fn();
+    renderGrabber({ onGrabbed, poolFull: true, embedded: true });
+    primeVideo(3.1);
+
+    expect((screen.getByTestId('cover-grab-button') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('cover-grab-person'));
+
+    await waitFor(() => expect(onGrabbed).toHaveBeenCalledWith(expect.objectContaining({ timestampSeconds: 3.1 }), true));
+  });
+
+  it('shows the sampled frames as the track when they arrive', () => {
+    strip.value = {
+      status: 'ready',
+      error: null,
+      retry: () => {},
+      candidates: [
+        { index: 0, timestamp_seconds: 0, preview_data_url: 'data:image/jpeg;base64,AAA', preview_width: 240, preview_height: 135 },
+        { index: 1, timestamp_seconds: 10, preview_data_url: 'data:image/jpeg;base64,BBB', preview_width: 240, preview_height: 135 },
+      ],
+    };
+    renderGrabber({ embedded: true });
+    expect(screen.getByTestId('cover-filmstrip').querySelectorAll('img')).toHaveLength(2);
+    expect(screen.getByTestId('cover-grab-track').className).toContain('strip');
+    strip.value = { status: 'idle', candidates: [], error: null, retry: () => {} };
+  });
+
+  it('says it is sampling while the strip is on its way', () => {
+    strip.value = { status: 'sampling', candidates: [], error: null, retry: () => {} };
+    renderGrabber({ embedded: true });
+    expect(screen.getByTestId('cover-filmstrip-sampling')).toBeTruthy();
+    strip.value = { status: 'idle', candidates: [], error: null, retry: () => {} };
   });
 });

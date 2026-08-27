@@ -32,9 +32,17 @@ export interface CoverSlotsProps {
   onOpen: (orientation: CoverOrientation) => void;
   /** Empty one slot. */
   onClear: (orientation: CoverOrientation) => void;
+  /**
+   * Why the slots cannot be used right now (no video selected). The tiles
+   * stay visible but dimmed, and a click hands the reason to `onBlocked`
+   * instead of opening anything — a control that looks usable and silently
+   * does nothing is the failure this page keeps re-learning.
+   */
+  blockedReason?: string | null;
+  onBlocked?: (reason: string) => void;
 }
 
-export const CoverSlots: React.FC<CoverSlotsProps> = ({ value, onOpen, onClear }) => {
+export const CoverSlots: React.FC<CoverSlotsProps> = ({ value, onOpen, onClear, blockedReason = null, onBlocked }) => {
   const { t } = useTranslation();
   // Signed URL transport for <img src> — headers are impossible there, and
   // the file endpoint accepts the Supabase JWT as ?token=.
@@ -59,8 +67,10 @@ export const CoverSlots: React.FC<CoverSlotsProps> = ({ value, onOpen, onClear }
       <div className="cover-cell">
         <button
           type="button"
-          className={`cover-slot ${kind} pick ${resourceId ? 'filled' : ''}`}
-          onClick={() => onOpen(orientation)}
+          className={`cover-slot ${kind} pick ${resourceId ? 'filled' : ''} ${blockedReason ? 'blocked' : ''}`}
+          aria-disabled={blockedReason ? true : undefined}
+          title={blockedReason ?? undefined}
+          onClick={() => (blockedReason ? onBlocked?.(blockedReason) : onOpen(orientation))}
           aria-label={resourceId
             ? t('distribution.publish.changeCoverAria', { defaultValue: 'Change {{label}}', label })
             : t('distribution.publish.chooseCoverAria', { defaultValue: 'Choose {{label}}', label })}

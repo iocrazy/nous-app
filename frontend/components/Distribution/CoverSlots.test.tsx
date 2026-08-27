@@ -70,3 +70,22 @@ describe('CoverSlots', () => {
     expect(onClear).toHaveBeenCalledWith('vertical');
   });
 });
+
+describe('CoverSlots — blocked without a video', () => {
+  it('dims the tiles, and a click reports the reason instead of opening', () => {
+    const onOpen = vi.fn();
+    const onBlocked = vi.fn();
+    render(
+      <I18nextProvider i18n={makeI18n()}>
+        <CoverSlots value={null} onOpen={onOpen} onClear={vi.fn()} blockedReason="Select a video above first" onBlocked={onBlocked} />
+      </I18nextProvider>,
+    );
+    const tile = screen.getByTestId('open-cover-studio');
+    expect(tile.className).toContain('blocked');
+    expect(tile.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(tile);
+    fireEvent.click(screen.getByTestId('open-cover-studio-h'));
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onBlocked).toHaveBeenCalledTimes(2);
+  });
+});

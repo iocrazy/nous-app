@@ -15,6 +15,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 
+import { HelpTip } from './HelpTip';
+
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
   listCoverTemplates,
@@ -80,6 +82,29 @@ export function CoverTemplateGrid({
         {embedded
           ? t('distribution.coverStudio.templateLibrary', 'Template library · click to add')
           : t('distribution.coverStudio.templates', 'Templates')}
+        {embedded && (
+          <HelpTip
+            text={[
+              t(
+                'distribution.coverStudio.templateExplainerMerged',
+                'The library is the shelf; the slots above are what is sent. A template is a picture you liked, handed to the model as a reference — it does not replace the style.',
+              ),
+              folder
+                ? folder.adopted
+                  ? t('distribution.coverStudio.templateFolderAdopted', {
+                      defaultValue:
+                        'These are the pictures in your “{{name}}” folder in the library. It is now a protected system folder — add or remove templates there too.',
+                      name: folder.name,
+                    })
+                  : t('distribution.coverStudio.templateFolderNote', {
+                      defaultValue:
+                        'Kept in the “{{name}}” folder in your library — a protected system folder. Add or remove templates there too.',
+                      name: folder.name,
+                    })
+                : '',
+            ].filter(Boolean).join('\n')}
+          />
+        )}
         <span className="aux">
           {loading
             ? t('common.loading', 'Loading…')
@@ -161,6 +186,10 @@ export function CoverTemplateGrid({
         </figure>
       </div>
 
+      {embedded && folder && (
+        <span className="sr-only" data-testid="cover-template-folder-note">{folder.name}</span>
+      )}
+
       {!loading && !loadError && items.length === 0 && (
         <div className="cs-empty">
           {t(
@@ -170,14 +199,10 @@ export function CoverTemplateGrid({
         </div>
       )}
 
+      {!embedded && (
       <div className="cs-body">
         <p className="cs-hint">
-          {embedded
-            ? t(
-                'distribution.coverStudio.templateExplainerMerged',
-                'The library is the shelf; the slots above are what is sent. A template is a picture you liked, handed to the model as a reference — it does not replace the style.',
-              )
-            : t(
+          {t(
             'distribution.coverStudio.templateExplainer',
             'A template is a picture you liked, kept as an example and handed to the model as a reference image. It does not replace the style, which is text.',
           )}
@@ -198,6 +223,7 @@ export function CoverTemplateGrid({
           </p>
         )}
       </div>
+      )}
 
       <AddCoverTemplateModal
         open={adding}

@@ -20,7 +20,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, X } from 'lucide-react';
+import { Sparkles, User, X } from 'lucide-react';
 
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
@@ -60,6 +60,7 @@ import { CoverReferencePool } from './CoverReferencePool';
 import { CoverTemplateGrid } from './CoverTemplateGrid';
 import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFrameGrabber';
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
+import { HelpTip } from './HelpTip';
 import './cover-studio.css';
 
 type Orientation = 'vertical' | 'horizontal';
@@ -112,7 +113,6 @@ export function CoverStudioOverlay({
   const [instructions, setInstructions] = useState('');
   const [refs, setRefs] = useState<CoverReference[]>([]);
   const [refusal, setRefusal] = useState<'full' | 'duplicate' | null>(null);
-  const [grabAsPerson, setGrabAsPerson] = useState(false);
   const [allowSmallLabels, setAllowSmallLabels] = useState(false);
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [model, setModel] = useState('');
@@ -213,18 +213,16 @@ export function CoverStudioOverlay({
   }, []);
 
   const onGrabbed = useCallback(
-    (frame: GrabbedFrame) => {
+    (frame: GrabbedFrame, asPerson: boolean) => {
       setLastFrameUrl(frame.url);
       addRef({
-        kind: grabAsPerson ? 'person' : 'frame',
+        kind: asPerson ? 'person' : 'frame',
         genId: frame.generatedMediaId,
         url: frame.url,
         timestampSeconds: frame.timestampSeconds,
       });
-      // One-shot: the next grab is an ordinary frame again unless re-armed.
-      setGrabAsPerson(false);
     },
-    [addRef, grabAsPerson],
+    [addRef],
   );
 
   const uploadReference = useCallback(
@@ -583,11 +581,47 @@ export function CoverStudioOverlay({
                 {/* One card: the nine slots that go to the model on top, the
                     template library to pick from underneath. Two cards read
                     as two piles of pictures with no visible relation. */}
+                {/* The person is its own thing: one face the style keeps
+                    across every draft, set from the stage. It is not one of
+                    the nine reference slots, so it gets its own card. */}
+                {requiresPerson && (
+                  <div className="cs-card cs-personcard" data-testid="cover-person-card">
+                    <h4>
+                      {t('distribution.coverStudio.refPerson', 'Person')}
+                      <HelpTip
+                        text={t('distribution.coverStudio.grabAsPersonWhy', 'The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.')}
+                      />
+                      <span className={`aux ${person ? '' : 'bad'}`}>
+                        {person
+                          ? t('distribution.coverStudio.personSet', 'set')
+                          : t('distribution.coverStudio.refPersonMissing', 'not set')}
+                      </span>
+                    </h4>
+                    <div className="cs-body cs-personbody">
+                      <div className={`cs-personslot ${person ? '' : 'missing'}`} data-testid="cover-ref-person">
+                        {person ? (
+                          <img src={`${getApiUrl()}${person.url}`} alt={t('distribution.coverStudio.refPerson', 'Person')} />
+                        ) : (
+                          <User size={18} />
+                        )}
+                      </div>
+                      <p className="cs-hint">
+                        {person
+                          ? t('distribution.coverStudio.personSetAt', {
+                              defaultValue: 'Person = the frame at {{at}}; grabbing again replaces it.',
+                              at: typeof person.timestampSeconds === 'number' ? `${person.timestampSeconds.toFixed(1)}s` : (person.label ?? ''),
+                            })
+                          : t('distribution.coverStudio.personHow', 'On the stage, find a frame of yourself and press “Set as person”.')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="cs-card cs-refcard" data-testid="cover-ref-card">
                   <CoverReferencePool
                     embedded
                     refs={refs}
-                    requiresPerson={requiresPerson}
+                    requiresPerson={false}
                     onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
                     onUpload={(file) => void uploadReference(file)}
                     refusal={refusal}
@@ -610,26 +644,6 @@ export function CoverStudioOverlay({
                     onToggle={(tpl) => void toggleTemplate(tpl)}
                   />
                 </div>
-
-                <label className="cs-toggle cs-person-toggle">
-                  <input
-                    type="checkbox"
-                    checked={grabAsPerson}
-                    onChange={(e) => setGrabAsPerson(e.target.checked)}
-                    data-testid="cover-grab-as-person"
-                  />
-                  <span>
-                    {t('distribution.coverStudio.grabAsPerson', 'Next grab is the person reference')}
-                    <em>
-                      {person
-                        ? t('distribution.coverStudio.personSetAt', {
-                            defaultValue: 'Person = the frame at {{at}}; grabbing again replaces it.',
-                            at: person.label ?? (typeof person.timestampSeconds === 'number' ? `${person.timestampSeconds.toFixed(1)}s` : ''),
-                          })
-                        : t('distribution.coverStudio.grabAsPersonWhy', 'The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.')}
-                    </em>
-                  </span>
-                </label>
 
                 <div className="cs-card">
                   <div className="cs-body">
@@ -730,7 +744,7 @@ export function CoverStudioOverlay({
                   sources={sources}
                   grabbedAt={frameTimestamps}
                   onGrabbed={onGrabbed}
-                  poolFull={refs.length >= 9 && !grabAsPerson}
+                  poolFull={refs.length >= 9}
                   onUseAsCover={useFrameAsCover}
                   onUploadCover={uploadAsCover}
                   scopeId={scopeId}
@@ -796,11 +810,6 @@ export function CoverStudioOverlay({
                     <span>{t('distribution.coverStudio.previewEmpty', 'How it will look in the feed.')}</span>
                   )}
                 </div>
-                <p className="cs-hint" style={{ marginTop: 8 }}>
-                  {stage === 'done'
-                    ? t('distribution.coverStudio.previewFinal', 'The finished cover as it will appear.')
-                    : t('distribution.coverStudio.previewHint', 'Switch between vertical and horizontal at the top.')}
-                </p>
               </div>
             </div>
 
@@ -808,7 +817,10 @@ export function CoverStudioOverlay({
               <h4>{t('distribution.coverStudio.modelAndStyle', 'Model & style')}</h4>
               <div className="cs-body">
                 <label className="cs-field">
-                  <span>{t('distribution.coverStudio.model', 'Model')}</span>
+                  <span>
+                    {t('distribution.coverStudio.model', 'Model')}
+                    <HelpTip text={t('distribution.coverStudio.modelNote', 'Same list as Settings → platform models: switch a model off there and it leaves this menu.')} />
+                  </span>
                   <select
                     className="cs-source"
                     style={{ marginBottom: 0 }}
@@ -824,11 +836,16 @@ export function CoverStudioOverlay({
                     ))}
                   </select>
                 </label>
-                <p className="cs-hint" style={{ marginTop: -4, marginBottom: 10 }} data-testid="cover-model-note">
-                  {t('distribution.coverStudio.modelNote', 'Same list as Settings → platform models: switch a model off there and it leaves this menu.')}
-                </p>
                 <label className="cs-field">
-                  <span>{t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}</span>
+                  <span>
+                    {t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}
+                    <HelpTip
+                      text={[
+                        style?.description ?? '',
+                        t('distribution.coverStudio.styleNote', 'The list is the built-in style plus every cover skill you have imported (category: cover).'),
+                      ].filter(Boolean).join('\n')}
+                    />
+                  </span>
                   <select
                     className="cs-source"
                     style={{ marginBottom: 0 }}
@@ -847,10 +864,6 @@ export function CoverStudioOverlay({
                     ))}
                   </select>
                 </label>
-                <p className="cs-hint" data-testid="cover-style-note">
-                  {style?.description ||
-                    t('distribution.coverStudio.styleNote', 'The list is the built-in style plus every cover skill you have imported (category: cover).')}
-                </p>
                 <label className="cs-toggle">
                   <input
                     type="checkbox"
@@ -860,21 +873,16 @@ export function CoverStudioOverlay({
                   />
                   <span>
                     {t('distribution.coverStudio.smallLabels', 'Platform-style labels — "REC", a search bar, corner tags.')}
-                    <em>
-                      {t('distribution.coverStudio.smallLabelsWhy', 'Your two files disagree: SKILL.md forbids them, cover-grammar.md allows them. Off follows SKILL.md.')}
-                    </em>
+                    <HelpTip text={t('distribution.coverStudio.smallLabelsWhy', 'Your two files disagree: SKILL.md forbids them, cover-grammar.md allows them. Off follows SKILL.md.')} />
                   </span>
                 </label>
               </div>
             </div>
 
+            {stage !== 'idle' && (
             <div className="cs-card">
               <div className="cs-body">
-                {stage === 'idle' ? (
-                  <p className="cs-hint" data-testid="cover-side-hint">
-                    {t('distribution.coverStudio.noAiHint', 'No AI needed: the frame on the stage can be the cover as it is — use the button under it.')}
-                  </p>
-                ) : stage !== 'done' ? (
+                {stage !== 'done' ? (
                   <p className="cs-hint" data-testid="cover-side-hint">
                     {t('distribution.coverStudio.refineNote', 'A second pass redraws it full size and drops the number.')}
                   </p>
@@ -928,6 +936,7 @@ export function CoverStudioOverlay({
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>

@@ -18,13 +18,15 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Camera, Check, Upload } from 'lucide-react';
+import { Camera, Check, Upload, User } from 'lucide-react';
 
 import { getSupabaseClient } from '../../../supabaseClient';
 import { getResourceFileUrl } from '../../../services/resourceService';
 import { grabCoverFrame, listLibraryMediaOrThrow } from '../../../services/distributionService';
 import type { LibraryVideo } from '../../../types';
 import { formatTimestamp } from './coverReferences';
+import { HelpTip } from './HelpTip';
+import { useCoverFrameCandidates } from './useCoverFrameCandidates';
 import './cover-studio.css';
 
 /** Normalised crop anchor — the centre of the crop box over the frame. */
@@ -48,7 +50,8 @@ interface Props {
   sources: LibraryVideo[];
   /** Timestamps already in the pool, drawn as dots on the track. */
   grabbedAt: number[];
-  onGrabbed: (frame: GrabbedFrame) => void;
+  /** `asPerson` — the frame was taken with "Set as person", not "Grab". */
+  onGrabbed: (frame: GrabbedFrame, asPerson: boolean) => void;
   /** True when the pool cannot take another frame (9/9). */
   poolFull?: boolean;
   /**
@@ -112,6 +115,9 @@ export function CoverFrameGrabber({
 
   const active =
     sources.find((s) => s.id === sourceId) ?? sources[0] ?? picked ?? null;
+  // The filmstrip: evenly spaced previews from the server (the old publish-page
+  // picker's sampling, ported). Click one to seek; the strip is also the track.
+  const strip = useCoverFrameCandidates(active?.id ?? null);
 
   const loadLibrary = useCallback(async () => {
     if (!scopeId) return;
@@ -229,8 +235,8 @@ export function CoverFrameGrabber({
     moveFocus(d[0], d[1]);
   };
 
-  const grab = useCallback(async () => {
-    if (!active || grabbing || poolFull) return;
+  const grab = useCallback(async (asPerson = false) => {
+    if (!active || grabbing || (poolFull && !asPerson)) return;
     // Pause first: the grabbed timestamp must be the second the user is
     // LOOKING at. On a playing video the clock advances between the click and
     // the read, and the server would re-read a frame the user never saw.
@@ -240,11 +246,14 @@ export function CoverFrameGrabber({
     setGrabError(null);
     try {
       const res = await grabCoverFrame(active.id, at);
-      onGrabbed({
-        generatedMediaId: res.generated_media_id,
-        url: res.url,
-        timestampSeconds: res.timestamp_seconds,
-      });
+      onGrabbed(
+        {
+          generatedMediaId: res.generated_media_id,
+          url: res.url,
+          timestampSeconds: res.timestamp_seconds,
+        },
+        asPerson,
+      );
     } catch (err) {
       console.error('[CoverFrameGrabber] grab failed:', err);
       // The server's sentence when there is one (422 "could not re-read the
@@ -392,6 +401,14 @@ export function CoverFrameGrabber({
               ? t('distribution.coverStudio.cropGuideH', 'Drag the box · horizontal 4:3')
               : t('distribution.coverStudio.cropGuideV', 'Drag the box · vertical 3:4')
             : formatTimestamp(current)}
+          {embedded && (
+            <HelpTip
+              text={t(
+                'distribution.coverStudio.grabDots',
+                'Dots are frames you already took. The frame is re-read from the source file at full quality — not a screenshot of the player.',
+              )}
+            />
+          )}
         </span>
       </h4>
       <div className="cs-body">
@@ -469,7 +486,7 @@ export function CoverFrameGrabber({
         </div>
 
         <div
-          className="cs-track"
+          className={`cs-track ${strip.candidates.length > 0 ? 'strip' : ''}`}
           data-testid="cover-grab-track"
           role="slider"
           aria-label={t('distribution.coverStudio.grabTimeline', 'Timeline')}
@@ -477,6 +494,18 @@ export function CoverFrameGrabber({
           aria-valuemax={duration}
           aria-valuenow={current}
         >
+          {strip.candidates.length > 0 && (
+            <div className="frames" aria-hidden="true" data-testid="cover-filmstrip">
+              {strip.candidates.map((c) => (
+                <img key={c.index} src={c.preview_data_url} alt="" draggable={false} />
+              ))}
+            </div>
+          )}
+          {strip.status === 'sampling' && (
+            <span className="sampling" data-testid="cover-filmstrip-sampling">
+              {t('distribution.coverStudio.sampling', 'Sampling frames…')}
+            </span>
+          )}
           <input
             type="range"
             min={0}
@@ -491,6 +520,7 @@ export function CoverFrameGrabber({
             }}
           />
           <span className="played" style={{ width: `${progress}%` }} />
+          <span className="cursor" style={{ left: `${progress}%` }} />
           {/* Dots are frames you already took — the design's own caption. */}
           {duration > 0 &&
             grabbedAt.map((at, i) => (
@@ -503,12 +533,13 @@ export function CoverFrameGrabber({
             ))}
         </div>
 
-        <div className="cs-stage-actions">
+        <div className="cs-stage-actions row">
           <button
             type="button"
             className="cs-grab"
             disabled={grabbing || poolFull}
-            onClick={() => void grab()}
+            onClick={() => void grab(false)}
+            title={t('distribution.coverStudio.grabThisWhy', 'Adds this frame to the pictures sent to the model. Re-read from the source file at full quality — not a screenshot of the player.')}
             data-testid="cover-grab-button"
           >
             <Camera size={14} />
@@ -517,6 +548,17 @@ export function CoverFrameGrabber({
               : poolFull
                 ? t('distribution.coverStudio.grabPoolFull', 'Pool is full (9/9)')
                 : t('distribution.coverStudio.grabThis', 'Grab this frame')}
+          </button>
+          <button
+            type="button"
+            className="cs-grab alt"
+            disabled={grabbing}
+            onClick={() => void grab(true)}
+            title={t('distribution.coverStudio.grabAsPersonWhy', 'The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.')}
+            data-testid="cover-grab-person"
+          >
+            <User size={14} />
+            {t('distribution.coverStudio.setAsPerson', 'Set as person')}
           </button>
           {onUseAsCover && (
             <button
@@ -529,9 +571,7 @@ export function CoverFrameGrabber({
               <Check size={14} />
               {using
                 ? t('distribution.coverStudio.applying', 'Saving…')
-                : aspect === '4:3'
-                  ? t('distribution.coverStudio.useFrameH', 'Use this crop as the horizontal cover')
-                  : t('distribution.coverStudio.useFrameV', 'Use this crop as the vertical cover')}
+                : t('distribution.coverStudio.useFrameShort', 'Use this crop as the cover')}
             </button>
           )}
           {onUploadCover && (
@@ -544,7 +584,7 @@ export function CoverFrameGrabber({
                 data-testid="cover-upload-cover"
               >
                 <Upload size={14} />
-                {t('distribution.coverStudio.uploadCover', 'Upload a cover')}
+                {t('distribution.coverStudio.uploadCoverShort', 'Upload')}
               </button>
               <input
                 ref={uploadRef}
@@ -568,12 +608,6 @@ export function CoverFrameGrabber({
           </div>
         )}
 
-        <p className="cs-hint" style={{ marginTop: 9 }}>
-          {t(
-            'distribution.coverStudio.grabDots',
-            'Dots are frames you already took. The frame is re-read from the source file at full quality — not a screenshot of the player.',
-          )}
-        </p>
       </div>
     </div>
   );

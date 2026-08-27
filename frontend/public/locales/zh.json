@@ -468,6 +468,7 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
+      "coverNeedsVideo": "先在上方选一个视频 —— 封面从它里面来。",
       "coverSetV": "竖版已设置",
       "coverSetH": "横版已设置",
       "coverHint": "点一个位置打开封面工作室 —— 裁一帧、上传一张，或让模型画。两个位置有一个就能发布。",
@@ -747,6 +748,13 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "setAsPerson": "设为人物",
+      "personSet": "已设置",
+      "personHow": "在舞台上找到你自己的一帧，点「设为人物」。",
+      "useFrameShort": "用这个裁切当封面",
+      "uploadCoverShort": "上传",
+      "sampling": "正在抽帧…",
+      "grabThisWhy": "把这一帧加进发给模型的图。会回到源文件按全画质重读 —— 不是播放器截屏。",
       "refExplainerMerged": "上面这九格才是发给模型的。下面是仓库 —— 点一张模板就加到这里。",
       "templateLibrary": "模板库 · 点一张加入",
       "templateExplainerMerged": "模板库是仓库，上面的格子才是发出去的。模板是你喜欢的一张图，作为参考交给模型 —— 它不替代风格。",

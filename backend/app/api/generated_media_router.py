@@ -317,11 +317,16 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
     )
     from app.services.library.media_storage import materialize
 
-    resource = await ResourcesRepository().get_resource_by_id(payload.resource_id)
-    if not resource:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    if not await check_media_access(payload.resource_id, auth.user_id, None):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # ⚠️ resources is a scoped table: reading it outside a request_scope raises
+    # UnscopedQueryError (2026-08-27: every template → reference import in Cover
+    # Studio failed this way, surfacing only as "could not prepare"). The scope
+    # is the caller's own user — the access check below is what authorises.
+    async with request_scope(Scope(user_id=str(auth.user_id))):
+        resource = await ResourcesRepository().get_resource_by_id(payload.resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if not await check_media_access(payload.resource_id, auth.user_id, None):
+            raise HTTPException(status_code=403, detail="Access denied")
     # PR-B 阶梯：平台下载来的素材路径在 parsed_media,不在 resources 行上。
     # 在这里解析(需要 DB),让 resolve_resource_import 保持纯函数。
     from app.services.library.resource_file_path import resolve_resource_file_path
