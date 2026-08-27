@@ -432,6 +432,45 @@ class RunRecorder:
                 f"(run={self.run_id} seq={self._event_seq}): {err}"
             )
 
+        if event_type == "todo_write":
+            await self._mirror_todos(payload)
+
+    async def _mirror_todos(self, payload: dict[str, Any]) -> None:
+        """Mirror the todo snapshot into agent_runs.metadata_json.todos.
+
+        The transcript event is the truth; this is a cache for the Task
+        Center, which already receives the agent_runs row over Realtime.
+        Best-effort: a failed mirror never touches the event or the run.
+        """
+        if self.run_id is None:
+            return
+        try:
+            import json as _json
+
+            from sqlalchemy import cast, func, update
+            from sqlalchemy.dialects.postgresql import JSONB
+
+            from app.db.session import write_scope
+            from app.models.agents import AgentRuns
+
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == int(self.run_id))
+                    .values(
+                        metadata_json=func.jsonb_set(
+                            func.coalesce(AgentRuns.metadata_json, cast("{}", JSONB)),
+                            "{todos}",
+                            cast(_json.dumps(payload, ensure_ascii=False), JSONB),
+                            True,
+                        )
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[RunRecorder] todo mirror failed (run={self.run_id}): {exc!r}"
+            )
+
     async def heartbeat(self) -> None:
         """Refresh heartbeat_at if >=15s since last write.
 

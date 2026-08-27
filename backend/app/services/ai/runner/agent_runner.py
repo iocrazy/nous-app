@@ -398,13 +398,24 @@ class AgentRunner:
                 )
                 inc_metric("stream_turn_auto_recorder")
 
-            async for _chunk in self._stream_turn_inner(
-                composed,
-                user_messages,
-                recorder=recorder,
-                abort=abort,
-            ):
-                yield _chunk
+            # Phase-2 (443): hand the skill tool this run's recorder for the
+            # duration of the turn so Skill(todo) snapshots file under THIS
+            # run; detach after (a tool outliving the turn would otherwise
+            # file the next run's todos here). Mirrors run_turn.
+            _todo_slot = recorder is not None and hasattr(self.skill_tool, "recorder")
+            if _todo_slot:
+                self.skill_tool.recorder = recorder
+            try:
+                async for _chunk in self._stream_turn_inner(
+                    composed,
+                    user_messages,
+                    recorder=recorder,
+                    abort=abort,
+                ):
+                    yield _chunk
+            finally:
+                if _todo_slot:
+                    self.skill_tool.recorder = None
 
     async def _stream_turn_inner(
         self,
@@ -1164,6 +1175,13 @@ class AgentRunner:
             from app.services.ai.llm.retry_events import make_retry_observer
 
             self.adapter.on_retry = make_retry_observer(recorder)
+        # Phase-2 (443): same attach-for-the-turn discipline for the skill
+        # tool, so Skill(todo) can file its whole-list snapshots under THIS
+        # run — and detach after, or a tool outliving one turn would file the
+        # next run's todos under this one.
+        todo_slot = recorder is not None and hasattr(self.skill_tool, "recorder")
+        if todo_slot:
+            self.skill_tool.recorder = recorder
         try:
             return await self._run_turn_inner(
                 composed, user_messages, recorder=recorder, abort=abort
@@ -1171,6 +1189,8 @@ class AgentRunner:
         finally:
             if has_slot:
                 self.adapter.on_retry = None
+            if todo_slot:
+                self.skill_tool.recorder = None
 
     async def _run_turn_inner(
         self,
