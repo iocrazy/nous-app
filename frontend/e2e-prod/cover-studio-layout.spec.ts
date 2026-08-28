@@ -93,9 +93,12 @@ for (const vp of [
     await open.click();
     const modal = page.getByTestId('cover-studio-overlay');
     await expect(modal).toBeVisible();
-    // Real data must have arrived: the template grid says "N saved".
-    await expect(page.getByTestId('cover-template-grid')).toBeVisible();
-    await expect(page.getByTestId('cover-template-folder-note')).toBeVisible();
+    // The library is a picker now: the tile opens it against real data.
+    await page.getByTestId('cover-ref-add-template').click();
+    await expect(page.getByTestId('cover-picker-grid')).toBeVisible();
+    await expect(page.getByTestId('cover-picker-count')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('cover-picker-grid')).toBeHidden();
 
     await page.screenshot({ path: `test-results/cover-studio-${vp.width}-vertical.png` });
     const vertical = await measureOverflow(page);

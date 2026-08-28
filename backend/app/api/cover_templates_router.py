@@ -14,7 +14,7 @@ Scope = the caller's personal team, same resolver generated_media uses.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.core.deps import AuthDep
 from app.db.scope import Scope, request_scope
@@ -65,12 +65,24 @@ async def get_cover_template_folder(auth: AuthDep) -> dict:
 
 
 @router.get("")
-async def list_cover_templates(auth: AuthDep) -> dict:
+async def list_cover_templates(
+    auth: AuthDep,
+    q: str = Query(default="", max_length=120),
+    limit: int = Query(default=48, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    """One page of the library (search by filename, most-used first).
+
+    The studio opens this as a picker — search + load more — because the
+    folder is meant to hold hundreds of pictures, not a handful.
+    """
     scope_id = await _scope(auth)
     repo = CoverTemplatesRepository()
     async with request_scope(Scope(user_id=str(auth.user_id))):
         folder = await repo.ensure_folder(scope_id, str(auth.user_id))
-        items = await repo.list_images(scope_id, int(folder["id"]))
+        items, total = await repo.list_images(
+            scope_id, int(folder["id"]), q=q, limit=limit, offset=offset
+        )
     return {
         "data": {
             "folder": {
@@ -79,6 +91,9 @@ async def list_cover_templates(auth: AuthDep) -> dict:
                 "adopted": folder["adopted"],
             },
             "items": [_present(i) for i in items],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
         }
     }
 

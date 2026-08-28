@@ -40,6 +40,10 @@ class CoverTemplateOut(BaseModel):
 class CoverTemplateListOut(BaseModel):
     folder: CoverTemplateFolderOut
     items: list[CoverTemplateOut]
+    # Paging — the studio's picker searches and loads more, never lists all.
+    total: int = 0
+    limit: int = 48
+    offset: int = 0
 
 
 class CoverTemplateUseRequest(BaseModel):

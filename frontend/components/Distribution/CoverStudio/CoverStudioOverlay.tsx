@@ -20,7 +20,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, User, X } from 'lucide-react';
+import { Sparkles, Upload, User, X } from 'lucide-react';
 
 import { getApiUrl } from '../../../utils/apiConfig';
 import {
@@ -57,7 +57,9 @@ import {
   type CoverReference,
 } from './coverReferences';
 import { CoverReferencePool } from './CoverReferencePool';
-import { CoverTemplateGrid } from './CoverTemplateGrid';
+import { CoverTemplatePickerModal } from './CoverTemplatePickerModal';
+import { PromptMentionInput } from './PromptMentionInput';
+import { expandMentions, mentionToken } from './promptMentions';
 import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFrameGrabber';
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import { HelpTip } from './HelpTip';
@@ -133,8 +135,11 @@ export function CoverStudioOverlay({
   const [promotedId, setPromotedId] = useState<string | undefined>(undefined);
   // Which template tile is being turned into a reference right now (the
   // generated-media import is a round-trip), and why the last one failed.
-  const [templateBusyId, setTemplateBusyId] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  // The template library opens as a picker (it will hold hundreds); when it
+  // was opened from the prompt's "@", the picked pictures are mentioned too.
+  const [picker, setPicker] = useState<null | { mention: boolean }>(null);
+  const personUploadRef = React.useRef<HTMLInputElement>(null);
   // The last frame grabbed, so the preview has something to show before any
   // generation has happened.
   const [lastFrameUrl, setLastFrameUrl] = useState<string | undefined>(undefined);
@@ -187,6 +192,12 @@ export function CoverStudioOverlay({
   }, [open]);
 
   const person = personReference(refs);
+  // Mentions are expanded by POSITION in the list the server receives
+  // (person first, then the rest — the same order as sourceUrls).
+  const orderedRefs = useMemo(
+    () => [...refs.filter((r) => r.kind === 'person'), ...refs.filter((r) => r.kind !== 'person')],
+    [refs],
+  );
   const frameTimestamps = useMemo(
     () =>
       refs
@@ -266,7 +277,7 @@ export function CoverStudioOverlay({
         sourceUrls: sourceUrls(refs),
         model,
         allowSmallLabels,
-        instructions: instructions.trim(),
+        instructions: expandMentions(instructions.trim(), orderedRefs),
         aspect,
         style: styleSlug,
       });
@@ -291,7 +302,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('idle');
     }
-  }, [canGenerate, topic, refs, model, allowSmallLabels, instructions, aspect, styleSlug]);
+  }, [canGenerate, topic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug]);
 
   const runRefine = useCallback(async () => {
     if (!round || !gridUrl || selected === null) return;
@@ -309,7 +320,7 @@ export function CoverStudioOverlay({
         sourceUrls: [...(person ? [person.url] : []), gridUrl],
         model,
         allowSmallLabels,
-        instructions: instructions.trim(),
+        instructions: expandMentions(instructions.trim(), orderedRefs),
         aspect: round.aspect,
         style: styleSlug,
         selectedDraft: selected,
@@ -330,7 +341,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('picking');
     }
-  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, styleSlug, patchRound]);
+  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound]);
 
   const apply = useCallback(async () => {
     if (!finalGenId || applying) return;
@@ -380,42 +391,61 @@ export function CoverStudioOverlay({
     }
   }, [finalGenId, savedAsTemplate, scopeId, promotedId, t]);
 
-  const toggleTemplate = useCallback(
-    async (tpl: CoverTemplate) => {
-      const existing = refs.find((r) => r.templateId === tpl.resource_id);
-      if (existing) {
-        setRefs((prev) => removeReference(prev, existing.genId));
-        setRefusal(null);
-        return;
-      }
-      if (templateBusyId) return;
-      setTemplateBusyId(tpl.resource_id);
+  const pickTemplates = useCallback(
+    async (picked: CoverTemplate[], mention: boolean) => {
       setTemplateError(null);
-      try {
-        // The model only sees generated-media URLs, so the folder picture is
-        // imported into one here, at the moment it enters the pool.
-        const ref = await resolveCoverTemplateReference(tpl.resource_id);
-        addRef({
-          kind: 'template',
-          genId: ref.genId,
-          url: ref.url,
-          label: tpl.name,
-          templateId: tpl.resource_id,
-        });
-      } catch (err) {
-        console.error('[CoverStudio] template reference failed:', err);
+      const failed: string[] = [];
+      for (const tpl of picked) {
+        if (refs.some((r) => r.templateId === tpl.resource_id)) continue;
+        try {
+          // The model only sees generated-media URLs, so the folder picture is
+          // imported into one here, at the moment it enters the pool.
+          const ref = await resolveCoverTemplateReference(tpl.resource_id);
+          const next: CoverReference = {
+            kind: 'template',
+            genId: ref.genId,
+            url: ref.url,
+            label: tpl.name,
+            templateId: tpl.resource_id,
+          };
+          addRef(next);
+          if (mention) setInstructions((s) => `${s}${s && !s.endsWith(' ') ? ' ' : ''}${mentionToken(next)} `);
+        } catch (err) {
+          console.error('[CoverStudio] template reference failed:', err);
+          failed.push(tpl.name);
+        }
+      }
+      if (failed.length > 0) {
         setTemplateError(
-          t(
-            'distribution.coverStudio.templateRefFailed',
-            'That template could not be prepared as a reference. Try again.',
-          ),
+          t('distribution.coverStudio.templateRefFailedNamed', {
+            defaultValue: 'Could not prepare as a reference: {{names}}. Try again.',
+            names: failed.join(', '),
+          }),
         );
-      } finally {
-        setTemplateBusyId(null);
       }
     },
-    [refs, templateBusyId, addRef, t],
+    [refs, addRef, t],
   );
+
+  const uploadPerson = useCallback(
+    async (file: File) => {
+      setPoolError(null);
+      try {
+        const ref = await importCanvasMedia(file, null, null);
+        if (ref.kind !== 'image' || !ref.id) throw new Error('uploaded person is not an image');
+        setLastFrameUrl(ref.url);
+        addRef({ kind: 'person', genId: ref.id, url: ref.url, label: file.name });
+      } catch (err) {
+        console.error('[CoverStudio] upload person failed:', err);
+        setPoolError(
+          t('distribution.coverStudio.personUploadFailed', 'That picture could not be used as the person. Try again.'),
+        );
+      }
+    },
+    [addRef, t],
+  );
+
+
 
   // ── The no-AI paths: a centre-cropped frame, or an upload ───────────────
   const slot = orientation === 'vertical' ? 'vertical' : 'horizontal';
@@ -563,17 +593,15 @@ export function CoverStudioOverlay({
                       {topic.trim() ||
                         t('distribution.coverStudio.needsTopicShort', 'No title yet')}
                     </div>
-                    <textarea
-                      className="cs-instructions"
-                      rows={3}
-                      maxLength={500}
+                    <PromptMentionInput
                       value={instructions}
-                      onChange={(e) => setInstructions(e.target.value)}
+                      onChange={setInstructions}
+                      refs={orderedRefs}
+                      onOpenLibrary={() => setPicker({ mention: true })}
                       placeholder={t(
                         'distribution.coverStudio.promptPlaceholder',
-                        'e.g. headline “内容差的真相”, the person points at a big screen on the right',
+                        'e.g. headline “内容差的真相”, @ a picture to point at it',
                       )}
-                      data-testid="cover-instructions"
                     />
                   </div>
                 </div>
@@ -613,6 +641,27 @@ export function CoverStudioOverlay({
                             })
                           : t('distribution.coverStudio.personHow', 'On the stage, find a frame of yourself and press “Set as person”.')}
                       </p>
+                      <button
+                        type="button"
+                        className="cs-ghost cs-person-upload"
+                        onClick={() => personUploadRef.current?.click()}
+                        data-testid="cover-person-upload"
+                      >
+                        <Upload size={12} />
+                        {t('distribution.coverStudio.refUpload', 'Upload')}
+                      </button>
+                      <input
+                        ref={personUploadRef}
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        data-testid="cover-person-upload-input"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadPerson(f);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
                   </div>
                 )}
@@ -624,6 +673,7 @@ export function CoverStudioOverlay({
                     requiresPerson={false}
                     onRemove={(genId) => setRefs((prev) => removeReference(prev, genId))}
                     onUpload={(file) => void uploadReference(file)}
+                    onAddFromTemplates={() => setPicker({ mention: false })}
                     refusal={refusal}
                   />
                   {poolError && (
@@ -636,14 +686,16 @@ export function CoverStudioOverlay({
                       {templateError}
                     </div>
                   )}
-                  <CoverTemplateGrid
-                    embedded
-                    scopeId={scopeId}
-                    selectedIds={templateIds(refs)}
-                    busyId={templateBusyId}
-                    onToggle={(tpl) => void toggleTemplate(tpl)}
-                  />
                 </div>
+
+                <CoverTemplatePickerModal
+                  open={picker !== null}
+                  scopeId={scopeId}
+                  alreadyIn={templateIds(refs)}
+                  room={Math.max(0, 9 - refs.filter((r) => r.kind !== 'person').length - (person ? 1 : 0))}
+                  onClose={() => setPicker(null)}
+                  onPick={(picked) => void pickTemplates(picked, picker?.mention ?? false)}
+                />
 
                 <div className="cs-card">
                   <div className="cs-body">

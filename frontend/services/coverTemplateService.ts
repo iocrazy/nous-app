@@ -46,6 +46,16 @@ export interface CoverTemplate {
 export interface CoverTemplateList {
   folder: CoverTemplateFolder;
   items: CoverTemplate[];
+  /** Paging: the library grows into the hundreds, so the studio pages it. */
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CoverTemplateQuery {
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /** A template made usable as a generation reference. */
@@ -122,9 +132,22 @@ export async function getCoverTemplateFolder(): Promise<CoverTemplateFolder> {
   return call<CoverTemplateFolder>('/api/v1/cover-templates/folder');
 }
 
-export async function listCoverTemplates(): Promise<CoverTemplateList> {
-  const data = await call<CoverTemplateList>('/api/v1/cover-templates');
-  return { folder: data.folder, items: data.items ?? [] };
+export async function listCoverTemplates(
+  query: CoverTemplateQuery = {},
+): Promise<CoverTemplateList> {
+  const params = new URLSearchParams();
+  if (query.q?.trim()) params.set('q', query.q.trim());
+  if (query.limit) params.set('limit', String(query.limit));
+  if (query.offset) params.set('offset', String(query.offset));
+  const qs = params.toString();
+  const data = await call<CoverTemplateList>(`/api/v1/cover-templates${qs ? `?${qs}` : ''}`);
+  return {
+    folder: data.folder,
+    items: data.items ?? [],
+    total: data.total ?? (data.items ?? []).length,
+    limit: data.limit ?? query.limit ?? 48,
+    offset: data.offset ?? query.offset ?? 0,
+  };
 }
 
 /**
