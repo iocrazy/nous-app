@@ -747,6 +747,10 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "elapsed": "已用 {{s}} 秒",
+      "progressHint": "一张图四个草案通常要一两分钟。等的时候可以继续改提示词。",
+      "draftingPct": "正在画… {{pct}}%",
+      "draftingElapsed": "正在画… {{s}} 秒",
       "personFromFrame": "来自 {{at}} 那一帧。再设会替换。",
       "personFromUpload": "已上传。再上传或再设会替换。",
       "pickTemplates": "从模板库挑选",

@@ -127,6 +127,10 @@ export function CoverStudioOverlay({
   const [rounds, setRounds] = useState<Round[]>([]);
   const [activeRound, setActiveRound] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Live progress of the running generation: engine percent (if any) and a
+  // wall clock, so "drawing…" is never a frozen label.
+  const [progress, setProgress] = useState<{ percent: number | null; startedAt: number } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
@@ -207,6 +211,17 @@ export function CoverStudioOverlay({
     [refs],
   );
 
+  useEffect(() => {
+    if (!progress) {
+      setElapsed(0);
+      return undefined;
+    }
+    const tick = () => setElapsed(Math.floor((Date.now() - progress.startedAt) / 1000));
+    tick();
+    const h = setInterval(tick, 1000);
+    return () => clearInterval(h);
+  }, [progress]);
+
   const patchRound = useCallback((id: number, patch: Partial<Round>) => {
     setRounds((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }, []);
@@ -275,6 +290,7 @@ export function CoverStudioOverlay({
     setSavedAsTemplate(false);
     setPromotedId(undefined);
     setActiveRound(null);
+    setProgress({ percent: null, startedAt: Date.now() });
     try {
       const dispatched = await generateCoverDrafts({
         topic: effectiveTopic,
@@ -288,7 +304,9 @@ export function CoverStudioOverlay({
       // Usage ticks AFTER a successful dispatch, once per run — and it can
       // never fail the generation (the service swallows its own errors).
       void markCoverTemplatesUsed(templateIds(refs));
-      const outcome = await awaitCoverGeneration(dispatched.task_id);
+      const outcome = await awaitCoverGeneration(dispatched.task_id, {
+        onProgress: (p) => setProgress((cur) => ({ percent: p.percent, startedAt: cur?.startedAt ?? Date.now() })),
+      });
       if (!outcome.ok || !outcome.url) {
         setRunError(outcome.error ?? 'generation failed');
         setStage('idle');
@@ -305,6 +323,8 @@ export function CoverStudioOverlay({
       console.error('[CoverStudio] stage 1 failed:', err);
       setRunError((err as Error).message);
       setStage('idle');
+    } finally {
+      setProgress(null);
     }
   }, [canGenerate, effectiveTopic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug]);
 
@@ -313,6 +333,7 @@ export function CoverStudioOverlay({
     const id = round.id;
     setStage('refining');
     setRunError(null);
+    setProgress({ percent: null, startedAt: Date.now() });
     try {
       const dispatched = await refineCoverDraft({
         topic: effectiveTopic,
@@ -330,7 +351,9 @@ export function CoverStudioOverlay({
         selectedDraft: selected,
       });
       patchRound(id, { prompt: dispatched.prompt });
-      const outcome = await awaitCoverGeneration(dispatched.task_id);
+      const outcome = await awaitCoverGeneration(dispatched.task_id, {
+        onProgress: (p) => setProgress((cur) => ({ percent: p.percent, startedAt: cur?.startedAt ?? Date.now() })),
+      });
       if (!outcome.ok || !outcome.url) {
         setRunError(outcome.error ?? 'generation failed');
         setStage('picking');
@@ -344,6 +367,8 @@ export function CoverStudioOverlay({
       console.error('[CoverStudio] stage 2 failed:', err);
       setRunError((err as Error).message);
       setStage('picking');
+    } finally {
+      setProgress(null);
     }
   }, [round, gridUrl, selected, effectiveTopic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound]);
 
@@ -715,7 +740,9 @@ export function CoverStudioOverlay({
                       data-testid="cover-generate"
                     >
                       {stage === 'drafting'
-                        ? t('distribution.coverStudio.drafting', 'Drawing four drafts…')
+                        ? progress?.percent !== null && progress?.percent !== undefined
+                          ? t('distribution.coverStudio.draftingPct', { defaultValue: 'Drawing… {{pct}}%', pct: Math.round(progress.percent) })
+                          : t('distribution.coverStudio.draftingElapsed', { defaultValue: 'Drawing… {{s}}s', s: elapsed })
                         : visibleRounds.length > 0
                           ? t('distribution.coverStudio.regenerateDrafts', 'Generate 4 new drafts')
                           : t('distribution.coverStudio.generateDrafts', 'Generate 4 drafts')}
@@ -849,6 +876,9 @@ export function CoverStudioOverlay({
                 prompt={prompt}
                 error={runError}
                 aspect={round?.aspect ?? aspect}
+                showSteps={false}
+                progressPercent={progress?.percent ?? null}
+                elapsedSeconds={elapsed}
               />
             )}
 

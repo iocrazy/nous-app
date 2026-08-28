@@ -31,6 +31,12 @@ interface Props {
   error?: string | null;
   /** The grid's shape — 3:4 for the vertical cover, 4:3 for the horizontal. */
   aspect?: '3:4' | '4:3';
+  /** The v4 stage already shows the three steps above this card. */
+  showSteps?: boolean;
+  /** While drafting/refining: 0-100 when the engine says, null = unknown. */
+  progressPercent?: number | null;
+  /** Seconds since the generation was dispatched. */
+  elapsedSeconds?: number;
 }
 
 const QUADRANTS = [1, 2, 3, 4] as const;
@@ -44,6 +50,9 @@ export function CoverDrafts({
   prompt,
   error,
   aspect = '3:4',
+  showSteps = true,
+  progressPercent = null,
+  elapsedSeconds = 0,
 }: Props): React.JSX.Element {
   const { t } = useTranslation();
   const busy = stage === 'drafting' || stage === 'refining';
@@ -70,13 +79,15 @@ export function CoverDrafts({
     <div className="cs-card">
       <h4>{t('distribution.coverStudio.drafts', 'Drafts')}</h4>
 
-      <div className="cs-steps">
-        {step(1, 'distribution.coverStudio.stepDrafts', 'Four drafts')}
-        <span className="bar" />
-        {step(2, 'distribution.coverStudio.stepPick', 'Pick one')}
-        <span className="bar" />
-        {step(3, 'distribution.coverStudio.stepFinal', 'Final cover')}
-      </div>
+      {showSteps && (
+        <div className="cs-steps">
+          {step(1, 'distribution.coverStudio.stepDrafts', 'Four drafts')}
+          <span className="bar" />
+          {step(2, 'distribution.coverStudio.stepPick', 'Pick one')}
+          <span className="bar" />
+          {step(3, 'distribution.coverStudio.stepFinal', 'Final cover')}
+        </div>
+      )}
 
       {error && (
         <div className="cs-error" data-testid="cover-drafts-error">
@@ -111,12 +122,29 @@ export function CoverDrafts({
             </>
           ) : (
             <div className="cs-draft-empty" data-testid="cover-draft-empty">
-              {busy
-                ? t('distribution.coverStudio.drafting', 'Drawing four drafts…')
-                : t(
-                    'distribution.coverStudio.draftsEmpty',
-                    'Four drafts will appear here as one picture.',
-                  )}
+              {busy ? (
+                <div className="cs-progress" data-testid="cover-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent ?? undefined}>
+                  <div className="label">
+                    {stage === 'refining'
+                      ? t('distribution.coverStudio.refining', 'Redrawing…')
+                      : t('distribution.coverStudio.drafting', 'Drawing four drafts…')}
+                  </div>
+                  <div className={`bar ${progressPercent === null ? 'indeterminate' : ''}`}>
+                    <span style={progressPercent === null ? undefined : { width: `${progressPercent}%` }} />
+                  </div>
+                  <div className="meta">
+                    {progressPercent !== null && <b data-testid="cover-progress-percent">{Math.round(progressPercent)}%</b>}
+                    <span data-testid="cover-progress-elapsed">
+                      {t('distribution.coverStudio.elapsed', { defaultValue: '{{s}}s elapsed', s: elapsedSeconds })}
+                    </span>
+                  </div>
+                  <p className="cs-hint">
+                    {t('distribution.coverStudio.progressHint', 'One image with four drafts usually takes a minute or two. You can keep editing the prompt meanwhile.')}
+                  </p>
+                </div>
+              ) : (
+                t('distribution.coverStudio.draftsEmpty', 'Four drafts will appear here as one picture.')
+              )}
             </div>
           )}
         </div>

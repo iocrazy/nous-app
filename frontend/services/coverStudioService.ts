@@ -177,12 +177,26 @@ export interface CoverGenerationOutcome {
  * Cover Studio addresses generated media by string id — mixing the two is the
  * exact drift that produced the 2026-08-12 storyboard incident.
  */
+/** What the studio can show while a generation runs. `percent` is null when
+ *  the engine reports no number — the bar then runs indeterminate. */
+export interface CoverGenerationProgress {
+  phase: string;
+  percent: number | null;
+}
+
 export async function awaitCoverGeneration(
   taskId: string,
-  opts: { shouldStop?: () => boolean } = {},
+  opts: { shouldStop?: () => boolean; onProgress?: (p: CoverGenerationProgress) => void } = {},
 ): Promise<CoverGenerationOutcome> {
   const task: GenerationTask = await pollGeneration(taskId, {
     shouldStop: opts.shouldStop,
+    onTick: (row) => {
+      // task_tracking.progress is 0-100 when the workflow reports it; the
+      // generation row type does not declare it, so read it loosely.
+      const raw = (row as { progress?: unknown }).progress;
+      const percent = typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : null;
+      opts.onProgress?.({ phase: row.phase, percent });
+    },
   });
   if (task.phase !== 'completed') {
     return {
