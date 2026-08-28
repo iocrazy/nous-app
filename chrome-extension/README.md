@@ -4,9 +4,34 @@ Push video URLs to Nous for parsing and download, and scan pages for images to i
 
 ## Install
 
+Build a release copy first — Chrome remembers whichever folder you pick, and
+pointing it at this source folder means branch switches, `git clean`, and
+uncommitted work all land straight in the extension you use every day.
+
+From the repo root:
+
+```bash
+bash scripts/package-extension.sh   # → release/chrome-extension/
+```
+
 1. Open `chrome://extensions/`
 2. Enable **Developer mode** (top right)
-3. Click **Load unpacked** → select this `chrome-extension/` folder
+3. Click **Load unpacked** → select `release/chrome-extension/`
+
+Note: `release/` is gitignored, so `git clean -ffdx` deletes the built copy
+along with everything else it's meant to protect you from — that tradeoff is
+intentional (see
+[`docs/superpowers/specs/2026-08-13-chrome-extension-packaging-design.md`](../docs/superpowers/specs/2026-08-13-chrome-extension-packaging-design.md)).
+If that happens, just re-run the script.
+
+After pulling new code, re-run the script, then hit the reload icon on the
+extension card. The popup header shows `v1.3.1 (<commit>)` so you can tell at a
+glance which build is loaded — if that commit does not match `git log -1`, the
+release copy is stale and needs a re-run. A `-dirty` suffix means it was built
+with uncommitted changes.
+
+Loading this `chrome-extension/` folder directly still works for debugging; the
+popup then shows the bare version with no commit.
 
 ## Setup
 
@@ -72,7 +97,7 @@ The import runs in the background service worker, so closing the popup does not 
 
 No automated test harness exists for this vanilla-JS extension (no build step) — verify with `node --check <file>.js` on every touched file, then walk through this checklist against a real backend:
 
-- [ ] `chrome://extensions` → reload the unpacked extension, confirm version shows `1.3.0` in the popup header
+- [ ] `chrome://extensions` → reload the unpacked extension, confirm the popup header version matches `chrome-extension/manifest.json`'s `version` field — the `release/chrome-extension/` build also appends a `(<commit>)` suffix, while loading the `chrome-extension/` source folder directly does not
 - [ ] Settings: enter API URL / API Key / Web URL, Save, reopen popup → all three persist
 - [ ] Right-click an image on any page → **Analyze Prompt (nous)** appears in the context menu and only for images (not on plain page right-click)
 - [ ] Click it → panel opens top-right, dark card, progress bar animates through "Uploading image…" → "Starting analysis…" → "Analyzing image…"
