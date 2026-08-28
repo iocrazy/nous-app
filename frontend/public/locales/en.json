@@ -747,6 +747,10 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "elapsed": "{{s}}s elapsed",
+      "progressHint": "One image with four drafts usually takes a minute or two. You can keep editing the prompt meanwhile.",
+      "draftingPct": "Drawing… {{pct}}%",
+      "draftingElapsed": "Drawing… {{s}}s",
       "personFromFrame": "From the frame at {{at}}. Set again to replace.",
       "personFromUpload": "Uploaded. Upload or set again to replace.",
       "pickTemplates": "Pick from the template library",

@@ -734,3 +734,25 @@ describe('CoverStudioOverlay — the prompt can be the topic', () => {
     expect(screen.getByTestId('cover-person-card').textContent).not.toContain('c284078e078abb510618eb422d9a1f2b3c4d5e6f');
   });
 });
+
+
+describe('CoverStudioOverlay — progress while drawing', () => {
+  it('shows the engine percent and a running clock instead of a frozen label', async () => {
+    let release: (v: unknown) => void = () => {};
+    svc.awaitCoverGeneration.mockImplementationOnce((_id: string, opts: { onProgress?: (p: { phase: string; percent: number | null }) => void }) => {
+      opts.onProgress?.({ phase: 'in_progress', percent: 40 });
+      return new Promise((resolve) => { release = resolve; });
+    });
+    renderOverlay();
+    setPerson();
+    fireEvent.click(screen.getByTestId('cover-generate'));
+
+    expect(await screen.findByTestId('cover-progress')).toBeTruthy();
+    expect(screen.getByTestId('cover-progress-percent').textContent).toBe('40%');
+    expect(screen.getByTestId('cover-progress-elapsed')).toBeTruthy();
+    expect(screen.getByTestId('cover-generate').textContent).toContain('40%');
+
+    release({ ok: true, url: '/api/v1/generated-media/500/cover', generatedMediaId: '500' });
+    await waitFor(() => expect(screen.queryByTestId('cover-progress')).toBeNull());
+  });
+});

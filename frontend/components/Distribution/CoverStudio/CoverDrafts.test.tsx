@@ -151,3 +151,23 @@ describe('CoverDrafts', () => {
     expect(onRefine).not.toHaveBeenCalled();
   });
 });
+
+
+describe('CoverDrafts — progress and steps', () => {
+  it('hides its own steps when told the stage already shows them', () => {
+    renderDrafts({ showSteps: false });
+    expect(document.querySelector('.cs-steps')).toBeNull();
+  });
+
+  it('runs an indeterminate bar when the engine gives no number', () => {
+    renderDrafts({ stage: 'drafting', gridUrl: undefined, progressPercent: null });
+    expect(document.querySelector('.cs-progress .bar')?.className).toContain('indeterminate');
+    expect(screen.queryByTestId('cover-progress-percent')).toBeNull();
+  });
+
+  it('shows the percent and the clock when the engine gives a number', () => {
+    renderDrafts({ stage: 'drafting', gridUrl: undefined, progressPercent: 62, elapsedSeconds: 17 });
+    expect(screen.getByTestId('cover-progress-percent').textContent).toBe('62%');
+    expect(screen.getByTestId('cover-progress-elapsed').textContent).toContain('17');
+  });
+});
