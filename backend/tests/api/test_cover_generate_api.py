@@ -287,3 +287,28 @@ class TestStylesEndpoint:
         assert slugs == ["viral-video-cover", "neon"]
         assert resp.json()["styles"][0]["builtin"] is True
         assert resp.json()["styles"][0]["aspects"] == ["3:4", "4:3"]
+
+
+class TestRoundBookkeeping:
+    """轮次要活过对话框关闭：生成参数里带上 cover 元数据，落到 generated_media.params。"""
+
+    def test_stage_one_stamps_source_video_and_stage(self, spy):
+        resp = _post(TestClient(_make_app()), source_video_id="900", aspect="4:3")
+        assert resp.status_code == 200, resp.text
+        cover = spy.started[0]["dbos_workflow_kwargs"]["params"]["cover"]
+        assert cover["stage"] == 1 and cover["aspect"] == "4:3"
+        assert cover["source_video_id"] == "900" and cover["grid_gen_id"] is None
+        assert spy.created[0]["metadata"]["source_video_id"] == "900"
+
+    def test_stage_two_links_back_to_its_grid(self, spy):
+        resp = _post(
+            TestClient(_make_app()),
+            stage=2,
+            selected_draft=3,
+            grid_gen_id="500",
+            source_video_id="900",
+        )
+        assert resp.status_code == 200, resp.text
+        cover = spy.started[0]["dbos_workflow_kwargs"]["params"]["cover"]
+        assert cover["stage"] == 2 and cover["selected_draft"] == 3
+        assert cover["grid_gen_id"] == "500"

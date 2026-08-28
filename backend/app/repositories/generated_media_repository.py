@@ -173,9 +173,16 @@ class GeneratedMediaRepository:
         entity_id: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 30,
+        cover_source: Optional[str] = None,
     ) -> dict:
         limit = max(1, min(int(limit), 100))
         stmt = select(*_GM_COLS).where(GeneratedMedia.scope_id == scope_id)
+        # Cover Studio rounds: stamped by /distribution/covers/generate as
+        # params.cover.source_video_id — the studio's history per video.
+        if cover_source:
+            stmt = stmt.where(
+                GeneratedMedia.params["cover"]["source_video_id"].astext == cover_source
+            )
         if kind:
             stmt = stmt.where(GeneratedMedia.media_kind == kind)
         # CC5 asset backlink: generations dispatched from an entity branch

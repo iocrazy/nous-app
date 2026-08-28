@@ -468,6 +468,8 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
+      "draftRestored": "Draft restored from {{when}} — everything you had typed and picked is back.",
+      "draftDiscard": "Discard draft",
       "coverNeedsVideo": "Pick a video above first — cover frames are sampled from it.",
       "coverSetV": "Vertical ready",
       "coverSetH": "Horizontal ready",

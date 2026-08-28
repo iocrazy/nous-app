@@ -31,6 +31,8 @@ import {
   BUILTIN_COVER_STYLE,
   awaitCoverGeneration,
   generateCoverDrafts,
+  genIdFromUrl,
+  listCoverRounds,
   listCoverStyles,
   refineCoverDraft,
   type CoverAspect,
@@ -68,7 +70,8 @@ import './cover-studio.css';
 
 type Orientation = 'vertical' | 'horizontal';
 
-/** One generation round: the grid, and the final it produced, if any. */
+/** One generation round: the grid, and the final it produced, if any.
+ *  `id` is the grid's generated_media id — rounds are durable server rows. */
 interface Round {
   id: number;
   /** Which cover this round was for; decides the slot "Done" fills. */
@@ -120,6 +123,7 @@ export function CoverStudioOverlay({
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [model, setModel] = useState('');
   const [styles, setStyles] = useState<CoverStyle[]>([]);
+  const sourceVideoId = sources[0]?.id ?? null;
   const [styleSlug, setStyleSlug] = useState(BUILTIN_COVER_STYLE);
   const [poolError, setPoolError] = useState<string | null>(null);
 
@@ -182,6 +186,39 @@ export function CoverStudioOverlay({
         // Degraded, not broken: '' lets the catalog pick its default.
         console.error('[CoverStudio] listGenerationModels failed:', err);
       });
+    // Past rounds for this video come back from the server — a round the user
+    // paid for must not vanish because the dialog was closed.
+    if (sourceVideoId) {
+      void listCoverRounds(sourceVideoId)
+        .then((records) => {
+          if (!alive) return;
+          const grids = new Map<number, Round>();
+          for (const r of records) {
+            if (r.stage === 1) {
+              grids.set(Number(r.genId), { id: Number(r.genId), aspect: r.aspect, gridUrl: r.url, prompt: '', selected: null });
+            }
+          }
+          for (const r of records) {
+            if (r.stage !== 2) continue;
+            const gid = r.gridGenId ? Number(r.gridGenId) : NaN;
+            const g = grids.get(gid);
+            if (g && !g.finalUrl) {
+              g.finalUrl = r.url;
+              g.finalGenId = r.genId;
+              g.selected = r.selectedDraft;
+            } else if (!g) {
+              // A final whose grid is gone: keep it as its own round.
+              grids.set(Number(r.genId), { id: Number(r.genId), aspect: r.aspect, gridUrl: r.url, prompt: '', selected: r.selectedDraft, finalUrl: r.url, finalGenId: r.genId });
+            }
+          }
+          const restored = [...grids.values()].sort((a, b) => a.id - b.id);
+          setRounds((prev) => {
+            const ids = new Set(prev.map((p) => p.id));
+            return [...restored.filter((r) => !ids.has(r.id)), ...prev];
+          });
+        })
+        .catch((err) => console.error('[CoverStudio] listCoverRounds failed:', err));
+    }
     void listCoverStyles()
       .then((all) => {
         if (alive) setStyles(all);
@@ -194,7 +231,7 @@ export function CoverStudioOverlay({
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, sourceVideoId]);
 
   const person = personReference(refs);
   // Mentions are expanded by POSITION in the list the server receives
@@ -300,6 +337,7 @@ export function CoverStudioOverlay({
         instructions: expandMentions(instructions.trim(), orderedRefs),
         aspect,
         style: styleSlug,
+        sourceVideoId: sourceVideoId ?? undefined,
       });
       // Usage ticks AFTER a successful dispatch, once per run — and it can
       // never fail the generation (the service swallows its own errors).
@@ -312,7 +350,9 @@ export function CoverStudioOverlay({
         setStage('idle');
         return;
       }
-      const id = Date.now();
+      // The round's identity is the grid's generated_media id — the same key
+      // the server-side history uses, so a reopen merges instead of duplicating.
+      const id = Number(genIdFromUrl(outcome.url) ?? Date.now());
       setRounds((prev) => [
         ...prev,
         { id, aspect, gridUrl: outcome.url as string, prompt: dispatched.prompt, selected: null },
@@ -326,7 +366,7 @@ export function CoverStudioOverlay({
     } finally {
       setProgress(null);
     }
-  }, [canGenerate, effectiveTopic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug]);
+  }, [canGenerate, effectiveTopic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug, sourceVideoId]);
 
   const runRefine = useCallback(async () => {
     if (!round || !gridUrl || selected === null) return;
@@ -349,6 +389,8 @@ export function CoverStudioOverlay({
         aspect: round.aspect,
         style: styleSlug,
         selectedDraft: selected,
+        sourceVideoId: sourceVideoId ?? undefined,
+        gridGenId: genIdFromUrl(gridUrl) ?? undefined,
       });
       patchRound(id, { prompt: dispatched.prompt });
       const outcome = await awaitCoverGeneration(dispatched.task_id, {
@@ -370,7 +412,7 @@ export function CoverStudioOverlay({
     } finally {
       setProgress(null);
     }
-  }, [round, gridUrl, selected, effectiveTopic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound]);
+  }, [round, gridUrl, selected, effectiveTopic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound, sourceVideoId]);
 
   const apply = useCallback(async () => {
     if (!finalGenId || applying) return;

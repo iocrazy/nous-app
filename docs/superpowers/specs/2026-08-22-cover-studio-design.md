@@ -419,3 +419,9 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - **人物卡可上传**：除了舞台「设为人物」，人物卡上直接上传一张（走 generated-media import）。
 - **模板库不再内联**：它会有成百上千张。参考图池里的「从模板库」磁贴打开 **挑选弹窗**（按名搜索、每页 48 张「加载更多」、多选、受池子剩余额度约束、已是参考图的置灰；弹窗内可「添加到模板库」）。后端 `GET /cover-templates` 加 `q / limit(≤200) / offset` 与 `total`。选中的模板和人物一起作为参考发给模型，不再分三类展示。
 - **提示词 @ 图**：输入 `@` 弹出当前参考图列表（人物 / 帧 / 模板）与「从模板库挑…」，选中插入 `@{标签}`；发送前按**送给模型的顺序**展开成 `reference image N (标签)`——模型按位置收图，不认我们的标签。从 @ 进入模板库挑的图，入池同时被提及。
+
+## 补记 2026-08-28：轮次持久化、发布页草稿、任务中心预览
+
+- **轮次不再只活在内存**：`covers/generate` 把 `params.cover = {stage, aspect, source_video_id, topic, style, selected_draft, grid_gen_id}` 落进 `generated_media.params`；`GET /generated-media?cover_source=<video id>` 按视频列出历史；工作室打开时重建轮次（成品按 `grid_gen_id` 挂回网格，缺网格的成品自成一轮），轮次 id = 网格的 generated_media id，本轮新生成的与服务端历史按 id 合并不重复。
+- **发布页草稿**（`publishDraft.ts`，localStorage 按 scope）：所选视频/账号、标题、描述、话题、可见范围、封面、自主声明、模式；到页即恢复并显示"已恢复草稿 · 清除"；发布成功即清除。不存定时时间与上传中状态。
+- **任务中心**：`cover_gen` 与 `canvas_gen` 同一结果体，显示 `result_url` 缩略图与 prompt。

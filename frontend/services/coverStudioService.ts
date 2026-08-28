@@ -92,6 +92,59 @@ export interface CoverGenerateInput {
   aspect?: CoverAspect;
   /** A cover style = the slug of a `category: cover` skill. */
   style?: string;
+  /** Which video this cover is for — stamped on the generation so the studio
+   *  can list past rounds per video when it reopens. */
+  sourceVideoId?: string;
+}
+
+/** One past round as stored on the server (generated_media.params.cover). */
+export interface CoverRoundRecord {
+  genId: string;
+  url: string;
+  stage: 1 | 2;
+  aspect: CoverAspect;
+  topic: string;
+  selectedDraft: number | null;
+  gridGenId: string | null;
+  createdAt: string;
+}
+
+/** `/api/v1/generated-media/123/cover` → `123`. */
+export function genIdFromUrl(url: string | undefined): string | null {
+  const m = url?.match(/\/generated-media\/(\d+)\//);
+  return m ? m[1] : null;
+}
+
+/**
+ * Past Cover Studio generations for a source video — grids (stage 1) and
+ * finals (stage 2), newest first. The studio rebuilds its rounds list from
+ * this on open, so closing the dialog no longer loses a paid-for round.
+ */
+export async function listCoverRounds(sourceVideoId: string): Promise<CoverRoundRecord[]> {
+  const params = new URLSearchParams({ kind: 'image', cover_source: sourceVideoId, limit: '100' });
+  const res = await apiFetch(`/api/v1/generated-media?${params.toString()}`);
+  const body = (await res.json()) as {
+    data?: { items?: Array<{ id: number | string; created_at: string; params?: { cover?: Record<string, unknown> } }> };
+  };
+  const items = body.data?.items ?? [];
+  const out: CoverRoundRecord[] = [];
+  for (const it of items) {
+    const c = it.params?.cover;
+    if (!c) continue;
+    const stage = Number(c.stage) === 2 ? 2 : 1;
+    const id = String(it.id);
+    out.push({
+      genId: id,
+      url: `/api/v1/generated-media/${id}/cover`,
+      stage,
+      aspect: c.aspect === '4:3' ? '4:3' : '3:4',
+      topic: typeof c.topic === 'string' ? c.topic : '',
+      selectedDraft: typeof c.selected_draft === 'number' ? c.selected_draft : null,
+      gridGenId: c.grid_gen_id ? String(c.grid_gen_id) : null,
+      createdAt: it.created_at,
+    });
+  }
+  return out;
 }
 
 export type CoverAspect = '3:4' | '4:3';
@@ -133,12 +186,13 @@ export async function generateCoverDrafts(
     instructions: input.instructions ?? '',
     aspect: input.aspect ?? '3:4',
     style: input.style ?? BUILTIN_COVER_STYLE,
+    source_video_id: input.sourceVideoId ?? '',
   });
 }
 
 /** Stage 2 — redraw the picked draft at full size. */
 export async function refineCoverDraft(
-  input: CoverGenerateInput & { selectedDraft: number; headline?: string },
+  input: CoverGenerateInput & { selectedDraft: number; headline?: string; gridGenId?: string },
 ): Promise<CoverGenerateResult> {
   return post<CoverGenerateResult>('/api/v1/distribution/covers/generate', {
     stage: 2,
@@ -150,8 +204,10 @@ export async function refineCoverDraft(
     instructions: input.instructions ?? '',
     aspect: input.aspect ?? '3:4',
     style: input.style ?? BUILTIN_COVER_STYLE,
+    source_video_id: input.sourceVideoId ?? '',
     selected_draft: input.selectedDraft,
     headline: input.headline ?? '',
+    grid_gen_id: input.gridGenId ?? '',
   });
 }
 

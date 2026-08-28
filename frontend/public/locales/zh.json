@@ -468,6 +468,8 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
+      "draftRestored": "已恢复 {{when}} 的草稿 —— 之前填的、选的都在。",
+      "draftDiscard": "清除草稿",
       "coverNeedsVideo": "请先在上方选择视频 — 封面帧从它里面抽取。",
       "coverSetV": "竖版已设置",
       "coverSetH": "横版已设置",

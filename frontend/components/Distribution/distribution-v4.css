@@ -786,3 +786,8 @@
 
 .dist-v4 .cover-slot.pick.blocked { opacity: .5; cursor: not-allowed; }
 .dist-v4 .cover-slot.pick.blocked:hover { border-color: var(--line-strong); color: var(--content-4); }
+
+/* Draft autosave banner (2026-08-28). */
+.dist-v4 .draft-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-soft); font-size: 12.5px; color: var(--content-2); }
+.dist-v4 .draft-banner button { border: 1px solid var(--line-strong); background: transparent; color: var(--content-2); border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.dist-v4 .draft-banner button:hover { color: var(--content); border-color: var(--content-4); }

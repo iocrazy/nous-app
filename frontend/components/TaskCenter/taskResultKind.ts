@@ -20,6 +20,9 @@ export function taskResultKind(
       return 'agent';
     case 'canvas_gen':
     case 'canvas_timeline':
+    // Cover Studio runs the same generation workflow; its result_url is the
+    // 2x2 drafts grid or the final cover, previewed the same way.
+    case 'cover_gen':
       // Result lives in task metadata (durable result_url), no resource row.
       return 'canvasGen';
     case 'ai_transcription':

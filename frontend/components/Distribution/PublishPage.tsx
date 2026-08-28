@@ -27,6 +27,7 @@ import { AccountAvatar } from './platform';
 import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverSlots, type CoverOrientation, type CoverPair } from './CoverSlots';
+import { clearPublishDraft, readPublishDraft, writePublishDraft } from './publishDraft';
 import { CoverStudioOverlay } from './CoverStudio/CoverStudioOverlay';
 import { PublishPreview, type PreviewSoundtrack } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
@@ -859,6 +860,52 @@ export const PublishPage: React.FC = () => {
 
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
+
+  // ── Draft autosave ──
+  // Everything typed or picked here lives only in memory; leaving the page
+  // (or just opening the library) used to wipe it — including covers the user
+  // had paid to generate. The draft is per scope, restored once on arrival,
+  // and forgotten when the post is created or the user discards it.
+  const [draftRestoredAt, setDraftRestoredAt] = useState<string | null>(null);
+  const draftRestoredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scopeId || draftRestoredFor.current === scopeId) return;
+    draftRestoredFor.current = scopeId;
+    const d = readPublishDraft(scopeId);
+    if (!d) return;
+    if (d.contentType === 'video' || d.contentType === 'images') setContentType(d.contentType);
+    if (d.selectedVideos) setSelectedVideos(d.selectedVideos);
+    if (d.selectedAccounts) setSelectedAccounts(d.selectedAccounts);
+    if (typeof d.title === 'string') setTitle(d.title);
+    if (typeof d.description === 'string') setDescription(d.description);
+    if (d.topics) setTopics(d.topics);
+    if (d.visibility === 'public' || d.visibility === 'friends' || d.visibility === 'private') setVisibility(d.visibility);
+    if (d.covers !== undefined) setCovers(d.covers ?? null);
+    if (typeof d.selfDeclaration === 'string') setSelfDeclaration(d.selfDeclaration as SelfDeclaration | '');
+    if (d.mode === 'broadcast' || d.mode === 'one_to_one') setMode(d.mode);
+    setDraftRestoredAt(d.savedAt);
+  }, [scopeId]);
+  useEffect(() => {
+    if (!scopeId || draftRestoredFor.current !== scopeId) return undefined;
+    const h = setTimeout(() => {
+      writePublishDraft(scopeId, {
+        contentType, selectedVideos, selectedAccounts, title, description, topics,
+        visibility, covers, selfDeclaration, mode,
+      });
+    }, 600);
+    return () => clearTimeout(h);
+  }, [scopeId, contentType, selectedVideos, selectedAccounts, title, description, topics, visibility, covers, selfDeclaration, mode]);
+  const discardDraft = () => {
+    if (scopeId) clearPublishDraft(scopeId);
+    setDraftRestoredAt(null);
+    setSelectedVideos([]);
+    setSelectedAccounts([]);
+    setTitle('');
+    setDescription('');
+    setTopics([]);
+    setCovers(null);
+    setSelfDeclaration('');
+  };
   // Not user-selectable: the backend routes per account (see the Channel type).
   const [channel] = useState<Channel>('session');
   const [orientation, setOrientation] = useState<Orientation>('vertical');
@@ -2275,6 +2322,9 @@ export const PublishPage: React.FC = () => {
         account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
       });
       addToast(t('distribution.publish.queued', 'Publish task created'), 'success');
+      // The post exists now; the draft would only re-fill a form the user has
+      // already sent.
+      if (scopeId) clearPublishDraft(scopeId);
       navigate('../records');
     } catch (err) {
       console.error('distribution: create publish task failed', err);
@@ -2319,6 +2369,19 @@ export const PublishPage: React.FC = () => {
       <div className="pub-cols">
         {/* ── left: form ── */}
         <div className="pub-form">
+          {draftRestoredAt && (
+            <div className="draft-banner" data-testid="publish-draft-banner">
+              <span>
+                {t('distribution.publish.draftRestored', {
+                  defaultValue: 'Draft restored from {{when}} — everything you had typed and picked is back.',
+                  when: new Date(draftRestoredAt).toLocaleString(),
+                })}
+              </span>
+              <button type="button" onClick={discardDraft} data-testid="publish-draft-discard">
+                {t('distribution.publish.draftDiscard', 'Discard draft')}
+              </button>
+            </div>
+          )}
           <div className="fcard">
             <h4>
               {t('distribution.publish.content', 'Content')}
