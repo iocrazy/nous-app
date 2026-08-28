@@ -11,6 +11,36 @@ import { getApiUrl } from '../utils/apiConfig';
 
 // ─── Global tag CRUD ──────────────────────────────────────
 
+/**
+ * Message for a failed tag request.
+ *
+ * The backend answers errors with a typed envelope —
+ * ``{success, error, code, request_id, details}`` — NOT FastAPI's bare
+ * ``{detail}``. Reading ``.detail`` therefore always came up undefined and the
+ * caller fell back to a generic string, so every reason the backend took the
+ * trouble to type was thrown away at the boundary. ``createTag`` was worse
+ * still: it never read the body at all.
+ *
+ * Prod 2026-08-27: a duplicate create answered
+ * `{"error": "Tag 'MiniMax H3' already exists", "code": "http_409"}` and the
+ * user saw "Failed to create tag".
+ *
+ * ``detail`` stays in the chain for any route still on the plain FastAPI shape.
+ */
+async function tagErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    const detail = body?.detail;
+    return (
+      body?.error ??
+      (typeof detail === 'string' ? detail : detail?.message) ??
+      `${fallback} (HTTP ${res.status})`
+    );
+  } catch {
+    return `${fallback} (HTTP ${res.status})`;
+  }
+}
+
 // Module-level cache with short TTL to avoid duplicate requests
 let _allTagsCache: { data: Tag[]; ts: number } | null = null;
 let _allTagsPromise: Promise<Tag[]> | null = null;
@@ -62,7 +92,7 @@ export async function createTag(data: {
     headers: await getAuthHeaders(),
     body: JSON.stringify({ ...data, type: data.type || 'user' }),
   });
-  if (!res.ok) throw new Error('Failed to create tag');
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to create tag'));
   invalidateAllTagsCache();
   return res.json();
 }
@@ -73,7 +103,7 @@ export async function deleteTag(tagId: string): Promise<void> {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  if (!res.ok) throw new Error('Failed to delete tag');
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to delete tag'));
   invalidateAllTagsCache();
 }
 
@@ -105,12 +135,7 @@ export async function updateTag(
     headers: await getAuthHeaders(),
     body: JSON.stringify(updates),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to update tag' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to update tag'));
   invalidateAllTagsCache();
   return res.json();
 }
@@ -125,12 +150,7 @@ export async function mergeTags(
     headers: await getAuthHeaders(),
     body: JSON.stringify({ target_id: targetId, source_ids: sourceIds }),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to merge tags' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to merge tags'));
   invalidateAllTagsCache();
   return res.json();
 }
@@ -147,12 +167,7 @@ export async function fetchTagGroups(): Promise<TagGroup[]> {
   const res = await fetch(`${apiUrl}/api/v1/tags/groups`, {
     headers: await getAuthHeaders(),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to fetch tag groups' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to fetch tag groups'));
   const data = await res.json();
   return data.groups || [];
 }
@@ -164,12 +179,7 @@ export async function createTagGroup(name: string): Promise<TagGroup> {
     headers: await getAuthHeaders(),
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to create group' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to create group'));
   return res.json();
 }
 
@@ -183,12 +193,7 @@ export async function renameTagGroup(
     headers: await getAuthHeaders(),
     body: JSON.stringify({ name }),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to rename group' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to rename group'));
   return res.json();
 }
 
@@ -198,12 +203,7 @@ export async function deleteTagGroup(groupId: string): Promise<void> {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to delete group' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to delete group'));
 }
 
 export async function reorderTagGroups(groupIds: string[]): Promise<void> {
@@ -213,12 +213,7 @@ export async function reorderTagGroups(groupIds: string[]): Promise<void> {
     headers: await getAuthHeaders(),
     body: JSON.stringify({ group_ids: groupIds }),
   });
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to reorder' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to reorder'));
 }
 
 export interface TagStatistics {
@@ -242,12 +237,7 @@ export async function fetchTagStatistics(
     `${apiUrl}/api/v1/tags/statistics?limit=${limit}`,
     { headers: await getAuthHeaders() },
   );
-  if (!res.ok) {
-    const error = await res
-      .json()
-      .catch(() => ({ detail: 'Failed to fetch tag statistics' }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to fetch tag statistics'));
   return res.json();
 }
 
@@ -289,7 +279,7 @@ export async function addResourceTag(
     headers: await getAuthHeaders(),
     body: JSON.stringify({ tag_id: tagId }),
   });
-  if (!res.ok) throw new Error('Failed to add resource tag');
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to add resource tag'));
 }
 
 /**
@@ -304,5 +294,5 @@ export async function removeResourceTag(
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  if (!res.ok) throw new Error('Failed to remove resource tag');
+  if (!res.ok) throw new Error(await tagErrorMessage(res, 'Failed to remove resource tag'));
 }

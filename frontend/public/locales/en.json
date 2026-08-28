@@ -468,7 +468,7 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
-      "coverNeedsVideo": "Select a video above first — the cover comes from it.",
+      "coverNeedsVideo": "Pick a video above first — cover frames are sampled from it.",
       "coverSetV": "Vertical ready",
       "coverSetH": "Horizontal ready",
       "coverHint": "Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.",
@@ -598,7 +598,6 @@
       "coverImagesNote": "The first image is used as the cover for image posts.",
       "coverFromVideo": "Cover from a video frame",
       "coverResample": "Sample again",
-      "coverNeedsVideo": "Pick a video above first — cover frames are sampled from it.",
       "coverSourceLabel": "Sample from",
       "coverPickFrame": "Pick a frame from the video",
       "coverPickFrameHint": "Samples a few evenly spaced frames, then crops the one you choose to 3:4 and 4:3.",
@@ -993,7 +992,9 @@
       "mergePickTarget": "Pick the tag to keep:",
       "mergePreview": "Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.",
       "merge": "Merge",
-      "merging": "Merging…"
+      "merging": "Merging…",
+      "duplicateExists": "\"{{name}}\" already exists — pick another name.",
+      "autoTranslated": "Machine-translated — check it, or press \"= EN\" to keep the English wording."
     },
     "promptTriggerTags": {
       "title": "Prompt Trigger Tags",
