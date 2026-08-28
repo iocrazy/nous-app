@@ -468,7 +468,7 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
-      "coverNeedsVideo": "先在上方选一个视频 —— 封面从它里面来。",
+      "coverNeedsVideo": "请先在上方选择视频 — 封面帧从它里面抽取。",
       "coverSetV": "竖版已设置",
       "coverSetH": "横版已设置",
       "coverHint": "点一个位置打开封面工作室 —— 裁一帧、上传一张，或让模型画。两个位置有一个就能发布。",
@@ -598,7 +598,6 @@
       "coverImagesNote": "图文帖以第一张图片作为封面。",
       "coverFromVideo": "从视频帧生成封面",
       "coverResample": "重新抽帧",
-      "coverNeedsVideo": "请先在上方选择视频 — 封面帧从它里面抽取。",
       "coverSourceLabel": "抽帧来源",
       "coverPickFrame": "从视频中选一帧",
       "coverPickFrameHint": "均匀抽取若干帧，再把你选中的那张裁成 3:4 与 4:3。",
@@ -994,7 +993,8 @@
       "mergePreview": "最多 {{count}} 个素材将归到「{{name}}」，{{n}} 个标签将被删除。",
       "merge": "合并",
       "merging": "合并中…",
-      "duplicateExists": "\"{{name}}\" 已存在，换个名字。"
+      "duplicateExists": "\"{{name}}\" 已存在，换个名字。",
+      "autoTranslated": "机器翻译结果，请核对；专有名词可按「= EN」保持与英文一致。"
     },
     "promptTriggerTags": {
       "title": "Prompt 触发标签",

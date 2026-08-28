@@ -92,6 +92,19 @@ export const TagsSettings: React.FC = () => {
   // toggling one doesn't bleed into the other. When ON: ZH mirrors EN
   // verbatim and auto-translate is suppressed.
   const [forceTagNameEqEn, setForceTagNameEqEn] = useState(false);
+
+  // Which create-dialog field currently holds MACHINE output rather than the
+  // user's own typing. mymemory is a translation MEMORY, not a translator —
+  // for product names it returns whatever crowd segment happens to match, and
+  // the answer drifts over time (it gave "简短" for "MiniMax H3" on
+  // 2026-08-07 and "MiniMax H3" three weeks later). Dropping that into a
+  // field the user is about to submit, styled exactly like text they typed,
+  // is how a tag ends up permanently named something unrelated: the Chinese
+  // UI then lists it under that guess, so its own author can't find it.
+  // Cleared the moment the user edits the field or locks it with "= EN".
+  const [autoTranslatedField, setAutoTranslatedField] = useState<
+    'en' | 'zh' | null
+  >(null);
   const [forceEditTagNameEqEn, setForceEditTagNameEqEn] = useState(false);
 
   // Inline-in-dialog delete confirmation. Separate from ``deletingTagId``
@@ -142,6 +155,7 @@ export const TagsSettings: React.FC = () => {
   // in the English field (or vice-versa) we hit mymemory.translated.net
   // after a 600ms idle to fill the other field.
   const translateTimerRef = React.useRef<number | null>(null);
+  const translateTicketRef = React.useRef(0);
 
   // Load tags and groups
   useEffect(() => {
@@ -425,6 +439,7 @@ export const TagsSettings: React.FC = () => {
       setNewTagName('');
       setNewTagNameZh('');
       setForceTagNameEqEn(false);
+      setAutoTranslatedField(null);
       setShowCreateForm(false);
     } catch (err) {
       setDialogError(
@@ -596,14 +611,22 @@ export const TagsSettings: React.FC = () => {
     if (translateTimerRef.current) window.clearTimeout(translateTimerRef.current);
     const trimmed = source.trim();
     if (!trimmed) return;
+    // Bumped on every schedule; a response whose ticket is no longer current
+    // belongs to text the user has already typed past. The 600ms timer can be
+    // cleared, but a request already in flight cannot — without this, a slow
+    // answer lands on top of whatever is in the box now.
+    const ticket = ++translateTicketRef.current;
+    const isCurrent = () => translateTicketRef.current === ticket;
+
     translateTimerRef.current = window.setTimeout(async () => {
       const sourceIsChinese = isChinese(trimmed);
       // EN field with Chinese input → user wants to type in Chinese; flip
       // the layout: fill EN with translation, mirror Chinese into ZH.
       if (originField === 'en' && sourceIsChinese) {
         const en = await fetchTranslation(trimmed, 'zh|en');
-        if (en) {
+        if (en && isCurrent()) {
           setNewTagName(en);
+          setAutoTranslatedField('en');
           // Mirror the original Chinese into the ZH field if it's empty.
           setNewTagNameZh((prev) => (prev.trim() ? prev : trimmed));
         }
@@ -612,16 +635,24 @@ export const TagsSettings: React.FC = () => {
       // EN field with English input → translate to ZH if ZH is empty.
       if (originField === 'en' && !sourceIsChinese) {
         const zh = await fetchTranslation(trimmed, 'en|zh');
-        if (zh) {
-          setNewTagNameZh((prev) => (prev.trim() ? prev : zh));
+        if (zh && isCurrent()) {
+          setNewTagNameZh((prev) => {
+            if (prev.trim()) return prev;
+            setAutoTranslatedField('zh');
+            return zh;
+          });
         }
         return;
       }
       // ZH field with Chinese input → translate to EN if EN is empty.
       if (originField === 'zh' && sourceIsChinese) {
         const en = await fetchTranslation(trimmed, 'zh|en');
-        if (en) {
-          setNewTagName((prev) => (prev.trim() ? prev : en));
+        if (en && isCurrent()) {
+          setNewTagName((prev) => {
+            if (prev.trim()) return prev;
+            setAutoTranslatedField('en');
+            return en;
+          });
         }
       }
     }, 600);
@@ -765,6 +796,7 @@ export const TagsSettings: React.FC = () => {
           <button
             onClick={() => {
               setDialogError(null);
+              setAutoTranslatedField(null);
               setShowCreateForm(true);
             }}
             className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
@@ -1282,6 +1314,7 @@ export const TagsSettings: React.FC = () => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
                   setDialogError(null);
+                  setAutoTranslatedField(null);
                 }}
                 className="text-ink-500 hover:text-ink-300"
               >
@@ -1314,6 +1347,7 @@ export const TagsSettings: React.FC = () => {
                   onChange={(e) => {
                     const value = e.target.value;
                     setNewTagName(value);
+                    setAutoTranslatedField((f) => (f === 'en' ? null : f));
                     if (forceTagNameEqEn) {
                       // Mirror EN→ZH live while locked. Skip the
                       // auto-translate path — equality is the contract.
@@ -1326,6 +1360,17 @@ export const TagsSettings: React.FC = () => {
                   autoFocus
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateTag(); }}
                 />
+                {autoTranslatedField === 'en' && (
+                  <p className="flex items-start gap-1.5 text-[11px] text-warn-soft">
+                    <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                    <span>
+                      {t(
+                        'settings.tags.autoTranslated',
+                        'Machine-translated — check it, or press "= EN" to keep the English wording.',
+                      )}
+                    </span>
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1359,6 +1404,8 @@ export const TagsSettings: React.FC = () => {
                       }
                       setNewTagNameZh(src);
                       setForceTagNameEqEn(true);
+                      // Deliberate choice now, not a guess.
+                      setAutoTranslatedField(null);
                     }}
                     disabled={!newTagName.trim() && !forceTagNameEqEn}
                     aria-pressed={forceTagNameEqEn}
@@ -1390,6 +1437,7 @@ export const TagsSettings: React.FC = () => {
                     if (forceTagNameEqEn) return; // locked — readonly
                     const value = e.target.value;
                     setNewTagNameZh(value);
+                    setAutoTranslatedField((f) => (f === 'zh' ? null : f));
                     scheduleTranslate(value, 'zh');
                   }}
                   readOnly={forceTagNameEqEn}
@@ -1400,6 +1448,17 @@ export const TagsSettings: React.FC = () => {
                   }`}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateTag(); }}
                 />
+                {autoTranslatedField === 'zh' && (
+                  <p className="flex items-start gap-1.5 text-[11px] text-warn-soft">
+                    <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                    <span>
+                      {t(
+                        'settings.tags.autoTranslated',
+                        'Machine-translated — check it, or press "= EN" to keep the English wording.',
+                      )}
+                    </span>
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-ink-300">
@@ -1452,6 +1511,7 @@ export const TagsSettings: React.FC = () => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
                   setDialogError(null);
+                  setAutoTranslatedField(null);
                 }}
                 className="px-5 py-2.5 rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 transition-colors font-medium text-sm"
               >
