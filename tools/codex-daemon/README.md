@@ -143,12 +143,63 @@ shell string), so nothing the server sends can be interpreted as shell
 syntax:
 
 - `gpt-image-2-skill images generate|edit …`
-- `codex exec --json …`
+- `codex exec --json --ephemeral --skip-git-repo-check -s read-only -C <temp dir> …`
 - `dreamina <whitelisted subcommand> …` (all other subcommands refused)
 
 Reference images are downloaded only from the nous API host; any other URL
 is refused. Config lives in `~/.config/nous-codex/config.json` (mode 600)
 and holds only the device token issued at pairing.
+
+### Text (LLM) jobs
+
+Besides canvas images, nous can route an **agent's text turn** to this daemon
+— you pick the model `Codex (Local)` in the agent editor and the reply is
+produced by the `codex` on your machine, spending your ChatGPT quota.
+
+What that job is, exactly:
+
+- **Plain text only.** codex runs its own internal tool loop and never emits
+  `tool_calls`, so nous refuses the turn with a typed error rather than
+  silently dropping capabilities: an agent with Skills bound to it cannot use
+  this model.
+- **No streaming.** The reply arrives in one piece when codex finishes; the
+  chat shows its waiting state until then.
+- **Read-only ephemeral sandbox.** `-s read-only --ephemeral` with `-C` set to
+  a fresh temp directory (which holds only the reference images for this job,
+  and is deleted afterwards). No `workspace-write`, no pointing codex at a
+  real project directory.
+- **The prompt goes over stdin,** never on the command line, so it does not
+  show up in `ps` and nothing in it can be read as shell syntax.
+- Replies larger than ~900 KB are split into `job_chunk` frames and
+  reassembled server-side. A single text result is capped at **64 chunks
+  (16 MiB)**; past that the job fails loudly instead of returning a truncated
+  answer.
+
+See "Only run the command nous gave you" above — it applies here in full: the
+prompt is assembled by nous from your agent's instructions and conversation,
+and codex acts on it on your machine.
+
+⚠️ **`-s read-only` stops writes, not reads — and "reads" means your whole
+home directory.** Measured on a real machine (2026-08-27) with the exact argv
+this daemon builds, `-C` pointed at an empty temp dir: codex read a file under
+`$HOME` that had nothing to do with the job and returned its contents verbatim.
+The sandbox is doing what OpenAI documents; it is just weaker than the `-C`
+flag makes it look.
+
+What actually keeps a text job away from your files today is one sentence in
+the prompt nous composes ("Do not read or modify any files"), and in testing
+codex honoured it — including when the user turn explicitly told it to ignore
+that sentence. But a prompt instruction is not an isolation boundary. So:
+
+- **Do not paste untrusted text into an agent that runs on `Codex (Local)`** —
+  a scraped page, an email, a document someone sent you. Whoever wrote that
+  text is writing part of the prompt.
+- Anything readable by your user account is in reach: `~/.ssh`, `~/.aws`,
+  `.env` files, browser profiles.
+- Bind the model to agents whose input you control.
+
+Real isolation (a container, or a separate user account with its own `codex`
+login) is tracked as follow-up work; it is not in this first version.
 
 ## Environment
 

@@ -207,3 +207,110 @@ async def test_batch_module_kwarg_passed_to_resolve_mediahub_model():
         )
     rmm.assert_any_call("doubao-seed-1-6", "caption")
     rmm.assert_any_call("doubao-seed-fallback", "caption")
+
+
+@pytest.mark.asyncio
+async def test_user_id_reaches_get_adapter_for_key():
+    hit = ("codex-local", {"api_key": "", "base_url": ""}, "")
+    with (
+        patch.object(fw, "resolve_mediahub_model", AsyncMock(return_value=hit)),
+        patch.object(fw, "resolve_provider_key", MagicMock(return_value="codex-local")),
+        patch.object(fw, "get_adapter_for_key", MagicMock(return_value="LOCAL")) as gak,
+        patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
+    ):
+        chain = await fw.build_fallback_llm(
+            primary_model="Codex (Local)",
+            fallback_models=[],
+            user_provider_config={},
+            user_id="u7",
+        )
+    gak.assert_called_once()
+    assert gak.call_args.kwargs.get("user_id") == "u7"
+    assert chain.adapter_factory("Codex (Local)") == "LOCAL"
+
+
+@pytest.mark.asyncio
+async def test_local_primary_drops_paid_fallbacks():
+    """选本机模型 = 用自己的订阅跑在自己机器上。daemon 掉线时静默改由平台付费模型
+    接管,等于替用户改了「在哪跑、谁付钱」两件事而不告知——必须让类型化的本机错误
+    浮上来,空 fallback 池就是让它可达的手段。"""
+
+    def _hit(model, module):
+        # 只有 primary 命中本机目录行;fallback 是普通付费平台模型。
+        if model == "Codex (Local)":
+            return ("codex-local", {"api_key": "", "base_url": ""}, "")
+        return ("qwen", {"api_key": "k", "base_url": "https://x/v1"}, model)
+
+    with (
+        patch.object(fw, "resolve_mediahub_model", AsyncMock(side_effect=_hit)),
+        patch.object(
+            fw,
+            "resolve_provider_key",
+            MagicMock(side_effect=lambda prov, actual: prov),
+        ),
+        patch.object(fw, "get_adapter_for_key", MagicMock(return_value="A")),
+        patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
+    ):
+        chain = await fw.build_fallback_llm(
+            primary_model="Codex (Local)",
+            fallback_models=["qwen-x"],
+            user_provider_config={},
+            user_id="u7",
+        )
+
+    assert chain.fallback_models == []
+    assert chain.primary_model == "Codex (Local)"
+
+
+@pytest.mark.asyncio
+async def test_non_local_primary_keeps_its_fallbacks():
+    """反向对照 —— 没有它,上面那条在「fallback 永远被清空」的实现下同样会绿。"""
+    with (
+        patch.object(
+            fw,
+            "resolve_mediahub_model",
+            AsyncMock(
+                return_value=("qwen", {"api_key": "k", "base_url": "https://x"}, "m")
+            ),
+        ),
+        patch.object(fw, "resolve_provider_key", MagicMock(return_value="qwen")),
+        patch.object(fw, "get_adapter_for_key", MagicMock(return_value="A")),
+        patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
+    ):
+        chain = await fw.build_fallback_llm(
+            primary_model="mediahub-qwen",
+            fallback_models=["qwen-x"],
+            user_provider_config={},
+        )
+
+    assert chain.fallback_models == ["qwen-x"]
+
+
+@pytest.mark.asyncio
+async def test_local_model_only_in_fallback_pool_does_not_empty_it():
+    """只有 PRIMARY 是本机才清池。本机模型出现在 fallback 位置时,清空整池会顺手
+    删掉与它无关的其它候选 —— 那是另一回事。"""
+
+    def _hit(model, module):
+        if model == "Codex (Local)":
+            return ("codex-local", {"api_key": "", "base_url": ""}, "")
+        return ("qwen", {"api_key": "k", "base_url": "https://x/v1"}, model)
+
+    with (
+        patch.object(fw, "resolve_mediahub_model", AsyncMock(side_effect=_hit)),
+        patch.object(
+            fw,
+            "resolve_provider_key",
+            MagicMock(side_effect=lambda prov, actual: prov),
+        ),
+        patch.object(fw, "get_adapter_for_key", MagicMock(return_value="A")),
+        patch.object(fw, "get_adapter_for_user", MagicMock(return_value="BYOK")),
+    ):
+        chain = await fw.build_fallback_llm(
+            primary_model="mediahub-qwen",
+            fallback_models=["Codex (Local)", "qwen-x"],
+            user_provider_config={},
+            user_id="u7",
+        )
+
+    assert chain.fallback_models == ["Codex (Local)", "qwen-x"]

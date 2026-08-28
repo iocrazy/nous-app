@@ -1002,7 +1002,7 @@
     },
     "localCli": {
       "codexTitle": "GPT CLI (codex)",
-      "codexDesc": "在你自己的电脑上用自己的 codex 登录态跑画布生成。凭证不出本机——nous 只负责派任务。",
+      "codexDesc": "在你自己的电脑上用自己的 codex 登录态跑画布生成。凭证不出本机——nous 只负责派任务。也可作为 agent 模型（Codex (Local)）使用——仅纯文本。文本任务运行在 codex 的只读沙箱中——不能写文件，但可以读取你电脑上的文件。请勿把不可信文本喂给绑定了 Codex (Local) 的 agent。",
       "notPaired": "未配对",
       "allOffline": "全部离线",
       "nOnline": "{{count}} 台在线",
@@ -3362,6 +3362,7 @@
     "retry": "重试",
     "expandSidebar": "展开侧边栏",
     "collapseSidebar": "折叠侧边栏",
+    "localModelPlainTextHint": "本机 Codex 以纯文本运行：此 agent 绑定的 Skill 与工具在运行时会被拒绝。",
     "tabs": {
       "agents": "智能体",
       "skills": "技能"
@@ -4728,12 +4729,47 @@
     "UNKNOWN": {
       "title": "任务失败"
     },
+    "local_daemon_offline": {
+      "title": "你的本机 codex daemon 当时没有连接",
+      "hint": "在你的电脑上启动它（设置 → AI → 本地 CLI 有说明），然后重试。"
+    },
+    "local_daemon_outdated": {
+      "title": "你的本机 codex daemon 版本过旧",
+      "hint": "到 设置 → AI → 本地 CLI 重新执行安装命令以更新，然后重试。"
+    },
+    "local_cli_missing": {
+      "title": "你的电脑上没有安装 codex CLI",
+      "hint": "在那台机器上运行 `npm i -g @openai/codex`，然后重启 daemon。"
+    },
+    "local_tools_unsupported": {
+      "title": "本机 Codex 不能运行工具或 Skill",
+      "hint": "把该 agent 上绑定的 Skill 解绑，或在 设置 → AI 里改用托管模型。"
+    },
+    "local_codex_not_logged_in": {
+      "title": "你的本机 codex CLI 未登录",
+      "hint": "在那台机器上运行 `codex login`，然后重试。"
+    },
+    "local_ref_rejected": {
+      "title": "有一张附图无法被你的本机 daemon 使用",
+      "hint": "请改用 nous 素材库中的图片后重试。"
+    },
+    "local_codex_failed": {
+      "title": "本机 Codex 没有返回内容",
+      "hint": "请查看你电脑上的 daemon 日志，然后重试。"
+    },
     "provider": {
       "providerRateLimit": "AI 模型服务商正在限流，请一分钟后重试。",
       "providerUnreachable": "AI 模型服务商暂时无法访问，请稍后重试。",
       "providerAuth": "AI 服务商拒绝了平台凭据，团队已收到通知。",
       "providerBadModel": "当前配置的 AI 模型不可用。",
-      "taskTimeout": "AI 模型响应超时，请重试。"
+      "taskTimeout": "AI 模型响应超时，请重试。",
+      "localDaemonOffline": "你的本机 codex daemon 未连接。请在你的电脑上启动它（设置 → AI → 本地 CLI）后重试。",
+      "localToolsUnsupported": "本机 Codex 不支持工具调用与 Skill。请解绑后再试，或换一个模型。",
+      "localCodexNotLoggedIn": "本机 codex CLI 未登录。请在你的电脑上运行 `codex login`。",
+      "localCodexFailed": "本机 Codex 没有返回内容。请查看你电脑上的 daemon 日志。",
+      "localRefRejected": "有一张附图无法被你的本机 daemon 使用。请改用 nous 素材库中的图片后重试。",
+      "localCliMissing": "你的电脑上没有安装 codex CLI。请运行 `npm i -g @openai/codex` 后重启 daemon。",
+      "localDaemonOutdated": "你的本机 codex daemon 版本过旧。请到 设置 → AI → 本地 CLI 重新执行安装命令以更新。"
     }
   },
   "issueDetail": {

@@ -21,6 +21,19 @@ describe('providerErrorMessage', () => {
     ['provider_auth', 'errors.provider.providerAuth'],
     ['provider_bad_model', 'errors.provider.providerBadModel'],
     ['task_timeout', 'errors.provider.taskTimeout'],
+    // codex-local 的四个码(backend/app/services/ai/error_catalog.py)。走的是同一条
+    // SSE error 通道,所以共用这份映射——本机链路的失败不该退化成通用兜底文案。
+    ['local_daemon_offline', 'errors.provider.localDaemonOffline'],
+    ['local_tools_unsupported', 'errors.provider.localToolsUnsupported'],
+    ['local_codex_not_logged_in', 'errors.provider.localCodexNotLoggedIn'],
+    ['local_codex_failed', 'errors.provider.localCodexFailed'],
+    // 后端审查追加的两个(同一份 error_catalog)。这两条的修复动作同样落在用户
+    // 自己的电脑上,而且比其余四条更具体——装 CLI、换图片来源。
+    ['local_ref_rejected', 'errors.provider.localRefRejected'],
+    ['local_cli_missing', 'errors.provider.localCliMissing'],
+    // 版本闸门(终审 I-2)。这条的修复动作是「重跑安装命令」,跟其余任何一条都不同,
+    // 掉进通用兜底会让用户去查一个其实健康的 daemon 的日志。
+    ['local_daemon_outdated', 'errors.provider.localDaemonOutdated'],
   ])('maps known code %s to i18n key %s', (code, expectedKey) => {
     expect(providerErrorMessage(code, t)).toBe(`${expectedKey}|${code}`);
   });

@@ -21,6 +21,23 @@ from loguru import logger
 _cache: dict[tuple[str, str], bool] = {}
 _cache_loaded: bool = False
 
+# Platform-catalog providers whose models accept images despite having no
+# ``ai_model_prices`` row and matching no prefix below. ``codex exec --image``
+# is a real capability of the user's local CLI, so answering False here does
+# not "degrade safely" — it silently strips the images off the request before
+# the adapter ever sees them (spec 2026-08-27 真链验收第 4 项).
+#
+# codex-local ONLY. ``jimeng-local`` is deliberately absent: it is an image
+# GENERATOR, not a chat model, so it never reaches this gate, and claiming
+# "accepts image input" for it would be a different claim entirely.
+_LOCAL_VISION_PROVIDERS = frozenset({"codex-local"})
+
+# Lowercased ``mediahub_models.name`` values served by one of those providers.
+# Cached beside _cache so the common path stays zero extra roundtrips — the
+# gate runs once per chat turn, and a per-turn catalog SELECT for EVERY model
+# would be a real cost paid by every user to fix one provider.
+_local_vision_models: set[str] = set()
+
 # Legacy fallback for models not in ai_model_prices. Identical to the
 # prior _VISION_MODEL_PREFIXES list in app/agent_framework/multimodal.py.
 # Kept here so removing the helper's DB dependency still degrades safely.
@@ -86,6 +103,28 @@ def _matches_fallback_prefix(model_lower: str) -> bool:
     return any(model_lower.startswith(p) for p in _FALLBACK_PREFIXES)
 
 
+async def _fetch_local_vision_models() -> set[str]:
+    """Names of the catalog rows whose provider runs on the user's own machine
+    and accepts images. ORM select, mirroring _capabilities_select_stmt (no raw
+    SQL, 2026-08-04 立约).
+
+    Not filtered on ``is_enabled``: a disabled row can't be picked as a model
+    in the first place, so filtering here would only add a way for the two
+    caches to disagree.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models.ai import MediahubModels
+
+    stmt = select(MediahubModels.name).where(
+        MediahubModels.actual_provider.in_(tuple(_LOCAL_VISION_PROVIDERS))
+    )
+    async with read_scope() as session:
+        rows = (await session.execute(stmt)).scalars().all()
+    return {(n or "").lower() for n in rows if n}
+
+
 async def _ensure_loaded() -> None:
     """Populate the cache from the DB once. Subsequent calls are a no-op
     until ``refresh_capabilities`` is invoked."""
@@ -110,14 +149,29 @@ async def _ensure_loaded() -> None:
         if not model:
             continue
         _cache[(model, provider)] = bool(row.get("supports_vision", False))
+
+    # Its own try: a failure here must not cost us the capability map that
+    # already loaded above, and vice versa.
+    try:
+        _local_vision_models.update(await _fetch_local_vision_models())
+    except Exception as exc:  # noqa: BLE001 — degrade to the prefix heuristic
+        logger.warning(
+            f"[model_capabilities] failed to load local-vision catalog rows: "
+            f"{exc}; local models will be treated as text-only"
+        )
+
     _cache_loaded = True
-    logger.info(f"[model_capabilities] loaded {len(_cache)} model capability rows")
+    logger.info(
+        f"[model_capabilities] loaded {len(_cache)} model capability rows, "
+        f"{len(_local_vision_models)} local-vision catalog rows"
+    )
 
 
 async def refresh_capabilities() -> None:
     """Force a fresh DB reload. Call after admin edits the model registry."""
     global _cache_loaded
     _cache.clear()
+    _local_vision_models.clear()
     _cache_loaded = False
     await _ensure_loaded()
 
@@ -133,8 +187,15 @@ async def model_supports_vision(
          caller didn't supply provider.
       3. Unique-model fallback: if exactly one provider has this model
          and the caller didn't specify, use that row.
-      4. Prefix heuristic (_FALLBACK_PREFIXES).
-      5. False.
+      4. Catalog rows served by a local vision provider (_LOCAL_VISION_PROVIDERS).
+      5. Prefix heuristic (_FALLBACK_PREFIXES).
+      6. False.
+
+    Step 4 sits AFTER the explicit lookups on purpose: an admin who inserts an
+    ``ai_model_prices`` row with ``supports_vision=FALSE`` is still opting that
+    model out, exactly as the module docstring promises. It sits BEFORE the
+    prefix heuristic because a catalog name like ``Codex (Local)`` matches no
+    prefix and would otherwise return False.
     """
     if not model:
         return False
@@ -158,5 +219,9 @@ async def model_supports_vision(
         if len(matching) == 1:
             return matching[0]
 
-    # 4 + 5: prefix heuristic, else False.
+    # 4: a catalog row whose provider runs on the user's own machine.
+    if model_lower in _local_vision_models:
+        return True
+
+    # 5 + 6: prefix heuristic, else False.
     return _matches_fallback_prefix(model_lower)

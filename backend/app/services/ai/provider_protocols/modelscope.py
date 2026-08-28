@@ -12,7 +12,9 @@ class ModelScopeProtocol(ProviderProtocol):
     model_types = ("llm",)
     is_chat_key = True
 
-    def build_chat_adapter(self, model: str, creds: dict[str, Any]) -> Any:
+    def build_chat_adapter(
+        self, model: str, creds: dict[str, Any], **context: Any
+    ) -> Any:
         # DB-only like every other provider (2026-07-07 follow-up): a missing
         # key raises here instead of building a keyless adapter that dies
         # upstream with ModelScope's opaque auth error.

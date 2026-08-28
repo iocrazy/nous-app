@@ -26,6 +26,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** This daemon's own version, reported in `env_report` so the server can
+ *  refuse to send job kinds an older build would mishandle.
+ *
+ *  A literal, NOT a read of package.json: `install.sh` downloads this single
+ *  file to ~/.local/share/nous-codex/nous-codex.mjs, so in every real
+ *  installation there is no package.json next to it. Kept in sync with
+ *  package.json by `index.test.mjs` ("DAEMON_VERSION matches package.json"),
+ *  which is the only thing standing between the two copies.
+ *
+ *  Bump this whenever the server needs to tell old daemons apart from new
+ *  ones — see MIN_TEXT_DAEMON_VERSION in
+ *  backend/app/services/ai/adapters/codex_daemon.py. */
+export const DAEMON_VERSION = '0.3.0';
+
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
 /** Both the config dir and the systemd unit dir must agree on where
@@ -177,28 +191,54 @@ async function pair(argv) {
 
 // ── job execution (WHITELIST — the only commands this process ever runs) ──
 
-function runCommand(bin, args, { timeoutMs = 15 * 60_000 } = {}) {
+/** Failure signals travel as fields, never as prose to be re-parsed.
+ *  `message` still falls back to stdout so a human reading the log sees
+ *  something, but classifyJobError reads `stderr` / `code` / `exitCode` —
+ *  stdout is the model's own output and must never steer a verdict. */
+function failure(message, fields) {
+  return Object.assign(new Error(message), {
+    stderr: '', exitCode: null, timedOut: false, ...fields,
+  });
+}
+
+export function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } = {}) {
   return new Promise((resolve, reject) => {
     // argv array, never a shell string: nothing the server sends can be
     // interpreted as shell syntax.
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { stdio: [stdin == null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`));
+      reject(failure(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`, {
+        stderr: err, timedOut: true,
+      }));
     }, timeoutMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(new Error(`${bin} not found or not executable: ${e.message}`));
+      // e.code is ENOENT (absent) / EACCES (present but not runnable). Keep it
+      // for diagnostics, but classify on `spawnFailed`: a bare ENOENT also
+      // comes from fs.readFile elsewhere, and "the CLI is missing" is the
+      // wrong thing to tell a user whose CLI ran fine but wrote no file.
+      reject(failure(`${bin} not found or not executable: ${e.message}`, {
+        code: e.code, spawnFailed: true, stderr: err,
+      }));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve({ out, err });
-      else reject(new Error(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`));
+      else {
+        reject(failure(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`, {
+          stderr: err, exitCode: code,
+        }));
+      }
     });
+    if (stdin != null) {
+      child.stdin.on('error', () => { /* EPIPE when codex exits early — the close handler reports it */ });
+      child.stdin.end(stdin);
+    }
   });
 }
 
@@ -225,12 +265,94 @@ async function requireCommand(bin, args) {
   return r;
 }
 
-async function downloadRef(url, dir, index) {
-  // SSRF guard: only nous' own API may be fetched by this daemon.
-  if (!url.startsWith(`${API_BASE}/`)) {
-    throw new Error(`refusing to fetch a non-nous url: ${url.slice(0, 80)}`);
+export const REF_MAX_BYTES = 6 * 1024 * 1024;
+
+/** Only formats codex actually reads as pictures. `image/svg+xml` is left
+ *  out on purpose: it is markup with script, not pixels. */
+const DATA_IMAGE_EXT = {
+  'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp', 'image/gif': 'gif',
+};
+
+function refRejected(why) {
+  throw Object.assign(new Error(`ref_rejected: ${why}`), { code: 'ref_rejected' });
+}
+
+/** The chat layer inlines attachments as `data:image/<mime>;base64,<b64>`
+ *  (see backend `flatten_for_codex`, which passes `image_url.url` through
+ *  verbatim), so the daemon has to accept them. This widens nothing: a data:
+ *  URL carries its own bytes and causes no network fetch, so the SSRF
+ *  whitelist below still governs every URL that does. */
+export function parseDataImageUrl(url) {
+  const m = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,([\s\S]*)$/i.exec(String(url));
+  if (!m) refRejected('only base64-encoded data:image URLs are accepted');
+  const mime = m[1].toLowerCase();
+  if (!(mime in DATA_IMAGE_EXT)) refRejected(`unsupported image type: ${mime}`);
+  const b64 = m[2].replace(/\s+/g, '');
+  // Buffer.from(…, 'base64') silently drops anything it cannot read, so a
+  // corrupt payload would otherwise become a corrupt image instead of an error.
+  if (!b64.length || b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+    refRejected('malformed base64 payload');
   }
-  const res = await fetch(url);
+  // Refuse on the encoded length first — do not allocate to find out it is huge.
+  if ((b64.length / 4) * 3 > REF_MAX_BYTES + 3) refRejected('image exceeds the size cap');
+  const bytes = Buffer.from(b64, 'base64');
+  if (!bytes.length) refRejected('empty image payload');
+  if (bytes.length > REF_MAX_BYTES) refRejected('image exceeds the size cap');
+  return { mime, bytes };
+}
+
+/** How many hops a nous URL may take before we stop believing it is one.
+ *  Real nous redirects are one hop (an object-storage presign); 3 leaves
+ *  room without letting a loop run forever. */
+export const REF_MAX_REDIRECTS = 3;
+
+/** SSRF guard: only nous' own API may be fetched by this daemon. Typed as
+ *  ref_rejected — nothing about codex or the user's machine is broken, the
+ *  request just has to carry a different attachment.
+ *
+ *  A function, not an inline check, because it has to be applied to EVERY
+ *  hop. `fetch` defaults to `redirect: 'follow'`, which made the old
+ *  string test govern the first request only: any nous endpoint that
+ *  redirects (`/api/v1/generated-media/<id>` presigns exactly that way) was
+ *  a way out of the allowlist, and this branch now takes user-controlled
+ *  chat-attachment URLs, not just server-built ones. */
+export function assertNousUrl(url) {
+  const s = String(url);
+  if (!s.startsWith(`${API_BASE}/`)) {
+    refRejected(`refusing to fetch a non-nous url: ${s.slice(0, 80)}`);
+  }
+  return s;
+}
+
+export async function downloadRef(url, dir, index) {
+  if (String(url).startsWith('data:image/')) {
+    const { mime, bytes } = parseDataImageUrl(url);
+    const inline = path.join(dir, `ref-${index}.${DATA_IMAGE_EXT[mime]}`);
+    await fs.writeFile(inline, bytes);
+    return inline;
+  }
+  let target = assertNousUrl(url);
+  let res;
+  // `redirect: 'manual'` so the allowlist — not fetch — decides where this
+  // goes next. Every Location is resolved against the URL it came from
+  // (relative redirects are legal) and re-checked before it is followed.
+  for (let hop = 0; ; hop += 1) {
+    res = await fetch(target, { redirect: 'manual' });
+    const status = Number(res.status);
+    if (!(status >= 300 && status < 400)) break;
+    if (hop >= REF_MAX_REDIRECTS) {
+      refRejected(`too many redirects (over ${REF_MAX_REDIRECTS}) fetching a ref`);
+    }
+    const location = res.headers?.get?.('location');
+    if (!location) refRejected(`redirect ${status} without a Location header`);
+    let resolved;
+    try {
+      resolved = new URL(location, target).toString();
+    } catch {
+      refRejected(`redirect to an unparseable Location: ${String(location).slice(0, 80)}`);
+    }
+    target = assertNousUrl(resolved);
+  }
   if (!res.ok) throw new Error(`ref download failed (${res.status})`);
   const file = path.join(dir, `ref-${index}.png`);
   await fs.writeFile(file, Buffer.from(await res.arrayBuffer()));
@@ -299,12 +421,120 @@ async function runDreaminaJob(payload, workDir) {
   return path.join(workDir, media);
 }
 
-async function runTextJob(payload) {
-  const args = ['exec', '--json'];
-  if (payload.model) args.push('--model', String(payload.model));
-  args.push(String(payload.prompt ?? ''));
-  const { out } = await runCommand('codex', args, { timeoutMs: 10 * 60_000 });
-  return out;
+export const TEXT_INLINE_LIMIT = 900 * 1024; // uvicorn's default WS frame cap is 1 MiB
+export const CHUNK_BYTES = 256 * 1024;
+const TEXT_TIMEOUT_DEFAULT_MS = 180_000;
+const TEXT_TIMEOUT_MAX_MS = 600_000;
+
+/** Fixed sandbox: read-only, ephemeral, cwd = an empty temp dir. IC ran
+ *  `--sandbox workspace-write --cd <app dir>` and then asked the model in the
+ *  prompt not to write files — we do not repeat that. */
+export function buildCodexExecArgs({ model, imagePaths, workDir }) {
+  const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-s', 'read-only', '-C', workDir];
+  if (model) args.push('--model', String(model));
+  for (const p of imagePaths ?? []) args.push('--image', p);
+  args.push('-'); // prompt from stdin: long prompts never hit argv / ps
+  return args;
+}
+
+/** `codex exec --json` prints JSONL. The answer is the LAST
+ *  item.completed whose item.type is agent_message; turn.completed.usage
+ *  carries real token counts. Non-JSON lines are ignored. */
+export function parseCodexExecOutput(jsonl) {
+  let text = null;
+  let usage = {};
+  let threadId = null;
+  for (const line of String(jsonl).split('\n')) {
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (ev?.type === 'thread.started' && ev.thread_id) threadId = ev.thread_id;
+    if (ev?.type === 'item.completed' && ev.item?.type === 'agent_message' && typeof ev.item.text === 'string') {
+      text = ev.item.text;
+    }
+    if (ev?.type === 'turn.completed' && ev.usage && typeof ev.usage === 'object') usage = ev.usage;
+  }
+  if (text == null) {
+    throw Object.assign(
+      new Error('codex_no_output: codex exec finished without an agent_message'),
+      { code: 'codex_no_output' },
+    );
+  }
+  return { text, usage, threadId };
+}
+
+export function chunkText(text, size = CHUNK_BYTES) {
+  const buf = Buffer.from(text, 'utf8');
+  const parts = [];
+  let start = 0;
+  while (start < buf.length) {
+    let end = Math.min(start + size, buf.length);
+    // never cut inside a UTF-8 sequence: back up to a char boundary
+    while (end < buf.length && (buf[end] & 0xc0) === 0x80) end -= 1;
+    parts.push(buf.subarray(start, end).toString('utf8'));
+    start = end;
+  }
+  return parts;
+}
+
+/** Text jobs carry refs under `image_urls`; the image/dreamina jobs next door
+ *  use `ref_urls`. A payload that gets that wrong, or ships a non-string
+ *  array, used to fall through `Array.isArray(...) ? ... : []` and produce an
+ *  empty list — the model then answered confidently about images it never
+ *  saw. Every rejection is typed and loud instead. */
+export function normalizeImageUrls(payload) {
+  const raw = payload?.image_urls;
+  if (raw == null) {
+    if (payload?.ref_urls != null) refRejected('refs must be sent as image_urls, not ref_urls');
+    return [];
+  }
+  if (!Array.isArray(raw) || raw.some((u) => typeof u !== 'string')) {
+    refRejected('image_urls must be an array of strings');
+  }
+  // Items may be a nous URL or an inline data:image — downloadRef tells them apart.
+  return raw.slice(0, 9);
+}
+
+/** The wire contract Task 2 reassembles. Kept as a pure function over `send`
+ *  so both branches are testable: the chunked one is otherwise near-dead code
+ *  that would first execute in production. */
+export function emitTextResult(send, { text, usage }) {
+  if (Buffer.byteLength(text, 'utf8') <= TEXT_INLINE_LIMIT) {
+    send({ type: 'job_done', text, usage, chunked: false });
+    return;
+  }
+  const parts = chunkText(text);
+  parts.forEach((data, seq) => send({ type: 'job_chunk', seq, data }));
+  send({ type: 'job_done', usage, chunked: true, chunks: parts.length });
+}
+
+/** Auth signals only ever appear on stderr. Deliberately narrow: a bare
+ *  `login` substring matched `systemd-logind` and any doc URL. */
+const AUTH_RE = /\bnot logged in\b|\bplease log ?in\b|\b401\b|unauthori[sz]ed/i;
+
+/** Map a thrown error to a wire `code`, using structured fields only — the
+ *  Error message contains codex stdout, i.e. text the model controls. */
+export function classifyJobError(err) {
+  if (err?.spawnFailed) return 'cli_missing';
+  // Ahead of exit code and stderr: SIGKILL races the child's own exit, so a
+  // timed-out run can still carry both, and neither is the real story.
+  if (err?.timedOut) return 'timeout';
+  const thrown = err?.code;
+  if (thrown === 'codex_no_output' || thrown === 'ref_rejected') return thrown;
+  if (AUTH_RE.test(String(err?.stderr ?? ''))) return 'codex_not_logged_in';
+  return 'job_failed';
+}
+
+async function runTextJob(payload, workDir) {
+  const refs = normalizeImageUrls(payload);
+  const imagePaths = [];
+  for (let i = 0; i < refs.length; i += 1) imagePaths.push(await downloadRef(refs[i], workDir, i));
+  const args = buildCodexExecArgs({ model: payload.model, imagePaths, workDir });
+  const timeoutMs = Math.min(
+    Number(payload.timeout_s) > 0 ? Number(payload.timeout_s) * 1000 : TEXT_TIMEOUT_DEFAULT_MS,
+    TEXT_TIMEOUT_MAX_MS,
+  );
+  const { out } = await runCommand('codex', args, { timeoutMs, stdin: String(payload.prompt ?? '') });
+  return parseCodexExecOutput(out);
 }
 
 const MIME_BY_EXT = {
@@ -388,18 +618,13 @@ async function connect(cfg) {
         const genId = await uploadResult(file, msg.payload?.upload_ticket);
         send({ type: 'job_done', gen_id: String(genId) });
       } else if (msg.kind === 'text') {
-        const text = await runTextJob(msg.payload ?? {});
-        send({ type: 'job_done', text });
+        emitTextResult(send, await runTextJob(msg.payload ?? {}, workDir));
       } else {
         send({ type: 'job_failed', code: 'unsupported_kind', message: String(msg.kind) });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const code = /not found or not executable/.test(message)
-        ? 'cli_missing'
-        : /not logged in|login/i.test(message)
-          ? 'codex_not_logged_in'
-          : 'job_failed';
+      const code = classifyJobError(err);
       log(`job ${jobId} failed: ${message}`);
       send({ type: 'job_failed', code, message: message.slice(0, 400) });
     } finally {
@@ -486,6 +711,10 @@ async function preflight() {
     log('note: dreamina not logged in — run: dreamina login');
   }
   return {
+    // First field on purpose: this is what the server gates job kinds on.
+    // A report WITHOUT it is a pre-0.3.0 daemon — see the backend's
+    // MIN_TEXT_DAEMON_VERSION check, which treats "missing" as "too old".
+    daemon_version: DAEMON_VERSION,
     codex_ok: Boolean(codexVersion),
     codex_version: codexVersion,
     skill_ok: Boolean(skillVersion),

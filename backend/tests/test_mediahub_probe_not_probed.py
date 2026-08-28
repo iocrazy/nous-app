@@ -34,6 +34,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.ai.mediahub_model_health import (
+    LOCAL_ENGINE_PROVIDERS,
     PROBE_STATUSES,
     PROBEABLE_TYPES,
     probe_mediahub_model,
@@ -182,3 +183,83 @@ def test_probe_statuses_matches_the_orm_check_constraint() -> None:
     )
     literals = set(re.findall(r"'([^']*)'", str(constraint.sqltext)))
     assert literals == set(PROBE_STATUSES)
+
+
+# ── local engines: the row is type=llm, so PROBEABLE_TYPES does NOT save it ──
+#
+# codex-local (spec 2026-08-27) is the same 2026-08-14 failure one layer over:
+# an unclearable red light on a healthy model. The row is type=llm with a NULL
+# base_url, so the hourly poll built "None/chat/completions" and recorded a
+# failure every hour, forever — and the AgentEditor surfaces that as a red box
+# the user has no way to clear, on a model that works fine whenever their own
+# daemon is up.
+
+
+def _local_row(provider: str, typ: str = "llm") -> dict:
+    """Shaped like migration 444's row: no base_url, no api_key — the
+    credential is the user's local ~/.codex/auth.json, which nous never sees."""
+    return {
+        "type": typ,
+        "actual_model": "",
+        "actual_provider": provider,
+        "base_url": None,
+        "api_key": "",
+    }
+
+
+@pytest.mark.parametrize("provider", sorted(LOCAL_ENGINE_PROVIDERS))
+@pytest.mark.asyncio
+async def test_local_engine_is_not_probed_and_never_touches_the_network(
+    provider: str,
+) -> None:
+    client_patch, provider_patch = _no_network()
+    with client_patch, provider_patch:
+        result = await probe_mediahub_model(_local_row(provider))
+
+    assert result["not_probed"] is True
+    assert result["ok"] is False
+    # Not a failure: nothing failed, so there is no reason code to record.
+    assert result["code"] is None
+    assert result["error"] is None
+    assert provider in result["detail"]
+
+
+@pytest.mark.asyncio
+async def test_local_engine_llm_row_maps_to_not_probed_status() -> None:
+    """The persisted ``last_test_status``. Pre-fix this row was type=llm, so it
+    reached the chat branch and persisted ``fail`` on every hourly poll."""
+    client_patch, provider_patch = _no_network()
+    with client_patch, provider_patch:
+        result = await probe_mediahub_model(_local_row("codex-local"))
+
+    assert probe_result_status(result) == "not_probed"
+
+
+@pytest.mark.asyncio
+async def test_local_engine_check_precedes_the_type_gate() -> None:
+    """A local row of a PROBEABLE type is the whole point — if the provider
+    check ran after the type gate, codex-local (type=llm) would sail straight
+    past it into ``/chat/completions``. Pinning the ordering keeps a later
+    refactor from silently reinstating the red light.
+    """
+    row = _local_row("codex-local", typ="llm")
+    assert row["type"] in PROBEABLE_TYPES  # positive control: the gate is open
+
+    client_patch, provider_patch = _no_network()
+    with client_patch, provider_patch:
+        result = await probe_mediahub_model(row)
+
+    assert result["not_probed"] is True
+    # The reason names the LOCAL boundary, not the type boundary.
+    assert "own machine" in result["detail"]
+
+
+def test_local_engine_providers_membership_is_pinned() -> None:
+    """Change-detector, same role as the PROBEABLE_TYPES one above.
+
+    NOTE: sibling copies of this literal live in
+    ``mediahub_model_repository.list_enabled`` (the picker's ``is_local`` flag)
+    and ``workflows/canvas_generation._LOCAL_ENGINES``. They are not imported
+    from here yet — see the task report's follow-up item.
+    """
+    assert LOCAL_ENGINE_PROVIDERS == frozenset({"codex-local", "jimeng-local"})

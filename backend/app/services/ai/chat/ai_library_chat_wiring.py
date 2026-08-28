@@ -332,6 +332,9 @@ async def build_agent_runner_stack(
         primary_model=primary_model,
         fallback_models=fallback_models,
         user_provider_config=user_provider_config,
+        # Routing context, not a credential: a codex-local catalog row runs
+        # the turn on THIS user's own paired machine.
+        user_id=str(user_id),
     )
 
     # ── 4. Delegate tool (M2.5 wiring) ──────────────────────────────

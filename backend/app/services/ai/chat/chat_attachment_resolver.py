@@ -152,6 +152,51 @@ class ResolutionFailure:
     reason: str
 
 
+# Attachment kinds that only reach the model through the vision multipart
+# build. When the model can't see, build_user_message flattens them to text
+# placeholders — the bytes never leave the process.
+_VISION_ONLY_KINDS = ("image", "video", "pdf")
+
+
+def vision_gate_failures(
+    requests: List[dict],
+    resolved: "ResolveResult",
+    *,
+    supports_vision: bool,
+) -> List["ResolutionFailure"]:
+    """Failures for attachments dropped by the model's VISION GATE, not by
+    resolution (spec 2026-08-27 真链验收第 4 项).
+
+    ``build_user_message(supports_vision=False)`` is a silent dropper: it
+    flattens every attachment into a text placeholder and returns a perfectly
+    ordinary message. Before this, that path left ``attachment_failures``
+    empty — the user attached an image, the model never received it, and
+    nothing anywhere said so. Same rule the repo already applies to触发路径:
+    a silent no-op is not an acceptable outcome.
+
+    Keyed by REQUEST index, not by resolved attachment: one PDF fans out to N
+    page images, and reporting "8 attachments failed" for one attached file
+    would be worse than useless. Requests that already failed to resolve are
+    skipped — they are in the caller's list once already, with a truer reason.
+
+    Returns ``[]`` whenever the model CAN see, or nothing resolved.
+    """
+    if supports_vision or not resolved.attachments:
+        return []
+    already = {f.request_index for f in resolved.failures}
+    out: List[ResolutionFailure] = []
+    for idx, req in enumerate(requests or []):
+        if idx in already:
+            continue
+        kind = (req.get("kind") or "") if isinstance(req, dict) else ""
+        if kind not in _VISION_ONLY_KINDS:
+            continue
+        out.append(
+            ResolutionFailure(request_index=idx, kind=kind, reason="model_no_vision")
+        )
+    return out
+
+
 @dataclass(frozen=True)
 class ResolveResult:
     attachments: List[Attachment]

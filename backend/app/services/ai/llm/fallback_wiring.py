@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from loguru import logger
+
 from app.services.ai.adapters.base import AIAdapter
 from app.services.ai.adapters.factory import (
     get_adapter_for_key,
@@ -20,6 +22,12 @@ from app.services.ai.adapters.factory import (
 )
 from app.services.ai.adapters.openai_compat import OpenAICompatibleAdapter
 from app.services.ai.llm.llm_fallback_chain import LLMFallbackChain
+
+# Chat protocols whose turns run on the USER's own machine. A primary on one of
+# these gets an EMPTY fallback pool (see build_fallback_llm) — see the reasoning
+# at the point of use. Kept as a named constant so the check reads as a policy
+# rather than a stray string comparison.
+LOCAL_ONLY_CHAT_KEY = "codex-local"
 
 
 async def resolve_mediahub_model(model_name: str, module: str):
@@ -69,6 +77,7 @@ async def build_fallback_llm(
     user_provider_config: Optional[dict],
     provider_key: Optional[str] = None,
     module: str = "chat",
+    user_id: Optional[str] = None,
 ) -> LLMFallbackChain:
     """Build the fallback-wrapped adapter chain (DB-only credentials).
 
@@ -104,6 +113,13 @@ async def build_fallback_llm(
     ``git show d48cd956~1`` for the pre-fallback-chain original) faithfully,
     so a primary whose provider the factory can't derive doesn't get treated
     as ``adapter_init_failed`` and skipped straight to a fallback model.
+
+    ``user_id`` is consumed ONLY by protocols that route per-user (today just
+    ``codex-local``, which dispatches the turn to that user's own paired
+    machine); every other protocol ignores it. It is not a credential and does
+    not participate in resolution — batch callers that have no user may leave
+    it unset, and ``codex-local`` then refuses to build rather than dial an
+    arbitrary daemon.
     """
     # Pre-resolve every model the fallback chain may dial against the platform
     # ``mediahub_models`` catalog (async — the factory below must stay sync for
@@ -114,6 +130,7 @@ async def build_fallback_llm(
     # the BYOK/platform-provider dict raises ProviderNotConfiguredError at dial
     # time — there is no env fallback anymore.
     _platform_adapters: dict = {}
+    _primary_is_local = False
     for _m in dict.fromkeys([primary_model, *fallback_models]):
         _hit = await resolve_mediahub_model(_m, module)
         if _hit:
@@ -124,7 +141,28 @@ async def build_fallback_llm(
             # models like ``qwen3-6-35b`` and killed EVERY chat turn at
             # stack-build time (prod 2026-07-06→13).
             _key = resolve_provider_key(_prov, _actual)
-            _platform_adapters[_m] = get_adapter_for_key(_key, _actual, {_key: _creds})
+            if _m == primary_model and _key == LOCAL_ONLY_CHAT_KEY:
+                _primary_is_local = True
+            _platform_adapters[_m] = get_adapter_for_key(
+                _key, _actual, {_key: _creds}, user_id=user_id
+            )
+
+    # Picking a local model is a statement about WHERE the work runs and WHO
+    # pays: the user's own machine, on their own codex subscription. Silently
+    # failing over to a platform model when their daemon is offline would move
+    # the work onto someone else's hardware and bill it to the platform —
+    # without the user ever being told. The typed local error is the right
+    # outcome; the empty pool is what makes it reachable.
+    if _primary_is_local and fallback_models:
+        logger.info(
+            "[fallback] primary {} runs on the user's own machine "
+            "({}) — dropping {} paid fallback model(s); an offline daemon "
+            "must surface as a typed local error, not a silent paid retry",
+            primary_model,
+            LOCAL_ONLY_CHAT_KEY,
+            len(fallback_models),
+        )
+        fallback_models = []
 
     # Captured as a local now (not re-looked-up from the module global at
     # call time) so the returned chain's ``adapter_factory`` keeps working

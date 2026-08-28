@@ -281,3 +281,491 @@ test('renderLaunchdPlist: an & in a path does not produce invalid XML', () => {
   // A bare & anywhere would make launchd reject the plist.
   assert.doesNotMatch(plist, /&(?!amp;|lt;|gt;|quot;|apos;)/);
 });
+
+import {
+  buildCodexExecArgs,
+  chunkText,
+  parseCodexExecOutput,
+  TEXT_INLINE_LIMIT,
+} from './index.mjs';
+
+test('buildCodexExecArgs pins the read-only ephemeral sandbox and reads the prompt from stdin', () => {
+  const args = buildCodexExecArgs({ model: 'gpt-5', imagePaths: ['/tmp/a.png'], workDir: '/tmp/w' });
+  assert.deepEqual(args, [
+    'exec', '--json', '--ephemeral', '--skip-git-repo-check',
+    '-s', 'read-only', '-C', '/tmp/w', '--model', 'gpt-5', '--image', '/tmp/a.png', '-',
+  ]);
+  const noModel = buildCodexExecArgs({ model: '', imagePaths: [], workDir: '/tmp/w' });
+  assert.ok(!noModel.includes('--model'));
+  assert.equal(noModel.at(-1), '-');
+});
+
+test('parseCodexExecOutput takes the LAST agent_message and the turn usage', () => {
+  const jsonl = [
+    '{"type":"thread.started","thread_id":"t1"}',
+    '{"type":"turn.started"}',
+    '{"type":"item.completed","item":{"id":"i0","type":"reasoning","text":"thinking"}}',
+    '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"draft"}}',
+    '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"final answer"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7,"reasoning_output_tokens":2}}',
+    'not json at all',
+  ].join('\n');
+  const out = parseCodexExecOutput(jsonl);
+  assert.equal(out.text, 'final answer');
+  assert.equal(out.threadId, 't1');
+  assert.deepEqual(out.usage, {
+    input_tokens: 100, cached_input_tokens: 40, output_tokens: 7, reasoning_output_tokens: 2,
+  });
+});
+
+test('parseCodexExecOutput throws codex_no_output when no agent_message exists', () => {
+  assert.throws(
+    () => parseCodexExecOutput('{"type":"turn.completed","usage":{}}'),
+    /codex_no_output/,
+  );
+});
+
+test('parseCodexExecOutput tolerates missing usage', () => {
+  const out = parseCodexExecOutput('{"type":"item.completed","item":{"type":"agent_message","text":"x"}}');
+  assert.equal(out.text, 'x');
+  assert.deepEqual(out.usage, {});
+});
+
+test('chunkText splits on byte size and round-trips', () => {
+  const s = '汉'.repeat(1000) + 'abc';
+  const parts = chunkText(s, 1000);
+  assert.ok(parts.length > 1);
+  assert.ok(parts.every((p) => Buffer.byteLength(p, 'utf8') <= 1000));
+  assert.equal(parts.join(''), s);
+  assert.equal(TEXT_INLINE_LIMIT, 900 * 1024);
+});
+
+// ── review round 1: structured error classification + frame protocol ──────
+
+/** assert.throws does not hand back the error, and these assertions are about
+ *  the error's structured fields, not its prose. */
+function thrownBy(fn) {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  throw new assert.AssertionError({ message: 'expected the call to throw, it returned' });
+}
+
+import {
+  classifyJobError,
+  emitTextResult,
+  normalizeImageUrls,
+  runCommand,
+  CHUNK_BYTES,
+} from './index.mjs';
+
+test('classifyJobError: a binary that would not spawn is cli_missing', () => {
+  for (const code of ['ENOENT', 'EACCES']) {
+    assert.equal(
+      classifyJobError(Object.assign(new Error('x'), { code, spawnFailed: true })),
+      'cli_missing',
+    );
+  }
+});
+
+// ENOENT is not proof the CLI is absent: fs.readFile raises it too, e.g. when
+// a CLI exits 0 but writes no output file. Telling that user to reinstall a
+// working CLI is the same misdiagnosis this round is fixing.
+test('classifyJobError: an ENOENT that did not come from spawn is not cli_missing', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('ENOENT: no such file, open /tmp/out.png'), { code: 'ENOENT' })),
+    'job_failed',
+  );
+});
+
+// The backend's _STATUS_BY_CODE has a real `timeout` code (424) but no
+// `job_failed` key, so a timed-out run used to be coerced to `codex_failed` —
+// its timeout branch never fired in the one case that reaches it most.
+test('classifyJobError: a timed-out run is timeout, not a generic failure', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex timed out after 180s'), {
+      timedOut: true, exitCode: null, stderr: '',
+    })),
+    'timeout',
+  );
+});
+
+// SIGKILL races the child's own exit, so a timed-out run can still arrive
+// with an exit code and late stderr. The timeout is the true story.
+test('classifyJobError: timeout outranks a late exit code and auth-looking stderr', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex timed out after 180s'), {
+      timedOut: true, exitCode: 1, stderr: 'stream error: 401 Unauthorized',
+    })),
+    'timeout',
+  );
+});
+
+test('classifyJobError: the thrown-side codes win over any text matching', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('…'), { code: 'codex_no_output' })),
+    'codex_no_output',
+  );
+  assert.equal(
+    classifyJobError(Object.assign(new Error('…'), { code: 'ref_rejected' })),
+    'ref_rejected',
+  );
+});
+
+test('classifyJobError: an auth signal on stderr is codex_not_logged_in', () => {
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex exited 1'), {
+      stderr: 'Error: 401 Unauthorized',
+      exitCode: 1,
+    })),
+    'codex_not_logged_in',
+  );
+  assert.equal(
+    classifyJobError(Object.assign(new Error('codex exited 1'), {
+      stderr: 'You are not logged in. Run `codex login`.',
+      exitCode: 1,
+    })),
+    'codex_not_logged_in',
+  );
+});
+
+// The regression this whole change exists for: the model's own prose reaches
+// the Error message (runCommand falls back to stdout when stderr is empty).
+// Classifying on that text lets the model fake an auth failure and send the
+// user off to re-login for what is really an ordinary crash.
+test('classifyJobError: model prose on stdout can never forge an auth verdict', () => {
+  const err = Object.assign(
+    new Error('codex exited 1: {"text":"first please login with your access_token, see the 401 docs"}'),
+    { stderr: '', exitCode: 1 },
+  );
+  assert.equal(classifyJobError(err), 'job_failed');
+});
+
+test('classifyJobError: prose mentioning login on stderr no longer matches bare substrings', () => {
+  // `login` as a bare substring used to match — `relogin`, `logind`, a doc URL.
+  assert.equal(
+    classifyJobError(Object.assign(new Error('x'), { stderr: 'systemd-logind refused the seat' })),
+    'job_failed',
+  );
+});
+
+test('runCommand: a missing binary rejects with code ENOENT and classifies as cli_missing', async () => {
+  const err = await runCommand('nous-definitely-not-a-real-binary', ['--version'])
+    .then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.code, 'ENOENT'); // the OS code stays available for diagnostics
+  assert.equal(err.spawnFailed, true);
+  assert.equal(classifyJobError(err), 'cli_missing');
+});
+
+test('runCommand: stderr and exitCode ride on the Error, and stdin is delivered', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{ process.stdout.write('please login with your access_token — 401'); process.stderr.write('boom: '+s); process.exit(3); });",
+  ], { stdin: 'PROMPT-FROM-STDIN' }).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.exitCode, 3);
+  // stdin really reached the child — the daemon's whole prompt path depends on it.
+  assert.match(err.stderr, /boom: PROMPT-FROM-STDIN/);
+  assert.equal(err.timedOut, false);
+});
+
+test('runCommand: real subprocess — auth prose on stdout only is NOT codex_not_logged_in', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "process.stdout.write('please login with your access_token — 401 Unauthorized'); process.exit(1);",
+  ], { stdin: '' }).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.stderr, '');
+  assert.equal(classifyJobError(err), 'job_failed');
+});
+
+test('runCommand: real subprocess — auth prose on stderr IS codex_not_logged_in', async () => {
+  const err = await runCommand('node', [
+    '-e',
+    "process.stderr.write('stream error: 401 Unauthorized'); process.exit(1);",
+  ]).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(classifyJobError(err), 'codex_not_logged_in');
+});
+
+test('emitTextResult: a short answer is exactly one job_done frame carrying the text', () => {
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text: 'hello', usage: { output_tokens: 1 } });
+  assert.deepEqual(sent, [
+    { type: 'job_done', text: 'hello', usage: { output_tokens: 1 }, chunked: false },
+  ]);
+});
+
+test('emitTextResult: an oversized answer becomes job_chunk*n then a text-less job_done', () => {
+  const text = 'y'.repeat(TEXT_INLINE_LIMIT + 1234);
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text, usage: { output_tokens: 9 } });
+
+  const chunks = sent.slice(0, -1);
+  const done = sent.at(-1);
+  const expected = Math.ceil(Buffer.byteLength(text, 'utf8') / CHUNK_BYTES);
+
+  assert.equal(chunks.length, expected);
+  chunks.forEach((f, i) => {
+    assert.equal(f.type, 'job_chunk');
+    assert.equal(f.seq, i); // seq is 0..n-1, in order
+  });
+  assert.equal(chunks.map((f) => f.data).join(''), text); // round-trips
+  assert.deepEqual(done, {
+    type: 'job_done', usage: { output_tokens: 9 }, chunked: true, chunks: expected,
+  });
+  assert.ok(!('text' in done), 'a chunked job_done must not repeat the whole text');
+});
+
+test('emitTextResult: a text of exactly TEXT_INLINE_LIMIT bytes still goes inline', () => {
+  const sent = [];
+  emitTextResult((f) => sent.push(f), { text: 'z'.repeat(TEXT_INLINE_LIMIT), usage: {} });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].chunked, false);
+});
+
+test('normalizeImageUrls: absent is an empty list, strings pass, over 9 are capped', () => {
+  assert.deepEqual(normalizeImageUrls({}), []);
+  assert.deepEqual(normalizeImageUrls({ image_urls: ['a', 'b'] }), ['a', 'b']);
+  assert.equal(normalizeImageUrls({ image_urls: Array(12).fill('u') }).length, 9);
+});
+
+test('normalizeImageUrls: a wrong-shaped image_urls is a typed refusal, never a silent drop', () => {
+  for (const bad of ['a-string', 42, { 0: 'a' }, [1, 2], ['ok', null]]) {
+    const err = thrownBy(() => normalizeImageUrls({ image_urls: bad }));
+    assert.match(err.message, /ref_rejected: image_urls must be an array of strings/);
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+test('normalizeImageUrls: refs sent under the neighbours\' ref_urls name are refused, not dropped', () => {
+  // runImageJob/runDreaminaJob read `ref_urls`; text jobs read `image_urls`.
+  // Getting that wrong used to mean the model silently never saw the images.
+  const err = thrownBy(() => normalizeImageUrls({ ref_urls: ['https://x/1.png'] }));
+  assert.match(err.message, /ref_rejected/);
+  assert.equal(err.code, 'ref_rejected');
+});
+
+test('parseCodexExecOutput: the no-output failure carries a structured code', () => {
+  const err = thrownBy(() => parseCodexExecOutput('{"type":"turn.completed"}'));
+  assert.equal(err.code, 'codex_no_output');
+  assert.equal(classifyJobError(err), 'codex_no_output');
+});
+
+// ── inline data:image refs + typed ref refusals ───────────────────────────
+
+import { downloadRef, parseDataImageUrl, REF_MAX_BYTES } from './index.mjs';
+
+const PNG_B64 = Buffer.from('\x89PNG\r\n\x1a\n-pretend-pixels-', 'binary').toString('base64');
+
+test('parseDataImageUrl: a base64 png yields its mime and exact bytes', () => {
+  const { mime, bytes } = parseDataImageUrl(`data:image/png;base64,${PNG_B64}`);
+  assert.equal(mime, 'image/png');
+  assert.equal(bytes.toString('base64'), PNG_B64);
+});
+
+test('parseDataImageUrl: a non-image mime is refused', () => {
+  for (const mime of ['text/plain', 'application/pdf', 'text/html']) {
+    const err = thrownBy(() => parseDataImageUrl(`data:${mime};base64,${PNG_B64}`));
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+// SVG is image/* but carries script; codex would be reading an attacker-
+// supplied document, so it stays off the allowlist with the rest.
+test('parseDataImageUrl: image/svg+xml is refused despite being image/*', () => {
+  const err = thrownBy(() => parseDataImageUrl(`data:image/svg+xml;base64,${PNG_B64}`));
+  assert.equal(err.code, 'ref_rejected');
+});
+
+test('parseDataImageUrl: malformed base64 is refused, not silently half-decoded', () => {
+  // Buffer.from(..., 'base64') is lenient: it drops junk and returns bytes.
+  // Without an explicit check these would sail through as a corrupt image.
+  for (const bad of ['not*base64!!', 'AAAA===', 'AAA', '', '@@@@']) {
+    const err = thrownBy(() => parseDataImageUrl(`data:image/png;base64,${bad}`));
+    assert.equal(err.code, 'ref_rejected');
+  }
+});
+
+test('parseDataImageUrl: a payload over the size cap is refused', () => {
+  const big = Buffer.alloc(REF_MAX_BYTES + 1, 0x41).toString('base64');
+  const err = thrownBy(() => parseDataImageUrl(`data:image/png;base64,${big}`));
+  assert.equal(err.code, 'ref_rejected');
+  // and exactly at the cap is still fine
+  const atCap = Buffer.alloc(REF_MAX_BYTES, 0x41).toString('base64');
+  assert.equal(parseDataImageUrl(`data:image/png;base64,${atCap}`).bytes.length, REF_MAX_BYTES);
+});
+
+test('parseDataImageUrl: a non-base64 data URL is refused', () => {
+  assert.equal(thrownBy(() => parseDataImageUrl('data:image/png,rawbytes')).code, 'ref_rejected');
+});
+
+test('downloadRef: a data:image ref is written locally with the mime-derived extension', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'refs-'));
+  const file = await downloadRef(`data:image/webp;base64,${PNG_B64}`, dir, 3);
+  assert.equal(path.basename(file), 'ref-3.webp');
+  assert.equal((await fs.readFile(file)).toString('base64'), PNG_B64);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+// "Local Codex failed to produce a reply" is a lie when the daemon simply
+// refused an off-host image — nothing about codex or the user's machine
+// is broken, the request just has to carry a different attachment.
+test('downloadRef: an off-host http url is a typed ref_rejected, not a generic failure', async () => {
+  const err = await downloadRef('https://evil.example/pic.png', '/tmp', 0).then(() => null, (e) => e);
+  assert.ok(err, 'expected a rejection');
+  assert.equal(err.code, 'ref_rejected');
+  assert.equal(classifyJobError(err), 'ref_rejected');
+});
+
+test('normalizeImageUrls: inline data:image refs pass the payload check', () => {
+  const urls = [`data:image/png;base64,${PNG_B64}`, 'https://api.nous.ink/x.png'];
+  assert.deepEqual(normalizeImageUrls({ image_urls: urls }), urls);
+});
+
+// ── SSRF guard applies to redirects, not just the URL we were handed ──────
+//
+// `fetch` follows redirects by default, so checking only the initial string
+// left the allowlist governing the first request alone — a nous endpoint
+// that 302s (generated-media presigns that way) was the way out. These use a
+// stub fetch, which cannot itself follow anything; that is exactly why the
+// first test below asserts the `redirect: 'manual'` option is passed. Without
+// that assertion every test here stays green on code that follows redirects
+// blind, because the stub hands back the 3xx either way.
+
+import { assertNousUrl, REF_MAX_REDIRECTS } from './index.mjs';
+
+const NOUS = 'https://api.nous.ink';
+
+function redirectRes(location, status = 302) {
+  return {
+    status,
+    ok: false,
+    headers: { get: (k) => (String(k).toLowerCase() === 'location' ? location : null) },
+  };
+}
+
+function okRes(buf) {
+  return {
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+  };
+}
+
+/** Installs a scripted fetch; returns the call log and a restore fn. */
+function stubFetch(responses) {
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    calls.push({ url: String(url), opts });
+    if (!responses.length) throw new Error(`unscripted fetch: ${url}`);
+    return responses.shift();
+  };
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+async function withTmpDir(fn) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'refs-'));
+  try {
+    return await fn(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('assertNousUrl: off-host is a typed ref_rejected, a nous url passes through', () => {
+  const err = thrownBy(() => assertNousUrl('https://evil.example/pic.png'));
+  assert.equal(err.code, 'ref_rejected');
+  assert.equal(assertNousUrl(`${NOUS}/api/v1/x.png`), `${NOUS}/api/v1/x.png`);
+});
+
+test('downloadRef: a same-host redirect is followed, and fetch is asked NOT to follow it itself', async () => {
+  const bytes = Buffer.from('\x89PNG\r\n\x1a\npixels');
+  const stub = stubFetch([redirectRes(`${NOUS}/api/v1/presigned/abc.png`), okRes(bytes)]);
+  try {
+    const file = await withTmpDir((dir) => downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 0));
+    assert.equal(path.basename(file), 'ref-0.png');
+    assert.equal(stub.calls.length, 2);
+    assert.equal(stub.calls[1].url, `${NOUS}/api/v1/presigned/abc.png`);
+    // The load-bearing assertion: a stub cannot follow redirects, so nothing
+    // else here would notice if this option went away.
+    for (const call of stub.calls) assert.equal(call.opts?.redirect, 'manual');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a redirect to another host is refused, not followed', async () => {
+  const stub = stubFetch([redirectRes('https://evil.example/steal.png')]);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 0).then(() => null, (e) => e));
+    assert.ok(err, 'expected a rejection');
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /non-nous url/);
+    // and it never issued the off-host request
+    assert.equal(stub.calls.length, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a relative Location resolves against the current url and stays on-host', async () => {
+  const bytes = Buffer.from('pix');
+  const stub = stubFetch([redirectRes('/api/v1/other.png'), okRes(bytes)]);
+  try {
+    await withTmpDir((dir) => downloadRef(`${NOUS}/api/v1/generated-media/7`, dir, 1));
+    assert.equal(stub.calls[1].url, `${NOUS}/api/v1/other.png`);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a redirect loop stops at the hop cap instead of spinning', async () => {
+  const hops = Array.from({ length: REF_MAX_REDIRECTS + 2 }, () =>
+    redirectRes(`${NOUS}/api/v1/loop.png`));
+  const stub = stubFetch(hops);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/loop.png`, dir, 0).then(() => null, (e) => e));
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /too many redirects/);
+    assert.equal(stub.calls.length, REF_MAX_REDIRECTS + 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('downloadRef: a 3xx with no Location is a typed refusal, not a crash on null', async () => {
+  const stub = stubFetch([redirectRes(null)]);
+  try {
+    const err = await withTmpDir((dir) =>
+      downloadRef(`${NOUS}/api/v1/x.png`, dir, 0).then(() => null, (e) => e));
+    assert.equal(err.code, 'ref_rejected');
+    assert.match(err.message, /Location/);
+  } finally {
+    stub.restore();
+  }
+});
+
+// ── daemon version, reported so the server can gate job kinds ─────────────
+
+import { DAEMON_VERSION } from './index.mjs';
+
+// DAEMON_VERSION is a literal because install.sh ships index.mjs ALONE —
+// there is no package.json next to it on a user's machine, so reading one at
+// runtime would throw in every real installation. This test is therefore the
+// only thing keeping the two copies of the version in sync; without it they
+// drift silently and the server gates on a number nobody bumped.
+test('DAEMON_VERSION matches the version in package.json', async () => {
+  const pkg = JSON.parse(
+    await fs.readFile(new URL('./package.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(DAEMON_VERSION, pkg.version);
+  assert.match(DAEMON_VERSION, /^\d+\.\d+\.\d+$/);
+});

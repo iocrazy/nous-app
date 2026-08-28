@@ -42,6 +42,8 @@ vi.mock('../../services/codexDaemonService', async (importOriginal) => {
 });
 
 import { codexDaemonService } from '../../services/codexDaemonService';
+import en from '../../public/locales/en.json';
+import zh from '../../public/locales/zh.json';
 
 describe('CodexDaemonSettings', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -92,5 +94,24 @@ describe('CodexDaemonSettings', () => {
     expect(text).toContain('gpt-image-2-skill 0.7.3');
     expect(text).toContain('/usr/local/bin/gpt-image-2-skill');
     expect(text).toContain('settings.localCli.authPresent');
+  });
+});
+
+// ── 只读沙箱披露(终审 I-3 / spec §6) ──────────────────────────────────────
+//
+// 实测结论:codex 的 `-s read-only --ephemeral -C <空目录>` 限制的是**写**,不限制
+// 读——$HOME 下与任务无关的文件可以被原样读出并返回。spec §6 预先授权了"带这个
+// 缺陷上线",条件是 README **与设置页**都显著标注。
+//
+// README 是仓库里的文件,绝大多数用户永远不会看到;用户实际在的地方是设置页的
+// GPT CLI 卡。所以这段文案本身就是那条授权的兑现物,而不是可选的润色——没有守卫
+// 的话,任何一次"文案太长了精简一下"都能把唯一的披露删掉且不产生任何信号。
+describe('read-only sandbox disclosure', () => {
+  it.each([
+    ['en', en, [/read-only sandbox/i, /can read files on your machine/i, /untrusted text/i]],
+    ['zh', zh, [/只读沙箱/, /可以读取你电脑上的文件/, /不可信文本/]],
+  ])('%s codexDesc says the sandbox does not stop reads', (_locale, bundle, patterns) => {
+    const desc = (bundle as Record<string, any>).settings.localCli.codexDesc as string;
+    for (const p of patterns) expect(desc).toMatch(p);
   });
 });

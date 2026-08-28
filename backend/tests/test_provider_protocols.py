@@ -11,7 +11,7 @@ from app.services.ai import provider_protocols as pp
 def test_chat_provider_keys_match_expected_set():
     # Behavior-identical to factory._PROVIDER_KEYS pre-refactor.
     assert pp.chat_provider_keys() == frozenset(
-        {"claude", "deepseek", "doubao", "openai", "modelscope", "qwen"}
+        {"claude", "codex-local", "deepseek", "doubao", "openai", "modelscope", "qwen"}
     )
 
 

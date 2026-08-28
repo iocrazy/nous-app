@@ -50,3 +50,27 @@ def test_qwen_requires_base_url_not_key():
         get_chat_protocol("qwen").build_chat_adapter(
             "m", {"api_key": "k", "base_url": ""}
         )
+
+
+@pytest.mark.unit
+def test_codex_local_builds_daemon_adapter_bound_to_user():
+    from app.services.ai.adapters.codex_daemon import CodexDaemonAdapter
+
+    a = get_chat_protocol("codex-local").build_chat_adapter(
+        "gpt-5", {"api_key": "", "base_url": ""}, user_id="u9"
+    )
+    assert isinstance(a, CodexDaemonAdapter)
+    assert a.user_id == "u9" and a.model == "gpt-5"
+
+
+@pytest.mark.unit
+def test_codex_local_without_user_id_raises_not_configured():
+    # ``.provider`` is asserted on purpose: an UNREGISTERED "codex-local"
+    # degrades to the qwen protocol, which ALSO raises here (empty base_url)
+    # — so a bare ``pytest.raises`` would pass while the key is missing and
+    # prove nothing. The provider name is what separates the two.
+    with pytest.raises(ProviderNotConfiguredError) as exc:
+        get_chat_protocol("codex-local").build_chat_adapter(
+            "gpt-5", {"api_key": "", "base_url": ""}
+        )
+    assert exc.value.provider == "codex-local"

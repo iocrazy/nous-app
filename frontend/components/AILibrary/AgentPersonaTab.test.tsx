@@ -70,6 +70,7 @@ function renderTab(over: Partial<React.ComponentProps<typeof AgentPersonaTab>> =
         readOnly={false}
         catalogLocked={false}
         modelGroups={[]}
+        localModelNames={[]}
         localSkillIds={[1]}
         allSkills={ALL}
         skillsLoading={false}

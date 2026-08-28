@@ -631,3 +631,75 @@ async def test_image_sb_path_respects_inline_size_cap(monkeypatch):
     assert result.attachments == []
     assert len(result.failures) == 1
     assert "too large" in result.failures[0].reason.lower()
+
+
+# ── vision gate: dropped attachments must be reported ─────────────────────
+#
+# 真链验收第 4 项: 模型不支持视觉时 build_user_message 把附件摊成文字占位符,
+# 而 attachment_failures 是空的 —— 用户传了图、模型没收到、没有任何一处说过。
+# 这里钉住"丢了就必须有类型化回显"。
+
+from app.services.ai.chat.chat_attachment_resolver import (  # noqa: E402
+    ResolutionFailure,
+    ResolveResult,
+    vision_gate_failures,
+)
+
+
+def _res(n_atts: int = 1, failures=None) -> ResolveResult:
+    # 只有 .attachments 的真假与 .failures 的 index 被读到,用轻量占位即可。
+    return ResolveResult(attachments=[object()] * n_atts, failures=list(failures or []))
+
+
+@pytest.mark.unit
+def test_vision_gate_reports_every_dropped_image():
+    reqs = [{"kind": "image"}, {"kind": "image"}]
+    out = vision_gate_failures(reqs, _res(2), supports_vision=False)
+
+    assert [f.request_index for f in out] == [0, 1]
+    assert {f.reason for f in out} == {"model_no_vision"}
+    assert {f.kind for f in out} == {"image"}
+
+
+@pytest.mark.unit
+def test_vision_capable_model_reports_nothing():
+    """反向对照 —— 没有它,一个"永远追加失败"的实现同样会绿。"""
+    reqs = [{"kind": "image"}]
+    assert vision_gate_failures(reqs, _res(1), supports_vision=True) == []
+
+
+@pytest.mark.unit
+def test_nothing_resolved_reports_nothing():
+    """没有任何附件成功解析时,视觉闸门没丢掉任何东西,不该凭空造失败。"""
+    reqs = [{"kind": "image"}]
+    assert vision_gate_failures(reqs, _res(0), supports_vision=False) == []
+
+
+@pytest.mark.unit
+def test_already_failed_request_is_not_double_reported():
+    """解析阶段就失败的那张已经在列表里了,而且它的原因更准确 —— 不能报两次。"""
+    reqs = [{"kind": "image"}, {"kind": "image"}]
+    prior = [ResolutionFailure(request_index=0, kind="image", reason="boom")]
+    out = vision_gate_failures(reqs, _res(1, prior), supports_vision=False)
+
+    assert [f.request_index for f in out] == [1]
+
+
+@pytest.mark.unit
+def test_one_pdf_is_one_failure_not_one_per_page():
+    """一个 PDF 会扇出成 N 张页图。按 request 记,否则用户传 1 个文件却被告知
+    "8 个附件失败"。"""
+    reqs = [{"kind": "pdf"}]
+    out = vision_gate_failures(reqs, _res(8), supports_vision=False)
+
+    assert len(out) == 1
+    assert out[0].request_index == 0 and out[0].kind == "pdf"
+
+
+@pytest.mark.unit
+def test_non_visual_kinds_are_not_reported_as_no_vision():
+    """audio 不是被"看不见"挡掉的,挂上 model_no_vision 是错误归因。"""
+    reqs = [{"kind": "audio"}, {"kind": "image"}]
+    out = vision_gate_failures(reqs, _res(2), supports_vision=False)
+
+    assert [f.request_index for f in out] == [1]

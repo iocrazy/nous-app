@@ -17,7 +17,7 @@ would say "offline" forever. Redis is the shared truth:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -50,6 +50,29 @@ async def is_online_anywhere(user_id: str) -> bool:
     except Exception as exc:
         logger.warning("[codex-daemon] presence check failed: {}", exc)
         return False
+
+
+async def online_device_id(user_id: str) -> Optional[str]:
+    """Which device is holding this user's socket right now, if any.
+
+    The presence key's VALUE is the device id (see ``mark_online``), so this
+    is the same round trip ``is_online_anywhere`` already makes — it just
+    keeps the answer instead of throwing it away.
+
+    ``None`` means "nothing connected, or we could not ask". Callers must not
+    read that as a verdict about the device: answering "your daemon is out of
+    date" when the real problem is that no daemon is running sends the user to
+    update something that is not even started.
+    """
+    try:
+        redis = await get_async_redis()
+        raw = await redis.get(f"{ONLINE_KEY_PREFIX}{user_id}")
+    except Exception as exc:
+        logger.warning("[codex-daemon] presence lookup failed: {}", exc)
+        return None
+    if raw is None:
+        return None
+    return raw.decode() if isinstance(raw, bytes) else str(raw)
 
 
 async def publish_job(user_id: str, job: dict[str, Any]) -> None:

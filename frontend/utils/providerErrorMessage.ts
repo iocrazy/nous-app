@@ -23,6 +23,19 @@ export function providerErrorMessage(
     'provider_auth',
     'provider_bad_model',
     'task_timeout',
+    // codex-local 链路(backend/app/services/ai/error_catalog.py)。这四个码的共同点
+    // 是修复动作在**用户自己的电脑上**——通用的 "provider unreachable" 会把人指向
+    // 平台状态页,而真正要做的是启动 daemon / 跑 codex login / 解绑 Skill。
+    'local_daemon_offline',
+    'local_tools_unsupported',
+    'local_codex_not_logged_in',
+    'local_codex_failed',
+    'local_ref_rejected',
+    'local_cli_missing',
+    // 版本闸门(终审 I-2)。旧 daemon 收到文本任务不会报错,而是无沙箱执行、prompt
+    // 进 ps、把原始 JSONL 当回复返回——所以这条的文案必须指向"去更新",不能落到
+    // 通用兜底。
+    'local_daemon_outdated',
   ];
   if (typeof code !== 'string' || !KNOWN.includes(code)) return null;
   const key = code

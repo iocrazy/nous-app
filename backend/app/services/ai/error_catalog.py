@@ -55,6 +55,19 @@ OUTPUT_PARSE: Final = "OUTPUT_PARSE"
 TASK_TIMEOUT: Final = "TASK_TIMEOUT"
 INTERNAL: Final = "INTERNAL"
 
+# codex-local (per-user daemon) failures. Lowercase on purpose: unlike the
+# codes above — which travel through ``task_tracking.metadata`` and are keyed
+# for i18n by the frontend — these are also the literal HTTP/SSE ``code``
+# strings the client reads (see ``core/provider_errors._MAPPING``), and those
+# are lowercase across the whole API surface. One string, one meaning.
+LOCAL_DAEMON_OFFLINE: Final = "local_daemon_offline"
+LOCAL_CLI_MISSING: Final = "local_cli_missing"
+LOCAL_TOOLS_UNSUPPORTED: Final = "local_tools_unsupported"
+LOCAL_CODEX_NOT_LOGGED_IN: Final = "local_codex_not_logged_in"
+LOCAL_REF_REJECTED: Final = "local_ref_rejected"
+LOCAL_CODEX_FAILED: Final = "local_codex_failed"
+LOCAL_DAEMON_OUTDATED: Final = "local_daemon_outdated"
+
 ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     PROVIDER_AUTH,
     PROVIDER_RATE_LIMIT,
@@ -64,6 +77,13 @@ ALL_ERROR_CODES: Final[tuple[str, ...]] = (
     OUTPUT_PARSE,
     TASK_TIMEOUT,
     INTERNAL,
+    LOCAL_DAEMON_OFFLINE,
+    LOCAL_CLI_MISSING,
+    LOCAL_TOOLS_UNSUPPORTED,
+    LOCAL_CODEX_NOT_LOGGED_IN,
+    LOCAL_REF_REJECTED,
+    LOCAL_CODEX_FAILED,
+    LOCAL_DAEMON_OUTDATED,
 )
 
 # ── Provider error codes that outrank the HTTP status carrying them ───
@@ -102,7 +122,41 @@ _STATUS_TO_CODE: Final[dict[int, str]] = {
 #     read as a dead endpoint.
 #   - UNREACHABLE before TASK_TIMEOUT, so a *connect* timeout is reported
 #     as "can't reach the provider" rather than "your task ran too long".
-_RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = (
+# ── codex-local marker rules ──────────────────────────────────────────
+# Spliced onto the FRONT of ``_RULES`` (they are emitted by our own code and
+# are strictly more specific than anything below — a "codex_not_logged_in"
+# message would otherwise be swallowed by the PROVIDER_AUTH prose rule) AND
+# used on their own by the marker fast-path in ``classify_ai_error``.
+#
+# One code per cause, deliberately: these four failures need four different
+# user actions. Collapsing ``cli_missing`` into "your daemon is not connected"
+# sends the user to restart a daemon that is connected and working — they
+# would restart, fail, restart, and the copy would never mention the one thing
+# that fixes it (installing the CLI). Same for a timeout: the daemon is
+# connected, it just did not finish in time.
+#
+# ``timeout`` maps to the EXISTING ``TASK_TIMEOUT`` rather than a new local
+# code — "the model took too long, try again" is already the right advice and
+# is already translated; a codex-local-specific string would say the same
+# thing in different words.
+_CODEX_LOCAL_RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = (
+    (LOCAL_DAEMON_OFFLINE, re.compile(r"\[codex-local:daemon_offline\]")),
+    (LOCAL_CLI_MISSING, re.compile(r"\[codex-local:cli_missing\]")),
+    (TASK_TIMEOUT, re.compile(r"\[codex-local:timeout\]")),
+    (LOCAL_TOOLS_UNSUPPORTED, re.compile(r"\[codex-local:tools_unsupported\]")),
+    (
+        LOCAL_CODEX_NOT_LOGGED_IN,
+        re.compile(r"\[codex-local:codex_not_logged_in\]"),
+    ),
+    (LOCAL_REF_REJECTED, re.compile(r"\[codex-local:ref_rejected\]")),
+    (LOCAL_DAEMON_OUTDATED, re.compile(r"\[codex-local:daemon_outdated\]")),
+    (
+        LOCAL_CODEX_FAILED,
+        re.compile(r"\[codex-local:(codex_no_output|codex_failed)\]"),
+    ),
+)
+
+_RULES: Final[tuple[tuple[str, "re.Pattern[str]"], ...]] = _CODEX_LOCAL_RULES + (
     (
         PROVIDER_AUTH,
         re.compile(
@@ -243,6 +297,16 @@ def classify_ai_error(exc_or_message: Union[BaseException, str, None]) -> Option
         # cap is reported as something that clears on its own.
         if _QUOTA_CAP_PATTERN.search(text):
             return PROVIDER_QUOTA_CAP
+        # Same reasoning as the cap pattern, one step stronger: a
+        # ``CodexLocalError`` carries BOTH a marker and a ``status_code``, and
+        # the status is deliberately borrowed from the HTTP class (401 for a
+        # logged-out CLI) — letting the status scan win would report the
+        # user's own machine problem as "the provider rejected our
+        # credentials". The marker is ours and unambiguous, so it goes first.
+        if "[codex-local:" in text:
+            for code, pattern in _CODEX_LOCAL_RULES:
+                if pattern.search(text):
+                    return code
         for member in chain:
             status = _status_code(member)
             if status is not None and status in _STATUS_TO_CODE:
@@ -294,6 +358,13 @@ async def record_ai_error_code(
 __all__ = [
     "ALL_ERROR_CODES",
     "INTERNAL",
+    "LOCAL_CLI_MISSING",
+    "LOCAL_CODEX_FAILED",
+    "LOCAL_CODEX_NOT_LOGGED_IN",
+    "LOCAL_DAEMON_OFFLINE",
+    "LOCAL_DAEMON_OUTDATED",
+    "LOCAL_REF_REJECTED",
+    "LOCAL_TOOLS_UNSUPPORTED",
     "OUTPUT_PARSE",
     "PROVIDER_AUTH",
     "PROVIDER_BAD_MODEL",

@@ -181,6 +181,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     return base;
   }, [aiSettings, nousEnabled, nousLlm]);
 
+  // Which platform rows actually run on the USER's machine (backend `is_local`).
+  // Derived from the payload rather than matched by name here: "Codex (Local)"
+  // is a display string an admin can rename, and a hint keyed on a guessed name
+  // would go silent the moment they did.
+  const localModelNames = useMemo(
+    () => nousLlm.filter((m) => m.is_local).map((m) => m.name),
+    [nousLlm],
+  );
+
   // Platform-model self-check, surfaced next to the picker (spec
   // 2026-08-14 §F2). Only platform models carry it — a BYOK provider's models
   // are never probed, so they stay absent from the map and the UI silent.
@@ -729,6 +738,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           readOnly={readOnly}
           catalogLocked={catalogLocked}
           modelGroups={modelGroups}
+          localModelNames={localModelNames}
           modelHealth={modelHealth}
           unhealthyModelLabels={unhealthyModelLabels}
           localSkillIds={localSkillIds}

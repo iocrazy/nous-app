@@ -21,3 +21,12 @@ def test_registry_default_matches_resolve_provider_key_fallback():
     assert factory.resolve_provider_key("totally-unknown", "no-prefix-model") == (
         default_chat_key()
     )
+
+
+@pytest.mark.unit
+def test_codex_local_is_a_registered_chat_key_and_never_degrades():
+    # Without registration resolve_provider_key silently falls back to the
+    # generic qwen adapter and dials DashScope with an empty key — a 401 no
+    # one can explain. The catalog row (mig 444) MUST hit its own key.
+    assert "codex-local" in chat_provider_keys()
+    assert factory.resolve_provider_key("codex-local", "") == "codex-local"

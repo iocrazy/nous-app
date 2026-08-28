@@ -12,7 +12,9 @@ class ClaudeProtocol(ProviderProtocol):
     model_types = ("llm",)
     is_chat_key = True
 
-    def build_chat_adapter(self, model: str, creds: dict[str, Any]) -> Any:
+    def build_chat_adapter(
+        self, model: str, creds: dict[str, Any], **context: Any
+    ) -> Any:
         from app.services.ai.adapters.claude import ClaudeAdapter
         from app.services.ai.provider_protocols.base import (
             ProviderNotConfiguredError,
