@@ -747,6 +747,8 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "personFromFrame": "From the frame at {{at}}. Set again to replace.",
+      "personFromUpload": "Uploaded. Upload or set again to replace.",
       "pickTemplates": "Pick from the template library",
       "pickerCount": "{{n}} picked · room for {{room}}",
       "addPicked": "Add {{n}} as references",
@@ -783,7 +785,7 @@
       "prompt": "Prompt",
       "promptAux": "one line for the model",
       "promptPlaceholder": "e.g. headline “内容差的真相”, @ a picture to point at it",
-      "needsTopicShort": "No title yet",
+      "needsTopicShort": "No title yet — the prompt below is the topic",
       "refUpload": "Upload",
       "refUploadFailed": "That picture could not be added as a reference. Try again.",
       "personSetAt": "Person = the frame at {{at}}; grabbing again replaces it.",
@@ -883,7 +885,7 @@
       "grabAsPerson": "Next grab is the person reference",
       "grabAsPersonWhy": "The style keeps the same face across every draft. Grab a frame of yourself; it replaces the previous person.",
       "generateDrafts": "Generate 4 drafts",
-      "needsTopic": "Blocked: give the publish a title first — the cover is about it.",
+      "needsTopic": "Blocked: give the publish a title, or write the prompt — the cover needs a topic.",
       "needsPerson": "Blocked: add the person picture first. Without it every draft is a different face.",
       "costNote": "One image, four drafts — a round of ideas costs one generation.",
       "finalCover": "Final cover",

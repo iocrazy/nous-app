@@ -158,7 +158,7 @@ export function AddCoverTemplateModal({
       isOpen={open}
       title={t('distribution.coverStudio.addTemplate', 'Add a template')}
       onClose={onClose}
-      widthClassName="w-[520px]"
+      widthClassName="w-[520px] cs-light-panel"
       containerClassName="cover-studio-modal"
       footer={
         <>

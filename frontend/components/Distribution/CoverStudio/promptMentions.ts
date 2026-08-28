@@ -13,13 +13,24 @@ import { formatTimestamp } from './coverReferences';
 
 export const MENTION_RE = /@\{([^}]+)\}/g;
 
+/**
+ * A filename as a label: no extension, no braces, and short — uploads often
+ * arrive as 40-character hashes, which overflow the pool captions and turn a
+ * mention into a wall of hex.
+ */
+export function shortName(raw: string, max = 18): string {
+  const base = (raw || '').replace(/\.[^./\\]+$/, '').replace(/[{}]/g, '').trim();
+  if (base.length <= max) return base || 'picture';
+  return `${base.slice(0, max - 1)}…`;
+}
+
 /** The label a reference is mentioned by — stable, human, unique enough. */
 export function mentionLabel(ref: CoverReference): string {
   if (ref.kind === 'person') return 'person';
   if (ref.kind === 'frame') {
     return `frame ${typeof ref.timestampSeconds === 'number' ? formatTimestamp(ref.timestampSeconds) : ''}`.trim();
   }
-  return (ref.label || 'template').replace(/[{}]/g, '');
+  return shortName(ref.label || 'template');
 }
 
 export function mentionToken(ref: CoverReference): string {

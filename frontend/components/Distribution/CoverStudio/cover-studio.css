@@ -1706,3 +1706,61 @@
   white-space: nowrap;
   flex: 0 0 auto;
 }
+
+
+/* ── follow the app theme in dialogs; long names; person card (2026-08-28) ── */
+
+/* UiModal's default surface is the dark canvas look. The studio lives on the
+   warm-paper publish page, so its dialogs take the page's own tokens. */
+.cs-light-panel {
+  background: var(--island) !important;
+  color: var(--content);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.cs-light-panel h2,
+.cs-light-panel .text-text-dark {
+  color: var(--content) !important;
+}
+
+.cs-light-panel [class*='border-[rgba(255,255,255'] {
+  border-color: var(--line) !important;
+}
+
+.cover-studio .cs-tpl figcaption,
+.cover-studio-modal .cs-tpl figcaption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-studio .cs-pool .rf .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.cover-studio .cs-personside {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.cover-studio .cs-personside .cs-hint {
+  overflow-wrap: anywhere;
+}
+
+/* The shared UiSelect trigger, dressed like the studio's other fields. */
+.cover-studio .cs-select {
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font-weight: 400;
+  margin-bottom: 0;
+}

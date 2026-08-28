@@ -102,7 +102,7 @@ export function CoverTemplatePickerModal({
       isOpen={open}
       title={t('distribution.coverStudio.pickTemplates', 'Pick from the template library')}
       onClose={onClose}
-      widthClassName="w-[720px]"
+      widthClassName="w-[720px] cs-light-panel"
       containerClassName="cover-studio-modal"
       footer={
         <>
