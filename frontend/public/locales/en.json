@@ -993,7 +993,8 @@
       "mergePickTarget": "Pick the tag to keep:",
       "mergePreview": "Up to {{count}} resources move to «{{name}}». {{n}} tags will be deleted.",
       "merge": "Merge",
-      "merging": "Merging…"
+      "merging": "Merging…",
+      "duplicateExists": "\"{{name}}\" already exists — pick another name."
     },
     "promptTriggerTags": {
       "title": "Prompt Trigger Tags",

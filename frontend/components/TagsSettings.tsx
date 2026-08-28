@@ -100,6 +100,14 @@ export const TagsSettings: React.FC = () => {
   const [confirmingEditDelete, setConfirmingEditDelete] = useState(false);
   const [isDeletingEdit, setIsDeletingEdit] = useState(false);
 
+  // Dialog-scoped error. The page-level ``error`` banner renders in the
+  // section body, which sits UNDER the create/edit modals' `fixed inset-0
+  // z-50` overlay — so a failure raised while a modal is open is invisible
+  // until the user closes it. (Prod 2026-08-27: four 409s in a row read as
+  // "the button does nothing"; the banner only appeared after Cancel.) Same
+  // reasoning as ``confirmingEditDelete`` above.
+  const [dialogError, setDialogError] = useState<string | null>(null);
+
   // Delete confirmation
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
 
@@ -210,6 +218,29 @@ export const TagsSettings: React.FC = () => {
       setIsCreating(false);
     }
   };
+
+  // The already-loaded tag that would make this create 409.
+  //
+  // Mirrors ``TagsRepository.get_tag_by_name`` EXACTLY — a client-side gate
+  // that blocks more than the server does is a lie told with confidence:
+  //   * only the EN ``name`` field is ever checked (the backend never looks at
+  //     the name_zh the client is submitting), and
+  //   * it is compared against ``tag.name`` case-insensitively for every tag,
+  //     but against ``tag.name_zh`` ONLY for system/time tags — user tags are
+  //     matched on their English name alone.
+  // Shadow (origin='note') tags stay in scope: uniqueness ignores origin.
+  // If the server rejects something this misses (stale pool, another scope),
+  // ``dialogError`` still carries the reason — this is a shortcut, not the
+  // authority.
+  const duplicateOfNewTag = useMemo(() => {
+    const q = newTagName.trim().toLowerCase();
+    if (!q) return undefined;
+    return tags.find(
+      (tag) =>
+        tag.name.toLowerCase() === q ||
+        (tag.type !== 'user' && (tag.name_zh ?? '').toLowerCase() === q),
+    );
+  }, [tags, newTagName]);
 
   // Filter tags based on search (curated pool only)
   const filteredTags = useMemo(() => {
@@ -378,7 +409,12 @@ export const TagsSettings: React.FC = () => {
   // Handle create tag
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
+    // Don't spend a round trip to learn what the loaded pool already knows —
+    // and don't make the user decode a 409 whose subject they can't find on
+    // screen (``duplicateOfNewTag`` names it the way the list labels it).
+    if (duplicateOfNewTag) return;
     setIsCreating(true);
+    setDialogError(null);
     try {
       const newTag = await createTag({
         name: newTagName.trim(),
@@ -391,7 +427,9 @@ export const TagsSettings: React.FC = () => {
       setForceTagNameEqEn(false);
       setShowCreateForm(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create tag');
+      setDialogError(
+        err instanceof Error ? err.message : 'Failed to create tag',
+      );
     } finally {
       setIsCreating(false);
     }
@@ -400,6 +438,7 @@ export const TagsSettings: React.FC = () => {
   // Handle edit tag
   const handleStartEdit = (tag: Tag, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    setDialogError(null);
     setEditingTag(tag);
     setEditTagName(tag.name);
     setEditTagNameZh(tag.name_zh || '');
@@ -460,7 +499,7 @@ export const TagsSettings: React.FC = () => {
       setTags((prev) => prev.map((t) => (t.id === editingTag.id ? patched : t)));
       setEditingTag(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update tag');
+      setDialogError(err instanceof Error ? err.message : 'Failed to update tag');
     } finally {
       setIsSaving(false);
     }
@@ -474,6 +513,7 @@ export const TagsSettings: React.FC = () => {
     setEditTagGroupId(null);
     setForceEditTagNameEqEn(false);
     setConfirmingEditDelete(false);
+    setDialogError(null);
   };
 
   const handleConfirmEditDelete = async () => {
@@ -484,7 +524,7 @@ export const TagsSettings: React.FC = () => {
       setTags((prev) => prev.filter((t) => t.id !== editingTag.id));
       handleCancelEdit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete tag');
+      setDialogError(err instanceof Error ? err.message : 'Failed to delete tag');
     } finally {
       setIsDeletingEdit(false);
     }
@@ -723,7 +763,10 @@ export const TagsSettings: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowCreateForm(true)}
+            onClick={() => {
+              setDialogError(null);
+              setShowCreateForm(true);
+            }}
             className="bg-ink-100 hover:bg-ink-50 text-ink-900 px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
           >
             <Plus size={16} />
@@ -1225,7 +1268,11 @@ export const TagsSettings: React.FC = () => {
       {/* Create Tag Modal */}
       {showCreateForm && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
+          >
             <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
               <h3 className="text-lg font-bold text-ink-50">
                 {t('settings.tags.createNew')}
@@ -1234,6 +1281,7 @@ export const TagsSettings: React.FC = () => {
                 onClick={() => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
+                  setDialogError(null);
                 }}
                 className="text-ink-500 hover:text-ink-300"
               >
@@ -1241,6 +1289,20 @@ export const TagsSettings: React.FC = () => {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              {/* Reason lives HERE, not in the page banner — the overlay above
+                  hides that one completely while this dialog is open. */}
+              {(dialogError || duplicateOfNewTag) && (
+                <div className="p-3 rounded-lg bg-danger-soft border border-danger-border flex items-start gap-2 text-danger-text text-sm">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>
+                    {dialogError ??
+                      t('settings.tags.duplicateExists', {
+                        name: getDisplayName(duplicateOfNewTag as Tag),
+                        defaultValue: `"${getDisplayName(duplicateOfNewTag as Tag)}" already exists — pick another name.`,
+                      })}
+                  </span>
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagName')} (English)
@@ -1389,6 +1451,7 @@ export const TagsSettings: React.FC = () => {
                 onClick={() => {
                   setShowCreateForm(false);
                   setForceTagNameEqEn(false);
+                  setDialogError(null);
                 }}
                 className="px-5 py-2.5 rounded-lg border border-ink-700 text-ink-300 hover:bg-ink-800 transition-colors font-medium text-sm"
               >
@@ -1396,7 +1459,7 @@ export const TagsSettings: React.FC = () => {
               </button>
               <button
                 onClick={handleCreateTag}
-                disabled={!newTagName.trim() || isCreating}
+                disabled={!newTagName.trim() || isCreating || !!duplicateOfNewTag}
                 className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {isCreating ? (
@@ -1414,7 +1477,11 @@ export const TagsSettings: React.FC = () => {
       {/* Edit Tag Modal */}
       {editingTag && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
+          >
             <div className="px-6 py-4 border-b border-ink-800 flex justify-between items-center">
               <h3 className="text-lg font-bold text-ink-50">
                 {t('settings.tags.editTag')}
@@ -1427,6 +1494,15 @@ export const TagsSettings: React.FC = () => {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              {/* Same reasoning as the create dialog: the page banner is
+                  behind this overlay, so save/delete failures must surface
+                  here or not at all. */}
+              {dialogError && (
+                <div className="p-3 rounded-lg bg-danger-soft border border-danger-border flex items-start gap-2 text-danger-text text-sm">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>{dialogError}</span>
+                </div>
+              )}
               {/* Renaming a shadow tag won't rewrite the #text already
                   living in note bodies — re-editing such a note re-creates
                   the old tag. Warn before the user renames one.

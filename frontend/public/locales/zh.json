@@ -993,7 +993,8 @@
       "mergePickTarget": "选择要保留的标签：",
       "mergePreview": "最多 {{count}} 个素材将归到「{{name}}」，{{n}} 个标签将被删除。",
       "merge": "合并",
-      "merging": "合并中…"
+      "merging": "合并中…",
+      "duplicateExists": "\"{{name}}\" 已存在，换个名字。"
     },
     "promptTriggerTags": {
       "title": "Prompt 触发标签",
