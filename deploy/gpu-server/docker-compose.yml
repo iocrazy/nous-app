@@ -252,13 +252,18 @@ services:
       context: ../../admin
       dockerfile: Dockerfile
       args:
-        # 直连 GPU 栈(api/sb.nous.ink),不用 nginx /api 代理;anon key 是公开的
-        VITE_API_URL: https://api.nous.ink
-        VITE_SUPABASE_URL: https://sb.nous.ink
+        # 本机专用(2026-08-27 起不再走 admin.nous.ink):API 留空 → 同源 /api,
+        # 由镜像内 nginx 代理到 nous-backend;Supabase 走 kong 的回环口。
+        # anon key 是公开的。
+        VITE_API_URL: ""
+        VITE_SUPABASE_URL: http://127.0.0.1:9082
         VITE_SUPABASE_ANON_KEY: ${NOUS_ANON_KEY}
     image: nous-admin:local
     container_name: nous-admin
     restart: unless-stopped
+    # 只绑回环:admin 不对外,浏览器开 http://127.0.0.1:8090
+    ports:
+      - "127.0.0.1:8090:8080"
 
 networks:
   default:
