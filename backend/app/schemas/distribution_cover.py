@@ -196,6 +196,11 @@ class CoverGenerateRequest(BaseModel):
     headline: str = Field(default="", max_length=120)
     # 创作者写给模型的一句话（提示词框）。空串 = 不加。
     instructions: str = Field(default="", max_length=500)
+    # 这次生成是为哪个视频做封面 —— 写进 generated_media.params.cover，工作室重新打开时
+    # 按它把历史轮次拉回来（轮次不再只活在内存里）。
+    source_video_id: str = Field(default="", max_length=32)
+    # 阶段二：它精修的是哪张网格（generated_media id），历史里成品才能挂回那一轮。
+    grid_gen_id: str = Field(default="", max_length=32)
 
     @field_validator("topic")
     @classmethod

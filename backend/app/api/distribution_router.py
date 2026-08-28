@@ -1779,6 +1779,7 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
             "topic": body.topic,
             "selected_draft": body.selected_draft,
             "reference_count": len(refs),
+            "source_video_id": body.source_video_id or None,
         },
     )
     await dbos_orchestrator.start_workflow_routed(
@@ -1792,6 +1793,19 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
             # 写错不会报错，只会静默变成正方形。
             "params": {
                 "ratio": body.aspect,
+                # Durable round bookkeeping: generated_media.params keeps this,
+                # so Cover Studio can list past rounds per source video
+                # (GET /generated-media?cover_source=…) instead of losing them
+                # the moment the dialog closes.
+                "cover": {
+                    "stage": body.stage,
+                    "aspect": body.aspect,
+                    "source_video_id": body.source_video_id or None,
+                    "topic": body.topic[:200],
+                    "style": body.style,
+                    "selected_draft": body.selected_draft,
+                    "grid_gen_id": body.grid_gen_id or None,
+                },
                 "quality": body.quality,
                 "source_urls": refs,
             },

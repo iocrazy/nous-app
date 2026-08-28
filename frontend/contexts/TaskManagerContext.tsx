@@ -33,6 +33,7 @@ export type TaskType =
   // Smart-canvas image/video generation (canvas_generation_workflow, G4-B1)
   // and the classic canvas DBOS graph run.
   | 'canvas_gen'
+  | 'cover_gen'
   | 'canvas_graph_run'
   | 'canvas_timeline'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
@@ -908,6 +909,8 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     agent: 0,
     agent_routine: 0,
     canvas_gen: 0,
+
+    cover_gen: 0,
     canvas_graph_run: 0,
     canvas_timeline: 0,
     publish: 0,

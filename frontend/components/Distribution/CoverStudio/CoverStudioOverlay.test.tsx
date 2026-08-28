@@ -37,6 +37,7 @@ const svc = vi.hoisted(() => ({
   saveGeneratedCoverAsTemplate: vi.fn(),
   listGenerationModels: vi.fn(),
   listCoverStyles: vi.fn(),
+  listCoverRounds: vi.fn(),
   selectCoverFrame: vi.fn(),
   uploadResource: vi.fn(),
   importCanvasMedia: vi.fn(),
@@ -57,6 +58,8 @@ vi.mock('../../../services/coverStudioService', () => ({
   refineCoverDraft: svc.refineCoverDraft,
   awaitCoverGeneration: svc.awaitCoverGeneration,
   listCoverStyles: svc.listCoverStyles,
+  listCoverRounds: svc.listCoverRounds,
+  genIdFromUrl: (url: string | undefined) => url?.match(/\/generated-media\/(\d+)\//)?.[1] ?? null,
 }));
 
 const BUILTIN_STYLE = {
@@ -223,6 +226,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   svc.listGenerationModels.mockResolvedValue([]);
   svc.listCoverStyles.mockResolvedValue([BUILTIN_STYLE, NEON_STYLE]);
+  svc.listCoverRounds.mockResolvedValue([]);
   svc.generateCoverDrafts.mockResolvedValue({
     task_id: 't1',
     prompt: 'STAGE1 PROMPT',
@@ -754,5 +758,39 @@ describe('CoverStudioOverlay — progress while drawing', () => {
 
     release({ ok: true, url: '/api/v1/generated-media/500/cover', generatedMediaId: '500' });
     await waitFor(() => expect(screen.queryByTestId('cover-progress')).toBeNull());
+  });
+});
+
+
+describe('CoverStudioOverlay — rounds survive closing the dialog', () => {
+  it('rebuilds past rounds for this video from the server, finals attached to their grids', async () => {
+    svc.listCoverRounds.mockResolvedValueOnce([
+      { genId: '600', url: '/api/v1/generated-media/600/cover', stage: 2, aspect: '3:4', topic: 't', selectedDraft: 2, gridGenId: '500', createdAt: '2026-08-28T00:00:01Z' },
+      { genId: '500', url: '/api/v1/generated-media/500/cover', stage: 1, aspect: '3:4', topic: 't', selectedDraft: null, gridGenId: null, createdAt: '2026-08-28T00:00:00Z' },
+      { genId: '700', url: '/api/v1/generated-media/700/cover', stage: 1, aspect: '4:3', topic: 't', selectedDraft: null, gridGenId: null, createdAt: '2026-08-28T00:00:02Z' },
+    ]);
+    renderOverlay();
+
+    await waitFor(() => expect(svc.listCoverRounds).toHaveBeenCalledWith('900'));
+    // Vertical tab: one round (grid 500 with its final 600); the 4:3 round is under the other tab.
+    expect(await screen.findByTestId('cover-history-round-1')).toBeTruthy();
+    expect(screen.queryByTestId('cover-history-round-2')).toBeNull();
+    expect(screen.getByTestId('cover-history-round-1').textContent).toContain('final');
+
+    fireEvent.click(screen.getByTestId('cover-history-round-1'));
+    expect(await screen.findByTestId('cover-final-image')).toBeTruthy();
+    expect(svc.generateCoverDrafts).not.toHaveBeenCalled();
+  });
+
+  it('stamps the source video and the grid id on what it sends', async () => {
+    renderOverlay();
+    setPerson();
+    fireEvent.click(screen.getByTestId('cover-generate'));
+    await waitFor(() => expect(svc.generateCoverDrafts).toHaveBeenCalledWith(expect.objectContaining({ sourceVideoId: '900' })));
+    await waitFor(() => expect(screen.queryByTestId('cover-draft-1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('cover-draft-1'));
+    svc.awaitCoverGeneration.mockResolvedValueOnce({ ok: true, url: '/api/v1/generated-media/600/cover', generatedMediaId: '600' });
+    fireEvent.click(screen.getByTestId('cover-make-final'));
+    await waitFor(() => expect(svc.refineCoverDraft).toHaveBeenCalledWith(expect.objectContaining({ gridGenId: '500', sourceVideoId: '900' })));
   });
 });
