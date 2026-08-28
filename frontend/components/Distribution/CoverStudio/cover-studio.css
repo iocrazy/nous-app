@@ -1700,3 +1700,9 @@
 .cover-studio .cs-personbody {
   align-items: flex-start;
 }
+
+/* The person card's Upload button wrapped to two lines in the 260px column. */
+.cover-studio .cs-person-upload {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
