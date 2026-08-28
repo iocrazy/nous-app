@@ -747,6 +747,8 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "personFromFrame": "来自 {{at}} 那一帧。再设会替换。",
+      "personFromUpload": "已上传。再上传或再设会替换。",
       "pickTemplates": "从模板库挑选",
       "pickerCount": "已选 {{n}} 张 · 还能加 {{room}} 张",
       "addPicked": "把这 {{n}} 张加为参考图",
@@ -783,7 +785,7 @@
       "prompt": "提示词",
       "promptAux": "写给模型的一句话",
       "promptPlaceholder": "例：标题用「内容差的真相」，@某张图 来指向它",
-      "needsTopicShort": "还没有标题",
+      "needsTopicShort": "还没有标题 —— 下面的提示词就是主题",
       "refUpload": "上传",
       "refUploadFailed": "这张图没能加进参考图，再试一次。",
       "personSetAt": "人物 = {{at}} 那一帧；再设会替换。",
@@ -883,7 +885,7 @@
       "grabAsPerson": "下一次抓取作为人物参考",
       "grabAsPersonWhy": "这套风格要求每个草案都是同一张脸。抓一帧你自己；会替换掉上一张人物参考。",
       "generateDrafts": "生成 4 个草案",
-      "needsTopic": "还差一步：先给发布填标题 —— 封面就是围绕它画的。",
+      "needsTopic": "还差一步：给发布填个标题，或者写提示词 —— 封面得有个主题。",
       "needsPerson": "还差一步：先加人物参考图。没有它，每个草案都是一张陌生的脸。",
       "costNote": "一张图、四个草案 —— 一轮想法只花一次生成。",
       "finalCover": "最终封面",

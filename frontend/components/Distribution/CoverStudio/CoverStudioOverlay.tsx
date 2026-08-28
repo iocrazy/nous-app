@@ -59,7 +59,8 @@ import {
 import { CoverReferencePool } from './CoverReferencePool';
 import { CoverTemplatePickerModal } from './CoverTemplatePickerModal';
 import { PromptMentionInput } from './PromptMentionInput';
-import { expandMentions, mentionToken } from './promptMentions';
+import { expandMentions, mentionToken, shortName } from './promptMentions';
+import { UiSelect } from '../../ui/primitives';
 import { CoverFrameGrabber, type CropFocus, type GrabbedFrame } from './CoverFrameGrabber';
 import { CoverDrafts, type CoverStage } from './CoverDrafts';
 import { HelpTip } from './HelpTip';
@@ -244,7 +245,7 @@ export function CoverStudioOverlay({
         if (ref.kind !== 'image' || !ref.id) {
           throw new Error('uploaded reference is not an image');
         }
-        addRef({ kind: 'template', genId: ref.id, url: ref.url, label: file.name });
+        addRef({ kind: 'template', genId: ref.id, url: ref.url, label: shortName(file.name) });
       } catch (err) {
         console.error('[CoverStudio] upload reference failed:', err);
         setPoolError(
@@ -258,10 +259,13 @@ export function CoverStudioOverlay({
     [addRef, t],
   );
 
+  // The publish title is the topic when there is one; otherwise the prompt
+  // box is. The user should not have to leave the studio to name the post.
+  const effectiveTopic = (topic.trim() || instructions.trim()).slice(0, 200);
   const canGenerate =
     stage !== 'drafting' &&
     stage !== 'refining' &&
-    !!topic.trim() &&
+    !!effectiveTopic &&
     (!requiresPerson || !!person);
 
   const runDrafts = useCallback(async () => {
@@ -273,7 +277,7 @@ export function CoverStudioOverlay({
     setActiveRound(null);
     try {
       const dispatched = await generateCoverDrafts({
-        topic: topic.trim(),
+        topic: effectiveTopic,
         sourceUrls: sourceUrls(refs),
         model,
         allowSmallLabels,
@@ -302,7 +306,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('idle');
     }
-  }, [canGenerate, topic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug]);
+  }, [canGenerate, effectiveTopic, refs, orderedRefs, model, allowSmallLabels, instructions, aspect, styleSlug]);
 
   const runRefine = useCallback(async () => {
     if (!round || !gridUrl || selected === null) return;
@@ -311,7 +315,7 @@ export function CoverStudioOverlay({
     setRunError(null);
     try {
       const dispatched = await refineCoverDraft({
-        topic: topic.trim(),
+        topic: effectiveTopic,
         // ★ Stage 2's references are the person + the GRID. The prompt says
         // "the supplied 2x2 grid image" and "the supplied character image" —
         // those two, in that speech, are what it needs. Re-sending the frames
@@ -341,7 +345,7 @@ export function CoverStudioOverlay({
       setRunError((err as Error).message);
       setStage('picking');
     }
-  }, [round, gridUrl, selected, topic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound]);
+  }, [round, gridUrl, selected, effectiveTopic, person, model, allowSmallLabels, instructions, orderedRefs, styleSlug, patchRound]);
 
   const apply = useCallback(async () => {
     if (!finalGenId || applying) return;
@@ -405,7 +409,7 @@ export function CoverStudioOverlay({
             kind: 'template',
             genId: ref.genId,
             url: ref.url,
-            label: tpl.name,
+            label: shortName(tpl.name),
             templateId: tpl.resource_id,
           };
           addRef(next);
@@ -434,7 +438,7 @@ export function CoverStudioOverlay({
         const ref = await importCanvasMedia(file, null, null);
         if (ref.kind !== 'image' || !ref.id) throw new Error('uploaded person is not an image');
         setLastFrameUrl(ref.url);
-        addRef({ kind: 'person', genId: ref.id, url: ref.url, label: file.name });
+        addRef({ kind: 'person', genId: ref.id, url: ref.url, label: shortName(file.name) });
       } catch (err) {
         console.error('[CoverStudio] upload person failed:', err);
         setPoolError(
@@ -497,8 +501,8 @@ export function CoverStudioOverlay({
 
   const busy = stage === 'drafting' || stage === 'refining';
   const previewUrl = finalUrl ?? lastFrameUrl;
-  const generateHint = !topic.trim()
-    ? t('distribution.coverStudio.needsTopic', 'Blocked: give the publish a title first — the cover is about it.')
+  const generateHint = !effectiveTopic
+    ? t('distribution.coverStudio.needsTopic', 'Blocked: give the publish a title, or write the prompt — the cover needs a topic.')
     : requiresPerson && !person
       ? t('distribution.coverStudio.needsPerson', 'Blocked: add the person picture first. Without it every draft is a different face.')
       : null;
@@ -591,7 +595,7 @@ export function CoverStudioOverlay({
                   <div className="cs-body">
                     <div className="cs-topicline" data-testid="cover-topic">
                       {topic.trim() ||
-                        t('distribution.coverStudio.needsTopicShort', 'No title yet')}
+                        t('distribution.coverStudio.needsTopicShort', 'No title yet — the prompt below is the topic')}
                     </div>
                     <PromptMentionInput
                       value={instructions}
@@ -633,12 +637,15 @@ export function CoverStudioOverlay({
                           <User size={18} />
                         )}
                       </div>
+                      <div className="cs-personside">
                       <p className="cs-hint">
                         {person
-                          ? t('distribution.coverStudio.personSetAt', {
-                              defaultValue: 'Person = the frame at {{at}}; grabbing again replaces it.',
-                              at: typeof person.timestampSeconds === 'number' ? `${person.timestampSeconds.toFixed(1)}s` : (person.label ?? ''),
-                            })
+                          ? typeof person.timestampSeconds === 'number'
+                            ? t('distribution.coverStudio.personFromFrame', {
+                                defaultValue: 'From the frame at {{at}}. Set again to replace.',
+                                at: `${person.timestampSeconds.toFixed(1)}s`,
+                              })
+                            : t('distribution.coverStudio.personFromUpload', 'Uploaded. Upload or set again to replace.')
                           : t('distribution.coverStudio.personHow', 'On the stage, find a frame of yourself and press “Set as person”.')}
                       </p>
                       <button
@@ -662,6 +669,7 @@ export function CoverStudioOverlay({
                           e.target.value = '';
                         }}
                       />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -873,12 +881,12 @@ export function CoverStudioOverlay({
                     {t('distribution.coverStudio.model', 'Model')}
                     <HelpTip text={t('distribution.coverStudio.modelNote', 'Same list as Settings → platform models: switch a model off there and it leaves this menu.')} />
                   </span>
-                  <select
-                    className="cs-source"
-                    style={{ marginBottom: 0 }}
+                  <UiSelect
+                    triggerClassName="cs-source cs-select"
                     aria-label={t('distribution.coverStudio.model', 'Model')}
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
+                    data-testid="cover-model"
                   >
                     <option value="">{t('distribution.coverStudio.modelDefault', 'Catalog default')}</option>
                     {models.map((m) => (
@@ -886,7 +894,7 @@ export function CoverStudioOverlay({
                         {m.display_name}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
                 </label>
                 <label className="cs-field">
                   <span>
@@ -898,9 +906,8 @@ export function CoverStudioOverlay({
                       ].filter(Boolean).join('\n')}
                     />
                   </span>
-                  <select
-                    className="cs-source"
-                    style={{ marginBottom: 0 }}
+                  <UiSelect
+                    triggerClassName="cs-source cs-select"
                     aria-label={t('distribution.coverStudio.styleSkill', 'Style (cover skill)')}
                     value={styleSlug}
                     onChange={(e) => setStyleSlug(e.target.value)}
@@ -914,7 +921,7 @@ export function CoverStudioOverlay({
                         {st.name}
                       </option>
                     ))}
-                  </select>
+                  </UiSelect>
                 </label>
                 <label className="cs-toggle">
                   <input

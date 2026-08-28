@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CoverReference } from './coverReferences';
-import { expandMentions, insertMention, mentionLabel, mentionToken } from './promptMentions';
+import { expandMentions, insertMention, mentionLabel, mentionToken, shortName } from './promptMentions';
 
 const person: CoverReference = { kind: 'person', genId: '1', url: '/p' };
 const frame: CoverReference = { kind: 'frame', genId: '2', url: '/f', timestampSeconds: 3.1 };
@@ -30,5 +30,13 @@ describe('promptMentions', () => {
 
   it('leaves a mention of a picture that is no longer in the pool as written', () => {
     expect(expandMentions('see @{gone}', [person])).toBe('see @{gone}');
+  });
+});
+
+describe('shortName', () => {
+  it('drops the extension and cuts hash-like names down', () => {
+    expect(shortName('bold-headline.png')).toBe('bold-headline');
+    expect(shortName('f91a9af91c45367032e3dc25a13be41bfa6ac385.jpg_.avif')).toBe('f91a9af91c4536703…');
+    expect(shortName('')).toBe('picture');
   });
 });

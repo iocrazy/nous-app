@@ -276,7 +276,7 @@ describe('CoverStudioOverlay — gating', () => {
       true,
     );
     expect(screen.getByTestId('cover-generate-hint').textContent).toMatch(
-      /give the publish a title first/,
+      /give the publish a title, or write the prompt/,
     );
   });
 
@@ -704,5 +704,33 @@ describe('CoverStudioOverlay — person upload and @-mentions', () => {
     await waitFor(() =>
       expect((screen.getByTestId('cover-instructions') as HTMLTextAreaElement).value).toContain('@{Bold headline}'),
     );
+  });
+});
+
+
+describe('CoverStudioOverlay — the prompt can be the topic', () => {
+  it('unblocks without a publish title once the prompt box has words, and sends them as the topic', async () => {
+    renderOverlay({ topic: '' });
+    setPerson();
+    expect((screen.getByTestId('cover-generate') as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByTestId('cover-instructions'), { target: { value: '仰望天空，文字是最伟大的作品' } });
+    expect((screen.getByTestId('cover-generate') as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId('cover-generate'));
+    await waitFor(() =>
+      expect(svc.generateCoverDrafts).toHaveBeenCalledWith(expect.objectContaining({ topic: '仰望天空，文字是最伟大的作品' })),
+    );
+  });
+
+  it('keeps the upload button on the person card after a person is set, and shortens long names', async () => {
+    svc.importCanvasMedia.mockResolvedValueOnce({ kind: 'image', id: '321', url: '/api/v1/generated-media/321/cover' });
+    renderOverlay();
+    fireEvent.change(screen.getByTestId('cover-person-upload-input'), {
+      target: { files: [new File(['x'], 'c284078e078abb510618eb422d9a1f2b3c4d5e6f.png', { type: 'image/png' })] },
+    });
+    await waitFor(() => expect(screen.getByTestId('cover-person-card').querySelector('img')).toBeTruthy());
+    expect(screen.getByTestId('cover-person-upload')).toBeTruthy();
+    expect(screen.getByTestId('cover-person-card').textContent).not.toContain('c284078e078abb510618eb422d9a1f2b3c4d5e6f');
   });
 });
