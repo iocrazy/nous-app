@@ -97,7 +97,8 @@ for (const vp of [
     await page.getByTestId('cover-ref-add-template').click();
     await expect(page.getByTestId('cover-picker-grid')).toBeVisible();
     await expect(page.getByTestId('cover-picker-count')).toBeVisible();
-    await page.keyboard.press('Escape');
+    // UiModal has no Escape handler; close the way a user would — Cancel.
+    await page.locator('.cover-studio-modal').getByRole('button', { name: /Cancel|取消/ }).first().click();
     await expect(page.getByTestId('cover-picker-grid')).toBeHidden();
 
     await page.screenshot({ path: `test-results/cover-studio-${vp.width}-vertical.png` });
