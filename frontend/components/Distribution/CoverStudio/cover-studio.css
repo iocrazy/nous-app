@@ -1550,3 +1550,153 @@
     flex-wrap: wrap;
   }
 }
+
+
+/* ── template picker, @-mentions, person upload (2026-08-27) ───────────── */
+
+.cover-studio-modal .cs-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.cover-studio-modal .cs-picker-search {
+  flex: 1 1 200px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--island-2);
+  color: var(--content-3);
+}
+
+.cover-studio-modal .cs-picker-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--content);
+  outline: none;
+}
+
+.cover-studio-modal .cs-picker-folder {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.cover-studio-modal .cs-picker-grid {
+  padding: 4px 0;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.cover-studio-modal .cs-tpl .sh.inpool {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cover-studio-modal .cs-picker-more {
+  text-align: center;
+  padding: 8px 0 0;
+}
+
+.cover-studio-modal .cs-picker-count {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--content-3);
+}
+
+.cover-studio .cs-mention {
+  position: relative;
+}
+
+.cover-studio .cs-mention-at {
+  position: absolute;
+  right: 6px;
+  bottom: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--island);
+  color: var(--content-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cover-studio .cs-mention-at:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.cover-studio .cs-mention-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 5;
+  background: var(--island);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.25);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.cover-studio .cs-mention-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--content);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cover-studio .cs-mention-menu button:hover {
+  background: var(--island-2);
+}
+
+.cover-studio .cs-mention-menu img {
+  width: 28px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--island-2);
+}
+
+.cover-studio .cs-mention-menu button.lib {
+  color: var(--content-2);
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  margin-top: 2px;
+}
+
+.cover-studio .cs-person-upload {
+  margin-top: 6px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cover-studio .cs-personbody {
+  align-items: flex-start;
+}

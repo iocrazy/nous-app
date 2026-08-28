@@ -147,25 +147,29 @@ vi.mock('./CoverFrameGrabber', () => ({
     </>
   ),
 }));
-vi.mock('./CoverTemplateGrid', () => ({
-  CoverTemplateGrid: ({ onToggle }: { onToggle: (t: unknown) => void }) => (
-    <button
-      type="button"
-      data-testid="stub-template"
-      onClick={() =>
-        onToggle({
-          resource_id: 'tpl-7',
-          name: 'Bold headline',
-          mime_type: 'image/png',
-          thumb_url: '/api/v1/resources/tpl-7/cover',
-          usage_count: 0,
-          last_used_at: null,
-        })
-      }
-    >
-      tpl
-    </button>
-  ),
+vi.mock('./CoverTemplatePickerModal', () => ({
+  CoverTemplatePickerModal: ({ open, onPick, onClose }: { open: boolean; onPick: (t: unknown[]) => void; onClose: () => void }) =>
+    open ? (
+      <button
+        type="button"
+        data-testid="stub-template"
+        onClick={() => {
+          onPick([
+            {
+              resource_id: 'tpl-7',
+              name: 'Bold headline',
+              mime_type: 'image/png',
+              thumb_url: '/api/v1/resources/tpl-7/cover',
+              usage_count: 0,
+              last_used_at: null,
+            },
+          ]);
+          onClose();
+        }}
+      >
+        tpl
+      </button>
+    ) : null,
 }));
 
 import { CoverStudioOverlay } from './CoverStudioOverlay';
@@ -201,6 +205,13 @@ function renderOverlay(over: Partial<React.ComponentProps<typeof CoverStudioOver
     </I18nextProvider>,
   );
   return { onClose, onApply };
+}
+
+/** Open the library picker from the pool tile and take the stub's template. */
+async function pickTemplate() {
+  fireEvent.click(screen.getByTestId('cover-ref-add-template'));
+  fireEvent.click(await screen.findByTestId('stub-template'));
+  await screen.findByText('Bold headline');
 }
 
 /** "Set as person" on the stage — the shortest path to "person set". */
@@ -284,8 +295,7 @@ describe('CoverStudioOverlay — the two-stage run', () => {
   it('sends the pool with the person first, then shows the grid', async () => {
     renderOverlay();
     setPerson();
-    fireEvent.click(screen.getByTestId('stub-template'));
-    await screen.findByText('Bold headline');
+    await pickTemplate();
 
     fireEvent.click(screen.getByTestId('cover-generate'));
 
@@ -308,8 +318,7 @@ describe('CoverStudioOverlay — the two-stage run', () => {
   it('stage 2 sends person + grid, not the whole pool', async () => {
     renderOverlay();
     setPerson();
-    fireEvent.click(screen.getByTestId('stub-template'));
-    await screen.findByText('Bold headline');
+    await pickTemplate();
     fireEvent.click(screen.getByTestId('cover-generate'));
     await waitFor(() => expect(screen.queryByTestId('cover-draft-2')).toBeTruthy());
 
@@ -616,12 +625,13 @@ describe('CoverStudioOverlay — v4 layout', () => {
 
 
 describe('CoverStudioOverlay — merged references card and in-studio video pick', () => {
-  it('shows the nine slots and the template library as ONE card, with no jump tile', () => {
+  it('shows the nine slots with a "From library" tile that opens the picker', () => {
     renderOverlay();
     const card = screen.getByTestId('cover-ref-card');
     expect(card.querySelector('[data-testid="cover-ref-pool"]')).toBeTruthy();
-    expect(card.querySelector('[data-testid="stub-template"]')).toBeTruthy();
-    expect(screen.queryByTestId('cover-ref-add-template')).toBeNull();
+    // The library is a picker now: the tile opens it, nothing is listed inline.
+    expect(screen.queryByTestId('stub-template')).toBeNull();
+    expect(card.querySelector('[data-testid="cover-ref-add-template"]')).toBeTruthy();
     expect(screen.getByText('Sent to the model')).toBeTruthy();
   });
 
@@ -649,5 +659,50 @@ describe('CoverStudioOverlay — the person card', () => {
     // The person is sent too (the server cap of nine includes it), so the
     // pool's budget shrinks by one instead of showing the person as a slot.
     expect(screen.getByTestId('cover-ref-count').textContent).toContain('0 / 8');
+  });
+});
+
+
+describe('CoverStudioOverlay — person upload and @-mentions', () => {
+  it('a picture uploaded on the person card becomes the person', async () => {
+    svc.importCanvasMedia.mockResolvedValueOnce({ kind: 'image', id: '321', url: '/api/v1/generated-media/321/cover' });
+    renderOverlay();
+    const file = new File(['x'], 'me.png', { type: 'image/png' });
+
+    fireEvent.change(screen.getByTestId('cover-person-upload-input'), { target: { files: [file] } });
+
+    await waitFor(() => expect(svc.importCanvasMedia).toHaveBeenCalledWith(file, null, null));
+    await waitFor(() => expect(screen.getByTestId('cover-person-card').querySelector('img')).toBeTruthy());
+    expect((screen.getByTestId('cover-generate') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('@{label} in the prompt is sent as a positional reference', async () => {
+    renderOverlay();
+    setPerson();
+    await pickTemplate();
+    fireEvent.change(screen.getByTestId('cover-instructions'), {
+      target: { value: 'make it look like @{Bold headline} but with @{person} smiling' },
+    });
+
+    fireEvent.click(screen.getByTestId('cover-generate'));
+
+    await waitFor(() =>
+      expect(svc.generateCoverDrafts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instructions: 'make it look like reference image 2 (Bold headline) but with reference image 1 (person) smiling',
+        }),
+      ),
+    );
+  });
+
+  it('picking from the library through "@" also mentions the picture', async () => {
+    renderOverlay();
+    fireEvent.click(screen.getByTestId('cover-mention-at'));
+    fireEvent.click(await screen.findByTestId('cover-mention-library'));
+    fireEvent.click(await screen.findByTestId('stub-template'));
+
+    await waitFor(() =>
+      expect((screen.getByTestId('cover-instructions') as HTMLTextAreaElement).value).toContain('@{Bold headline}'),
+    );
   });
 });

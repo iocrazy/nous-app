@@ -85,9 +85,11 @@ class _FakeRepo:
     async def ensure_folder(self, scope_id, user_id):
         return {"id": FOLDER_ID, "name": "封面", "adopted": self._adopted}
 
-    async def list_images(self, scope_id, folder_id):
+    async def list_images(self, scope_id, folder_id, *, q="", limit=48, offset=0):
         assert folder_id == int(FOLDER_ID)
-        return self._items
+        self.last_query = {"q": q, "limit": limit, "offset": offset}
+        rows = [r for r in self._items if q.lower() in r["name"].lower()]
+        return rows[offset : offset + limit], len(rows)
 
     async def bump_usage(self, resource_ids, scope_id):
         self.bumped.append((resource_ids, scope_id))
@@ -162,3 +164,24 @@ async def test_a_non_numeric_id_is_400_not_500(monkeypatch, client):
     )
 
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_list_is_paged_and_searchable(monkeypatch, client):
+    """The library will hold hundreds of pictures: the endpoint pages and
+    filters by filename, and says the total so the picker can offer more."""
+    _wire(monkeypatch)
+    resp = await client.get("/api/v1/cover-templates?q=bold&limit=1&offset=0")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["limit"] == 1 and data["offset"] == 0
+    assert len(data["items"]) <= 1
+    assert data["total"] >= len(data["items"])
+    assert all("bold" in i["name"].lower() for i in data["items"])
+
+
+@pytest.mark.asyncio
+async def test_list_refuses_a_page_larger_than_200(monkeypatch, client):
+    _wire(monkeypatch)
+    resp = await client.get("/api/v1/cover-templates?limit=1000")
+    assert resp.status_code == 422

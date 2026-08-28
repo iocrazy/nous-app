@@ -128,9 +128,42 @@ class CoverTemplatesRepository:
             )
             return {"id": _s(created["id"]), "name": created["name"], "adopted": False}
 
-    async def list_images(self, scope_id: int, folder_id: int) -> list[dict]:
-        """Image resources filed in the folder, most-used first, then newest."""
+    async def list_images(
+        self,
+        scope_id: int,
+        folder_id: int,
+        *,
+        q: str = "",
+        limit: int = 48,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Image resources filed in the folder, most-used first, then newest.
+
+        Paged and searchable: the library is meant to grow into the hundreds,
+        so the studio opens it as a picker (search + load more), never as a
+        wall of every picture. Returns ``(page, total)``.
+        """
+        needle = (q or "").strip()
+        where = [
+            ResourceItems.scope_id == scope_id,
+            ResourceItems.folder_id == folder_id,
+            Resources.is_trashed.is_(False),
+            Resources.mime_type.ilike("image/%"),
+        ]
+        if needle:
+            where.append(Resources.filename.ilike(f"%{needle}%"))
         async with read_scope() as session:
+            total = int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(ResourceItems)
+                        .join(Resources, Resources.id == ResourceItems.resource_id)
+                        .where(*where)
+                    )
+                ).scalar_one()
+                or 0
+            )
             rows = (
                 (
                     await session.execute(
@@ -152,16 +185,13 @@ class CoverTemplatesRepository:
                             (CoverTemplateUsage.resource_id == Resources.id)
                             & (CoverTemplateUsage.scope_id == scope_id),
                         )
-                        .where(
-                            ResourceItems.scope_id == scope_id,
-                            ResourceItems.folder_id == folder_id,
-                            Resources.is_trashed.is_(False),
-                            Resources.mime_type.ilike("image/%"),
-                        )
+                        .where(*where)
                         .order_by(
                             func.coalesce(CoverTemplateUsage.usage_count, 0).desc(),
                             Resources.created_at.desc(),
                         )
+                        .limit(max(1, min(int(limit), 200)))
+                        .offset(max(0, int(offset)))
                     )
                 )
                 .mappings()
@@ -177,7 +207,7 @@ class CoverTemplatesRepository:
                 "updated_at": r["updated_at"],
             }
             for r in rows
-        ]
+        ], total
 
     async def bump_usage(self, resource_ids: list[int], scope_id: int) -> None:
         """Once per generation, not once per rendered draft."""
