@@ -113,7 +113,12 @@ type Locator = { label: string } | { testId: string };
  * `readonly` rather than `disabled` so their content stays selectable.
  * Anything without it is a button / picker / stepper and takes `disabled`.
  */
-type Affordance = { what: string; text?: true } & Locator;
+/** `richText: true` marks a free-text field that is a contenteditable surface
+ *  rather than a form control (the prompt body is a tiptap editor so it can
+ *  hold inline image chips). The REQUIREMENT is identical — withheld without
+ *  being disabled, still focusable, content still readable — only the
+ *  attributes expressing it differ. */
+type Affordance = { what: string; text?: true; richText?: true } & Locator;
 
 interface NodeCase {
   /** Row name — also the `type` prop React Flow would pass. */
@@ -253,7 +258,7 @@ const CASES: NodeCase[] = [
       gen: null,
     },
     writes: [
-      { what: 'body', label: 'Prompt body', text: true },
+      { what: 'body', label: 'Prompt body', text: true, richText: true },
       { what: 'negative body', label: 'Negative prompt', text: true },
       { what: 'kind picker', label: 'Prompt kind' },
       { what: 'provider picker', label: 'Prompt provider' },
@@ -385,6 +390,14 @@ describe('smart nodes — no dead write buttons in a read-only session', () => {
     it.each(c.writes)('withholds $what when read-only', (affordance) => {
       renderCase(c, true);
       const el = find(affordance);
+      if (affordance.richText) {
+        // Same requirement, expressed the way a contenteditable does it.
+        expect(el).not.toBeNull();
+        expect(el).toHaveAttribute('contenteditable', 'false');
+        expect(el).toHaveAttribute('aria-readonly', 'true');
+        expect(el).not.toBeDisabled();
+        return;
+      }
       if (affordance.text) {
         // A text field is withheld by going `readonly` — and it must NOT
         // have gone `disabled`, which would cost the viewer the ability to
@@ -445,15 +458,22 @@ describe('smart nodes — no dead write buttons in a read-only session', () => {
 
       // Never `disabled` — that is the regression this test exists for.
       expect(el).not.toBeDisabled();
-      expect(el).toHaveAttribute('readonly');
+      if (locator.richText) {
+        expect(el).toHaveAttribute('aria-readonly', 'true');
+      } else {
+        expect(el).toHaveAttribute('readonly');
+      }
 
       // Focusable, which is what makes select-and-copy possible at all.
+      // A contenteditable=false div needs an explicit tabindex for this;
+      // losing it would silently cost keyboard users the prompt text.
       el!.focus();
       expect(document.activeElement).toBe(el);
 
       // And the content is still THERE to be read — a field emptied or
       // replaced by a placeholder would pass every check above.
-      expect(el!.value.length).toBeGreaterThan(0);
+      const content = locator.richText ? (el!.textContent ?? '') : el!.value;
+      expect(content.length).toBeGreaterThan(0);
     },
   );
 

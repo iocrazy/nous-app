@@ -6,10 +6,15 @@
  *
  * Uses a synchronous mock for useResourceSearch so tests are deterministic
  * without needing to advance fake timers through the 150ms debounce.
+ *
+ * The body is a tiptap contenteditable, so `fireEvent.change` cannot drive it
+ * — ProseMirror syncs from the DOM. `typeBody` writes the text and fires
+ * `input`, which is what a keystroke ends up doing; that sync lands a
+ * microtask later, so this suite runs on real timers and awaits.
  */
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import {
   afterEach,
@@ -139,6 +144,19 @@ function renderPromptNode(id: string, data: Record<string, unknown>) {
   );
 }
 
+/** Type into the tiptap prompt body, then let ProseMirror's DOM sync and the
+ *  React update settle so the assertions after it can stay synchronous. */
+async function typeBody(text: string): Promise<void> {
+  const el = screen.getByLabelText('Prompt body');
+  const block = el.querySelector('p');
+  if (!block) throw new Error('prompt body has no paragraph to type into');
+  await act(async () => {
+    block.textContent = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 // ── Setup / Teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -151,11 +169,9 @@ beforeEach(() => {
   });
   // Default: no results
   vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([]));
-  vi.useFakeTimers();
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
   useCanvasCoreStore.getState().reset();
 });
@@ -163,33 +179,29 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('PromptNodeView — @-mention picker', () => {
-  it('picker is hidden on initial render', () => {
+  it('picker is hidden on initial render', async () => {
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
     expect(screen.queryByTestId('canvas-mention-picker')).toBeNull();
   });
 
-  it('typing @ opens the picker', () => {
+  it('typing @ opens the picker', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: '@' },
-    });
+    await typeBody('@');
 
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
     expect(screen.getByTestId('resource-picker')).toBeInTheDocument();
   });
 
-  it('picker shows search results returned by useResourceSearch', () => {
+  it('picker shows search results returned by useResourceSearch', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT, FAKE_RESULT_2]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: '@' },
-    });
+    await typeBody('@');
 
     // Two result rows rendered
     const rows = screen.getAllByTestId('resource-picker-row');
@@ -198,13 +210,12 @@ describe('PromptNodeView — @-mention picker', () => {
     expect(rows[1]).toHaveTextContent('canyon-sunset.mp4');
   });
 
-  it('picking a resource replaces the @-token in the body', () => {
+  it('picking a resource replaces the @-token in the body', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1', { body: '' });
     renderPromptNode('p1', data);
 
-    const textarea = screen.getByLabelText('Prompt body');
-    fireEvent.change(textarea, { target: { value: '@robot' } });
+        await typeBody('@robot');
 
     const row = screen.getByTestId('resource-picker-row');
     fireEvent.click(row);
@@ -217,14 +228,12 @@ describe('PromptNodeView — @-mention picker', () => {
     expect((node.data.body as string)).toBe('@robot-concept.jpg ');
   });
 
-  it('picking a resource persists a PromptResourceRef in node data', () => {
+  it('picking a resource persists a PromptResourceRef in node data', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: '@' },
-    });
+    await typeBody('@');
     fireEvent.click(screen.getByTestId('resource-picker-row'));
 
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
@@ -242,30 +251,27 @@ describe('PromptNodeView — @-mention picker', () => {
     });
   });
 
-  it('picker closes after picking a resource', () => {
+  it('picker closes after picking a resource', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: '@' },
-    });
+    await typeBody('@');
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('resource-picker-row'));
     expect(screen.queryByTestId('canvas-mention-picker')).toBeNull();
   });
 
-  it('Escape key closes the picker without selecting', () => {
+  it('Escape key closes the picker without selecting', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    const textarea = screen.getByLabelText('Prompt body');
-    fireEvent.change(textarea, { target: { value: '@' } });
+        await typeBody('@');
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
 
-    fireEvent.keyDown(textarea, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByLabelText('Prompt body'), { key: 'Escape' });
     expect(screen.queryByTestId('canvas-mention-picker')).toBeNull();
 
     // No refs added
@@ -276,44 +282,40 @@ describe('PromptNodeView — @-mention picker', () => {
     expect(node.data.resource_refs).toEqual([]);
   });
 
-  it('typing text without @ keeps picker hidden', () => {
+  it('typing text without @ keeps picker hidden', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: 'hello world' },
-    });
+    await typeBody('hello world');
     expect(screen.queryByTestId('canvas-mention-picker')).toBeNull();
   });
 
-  it('removing @ from the text closes the picker', () => {
+  it('removing @ from the text closes the picker', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    const textarea = screen.getByLabelText('Prompt body');
-    fireEvent.change(textarea, { target: { value: '@foo' } });
+        await typeBody('@foo');
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
 
     // Remove the @ — plain text again
-    fireEvent.change(textarea, { target: { value: 'foo' } });
+    await typeBody('foo');
     expect(screen.queryByTestId('canvas-mention-picker')).toBeNull();
   });
 
-  it('duplicate resource is not added twice', () => {
+  it('duplicate resource is not added twice', async () => {
     vi.mocked(useResourceSearch).mockReturnValue(makeSearchData([FAKE_RESULT]));
     const data = seedPromptNode('p1');
     renderPromptNode('p1', data);
 
-    const textarea = screen.getByLabelText('Prompt body');
-
+    
     // First pick
-    fireEvent.change(textarea, { target: { value: '@' } });
+    await typeBody('@');
     fireEvent.click(screen.getByTestId('resource-picker-row'));
 
     // Second pick of the same resource
-    fireEvent.change(textarea, { target: { value: '@' } });
+    await typeBody('@');
     fireEvent.click(screen.getByTestId('resource-picker-row'));
 
     const node = useCanvasCoreStore.getState().nodes[0] as Record<
@@ -324,7 +326,7 @@ describe('PromptNodeView — @-mention picker', () => {
     expect((node.data.resource_refs as unknown[]).length).toBe(1);
   });
 
-  it('ref chip renders for each resource_refs entry', () => {
+  it('ref chip renders for each resource_refs entry', async () => {
     const data = seedPromptNode('p1', {
       resource_refs: [
         {
@@ -344,7 +346,7 @@ describe('PromptNodeView — @-mention picker', () => {
     );
   });
 
-  it('clicking × on a ref chip removes the ref from node data', () => {
+  it('clicking × on a ref chip removes the ref from node data', async () => {
     const data = seedPromptNode('p1', {
       resource_refs: [
         {
@@ -369,16 +371,14 @@ describe('PromptNodeView — @-mention picker', () => {
     expect((node.data.resource_refs as unknown[])).toHaveLength(0);
   });
 
-  it('existing tests still pass — patchNode does not push undo history', () => {
+  it('existing tests still pass — patchNode does not push undo history', async () => {
     // Regression guard: the mention wiring must not break the existing invariant
     // that inline edits do not push onto the undo stack.
     const data = seedPromptNode('p1');
     expect(useCanvasCoreStore.getState().canUndo()).toBe(false);
     renderPromptNode('p1', data);
 
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: 'some text' },
-    });
+    await typeBody('some text');
     expect(useCanvasCoreStore.getState().canUndo()).toBe(false);
   });
 });

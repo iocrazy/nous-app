@@ -134,6 +134,11 @@ export interface PromptNodeData {
    * attachments. Defaults to [] for nodes created before this field existed.
    */
   resource_refs: PromptResourceRef[];
+  /** Inline image chips in the body (IC's mention tokens). The body text is a
+   *  plain-text projection rendering each chip as `@alias`, so it cannot carry
+   *  them — this is what a reload rebuilds them from. Absent on nodes saved
+   *  before the feature. */
+  image_refs?: { url: string; alias: string; kind: string }[];
   /**
    * Negative prompt text loaded from an asset's prompt library entry
    * (Phase 2). Optional; absent for hand-typed prompts. The generation

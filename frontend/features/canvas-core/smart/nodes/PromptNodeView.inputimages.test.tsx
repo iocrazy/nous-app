@@ -10,7 +10,7 @@
  */
 
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
@@ -137,28 +137,34 @@ describe('input image row', () => {
 });
 
 describe('@ picker input tab', () => {
+  // The body is a tiptap contenteditable; '@' is reported from its keydown
+  // handler, not from a ChangeEvent it never produces. It notifies on the
+  // next tick (so the character lands first), so callers await what they
+  // actually need — the two tabs render different roots, and only the
+  // Library one carries the `canvas-mention-picker` testid.
   function openPicker(): void {
-    const textarea = screen.getByRole('textbox', { name: 'Prompt body' });
-    fireEvent.change(textarea, { target: { value: '@', selectionStart: 1 } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt body' }), { key: '@' });
   }
 
-  it('defaults to the Input tab when inputs exist; picking sets source_ref and inserts text', () => {
+  it('defaults to the Input tab when inputs exist; picking sets source_ref and inserts a chip', async () => {
     seed(true);
     renderPrompt();
     openPicker();
-    const options = screen.getAllByTestId('mention-input-option');
+    const options = await screen.findAllByTestId('mention-input-option');
     expect(options).toHaveLength(2);
     fireEvent.mouseDown(options[1]);
-    fireEvent.click(options[1]);
     expect(promptData().source_ref).toBe(URL_B);
-    expect(promptData().body).toContain('@');
+    // The picked image is now a chip in the document, and the body's plain
+    // text projection renders it as @alias.
+    expect(await screen.findByTestId('prompt-image-chip')).toHaveTextContent('Image 2');
+    await waitFor(() => expect(promptData().body).toContain('@Image 2'));
   });
 
-  it('without inputs the Input tab is disabled and Library is active', () => {
+  it('without inputs the Input tab is disabled and Library is active', async () => {
     seed(false);
     renderPrompt();
     openPicker();
-    expect(screen.getByTestId('mention-tab-input')).toBeDisabled();
+    expect(await screen.findByTestId('mention-tab-input')).toBeDisabled();
     expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
   });
 });

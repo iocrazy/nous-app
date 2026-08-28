@@ -43,6 +43,20 @@ export interface MentionPickerBag {
   /** Call to close the picker (e.g. `onBlur`) */
   closePicker: () => void;
   /**
+   * Open the picker explicitly. The textarea path detects '@' inside
+   * `handleChange`; a contenteditable editor reports it from its own keydown
+   * handler instead, so it needs a way in that does not go through a
+   * ChangeEvent it never produces.
+   */
+  openPicker: () => void;
+  /**
+   * Drive the picker from a live `@query` the editor computes: a string
+   * narrows it, null means the token is gone and the picker should close.
+   */
+  setMentionQuery: (q: string | null) => void;
+  /** Move the active row by `delta`, wrapping — arrow-key navigation. */
+  moveActive: (delta: number) => void;
+  /**
    * Sync the item count for accurate keyboard-wrap.
    * Call whenever search results change: `mention.setItemCount(results.length)`.
    * Stored as a ref — does not trigger re-renders.
@@ -82,6 +96,27 @@ export function useCanvasMentionPicker({
 
   const setItemCount = useCallback((n: number) => {
     itemCountRef.current = Math.max(1, n);
+  }, []);
+
+  const openPicker = useCallback(() => {
+    setQuery('');
+    setActiveIndex(0);
+    setPickerOpen(true);
+  }, []);
+
+  const setMentionQuery = useCallback((q: string | null) => {
+    if (q === null) {
+      setPickerOpen(false);
+      return;
+    }
+    setQuery(q);
+    setActiveIndex(0);
+    setPickerOpen(true);
+  }, []);
+
+  const moveActive = useCallback((delta: number) => {
+    const count = itemCountRef.current;
+    setActiveIndex((i) => (i + delta + count) % count);
   }, []);
 
   const handleChange = useCallback(
@@ -162,6 +197,9 @@ export function useCanvasMentionPicker({
     handleSelect,
     handleInsertText,
     closePicker,
+    openPicker,
+    setMentionQuery,
+    moveActive,
     setItemCount,
   };
 }

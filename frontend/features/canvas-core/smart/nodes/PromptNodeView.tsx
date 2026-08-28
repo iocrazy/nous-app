@@ -25,6 +25,8 @@ import {
   useElapsedSeconds,
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
+import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
+import type { PromptImageRef } from './promptImageRefs';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { GenFooterControls } from './GenFooterControls';
 import { AssetPromptPicker } from './AssetPromptPicker';
@@ -56,6 +58,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     run_started_at = null,
     run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
+    image_refs = [],      // inline image chips in the body (IC's mention tokens)
     negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
@@ -162,6 +165,37 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       mention.handleChange(e);
     },
     [mention.handleChange],
+  );
+
+  // ── Image chips in the body ──────────────────────────────────────────────
+  const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
+  // Seeded once: the document owns the chips from then on.
+  const seededChips = useRef<PromptImageRef[]>(
+    (image_refs ?? []) as PromptImageRef[],
+  ).current;
+  // The document is the chip list; node data mirrors it so a reload can
+  // rebuild them (body is plain text and cannot carry them).
+  const handleImageRefsChange = useCallback(
+    (refs: PromptImageRef[]) => {
+      patch({ image_refs: refs });
+    },
+    [patch],
+  );
+  // While the picker is open, Escape and arrows belong to it, not the text.
+  const handleBodyKeyDown = useCallback(
+    (event: KeyboardEvent): boolean => {
+      if (!mention.pickerOpen) return false;
+      if (event.key === 'Escape') {
+        mention.closePicker();
+        return true;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        mention.moveActive(event.key === 'ArrowDown' ? 1 : -1);
+        return true;
+      }
+      return false;
+    },
+    [mention],
   );
   const handleCompositionStart = useCallback(() => {
     composingRef.current = true;
@@ -560,28 +594,32 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             />
           </div>
         )}
-        <textarea
-          // nodrag → React Flow doesn't start a drag from this input
-          // nowheel → wheel events scroll the textarea instead of zooming canvas
-          className="nodrag nowheel min-h-[3.5rem] w-full resize-y bg-transparent text-[13px] text-ink-200 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40 read-only:opacity-80 read-only:cursor-default"
+        {/* The resizer now lives on this wrapper. A <textarea> had one for
+            free; a contenteditable does not, and IC's promptH (a body height
+            the user drags and we persist) is a real behaviour to keep — CSS
+            `resize` works on any block box, so the handle moves out here and
+            the editor fills it. */}
+        <div
+          data-testid="prompt-body-resizer"
+          className="nodrag nowheel min-h-[3.5rem] w-full resize-y overflow-auto"
           style={body_h ? { height: body_h } : undefined}
           onMouseUp={(e) => {
-            // IC promptH: the drag handle is the textarea's own resizer —
-            // capture the new height once the drag ends and persist it.
             const h = Math.round(e.currentTarget.getBoundingClientRect().height);
             if (h > 0 && h !== body_h) patch({ body_h: h });
           }}
-          placeholder="What should the model generate? Type @ to reference an asset"
-          value={draft}
-          onChange={handleBodyChange}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onKeyDown={mention.handleKeyDown}
-          onBlur={mention.closePicker}
-          aria-label="Prompt body"
-          rows={3}
-          readOnly={readOnly}
-        />
+        >
+          <PromptBodyEditor
+            ref={bodyEditorRef}
+            value={draft}
+            onChange={pushBody}
+            onRefsChange={handleImageRefsChange}
+            onAtTyped={mention.openPicker}
+            onMentionQueryChange={mention.setMentionQuery}
+            onKeyDown={handleBodyKeyDown}
+            initialChips={seededChips}
+            readOnly={readOnly}
+          />
+        </div>
 
         {mention.pickerOpen && (
           <div
@@ -623,9 +661,17 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                     key={url}
                     type="button"
                     data-testid="mention-input-option"
-                    onClick={() => {
-                      mention.handleInsertText(`Image ${i + 1}`);
+                    onMouseDown={(e) => {
+                      // mousedown, not click: the editor must keep focus or
+                      // its blur closes this popover first.
+                      e.preventDefault();
+                      bodyEditorRef.current?.insertImage({
+                        url,
+                        alias: `Image ${i + 1}`,
+                        kind: 'image',
+                      });
                       patch({ source_ref: url });
+                      mention.closePicker();
                     }}
                     className="nodrag flex flex-col items-center gap-0.5"
                   >
