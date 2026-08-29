@@ -1746,7 +1746,8 @@
       "clear": "Clear",
       "done": "{{ok}} done",
       "partial": "{{ok}} done, {{failed}} failed",
-      "confirmDelete": "Confirm Delete ({{n}})"
+      "confirmDelete": "Confirm Delete ({{n}})",
+      "deleteOnlyUnreviewed": "Only unreviewed items can be deleted — saved items live in your library"
     },
     "empty": {
       "unreviewed": "Nothing To Review",

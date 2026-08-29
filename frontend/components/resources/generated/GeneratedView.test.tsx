@@ -446,6 +446,41 @@ describe('GeneratedView — batch bar', () => {
     expect(batchGenerated).not.toHaveBeenCalled();
     expect(dialogProps?.items.map((i) => i.id)).toEqual([ITEM_A.id, ITEM_B.id]);
   });
+
+  it('refuses batch Delete when the selection contains a promoted row', async () => {
+    // A saved row's bytes belong to a `resources` row now; the content-
+    // addressed key is shared, so "delete this card" must never be a route to
+    // "delete my file". The per-card menu already hides Delete outside
+    // Unreviewed — the batch bar was the hole.
+    fetchGenerated
+      .mockReset()
+      .mockResolvedValue({
+        items: [ITEM_A, { ...ITEM_B, review_state: 'saved' }],
+        next_cursor: null,
+      });
+    renderView();
+    const bar = await selectFirstTwo();
+
+    const del = within(bar).getByRole('button', { name: 'Delete' });
+    expect((del as HTMLButtonElement).disabled).toBe(true);
+    expect(del.getAttribute('title')).toContain('Only unreviewed items');
+
+    fireEvent.click(del);
+    expect(within(bar).queryByRole('button', { name: /^Confirm Delete/ })).toBeNull();
+    expect(batchGenerated).not.toHaveBeenCalled();
+  });
+
+  it('still allows batch Delete for an all-unreviewed selection', async () => {
+    // Positive control: without it the test above passes on a Delete button
+    // that is disabled unconditionally.
+    renderView();
+    const bar = await selectFirstTwo();
+
+    const del = within(bar).getByRole('button', { name: 'Delete' });
+    expect((del as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(del);
+    expect(within(bar).getByRole('button', { name: 'Confirm Delete (2)' })).toBeTruthy();
+  });
 });
 
 describe('GeneratedView — single-card actions', () => {

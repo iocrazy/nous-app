@@ -5,15 +5,24 @@ service. Three properties are load-bearing:
 
 1. **The review-state machine is closed here.** No public method accepts a
    state string. ``saved`` is written only by ``mark_promoted`` (inside
-   ``PromoteGeneratedMediaService.promote``); ``in_assets`` only by
-   :meth:`save_as_asset`, and only after the attach has succeeded.
+   ``PromoteGeneratedMediaService.promote``); ``in_assets`` is written by
+   :meth:`save_as_asset` — and only after the attach has succeeded — and by
+   ``workflows/backfill_generated_inbox._apply``, an admin-only reconciliation
+   that labels rows whose attachment already exists. Two writers, both
+   guarded; there is no generic setter.
    ``GeneratedMediaRepository.set_review_state`` is a repo primitive — it is
-   deliberately NOT re-exported as a generic setter, because a caller that can
-   write any state can silently un-promote a row.
-2. **Save-as-asset is one transaction.** promote → (create) → attach →
-   ``in_assets`` all run inside ``unit_of_work()``, so a failed attach leaves
-   no promoted-but-unattached, half-labelled row behind. The rollback is the
-   UoW's; this service just never writes the state when a step raised.
+   deliberately NOT re-exported, because a caller that can write any state can
+   silently un-promote a row.
+2. **Save-as-asset is TWO segments, not one transaction.** ``promote`` runs
+   first and OUTSIDE ``unit_of_work()`` (it does ``SET LOCAL ROLE``, storage
+   I/O, and carries a "non-fatal" backlink guard that a shared transaction
+   would make fatal — see :meth:`_save_as_asset_core` for the full reasoning);
+   attach + ``in_assets`` then share one transaction. A failed attach leaves
+   the row ``saved`` with a promoted resource behind it — a legitimate state,
+   identical to a plain :meth:`save`. What can never happen is the harmful
+   direction, ``in_assets`` without an attachment, because that write is last.
+   Pure validation failures do not even get that far: :meth:`_validate_target`
+   refuses before ``promote``.
 3. **Errors are typed, never swallowed.** Everything a caller can be expected
    to act on becomes an :class:`AssetError` with a code; anything else (a
    storage backend refusing, a bug) propagates, because reporting a genuine
@@ -46,6 +55,7 @@ from app.schemas.generated import (
     derive_title,
 )
 from app.services.assets.assets_service import AssetError, AssetsService
+from app.services.assets.slots import is_valid_slot
 from app.services.library.generated_source import describe_source
 from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
@@ -194,7 +204,15 @@ class GeneratedInboxService:
 
         Split from :meth:`save` so ``batch`` can run it N times without paying
         for a card it throws away (each decoration is a ``names_by_ids``).
+
+        The scope read comes FIRST. ``promote`` resolves the generation by id
+        alone (it has its own source-scope grant check), so a gen_id that lives
+        in another scope the caller belongs to used to be copied into this
+        library and only THEN 404'd — a refusal that had already half-applied.
+        A cheap read turns it back into a real no-op.
         """
+        if await self.gen_repo.get(int(gen_id), int(scope_id)) is None:
+            raise self._not_in_scope()
         await self._promoted_resource(gen_id, scope_id, user_id)
         row = await self.gen_repo.get(int(gen_id), int(scope_id))
         if row is None:
@@ -206,6 +224,27 @@ class GeneratedInboxService:
         inside ``mark_promoted`` — never written here."""
         row = await self._save_core(gen_id, scope_id, user_id)
         return (await self._decorate([row], str(scope_id)))[0]
+
+    async def _validate_target(self, scope_id: int, req: SaveAsAssetRequest) -> None:
+        """Everything about the DESTINATION that can be known before promoting.
+
+        Deliberately the same two checks ``attach_file`` runs (asset resolvable
+        + writable in this scope, slot valid for its type) — run early rather
+        than reimplemented, so the two cannot answer differently. What is NOT
+        pre-checked is the resource-in-scope check: that resource does not
+        exist yet, it is what ``promote`` is about to create.
+        """
+        if req.new_asset is not None:
+            asset_type = req.new_asset.asset_type
+        else:
+            row = await self.assets._require_writable(int(req.asset_id), int(scope_id))
+            asset_type = row["asset_type"]
+        if not is_valid_slot(asset_type, req.slot):
+            raise AssetError(
+                422,
+                "invalid_slot",
+                f"Slot '{req.slot}' is not valid for {asset_type}",
+            )
 
     async def _save_as_asset_core(
         self,
@@ -240,7 +279,15 @@ class GeneratedInboxService:
         short-circuit). What can never happen is the harmful direction:
         ``in_assets`` without an attachment, because that write is the last
         thing in the transaction the attach shares.
+
+        That accepted cost covers a genuine ATTACH failure — a mid-flight
+        conflict nothing could have foreseen. It does not extend to pure
+        validation: an unknown ``asset_id``, a read-only preset or a slot the
+        asset type does not have are all knowable from a cheap read, so they
+        are checked BEFORE ``promote`` and refuse cleanly instead of leaving a
+        promoted resource in My Uploads behind a 404/422.
         """
+        await self._validate_target(scope_id, req)
         resource = await self._promoted_resource(gen_id, scope_id, user_id)
         resource_id = str(resource["id"])
         async with unit_of_work():

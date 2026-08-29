@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import datetime
 import json
+from contextlib import nullcontext
 from typing import Optional
 
 from loguru import logger
@@ -22,10 +23,13 @@ from sqlalchemy import insert as sa_insert
 from sqlalchemy import select, tuple_
 from sqlalchemy import update as sa_update
 
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     Canvases,
     GeneratedMedia,
+    Resources,
+    ResourceVersions,
     ScriptProjects,
     ScriptScenes,
     ScriptShots,
@@ -138,6 +142,44 @@ def _promote_review_state():
     return case(
         (GeneratedMedia.review_state == "unreviewed", "saved"),
         else_=GeneratedMedia.review_state,
+    )
+
+
+def _object_refcount_stmt(file_path: str):
+    """How many rows across ALL THREE tables still point at ``file_path``.
+
+    Content-addressed keys (``t{scope}/{sha}/…``) are SHARED by dedup, and
+    since P1 a ``generated_media`` row's ``file_path`` can be verbatim a live
+    ``resources.file_path``: ``insert_registered_resource`` stores the
+    resource's own path, and ``promote`` re-derives the same key from the same
+    sha when target scope == source scope. Counting only sibling
+    ``generated_media`` rows therefore reads 0 while My Uploads, a
+    ``resource_versions`` row and any ``asset_files`` attachment are still
+    pointing at those exact bytes — deleting an inbox card would 404 the
+    user's file with no error anywhere.
+
+    ``asset_files`` is NOT counted: it keys on ``resource_id``, so a live
+    attachment is already covered by the ``resources`` row it points at.
+    """
+    return select(
+        (
+            select(func.count())
+            .select_from(GeneratedMedia)
+            .where(GeneratedMedia.file_path == file_path)
+            .scalar_subquery()
+        )
+        + (
+            select(func.count())
+            .select_from(Resources)
+            .where(Resources.file_path == file_path)
+            .scalar_subquery()
+        )
+        + (
+            select(func.count())
+            .select_from(ResourceVersions)
+            .where(ResourceVersions.file_path == file_path)
+            .scalar_subquery()
+        )
     )
 
 
@@ -345,7 +387,10 @@ class GeneratedMediaRepository:
             row = (
                 (
                     await session.execute(
-                        select(GeneratedMedia.file_path).where(
+                        select(
+                            GeneratedMedia.file_path,
+                            GeneratedMedia.promoted_resource_id,
+                        ).where(
                             GeneratedMedia.id == gen_id,
                             GeneratedMedia.scope_id == scope_id,
                         )
@@ -363,29 +408,52 @@ class GeneratedMediaRepository:
             )
             n = result.rowcount
         if n and row:
-            await self._maybe_remove_object(row.get("file_path") or "")
+            await self._maybe_remove_object(dict(row))
         return bool(n)
 
-    async def _maybe_remove_object(self, file_path: str) -> None:
-        """Remove the backing object IFF no other row still references it.
+    async def _maybe_remove_object(self, row: dict) -> None:
+        """Remove the backing object IFF nothing else still references it.
 
-        Content-addressed keys are SHARED by dedup — two generated_media rows
-        with identical bytes point at the same object. Only remove when the
-        refcount hits zero (no sibling row has the same file_path), else we'd
-        delete a live object out from under another row. A removal failure is
-        swallowed (a leaked object is acceptable; failing the delete is not).
+        Two guards, in order:
+
+        1. **A promoted row never removes anything.** ``promoted_resource_id``
+           means those bytes were handed to Tier-2; the ``resources`` row owns
+           them now and the inbox card is only a pointer. Deleting the card is
+           "stop showing me this", never "delete my file".
+        2. **The refcount is cross-table** (``_object_refcount_stmt``): a
+           content-addressed key is shared by dedup, and since P1 it can be
+           shared with ``resources`` / ``resource_versions``, not just with a
+           sibling generation.
+
+        A removal failure is swallowed (a leaked object is acceptable; failing
+        the delete is not).
         """
+        if row.get("promoted_resource_id"):
+            return  # the resource owns these bytes now
+        file_path = row.get("file_path") or ""
         if not file_path:
             return
         loc = resolve_media_source(file_path)
         if not loc.is_object_store:
             return
-        async with read_scope() as session:
-            remaining = (
-                await session.execute(
-                    select(func.count()).where(GeneratedMedia.file_path == file_path)
-                )
-            ).scalar()
+        # The refcount must see EVERY owner, not just the caller's own rows:
+        # ``Resources`` is UserScoped, so under an ambient user Scope the
+        # count would silently drop another user's live row and read 0.
+        # Same rationale as ``canvas_refs_repository.list_assets_for_canvas``.
+        scope_cm = (
+            system_request_scope(
+                reason="generated-media object refcount: ownership of the "
+                "bytes is global — a resources row belonging to ANOTHER "
+                "creator still keeps the object alive"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                remaining = (
+                    await session.execute(_object_refcount_stmt(file_path))
+                ).scalar()
         if remaining and int(remaining) > 0:
             return  # still referenced — keep the object
         try:

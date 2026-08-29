@@ -138,12 +138,33 @@ class FakePromote:
 
 
 class FakeAssets:
-    def __init__(self, attach_raises=None, create_raises=None, log=None):
+    """Stands in for ``AssetsService``.
+
+    ``_require_writable`` is modelled too: ``_validate_target`` calls the real
+    service's own gate rather than reimplementing it, so the fake has to answer
+    the same shape — the asset row, with the ``asset_type`` the slot table is
+    keyed on. Slots in this file are REAL slots (``app/services/assets/slots``
+    is imported for real by the service under test); a made-up slot name here
+    would be a fixture that the production code path rejects.
+    """
+
+    def __init__(
+        self, attach_raises=None, create_raises=None, log=None, require_raises=None
+    ):
         self.attach_raises = attach_raises
         self.create_raises = create_raises
+        self.require_raises = require_raises
         self.log = log if log is not None else []
         self.created: list[tuple] = []
         self.attached: list[tuple] = []
+        self.required: list[tuple] = []
+
+    async def _require_writable(self, asset_id, scope_id):
+        self.log.append("require_writable")
+        if self.require_raises:
+            raise self.require_raises
+        self.required.append((int(asset_id), int(scope_id)))
+        return {"id": ASSET, "asset_type": "character", "is_system_preset": False}
 
     async def create_asset(self, scope_id, payload, user_id):
         self.log.append("create_asset")
@@ -345,12 +366,12 @@ async def test_save_as_asset_attaches_promoted_resource_and_sets_in_assets(fake_
         GEN,
         SCOPE,
         USER,
-        SaveAsAssetRequest(asset_id=ASSET, slot="portrait"),
+        SaveAsAssetRequest(asset_id=ASSET, slot="stills"),
     )
     assert assets.created == []
     (aid, sid, req, uid) = assets.attached[0]
     assert (aid, sid, uid) == (int(ASSET), SCOPE, USER)
-    assert (req.resource_id, req.slot, req.loadout_id) == (RESOURCE, "portrait", None)
+    assert (req.resource_id, req.slot, req.loadout_id) == (RESOURCE, "stills", None)
     assert repo.state_writes == [(int(GEN), SCOPE, "in_assets")]
     assert out["asset_id"] == ASSET
     assert out["resource_id"] == RESOURCE
@@ -359,7 +380,10 @@ async def test_save_as_asset_attaches_promoted_resource_and_sets_in_assets(fake_
     # promote runs BEFORE the transaction opens: its `SET LOCAL ROLE
     # service_role` (canvas-origin rows) and its storage I/O must not ride
     # inside the transaction that then writes the asset rows.
+    # The destination is validated BEFORE promote: a 404/422 about the asset
+    # or the slot must not leave a promoted resource in My Uploads behind it.
     assert fake_uow.log == [
+        "require_writable",
         "promote",
         "uow_enter",
         "attach_file",
@@ -377,7 +401,7 @@ async def test_save_as_asset_creates_the_asset_first_when_asked(fake_uow):
         USER,
         SaveAsAssetRequest(
             new_asset=NewAssetSpec(asset_type="character", name="Harbour Girl"),
-            slot="reference",
+            slot="stills",
         ),
     )
     (scope, payload, uid) = assets.created[0]
@@ -400,22 +424,34 @@ async def test_save_as_asset_creates_the_asset_first_when_asked(fake_uow):
 
 
 async def test_save_as_asset_leaves_state_untouched_when_attach_fails(fake_uow):
+    """The accepted weaker guarantee, for a failure only the ATTACH can see.
+
+    The raise is ``resource_not_found`` on purpose: an invalid slot no longer
+    reaches this far (``_validate_target`` refuses it before ``promote``), so
+    using one here would silently stop testing the attach-failure path.
+    """
     assets = FakeAssets(
-        attach_raises=AssetError(422, "invalid_slot", "Slot 'x' is not valid")
+        attach_raises=AssetError(404, "resource_not_found", "Resource not found")
     )
     svc, repo, _p = build(assets=assets, log=fake_uow.log)
     with pytest.raises(AssetError) as ei:
         await svc.save_as_asset(
-            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="x")
+            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="stills")
         )
-    assert ei.value.code == "invalid_slot"
+    assert ei.value.code == "resource_not_found"
     assert repo.state_writes == []  # rollback is the UoW's job; we never wrote
     # The accepted weaker guarantee: promote is already committed, so the row
     # sits at `saved` — a legitimate state. What must never happen is
     # `in_assets` with nothing attached.
     assert repo.rows[int(GEN)]["review_state"] == "saved"
     assert fake_uow.enters == 1 and fake_uow.exits == 1
-    assert fake_uow.log == ["promote", "uow_enter", "attach_file", "uow_rollback"]
+    assert fake_uow.log == [
+        "require_writable",
+        "promote",
+        "uow_enter",
+        "attach_file",
+        "uow_rollback",
+    ]
 
 
 async def test_save_as_asset_propagates_a_create_conflict(fake_uow):
@@ -438,6 +474,88 @@ async def test_save_as_asset_propagates_a_create_conflict(fake_uow):
         {"a": 1},
     )
     assert assets.attached == [] and repo.state_writes == []
+
+
+# ── I1: a refusal must not have half-applied ───────────────────────────────
+#
+# ``promote`` copies bytes and creates a resource. Every failure that is
+# knowable BEFORE it runs must therefore run before it — otherwise the caller
+# gets a 404/422 that already put a file in their library.
+
+
+async def test_save_refuses_an_out_of_scope_generation_without_promoting(fake_uow):
+    """404 for a generation in another scope, with nothing copied.
+
+    ``promote`` resolves a generation by id alone (it carries its own
+    source-scope grant), so a gen_id in a DIFFERENT scope the caller belongs
+    to would promote successfully and only then fail the scope re-read.
+    """
+    svc, _repo, promote = build(
+        rows=[make_row(scope_id=str(SCOPE + 1))], log=fake_uow.log
+    )
+    with pytest.raises(AssetError) as ei:
+        await svc.save(GEN, SCOPE, USER)
+    assert (ei.value.status, ei.value.code) == (404, "generation_not_found")
+    assert promote.calls == []
+    assert fake_uow.log == []
+
+
+async def test_save_as_asset_refuses_an_unknown_asset_without_promoting(fake_uow):
+    assets = FakeAssets(
+        require_raises=AssetError(404, "asset_not_found", "Asset not found")
+    )
+    svc, repo, promote = build(assets=assets, log=fake_uow.log)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="stills")
+        )
+    assert (ei.value.status, ei.value.code) == (404, "asset_not_found")
+    assert promote.calls == []
+    assert repo.state_writes == [] and fake_uow.enters == 0
+
+
+async def test_save_as_asset_refuses_a_system_preset_without_promoting(fake_uow):
+    assets = FakeAssets(
+        require_raises=AssetError(403, "system_preset_readonly", "read-only")
+    )
+    svc, _repo, promote = build(assets=assets, log=fake_uow.log)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="stills")
+        )
+    assert (ei.value.status, ei.value.code) == (403, "system_preset_readonly")
+    assert promote.calls == []
+
+
+async def test_save_as_asset_refuses_an_invalid_slot_without_promoting(fake_uow):
+    """The slot is checked against the EXISTING asset's type, read first."""
+    assets = FakeAssets()  # _require_writable answers asset_type='character'
+    svc, _repo, promote = build(assets=assets, log=fake_uow.log)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="turnaround")
+        )
+    assert (ei.value.status, ei.value.code) == (422, "invalid_slot")
+    assert promote.calls == []
+    assert assets.attached == [] and fake_uow.enters == 0
+
+
+async def test_save_as_asset_refuses_an_invalid_slot_for_a_new_asset(fake_uow):
+    """new_asset has no row to read — the slot is checked against its type."""
+    svc, _repo, promote = build(log=fake_uow.log)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN,
+            SCOPE,
+            USER,
+            SaveAsAssetRequest(
+                new_asset=NewAssetSpec(asset_type="prop", name="Lantern"),
+                slot="stills",  # a character slot, not a prop slot
+            ),
+        )
+    assert (ei.value.status, ei.value.code) == (422, "invalid_slot")
+    assert promote.calls == []
+    assert fake_uow.enters == 0
 
 
 async def test_save_as_asset_maps_promote_permission_error(fake_uow):
@@ -496,13 +614,13 @@ async def test_batch_save_as_asset_uses_the_request_payload(fake_uow):
         BatchRequest(
             ids=[GEN],
             action="save_as_asset",
-            save_as_asset=SaveAsAssetRequest(asset_id=ASSET, slot="portrait"),
+            save_as_asset=SaveAsAssetRequest(asset_id=ASSET, slot="stills"),
         ),
         SCOPE,
         USER,
     )
     assert out["ok"] == [GEN]
-    assert assets.attached[0][2].slot == "portrait"
+    assert assets.attached[0][2].slot == "stills"
     assert fake_uow.enters == 1
 
 

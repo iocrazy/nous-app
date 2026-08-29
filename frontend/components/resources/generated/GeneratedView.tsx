@@ -464,6 +464,22 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
     [items, selectedIds],
   );
 
+  /** Batch Delete is offered only when EVERY selected row is still
+   *  unreviewed — the same rule the per-card menu already applies (Delete
+   *  appears in the `unreviewed` branch only).
+   *
+   *  This is defence in depth for the destructive direction: a saved /
+   *  in_assets row's bytes are owned by a `resources` row, and a
+   *  content-addressed key is shared, so "delete this card" must never read
+   *  as "delete my file". The backend refuses to remove the object for a
+   *  promoted row; this stops the user asking for it in the first place. */
+  const deletableSelection = useMemo(
+    () =>
+      selectedItems.length > 0 &&
+      selectedItems.every((row) => row.review_state === 'unreviewed'),
+    [selectedItems],
+  );
+
   /** Model options come from what is actually on screen — an exhaustive list
    *  of every model the workspace ever used is not something the API offers,
    *  and inventing one would advertise filters that match nothing. */
@@ -826,7 +842,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
           >
             {t('generated.action.saveAsAsset', 'As Asset…')}
           </button>
-          {confirmingBatchDelete ? (
+          {confirmingBatchDelete && deletableSelection ? (
             <button
               type="button"
               onClick={() => {
@@ -843,8 +859,17 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
           ) : (
             <button
               type="button"
+              disabled={!deletableSelection}
+              title={
+                deletableSelection
+                  ? undefined
+                  : t(
+                      'generated.batch.deleteOnlyUnreviewed',
+                      'Only unreviewed items can be deleted — saved items live in your library',
+                    )
+              }
               onClick={() => setConfirmingBatchDelete(true)}
-              className="rounded-lg border border-danger-line px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger-soft"
+              className="rounded-lg border border-danger-line px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             >
               {t('generated.action.delete', 'Delete')}
             </button>

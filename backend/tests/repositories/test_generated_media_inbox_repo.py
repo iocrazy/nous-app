@@ -1,3 +1,4 @@
+import contextlib
 import datetime as dt
 
 from sqlalchemy import select
@@ -181,3 +182,102 @@ def test_registered_resource_insert_shape():
 
 def test_repo_exposes_insert_registered_resource():
     assert callable(GeneratedMediaRepository().insert_registered_resource)
+
+
+def test_object_refcount_spans_resources_and_versions():
+    """C1: a content-addressed key is not owned by generated_media alone.
+
+    Since P1 a generation's ``file_path`` can be verbatim a live
+    ``resources.file_path`` (``insert_registered_resource`` stores the
+    resource's own path; ``promote`` re-derives the same key when target scope
+    == source scope). A refcount over one table reads 0 while My Uploads still
+    points at those bytes — so the predicate itself is what is pinned here.
+    """
+    from app.repositories.generated_media_repository import _object_refcount_stmt
+
+    sql = _compiled(_object_refcount_stmt("t7/abc/x.png"))
+    assert "FROM public.generated_media" in sql
+    assert "FROM public.resources" in sql
+    assert "FROM public.resource_versions" in sql
+    # the three counts are SUMMED — three separate scalars would let a caller
+    # read only the first one and remove a live object
+    assert sql.count("count(*)") == 3
+    assert sql.count("file_path = 't7/abc/x.png'") == 3
+
+
+class _FakeStore:
+    """Records what would have been removed from the object store."""
+
+    removed: list[str] = []
+
+    def __init__(self, bucket):
+        self.bucket = bucket
+
+    async def remove(self, key):
+        _FakeStore.removed.append(key)
+
+
+@contextlib.asynccontextmanager
+async def _fake_read_scope(result):
+    class _S:
+        async def execute(self, _stmt):
+            class _R:
+                def scalar(self_inner):
+                    return result
+
+            return _R()
+
+    yield _S()
+
+
+async def _removals_for(monkeypatch, row, *, refcount):
+    """Run ``_maybe_remove_object`` with no DB; return the keys it removed."""
+    import app.repositories.generated_media_repository as mod
+
+    _FakeStore.removed = []
+    monkeypatch.setattr(mod, "ObjectStore", _FakeStore)
+    monkeypatch.setattr(
+        mod, "read_scope", lambda: _fake_read_scope(refcount), raising=True
+    )
+    await GeneratedMediaRepository()._maybe_remove_object(row)
+    return list(_FakeStore.removed)
+
+
+async def test_promoted_row_never_removes_the_object(monkeypatch):
+    """C1: deleting an inbox card whose bytes a resource owns removes nothing.
+
+    A promoted row is a POINTER at the resource — ``resources``,
+    ``resource_versions`` and any ``asset_files`` attachment still reference
+    the object. The refcount is not even consulted (it would be 0 for a row
+    whose only sibling was just deleted).
+    """
+    removed = await _removals_for(
+        monkeypatch,
+        {"file_path": "sb://media/t7/abc/x.png", "promoted_resource_id": "555"},
+        refcount=0,
+    )
+    assert removed == []
+
+
+async def test_unpromoted_orphan_is_still_removed(monkeypatch):
+    """The positive control: without the guard the object DOES go.
+
+    Without this, ``test_promoted_row_never_removes_the_object`` would pass on
+    an implementation that never removes anything at all.
+    """
+    removed = await _removals_for(
+        monkeypatch,
+        {"file_path": "sb://media/t7/abc/x.png", "promoted_resource_id": None},
+        refcount=0,
+    )
+    assert removed == ["t7/abc/x.png"]
+
+
+async def test_a_live_reference_anywhere_keeps_the_object(monkeypatch):
+    """Non-zero cross-table refcount → keep. (The count is what spans tables.)"""
+    removed = await _removals_for(
+        monkeypatch,
+        {"file_path": "sb://media/t7/abc/x.png", "promoted_resource_id": None},
+        refcount=1,
+    )
+    assert removed == []
