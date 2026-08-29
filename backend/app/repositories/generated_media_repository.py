@@ -15,13 +15,14 @@ from typing import Optional
 
 from loguru import logger
 from sqlalchemy import Text as SAText
-from sqlalchemy import cast
+from sqlalchemy import case, cast
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, tuple_
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
+    Canvases,
     GeneratedMedia,
     ScriptProjects,
     ScriptScenes,
@@ -113,6 +114,44 @@ def _cursor_ts(ts: str) -> datetime.datetime:
 # video) — the only generated_media rows addressable from a project via
 # node_id = str(shot_id).
 _SHOT_ORIGIN_KINDS = ("shot_generate", "shot_video")
+
+
+def _inbox_filters(
+    *,
+    scope_id: int,
+    state: Optional[str],
+    origin_kinds: Optional[list[str]],
+    project_id: Optional[int],
+    media_kind: Optional[str],
+    model: Optional[str],
+    since: Optional[datetime.datetime],
+) -> list:
+    """Criteria for the Generated inbox list. Pure so tests can compile them.
+
+    state=None -> every state except 'deleted'. project_id is resolved through
+    canvases.project_id; rows without a canvas_id (chat uploads, agent runs)
+    never match a project filter -- the inbox says so in its empty state.
+    """
+    crit = [GeneratedMedia.scope_id == int(scope_id)]
+    if state:
+        crit.append(GeneratedMedia.review_state == state)
+    else:
+        crit.append(GeneratedMedia.review_state != "deleted")
+    if origin_kinds:
+        crit.append(GeneratedMedia.origin_kind.in_(list(origin_kinds)))
+    if project_id is not None:
+        crit.append(
+            GeneratedMedia.canvas_id.in_(
+                select(Canvases.id).where(Canvases.project_id == int(project_id))
+            )
+        )
+    if media_kind:
+        crit.append(GeneratedMedia.media_kind == media_kind)
+    if model:
+        crit.append(GeneratedMedia.model == model)
+    if since is not None:
+        crit.append(GeneratedMedia.created_at >= since)
+    return crit
 
 
 class GeneratedMediaRepository:
@@ -313,7 +352,16 @@ class GeneratedMediaRepository:
                     await session.execute(
                         sa_update(GeneratedMedia)
                         .where(GeneratedMedia.id == gen_id)
-                        .values(promoted_resource_id=resource_id)
+                        .values(
+                            promoted_resource_id=resource_id,
+                            review_state=case(
+                                (
+                                    GeneratedMedia.review_state == "unreviewed",
+                                    "saved",
+                                ),
+                                else_=GeneratedMedia.review_state,
+                            ),
+                        )
                         .returning(*_GM_COLS)
                     )
                 )
@@ -321,3 +369,101 @@ class GeneratedMediaRepository:
                 .first()
             )
         return _normalize(dict(row)) if row else None
+
+    async def list_inbox(
+        self,
+        scope_id: int,
+        *,
+        state: Optional[str] = None,
+        origin_kinds: Optional[list[str]] = None,
+        project_id: Optional[int] = None,
+        media_kind: Optional[str] = None,
+        model: Optional[str] = None,
+        since: Optional[datetime.datetime] = None,
+        cursor: Optional[str] = None,
+        limit: int = 60,
+    ) -> dict:
+        """Generated inbox page (keyset on (created_at, id) DESC).
+
+        Same cursor shape as ``list_for_scope``; filters come from the pure
+        ``_inbox_filters`` so they can be asserted without a database.
+        """
+        limit = max(1, min(int(limit), 200))
+        stmt = select(*_GM_COLS).where(
+            *_inbox_filters(
+                scope_id=scope_id,
+                state=state,
+                origin_kinds=origin_kinds,
+                project_id=project_id,
+                media_kind=media_kind,
+                model=model,
+                since=since,
+            )
+        )
+        decoded = _decode_cursor(cursor)
+        if decoded:
+            c_ts, c_id = decoded
+            stmt = stmt.where(
+                tuple_(GeneratedMedia.created_at, GeneratedMedia.id)
+                < tuple_(_cursor_ts(c_ts), c_id)
+            )
+        stmt = stmt.order_by(
+            GeneratedMedia.created_at.desc(), GeneratedMedia.id.desc()
+        ).limit(limit + 1)
+        async with read_scope() as session:
+            rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = _encode_cursor(str(last["created_at"]), int(last["id"]))
+            rows = rows[:limit]
+        return {"items": [_normalize(r) for r in rows], "next_cursor": next_cursor}
+
+    async def set_review_state(
+        self, gen_id: int, scope_id: int, state: str
+    ) -> Optional[dict]:
+        """Move one row to ``state``. Returns None when nothing matched."""
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        sa_update(GeneratedMedia)
+                        .where(GeneratedMedia.id == int(gen_id))
+                        .where(GeneratedMedia.scope_id == int(scope_id))
+                        .values(review_state=state)
+                        .returning(*_GM_COLS)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _normalize(dict(row)) if row else None
+
+    async def count_by_state(self, scope_id: int) -> dict[str, int]:
+        """Per-state counts. Always returns all four keys (0 when absent)."""
+        stmt = (
+            select(GeneratedMedia.review_state, func.count())
+            .where(GeneratedMedia.scope_id == int(scope_id))
+            .group_by(GeneratedMedia.review_state)
+        )
+        out = {"unreviewed": 0, "saved": 0, "in_assets": 0, "deleted": 0}
+        async with read_scope() as session:
+            for state, n in (await session.execute(stmt)).all():
+                out[state] = int(n)
+        return out
+
+    async def list_older_unreviewed(
+        self, scope_id: int, older_than: datetime.datetime, limit: int = 500
+    ) -> list[dict]:
+        """Oldest-first unreviewed rows created before ``older_than``."""
+        stmt = (
+            select(*_GM_COLS)
+            .where(GeneratedMedia.scope_id == int(scope_id))
+            .where(GeneratedMedia.review_state == "unreviewed")
+            .where(GeneratedMedia.created_at < older_than)
+            .order_by(GeneratedMedia.created_at.asc())
+            .limit(max(1, min(int(limit), 2000)))
+        )
+        async with read_scope() as session:
+            rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
+        return [_normalize(r) for r in rows]
