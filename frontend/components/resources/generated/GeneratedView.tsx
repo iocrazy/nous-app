@@ -40,6 +40,8 @@ import type {
 } from '../../../services/generatedService';
 import { GeneratedCard } from './GeneratedCard';
 import { CleanupDialog } from './CleanupDialog';
+import { SaveAsAssetDialog } from '../../assets/SaveAsAssetDialog';
+import type { SaveAsAssetOutcome } from '../../assets/SaveAsAssetDialog';
 import {
   FILTER_STATES,
   MEDIA_KINDS,
@@ -368,6 +370,39 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
       onSaveAsAsset?.(chosen);
     },
     [onSaveAsAsset],
+  );
+
+  /**
+   * The dialog already spoke its own result (toast + failed codes); this is
+   * the list catching up. Patched in place rather than dropped, for the same
+   * reason `handleSave` patches: a row vanishing mid-triage reads as a
+   * delete. The ids the dialog reports as FAILED are deliberately left where
+   * they were — they did not become assets, and moving them would be the UI
+   * claiming a success the server refused.
+   */
+  const handleSaveAsAssetDone = useCallback(
+    (result: SaveAsAssetOutcome) => {
+      const failed = new Set(result.failed.map((f) => f.id));
+      const attached = new Set(
+        (saveAsAssetItems ?? []).map((row) => row.id).filter((id) => !failed.has(id)),
+      );
+      if (attached.size > 0) {
+        setItems((prev) =>
+          prev.map((row) =>
+            attached.has(row.id)
+              ? { ...row, review_state: 'in_assets', source_asset_id: result.assetId }
+              : row,
+          ),
+        );
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of attached) next.delete(id);
+          return next;
+        });
+      }
+      refreshAllCounts();
+    },
+    [saveAsAssetItems, refreshAllCounts],
   );
 
   const runBatch = useCallback(
@@ -827,11 +862,13 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
         </div>
       )}
 
-      {/* Task 10 replaces this placeholder with the real picker; the state it
-          hangs off is the contract between the two tasks. */}
-      {saveAsAssetItems !== null && (
-        <div data-testid="save-as-asset-dialog" data-count={saveAsAssetItems.length} />
-      )}
+      <SaveAsAssetDialog
+        open={saveAsAssetItems !== null && saveAsAssetItems.length > 0}
+        scopeId={scopeId}
+        items={saveAsAssetItems ?? []}
+        onClose={() => setSaveAsAssetItems(null)}
+        onDone={handleSaveAsAssetDone}
+      />
 
       {cleanupOpen && (
         <CleanupDialog

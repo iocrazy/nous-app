@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 // A stand-in bundle, not a bare `d ?? k`: the error path resolves
@@ -87,9 +87,35 @@ vi.mock('./CleanupDialog', () => ({
   ),
 }));
 
+// Stubbed like CleanupDialog: what this file owns is the HAND-OFF (which items
+// go in, what the view does with the outcome), not the picker's own behaviour
+// — that has its own suite in `components/assets/SaveAsAssetDialog.test.tsx`.
+// The stub records its props so the hand-off itself stays assertable.
+let dialogProps: {
+  open: boolean;
+  items: GeneratedItem[];
+  scopeId: string;
+} | null = null;
+let dialogDone: ((result: SaveAsAssetOutcome) => void) | null = null;
+vi.mock('../../assets/SaveAsAssetDialog', () => ({
+  SaveAsAssetDialog: (props: {
+    open: boolean;
+    scopeId: string;
+    items: GeneratedItem[];
+    onClose: () => void;
+    onDone: (result: SaveAsAssetOutcome) => void;
+  }) => {
+    dialogProps = { open: props.open, items: props.items, scopeId: props.scopeId };
+    dialogDone = props.onDone;
+    if (!props.open) return null;
+    return <div data-testid="save-as-asset-dialog" data-count={props.items.length} />;
+  },
+}));
+
 import { GeneratedView } from './GeneratedView';
 import { GeneratedApiError } from '../../../services/apiEnvelope';
 import type { GeneratedItem } from '../../../services/generatedService';
+import type { SaveAsAssetOutcome } from '../../assets/SaveAsAssetDialog';
 
 // ─── Fixtures: copied verbatim from wire-fixtures.json (string ids) ──────────
 
@@ -174,6 +200,8 @@ beforeEach(() => {
   saveGeneration.mockReset();
   deleteGeneration.mockReset();
   batchGenerated.mockReset();
+  dialogProps = null;
+  dialogDone = null;
 });
 
 describe('GeneratedView — tabs', () => {
@@ -407,14 +435,16 @@ describe('GeneratedView — batch bar', () => {
     expect(batchGenerated).not.toHaveBeenCalled();
   });
 
-  it('routes the batch "As Asset…" into the (Task 10) dialog rather than the API', async () => {
+  it('routes the batch "As Asset…" into the dialog rather than the API', async () => {
     renderView();
     const bar = await selectFirstTwo();
 
     fireEvent.click(within(bar).getByRole('button', { name: 'As Asset…' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
+    // The dialog owns the call; the view must not have fired one of its own.
     expect(batchGenerated).not.toHaveBeenCalled();
+    expect(dialogProps?.items.map((i) => i.id)).toEqual([ITEM_A.id, ITEM_B.id]);
   });
 });
 
@@ -450,7 +480,7 @@ describe('GeneratedView — single-card actions', () => {
     expect(refreshGeneratedCounts).toHaveBeenCalled();
   });
 
-  it('opens the (Task 10) dialog for a single card', async () => {
+  it('opens the dialog for a single card, with just that card', async () => {
     renderView();
     await screen.findByText('Prompt 0');
 
@@ -458,6 +488,72 @@ describe('GeneratedView — single-card actions', () => {
     fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset…' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
+    expect(dialogProps?.items.map((i) => i.id)).toEqual([ITEM_A.id]);
+    expect(dialogProps?.scopeId).toBe('727145299382534200');
+  });
+
+  it('keeps the dialog closed until a card asks for it', async () => {
+    renderView();
+    await screen.findByText('Prompt 0');
+
+    expect(screen.queryByTestId('save-as-asset-dialog')).toBeNull();
+    expect(dialogProps?.open).toBe(false);
+  });
+
+  it('moves an attached card to in_assets in place, without refetching', async () => {
+    renderView();
+    await screen.findByText('Prompt 0');
+
+    const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset…' }));
+    await screen.findByTestId('save-as-asset-dialog');
+
+    act(() => dialogDone!({
+      attachedCount: 1,
+      failed: [],
+      assetId: '727145299382534201',
+      assetName: 'Sang Yao',
+      slot: 'stills',
+    }));
+
+    await waitFor(() => expect(card.getAttribute('data-review-state')).toBe('in_assets'));
+    // Patched in place — the list was not asked for again.
+    expect(fetchGenerated).toHaveBeenCalledTimes(1);
+    expect(refreshGeneratedCounts).toHaveBeenCalled();
+    // …and the card now points at the asset it joined.
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: 'Open asset' }),
+    ).toBeTruthy();
+  });
+
+  it('leaves the ids the batch refused exactly where they were', async () => {
+    renderView();
+    await screen.findByText('Prompt 0');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Prompt 0' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Prompt 1' }));
+    fireEvent.click(
+      within(screen.getByTestId('generated-batch-bar')).getByRole('button', {
+        name: 'As Asset…',
+      }),
+    );
+    await screen.findByTestId('save-as-asset-dialog');
+
+    act(() => dialogDone!({
+      attachedCount: 1,
+      failed: [{ id: ITEM_B.id, code: 'invalid_slot' }],
+      assetId: '727145299382534201',
+      assetName: 'Sang Yao',
+      slot: 'stills',
+    }));
+
+    const cardA = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
+    const cardB = screen.getByText('Prompt 1').closest('[data-testid="generated-card"]')!;
+    await waitFor(() => expect(cardA.getAttribute('data-review-state')).toBe('in_assets'));
+    // The refused one did not become an asset — saying it did would be the UI
+    // claiming a success the server declined.
+    expect(cardB.getAttribute('data-review-state')).toBe('unreviewed');
+    // …and it stays selected, so it is still the thing you can retry.
+    expect(screen.getByTestId('generated-batch-bar').textContent).toContain('1 selected');
   });
 });
 
