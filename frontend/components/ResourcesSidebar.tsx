@@ -296,26 +296,33 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               </button>
             </div>
 
-            {/* Generated — the AI-output inbox (replaces Project Assets).
-                The pill counts UNREVIEWED items only, and is omitted entirely
-                when the count is 0 or not yet known: a "0" badge would be a
-                permanent decoration, and a badge on `null` would assert a
-                number we failed to fetch. */}
-            <button
-              onClick={() => navigate(resPath('/resources/generated'))}
-              className={sidebarItemClass(isGeneratedView)}
-            >
-              <Sparkles size={15} className="shrink-0 opacity-70" />
-              <span className="flex-1 truncate">{t('resources.generated', 'Generated')}</span>
-              {generatedUnreviewedCount !== null && generatedUnreviewedCount > 0 && (
-                <span className="text-[10px] min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-warn-soft text-warn border border-warn-line font-medium tabular-nums">
-                  {formatCappedCount(generatedUnreviewedCount)}
-                </span>
-              )}
-            </button>
-
           </>
         )}
+
+        {/* Generated — the AI-output inbox (replaces Project Assets). Rendered
+            OUTSIDE the personal/team split: `generated_media.scope_id` IS a
+            team id, so the route, the view flag and fetchGeneratedCounts all
+            work in team scope — keeping the button inside the personal branch
+            made the inbox reachable by URL but not by clicking (spec §2.6/§6.1
+            make it a fixed rail position). Sitting just after the ternary puts
+            it directly below the file-store block in BOTH scopes: My Uploads
+            in personal, the Library group in team.
+            The pill counts UNREVIEWED items only, and is omitted entirely when
+            the count is 0 or not yet known: a "0" badge would be a permanent
+            decoration, and a badge on `null` would assert a number we failed
+            to fetch. */}
+        <button
+          onClick={() => navigate(resPath('/resources/generated'))}
+          className={sidebarItemClass(isGeneratedView)}
+        >
+          <Sparkles size={15} className="shrink-0 opacity-70" />
+          <span className="flex-1 truncate">{t('resources.generated', 'Generated')}</span>
+          {generatedUnreviewedCount !== null && generatedUnreviewedCount > 0 && (
+            <span className="text-[10px] min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-warn-soft text-warn border border-warn-line font-medium tabular-nums">
+              {formatCappedCount(generatedUnreviewedCount)}
+            </span>
+          )}
+        </button>
 
         {/* ── Divider ── */}
         <div className={`mx-1 my-2.5 border-t ${cBorderSection}`} />

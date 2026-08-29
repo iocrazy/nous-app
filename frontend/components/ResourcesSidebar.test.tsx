@@ -118,6 +118,38 @@ describe('ResourcesSidebar — Generated entry', () => {
     expect(navigate).toHaveBeenCalledWith('/team/42/resources/generated');
   });
 
+  // The rail entry is a fixed position in BOTH scopes (spec §2.6/§6.1):
+  // `generated_media.scope_id` IS a team id, so the route, the view flag and
+  // fetchGeneratedCounts all work under /team/:teamId — only the button was
+  // missing, which made the inbox reachable by URL but not by clicking.
+  it('renders in team scope too, not just personal', () => {
+    setCtx({ isPersonal: false, generatedUnreviewedCount: 7 });
+    render(<ResourcesSidebar {...baseProps} />);
+
+    expect(generatedButton().textContent).toContain('7');
+  });
+
+  it('navigates to the team-scoped inbox in team scope', () => {
+    setCtx({
+      isPersonal: false,
+      generatedUnreviewedCount: 7,
+      resPath: (p: string) => `/team/42${p}`,
+    });
+    render(<ResourcesSidebar {...baseProps} />);
+
+    fireEvent.click(generatedButton());
+    expect(navigate).toHaveBeenCalledWith('/team/42/resources/generated');
+  });
+
+  it('renders exactly one Generated entry in each scope', () => {
+    for (const isPersonal of [true, false]) {
+      setCtx({ isPersonal });
+      const { unmount } = render(<ResourcesSidebar {...baseProps} />);
+      expect(screen.getAllByText('Generated').length, `isPersonal=${isPersonal}`).toBe(1);
+      unmount();
+    }
+  });
+
   it('no longer offers the retired Project Assets entry', () => {
     setCtx();
     render(<ResourcesSidebar {...baseProps} />);

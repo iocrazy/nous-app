@@ -635,11 +635,23 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
 
   // Generated inbox count — same scope id the folder/resource queries use
   // (`generated_media.scope_id` is a team id, and so is `scopeId`). A failure
-  // leaves the count at `null`, which renders NO pill: showing a 0 would claim
-  // "nothing to review" on evidence we do not have.
+  // leaves the count untouched and logs: on first load that means it stays
+  // `null`, which renders NO pill — showing a 0 would claim "nothing to
+  // review" on evidence we do not have. On a failed REFRESH the last known
+  // number stays on screen rather than the pill vanishing; it may be stale,
+  // and the console.error is the signal that it might be.
+  //
+  // Reset is deliberately split into its own effect keyed on `scopeId` ALONE.
+  // Folding it into the fetch below would blank the pill on every
+  // `refreshGeneratedCounts()` tick too, making the badge disappear and pop
+  // back on each refresh. `null` means "we do not know", which is true when
+  // the scope changes and false during a refresh.
+  useEffect(() => {
+    setGeneratedUnreviewedCount(null);
+  }, [scopeId]);
+
   useEffect(() => {
     let cancelled = false;
-    setGeneratedUnreviewedCount(null);
     fetchGeneratedCounts(scopeId)
       .then((counts) => {
         if (!cancelled) setGeneratedUnreviewedCount(counts.unreviewed);
@@ -913,6 +925,18 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   useEffect(() => {
     setSelectedResource(null);
   }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
+
+  // Entering the Generated inbox drops a multi-selection carried over from the
+  // previous view — those `item:` ids point at files that are no longer on
+  // screen, and the batch toolbar would still act on them. (The retired temp
+  // effect did this on entry; deleting it took the behaviour with it.)
+  // Keyed on the boolean, so it fires on ENTRY only: the Generated view has
+  // its own multi-select, and a selection made while already inside it must
+  // survive.
+  useEffect(() => {
+    if (!isGeneratedView) return;
+    setSelectedIds(new Set());
+  }, [isGeneratedView]);
 
   // ESC to close panel / exit multi-select
   useEffect(() => {
