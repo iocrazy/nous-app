@@ -59,7 +59,8 @@ class AssetReadiness(BaseModel):
 
 class AssetResponse(BaseModel):
     id: str
-    scope_id: str
+    # NULL for global system presets (assets_scope_or_preset CHECK).
+    scope_id: Optional[str] = None
     asset_type: AssetType
     subtype: Optional[str] = None
     name: str
@@ -140,7 +141,7 @@ class AssetDetailResponse(AssetResponse):
 
 class AttachFileRequest(BaseModel):
     resource_id: str
-    slot: str = "unsorted"
+    slot: str = Field(default="unsorted", min_length=1)
     loadout_id: Optional[str] = None
     note: Optional[str] = Field(default=None, max_length=2000)
 
