@@ -39,7 +39,7 @@ const LOCATION_BRANCHES: Branch[] = [
       `\n\n${describe('Location', n, d)}`,
   },
   {
-    gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+    gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
     body: (n, d) =>
       `Top-down floor plan / staging diagram, clean linework, labeled zones.` +
       `\n\n${describe('Location', n, d)}`,
@@ -61,7 +61,7 @@ const PROP_BRANCHES: Branch[] = [
       `\n\n${describe('Prop', n, d)}`,
   },
   {
-    gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+    gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
     body: (n, d) =>
       `Hero product-style render on plain background, studio lighting.` +
       `\n\n${describe('Prop', n, d)}`,
@@ -73,7 +73,7 @@ const PROP_BRANCHES: Branch[] = [
       `scale, plain background, model sheet style.\n\n${describe('Prop', n, d)}`,
   },
   {
-    gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+    gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
     body: (n, d) =>
       `Extreme close-up material study: texture, wear, engravings, patina.` +
       `\n\n${describe('Prop', n, d)}`,

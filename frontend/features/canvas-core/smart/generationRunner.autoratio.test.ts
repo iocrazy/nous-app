@@ -1,0 +1,89 @@
+// Resolving `ratio: 'auto'` at dispatch.
+//
+// The value means "match the image feeding this prompt". It has to be
+// resolved when the run starts, not when the node was created: the wired
+// input can change afterwards, and a ratio frozen at creation would quietly
+// stop matching what the user is looking at.
+//
+// An explicit choice always wins. That is the half of the request that is
+// easy to break — "default to the source" must not become "override me".
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const measureRatio = vi.fn<(url: string) => Promise<string | null>>();
+vi.mock('./autoRatio', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./autoRatio')>();
+  return { ...actual, measureRatio: (url: string) => measureRatio(url) };
+});
+
+const dispatchGenerations =
+  vi.fn<(canvasId: string, req: { params?: Record<string, unknown> }) => Promise<string[]>>(
+    async () => ['t1'],
+  );
+vi.mock('../services/canvasGenerationService', () => ({
+  dispatchGenerations: (canvasId: string, req: { params?: Record<string, unknown> }) =>
+    dispatchGenerations(canvasId, req),
+  pollGeneration: vi.fn(async () => ({ ok: true, url: null, kind: 'image' })),
+  PollStopped: class PollStopped extends Error {},
+}));
+
+import { withGenerationRunner } from './generationRunner';
+import type { RunnerContext } from './runner';
+
+const baseCtx = (over: Partial<RunnerContext> = {}): RunnerContext =>
+  ({
+    promptId: 'p1',
+    body: 'a cat',
+    provider_slug: null,
+    agent_id: null,
+    gen: { kind: 'image', model: 'm', ratio: 'auto', count: 1 },
+    source_url: '/api/v1/generated-media/7/cover',
+    source_urls: ['/api/v1/generated-media/7/cover'],
+    entity_ref: null,
+    ...over,
+  }) as RunnerContext;
+
+const run = (ctx: RunnerContext) =>
+  withGenerationRunner(async () => ({ ok: true, text: '', error: null }), {
+    canvasId: 'c1',
+  })(ctx);
+
+const dispatchedParams = () => dispatchGenerations.mock.calls[0]?.[1]?.params ?? {};
+
+beforeEach(() => {
+  dispatchGenerations.mockClear();
+  measureRatio.mockReset();
+});
+
+describe('auto ratio at dispatch', () => {
+  it('sends the measured ratio of the source image', async () => {
+    measureRatio.mockResolvedValue('16:9');
+    await run(baseCtx());
+    expect(dispatchedParams().ratio).toBe('16:9');
+  });
+
+  it('measures the image the run actually uses as its source', async () => {
+    measureRatio.mockResolvedValue('3:4');
+    await run(baseCtx({ source_url: '/api/v1/generated-media/99/cover' }));
+    expect(measureRatio).toHaveBeenCalledWith('/api/v1/generated-media/99/cover');
+  });
+
+  it('never overrides a ratio the user picked', async () => {
+    measureRatio.mockResolvedValue('16:9');
+    await run(baseCtx({ gen: { kind: 'image', model: 'm', ratio: '1:1', count: 1 } } as never));
+    expect(dispatchedParams().ratio, 'an explicit 1:1 was replaced').toBe('1:1');
+    expect(measureRatio, 'measured despite an explicit choice').not.toHaveBeenCalled();
+  });
+
+  it('omits ratio entirely when there is no source to follow', async () => {
+    await run(baseCtx({ source_url: undefined, source_urls: [] } as never));
+    expect(dispatchedParams()).not.toHaveProperty('ratio');
+    expect(measureRatio).not.toHaveBeenCalled();
+  });
+
+  it('omits ratio when the source cannot be measured, rather than guessing', async () => {
+    measureRatio.mockResolvedValue(null);
+    await run(baseCtx());
+    expect(dispatchedParams()).not.toHaveProperty('ratio');
+  });
+});

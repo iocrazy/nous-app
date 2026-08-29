@@ -55,7 +55,7 @@ const BRANCHES: Branch[] = [
   },
   {
     key: 'expression',
-    gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+    gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
     body: (n, d) =>
       `Expression sheet: joy, anger, sorrow, fear, surprise, deadpan — same ` +
       `face, grid layout.\n\n${describe(n, d)}`,

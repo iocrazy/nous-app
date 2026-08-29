@@ -54,7 +54,7 @@ export function createPromptFromNode(
   const prompt = createPromptNode(
     {
       body: init.body ?? '',
-      gen: init.gen ?? { kind: 'image', model: '', ratio: '1:1', count: 1 },
+      gen: init.gen ?? { kind: 'image', model: '', ratio: 'auto', count: 1 },
     },
     { position: { x: originX, y: originY + height + BELOW_GAP } },
   );
