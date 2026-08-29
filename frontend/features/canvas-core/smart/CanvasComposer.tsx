@@ -34,12 +34,11 @@ import { groupSelection, ungroupNode } from './grouping';
 import {
   cancelPendingGenTasks,
   clearPendingGenTasks,
-  persistPendingGenTasks,
   prunePendingGenTask,
 } from './genResume';
+import { onGenerationDispatched } from './dispatchEffects';
 import {
   appendGenerationResults,
-  beginGenerationSlot,
   markGenerationRecover,
   settleGenerationSlot,
 } from './genSlots';
@@ -193,10 +192,7 @@ export function CanvasComposer({
       // burn a cell into the failed count. Task ids persist on the prompt
       // node (P1-13) so a reload resumes the batch; a broken poll becomes
       // a recover mark ("task not lost") instead of a silent failure.
-      onDispatched: (id, count, kind, taskIds) => {
-        beginGenerationSlot(id, count, kind);
-        persistPendingGenTasks(id, taskIds, kind);
-      },
+      onDispatched: onGenerationDispatched,
       onItemSettled: (id, item) => {
         if (item.url) appendGenerationResults(id, [item.url], item.kind);
         else if (item.recoverable) markGenerationRecover(id, item.taskId, item.kind);

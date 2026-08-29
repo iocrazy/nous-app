@@ -12,9 +12,9 @@
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
   clearPendingGenTasks,
-  persistPendingGenTasks,
   prunePendingGenTask,
 } from './genResume';
+import { onGenerationDispatched } from './dispatchEffects';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveEntityRef } from './entityRef';
 import { DEFAULT_SPLIT_SEPARATOR, splitPromptItems } from './promptSplit';
@@ -52,11 +52,12 @@ function resolveCaller(canvasId: string | null): PromptCaller {
   if (canvasId) {
     return withGenerationRunner(createBackendRunner({ canvasId }), {
       canvasId,
-      // Reruns survive a reload too (P1-13): persist the batch, prune per
-      // settled item, mark broken polls recoverable. Results still land via
-      // the end-of-run upsert below — resume only takes over after refresh.
-      onDispatched: (id, _count, kind, taskIds) =>
-        persistPendingGenTasks(id, taskIds, kind),
+      // Same dispatch effect as the composer (shared so the two cannot drift):
+      // the output slot appears immediately to the right, wired up, holding
+      // `count` shimmer cells, and the batch is persisted for reload resume.
+      // Results still land via the end-of-run upsert below, which finds this
+      // slot and fills it — resume only takes over after a refresh.
+      onDispatched: onGenerationDispatched,
       onItemSettled: (id, item) => {
         if (!item.url && item.recoverable) {
           markGenerationRecover(id, item.taskId, item.kind);
