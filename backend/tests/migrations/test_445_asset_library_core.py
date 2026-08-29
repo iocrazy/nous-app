@@ -209,6 +209,6 @@ async def test_new_asset_fks_null_out_on_delete(conn, table, constraint):
         table,
         constraint,
     )
-    assert action == "n", (
-        f"{constraint} has ON DELETE {action!r}, expected 'n' (SET NULL)"
-    )
+    assert (
+        action == "n"
+    ), f"{constraint} has ON DELETE {action!r}, expected 'n' (SET NULL)"

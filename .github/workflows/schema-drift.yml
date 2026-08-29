@@ -54,6 +54,10 @@ on:
       - 'supabase/schema_baseline.sql'
       - 'supabase/ci_bootstrap.sql'
       - 'backend/tests/db/test_schema_drift.py'
+      - 'backend/tests/db/test_assets_repository_integration.py'
+      - 'backend/app/repositories/assets_repository.py'
+      - 'backend/app/repositories/asset_relations_repository.py'
+      - 'backend/app/services/assets/**'
       - '.github/workflows/schema-drift.yml'
   push:
     branches: [master]
@@ -253,3 +257,17 @@ jobs:
           # predicate and the drift test still passes while a soft-deleted row
           # squats its name forever.
           uv run pytest tests/migrations/test_445_asset_library_core.py -v
+
+      - name: Exercise the asset-library repositories against the built schema (mig 445/446)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place the two asset repositories' ORM statements actually
+          # execute. Their unit tests stub the session, so nothing else proves
+          # that asyncpg's IntegrityError names uq_assets_scope_type_name, that
+          # UPDATE...RETURNING(Assets) yields an entity, that the partial unique
+          # indexes free/hold names, that ON CONFLICT finds the real index, or
+          # that a raise inside unit_of_work() rolls the whole batch back.
+          uv run pytest tests/db/test_assets_repository_integration.py -v
