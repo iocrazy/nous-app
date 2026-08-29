@@ -256,6 +256,29 @@ describe('GeneratedView — filter chips', () => {
     );
   });
 
+  it('says so in the Project popover when the project list could not be fetched', async () => {
+    // A failed fetch must not read as "this workspace has no projects".
+    fetchProjects.mockRejectedValueOnce(new Error('network down'));
+    renderView();
+    await screen.findByText('Prompt 0');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Project/ }));
+
+    expect(await screen.findByText('Projects unavailable')).toBeTruthy();
+    // The chip stays usable: clearing an active filter must still work.
+    expect(screen.getByRole('menuitemradio', { name: 'Any Project' })).toBeTruthy();
+  });
+
+  it('shows no failure notice when the list is merely empty', async () => {
+    fetchProjects.mockResolvedValueOnce([]);
+    renderView();
+    await screen.findByText('Prompt 0');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Project/ }));
+    await screen.findByRole('menuitemradio', { name: 'Any Project' });
+    expect(screen.queryByText('Projects unavailable')).toBeNull();
+  });
+
   it('turns a Date preset into an ISO instant on the request but keeps the preset in the URL', async () => {
     renderView();
     await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));

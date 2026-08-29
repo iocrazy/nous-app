@@ -167,6 +167,10 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
   const [countsTick, setCountsTick] = useState(0);
   const [reloadTick, setReloadTick] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
+  // Distinct from `projects.length === 0`: an empty list and a failed fetch
+  // look identical in the popover otherwise, and the user is left reading
+  // "this workspace has no projects" off a network error.
+  const [projectsError, setProjectsError] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [saveAsAssetItems, setSaveAsAssetItems] = useState<GeneratedItem[] | null>(null);
@@ -241,8 +245,11 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
         if (alive) setCounts(next);
       })
       .catch((err) => {
-        // A failed counter must not become a fake zero — the tabs simply
-        // render without numbers.
+        // Console-only ON PURPOSE — the only one in this file. Tabs rendering
+        // without numbers is already an honest, visible "not known" (a failed
+        // counter must never become a fake zero), and the counters are
+        // decoration around a list that reports its own failures loudly. A
+        // toast here would fire alongside the list's on every outage.
         console.error('[GeneratedView] counts unavailable:', err);
         if (alive) setCounts(null);
       });
@@ -255,11 +262,21 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
     let alive = true;
     fetchProjects(teamId ? { teamId } : undefined)
       .then((list) => {
-        if (alive) setProjects(list);
+        if (alive) {
+          setProjects(list);
+          setProjectsError(false);
+        }
       })
       .catch((err) => {
+        // Recorded, not just logged: the chip stays usable (clearing an
+        // active project filter must keep working when the list is down),
+        // but the popover says the options are missing rather than
+        // presenting "no projects" as fact.
         console.error('[GeneratedView] project list unavailable:', err);
-        if (alive) setProjects([]);
+        if (alive) {
+          setProjects([]);
+          setProjectsError(true);
+        }
       });
     return () => {
       alive = false;
@@ -551,6 +568,11 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
               >
                 {t('generated.filter.anyProject', 'Any Project')}
               </button>
+              {projectsError && (
+                <p className="px-3 py-1.5 text-xs text-danger">
+                  {t('generated.projectsUnavailable', 'Projects unavailable')}
+                </p>
+              )}
               {projects.map((project) => (
                 <button
                   key={String(project.id)}

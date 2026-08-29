@@ -1686,6 +1686,7 @@
     "title": "Generated",
     "unreviewedChip": "{{n}} 项待处理",
     "loadMore": "加载更多",
+    "projectsUnavailable": "项目列表加载失败",
     "tab": {
       "unreviewed": "待处理",
       "saved": "已保存",

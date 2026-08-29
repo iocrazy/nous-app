@@ -559,10 +559,18 @@ export function CanvasView({
   // (`/team/{scope}/canvas/{id}?node=n9`). Unlike `focusShotId` this id is a
   // canvas node id straight out of `nodes_json`, so no `shot-` prefixing.
   //
-  // Latched per PARAM VALUE, not per canvas: navigating from one inbox card
-  // to another on the same canvas changes only the query string, and that
-  // second click must move the viewport too. Re-selecting on every render, on
-  // the other hand, would fight the user's own clicks.
+  // Latched on `canvasId|nodeParam`, not on the param alone. Both halves of
+  // that key are load-bearing:
+  //  * the param, because navigating from one inbox card to another on the
+  //    same canvas changes ONLY the query string, and that second click must
+  //    move the viewport too;
+  //  * the canvas id, because `CanvasView` is not remounted when the route's
+  //    `:canvasId` changes — it re-renders with a new prop and the ref
+  //    survives. Latching on the param alone would make canvas A → canvas B
+  //    with the same node id a silent no-op.
+  // What the latch is actually there to stop is a re-run at the SAME key:
+  // StrictMode double-invokes mount effects, and without it the viewport
+  // animates twice and selection is stamped twice on every open.
   const nodeParam = searchParams.get('node');
   const nodeParamHandledRef = useRef<string | null>(null);
   useEffect(() => {
@@ -570,8 +578,9 @@ export function CanvasView({
     if (loadStatus !== 'ready' || !reconcileDone) return;
     const instance = rfInstanceRef.current;
     if (!instance) return;
-    if (nodeParamHandledRef.current === nodeParam) return;
-    nodeParamHandledRef.current = nodeParam;
+    const latchKey = `${canvasId}|${nodeParam}`;
+    if (nodeParamHandledRef.current === latchKey) return;
+    nodeParamHandledRef.current = latchKey;
 
     const exists = useCanvasCoreStore
       .getState()

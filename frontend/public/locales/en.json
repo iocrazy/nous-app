@@ -1686,6 +1686,7 @@
     "title": "Generated",
     "unreviewedChip": "{{n}} unreviewed",
     "loadMore": "Load More",
+    "projectsUnavailable": "Projects unavailable",
     "tab": {
       "unreviewed": "Unreviewed",
       "saved": "Saved",
