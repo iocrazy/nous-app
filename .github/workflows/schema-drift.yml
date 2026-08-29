@@ -239,3 +239,17 @@ jobs:
           # under SQLAlchemy and can still be rejected by the server. These
           # execute them for real against the schema this job just built.
           uv run pytest tests/db/test_publish_readback_db.py -v
+
+      - name: Assert the asset-library schema's RLS, partial indexes & CHECKs (mig 445/446)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # Complements (does not duplicate) the drift test above: RLS being on
+          # with a service_role-only policy, the WHERE predicates that make
+          # uq_assets_scope_type_name / uq_loadout_default partial, and the
+          # CHECK bodies are all invisible to a model-vs-schema diff — drop the
+          # predicate and the drift test still passes while a soft-deleted row
+          # squats its name forever.
+          uv run pytest tests/migrations/test_445_asset_library_core.py -v
