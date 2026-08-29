@@ -37,10 +37,11 @@
   text-transform: none;
   letter-spacing: 0;
   box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  visibility: hidden;
+  /* display:none, not visibility:hidden — a hidden-but-laid-out bubble still
+     widens its scroll container (it pushed the studio's three columns into a
+     16px horizontal scroll, caught by the real-stack measurement). */
+  display: none;
   pointer-events: none;
-  transition: opacity 0.08s ease, transform 0.08s ease;
   z-index: 80;
 }
 
@@ -61,7 +62,6 @@
 .cs-help:hover .cs-tip,
 .cs-help:focus-visible .cs-tip,
 .cs-help:focus .cs-tip {
-  opacity: 1;
-  visibility: visible;
+  display: block;
   transform: translateX(-50%) translateY(0);
 }
