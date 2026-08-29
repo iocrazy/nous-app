@@ -468,6 +468,7 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
+      "draftSaved": "草稿已保存在本机 —— 下次打开「发布」会自动恢复。",
       "aboutPreview": "关于这个预览",
       "previewNoCoverShort": "尚未设置封面",
       "draftRestored": "已恢复 {{when}} 的草稿 —— 之前填的、选的都在。",

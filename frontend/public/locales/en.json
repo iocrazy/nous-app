@@ -468,6 +468,7 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
+      "draftSaved": "Draft saved on this device — it comes back the next time you open Publish.",
       "aboutPreview": "About this preview",
       "previewNoCoverShort": "No cover set yet",
       "draftRestored": "Draft restored from {{when}} — everything you had typed and picked is back.",
