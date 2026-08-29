@@ -3,9 +3,12 @@
 DBOS workflow, ``dry_run=True`` by default, idempotent, failures raise.
 
 P0 ships the PLANNER and the dry-run path. Execution (dry_run=False) is wired
-here so P3 only has to flip the flag after the merge list has been reviewed by
-a human — same-name-same-type rows inside one team MERGE into one asset (the
-first cross-project reuse win, and the one place a wrong merge would hurt).
+here — but ``_reject_execution_until_p3()`` blocks it: this code has never run
+against a database, and the registry entry makes one admin POST enough to reach
+it. P3 removes that guard after the merge list has been reviewed by a human and
+an integration test exists — same-name-same-type rows inside one team MERGE into
+one asset (the first cross-project reuse win, and the one place a wrong merge
+would hurt).
 
 Task Center: pass the dispatching admin's ``run_user_id`` (a real auth.users
 row) so the run shows up; the all-zero system id never creates a row.
@@ -205,6 +208,83 @@ async def _load_inputs() -> Tuple[List[dict], List[dict], Dict[int, int], Set[in
     return chars, ents, project_team, personal_project_ids
 
 
+def reconcile_counts(
+    expected_assets: int,
+    actual_assets: int,
+    expected_refs: int,
+    actual_refs: int,
+) -> None:
+    """Pure: raise unless the database agrees with the plan (spec §4).
+
+    Kept separate from the queries so the arithmetic is testable, and stated as
+    a comparison against *database* counts on purpose: the previous version
+    compared ``created + existing`` against ``len(plan["assets"])``, which the
+    apply loop makes true by construction — a check that cannot fail is not a
+    check.
+    """
+    if expected_assets == actual_assets and expected_refs == actual_refs:
+        return
+    raise RuntimeError(
+        "[backfill-assets] reconciliation failed: "
+        f"assets expected={expected_assets} actual={actual_assets}; "
+        f"project_refs expected={expected_refs} actual={actual_refs}"
+    )
+
+
+async def _reconcile(plan: MigrationPlan) -> Dict[str, int]:
+    """Count what is actually in the DB for the planned scopes and compare.
+
+    Re-running the same plan keeps this true: every planned asset exists exactly
+    once (the idempotency lookup finds it) and every planned project ref exists
+    exactly once (``AssetProjectRefs`` is PK'd on ``(asset_id, project_id)``).
+    """
+    expected_assets = plan["counts"]["assets"]
+    expected_refs = sum(len(a["project_ids"]) for a in plan["assets"])
+    scope_ids = sorted({a["scope_id"] for a in plan["assets"]})
+    actual_assets = 0
+    actual_refs = 0
+    if scope_ids:
+        async with read_scope() as session:
+            asset_ids = [
+                int(x)
+                for x in (
+                    await session.execute(
+                        select(Assets.id)
+                        .where(Assets.source == "migrated")
+                        .where(Assets.deleted_at.is_(None))
+                        .where(Assets.scope_id.in_(scope_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            ]
+            actual_assets = len(asset_ids)
+            if asset_ids:
+                actual_refs = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(AssetProjectRefs)
+                        .where(AssetProjectRefs.asset_id.in_(asset_ids))
+                    )
+                ).scalar_one()
+    reconcile_counts(expected_assets, actual_assets, expected_refs, actual_refs)
+    return {"assets": actual_assets, "project_refs": actual_refs}
+
+
+def _reject_execution_until_p3() -> None:
+    """P3 deletes this guard (and its call) once the integration test lands.
+
+    ``_apply`` / ``_reconcile`` are compile-verified only — they have never run
+    against a database, and their first run would be a production write reached
+    by one admin POST with ``dry_run: false``. The registry entry exists so the
+    *plan* can be reviewed; executing it is not P0's to ship.
+    """
+    raise NotImplementedError(
+        "assets_from_project_entities execution is P3 — dry_run=False is "
+        "blocked until the integration test lands"
+    )
+
+
 async def _apply(plan: MigrationPlan, run_user_id: str) -> Dict[str, int]:
     created = existing = refs = 0
     for a in plan["assets"]:
@@ -319,13 +399,10 @@ async def backfill_assets_from_project_entities(
         out["counts"] = plan["counts"]
         out["merges"] = plan["merges"][:_MERGES_CAP]
         if not dry_run:
+            _reject_execution_until_p3()
             out["applied"] = await _apply(plan, owner)
-            # Reconciliation (spec §4): assets created + existing == planned.
-            if (
-                out["applied"]["created"] + out["applied"]["existing"]
-                != plan["counts"]["assets"]
-            ):
-                raise RuntimeError(f"[backfill-assets] reconciliation failed: {out}")
+            # Reconciliation (spec §4) — against DB counts, not our own tally.
+            out["reconciled"] = await _reconcile(plan)
     except Exception:
         # Persist whatever was computed before the crash, then raise —
         # 路线 C rule 4: the trigger writes phase=failed, we never do.

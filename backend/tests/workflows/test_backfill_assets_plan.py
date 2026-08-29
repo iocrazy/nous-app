@@ -5,10 +5,17 @@ one place a wrong decision would silently fuse two different people's
 characters into one team asset, so every branch of it is pinned here.
 """
 
+import inspect
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.api.admin.backfill_router import _BACKFILLS, workflow_kwargs
-from app.workflows.backfill_assets_from_project_entities import plan_migration
+from app.workflows.backfill_assets_from_project_entities import (
+    plan_migration,
+    reconcile_counts,
+)
 
 TEAM_A, TEAM_B = 100, 200
 P1, P2, P3 = 11, 12, 13  # P1,P2 in team A; P3 in team B
@@ -177,3 +184,72 @@ class TestRouterWiring:
             "dry_run": True,
             "limit": 10,
         }
+
+
+class TestReconcileCounts:
+    """The arithmetic half of spec §4's reconciliation. The previous form
+    (``created + existing == len(plan["assets"])``) was true by construction —
+    these pin a comparison that can actually fail."""
+
+    def test_passes_when_db_agrees_with_the_plan(self):
+        assert reconcile_counts(3, 3, 7, 7) is None
+
+    def test_raises_when_asset_count_disagrees(self):
+        with pytest.raises(RuntimeError) as e:
+            reconcile_counts(3, 2, 7, 7)
+        msg = str(e.value)
+        assert "assets expected=3 actual=2" in msg
+        assert "project_refs expected=7 actual=7" in msg
+
+    def test_raises_when_ref_count_disagrees(self):
+        with pytest.raises(RuntimeError) as e:
+            reconcile_counts(3, 3, 7, 5)
+        assert "project_refs expected=7 actual=5" in str(e.value)
+
+
+class TestExecutionBlockedInP0:
+    async def test_dry_run_false_raises_before_touching_the_database(self):
+        """One admin POST with ``dry_run: false`` must not reach ``_apply``,
+        which has never run against a database."""
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        applied = AsyncMock()
+        with (
+            patch.object(
+                m, "_load_inputs", AsyncMock(return_value=([], [], {}, set()))
+            ),
+            patch.object(m, "_apply", applied),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=AsyncMock(),
+            ),
+        ):
+            with pytest.raises(NotImplementedError, match="P3"):
+                await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                    dry_run=False, run_user_id="admin-uuid"
+                )
+        applied.assert_not_awaited()
+
+    async def test_dry_run_true_still_returns_the_plan(self):
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        with (
+            patch.object(
+                m,
+                "_load_inputs",
+                AsyncMock(
+                    return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
+                ),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=AsyncMock(),
+            ),
+        ):
+            out = await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                dry_run=True, run_user_id="admin-uuid"
+            )
+        assert out["dry_run"] is True
+        assert out["counts"]["assets"] == 1
+        assert out["merges"] == []
+        assert "applied" not in out
