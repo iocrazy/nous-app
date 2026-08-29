@@ -17,7 +17,9 @@ from loguru import logger
 from sqlalchemy import Text as SAText
 from sqlalchemy import case, cast
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func
+from sqlalchemy import insert as sa_insert
+from sqlalchemy import select, tuple_
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
@@ -129,6 +131,33 @@ def _promote_review_state():
         (GeneratedMedia.review_state == "unreviewed", "saved"),
         else_=GeneratedMedia.review_state,
     )
+
+
+def _registered_resource_lookup_stmt(resource_id: int):
+    """The idempotency SELECT for ``insert_registered_resource``.
+
+    Keyed on ``promoted_resource_id`` alone: a resource has at most one
+    inbox row, whether this backfill made it or a promote did. ``order_by``
+    is not decoration — a legacy promote may already have left a row, and
+    ``LIMIT 1`` without an order is a coin flip between them.
+    """
+    return (
+        select(*_GM_COLS)
+        .where(GeneratedMedia.promoted_resource_id == int(resource_id))
+        .order_by(GeneratedMedia.id.asc())
+        .limit(1)
+    )
+
+
+def _registered_resource_insert_stmt(**values):
+    """The INSERT...RETURNING for a row that registers an EXISTING resource.
+
+    Column-level RETURNING (never entity-level — see
+    ``generated_media_service._generated_media_insert_stmt``): entity-level
+    returning maps a row to one entity-named key instead of one key per
+    column.
+    """
+    return sa_insert(GeneratedMedia).values(**values).returning(*_GM_COLS)
 
 
 def _inbox_filters(
@@ -378,6 +407,72 @@ class GeneratedMediaRepository:
                 .first()
             )
         return _normalize(dict(row)) if row else None
+
+    async def insert_registered_resource(
+        self,
+        *,
+        scope_id: int,
+        creator_id: str,
+        resource_id: int,
+        file_path: str,
+        mime: Optional[str],
+        media_kind: str,
+        conversation_id: Optional[int],
+        origin_kind: str = "chat_upload",
+    ) -> dict:
+        """Register an EXISTING resource into the Generated inbox. Returns the row.
+
+        No blob is copied: ``file_path`` is the resource's own stored path and
+        ``promoted_resource_id`` points at the resource, so the row is born
+        ``saved`` (Tier-2 already holds the bytes) rather than ``unreviewed``.
+
+        Idempotent by ``promoted_resource_id``: a resource that already has an
+        inbox row gets that row back instead of a duplicate. The check is a
+        SELECT, not a DB constraint — ``promoted_resource_id`` has no unique
+        index — so two concurrent callers for the same brand-new resource can
+        still both insert. That is the accepted shape here: the only writers
+        are one upload (once per resource) and a re-runnable backfill.
+        """
+        async with read_scope() as session:
+            existing = (
+                (await session.execute(_registered_resource_lookup_stmt(resource_id)))
+                .mappings()
+                .first()
+            )
+        if existing:
+            return _normalize(dict(existing))  # type: ignore[return-value]
+
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        _registered_resource_insert_stmt(
+                            scope_id=int(scope_id),
+                            creator_id=str(creator_id),
+                            media_kind=media_kind,
+                            mime=mime,
+                            file_path=file_path,
+                            origin_kind=origin_kind,
+                            conversation_id=(
+                                int(conversation_id)
+                                if conversation_id is not None
+                                else None
+                            ),
+                            promoted_resource_id=int(resource_id),
+                            review_state="saved",
+                            params={},
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:  # an INSERT...RETURNING that returns nothing
+            raise RuntimeError(
+                f"[generated_media] registration insert returned no row for "
+                f"resource {resource_id}"
+            )
+        return _normalize(dict(row))  # type: ignore[return-value]
 
     async def list_inbox(
         self,

@@ -24,6 +24,7 @@ from app.utils.admin_helpers import create_audit_log
 from app.workflows.backfill_assets_from_project_entities import (
     backfill_assets_from_project_entities,
 )
+from app.workflows.backfill_generated_inbox import backfill_generated_inbox
 from app.workflows.backfill_issue_scope import backfill_issue_scope_workflow
 from app.workflows.backfill_normalize_personal_project_team_ids import (
     backfill_normalize_personal_project_team_ids_workflow,
@@ -51,6 +52,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
     "assets_from_project_entities": backfill_assets_from_project_entities,
+    "generated_inbox": backfill_generated_inbox,
 }
 
 
