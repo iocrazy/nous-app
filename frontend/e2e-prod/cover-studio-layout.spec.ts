@@ -40,7 +40,12 @@ async function measureOverflow(page: import('@playwright/test').Page): Promise<O
       if (!box) continue;
       const cr = box.getBoundingClientRect();
       for (const el of Array.from(box.querySelectorAll<HTMLElement>('*'))) {
-        if (el.offsetParent === null) continue; // hidden
+        if (el.offsetParent === null) continue; // display:none subtree
+        // Tooltip bubbles (.cs-tip) sit absolutely positioned and invisible
+        // until hover; they have a box but nobody can see it. Only what is
+        // painted counts as overflow.
+        const cs = getComputedStyle(el);
+        if (cs.visibility === 'hidden' || cs.opacity === '0') continue;
         const r = el.getBoundingClientRect();
         if (r.width === 0) continue;
         const by = Math.max(r.right - cr.right, cr.left - r.left);
