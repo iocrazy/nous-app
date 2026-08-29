@@ -47,16 +47,22 @@ class Readiness(TypedDict):
 def readiness(
     asset_type: str, slot_counts: dict[str, int], prompt_positive: str | None
 ) -> Readiness:
-    """ready iff the primary slot has ≥1 file (prompt: non-blank body)."""
-    primary = PRIMARY_SLOT.get(asset_type)
+    """ready iff the primary slot has ≥1 file (prompt: non-blank body).
+
+    Raises ValueError on an unrecognized asset_type. A typo'd or renamed type
+    must not come back as a well-formed, plausible-looking 'draft'.
+    """
+    if asset_type not in PRIMARY_SLOT:
+        raise ValueError(f"unknown asset_type: {asset_type!r}")
     if asset_type == "prompt":
         ok = bool(prompt_positive and prompt_positive.strip())
         return {
             "state": "ready" if ok else "draft",
             "missing": [] if ok else ["prompt_positive"],
         }
-    if primary is None:
-        return {"state": "draft", "missing": []}
+    # Every non-prompt type has a primary slot; PRIMARY_SLOT is a code constant
+    # pinned against ASSET_TYPES by test_tables_match_model_constants.
+    primary = PRIMARY_SLOT[asset_type]
     ok = slot_counts.get(primary, 0) > 0
     return {"state": "ready" if ok else "draft", "missing": [] if ok else [primary]}
 

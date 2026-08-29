@@ -1,6 +1,8 @@
 import pytest
 
+from app.models.assets import ASSET_TYPES, LINK_RELATIONS
 from app.services.assets.slots import (
+    LINK_RULES,
     PRIMARY_SLOT,
     SLOTS,
     is_valid_slot,
@@ -54,6 +56,17 @@ def test_every_type_has_slots_and_unsorted_is_always_valid():
 )
 def test_readiness(atype, counts, prompt, expected):
     assert readiness(atype, counts, prompt) == expected
+
+
+def test_readiness_rejects_unknown_type():
+    # A typo'd type must not read as a plausible 'draft'.
+    with pytest.raises(ValueError, match="unknown asset_type"):
+        readiness("nope", {}, None)
+
+
+def test_tables_match_model_constants():
+    assert set(PRIMARY_SLOT) == set(SLOTS) == set(ASSET_TYPES)
+    assert set(LINK_RULES) == set(LINK_RELATIONS)
 
 
 def test_link_rules():
