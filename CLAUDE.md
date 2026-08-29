@@ -596,7 +596,9 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 - 语义实体在 `assets`，文件通过 `asset_files` 的 slot 挂上来（`resources` 行不动，见 `app/services/assets/slots.py` 的 slot 表与 readiness 派生）；`asset_loadouts` 是角色的「造型」子集，必须是 `asset_links` 的子集，解链时 `strip_from_loadouts` 同步剔除。
 - `scope_id` 指向 `teams`，**仅系统预设为 NULL**（`assets_scope_or_preset` CHECK），预设对所有 scope 可读且只读。两个唯一索引都是 partial（`WHERE deleted_at IS NULL` / `WHERE is_default`）—— 软删除会释放同名占用。
 - 两个 repository 的 ORM 语句唯一的真执行覆盖是 `backend/tests/db/test_assets_repository_integration.py`（挂在 `schema-drift.yml` 上，需 `INTEGRATION_DATABASE_URL`）；单测里的 session 是桩的，跑绿不代表 Postgres 接受。
-- P0 只到数据层 + `/api/v1/assets` 基础 API，无 UI；后续分期见 spec §9。
+- slot 表在前后端各存一份（`app/services/assets/slots.py` 与 `frontend/components/assets/assetSlots.ts`）。改一边必须改另一边 —— `backend/tests/services/assets/test_slots_frontend_mirror.py` 直接读 TS 文件做比对（含顺序），前端自己那个测试是把同样的值又硬编码了一遍，单侧修改它照样绿。
+- P0 只到数据层 + `/api/v1/assets` 基础 API，无 UI；P1 已补上 Generated 收件箱（见下），其余分期见 spec §9。
+- **Generated 收件箱**（P1, 2026-08-29）= `generated_media` + `review_state`；API `/api/v1/generated`；Project Assets / Temp 视图已退役；temp sweeper 已停调度，清理走 `/generated/cleanup`（两步：先 dry-run 预览再确认，不自动、不静默 —— 这正是当年退役 TTL 的原因）。
 
 ## AI Library (Phase 1) — Agent Framework
 

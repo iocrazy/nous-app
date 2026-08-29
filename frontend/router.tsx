@@ -203,9 +203,18 @@ export const router = createBrowserRouter([
           { path: 'dashboard/:subview', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/file/:resourceId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><FileDetailDispatcher /></ModuleGuard></SuspenseWrap> },
-          // Legacy redirect: the "Temp" view was repurposed into "Project Assets".
-          // Static `temp` ranks above the dynamic `:section` below.
-          { path: 'resources/temp', element: <Navigate to="../project-assets" replace /> },
+          // Legacy redirects: "Temp" became "Project Assets", and both were
+          // retired in favour of the Generated inbox (P1, 2026-08-29).
+          // Static `temp` / `project-assets` rank above the dynamic
+          // `:section` below, which is what serves `generated`.
+          // `relative="path"` is load-bearing: React Router's default relative
+          // resolution is ROUTE-based, so `..` from a route whose path is the
+          // two-segment `resources/temp` climbs past BOTH segments and lands on
+          // `/team/:teamId/generated` — an unmatched URL that falls through to
+          // the catch-all. (The pre-P1 `temp → ../project-assets` redirect had
+          // exactly this defect.) Pinned by router.legacyRedirects.test.tsx.
+          { path: 'resources/temp', element: <Navigate to="../generated" relative="path" replace /> },
+          { path: 'resources/project-assets', element: <Navigate to="../generated" relative="path" replace /> },
           { path: 'resources/:section', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/smart/:smartFolderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },

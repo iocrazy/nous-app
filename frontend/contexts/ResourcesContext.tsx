@@ -5,7 +5,6 @@ import { Folder, ResourceItem, Tag, SmartCollection, Library } from '../types';
 import {
   fetchFolders,
   fetchChildFolders,
-  fetchResources,
   fetchResourcesPaginated,
   trashResource,
   restoreResource,
@@ -29,6 +28,7 @@ import {
   type FetchResourcesParams,
 } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
+import { fetchGeneratedCounts } from '../services/generatedService';
 import { useKeysetPagination } from '../hooks/useKeysetPagination';
 import type { KeysetCursor } from '../services/pagination';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
@@ -43,7 +43,7 @@ import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
 
-export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'temp' | 'project-assets';
+export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'generated';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 /** Subset of fetchResources params that the filter bar contributes.
@@ -73,14 +73,8 @@ export interface ResourcesContextType {
   isRecycleView: boolean;
   isSharedView: boolean;
   isDownloadsView: boolean;
-  isTempView: boolean;
-  isProjectAssetsView: boolean;
+  isGeneratedView: boolean;
   canUpload: boolean;
-
-  // ── Temp view state ──
-  tempFolderId: string | null;
-  tempResources: ResourceItem[];
-  reloadTemp: () => void;
 
   // ── Data state ──
   resources: ResourceItem[];
@@ -117,6 +111,12 @@ export interface ResourcesContextType {
   downloadsCount: number | null;
   /** Trigger a refresh of both sidebar counts (e.g. after trash/restore/upload). */
   refreshSidebarCounts: () => void;
+  /** Unreviewed generations in the current scope — the Generated rail pill.
+   *  `null` means "not known" (still loading, or the fetch failed): the pill
+   *  is then not rendered at all, so a failed fetch never shows a fake 0. */
+  generatedUnreviewedCount: number | null;
+  /** Re-fetch `generatedUnreviewedCount` (e.g. after saving/discarding). */
+  refreshGeneratedCounts: () => void;
   resourceTagNamesMap: Record<string, string>;
   /**
    * Per-resource set of tag ids. Populated alongside resourceTagNamesMap
@@ -234,7 +234,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   // ── URL-driven state ──
   const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle', 'downloads', 'temp', 'project-assets'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads', 'generated'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
@@ -270,6 +270,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [countsRefreshTick, setCountsRefreshTick] = useState(0);
   const refreshSidebarCounts = useCallback(() => {
     setCountsRefreshTick((v) => v + 1);
+  }, []);
+
+  // ── Generated inbox count (the "Generated" rail pill) ──
+  const [generatedUnreviewedCount, setGeneratedUnreviewedCount] = useState<number | null>(null);
+  const [generatedRefreshTick, setGeneratedRefreshTick] = useState(0);
+  const refreshGeneratedCounts = useCallback(() => {
+    setGeneratedRefreshTick((v) => v + 1);
   }, []);
 
   // ── Selection state ──
@@ -448,16 +455,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const isRecycleView = sidebarView === 'recycle';
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
-  const isTempView = sidebarView === 'temp';
-  const isProjectAssetsView = sidebarView === 'project-assets';
-
-  // ── Temp view state ──
-  const [tempFolderId, setTempFolderId] = useState<string | null>(null);
-  const [tempResources, setTempResources] = useState<ResourceItem[]>([]);
-  // Bumped to force the temp-view list to re-fetch (e.g. after a temp resource
-  // is promoted to permanent, so it drops out of the temp view).
-  const [tempRefreshTick, setTempRefreshTick] = useState(0);
-  const reloadTemp = useCallback(() => setTempRefreshTick((t) => t + 1), []);
+  const isGeneratedView = sidebarView === 'generated';
 
   // ── Permission check ──
   const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
@@ -517,11 +515,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     // Reset to the first page. loadResourcesFirstPage owns the items state +
     // abort lifecycle and reads the current scope/filters via fetchResourcesPage.
     await loadResourcesFirstPage();
-    // Post-mutation refreshers (incl. the batch toolbar) call this; if the user
-    // is in the Temp view its separate tempResources state must also re-fetch,
-    // otherwise batch ops leave the Temp view stale. The temp effect
-    // early-returns when not in the Temp view, so this is a no-op elsewhere.
-    setTempRefreshTick((t) => t + 1);
   // loadResourcesFirstPage has stable identity (keyset hook).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -639,6 +632,37 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       cancelled = true;
     };
   }, [isPersonal, scopeId, countsRefreshTick]);
+
+  // Generated inbox count — same scope id the folder/resource queries use
+  // (`generated_media.scope_id` is a team id, and so is `scopeId`). A failure
+  // leaves the count untouched and logs: on first load that means it stays
+  // `null`, which renders NO pill — showing a 0 would claim "nothing to
+  // review" on evidence we do not have. On a failed REFRESH the last known
+  // number stays on screen rather than the pill vanishing; it may be stale,
+  // and the console.error is the signal that it might be.
+  //
+  // Reset is deliberately split into its own effect keyed on `scopeId` ALONE.
+  // Folding it into the fetch below would blank the pill on every
+  // `refreshGeneratedCounts()` tick too, making the badge disappear and pop
+  // back on each refresh. `null` means "we do not know", which is true when
+  // the scope changes and false during a refresh.
+  useEffect(() => {
+    setGeneratedUnreviewedCount(null);
+  }, [scopeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGeneratedCounts(scopeId)
+      .then((counts) => {
+        if (!cancelled) setGeneratedUnreviewedCount(counts.unreviewed);
+      })
+      .catch((err) => {
+        console.error('[ResourcesContext] generated counts failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeId, generatedRefreshTick]);
 
   // Load folder previews when child folders change
   useEffect(() => {
@@ -872,46 +896,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     }
   }, [sidebarView, loadDownloadedResources]);
 
-  // Load temp folder resources.
-  // Also fires for the Project Assets view: its "Chat Uploads" group reuses
-  // this same temp-folder fetch (a later task renders that group from
-  // tempResources), so the effect must run for both views.
-  useEffect(() => {
-    if (!isTempView && !isProjectAssetsView) return;
-    let cancelled = false;
-    setSelectedIds(new Set());
-    setLoading(true);
-    const loadTemp = async () => {
-      try {
-        // Find the folder named 'temp' in the current scope
-        const allFolders = await fetchFolders(scopeId, isPersonal, selectedLibraryId);
-        if (cancelled) return;
-        const tempFolder = allFolders.find((f) => f.name === 'temp') ?? null;
-        setTempFolderId(tempFolder ? String(tempFolder.id) : null);
-        if (!tempFolder) {
-          setTempResources([]);
-          return;
-        }
-        const items = await fetchResources({
-          isPersonal,
-          scopeId,
-          folderId: String(tempFolder.id),
-          // temp folder = chat-upload staging; explicit cap instead of the
-          // silent PostgREST 1000 ceiling.
-          limit: 1000,
-        });
-        if (!cancelled) setTempResources(items);
-      } catch (err) {
-        console.error('[ResourcesContext] Failed to load temp folder resources:', err);
-        if (!cancelled) setTempResources([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    loadTemp();
-    return () => { cancelled = true; };
-  }, [isTempView, isProjectAssetsView, isPersonal, scopeId, selectedLibraryId, tempRefreshTick]);
-
   // Load tags when selected resource changes
   useEffect(() => {
     if (!selectedResource?.resource?.id) {
@@ -942,6 +926,18 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     setSelectedResource(null);
   }, [sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId]);
 
+  // Entering the Generated inbox drops a multi-selection carried over from the
+  // previous view — those `item:` ids point at files that are no longer on
+  // screen, and the batch toolbar would still act on them. (The retired temp
+  // effect did this on entry; deleting it took the behaviour with it.)
+  // Keyed on the boolean, so it fires on ENTRY only: the Generated view has
+  // its own multi-select, and a selection made while already inside it must
+  // survive.
+  useEffect(() => {
+    if (!isGeneratedView) return;
+    setSelectedIds(new Set());
+  }, [isGeneratedView]);
+
   // ESC to close panel / exit multi-select
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -965,10 +961,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       const item = resources.find((r) => String(r.resource?.id) === rid);
       await trashResource(rid, scopeId, selectedFolderId);
       setResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
-      // The Temp sidebar view (#360) renders from a separate tempResources
-      // state, so the optimistic removal above must mirror into it or the
-      // trashed item lingers in the Temp view until a remount.
-      setTempResources((prev) => prev.filter((r) => String(r.resource?.id) !== rid));
       if (String(selectedResource?.resource?.id) === rid) setSelectedResource(null);
       const filename = item?.resource?.filename || '';
       addToast(t('resources.trashedNotification', { name: filename }), 'success');
@@ -1082,13 +1074,6 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
           ? { ...item, resource: { ...item.resource!, ...data } as Resource }
           : item
       ));
-      // Mirror into the Temp view's separate state (#360) so edits/renames
-      // made while in the Temp view reflect immediately there too.
-      setTempResources(prev => prev.map(item =>
-        String(item.resource?.id) === rid
-          ? { ...item, resource: { ...item.resource!, ...data } as Resource }
-          : item
-      ));
     } catch (err) {
       console.error('Failed to update resource:', err);
     }
@@ -1123,13 +1108,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isRecycleView,
     isSharedView,
     isDownloadsView,
-    isTempView,
-    isProjectAssetsView,
+    isGeneratedView,
     canUpload,
-
-    tempFolderId,
-    tempResources,
-    reloadTemp,
 
     resources,
     setResources,
@@ -1155,6 +1135,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     myResourcesCount,
     downloadsCount,
     refreshSidebarCounts,
+    generatedUnreviewedCount,
+    refreshGeneratedCounts,
     resourceTagNamesMap,
     resourceTagIdsMap,
     loading,
@@ -1224,10 +1206,10 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     transcodingResourceIds,
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, isProjectAssetsView, canUpload,
-    tempFolderId, tempResources, reloadTemp,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
+    generatedUnreviewedCount, refreshGeneratedCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,

@@ -18,7 +18,6 @@ import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 import { useConfirm } from './ConfirmDialog';
-import { ChatTempTtlPanel } from './ChatTempTtlPanel';
 import { WorkflowTemplateEditor } from './workflow/WorkflowTemplateEditor';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { DateTimePopover } from './common/DateTimePopover';
@@ -578,19 +577,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </p>
            </div>
 
-           {/* Chat attachment TTL retired (IC-port P4) — files no longer auto-expire.
-               Hidden behind `false` so the control can be restored if the policy changes. */}
-           {false && currentUserId && (
-             <div className="px-6 pb-2 border-t border-ink-800">
-               <div className="pt-4">
-                 <h3 className="text-base font-semibold text-ink-200 mb-2">Chat attachment TTL</h3>
-                 <ChatTempTtlPanel scopeType="personal" scopeId={currentUserId} label="Personal" />
-                 {userTeams.map((t) => (
-                   <ChatTempTtlPanel key={t.id} scopeType="team" scopeId={t.id} label={t.name} />
-                 ))}
-               </div>
-             </div>
-           )}
 
            {/* Actions Footer */}
            <div className="px-6 py-4 border-t border-ink-800 bg-ink-950/50 flex justify-end">

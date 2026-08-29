@@ -25,7 +25,7 @@ import { loadProdCreds, WALKTHROUGH_IDS } from './helpers';
 const { teamId: TEAM_ID, projectId: PROJECT_ID, episodeId: EPISODE_ID, sceneId: SCENE_ID, shotId: SHOT_ID } =
   WALKTHROUGH_IDS;
 
-test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor', async ({ page }) => {
+test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → generated inbox', async ({ page }) => {
   const creds = loadProdCreds();
 
   // i18n defaults to 'zh' with nothing in localStorage (i18n.ts:8) — pin 'en'
@@ -151,4 +151,20 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   // ── 7. Back to the script module — the inline-mounted editor shell. ─────
   await page.getByTestId('ws-ep-script').click();
   await expect(page.locator('[data-editor-shell]')).toBeVisible({ timeout: 15_000 });
+
+  // ── 8. Library → Generated inbox (P1). Deliberately makes NO claim about
+  // what is in it: this account's inbox may legitimately be empty, and an
+  // assertion on cards would turn "nothing generated lately" into a red
+  // deploy. What is being smoked is that the rail entry is reachable and the
+  // view mounts against the real `/api/v1/generated` — the failure this
+  // catches is a blank surface, which is exactly what shipped on 2026-08-11.
+  await page.goto(`/team/${TEAM_ID}/resources`);
+  await page.getByRole('button', { name: /^Generated/ }).click();
+  const generated = page.getByTestId('generated-view');
+  await expect(generated).toBeVisible({ timeout: 15_000 });
+  await expect(generated.getByRole('heading', { name: 'Generated' })).toBeVisible();
+  // The tabs are the view's own chrome, not data — they render whether or not
+  // the inbox has a single row, so a visible tablist separates "mounted and
+  // empty" from "mounted and broken".
+  await expect(generated.getByRole('tab', { name: /^Unreviewed/ })).toBeVisible();
 });

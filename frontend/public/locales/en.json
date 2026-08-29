@@ -1666,9 +1666,13 @@
     "trashFolderFailed": "Failed to move folder to trash",
     "systemFolderLocked": "System folder — cannot be renamed, moved or trashed",
     "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
-    "temp": "Temp",
-    "projectAssets": "Project Assets",
-    "tempEmpty": "No chat uploads yet — files you paste or drop into the chat composer land here for 24h before being moved or expired.",
+    "generated": "Generated",
+    "appearsInCanvases_one": "Appears in {{count}} canvas",
+    "appearsInCanvases_other": "Appears in {{count}} canvases",
+    "canvasRefRole": {
+      "reference": "Reference",
+      "output": "Output"
+    },
     "sectionLocations": "Locations",
     "edit": "Edit",
     "saveAsNewVersion": "Save as new version",
@@ -1677,6 +1681,158 @@
     "saveFailed": "Failed to save",
     "textTooLargeToEdit": "File is too large to preview or edit inline.",
     "previewFailed": "Failed to load preview"
+  },
+  "generated": {
+    "title": "Generated",
+    "unreviewedChip": "{{n}} unreviewed",
+    "loadMore": "Load More",
+    "projectsUnavailable": "Projects unavailable",
+    "tab": {
+      "unreviewed": "Unreviewed",
+      "saved": "Saved",
+      "inAssets": "In Assets",
+      "all": "All"
+    },
+    "state": {
+      "new": "New",
+      "saved": "Saved",
+      "asset": "Asset",
+      "deleted": "Deleted"
+    },
+    "source": {
+      "canvas_run": "Canvas",
+      "canvas_upload": "Canvas Upload",
+      "shot_generate": "Storyboard Image",
+      "shot_video": "Storyboard Video",
+      "agent_run": "Agent",
+      "chat_upload": "Chat Upload"
+    },
+    "type": {
+      "image": "Image",
+      "video": "Video"
+    },
+    "since": {
+      "24h": "Last 24 Hours",
+      "7d": "Last 7 Days",
+      "30d": "Last 30 Days"
+    },
+    "filter": {
+      "source": "Source",
+      "project": "Project",
+      "type": "Type",
+      "model": "Model",
+      "date": "Date",
+      "anyProject": "Any Project",
+      "anyType": "Any Type",
+      "anyModel": "Any Model",
+      "anyDate": "Any Time",
+      "noModels": "No Models On This Page"
+    },
+    "action": {
+      "save": "Save",
+      "saveAsAsset": "As Asset…",
+      "delete": "Delete",
+      "inMyUploads": "In My Uploads",
+      "openAsset": "Open asset"
+    },
+    "card": {
+      "select": "Select {{title}}",
+      "confirmDelete": "Confirm Delete",
+      "openCanvasNodeHint": "Opens the canvas at this node",
+      "openSourceHint": "Opens where this was generated"
+    },
+    "batch": {
+      "selected": "{{n}} selected",
+      "clear": "Clear",
+      "done": "{{ok}} done",
+      "partial": "{{ok}} done, {{failed}} failed",
+      "confirmDelete": "Confirm Delete ({{n}})",
+      "deleteOnlyUnreviewed": "Only unreviewed items can be deleted — saved items live in your library"
+    },
+    "empty": {
+      "unreviewed": "Nothing To Review",
+      "project": "Only Canvas Generations Can Be Filtered By Project",
+      "filtered": "No Generations Match These Filters"
+    },
+    "cleanup": {
+      "open": "Clean Up…",
+      "title": "Clean Up Generated",
+      "hint": "Deletes unreviewed generations older than the given number of days. Saved items and items in assets are never touched.",
+      "olderThan": "Older Than (Days)",
+      "preview": "Preview",
+      "confirm": "Delete {{n}}",
+      "matched": "{{n}} Unreviewed Generations Match",
+      "empty": "Nothing To Clean Up",
+      "truncated": "Showing the first 2000 — run clean up again for the rest.",
+      "deleted": "{{n}} deleted"
+    },
+    "err": {
+      "generic": "Something went wrong. Please try again.",
+      "network": "The request never reached the server. Check your connection.",
+      "not_a_member": "You are not a member of this workspace.",
+      "not_found": "That generation no longer exists.",
+      "asset_exists": "An asset with this name and type already exists here.",
+      "invalid_slot": "That slot is not valid for this asset type.",
+      "unreadable_body": "The server sent a response we could not read."
+    }
+  },
+  "saveAsAsset": {
+    "title": "Save as Asset",
+    "assetType": "Asset Type",
+    "attachToLabel": "Attach To",
+    "attachTo": "Attach to {{name}}",
+    "createAndAttach": "Create & attach",
+    "createNew": "Create New {{type}} \"{{name}}\"",
+    "newName": "New Asset Name",
+    "search": "Search…",
+    "searchLabel": "Search Assets",
+    "searchUnavailable": "Could not load assets — you can still create a new one.",
+    "suggested": "suggested · from canvas",
+    "ready": "Ready",
+    "draft": "Draft",
+    "slotLabel": "Slot",
+    "loadout": "Loadout",
+    "more": "+{{n}} more",
+    "neverMoves": "File stays where it is · attaching never moves or copies",
+    "exists": "An asset with this name exists — attach to it instead?",
+    "useExisting": "Use Existing",
+    "attached": "Attached to {{name}} · {{slot}}",
+    "partial": "{{ok}} attached, {{failed}} failed",
+    "type": {
+      "character": "Character",
+      "location": "Location",
+      "prop": "Prop",
+      "costume": "Costume",
+      "prompt": "Prompt",
+      "audio": "Audio"
+    },
+    "slot": {
+      "sheet": "Sheet",
+      "stills": "Stills",
+      "expressions": "Expressions",
+      "extras": "Extras",
+      "worn": "Worn",
+      "establishing": "Establishing",
+      "keyframes": "Keyframes",
+      "details": "Details",
+      "layout": "Layout",
+      "turnaround": "Turnaround",
+      "in_scene": "In Scene",
+      "flat": "Flat",
+      "examples": "Examples",
+      "primary": "Primary",
+      "variants": "Variants",
+      "unsorted": "Unsorted"
+    },
+    "err": {
+      "generic": "Something went wrong. Please try again.",
+      "network": "The request never reached the server. Check your connection.",
+      "not_a_member": "You are not a member of this workspace.",
+      "not_found": "That generation no longer exists.",
+      "asset_exists": "An asset with this name and type already exists here.",
+      "invalid_slot": "That slot is not valid for this asset type.",
+      "unreadable_body": "The server sent a response we could not read."
+    }
   },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
@@ -3956,38 +4112,6 @@
     "warning": "Your device clock is {{amount}} {{direction}} server time — this breaks sign-in. Enable automatic date & time in system settings.",
     "behind": "behind",
     "ahead": "ahead"
-  },
-  "projectAssets": {
-    "chatUploads": "Chat Uploads",
-    "generations": "Generations",
-    "noGenerations": "No generations yet",
-    "noCanvases": "No canvases yet",
-    "newCanvas": "New Canvas",
-    "untitledCanvas": "Untitled Canvas",
-    "createFailed": "Failed to create canvas",
-    "appearsInCanvases_one": "Appears in {{count}} canvas",
-    "appearsInCanvases_other": "Appears in {{count}} canvases",
-    "keep": "Keep",
-    "kept": "Saved to library",
-    "keptShort": "Saved",
-    "inLibrary": "In Library",
-    "deleteGeneration": "Delete generation",
-    "deleteConfirm": "Delete this generation? This cannot be undone.",
-    "deleteConfirmKept": "Delete this generation? The copy already saved in your library is kept.",
-    "confirmDelete": "Delete",
-    "deleted": "Generation deleted",
-    "errNetwork": "Could not reach the server. Check your connection and try again.",
-    "errUnauthenticated": "Your session has expired. Sign in again to continue.",
-    "errDeleteForbidden": "You do not have permission to delete this generation.",
-    "errKeepForbidden": "You do not have permission to save this generation to the library.",
-    "errDeleteGone": "This generation was already deleted, or it is not in this workspace.",
-    "errKeepGone": "This generation no longer exists, so it cannot be saved to the library.",
-    "errDeleteServer": "The server could not delete this generation (HTTP {{status}}).",
-    "errKeepServer": "The server could not save this generation (HTTP {{status}}).",
-    "role": {
-      "reference": "Reference",
-      "output": "Output"
-    }
   },
   "memory": {
     "title": "Memory",

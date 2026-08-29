@@ -34,15 +34,17 @@ export const FIXTURE_IMAGE_URL =
 
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
-const TEAM = {
-  id: TEAM_ID,
-  name: 'E2E Personal Team',
-  kind: 'personal',
-  enabled_modules: null,
-  owner_id: USER_ID,
-  created_at: '2020-01-01T00:00:00Z',
-  updated_at: '2020-01-01T00:00:00Z',
-};
+function buildTeam(teamId: string) {
+  return {
+    id: teamId,
+    name: 'E2E Personal Team',
+    kind: 'personal',
+    enabled_modules: null,
+    owner_id: USER_ID,
+    created_at: '2020-01-01T00:00:00Z',
+    updated_at: '2020-01-01T00:00:00Z',
+  };
+}
 
 function base64url(value: object): string {
   return Buffer.from(JSON.stringify(value))
@@ -125,6 +127,14 @@ export interface StubOptions {
   nodes?: unknown[];
   edges?: unknown[];
   characters?: unknown[];
+  /**
+   * The personal team id this session resolves to — the `:teamId` segment of
+   * every `/team/:teamId/...` URL and the `scope_id` every scoped API call
+   * carries. Defaults to {@link TEAM_ID}, which is not snowflake-shaped; a
+   * suite whose fixtures carry real BIGINT ids should pass the same snowflake
+   * here so the URL and the response bodies agree.
+   */
+  teamId?: string;
 }
 
 /**
@@ -133,6 +143,8 @@ export interface StubOptions {
  */
 export async function setupStubbedSession(page: Page, opts: StubOptions = {}): Promise<void> {
   const session = buildSession();
+  const activeTeamId = opts.teamId ?? TEAM_ID;
+  const team = buildTeam(activeTeamId);
 
   await page.addInitScript(
     ([key, sess, teamId]) => {
@@ -144,7 +156,7 @@ export async function setupStubbedSession(page: Page, opts: StubOptions = {}): P
         /* localStorage unavailable — nothing we can do */
       }
     },
-    [STORAGE_KEY, session, TEAM_ID] as const,
+    [STORAGE_KEY, session, activeTeamId] as const,
   );
 
   // Fail-closed backstop (registered first → lowest priority): abort any
@@ -174,7 +186,7 @@ export async function setupStubbedSession(page: Page, opts: StubOptions = {}): P
 
   // ── Supabase REST: team resolution ─────────────────────────────────────────
   await page.route('**/rest/v1/team_members*', (route) =>
-    fulfillJson(route, [{ team_id: TEAM_ID }]),
+    fulfillJson(route, [{ team_id: activeTeamId }]),
   );
   await page.route('**/rest/v1/teams*', (route) => {
     const url = route.request().url();
@@ -182,8 +194,8 @@ export async function setupStubbedSession(page: Page, opts: StubOptions = {}): P
     // fetchMyTeams filters non-personal teams → none in this fixture.
     if (url.includes('kind=neq.personal')) return fulfillJson(route, []);
     // fetchPersonalTeam uses .maybeSingle() → PostgREST returns a single object.
-    if (accept.includes('pgrst.object')) return fulfillJson(route, TEAM);
-    return fulfillJson(route, [TEAM]);
+    if (accept.includes('pgrst.object')) return fulfillJson(route, team);
+    return fulfillJson(route, [team]);
   });
 
   // ── Storyboard project load (fetchProject) ─────────────────────────────────

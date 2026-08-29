@@ -86,6 +86,26 @@ class PromoteGeneratedMediaService:
         self.gen_repo = GeneratedMediaRepository()
         self.res_repo = ResourcesRepository()
 
+    async def _can_read_source_scope(
+        self, gen: dict, *, user_id: str, personal_team_id: int, conv_repo
+    ) -> bool:
+        """May *user_id* read the scope this generation lives in?
+
+        Works for every ``origin_kind`` — a chat_upload row carries the same
+        ``scope_id`` as any other (the resolved chat scope), so this is the
+        check that still applies when there is no conversation to check
+        membership against. A row with no ``scope_id`` at all is unreadable.
+        """
+        gen_scope = gen.get("scope_id")
+        if gen_scope is None:
+            return False
+        source_scope_id = int(gen_scope)
+        if source_scope_id == personal_team_id:
+            return True
+        return bool(
+            await conv_repo.is_team_member(team_id=source_scope_id, user_id=user_id)
+        )
+
     async def promote(self, *, gen_id: int, user_id: str, target_scope_id: int) -> dict:
         """Promote a Tier-1 generation into a Tier-2 resource."""
         gen = await self.gen_repo.get_by_id(gen_id)
@@ -94,6 +114,35 @@ class PromoteGeneratedMediaService:
 
         conv_repo = get_conversation_repository()
         personal_team_id = int(await _resolve_personal_team_id(user_id))
+
+        # A generation that already IS a resource: hand back the resource,
+        # before any source check. Nothing is copied here, so no
+        # source-CONVERSATION grant is needed — and demanding one broke every
+        # row the chat-upload write path and backfill_generated_inbox create
+        # (they set promoted_resource_id and leave conversation_id NULL: a
+        # session-less upload has no conversation, and the backfill can never
+        # recover one). The scope check below still applies, so a guessed
+        # gen_id does not become a resource lookup for an unrelated caller.
+        # The target-scope check is deliberately NOT run on this path: it
+        # gates writes INTO a scope, and this path writes nothing.
+        # AUTHORIZATION NOTE: for an already-promoted row the gate is
+        # source-SCOPE membership, not conversation membership — so a team
+        # member who never joined the conversation CAN resolve an already-
+        # promoted chat attachment. That is intended: the resource lives in
+        # that team's library and is already readable by any member through
+        # /resources, and this path hands back that same row without copying.
+        if gen.get("promoted_resource_id"):
+            if not await self._can_read_source_scope(
+                gen,
+                user_id=user_id,
+                personal_team_id=personal_team_id,
+                conv_repo=conv_repo,
+            ):
+                raise PermissionError("not authorised to access this generation")
+            existing = await self.res_repo.get_resource_by_id(
+                str(gen["promoted_resource_id"])
+            )
+            return existing or {"id": gen["promoted_resource_id"]}
 
         if gen.get("origin_kind") == "chat_upload":
             conv_id = gen.get("conversation_id")
@@ -104,17 +153,14 @@ class PromoteGeneratedMediaService:
             ):
                 raise PermissionError("not a member of the source conversation")
         else:
-            gen_scope = gen.get("scope_id")
-            if gen_scope is None:
+            if gen.get("scope_id") is None:
                 raise PermissionError("generation has no source scope")
-            source_scope_id = int(gen_scope)
-            can_read_source = (
-                source_scope_id == personal_team_id
-                or await conv_repo.is_team_member(
-                    team_id=source_scope_id, user_id=user_id
-                )
-            )
-            if not can_read_source:
+            if not await self._can_read_source_scope(
+                gen,
+                user_id=user_id,
+                personal_team_id=personal_team_id,
+                conv_repo=conv_repo,
+            ):
                 raise PermissionError("not authorised to access this generation")
 
         is_target_personal = personal_team_id == target_scope_id
@@ -123,12 +169,6 @@ class PromoteGeneratedMediaService:
         )
         if not is_target_personal and not is_target_team_member:
             raise PermissionError("not authorised to write to target scope")
-
-        if gen.get("promoted_resource_id"):
-            existing = await self.res_repo.get_resource_by_id(
-                str(gen["promoted_resource_id"])
-            )
-            return existing or {"id": gen["promoted_resource_id"]}
 
         media_kind = gen.get("media_kind") or "image"
         mime = gen.get("mime") or (

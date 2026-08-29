@@ -9,6 +9,11 @@ resources makes them readable from both sides.
 Task 1 scope: ``resolve_chat_scope`` + ``_get_session_team_id``.
 Task 2 scope: ``save_chat_temp_upload``, ``_ensure_temp_folder``,
               ``_resources_service``, ``_kind_for_mime``.
+P1 Task 6:    ``_register_in_generated_inbox`` — the saved resource also gets
+              a ``generated_media`` row (``origin_kind='chat_upload'``,
+              ``review_state='saved'``, ``promoted_resource_id`` = the
+              resource) so chat uploads show up in the Generated inbox. No
+              blob copy: the row points at the resource's own file_path.
 """
 
 from __future__ import annotations
@@ -154,6 +159,76 @@ def _kind_for_mime(mime: str, filename: str) -> str:
     return "pdf"
 
 
+def media_kind_for_mime(mime: Optional[str]) -> str:
+    """``generated_media.media_kind`` for a chat upload.
+
+    Deliberately NOT ``_kind_for_mime`` above (which answers the API's
+    ``kind`` and folds everything unknown into "pdf"): the inbox renders by
+    media_kind, and a docx must not claim to be a PDF preview. Three values
+    only — image / video / file.
+    """
+    m = (mime or "").lower()
+    if m.startswith("image/"):
+        return "image"
+    if m.startswith("video/"):
+        return "video"
+    return "file"
+
+
+def _conversation_id_from_session(session_id: Optional[str]) -> Optional[int]:
+    """The conversation this upload belongs to, when the session names one.
+
+    ``session_id`` is a conversation snowflake for chat turns, but issue turns
+    pass a non-numeric handle — those get NULL rather than a fabricated id.
+    """
+    if not session_id:
+        return None
+    try:
+        return int(session_id)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _register_in_generated_inbox(
+    *,
+    resource: dict,
+    scope_id: str,
+    user_id: str,
+    session_id: Optional[str],
+    mime: str,
+) -> None:
+    """Best-effort: give the saved resource a row in the Generated inbox.
+
+    This is the ONE place in this module where a swallowed error is correct:
+    the bytes are on disk and the resource row exists, so the upload has
+    already succeeded from the caller's point of view — failing it here would
+    lose a file the user is waiting on to fix a row that
+    ``backfill_generated_inbox`` re-creates on its next run. It is logged with
+    the resource id (never ``pass``) so the gap is reconcilable.
+    """
+    from app.repositories.generated_media_repository import (  # noqa: PLC0415
+        GeneratedMediaRepository,
+    )
+
+    try:
+        await GeneratedMediaRepository().insert_registered_resource(
+            scope_id=int(scope_id),
+            creator_id=str(user_id),
+            resource_id=int(resource["id"]),
+            file_path=resource["file_path"],
+            mime=mime or None,
+            media_kind=media_kind_for_mime(mime),
+            conversation_id=_conversation_id_from_session(session_id),
+            origin_kind="chat_upload",
+        )
+    except Exception as e:
+        logger.error(
+            f"[chat_upload] inbox registration failed for resource "
+            f"{resource['id']!r} (scope {scope_id}); backfill_generated_inbox "
+            f"will pick it up: {e!r}"
+        )
+
+
 async def _ensure_temp_folder(scope_type: str, scope_id: str, user_id: str) -> str:
     """Get-or-create the reserved ``temp`` folder for *scope_type*/*scope_id*.
 
@@ -287,6 +362,14 @@ async def save_chat_temp_upload(
     logger.info(
         f"[chat_upload] saved temp resource {resource['id']!r} "
         f"({size_bytes} bytes) in scope {scope_type}/{scope_id}"
+    )
+
+    await _register_in_generated_inbox(
+        resource=resource,
+        scope_id=scope_id,
+        user_id=user_id,
+        session_id=session_id,
+        mime=mime,
     )
 
     return {

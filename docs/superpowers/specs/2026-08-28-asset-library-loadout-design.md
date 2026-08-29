@@ -198,14 +198,14 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 - **新表 `canvas_asset_refs`**（镜像 `canvas_resource_refs`）：`(canvas_id, asset_id, node_id, loadout_id)`；`CanvasService.save` 从 `nodes_json` 提取 `type='asset'` 节点维护，失败不阻塞保存，可 backfill。
 - `generated_media` 加 `review_state TEXT NOT NULL DEFAULT 'unreviewed' CHECK (IN ('unreviewed','saved','in_assets','deleted'))` 与 `source_asset_id BIGINT NULL`（从资产节点/实体画布生成时预填）。
   ⚠️ **`origin_kind` 不加 CHECK，也没有「扩枚举」这回事**（P0 实证纠偏）：该列自 mig 307 起就是裸 `TEXT NOT NULL`，`schema_baseline.sql` 确认从未有过 CHECK；而 `idx_genmedia_node_shot`（mig 354）的谓词是 `origin_kind IN ('shot_generate','shot_video')` —— 这两个值不在本文档原先列出的枚举里。对一个从没有约束的列「扩枚举」等于**新加限制**，会当场把活数据判违规。`origin_kind` 因此保持**代码级枚举、数据库不设约束**。
-- **Chat Uploads 迁入 `generated_media`**：temp 文件夹里的 `resources` 逐行登记为 `origin_kind='chat_upload'`、`promoted_resource_id` 指向自身、`review_state='saved'`（它们本来就在 resources）。temp 文件夹本身保留为普通文件夹"Chat uploads"（在 My Uploads 下可见），不再有特殊语义；`tempResources` 代码路径退役。
+- **Chat Uploads 迁入 `generated_media`**：temp 文件夹里的 `resources` 逐行登记为 `origin_kind='chat_upload'`、`promoted_resource_id` 指向自身、`review_state='saved'`（它们本来就在 resources）。temp 文件夹本身不再有特殊语义；`tempResources` 代码路径退役。⚠️ **P1 只做了这半边**：`ResourceGrid` 仍然把 `temp` 从根目录网格里滤掉，文件夹也没有改名为 "Chat uploads" —— "保留为普通文件夹、在 My Uploads 下可见"这一半**移交 P6**（与 `tempResources` 的删除同批）。功能上不阻塞：这些文件通过 Generated 收件箱可达。
 - `tags.prompt_trigger` 与 `resources.gen_prompt*` **保留不动**——文件级 prompt 仍可搜；提示词**模板**才是 `assets(type=prompt)`。
 
 ### 3.8 退役
 
 - `project_characters`、`project_lib_entities` → 迁到 `assets` 后 DROP（分两步：先 rename 成 `_legacy_*` 一个版本周期，再删）。
 - `canvas_resource_refs` 保留（文件级反查照旧）。
-- `temp_resource_sweeper` 早已停用，代码删除。
+- `temp_resource_sweeper` 的**调度早已停用**（cron 装饰器自 2026-06-13 起就是注释掉的，已在 merge base 核实）；P1 只移除了它那个 bundle 导入 —— 也就是说这**不是**一次对现存用户的行为改变。代码删除留 P6。
 - 智能文件夹"提示词库"是用户数据，不动；文档提示用 Assets → Prompts。
 
 ## 4. 迁移路径（一次性 backfill，幂等）
@@ -251,9 +251,9 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 
 | 端点 | 说明 |
 |---|---|
-| `GET /generated?scope_id&state&origin_kind&project_id&media_kind&model&since` | 扁平列表，默认 `state=unreviewed`；每项带 `source {kind, canvas_id, node_id, shot_id, label, deep_link}` |
+| `GET /generated?scope_id&state&origin_kind&project_id&media_kind&model&since&cursor&limit` | 扁平列表，默认 `state=unreviewed`（`state=all` 是无过滤别名）；`cursor` keyset 翻页，`limit` 1–200、默认 60；每项带 `source {kind, canvas_id, node_id, shot_id, label, deep_link}` |
 | `POST /generated/{id}/save` | 现有 promote，且置 `saved` |
-| `POST /generated/{id}/save-as-asset` `{asset_id \| new_asset:{type,name}, slot, loadout_id?}` | promote + `asset_files` + `in_assets`，一个事务 |
+| `POST /generated/{id}/save-as-asset` `{asset_id \| new_asset:{type,name}, slot, loadout_id?}` | `promote`（幂等，事务外）→ 然后 `asset_files` attach + `in_assets` 在同一个事务里。目标校验（asset 可写 + slot 合法）在 `promote` **之前**跑，纯校验失败不留下已 promote 的资源 |
 | `POST /generated/batch` `{ids, action: save\|save_as_asset\|delete, …}` | 批量 |
 | `POST /generated/cleanup` `{older_than_days, dry_run}` | 手动清理；`dry_run` 返回数量与样例，UI 必须先 dry-run 再确认 |
 
@@ -315,7 +315,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 
 
 - 归入资产的每条路径都返回类型化结果（成功 / 409 已存在 / 404 资源不可见 / 422 槽位不合法），前端逐条回显——沿用"触发路径必须类型化失败回显"纪律。
-- `save-as-asset` 是一个事务：promote 失败不写 `asset_files`；写 `asset_files` 失败回滚 promote 状态（`review_state` 不变）。
+- `save-as-asset` 分两段：`promote` 先跑（幂等，靠 `promoted_resource_id` 短路），**不在事务内** —— 它会 `SET LOCAL ROLE service_role`、做存储 I/O、且内部有"非致命"的 backlink 兜底，三者都不能待在共享事务里。attach + `in_assets` 在一个事务里：attach 失败则该行停在 `saved`（一个合法状态，等同于普通 Save），**永远不会出现 `in_assets` 却没有附件**。
+  纯校验失败（asset 不存在 / 是系统预设 / slot 与该 asset_type 不匹配）在 `promote` 之前就拒绝，所以 404/422 不会已经把文件拷进 My Uploads；`save` 同理先校验 scope 再 promote。
 - `canvas_asset_refs` 维护失败只记日志，不阻塞画布保存；backfill 可重建。
 - readiness 永远派生，不缓存进列；列表端点用一条带 `EXISTS` 的查询算。
 - 边界 mock 用真实 wire 形状：`assets.id` 与 `canvases` 一样显式 `str()`，但落点是 **repository 的序列化边界**（`_serialize` / `_serialize_file` / `_serialize_link` / `_serialize_loadout`），不是 router —— 数组元素（`costume_ids` / `prop_ids`）也在那里逐个 `str()`；`asset_files.resource_id` 同。测试 fixture 必须覆盖数字 id 分支（2026-08-12 教训）。
@@ -337,7 +338,7 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 | **P3 项目分级视图 + 迁移执行** | 项目侧栏改数据源 / Link from library / import-from-script 改落 assets / 跑迁移 / 旧表 rename legacy | P2 |
 | **P4 画布** | asset 节点 / bundle 投递协议 / Output 预填 / Insert project assets / canvas_asset_refs | P2 |
 | **P5 聊天 / agent** | pendingAsset / resolver / `<asset>` 框 / @ 选择器 | P2 |
-| **P6 清尾** | 删 legacy 表 / EntityAssetStrip / tempResources / temp_resource_sweeper；My Uploads 右键与 Output 节点的 As Asset 入口 | P3 P4 |
+| **P6 清尾** | 删 legacy 表 / EntityAssetStrip / tempResources / temp_resource_sweeper（含 `ChatTempTtlPanel` + `tempTtlService`，P1 已下架其渲染点）；temp 文件夹改名 "Chat uploads" 并在 My Uploads 下可见（§3.7 未做的那半边）；My Uploads 右键与 Output 节点的 As Asset 入口 | P3 P4 |
 
 P1 与 P2 可并行（不同 worktree）。
 

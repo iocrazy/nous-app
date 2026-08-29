@@ -83,7 +83,6 @@ vi.mock('./TaskCenter/TaskCenter', () => ({ TaskCenter: () => null }));
 vi.mock('./TagsSettings', () => ({ TagsSettings: () => null }));
 vi.mock('./ApiDocsPanel', () => ({ ApiDocsPanel: () => null }));
 vi.mock('./CookiesSettings', () => ({ CookiesSettings: () => null }));
-vi.mock('./ChatTempTtlPanel', () => ({ ChatTempTtlPanel: () => null }));
 // B5 (#1720) added a top-level useWorkspaceScope() in SettingsView (for the
 // Workflow Templates tab's teamId). It reads TeamContext, which this isolated
 // API-tab render does not provide — stub it, same pattern as the panels above.
