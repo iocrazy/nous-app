@@ -63,9 +63,31 @@ export interface AssetSearchOptions {
   limit?: number;
 }
 
+/**
+ * How an asset came to exist (`assets_source_check`, mirrored from
+ * `app/schemas/assets.py::AssetSource`). It is provenance, written once at
+ * creation and never corrected afterwards, so a caller that omits it does not
+ * get "unknown" — it gets the server default `manual`, which is a claim.
+ */
+export type AssetSource =
+  | 'manual'
+  | 'script_import'
+  | 'generated'
+  | 'migrated'
+  | 'duplicated'
+  | 'system_preset';
+
 export interface AssetCreateBody {
   asset_type: AssetType;
   name: string;
+  /**
+   * Defaults to `manual` SERVER-side. Any caller creating an asset on behalf
+   * of a generation must pass `generated` explicitly: the backend's own
+   * create-and-attach path (`generated_inbox_service.save_as_asset`) does, and
+   * a two-step client that skips it writes a permanently wrong provenance
+   * that nothing downstream can distinguish from a hand-made asset.
+   */
+  source?: AssetSource;
 }
 
 const BASE = () => `${getApiUrl()}/api/v1/assets`;

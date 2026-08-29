@@ -159,6 +159,14 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   const [loadouts, setLoadouts] = useState<AssetLoadout[]>([]);
   const [loadoutId, setLoadoutId] = useState<string | null>(null);
   /**
+   * The loadout fetch is in flight. Submitting during that window used to
+   * send NO `loadout_id` — the file would attach to the character but not to
+   * the loadout the dialog was a moment away from showing as the default,
+   * with nothing anywhere saying so. A silent wrong result, so the primary
+   * waits rather than guessing.
+   */
+  const [loadoutsPending, setLoadoutsPending] = useState(false);
+  /**
    * Distinct from `results.length === 0`: an empty scope and a failed search
    * look identical in the list otherwise, and reading a network error as
    * "you have no characters yet" is what walks a user into creating a
@@ -212,6 +220,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
     setSlot(UNSORTED);
     setLoadouts([]);
     setLoadoutId(null);
+    setLoadoutsPending(false);
     setExistingConflictId(null);
     setBusy(false);
     // `items` is a fresh array each render; `itemsKey` is its identity.
@@ -295,9 +304,11 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
     if (!open || type !== 'character' || !existingId) {
       setLoadouts([]);
       setLoadoutId(null);
+      setLoadoutsPending(false);
       return;
     }
     let alive = true;
+    setLoadoutsPending(true);
     fetchAsset(scopeId, existingId)
       .then((asset) => {
         if (!alive) return;
@@ -311,6 +322,11 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
           setLoadouts([]);
           setLoadoutId(null);
         }
+      })
+      .finally(() => {
+        // Settled either way: a character whose loadouts could not be read
+        // must still be attachable, just without one.
+        if (alive) setLoadoutsPending(false);
       });
     return () => {
       alive = false;
@@ -320,13 +336,27 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   // ─── Actions ─────────────────────────────────────────────────────────────
 
   const chooseType = (next: AssetType) => {
+    if (next === type) return;
     typeTouched.current = true;
     setType(next);
-    // A target and a slot only mean anything under one type; carrying them
-    // across would submit a character's slot against a location.
-    setTarget(null);
+    // Cleared rather than left to be overwritten when the new search lands:
+    // for that round-trip the list would otherwise show the OLD type's
+    // assets under the new heading, and a click in that window attaches to
+    // an asset of the wrong type.
+    setResults([]);
+    setSearchError(false);
+    // A slot only means something under one type — `stills` is not a slot a
+    // location has.
     setSlot(UNSORTED);
     setExistingConflictId(null);
+    // Unconditionally, and the "unless it is the suggestion of the new type"
+    // exception is deliberately absent: it cannot fire. An existing target is
+    // only ever set from a row of the CURRENT type — the candidate list is
+    // `searchAssets({type})` plus the suggestion pinned only while its type
+    // matches, and the 409 path adopts the asset that collided with a
+    // `createAsset({asset_type: type})`. Since this function early-returns on
+    // `next === type`, every surviving target would be of the wrong type.
+    setTarget(null);
   };
 
   /** Adopt the asset the 409 pointed at. Its name is fetched because the
@@ -357,7 +387,17 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
       if (target.kind === 'new') {
         const name = newName.trim();
         if (!name) return;
-        const created = await createAsset(scopeId, { asset_type: type, name });
+        // `source` is NOT optional in practice: it defaults to `manual`
+        // server-side, and the backend's own create-and-attach path
+        // (`generated_inbox_service.save_as_asset`) passes `generated`. This
+        // client creates then attaches in two steps, so omitting it here
+        // would label every asset born in this dialog as hand-made —
+        // permanently, and with nothing downstream able to tell.
+        const created = await createAsset(scopeId, {
+          asset_type: type,
+          name,
+          source: 'generated',
+        });
         assetId = created.id;
         assetName = created.name;
       } else {
@@ -446,7 +486,10 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   const stripOverflow = siblings.length - stripThumbs.length;
 
   const canSubmit =
-    target !== null && !busy && (target.kind === 'existing' || newName.trim().length > 0);
+    target !== null &&
+    !busy &&
+    !loadoutsPending &&
+    (target.kind === 'existing' || newName.trim().length > 0);
 
   const primaryLabel =
     target?.kind === 'existing'

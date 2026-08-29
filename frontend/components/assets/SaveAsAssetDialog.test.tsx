@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 // A stand-in bundle, not a bare `d ?? k`: the failure path resolves
 // `saveAsAsset.err.<code>` with `saveAsAsset.err.generic` AS its default, so a
@@ -277,6 +277,32 @@ describe('SaveAsAssetDialog — target, slot, loadout', () => {
     await waitFor(() => expect(screen.queryByTestId('sa-loadout-seg')).toBeNull());
   });
 
+  it('will not submit while the chosen character\'s loadouts are still loading', async () => {
+    searchAssets.mockResolvedValue([summary()]);
+    let release: (asset: AssetDetail) => void = () => {};
+    fetchAsset.mockImplementation(
+      () =>
+        new Promise<AssetDetail>((resolve) => {
+          release = resolve;
+        }),
+    );
+    renderDialog([ITEM_B]);
+
+    await waitFor(() => expect(candidates().length).toBe(1));
+    fireEvent.click(screen.getByText('Yi Heng'));
+
+    // A target IS chosen, but submitting now would send no `loadout_id` and
+    // attach to the character without the loadout about to be shown as its
+    // default — a wrong result nothing would report.
+    await waitFor(() => expect(primary().textContent).toContain('Attach to Yi Heng'));
+    expect(primary().disabled).toBe(true);
+
+    await act(async () => {
+      release(YI_HENG);
+    });
+    await waitFor(() => expect(primary().disabled).toBe(false));
+  });
+
   it('never offers loadouts for a non-character type', async () => {
     searchAssets.mockResolvedValue([LOCATION_ASSET]);
     renderDialog([ITEM_B]);
@@ -288,6 +314,52 @@ describe('SaveAsAssetDialog — target, slot, loadout', () => {
 
     await waitFor(() => expect(primary().disabled).toBe(false));
     expect(screen.queryByTestId('sa-loadout-seg')).toBeNull();
+  });
+
+  it('drops the previous type\'s candidates before the new ones arrive', async () => {
+    searchAssets.mockResolvedValueOnce([summary()]);
+    renderDialog([ITEM_B]);
+
+    await waitFor(() => expect(candidates().length).toBe(1));
+    expect(screen.getByText('Yi Heng')).toBeTruthy();
+
+    // Hold the next search open, so the window between the click and the new
+    // list is observable rather than a race we hope is short.
+    let release: (list: AssetSummary[]) => void = () => {};
+    searchAssets.mockImplementationOnce(
+      () =>
+        new Promise<AssetSummary[]>((resolve) => {
+          release = resolve;
+        }),
+    );
+    fireEvent.click(within(typeSeg()).getByRole('radio', { name: 'Location' }));
+
+    // A character listed under Location is not merely stale: clicking it in
+    // this window attaches the generation to an asset of the wrong type.
+    await waitFor(() => expect(candidates().length).toBe(0));
+    expect(screen.queryByText('Yi Heng')).toBeNull();
+
+    await act(async () => {
+      release([LOCATION_ASSET]);
+    });
+    await waitFor(() => expect(candidates().length).toBe(1));
+    expect(screen.getByText('Tea Port')).toBeTruthy();
+  });
+
+  it('drops a chosen target when the type changes out from under it', async () => {
+    searchAssets.mockResolvedValue([summary()]);
+    renderDialog([ITEM_B]);
+
+    await waitFor(() => expect(candidates().length).toBe(1));
+    fireEvent.click(screen.getByText('Yi Heng'));
+    await waitFor(() => expect(primary().disabled).toBe(false));
+
+    fireEvent.click(within(typeSeg()).getByRole('radio', { name: 'Location' }));
+
+    // Back to "nothing chosen": a character is not a target a location
+    // attach could ever have used.
+    await waitFor(() => expect(primary().disabled).toBe(true));
+    expect(primary().textContent).toContain('Create & attach');
   });
 
   it('debounces the search rather than firing per keystroke', async () => {
@@ -371,6 +443,10 @@ describe('SaveAsAssetDialog — attaching', () => {
       expect(createAsset).toHaveBeenCalledWith(SCOPE, {
         asset_type: 'character',
         name: 'Prompt 0',
+        // Provenance. Omitting it takes the server default `manual`, which
+        // would label an asset born from a generation as hand-made — for
+        // good, and indistinguishably.
+        source: 'generated',
       }),
     );
     await waitFor(() =>
@@ -380,7 +456,39 @@ describe('SaveAsAssetDialog — attaching', () => {
       }),
     );
     expect(onDone).toHaveBeenCalledWith(
-      expect.objectContaining({ assetId: '727145299382534299', assetName: 'Prompt 0' }),
+      expect.objectContaining({ assetId: '727145299382534299' }),
+    );
+  });
+
+  it('reports the name the server assigned, not the one that was typed', async () => {
+    // The server is free to trim, normalise, or de-duplicate the name. Echoing
+    // the typed one back would tell the user about an asset that does not
+    // exist under that name.
+    createAsset.mockResolvedValue(summary({ id: '727145299382534299', name: 'Prompt 0 (2)' }));
+    saveGenerationAsAsset.mockResolvedValue({
+      generation: { ...ITEM_A, review_state: 'in_assets' },
+      asset_id: '727145299382534299',
+      resource_id: '727145299382534301',
+    });
+    const { onDone } = renderDialog();
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('sa-create-button'));
+    fireEvent.change(screen.getByTestId('sa-new-name'), { target: { value: '  Prompt 0  ' } });
+    fireEvent.click(primary());
+
+    await waitFor(() =>
+      expect(createAsset).toHaveBeenCalledWith(SCOPE, {
+        asset_type: 'character',
+        name: 'Prompt 0',
+        source: 'generated',
+      }),
+    );
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('Attached to Prompt 0 (2) · Unsorted', 'success'),
+    );
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({ assetId: '727145299382534299', assetName: 'Prompt 0 (2)' }),
     );
   });
 
@@ -409,8 +517,11 @@ describe('SaveAsAssetDialog — attaching', () => {
 
     fireEvent.click(screen.getByTestId('sa-use-existing'));
 
-    // The switch resolves the name so the primary can name its target.
+    // The switch resolves the name so the primary can name its target — and
+    // the button is only the readiness signal once it is also ENABLED, which
+    // waits on the loadout fetch the new target just kicked off.
     await waitFor(() => expect(primary().textContent).toContain('Attach to Sang Yao'));
+    await waitFor(() => expect(primary().disabled).toBe(false));
     fireEvent.click(primary());
 
     await waitFor(() =>
