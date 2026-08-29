@@ -31,6 +31,7 @@ from app.schemas.assets import (
     LoadoutUpdate,
 )
 from app.services.assets.slots import is_valid_slot, link_allowed
+from app.services.library.resources_service import _resolve_personal_team_id
 
 
 class AssetError(Exception):
@@ -61,6 +62,26 @@ class AssetsService:
         row = await self.assets.get(int(asset_id), int(scope_id))
         if not row:
             raise AssetError(404, "asset_not_found", "Asset not found")
+        return row
+
+    async def _require_writable(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
+        """``_require`` + the system-preset read-only gate (spec §7.0).
+
+        ``AssetsRepository.get`` unions ``is_system_preset`` into EVERY scope, so
+        a preset row is reachable from any team. The header-column writes carry a
+        scope predicate a preset (scope_id NULL) never matches, but the relation
+        tables (asset_files / asset_links / asset_loadouts / asset_project_refs)
+        key on ``asset_id`` alone — nothing there would stop team T from writing
+        to the global row and team U from reading the result. Every mutating path
+        goes through this, not ``_require``.
+        """
+        row = await self._require(asset_id, scope_id)
+        if row.get("is_system_preset"):
+            raise AssetError(
+                403,
+                "system_preset_readonly",
+                "System presets are read-only; duplicate to edit",
+            )
         return row
 
     async def _derived(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -112,13 +133,7 @@ class AssetsService:
     async def update_asset(
         self, asset_id: int, scope_id: int, payload: AssetUpdate
     ) -> Dict[str, Any]:
-        row = await self._require(asset_id, scope_id)
-        if row.get("is_system_preset"):
-            raise AssetError(
-                403,
-                "system_preset_readonly",
-                "System presets are read-only; duplicate to edit",
-            )
+        await self._require_writable(asset_id, scope_id)
         fields = payload.model_dump(exclude_none=True)
         if "cover_file_id" in fields:
             fields["cover_file_id"] = int(fields["cover_file_id"])
@@ -139,16 +154,10 @@ class AssetsService:
         return (await self._derived([updated]))[0]
 
     async def delete_asset(self, asset_id: int, scope_id: int) -> None:
-        row = await self._require(asset_id, scope_id)
         # soft_delete's scope predicate never matches a preset (scope_id NULL),
-        # so without this it would return False and the caller would see a
+        # so without the gate it would return False and the caller would see a
         # silent no-op instead of "presets are read-only".
-        if row.get("is_system_preset"):
-            raise AssetError(
-                403,
-                "system_preset_readonly",
-                "System presets are read-only; duplicate to edit",
-            )
+        await self._require_writable(asset_id, scope_id)
         await self.assets.soft_delete(int(asset_id), int(scope_id))
 
     # ── files ──────────────────────────────────────────────────────────────
@@ -160,7 +169,7 @@ class AssetsService:
         req: AttachFileRequest,
         user_id: Optional[str],
     ) -> Dict[str, Any]:
-        row = await self._require(asset_id, scope_id)
+        row = await self._require_writable(asset_id, scope_id)
         if not is_valid_slot(row["asset_type"], req.slot):
             raise AssetError(
                 422,
@@ -196,7 +205,7 @@ class AssetsService:
     async def detach_file(
         self, asset_id: int, scope_id: int, resource_id: int, slot: str
     ) -> None:
-        await self._require(asset_id, scope_id)
+        await self._require_writable(asset_id, scope_id)
         if not await self.relations.detach(int(asset_id), int(resource_id), slot):
             raise AssetError(
                 404, "file_not_attached", "File is not attached to this slot"
@@ -207,7 +216,7 @@ class AssetsService:
     async def add_link(
         self, asset_id: int, scope_id: int, req: LinkRequest
     ) -> Dict[str, Any]:
-        src = await self._require(asset_id, scope_id)
+        src = await self._require_writable(asset_id, scope_id)
         dst = await self.assets.get(int(req.to_asset_id), int(scope_id))
         if not dst:
             raise AssetError(404, "asset_not_found", "Target asset not found")
@@ -229,7 +238,7 @@ class AssetsService:
     async def remove_link(
         self, asset_id: int, scope_id: int, to_asset_id: int, relation: str
     ) -> None:
-        await self._require(asset_id, scope_id)
+        await self._require_writable(asset_id, scope_id)
         if not await self.relations.remove_link(
             int(asset_id), int(to_asset_id), relation
         ):
@@ -263,7 +272,7 @@ class AssetsService:
     async def create_loadout(
         self, asset_id: int, scope_id: int, payload: LoadoutCreate
     ) -> Dict[str, Any]:
-        row = await self._require(asset_id, scope_id)
+        row = await self._require_writable(asset_id, scope_id)
         if row["asset_type"] != "character":
             raise AssetError(
                 422, "loadouts_character_only", "Only characters have loadouts"
@@ -283,7 +292,7 @@ class AssetsService:
     async def update_loadout(
         self, asset_id: int, scope_id: int, loadout_id: int, payload: LoadoutUpdate
     ) -> Dict[str, Any]:
-        await self._require(asset_id, scope_id)
+        await self._require_writable(asset_id, scope_id)
         fields = payload.model_dump(exclude_none=True)
         make_default = fields.pop("is_default", None)
         if "costume_ids" in fields or "prop_ids" in fields:
@@ -307,7 +316,7 @@ class AssetsService:
     async def delete_loadout(
         self, asset_id: int, scope_id: int, loadout_id: int
     ) -> None:
-        await self._require(asset_id, scope_id)
+        await self._require_writable(asset_id, scope_id)
         current = {
             int(lo["id"]): lo
             for lo in await self.relations.list_loadouts(int(asset_id))
@@ -325,13 +334,20 @@ class AssetsService:
     async def link_project(
         self, asset_id: int, scope_id: int, project_id: int, user_id: Optional[str]
     ) -> None:
-        await self._require(asset_id, scope_id)
-        exists, team_id = await self.relations.project_team_id(int(project_id))
+        await self._require_writable(asset_id, scope_id)
+        exists, team_id, owner_id = await self.relations.project_team_id(
+            int(project_id)
+        )
         if not exists:
             raise AssetError(404, "project_not_found", "Project not found")
-        # Personal projects carry team_id NULL; their scope is the owner's personal
-        # team, which is what the caller passed as scope_id when they are that owner.
-        if team_id is not None and int(team_id) != int(scope_id):
+        if team_id is None:
+            # Personal project (projects.team_id NULL). Its asset scope is the
+            # OWNER's personal team — the same resolution the read side
+            # (GET /projects/{id}/assets) performs. Accepting it unchecked let a
+            # collaborator link an asset from their own team into someone else's
+            # personal project: a 201 for a row the read path can never return.
+            team_id = await self._owner_personal_team(owner_id)
+        if int(team_id) != int(scope_id):
             raise AssetError(
                 422,
                 "project_scope_mismatch",
@@ -339,10 +355,33 @@ class AssetsService:
             )
         await self.relations.link_project(int(asset_id), int(project_id), user_id)
 
+    @staticmethod
+    async def _owner_personal_team(owner_id: Optional[str]) -> int:
+        """The personal team a team-less project belongs to, as a typed failure.
+
+        ``_resolve_personal_team_id`` raises ValueError on legacy rows with no
+        personal team; letting that out would be an untyped 500 on a path whose
+        honest answer is "this project is not in your scope".
+        """
+        if owner_id is None:
+            raise AssetError(
+                422,
+                "project_scope_mismatch",
+                "Project has no team and no owner to resolve a scope from",
+            )
+        try:
+            return int(await _resolve_personal_team_id(str(owner_id)))
+        except ValueError:
+            raise AssetError(
+                422,
+                "project_scope_mismatch",
+                "Project owner has no personal team; cannot resolve its scope",
+            )
+
     async def unlink_project(
         self, asset_id: int, scope_id: int, project_id: int
     ) -> None:
-        await self._require(asset_id, scope_id)
+        await self._require_writable(asset_id, scope_id)
         if not await self.relations.unlink_project(int(asset_id), int(project_id)):
             raise AssetError(
                 404, "project_ref_not_found", "Asset is not linked to this project"

@@ -20,6 +20,7 @@ from app.services.assets.assets_service import AssetError, AssetsService
 NOW = datetime.datetime(2026, 8, 28, tzinfo=datetime.timezone.utc)
 SCOPE = 727145299382534200
 USER = "11111111-1111-1111-1111-111111111111"
+OTHER_OWNER = "22222222-2222-2222-2222-222222222222"
 
 
 class FakeAssetsRepo:
@@ -231,12 +232,20 @@ class FakeRelationsRepo:
         self.strip_calls.append((asset_id, costume_id, prop_id))
         return 0
 
-    project_teams = {55: SCOPE, 56: 999}
+    # project_id -> (team_id, owner_id). team_id None = personal project, whose
+    # asset scope is the OWNER's personal team (resolved by the service).
+    project_teams = {
+        55: (SCOPE, USER),
+        56: (999, USER),
+        58: (None, OTHER_OWNER),
+        59: (None, None),
+    }
 
     async def project_team_id(self, project_id):
         if project_id not in self.project_teams:
-            return False, None
-        return True, self.project_teams[project_id]
+            return False, None, None
+        team_id, owner_id = self.project_teams[project_id]
+        return True, team_id, owner_id
 
     async def link_project(self, a, p, u):
         self.refs.append((a, p))
@@ -684,3 +693,175 @@ async def test_service_payloads_satisfy_declared_response_schemas(svc):
     assert len(parsed.files) == 1 and len(parsed.links) == 1
     assert len(parsed.loadouts) == 2  # Default + Battle
     assert parsed.linked_by == []
+
+
+# ── I1: system presets are read-only on EVERY mutating path ────────────────
+
+
+async def _preset(svc, asset_type="prompt", name="Grid"):
+    """A row reachable from SCOPE only because ``get()`` unions presets in."""
+    p = await svc.create_asset(
+        SCOPE,
+        AssetCreate(asset_type=asset_type, name=name, source="system_preset"),
+        USER,
+    )
+    svc.assets.make_preset(p["id"])
+    return int(p["id"])
+
+
+@pytest.mark.asyncio
+async def test_attach_file_refuses_system_preset(svc):
+    pid = await _preset(svc)
+    with pytest.raises(AssetError) as ei:
+        await svc.attach_file(
+            pid,
+            SCOPE,
+            # 'examples' IS a valid prompt slot — the refusal must come from the
+            # preset gate, not from slot validation.
+            AttachFileRequest(resource_id="727145299382534146", slot="examples"),
+            USER,
+        )
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert svc.relations.files == []
+
+
+@pytest.mark.asyncio
+async def test_detach_file_refuses_system_preset(svc):
+    pid = await _preset(svc)
+    with pytest.raises(AssetError) as ei:
+        await svc.detach_file(pid, SCOPE, 727145299382534146, "examples")
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+
+
+@pytest.mark.asyncio
+async def test_add_link_refuses_system_preset(svc):
+    """The preset is the LINK SOURCE: without the gate, team T writes an
+    asset_links row on the global asset and team U reads the target id back."""
+    pid = await _preset(svc, "audio", "Preset Ambience")
+    loc = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="location", name="Rooftop"), USER
+    )
+    with pytest.raises(AssetError) as ei:
+        await svc.add_link(
+            pid, SCOPE, LinkRequest(to_asset_id=loc["id"], relation="ambience_of")
+        )
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert svc.relations.links == []
+
+
+@pytest.mark.asyncio
+async def test_remove_link_refuses_system_preset(svc):
+    pid = await _preset(svc, "audio", "Preset Ambience")
+    with pytest.raises(AssetError) as ei:
+        await svc.remove_link(pid, SCOPE, 12345, "ambience_of")
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+
+
+@pytest.mark.asyncio
+async def test_create_loadout_refuses_system_preset(svc):
+    pid = await _preset(svc, "character", "Preset Hero")
+    before = len(await svc.relations.list_loadouts(pid))
+    with pytest.raises(AssetError) as ei:
+        await svc.create_loadout(pid, SCOPE, LoadoutCreate(name="Night"))
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert len(await svc.relations.list_loadouts(pid)) == before
+
+
+@pytest.mark.asyncio
+async def test_update_loadout_refuses_system_preset(svc):
+    pid = await _preset(svc, "character", "Preset Hero")
+    lo = (await svc.relations.list_loadouts(pid))[0]
+    with pytest.raises(AssetError) as ei:
+        await svc.update_loadout(pid, SCOPE, int(lo["id"]), LoadoutUpdate(name="X"))
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert lo["name"] == "Default"
+
+
+@pytest.mark.asyncio
+async def test_delete_loadout_refuses_system_preset(svc):
+    pid = await _preset(svc, "character", "Preset Hero")
+    lo = (await svc.relations.list_loadouts(pid))[0]
+    with pytest.raises(AssetError) as ei:
+        await svc.delete_loadout(pid, SCOPE, int(lo["id"]))
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert len(await svc.relations.list_loadouts(pid)) == 1
+
+
+@pytest.mark.asyncio
+async def test_link_project_refuses_system_preset(svc):
+    pid = await _preset(svc)
+    with pytest.raises(AssetError) as ei:
+        await svc.link_project(pid, SCOPE, 55, USER)
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+    assert svc.relations.refs == []
+
+
+@pytest.mark.asyncio
+async def test_unlink_project_refuses_system_preset(svc):
+    pid = await _preset(svc)
+    with pytest.raises(AssetError) as ei:
+        await svc.unlink_project(pid, SCOPE, 55)
+    assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
+
+
+# ── I2: a personal project's scope is its OWNER's personal team ────────────
+
+
+@pytest.mark.asyncio
+async def test_link_personal_project_requires_owners_personal_team(svc, monkeypatch):
+    """A collaborator on someone else's personal project used to link an asset
+    from their OWN team: 201 for a row GET /projects/{id}/assets can never
+    return, because the read side resolves the owner's team."""
+    import app.services.assets.assets_service as m
+
+    seen = []
+
+    async def _resolver(user_id):
+        seen.append(user_id)
+        return "999"  # the owner's personal team — NOT the caller's SCOPE
+
+    monkeypatch.setattr(m, "_resolve_personal_team_id", _resolver)
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    with pytest.raises(AssetError) as ei:
+        await svc.link_project(int(c["id"]), SCOPE, 58, USER)
+    assert ei.value.status == 422 and ei.value.code == "project_scope_mismatch"
+    assert seen == [OTHER_OWNER], "resolved the caller's team, not the owner's"
+    assert svc.relations.refs == []
+
+
+@pytest.mark.asyncio
+async def test_link_personal_project_ok_when_owner_team_is_the_scope(svc, monkeypatch):
+    import app.services.assets.assets_service as m
+
+    async def _resolver(user_id):
+        return str(SCOPE)
+
+    monkeypatch.setattr(m, "_resolve_personal_team_id", _resolver)
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    await svc.link_project(int(c["id"]), SCOPE, 58, USER)
+    assert (int(c["id"]), 58) in svc.relations.refs
+
+
+@pytest.mark.asyncio
+async def test_link_personal_project_without_owner_is_typed_not_500(svc, monkeypatch):
+    """Legacy rows: no team AND no resolvable personal team must answer 422,
+    not let a ValueError out as an untyped 500."""
+    import app.services.assets.assets_service as m
+
+    async def _boom(user_id):
+        raise ValueError("No personal team found")
+
+    monkeypatch.setattr(m, "_resolve_personal_team_id", _boom)
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    with pytest.raises(AssetError) as ei:
+        await svc.link_project(int(c["id"]), SCOPE, 58, USER)
+    assert ei.value.status == 422 and ei.value.code == "project_scope_mismatch"
+    with pytest.raises(AssetError) as ei:  # owner_id NULL
+        await svc.link_project(int(c["id"]), SCOPE, 59, USER)
+    assert ei.value.status == 422 and ei.value.code == "project_scope_mismatch"

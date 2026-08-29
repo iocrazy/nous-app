@@ -109,9 +109,60 @@ async def test_list_passes_filters_and_wraps(app):
 
 @pytest.mark.asyncio
 async def test_non_member_403(app):
+    """I4: the gate answers in the SAME envelope as every other failure. It used
+    to raise a bare HTTPException, so the one 403 that matters most was the only
+    failure with no ``code`` for a client to branch on."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/v1/assets?scope_id=666")
     assert r.status_code == 403
+    body = r.json()
+    assert body["success"] is False
+    assert body["error"]["code"] == "not_a_member"
+    assert "detail" not in body, "bare HTTPException shape leaked out"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method,url",
+    [
+        ("get", "/api/v1/assets?scope_id=666"),
+        ("get", "/api/v1/assets/5?scope_id=666"),
+        ("delete", "/api/v1/assets/5?scope_id=666"),
+        ("post", "/api/v1/assets/5/files?scope_id=666"),
+        ("delete", "/api/v1/assets/5/files/6/sheet?scope_id=666"),
+        ("post", "/api/v1/assets/5/links?scope_id=666"),
+        ("delete", "/api/v1/assets/5/links/6/wears?scope_id=666"),
+        ("post", "/api/v1/assets/5/loadouts?scope_id=666"),
+        ("patch", "/api/v1/assets/5/loadouts/6?scope_id=666"),
+        ("delete", "/api/v1/assets/5/loadouts/6?scope_id=666"),
+        ("post", "/api/v1/assets/5/project-refs?scope_id=666"),
+        ("delete", "/api/v1/assets/5/project-refs/7?scope_id=666"),
+    ],
+)
+async def test_every_gated_route_uses_the_error_envelope(app, method, url):
+    bodies = {
+        "post": {
+            "files": {"resource_id": "1", "slot": "sheet"},
+            "links": {"to_asset_id": "6", "relation": "wears"},
+            "loadouts": {"name": "Night"},
+            "project-refs": {"project_id": "7"},
+        }
+    }
+    json_body = None
+    if method in ("post", "patch"):
+        json_body = next(
+            (v for k, v in bodies["post"].items() if f"/{k}" in url), {"name": "Night"}
+        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await getattr(c, method)(url, **({"json": json_body} if json_body else {}))
+    assert r.status_code == 403, r.text
+    assert r.json() == {
+        "success": False,
+        "error": {
+            "code": "not_a_member",
+            "detail": "You are not a member of this scope",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -294,3 +345,106 @@ async def test_personal_project_resolves_owner_team_not_callers(app, monkeypatch
     assert seen["user_id"] == OWNER, "resolved the caller's team, not the owner's"
     _, scope, f = app.state.fake.calls[0]
     assert scope == 777 and f["project_id"] == 55
+
+
+# ── I2: project-refs are WRITES, and both halves are guarded the same ──────
+
+
+@pytest.fixture
+def guard_spy(monkeypatch):
+    """Records which project guard each route reached. ``_project_gate`` resolves
+    the guard by module global at call time, so patching the names here is what
+    the router really calls."""
+    seen = {"read": [], "write": []}
+
+    async def _read(project_id, auth):
+        seen["read"].append(str(project_id))
+
+    async def _write(project_id, auth):
+        seen["write"].append(str(project_id))
+
+    monkeypatch.setattr(ar, "verify_project_read_access", _read)
+    monkeypatch.setattr(ar, "verify_project_write_access", _write)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_link_project_ref_uses_the_write_guard(app, guard_spy):
+    """``_resolve_project_access`` grants can_read to ANY project_members row —
+    a viewer. Creating an asset_project_refs row is a write."""
+
+    async def _link(asset_id, scope_id, project_id, user_id):
+        return None
+
+    app.state.fake.link_project = _link
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets/5/project-refs?scope_id=9000", json={"project_id": "77"}
+        )
+    assert r.status_code == 201 and r.json()["data"] == {"linked": True}
+    assert guard_spy["write"] == ["77"]
+    assert guard_spy["read"] == [], "a write path must not gate on read access"
+
+
+@pytest.mark.asyncio
+async def test_unlink_project_ref_uses_the_write_guard(app, guard_spy):
+    """This route had NO project guard at all — the two halves of one operation
+    were guarded differently."""
+
+    async def _unlink(asset_id, scope_id, project_id):
+        return None
+
+    app.state.fake.unlink_project = _unlink
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.delete("/api/v1/assets/5/project-refs/77?scope_id=9000")
+    assert r.status_code == 200 and r.json()["data"] == {"unlinked": True}
+    assert guard_spy["write"] == ["77"]
+    assert guard_spy["read"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,expected_code",
+    [(403, "project_forbidden"), (404, "project_not_found")],
+)
+async def test_project_guard_refusal_wears_the_asset_envelope(
+    app, monkeypatch, status_code, expected_code
+):
+    """The guards raise FastAPI HTTPExceptions ({"detail": ...}); on this router
+    they must come back in the one shape clients branch on."""
+    from fastapi import HTTPException
+
+    async def _deny(project_id, auth):
+        raise HTTPException(status_code=status_code, detail="nope")
+
+    monkeypatch.setattr(ar, "verify_project_write_access", _deny)
+    monkeypatch.setattr(ar, "verify_project_read_access", _deny)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        post = await c.post(
+            "/api/v1/assets/5/project-refs?scope_id=9000", json={"project_id": "77"}
+        )
+        delete = await c.delete("/api/v1/assets/5/project-refs/77?scope_id=9000")
+        listing = await c.get("/api/v1/projects/77/assets")
+    for r in (post, delete, listing):
+        assert r.status_code == status_code, r.text
+        body = r.json()
+        assert body["success"] is False and body["error"]["code"] == expected_code
+
+
+# ── M1: a query-string id past int64 is 422, not a 500 at driver BIND ──────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/v1/assets?scope_id=99999999999999999999",
+        "/api/v1/assets?scope_id=9000&project_id=99999999999999999999",
+        "/api/v1/assets/99999999999999999999?scope_id=9000",
+        "/api/v1/projects/99999999999999999999/assets",
+    ],
+)
+async def test_ids_past_int64_are_422_not_500(app, url):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(url)
+    assert r.status_code == 422, r.text

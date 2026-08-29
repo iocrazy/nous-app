@@ -353,14 +353,28 @@ class AssetRelationsRepository:
 
     # ── project refs ───────────────────────────────────────────────────────
 
-    async def project_team_id(self, project_id: int) -> Tuple[bool, Optional[int]]:
-        """(exists, team_id). team_id None = personal project."""
-        stmt = select(Projects.team_id).where(Projects.id == int(project_id))
+    async def project_team_id(
+        self, project_id: int
+    ) -> Tuple[bool, Optional[int], Optional[str]]:
+        """``(exists, team_id, owner_id)``. ``team_id`` None = personal project.
+
+        The owner rides along because a personal project's asset scope IS the
+        owner's personal team — the caller cannot substitute its own without
+        writing a row the read path would never return.
+        """
+        stmt = select(Projects.team_id, Projects.owner_id).where(
+            Projects.id == int(project_id)
+        )
         async with read_scope() as session:
             row = (await session.execute(stmt)).first()
         if row is None:
-            return False, None
-        return True, (int(row[0]) if row[0] is not None else None)
+            return False, None, None
+        team_id, owner_id = row
+        return (
+            True,
+            (int(team_id) if team_id is not None else None),
+            (str(owner_id) if owner_id is not None else None),
+        )
 
     async def link_project(
         self, asset_id: int, project_id: int, linked_by: Optional[str]
