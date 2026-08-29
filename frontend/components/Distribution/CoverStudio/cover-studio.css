@@ -1425,20 +1425,7 @@
 
 /* ── help tips, person card, filmstrip, one-row actions (2026-08-27) ───── */
 
-.cover-studio .cs-help {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 5px;
-  color: var(--content-4);
-  cursor: help;
-  vertical-align: middle;
-}
-
-.cover-studio .cs-help:hover,
-.cover-studio .cs-help:focus-visible {
-  color: var(--accent);
-  outline: none;
-}
+/* .cs-help lives in help-tip.css (shared with the publish page). */
 
 .cover-studio .cs-personbody {
   display: flex;
