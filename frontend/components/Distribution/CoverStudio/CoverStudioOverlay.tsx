@@ -522,12 +522,13 @@ export function CoverStudioOverlay({
   const slot = orientation === 'vertical' ? 'vertical' : 'horizontal';
 
   const useFrameAsCover = useCallback(
-    async (sourceId: string, timestampSeconds: number, focus: CropFocus) => {
+    async (sourceId: string, timestampSeconds: number, focus: CropFocus, zoom = 1) => {
       const res = await selectCoverFrame({
         source_resource_id: sourceId,
         timestamp_seconds: timestampSeconds,
         focus_x: focus.x,
         focus_y: focus.y,
+        zoom,
       });
       // The server derives BOTH crops from one frame; only the slot this tab
       // is setting is applied. The other keeps whatever it had.

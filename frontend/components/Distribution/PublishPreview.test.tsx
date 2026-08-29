@@ -146,6 +146,13 @@ const selectedTabNames = (): string[] =>
     .filter((el) => el.getAttribute('aria-selected') === 'true')
     .map((el) => el.textContent ?? '');
 
+/** The notes under the phone live in (?) tips now: their text is the tip's title. */
+const tipText = (): string =>
+  Array.from(document.querySelectorAll('.cs-help'))
+    .map((el) => el.getAttribute('title') ?? '')
+    .join('\n');
+const tipHas = (text: string): boolean => tipText().includes(text);
+
 describe('the stylesheet under test is actually loaded', () => {
   it('resolves a rule that only this stylesheet defines', () => {
     renderPanel();
@@ -210,7 +217,7 @@ describe('the two-column feed', () => {
   it('says in words that the other cards are placeholders', () => {
     renderPanel();
     expect(
-      screen.getByText('Every card except yours is an empty placeholder, not a real post.'),
+      tipHas('Every card except yours is an empty placeholder, not a real post.'),
     ).toBeTruthy();
   });
 
@@ -223,25 +230,26 @@ describe('the two-column feed', () => {
    * `not.toContain('0')`: an equality fails both when a fabricated number
    * comes back AND when the card renders nothing at all.
    */
-  it('shows the title and the handle, and no counts of any kind', () => {
+  it('shows the title, the handle, and an empty heart with 0 — what an unpublished post has', () => {
     renderPanel({ title: 'Rooftop timelapse', items: [CLIP], handle: 'realaccount' });
     // The heart is scenery; it is aria-hidden and carries no number, so the
     // card's text is exactly the title followed by the handle.
-    expect(mine().textContent).toBe('Rooftop timelapserealaccount');
+    expect(mine().textContent).toBe('Rooftop timelapserealaccount0');
     expect(mine().querySelectorAll('.pv-fheart').length).toBe(1);
   });
 
-  it('draws no by-line at all when no account is selected', () => {
+  it('draws the by-line with the platform’s blank avatar when no account is selected', () => {
     renderPanel({ title: 'Rooftop timelapse', items: [CLIP], handle: null });
     // Equality again: an invented `@yourhandle` returning turns this red.
-    expect(mine().textContent).toBe('Rooftop timelapse');
-    expect(mine().querySelectorAll('.pv-fby').length).toBe(0);
+    expect(mine().textContent).toBe('Rooftop timelapse0');
+    expect(mine().querySelectorAll('.pv-fby').length).toBe(1);
+    expect(mine().querySelectorAll('.pv-favatar.ph').length).toBe(1);
   });
 
-  it('shows a real avatar, and draws none when the account has no picture', () => {
+  it('shows a real avatar, and the platform’s blank circle when the account has no picture', () => {
     const { update } = renderPanel({ items: [CLIP], handle: 'realaccount', avatarUrl: null });
     // No grey circle standing in for a picture the account does not have.
-    expect(mine().querySelectorAll('.pv-favatar').length).toBe(0);
+    expect(mine().querySelectorAll('.pv-favatar.ph').length).toBe(1);
 
     update({ avatarUrl: '/avatar/real.png' });
     expect(mine().querySelector('.pv-favatar')?.getAttribute('src')).toBe('/avatar/real.png');
@@ -298,9 +306,7 @@ describe('the platform chrome', () => {
 
   it('says which parts of the phone are borrowed and which are ours', () => {
     renderPanel({ platform: 'douyin', items: [CLIP] });
-    expect(screen.getByText(
-      'The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.',
-    )).toBeTruthy();
+    expect(tipHas('The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.')).toBeTruthy();
   });
 });
 
@@ -351,15 +357,15 @@ describe('the vertical / horizontal switch', () => {
 
     const { update } = renderPanel({ orientation: 'vertical' });
     expect(getComputedStyle(cover()).aspectRatio).toBe('3 / 4');
-    // The empty cards follow the same shape, so the columns stay on one
-    // rhythm rather than the user's card standing out by size alone.
-    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty') as Element).aspectRatio)
-      .toBe('3 / 4.62');
+    // The empty cards carry the same cover box (plus a placeholder foot), so
+    // the columns stay on one rhythm rather than the user's card standing out.
+    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty .pv-fcover') as Element).aspectRatio)
+      .toBe('3 / 4');
 
     update({ orientation: 'horizontal' });
     expect(getComputedStyle(cover()).aspectRatio).toBe('4 / 3');
-    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty') as Element).aspectRatio)
-      .toBe('4 / 3.9');
+    expect(getComputedStyle(feed().querySelector('.pv-fcard.empty .pv-fcover') as Element).aspectRatio)
+      .toBe('4 / 3');
   });
 
   /* Shorter cards need a smaller bite taken out of the top row, or the cut-off
@@ -394,7 +400,7 @@ describe('the vertical / horizontal switch', () => {
 describe('where the first cell’s picture comes from is stated, never implied', () => {
   it('names the crop when the user has derived covers', () => {
     renderPanel({ covers: { vertical: 'cover-v', horizontal: 'cover-h' } });
-    expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
+    expect(tipHas('Showing your vertical 3:4 cover.')).toBeTruthy();
   });
 
   /* The caption names a specific crop, so it has to follow the crop actually
@@ -406,19 +412,17 @@ describe('where the first cell’s picture comes from is stated, never implied',
       covers: { vertical: 'cover-v', horizontal: 'cover-h' },
       orientation: 'vertical',
     });
-    expect(screen.getByText('Showing your vertical 3:4 cover.')).toBeTruthy();
+    expect(tipHas('Showing your vertical 3:4 cover.')).toBeTruthy();
 
     update({ orientation: 'horizontal' });
-    expect(screen.getByText('Showing your horizontal 4:3 cover.')).toBeTruthy();
+    expect(tipHas('Showing your horizontal 4:3 cover.')).toBeTruthy();
     expect(mine().querySelector('img')?.getAttribute('src')).toBe('/file/cover-h');
   });
 
   it('falls back to the thumbnail AND says it is not a cover', () => {
     renderPanel({ covers: null, items: [CLIP] });
     expect(mine().querySelector('img')?.getAttribute('src')).toBe('/thumb/clip');
-    expect(screen.getByText(
-      'No cover set — this is the stored thumbnail, not a cover. The platform picks its own frame at publish time.',
-    )).toBeTruthy();
+    expect(tipHas('No cover set — this is the stored thumbnail, not a cover. The platform picks its own frame at publish time.')).toBeTruthy();
   });
 
   it('states the absence rather than drawing an empty box', () => {
@@ -1039,9 +1043,7 @@ describe('the immersive full-screen view', () => {
 
   it('tells the reader which parts of the screen are a sketch', () => {
     openVideo();
-    expect(screen.getByText(
-      'The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.',
-    )).toBeTruthy();
+    expect(tipHas('The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.')).toBeTruthy();
   });
 
   it('names the pager as ours rather than letting it pass for the platform’s', () => {

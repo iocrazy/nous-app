@@ -557,6 +557,11 @@ def test_select_carries_the_crop_focus_through_and_defaults_to_centre(
     )
     assert r.status_code == 200, r.text
     assert seen[-1]["focus_x"] == 0.2 and seen[-1]["focus_y"] == 0.9
+    assert seen[-1]["zoom"] == 1.0
+
+    r = client.post("/api/v1/distribution/covers/select", json={**body, "zoom": 2.5})
+    assert r.status_code == 200, r.text
+    assert seen[-1]["zoom"] == 2.5
 
     r = client.post("/api/v1/distribution/covers/select", json=body)
     assert r.status_code == 200, r.text

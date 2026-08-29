@@ -1844,3 +1844,45 @@
 .cover-studio .cs-progress .cs-hint {
   margin-top: 10px;
 }
+
+
+/* ── zoom bar; the picture moves, the box stays (2026-08-28) ───────────── */
+
+.cover-studio .cs-stage video {
+  transition: transform 0.08s linear;
+  will-change: transform;
+}
+
+.cover-studio .cs-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+
+.cover-studio .cs-zoom button {
+  border: 0;
+  background: transparent;
+  color: var(--content-3);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.cover-studio .cs-zoom button:hover {
+  color: var(--content);
+}
+
+.cover-studio .cs-zoom input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
+.cover-studio .cs-zoom .val {
+  font-size: 11px;
+  color: var(--content-3);
+  min-width: 34px;
+  text-align: right;
+}

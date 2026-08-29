@@ -59,3 +59,23 @@ def test_an_out_of_range_focus_is_400_not_silently_clamped(fx, fy):
     with pytest.raises(CoverFrameError) as ei:
         center_crop_region(W, H, COVER_VERTICAL_ASPECT, fx, fy)
     assert ei.value.status_code == 400
+
+
+def test_zoom_shrinks_the_window_and_still_follows_focus():
+    base = center_crop_region(W, H, COVER_VERTICAL_ASPECT, 0.5, 0.5, 1.0)
+    z2 = center_crop_region(W, H, COVER_VERTICAL_ASPECT, 0.5, 0.5, 2.0)
+    assert (
+        abs(z2.width - base.width / 2) < 1e-9
+        and abs(z2.height - base.height / 2) < 1e-9
+    )
+    # Zoomed windows are centred on the focus (no clamp needed mid-picture).
+    assert abs((z2.x + z2.width / 2) - 0.5) < 1e-9
+    corner = center_crop_region(W, H, COVER_VERTICAL_ASPECT, 0.0, 0.0, 2.0)
+    assert corner.x == 0.0 and corner.y == 0.0
+
+
+@pytest.mark.parametrize("zoom", [0.5, 4.5])
+def test_zoom_out_of_range_is_400(zoom):
+    with pytest.raises(CoverFrameError) as ei:
+        center_crop_region(W, H, COVER_VERTICAL_ASPECT, 0.5, 0.5, zoom)
+    assert ei.value.status_code == 400

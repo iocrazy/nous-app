@@ -468,6 +468,8 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
+      "aboutPreview": "关于这个预览",
+      "previewNoCoverShort": "尚未设置封面",
       "draftRestored": "已恢复 {{when}} 的草稿 —— 之前填的、选的都在。",
       "draftDiscard": "清除草稿",
       "coverNeedsVideo": "请先在上方选择视频 — 封面帧从它里面抽取。",
@@ -749,6 +751,9 @@
       "endedAbandoned": "本次发布已不再等待验证码。"
     },
     "coverStudio": {
+      "zoom": "缩放",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
       "elapsed": "已用 {{s}} 秒",
       "progressHint": "一张图四个草案通常要一两分钟。等的时候可以继续改提示词。",
       "draftingPct": "正在画… {{pct}}%",
@@ -783,7 +788,7 @@
       "libraryNoVideos": "素材库里还没有视频。",
       "changeVideo": "换个视频",
       "modelNote": "与 Settings → 平台模型 同一份列表：在那里关掉的模型这里就不出现。",
-      "cropBox": "裁切框 —— 拖动或用方向键",
+      "cropBox": "裁切框 —— 拖动画面或用方向键",
       "willFillPublishH": "回填发布页的横封面位",
       "coverTabs": "封面",
       "tabVertical": "设置竖封面 3:4",

@@ -234,7 +234,7 @@ describe('CoverFrameGrabber — stage mode (v4)', () => {
     expect(screen.getByTestId('cover-crop-guide').className).toContain('h');
     fireEvent.click(screen.getByTestId('cover-use-frame'));
 
-    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0.5, y: 0.5 }));
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0.5, y: 0.5 }, 1));
     // The AI grab is still there too — the two paths are not either/or.
     expect(screen.getByTestId('cover-grab-button')).toBeTruthy();
   });
@@ -304,7 +304,7 @@ describe('CoverFrameGrabber — the crop box moves', () => {
     expect(box.getAttribute('data-focus-x')).toBe('0.00');
 
     fireEvent.click(screen.getByTestId('cover-use-frame'));
-    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0, y: 0.45 }));
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0, y: 0.45 }, 1));
   });
 
   it('resets the anchor when the source video changes', () => {
@@ -402,5 +402,22 @@ describe('CoverFrameGrabber — set as person, and the filmstrip', () => {
     renderGrabber({ embedded: true });
     expect(screen.getByTestId('cover-filmstrip-sampling')).toBeTruthy();
     strip.value = { status: 'idle', candidates: [], error: null, retry: () => {} };
+  });
+});
+
+
+describe('CoverFrameGrabber — zoom', () => {
+  it('the slider scales the picture behind the fixed box and rides along to the crop', async () => {
+    const onUseAsCover = vi.fn().mockResolvedValue(undefined);
+    renderGrabber({ embedded: true, onUseAsCover });
+    primeVideo(3.1);
+    const box = screen.getByTestId('cover-crop-guide');
+    expect(box.getAttribute('data-zoom')).toBe('1.0');
+
+    fireEvent.change(screen.getByTestId('cover-zoom-slider'), { target: { value: '2' } });
+    expect(box.getAttribute('data-zoom')).toBe('2.0');
+
+    fireEvent.click(screen.getByTestId('cover-use-frame'));
+    await waitFor(() => expect(onUseAsCover).toHaveBeenCalledWith('900', 3.1, { x: 0.5, y: 0.5 }, 2));
   });
 });

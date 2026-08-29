@@ -85,6 +85,7 @@ import {
 
 import { getResourceFileUrl } from '../../services/resourceService';
 import type { CoverPair } from './CoverSlots';
+import { HelpTip } from './CoverStudio/HelpTip';
 
 /** The three views the panel offers. */
 export type PreviewTab = 'video' | 'gallery' | 'cover';
@@ -813,7 +814,23 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
               >
                 {Array.from({ length: FEED_CARDS }, (_, i) => {
                   if (i !== MINE_INDEX) {
-                    return <div className="pv-fcard empty" key={i} aria-hidden="true" />;
+                    // Placeholder cards drawn the way the platform's own
+                    // preview draws them: a dotted title line, a blank avatar
+                    // and an empty heart — scenery, not posts.
+                    return (
+                      <div className="pv-fcard empty" key={i} aria-hidden="true">
+                        <div className="pv-fcover" />
+                        <div className="pv-ffoot ph">
+                          <span className="pv-fline" />
+                          <span className="pv-fby">
+                            <span className="pv-favatar ph" />
+                            <span className="pv-fname" />
+                            <Heart className="pv-fheart" size={9} aria-hidden="true" />
+                            <span className="pv-fcount">0</span>
+                          </span>
+                        </div>
+                      </div>
+                    );
                   }
                   return (
                     <div className="pv-fcard mine" key={i}>
@@ -830,21 +847,21 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
                             ? t('distribution.publish.titlePlaceholderPreview', 'Your title appears here')
                             : titleText}
                         </span>
-                        {/* The by-line only exists when there is a real account
-                            behind it. No handle, no line — and no grey circle
-                            standing in for an avatar the account does not have.
-                            The heart is scenery and carries NO number: the post
-                            has no likes, which is a different statement from
-                            zero likes. */}
-                        {handle !== null && (
-                          <span className="pv-fby">
-                            {avatarUrl !== null && (
-                              <img className="pv-favatar" src={avatarUrl} alt="" />
-                            )}
-                            <span className="pv-fname">{handle}</span>
-                            <Heart className="pv-fheart" size={9} aria-hidden="true" />
-                          </span>
-                        )}
+                        {/* The by-line, the way the platform's own preview draws
+                            it: avatar (the account's when one is selected, the
+                            platform's blank circle otherwise), the name, and an
+                            empty heart with 0 — which is what an unpublished
+                            post has. */}
+                        <span className="pv-fby">
+                          {avatarUrl !== null ? (
+                            <img className="pv-favatar" src={avatarUrl} alt="" />
+                          ) : (
+                            <span className="pv-favatar ph" aria-hidden="true" />
+                          )}
+                          <span className="pv-fname">{handle ?? ''}</span>
+                          <Heart className="pv-fheart" size={9} aria-hidden="true" />
+                          <span className="pv-fcount" data-testid="pv-like-count">0</span>
+                        </span>
                       </div>
                     </div>
                   );
@@ -974,32 +991,42 @@ export const PublishPreview: React.FC<PublishPreviewProps> = ({
         )}
       </div>
 
+      {/* Everything that used to be paragraphs under the phone lives in one
+          (?) now — hover to read, nothing to scroll past. */}
       {tab !== 'cover' && showsPlatformChrome && (
-        <p className="pv-note">
-          {t(
-            'distribution.publish.previewImmersiveChromeNote',
-            'The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.',
-          )}
+        <p className="pv-note pv-note-tip">
+          {t('distribution.publish.aboutPreview', 'About this preview')}
+          <HelpTip
+            text={t(
+              'distribution.publish.previewImmersiveChromeNote',
+              'The tabs, side icons and bottom bar are a sketch of the platform app, with no counts because this post has none. Only the outlined pager belongs to this page.',
+            )}
+          />
         </p>
       )}
 
       {tab === 'cover' && (
         <>
-          {provenanceNote !== null && <p className="pv-note">{provenanceNote}</p>}
-          <p className="pv-note">
-            {t(
-              'distribution.publish.previewFeedPlaceholderNote',
-              'Every card except yours is an empty placeholder, not a real post.',
-            )}
+          <p className="pv-note pv-note-tip" data-testid="pv-cover-note">
+            {provenanceNote !== null && coverSource.provenance !== 'cover'
+              ? t('distribution.publish.previewNoCoverShort', 'No cover set yet')
+              : t('distribution.publish.aboutPreview', 'About this preview')}
+            <HelpTip
+              text={[
+                provenanceNote ?? '',
+                t(
+                  'distribution.publish.previewFeedPlaceholderNote',
+                  'Every card except yours is an empty placeholder, not a real post.',
+                ),
+                showsPlatformChrome
+                  ? t(
+                      'distribution.publish.previewChromeNote',
+                      'The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.',
+                    )
+                  : '',
+              ].filter(Boolean).join('\n')}
+            />
           </p>
-          {showsPlatformChrome && (
-            <p className="pv-note">
-              {t(
-                'distribution.publish.previewChromeNote',
-                'The feed tabs and bottom bar are a sketch of the platform app. Only the highlighted switch belongs to this page.',
-              )}
-            </p>
-          )}
         </>
       )}
     </div>

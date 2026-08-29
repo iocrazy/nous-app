@@ -733,6 +733,8 @@ export const selectCoverFrame = (body: {
    *  Omitted = centre crop. */
   focus_x?: number;
   focus_y?: number;
+  /** 1 = box as large as the picture allows; up to 4. */
+  zoom?: number;
   publish_task_id?: string;
 } | {
   /** DEPRECATED shape, for the deploy-skew window only — a backend that has
