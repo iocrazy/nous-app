@@ -31,9 +31,12 @@ export const useToast = (): ToastContextValue => {
 export const useOptionalToast = (): ToastContextValue | null => useContext(ToastContext);
 
 const toastStyles: Record<ToastType, { icon: React.ElementType; border: string; bg: string; text: string; iconColor: string }> = {
-  success: { icon: CheckCircle2, border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-300', iconColor: 'text-emerald-400' },
-  error:   { icon: AlertCircle,  border: 'border-red-500/30',     bg: 'bg-red-500/10',     text: 'text-red-300',     iconColor: 'text-red-400' },
-  info:    { icon: Info,         border: 'border-sky-500/30',     bg: 'bg-sky-500/10',     text: 'text-sky-300',     iconColor: 'text-sky-400' },
+  // Semantic tokens (ok / danger / info), not the old hue classes: the
+  // emerald-300-on-translucent look was drawn for a dark surface and was
+  // unreadable on the warm-paper theme (2026-08-29, "保存看不清字").
+  success: { icon: CheckCircle2, border: 'border-ok-line',     bg: 'bg-ok-soft',     text: 'text-content', iconColor: 'text-ok' },
+  error:   { icon: AlertCircle,  border: 'border-danger-line', bg: 'bg-danger-soft', text: 'text-content', iconColor: 'text-danger' },
+  info:    { icon: Info,         border: 'border-info-line',   bg: 'bg-info-soft',   text: 'text-content', iconColor: 'text-info' },
 };
 
 const ToastItem: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = ({ toast, onDismiss }) => {
@@ -47,13 +50,13 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = (
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-3 rounded-lg border ${style.border} ${style.bg} backdrop-blur-md shadow-lg max-w-sm animate-in slide-in-from-right-5 fade-in duration-300`}
+      className={`flex items-start gap-3 px-4 py-3 rounded-lg border ${style.border} ${style.bg} shadow-lg max-w-sm animate-in slide-in-from-right-5 fade-in duration-300`}
     >
       <Icon size={18} className={`${style.iconColor} shrink-0 mt-0.5`} />
       <p className={`text-sm ${style.text} flex-1`}>{toast.message}</p>
       <button
         onClick={() => onDismiss(toast.id)}
-        className="text-ink-500 hover:text-ink-300 shrink-0"
+        className="text-content-3 hover:text-content shrink-0"
       >
         <X size={14} />
       </button>
