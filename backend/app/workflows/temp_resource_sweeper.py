@@ -1,8 +1,19 @@
-"""DBOS scheduled workflow: soft-delete expired chat temp resources.
+"""Soft-delete expired chat temp resources. **NO LONGER SCHEDULED.**
 
-Runs daily at 04:00 UTC. For every scope (personal + team) that owns a
-``temp`` folder, reads the scope's ``chat_temp_ttl_days`` setting and
-soft-deletes resources whose ``created_at + ttl_days < now``.
+⚠️ Nothing runs this on a timer. The daily 04:00 UTC cron was disabled at the
+decorator on 2026-06-13 (IC-port P4: chat-temp TTL retired — users decide
+deletion), and the module is no longer imported by
+``app/workflows/_scheduled_bundle.py`` either, so the worker does not even
+register it. **Chat-temp clean-up is manual: POST /api/v1/generated/cleanup**
+(spec decision 7). The Generated inbox now carries rows whose ``file_path``
+IS a temp resource's file, so an unattended sweep would leave live inbox
+cards pointing at trashed files.
+
+Kept (not deleted) so the policy can be reversed by restoring the
+``@DBOS.scheduled`` decorator below AND the bundle import. What it does when
+called: for every scope (personal + team) that owns a ``temp`` folder, read
+the scope's ``chat_temp_ttl_days`` setting and soft-delete resources whose
+``created_at + ttl_days < now``.
 
 Soft delete only — file cleanup is handled by the existing trash pipeline
 (``cleanup_trashed_resources_workflow``), not by this workflow.

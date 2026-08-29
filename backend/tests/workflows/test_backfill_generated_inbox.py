@@ -139,3 +139,53 @@ class TestRouterWiring:
             "dry_run": True,
             "run_user_id": "admin-uuid",
         }
+
+
+class TestAssetFilesQuery:
+    """I1: a soft-deleted asset keeps its asset_files rows.
+
+    Asserted on the compiled SQL, not on Python: without the join to
+    ``assets`` the query still runs and still returns rows — it just quietly
+    flips resources attached only to a deleted asset to ``in_assets``, and
+    nothing downstream would say so.
+    """
+
+    def test_deleted_assets_are_excluded(self):
+        from sqlalchemy.dialects import postgresql
+
+        from app.workflows.backfill_generated_inbox import (
+            _resources_with_asset_files_stmt,
+        )
+
+        sql = str(
+            _resources_with_asset_files_stmt().compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        assert "assets.deleted_at IS NULL" in sql
+        assert "JOIN public.assets" in sql
+        assert "DISTINCT" in sql
+
+
+class TestTempSweeperIsNotScheduled:
+    """Spec decision 7: temp clean-up is manual (`POST /generated/cleanup`).
+
+    The inbox rows this task creates point at the resource's own file; a
+    daily sweep would trash those files under a live inbox card. The cron
+    decorator has been commented out since 2026-06-13, but the worker still
+    imported the module through the scheduled bundle — one uncommented line
+    away from arming it again, and reading as "scheduled" to anyone who
+    grepped the bundle.
+    """
+
+    def test_scheduled_bundle_does_not_export_the_sweeper(self):
+        import app.workflows._scheduled_bundle as bundle
+
+        assert not hasattr(bundle, "temp_resource_sweeper_scheduled")
+        assert not hasattr(bundle, "sweep_temp_resources")
+
+    def test_the_sweeper_itself_still_exists_for_manual_use(self):
+        from app.workflows import temp_resource_sweeper
+
+        assert callable(temp_resource_sweeper.sweep_temp_resources)

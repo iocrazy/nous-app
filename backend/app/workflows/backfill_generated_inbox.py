@@ -44,7 +44,14 @@ from sqlalchemy import select
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
-from app.models import AssetFiles, Folders, GeneratedMedia, ResourceItems, Resources
+from app.models import (
+    AssetFiles,
+    Assets,
+    Folders,
+    GeneratedMedia,
+    ResourceItems,
+    Resources,
+)
 from app.services.library.chat_upload import TEMP_FOLDER_NAME, media_kind_for_mime
 
 SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
@@ -64,6 +71,24 @@ _NOT_MARKABLE = ("in_assets", "deleted")
 # What ``_load_inputs`` hands the planner: (temp resources, generated_media
 # rows keyed by promoted_resource_id, resource ids that have an asset_files row).
 PlannerInputs = Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]], Set[int]]
+
+
+def _resources_with_asset_files_stmt():
+    """Resource ids that are attached to a LIVE asset.
+
+    Pure + module-level so the join can be asserted on compiled SQL (same
+    stance as ``generated_media_repository._inbox_filters``): a soft-deleted
+    asset KEEPS its ``asset_files`` rows, so without the join to ``assets``
+    this query still returns rows and the backfill quietly flips resources
+    attached only to a deleted asset to ``in_assets`` — a wrong answer that
+    produces no error anywhere.
+    """
+    return (
+        select(AssetFiles.resource_id)
+        .join(Assets, Assets.id == AssetFiles.asset_id)
+        .where(Assets.deleted_at.is_(None))
+        .distinct()
+    )
 
 
 class InboxPlan(TypedDict):
@@ -115,8 +140,9 @@ async def _load_inputs() -> PlannerInputs:
     ``folder_id`` lives on ``resource_items``, not on ``resources`` — the
     temp-folder membership is a two-hop join. Trashed resources and trashed
     folders are excluded: an inbox row for a file on its way to deletion is
-    noise, and the sweeper (``temp_resource_sweeper``) trashes temp resources
-    on a TTL. ``file_path IS NULL`` rows are excluded because
+    noise (temp clean-up is manual — ``POST /api/v1/generated/cleanup``; the
+    TTL sweeper is unscheduled). ``file_path IS NULL`` rows are excluded
+    because
     ``generated_media.file_path`` is NOT NULL.
     """
     async with read_scope() as session:
@@ -162,9 +188,7 @@ async def _load_inputs() -> PlannerInputs:
             .all()
         )
         asset_file_resource_ids = (
-            (await session.execute(select(AssetFiles.resource_id).distinct()))
-            .scalars()
-            .all()
+            (await session.execute(_resources_with_asset_files_stmt())).scalars().all()
         )
 
     # De-duplicated by resource id: the join is through ``resource_items``,
