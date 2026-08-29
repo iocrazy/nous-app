@@ -1683,7 +1683,7 @@
     "previewFailed": "预览加载失败"
   },
   "generated": {
-    "title": "Generated",
+    "title": "生成内容",
     "unreviewedChip": "{{n}} 项待处理",
     "loadMore": "加载更多",
     "projectsUnavailable": "项目列表加载失败",
@@ -1746,7 +1746,8 @@
       "clear": "取消选择",
       "done": "成功 {{ok}} 项",
       "partial": "成功 {{ok}} 项，失败 {{failed}} 项",
-      "confirmDelete": "确认删除 {{n}} 项"
+      "confirmDelete": "确认删除 {{n}} 项",
+      "deleteOnlyUnreviewed": "只有未处理的内容可以删除 —— 已保存的内容在你的素材库里"
     },
     "empty": {
       "unreviewed": "没有待处理的产出",
