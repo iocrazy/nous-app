@@ -3745,7 +3745,25 @@ export const PublishPage: React.FC = () => {
             )}
 
             <div className="actions">
-              <button type="button" className="btn btn-ghost" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.saveDraft', 'Save draft')}</button>
+              {/* Saves the same draft the page autosaves (this browser, this
+                  workspace) — right now, and says so. Before this the button
+                  was a permanently disabled "Coming in D3" placeholder. */}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  if (!scopeId) return;
+                  writePublishDraft(scopeId, {
+                    contentType, selectedVideos, selectedAccounts, title, description, topics,
+                    visibility, covers, selfDeclaration, mode,
+                  });
+                  setDraftRestoredAt(new Date().toISOString());
+                  addToast(t('distribution.publish.draftSaved', 'Draft saved on this device — it comes back the next time you open Publish.'), 'success');
+                }}
+                data-testid="publish-save-draft"
+              >
+                {t('distribution.publish.saveDraft', 'Save draft')}
+              </button>
               <button type="button" className="btn btn-solid" disabled={!canPublish || submitting} onClick={onPublish}>
                 <Send size={15} /> {t('distribution.publish.publishNow', 'Publish now')}
               </button>
