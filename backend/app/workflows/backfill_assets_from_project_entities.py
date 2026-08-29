@@ -413,13 +413,22 @@ async def backfill_assets_from_project_entities(
         raise
 
     counts = out["counts"]
+    # I5: the skip buckets belong in the line a human reads. On a workspace of
+    # mostly personal projects the headline alone said "0 assets from 42 rows,
+    # 0 merges" — indistinguishable from "nothing to migrate" when the truth is
+    # "42 rows are waiting on a P3 decision".
+    skipped = (
+        f", skipped {counts['skipped_personal_project']} personal"
+        f" / {counts['skipped_unknown_project']} unknown"
+    )
     subtitle = (
         f"dry-run: {counts['assets']} assets from "
-        f"{counts['characters']}+{counts['entities']} rows, {counts['merges']} merges"
+        f"{counts['characters']}+{counts['entities']} rows, "
+        f"{counts['merges']} merges{skipped}"
         if dry_run
         else (
             f"{out['applied']['created']} created, {out['applied']['existing']} existing, "
-            f"{out['applied']['project_refs_added']} project refs"
+            f"{out['applied']['project_refs_added']} project refs{skipped}"
         )
     )
     try:

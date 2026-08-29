@@ -8,12 +8,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 # Snowflake ids ride as strings here (bigIntSafeFetch discipline), but the
 # service int()s them. Without this the first non-numeric body value is a
 # ValueError deep in the service — a 500 where the caller should have got a 422.
-SnowflakeId = Annotated[str, Field(pattern=r"^[0-9]{1,20}$")]
+SNOWFLAKE_PATTERN = r"^[0-9]{1,20}$"
+
+# ``assets.id`` and every id it references are PostgreSQL BIGINT. The pattern
+# alone admits 20 digits, i.e. up to 10^20-1, which is ~10x past int64: the
+# value parses, reaches the driver, and fails at BIND — a 500 handed out for
+# hostile input. Bound it where the string is validated instead.
+_INT64_EXCLUSIVE_MAX = 2**63
+
+
+def within_int64(value: Optional[str]) -> Optional[str]:
+    """Reject digit strings the BIGINT columns cannot hold (``>= 2**63``)."""
+    if value is not None and int(value) >= _INT64_EXCLUSIVE_MAX:
+        raise ValueError(f"id must be < {_INT64_EXCLUSIVE_MAX} (BIGINT range)")
+    return value
+
+
+SnowflakeId = Annotated[
+    str, Field(pattern=SNOWFLAKE_PATTERN), AfterValidator(within_int64)
+]
 
 AssetType = Literal["character", "location", "prop", "costume", "prompt", "audio"]
 AssetSource = Literal[
@@ -40,7 +58,14 @@ class AssetCreate(BaseModel):
 
 
 class AssetUpdate(BaseModel):
-    """PATCH payload — None means "leave unchanged"."""
+    """PATCH payload — None means "leave unchanged".
+
+    ``extra="forbid"``: without it ``{"promptpositive": "..."}`` answered 200
+    with the asset untouched, so a typo'd field was indistinguishable from a
+    successful edit — the silent-no-op class this module refuses everywhere else.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     subtype: Optional[str] = Field(default=None, max_length=40)
@@ -117,6 +142,17 @@ class LoadoutCreate(BaseModel):
 
 
 class LoadoutUpdate(BaseModel):
+    """PATCH payload — None means "leave unchanged".
+
+    ``is_default=False`` is NOT an operation: ``uq_loadout_default`` means an
+    asset has exactly one default, so there is no "unset the default", only
+    "make a different one default". A False is therefore dropped, deliberately.
+
+    ``extra="forbid"`` for the same reason as :class:`AssetUpdate`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     costume_ids: Optional[List[SnowflakeId]] = None
     prop_ids: Optional[List[SnowflakeId]] = None

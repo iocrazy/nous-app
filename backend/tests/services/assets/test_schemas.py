@@ -116,3 +116,56 @@ def test_literals_match_model_constants():
     assert set(get_args(AssetType)) == set(ASSET_TYPES)
     assert set(get_args(LinkRelation)) == set(LINK_RELATIONS)
     assert set(get_args(AssetSource)) == set(ASSET_SOURCES)
+
+
+# ── I3: a typo'd PATCH field must not read as a successful edit ────────────
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    [
+        (AssetUpdate, {"promptpositive": "a moonlit rooftop"}),
+        (AssetUpdate, {"prompt_postive": "typo"}),
+        (LoadoutUpdate, {"costumeids": ["1"]}),
+        (LoadoutUpdate, {"isdefault": True}),
+    ],
+)
+def test_patch_models_forbid_unknown_fields(model, payload):
+    """Without extra="forbid" these returned 200 with the row untouched — a
+    typo'd field indistinguishable from a successful edit."""
+    with pytest.raises(ValidationError) as ei:
+        model(**payload)
+    assert "extra" in str(ei.value).lower()
+
+
+# ── M1: ids must fit BIGINT, not just "20 digits" ──────────────────────────
+
+
+_TOO_BIG = str(2**63)  # 19 digits, first value BIGINT cannot hold
+_MAX_OK = str(2**63 - 1)
+
+
+@pytest.mark.parametrize(
+    "model,field",
+    [
+        (AttachFileRequest, "resource_id"),
+        (LinkRequest, "to_asset_id"),
+        (ProjectRefRequest, "project_id"),
+        (AssetUpdate, "cover_file_id"),
+    ],
+)
+def test_snowflake_ids_are_bounded_to_int64(model, field):
+    """``^[0-9]{1,20}$`` alone admits ~10x int64; those parse and then blow up at
+    driver BIND — a 500 for hostile input. The bound belongs at validation."""
+    base = {"relation": "wears"} if model is LinkRequest else {}
+    with pytest.raises(ValidationError):
+        model(**{**base, field: "99999999999999999999"})  # 20 digits
+    with pytest.raises(ValidationError):
+        model(**{**base, field: _TOO_BIG})  # exactly 2**63
+    assert model(**{**base, field: _MAX_OK})  # 2**63-1 still accepted
+
+
+def test_loadout_id_lists_are_bounded_too():
+    with pytest.raises(ValidationError):
+        LoadoutCreate(name="Night", costume_ids=["99999999999999999999"])
+    assert LoadoutCreate(name="Night", costume_ids=[_MAX_OK])

@@ -253,3 +253,57 @@ class TestExecutionBlockedInP0:
         assert out["counts"]["assets"] == 1
         assert out["merges"] == []
         assert "applied" not in out
+
+
+class TestSubtitle:
+    """I5: the skip buckets must be in the line a human reads, not only in
+    ``counts`` metadata. Without them a mostly-personal workspace reports
+    "0 assets from 42 rows, 0 merges" — which reads as "nothing to migrate"
+    when the truth is "42 rows are waiting on a P3 decision"."""
+
+    async def _run_and_capture_subtitle(self, chars, project_team, personal):
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        manager = AsyncMock()
+        with (
+            patch.object(
+                m,
+                "_load_inputs",
+                AsyncMock(return_value=(chars, [], project_team, personal)),
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+        ):
+            await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                dry_run=True, run_user_id="admin-uuid"
+            )
+        return manager.complete.await_args.kwargs["subtitle"]
+
+    async def test_dry_run_subtitle_reports_both_skip_buckets(self):
+        subtitle = await self._run_and_capture_subtitle(
+            [
+                _char(1, P1, "Sang Yao"),
+                _char(2, P_PERSONAL, "Personal One"),
+                _char(3, P_PERSONAL, "Personal Two"),
+                _char(4, 999, "Orphan"),
+            ],
+            PROJECT_TEAM,
+            {P_PERSONAL},
+        )
+        assert subtitle == (
+            "dry-run: 1 assets from 4+0 rows, 0 merges, "
+            "skipped 2 personal / 1 unknown"
+        )
+
+    async def test_zero_skips_still_say_so(self):
+        """Reporting the zeros is the point: a reader must be able to tell
+        "nothing was skipped" from "the skip counts are not in this line"."""
+        subtitle = await self._run_and_capture_subtitle(
+            [_char(1, P1, "Sang Yao")], PROJECT_TEAM, set()
+        )
+        assert subtitle == (
+            "dry-run: 1 assets from 1+0 rows, 0 merges, "
+            "skipped 0 personal / 0 unknown"
+        )
