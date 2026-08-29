@@ -4,7 +4,9 @@
  * Open Canvas jump. No resource fetch involved.
  */
 import { render, screen, cleanup } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
 import { CanvasGenResultBody } from './CanvasGenResultBody';
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
@@ -44,5 +46,15 @@ describe('CanvasGenResultBody', () => {
   it('shows the pending placeholder while running', () => {
     render(<CanvasGenResultBody task={task({}, )} />);
     expect(screen.getByText(/No result attached|Result appears here/)).toBeTruthy();
+  });
+});
+
+
+describe('CanvasGenResultBody — result_url host', () => {
+  it('prefixes an API-relative result_url with the API origin', () => {
+    const { container } = render(
+      <CanvasGenResultBody task={{ id: 't', task_type: 'cover_gen', status: 'completed', phase: 'completed', title: 'AI cover', metadata: { result_url: '/api/v1/generated-media/1/cover' } } as unknown as UnifiedTask} />,
+    );
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('https://api.test/api/v1/generated-media/1/cover');
   });
 });

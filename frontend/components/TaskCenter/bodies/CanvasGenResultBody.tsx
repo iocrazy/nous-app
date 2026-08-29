@@ -6,6 +6,15 @@
  */
 
 import type { UnifiedTask } from '../../../contexts/TaskManagerContext';
+import { getApiUrl } from '../../../utils/apiConfig';
+
+/** `result_url` is API-relative (`/api/v1/generated-media/…`); on the deployed
+ *  site the app and the API are different hosts, so a bare relative src
+ *  resolved against the app host and 404'd — a broken image where the result
+ *  should be (2026-08-29). */
+function absolute(url: string): string {
+  return url.startsWith('/') ? `${getApiUrl()}${url}` : url;
+}
 
 export function CanvasGenResultBody({ task }: { task: UnifiedTask }) {
   const meta = (task.metadata ?? {}) as {
@@ -21,13 +30,13 @@ export function CanvasGenResultBody({ task }: { task: UnifiedTask }) {
       {meta.result_url ? (
         meta.kind === 'video' ? (
           <video
-            src={meta.result_url}
+            src={absolute(meta.result_url)}
             controls
             className="max-h-72 w-full rounded-lg bg-black object-contain"
           />
         ) : (
           <img
-            src={meta.result_url}
+            src={absolute(meta.result_url)}
             alt={task.subtitle || 'Generated result'}
             className="max-h-72 w-full rounded-lg object-contain"
           />
