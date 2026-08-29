@@ -20,6 +20,8 @@
 - Migrations end with `NOTIFY pgrst, 'reload schema';`. Never `SET ROLE service_role`.
 - UI text is English; this phase has no UI.
 - Lint: `black` (88 cols) + `isort` (profile black) + `flake8`; run `cd backend && uv run black <files> && uv run isort <files>` before each commit.
+- All six new tables are **RLS service_role-only**; the frontend never reads them via PostgREST (spec §7.0). P2 adds a grep tripwire; P0 just ships the policies.
+- System presets are the only `scope_id NULL` rows (`assets_scope_or_preset` CHECK); reads union them into every scope, writes are refused (`403 system_preset_readonly`).
 - Commit only files this plan touches; do not `git add -A`.
 
 ---
@@ -140,6 +142,30 @@ async def test_asset_loadouts_single_default_per_asset():
     assert rows and "WHERE is_default" in rows[0]["indexdef"]
 
 
+async def test_assets_scope_nullable_only_for_presets():
+    cols = await _columns("assets")
+    assert cols["scope_id"]["is_nullable"] == "YES"
+    rows = await db_engine.fetch_all(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
+        "WHERE conrelid='assets'::regclass AND conname='assets_scope_or_preset'",
+        {},
+    )
+    assert rows and "is_system_preset" in rows[0]["def"]
+
+
+@pytest.mark.parametrize("table", _TABLES)
+async def test_rls_enabled_service_role_only(table):
+    rows = await db_engine.fetch_all(
+        "SELECT relrowsecurity FROM pg_class WHERE relname=:t", {"t": table}
+    )
+    assert rows and rows[0]["relrowsecurity"] is True
+    pols = await db_engine.fetch_all(
+        "SELECT policyname, roles::text AS roles FROM pg_policies WHERE tablename=:t",
+        {"t": table},
+    )
+    assert len(pols) == 1 and "service_role" in pols[0]["roles"]
+
+
 async def test_asset_links_relation_check():
     rows = await db_engine.fetch_all(
         "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
@@ -174,7 +200,8 @@ Expected: `SKIPPED` (no DB URL). With `INTEGRATION_DATABASE_URL` set: FAIL "asse
 -- 1) assets ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS assets (
     id                 BIGINT PRIMARY KEY DEFAULT generate_snowflake_id(),
-    scope_id           BIGINT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    -- NULL only for global system presets (is_system_preset) — see CHECK below.
+    scope_id           BIGINT REFERENCES teams(id) ON DELETE CASCADE,
     asset_type         TEXT NOT NULL
                        CHECK (asset_type IN ('character','location','prop','costume','prompt','audio')),
     -- audio: music|sfx|voice ; prompt: character|storyboard|product|lighting|…
@@ -204,7 +231,8 @@ CREATE TABLE IF NOT EXISTS assets (
     created_by         UUID,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at         TIMESTAMPTZ
+    deleted_at         TIMESTAMPTZ,
+    CONSTRAINT assets_scope_or_preset CHECK (scope_id IS NOT NULL OR is_system_preset)
 );
 
 CREATE INDEX IF NOT EXISTS idx_assets_scope_type
@@ -213,7 +241,7 @@ CREATE INDEX IF NOT EXISTS idx_assets_scope_type
 -- Decision 14: same-name-same-type within a scope must not silently create a
 -- second entity. Partial so a soft-deleted row frees the name.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_assets_scope_type_name
-    ON assets (scope_id, asset_type, lower(name)) WHERE deleted_at IS NULL;
+    ON assets (COALESCE(scope_id, 0), asset_type, lower(name)) WHERE deleted_at IS NULL;
 
 -- 2) asset_loadouts ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS asset_loadouts (
@@ -286,6 +314,28 @@ CREATE TABLE IF NOT EXISTS canvas_asset_refs (
 
 CREATE INDEX IF NOT EXISTS idx_car_asset ON canvas_asset_refs (asset_id);
 
+-- 7) RLS: service_role only (mirror mig 441 cover_template_usage). The frontend
+-- must never read these via PostgREST — every read goes through /api/v1/assets
+-- so the team-membership gate is the single authority.
+ALTER TABLE assets             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_loadouts     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_files        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_links        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE asset_project_refs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE canvas_asset_refs  ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS assets_service_role_all ON assets;
+CREATE POLICY assets_service_role_all ON assets FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS asset_loadouts_service_role_all ON asset_loadouts;
+CREATE POLICY asset_loadouts_service_role_all ON asset_loadouts FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS asset_files_service_role_all ON asset_files;
+CREATE POLICY asset_files_service_role_all ON asset_files FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS asset_links_service_role_all ON asset_links;
+CREATE POLICY asset_links_service_role_all ON asset_links FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS asset_project_refs_service_role_all ON asset_project_refs;
+CREATE POLICY asset_project_refs_service_role_all ON asset_project_refs FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS canvas_asset_refs_service_role_all ON canvas_asset_refs;
+CREATE POLICY canvas_asset_refs_service_role_all ON canvas_asset_refs FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 -- PostgREST schema reload (CI-migration-skips-reload trap).
 NOTIFY pgrst, 'reload schema';
 ```
@@ -293,7 +343,7 @@ NOTIFY pgrst, 'reload schema';
 - [ ] **Step 5: Apply locally and run the test**
 
 Run: `psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -f supabase/migrations/445_asset_library_core.sql && cd backend && INTEGRATION_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres uv run pytest tests/migrations/test_445_asset_library_core.py -v`
-Expected: 9 PASS. (If the local Supabase is not running, run against nous-db via `docker exec -i nous-db psql -U postgres -p 55434 -d postgres < …` on gpupc, or skip and rely on CI's schema-drift job.)
+Expected: 16 PASS. (If the local Supabase is not running, run against nous-db via `docker exec -i nous-db psql -U postgres -p 55434 -d postgres < …` on gpupc, or skip and rely on CI's schema-drift job.)
 
 - [ ] **Step 6: Commit**
 
@@ -529,6 +579,9 @@ class Assets(Base):
             "source IN ('manual','script_import','generated','migrated','duplicated','system_preset')",
             name="assets_source_check",
         ),
+        CheckConstraint(
+            "scope_id IS NOT NULL OR is_system_preset", name="assets_scope_or_preset"
+        ),
         Index(
             "idx_assets_scope_type",
             "scope_id",
@@ -541,7 +594,8 @@ class Assets(Base):
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
-    scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # NULL only for global system presets (assets_scope_or_preset CHECK).
+    scope_id: Mapped[int | None] = mapped_column(BigInteger)
     asset_type: Mapped[str] = mapped_column(Text, nullable=False)
     subtype: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1248,7 +1302,7 @@ git commit -m "feat(assets): pydantic schemas for assets API"
 - Consumes: `Assets`, `AssetFiles`, `AssetProjectRefs`, `AssetLoadouts` models; `readiness()` from Task 4.
 - Produces class `AssetsRepository` with:
   - `async def create(self, scope_id: int, fields: dict, created_by: str | None) -> dict` — raises `DuplicateAssetName(existing_id: int)` on unique violation
-  - `async def get(self, asset_id: int, scope_id: int) -> dict | None` (soft-deleted excluded)
+  - `async def get(self, asset_id: int, scope_id: int) -> dict | None` (soft-deleted excluded; system presets with `scope_id NULL` visible from any scope)
   - `async def list(self, scope_id: int, *, asset_type: str | None, project_id: int | None, q: str | None, limit: int, offset: int) -> list[dict]`
   - `async def update(self, asset_id: int, scope_id: int, fields: dict) -> dict | None`
   - `async def soft_delete(self, asset_id: int, scope_id: int) -> bool`
@@ -1434,10 +1488,11 @@ class AssetsRepository:
         return _row_dict(obj) if obj else None
 
     async def get(self, asset_id: int, scope_id: int) -> Optional[Dict[str, Any]]:
+        # System presets (scope_id NULL) are readable from every scope.
         stmt = (
             select(Assets)
             .where(Assets.id == int(asset_id))
-            .where(Assets.scope_id == int(scope_id))
+            .where(or_(Assets.scope_id == int(scope_id), Assets.is_system_preset.is_(True)))
             .where(Assets.deleted_at.is_(None))
         )
         async with read_scope() as session:
@@ -1457,7 +1512,7 @@ class AssetsRepository:
         limit = max(1, min(int(limit), 200))
         stmt = (
             select(Assets)
-            .where(Assets.scope_id == int(scope_id))
+            .where(or_(Assets.scope_id == int(scope_id), Assets.is_system_preset.is_(True)))
             .where(Assets.deleted_at.is_(None))
         )
         if asset_type:
@@ -1588,7 +1643,7 @@ git commit -m "feat(assets): AssetsRepository with scope predicates, 409 duplica
   - files: `attach(asset_id, resource_id, slot, *, loadout_id, note, attached_by) -> dict` (upsert on PK — re-attach updates loadout/note), `detach(asset_id, resource_id, slot) -> bool`, `list_files(asset_id) -> list[dict]`, `resource_in_scope(resource_id, scope_id) -> bool`
   - links: `add_link(from_id, to_id, relation) -> dict` (idempotent), `remove_link(from_id, to_id, relation) -> bool`, `list_links(asset_id) -> tuple[list[dict], list[dict]]` (outgoing, incoming), `link_targets(from_id, relation) -> set[int]`
   - loadouts: `create_loadout(asset_id, fields) -> dict`, `update_loadout(loadout_id, asset_id, fields) -> dict | None`, `delete_loadout(loadout_id, asset_id) -> bool`, `list_loadouts(asset_id) -> list[dict]`, `set_default(loadout_id, asset_id) -> None` (clears others in one transaction), `strip_from_loadouts(asset_id, *, costume_id=None, prop_id=None) -> int`
-  - project refs: `link_project(asset_id, project_id, linked_by) -> bool`, `unlink_project(asset_id, project_id) -> bool`, `list_project_ids(asset_id) -> list[int]`
+  - project refs: `project_team_id(project_id) -> tuple[bool, int | None]` (exists?, team_id), `link_project(asset_id, project_id, linked_by) -> bool`, `unlink_project(asset_id, project_id) -> bool`, `list_project_ids(asset_id) -> list[int]`
   - module-level `_serialize_file`, `_serialize_link`, `_serialize_loadout`
 
 - [ ] **Step 1: Write serialization tests (no DB)**
@@ -1678,6 +1733,7 @@ from app.models import (
     AssetLinks,
     AssetLoadouts,
     AssetProjectRefs,
+    Projects,
     ResourceItems,
 )
 
@@ -1921,6 +1977,15 @@ class AssetRelationsRepository:
 
     # ── project refs ───────────────────────────────────────────────────────
 
+    async def project_team_id(self, project_id: int) -> Tuple[bool, Optional[int]]:
+        """(exists, team_id). team_id None = personal project."""
+        stmt = select(Projects.team_id).where(Projects.id == int(project_id))
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).first()
+        if row is None:
+            return False, None
+        return True, (int(row[0]) if row[0] is not None else None)
+
     async def link_project(self, asset_id: int, project_id: int, linked_by: Optional[str]) -> bool:
         stmt = (
             pg_insert(AssetProjectRefs)
@@ -1984,7 +2049,7 @@ git commit -m "feat(assets): relations repository — files/links/loadouts/proje
   - `create_loadout(asset_id, scope_id, payload: LoadoutCreate) -> dict` — asset must be `character` (`422 loadouts_character_only`); costume/prop ids ⊆ link targets (`422 loadout_not_subset`)
   - `update_loadout(asset_id, scope_id, loadout_id, payload: LoadoutUpdate) -> dict`
   - `delete_loadout(asset_id, scope_id, loadout_id) -> None` (`422 cannot_delete_default`)
-  - `link_project(asset_id, scope_id, project_id, user_id) -> None` / `unlink_project(...) -> None`
+  - `link_project(asset_id, scope_id, project_id, user_id) -> None` — project must exist (`404 project_not_found`) and its `team_id` must equal `scope_id` or be NULL (personal) (`422 project_scope_mismatch`) / `unlink_project(...) -> None`
 
 - [ ] **Step 1: Write the tests with fake repos**
 
@@ -2122,6 +2187,13 @@ class FakeRelationsRepo:
     async def strip_from_loadouts(self, asset_id, costume_id=None, prop_id=None):
         return 0
 
+    project_teams = {55: SCOPE, 56: 999}
+
+    async def project_team_id(self, project_id):
+        if project_id not in self.project_teams:
+            return False, None
+        return True, self.project_teams[project_id]
+
     async def link_project(self, a, p, u):
         self.refs.append((a, p))
         return True
@@ -2233,6 +2305,19 @@ async def test_get_detail_composes_files_links_loadouts_and_readiness(svc):
     with pytest.raises(AssetError) as ei:
         await svc.get_asset(999, SCOPE)
     assert ei.value.status == 404
+
+
+@pytest.mark.asyncio
+async def test_link_project_rejects_other_team_and_unknown(svc):
+    c = await svc.create_asset(SCOPE, AssetCreate(asset_type="character", name="C"), USER)
+    await svc.link_project(int(c["id"]), SCOPE, 55, USER)
+    assert (int(c["id"]), 55) in svc.relations.refs
+    with pytest.raises(AssetError) as ei:
+        await svc.link_project(int(c["id"]), SCOPE, 56, USER)
+    assert ei.value.code == "project_scope_mismatch"
+    with pytest.raises(AssetError) as ei:
+        await svc.link_project(int(c["id"]), SCOPE, 57, USER)
+    assert ei.value.status == 404 and ei.value.code == "project_not_found"
 
 
 @pytest.mark.asyncio
@@ -2476,6 +2561,13 @@ class AssetsService:
 
     async def link_project(self, asset_id: int, scope_id: int, project_id: int, user_id: Optional[str]) -> None:
         await self._require(asset_id, scope_id)
+        exists, team_id = await self.relations.project_team_id(int(project_id))
+        if not exists:
+            raise AssetError(404, "project_not_found", "Project not found")
+        # Personal projects carry team_id NULL; their scope is the owner's personal
+        # team, which is what the caller passed as scope_id when they are that owner.
+        if team_id is not None and int(team_id) != int(scope_id):
+            raise AssetError(422, "project_scope_mismatch", "Project belongs to a different team than this asset")
         await self.relations.link_project(int(asset_id), int(project_id), user_id)
 
     async def unlink_project(self, asset_id: int, scope_id: int, project_id: int) -> None:
@@ -2487,7 +2579,7 @@ class AssetsService:
 - [ ] **Step 4: Run tests**
 
 Run: `cd backend && uv run pytest tests/services/assets/ -v`
-Expected: all PASS (10 service + earlier).
+Expected: all PASS (11 service + earlier).
 
 - [ ] **Step 5: Commit**
 

@@ -49,7 +49,7 @@
 ```sql
 CREATE TABLE assets (
   id              BIGINT PRIMARY KEY DEFAULT generate_snowflake_id(),
-  scope_id        BIGINT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  scope_id        BIGINT REFERENCES teams(id) ON DELETE CASCADE,   -- NULL 仅允许系统预设（全局只读）
   asset_type      TEXT   NOT NULL CHECK (asset_type IN ('character','location','prop','costume','prompt','audio')),
   subtype         TEXT,                      -- audio: music|sfx|voice ; prompt: character|storyboard|product|lighting|…
   name            TEXT   NOT NULL,
@@ -70,13 +70,19 @@ CREATE TABLE assets (
   created_by      UUID,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at      TIMESTAMPTZ
+  deleted_at      TIMESTAMPTZ,
+  CONSTRAINT assets_scope_or_preset CHECK (scope_id IS NOT NULL OR is_system_preset)
 );
 CREATE INDEX idx_assets_scope_type ON assets(scope_id, asset_type) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX uq_assets_scope_type_name ON assets(scope_id, asset_type, lower(name)) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_assets_scope_type_name ON assets(COALESCE(scope_id, 0), asset_type, lower(name)) WHERE deleted_at IS NULL;
+
+-- 六张表全部 ENABLE ROW LEVEL SECURITY + 仅 service_role 策略（照 mig 441 cover_template_usage）：
+-- 前端不得 supabase.from('assets'…) 直读，一律走 /api/v1/assets。
 ```
 
 `uq_assets_scope_type_name` 是决策 14 的"同名提示"落点：API 捕获 23505 后返回 `409 {existing_asset_id}`，前端弹"已存在，是否关联"。
+
+**系统预设**（`is_system_preset=true, scope_id NULL`）是唯一的全局行：列表查询 `scope_id = :scope OR is_system_preset`，只读，Duplicate 落到调用者 scope。
 
 ### 3.2 `asset_files` — 文件挂到槽位
 
@@ -274,6 +280,22 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 - 聊天里 `@` 选择器加 Assets 一栏（v1 只做插入引用，不做 loadout 选择）。
 
 ## 7. 错误处理与不变量
+
+### 7.0 作用域与权限（2026-08-28 复盘补）
+
+| 规则 | 落点 |
+|---|---|
+| 资产归 `scope_id = teams.id`（个人 = 个人 team）；`/assets*` 门控 = **team 成员**（与 `verify_scope_access` 同口径） | router `_gate` |
+| 写权限 = 任意 team 成员，v1 不分角色（与 resources 一致） | 明示取舍，不做 |
+| 只在 `project_members`、不在 team 的协作者：经 `/projects/{id}/assets` **只读**；`/assets?scope_id` 会 403 | 项目视图是只读投影 |
+| `asset_files.resource_id` 必须在同 scope（`resource_items.scope_id`） | service `attach_file` → 404 |
+| `asset_links` 两端必须同 scope | service `add_link` → 404 |
+| `asset_project_refs` 的项目必须属于同 scope（`projects.team_id == scope_id`，个人项目 `team_id NULL` 对应个人 team） | service `link_project` → 422 `project_scope_mismatch` |
+| 六张表 RLS：service_role-only，前端零直读；P2 加前端 tripwire 测试（grep `from('assets`）拒绝 | mig 445 + 前端测试 |
+| 系统预设 `scope_id NULL`，任何 scope 可读、不可改 | §3.1 |
+
+存储：资产库**不写字节**——`asset_files` 只指 `resources`，封面走 `/resources/{id}/cover`（已兼容 `sb://` 对象存储）。P3 迁移把旧 `portrait_url/cover_url`（URL）反解为 `cover_file_id`，反解不到的留在 `attrs.legacy_cover_url`。
+
 
 - 归入资产的每条路径都返回类型化结果（成功 / 409 已存在 / 404 资源不可见 / 422 槽位不合法），前端逐条回显——沿用"触发路径必须类型化失败回显"纪律。
 - `save-as-asset` 是一个事务：promote 失败不写 `asset_files`；写 `asset_files` 失败回滚 promote 状态（`review_state` 不变）。
