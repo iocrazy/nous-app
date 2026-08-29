@@ -26,7 +26,11 @@ export function MentionImageGrid({ images, onPick }: Props): React.ReactElement 
   return (
     <div
       data-testid="mention-image-grid"
-      className="mh-pop-in nodrag nowheel absolute bottom-full left-0 z-50 mb-1 w-[18rem] rounded-xl border border-canvas-line bg-canvas-card p-2 shadow-lg"
+      // Opens DOWNWARD (IC does): anchored above, it covered the input-image
+      // row and collided with the count/size popovers that live over the
+      // footer. z-60 so it wins against those (they sit at z-50) — it is the
+      // thing the user just summoned.
+      className="mh-pop-in nodrag nowheel absolute left-0 top-full z-[60] mt-1 w-[26rem] rounded-xl border border-canvas-line bg-canvas-card p-2 shadow-lg"
       onMouseDown={(e) => e.preventDefault()}
     >
       {images.length === 0 ? (

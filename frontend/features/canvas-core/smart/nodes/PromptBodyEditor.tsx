@@ -155,8 +155,10 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
           class: [
             'nodrag nowheel',
             'min-h-[3.5rem] max-h-[240px] w-full overflow-y-auto bg-transparent',
+            // No focus ring: the box already sits inside a bordered card, and
+            // a ring around the whole field reads as an error state. IC draws
+            // none either.
             'text-[13px] text-ink-200 outline-none',
-            'focus:ring-1 focus:ring-canvas-strong/40',
             'prompt-body-editor',
           ].join(' '),
           'data-testid': testId,

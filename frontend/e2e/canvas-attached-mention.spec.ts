@@ -234,3 +234,35 @@ test('Chinese IME input survives the store round-trip', async ({ page }) => {
   await page.waitForTimeout(500); // let the store echo land
   await expect(editor).toContainText('你好世界');
 });
+
+test('the popover opens below the box and the chip thumbnail is a real image', async ({
+  page,
+}) => {
+  // Two things a unit test cannot settle: where the popover actually lands
+  // relative to the box, and whether the chip's <img> genuinely decoded.
+  await openCanvas(page);
+  await openAttachedPanel(page);
+  const editor = page.getByTestId('attached-prompt-editor');
+  await editor.click();
+  await page.keyboard.type('@');
+
+  const grid = page.getByTestId('mention-image-grid');
+  await expect(grid).toBeVisible();
+
+  const editorBox = await editor.boundingBox();
+  const gridBox = await grid.boundingBox();
+  if (!editorBox || !gridBox) throw new Error('missing box');
+  // IC opens downward. Anchored above, it covered the input-image row.
+  expect(
+    gridBox.y,
+    `popover top (${gridBox.y}) is above the editor top (${editorBox.y}) — it opened upward`,
+  ).toBeGreaterThan(editorBox.y);
+
+  await page.getByTestId('mention-image-option').first().click();
+  const chip = page.getByTestId('prompt-image-chip');
+  await expect(chip).toBeVisible();
+  const decoded = await chip.locator('img').evaluate(
+    (el) => (el as HTMLImageElement).naturalWidth > 0,
+  );
+  expect(decoded, 'chip thumbnail did not decode').toBe(true);
+});

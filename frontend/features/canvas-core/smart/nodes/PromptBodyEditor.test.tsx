@@ -40,7 +40,12 @@ describe('PromptBodyEditor', () => {
     render(<PromptBodyEditor value="" onChange={() => {}} initialChips={[CHIP]} />);
     const chip = await screen.findByTestId('prompt-image-chip');
     expect(chip).toHaveTextContent('hero.png');
-    expect(chip.querySelector('img')?.getAttribute('src')).toBe(CHIP.url);
+    // The src goes through mediaSrc(), so it is no longer the bare relative
+    // path — asserting equality here is what let the broken-image bug ship.
+    // What matters is that it still points at this resource.
+    const src = chip.querySelector('img')?.getAttribute('src') ?? '';
+    expect(src).toContain('/generated-media/5/cover');
+    expect(src.startsWith('/'), 'relative src will 404 across origins').toBe(false);
   });
 
   it('reports a chip as @alias in the prompt text', async () => {
