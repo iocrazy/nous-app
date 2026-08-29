@@ -128,6 +128,10 @@ export function UnifiedImageEditor({
   const [maskTool] = useState<MaskTool>('brush');
   const [maskSize, setMaskSize] = useState<number>(BRUSH_SIZES[1].value);
   const paintRef = useRef<PaintCanvasHandle | null>(null);
+  // A user action that cannot complete must say so. Every apply path here is
+  // a chain of optional calls, and each link fails by doing nothing at all —
+  // which reaches the user as a dead button and reaches us as no signal.
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [paintHistory, setPaintHistory] = useState({ canUndo: false, canRedo: false });
   // IC crop aspect presets — null = free.
   const [cropAspect, setCropAspect] = useState<number | null>(null);
@@ -184,14 +188,36 @@ export function UnifiedImageEditor({
   };
 
   const apply = () => {
+    setApplyError(null);
     if (mode === 'crop') onCropCommit?.(region);
     else if (mode === 'outpaint') onOutpaintCommit?.(padding, outpaintPrompt);
     else if (mode === 'mask')
       onMaskCommit?.(strokes, naturalSize ?? FALLBACK_MASK_SIZE);
     else if (mode === 'brush') {
-      void paintRef.current?.exportComposite().then((blob) => {
-        if (blob) onBrushCommit?.(blob);
-      });
+      const paint = paintRef.current;
+      if (!paint) {
+        setApplyError('The drawing surface is not ready yet — try again.');
+        return;
+      }
+      void paint
+        .exportComposite()
+        .then((blob) => {
+          if (!blob) {
+            setApplyError(
+              'Could not export the drawing. The image may be blocked from being read back; try reopening the editor.',
+            );
+            return;
+          }
+          if (!onBrushCommit) {
+            setApplyError('This view cannot save brush edits.');
+            return;
+          }
+          onBrushCommit(blob);
+        })
+        .catch((err: unknown) => {
+          console.error('[editor] brush export failed', err);
+          setApplyError('Could not export the drawing.');
+        });
     }
     else if (mode === 'resize') onResizeCommit?.(scale);
     else if (mode === 'split') onSplitCommit?.(lines);
@@ -612,6 +638,15 @@ export function UnifiedImageEditor({
 
       {/* Footer. */}
       <div className="mt-3 flex items-center gap-2">
+        {applyError && (
+          <p
+            role="alert"
+            data-testid="editor-apply-error"
+            className="text-xs font-medium text-danger"
+          >
+            {applyError}
+          </p>
+        )}
         <button
           type="button"
           data-testid="editor-cancel"

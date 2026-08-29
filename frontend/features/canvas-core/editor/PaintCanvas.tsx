@@ -62,6 +62,10 @@ export const PaintCanvas = forwardRef<
   // anonymous first, fall back to a plain load — the export path then
   // degrades to overlay-only instead of failing to show anything.
   const [anonymous, setAnonymous] = useState(true);
+  // The imperative handle closes over state, so export must read this through
+  // a ref or it will act on a stale value.
+  const anonymousRef = useRef(true);
+  anonymousRef.current = anonymous;
   const imgRef = useRef<HTMLImageElement | null>(null);
   const undoStack = useRef<ImageData[]>([]);
   const redoStack = useRef<ImageData[]>([]);
@@ -312,18 +316,35 @@ export const PaintCanvas = forwardRef<
       out.height = c.height;
       const ctx = out.getContext('2d');
       if (!ctx) return null;
-      try {
-        ctx.drawImage(img, 0, 0, out.width, out.height);
-      } catch (err) {
-        // Cross-origin image without CORS headers — compositing would taint
-        // the canvas; ship the annotation layer alone rather than nothing.
-        console.error('[paint] base image not exportable, overlay only', err);
+
+      // Only composite the base when it was loaded CORS-clean.
+      //
+      // A plain-loaded cross-origin image does NOT throw here — `drawImage`
+      // succeeds and quietly TAINTS the canvas, and the failure only surfaces
+      // later as a SecurityError from `toBlob`. The previous code guarded
+      // this call instead, so its "overlay only" fallback never ran: export
+      // returned null and Apply Brush silently did nothing.
+      //
+      // Skipping the base keeps the canvas clean, so the annotation layer
+      // still exports. An overlay is worth strictly more than nothing.
+      if (anonymousRef.current) {
+        try {
+          ctx.drawImage(img, 0, 0, out.width, out.height);
+        } catch (err) {
+          console.error('[paint] base image not exportable, overlay only', err);
+        }
+      } else {
+        console.warn(
+          '[paint] base image is not CORS-readable; exporting the annotation layer only',
+        );
       }
       ctx.drawImage(c, 0, 0);
       return new Promise((resolve) => {
         try {
           out.toBlob(resolve, 'image/png');
         } catch (err) {
+          // Defence in depth: we should no longer be tainted, but a null here
+          // would be an invisible dead end for the user either way.
           console.error('[paint] export failed (tainted canvas)', err);
           resolve(null);
         }
