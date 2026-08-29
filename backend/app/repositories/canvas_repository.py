@@ -122,6 +122,33 @@ class CanvasRepository:
             logger.error(f"canvas get_by_id({canvas_id}) failed: {e}")
             return None
 
+    async def names_by_ids(self, ids: List[int]) -> Dict[str, str]:
+        """``{str(canvas_id): name}`` for many canvases in ONE query.
+
+        For decorating lists (the Generated inbox card prints the source
+        canvas's name) — the alternative, ``get_by_id`` in a loop, is one
+        round-trip per card. An empty ``ids`` short-circuits instead of
+        issuing an ``IN ()`` that can only return nothing.
+
+        Soft-deleted canvases are deliberately INCLUDED: a generation made on
+        a canvas that has since been trashed still came from a canvas with a
+        name, and printing that name beats printing "Untitled canvas". Ids
+        with no row are simply absent — the caller owns the fallback.
+
+        NOT scope-filtered: it answers for whatever ids it is given, so the
+        CALLER must only pass ids it already read out of scoped rows. The
+        Generated inbox does (``generated_media.canvas_id`` of rows the scope
+        predicate already matched).
+        """
+        wanted = [_bigint(i) for i in ids if i is not None]
+        if not wanted:
+            return {}
+        async with read_scope() as session:
+            rows = await session.execute(
+                select(Canvases.id, Canvases.name).where(Canvases.id.in_(wanted))
+            )
+            return {str(r.id): r.name for r in rows.all()}
+
     async def get_storyboard_canvas(
         self,
         project_id: str,

@@ -1,0 +1,572 @@
+"""GeneratedInboxService invariants with in-memory fakes (no DB).
+
+Same shape as ``tests/services/assets/test_assets_service.py``: the repos and
+the collaborating services are fakes, so what is under test is the
+orchestration — error mapping, the save-as-asset ordering inside one unit of
+work, and the per-item accounting of a batch.
+
+Row fixtures copy what ``GeneratedMediaRepository._normalize`` actually
+returns: snowflake ids as STRINGS, ``created_at`` as a driver ``datetime``.
+(The wire-shape variant — an ISO string — is covered by the contract test at
+the bottom.)
+"""
+
+from __future__ import annotations
+
+import datetime
+
+import pytest
+
+from app.schemas.generated import (
+    BatchRequest,
+    CleanupRequest,
+    NewAssetSpec,
+    SaveAsAssetRequest,
+)
+from app.services.assets.assets_service import AssetError
+from app.services.library import generated_inbox_service as mod
+from app.services.library.generated_inbox_service import GeneratedInboxService
+
+NOW = datetime.datetime(2026, 8, 20, 12, 0, tzinfo=datetime.timezone.utc)
+SCOPE = 727145299382534200
+USER = "11111111-1111-1111-1111-111111111111"
+CANVAS = "900000000000000001"
+GEN = "800000000000000001"
+ASSET = "700000000000000001"
+RESOURCE = "600000000000000001"
+
+
+def make_row(**kw) -> dict:
+    base = {
+        "id": GEN,
+        "scope_id": str(SCOPE),
+        "creator_id": USER,
+        "media_kind": "image",
+        "mime": "image/png",
+        "file_path": "sb://generated/ab/abcdef.png",
+        "file_size_bytes": 20481,
+        "origin_kind": "canvas_run",
+        "origin_run_id": None,
+        "agent_id": None,
+        "canvas_id": CANVAS,
+        "node_id": "node-7",
+        "prompt": "A wide shot of the harbour. Golden hour, long lens.",
+        "model": "doubao-seedream",
+        "provider": "volcengine",
+        "params": {},
+        "cost_cents": 3,
+        "parent_resource_id": None,
+        "derivation_kind": None,
+        "promoted_resource_id": None,
+        "review_state": "unreviewed",
+        "source_asset_id": None,
+        "conversation_id": None,
+        "created_at": NOW,
+    }
+    base.update(kw)
+    return base
+
+
+# ── fakes ──────────────────────────────────────────────────────────────────
+
+
+class FakeGenRepo:
+    def __init__(self, rows=None):
+        self.rows: dict[int, dict] = {int(r["id"]): r for r in (rows or [])}
+        self.deleted: list[int] = []
+        self.state_writes: list[tuple[int, int, str]] = []
+        self.delete_returns: dict[int, bool] = {}
+
+    async def list_inbox(self, scope_id, **filters):
+        self.last_filters = dict(filters)
+        rows = [r for r in self.rows.values() if int(r["scope_id"]) == int(scope_id)]
+        return {"items": rows, "next_cursor": "cur-2"}
+
+    async def get(self, gen_id, scope_id):
+        r = self.rows.get(int(gen_id))
+        return r if r and int(r["scope_id"]) == int(scope_id) else None
+
+    async def delete(self, gen_id, scope_id):
+        self.deleted.append(int(gen_id))
+        if int(gen_id) in self.delete_returns:
+            return self.delete_returns[int(gen_id)]
+        return self.rows.pop(int(gen_id), None) is not None
+
+    async def set_review_state(self, gen_id, scope_id, state):
+        self.state_writes.append((int(gen_id), int(scope_id), state))
+        r = self.rows.get(int(gen_id))
+        if not r or int(r["scope_id"]) != int(scope_id):
+            return None
+        r["review_state"] = state
+        return r
+
+    async def count_by_state(self, scope_id):
+        return {"unreviewed": 4, "saved": 2, "in_assets": 1, "deleted": 9}
+
+    async def list_older_unreviewed(self, scope_id, older_than, limit=500):
+        self.cleanup_call = (int(scope_id), older_than, limit)
+        return [
+            r
+            for r in self.rows.values()
+            if r["review_state"] == "unreviewed" and r["created_at"] < older_than
+        ]
+
+
+class FakePromote:
+    """Stands in for PromoteGeneratedMediaService (returns a resource row)."""
+
+    def __init__(self, raises=None):
+        self.raises = raises
+        self.calls: list[dict] = []
+
+    async def promote(self, *, gen_id, user_id, target_scope_id):
+        self.calls.append(
+            {"gen_id": gen_id, "user_id": user_id, "target_scope_id": target_scope_id}
+        )
+        if self.raises:
+            raise self.raises
+        row = self.rows.get(int(gen_id)) if hasattr(self, "rows") else None
+        if row is not None:
+            row["promoted_resource_id"] = RESOURCE
+            row["review_state"] = "saved"
+        return {"id": RESOURCE, "filename": "abcdef.png"}
+
+
+class FakeAssets:
+    def __init__(self, attach_raises=None, create_raises=None):
+        self.attach_raises = attach_raises
+        self.create_raises = create_raises
+        self.created: list[tuple] = []
+        self.attached: list[tuple] = []
+
+    async def create_asset(self, scope_id, payload, user_id):
+        if self.create_raises:
+            raise self.create_raises
+        self.created.append((int(scope_id), payload, user_id))
+        return {"id": ASSET, "name": payload.name, "asset_type": payload.asset_type}
+
+    async def attach_file(self, asset_id, scope_id, req, user_id):
+        if self.attach_raises:
+            raise self.attach_raises
+        self.attached.append((int(asset_id), int(scope_id), req, user_id))
+        return {"id": "500000000000000001", "resource_id": req.resource_id}
+
+
+class FakeCanvases:
+    def __init__(self, names=None):
+        self.names = names or {CANVAS: "Harbour Board"}
+        self.calls: list[list[int]] = []
+
+    async def names_by_ids(self, ids):
+        self.calls.append(list(ids))
+        return {k: v for k, v in self.names.items() if int(k) in {int(i) for i in ids}}
+
+
+class FakeUnitOfWork:
+    """``async with unit_of_work():`` recorder — counts enters and exits."""
+
+    def __init__(self):
+        self.enters = 0
+        self.exits = 0
+        self.exit_excs: list = []
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        self.enters += 1
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.exits += 1
+        self.exit_excs.append(exc_type)
+        return False
+
+
+def build(rows=None, promote=None, assets=None, canvases=None):
+    repo = FakeGenRepo(rows if rows is not None else [make_row()])
+    promote = promote or FakePromote()
+    promote.rows = repo.rows
+    svc = GeneratedInboxService(
+        gen_repo=repo,
+        promote=promote,
+        assets=assets or FakeAssets(),
+        canvases=canvases or FakeCanvases(),
+    )
+    return svc, repo, promote
+
+
+@pytest.fixture
+def fake_uow(monkeypatch):
+    uow = FakeUnitOfWork()
+    monkeypatch.setattr(mod, "unit_of_work", uow)
+    return uow
+
+
+# ── list / counts ──────────────────────────────────────────────────────────
+
+
+async def test_list_attaches_source_and_title_and_resolves_names_once():
+    canvases = FakeCanvases()
+    svc, _repo, _p = build(
+        rows=[make_row(), make_row(id="800000000000000002")], canvases=canvases
+    )
+    page = await svc.list(SCOPE, str(SCOPE))
+    assert page["next_cursor"] == "cur-2"
+    assert len(page["items"]) == 2
+    item = page["items"][0]
+    assert item["title"] == "A wide shot of the harbour"
+    assert item["source"]["label"] == "Harbour Board · Canvas"
+    assert item["source"]["deep_link"] == f"/team/{SCOPE}/canvas/{CANVAS}?node=node-7"
+    # Two rows, one canvas lookup — not one query per card.
+    assert len(canvases.calls) == 1
+
+
+async def test_list_passes_filters_through_to_the_repository():
+    svc, repo, _p = build()
+    since = datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
+    await svc.list(
+        SCOPE,
+        str(SCOPE),
+        state="saved",
+        origin_kinds=["canvas_run"],
+        project_id=42,
+        media_kind="image",
+        model="doubao-seedream",
+        since=since,
+        cursor="c1",
+        limit=7,
+    )
+    assert repo.last_filters == {
+        "state": "saved",
+        "origin_kinds": ["canvas_run"],
+        "project_id": 42,
+        "media_kind": "image",
+        "model": "doubao-seedream",
+        "since": since,
+        "cursor": "c1",
+        "limit": 7,
+    }
+
+
+async def test_empty_origin_kind_is_labelled_unknown_not_blank():
+    svc, _repo, _p = build(rows=[make_row(origin_kind="", canvas_id=None)])
+    item = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
+    assert item["origin_kind"] == "unknown"
+    assert item["source"]["kind"] == "unknown"
+    assert item["source"]["label"] == "unknown"
+
+
+async def test_none_origin_kind_is_labelled_unknown():
+    svc, _repo, _p = build(rows=[make_row(origin_kind=None, canvas_id=None)])
+    item = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
+    assert item["source"]["label"] == "unknown"
+
+
+async def test_counts_drops_the_deleted_bucket():
+    svc, _repo, _p = build()
+    assert await svc.counts(SCOPE) == {"unreviewed": 4, "saved": 2, "in_assets": 1}
+
+
+# ── save ───────────────────────────────────────────────────────────────────
+
+
+async def test_save_promotes_and_returns_the_refreshed_item():
+    svc, _repo, promote = build()
+    out = await svc.save(GEN, SCOPE, USER)
+    assert promote.calls == [
+        {"gen_id": int(GEN), "user_id": USER, "target_scope_id": SCOPE}
+    ]
+    assert out["review_state"] == "saved"
+    assert out["promoted_resource_id"] == RESOURCE
+    assert out["title"] and out["source"]["label"]
+
+
+async def test_save_maps_permission_error_to_403():
+    svc, _repo, _p = build(promote=FakePromote(PermissionError("nope")))
+    with pytest.raises(AssetError) as ei:
+        await svc.save(GEN, SCOPE, USER)
+    assert (ei.value.status, ei.value.code) == (403, "not_authorised")
+    assert ei.value.detail == "nope"
+
+
+async def test_save_maps_not_found_to_404():
+    svc, _repo, _p = build(promote=FakePromote(ValueError("generation not found")))
+    with pytest.raises(AssetError) as ei:
+        await svc.save(GEN, SCOPE, USER)
+    assert (ei.value.status, ei.value.code) == (404, "generation_not_found")
+
+
+async def test_save_maps_file_missing_to_409():
+    svc, _repo, _p = build(promote=FakePromote(ValueError("generation file missing")))
+    with pytest.raises(AssetError) as ei:
+        await svc.save(GEN, SCOPE, USER)
+    assert (ei.value.status, ei.value.code) == (409, "file_missing")
+
+
+async def test_save_reraises_an_unmapped_value_error():
+    svc, _repo, _p = build(promote=FakePromote(ValueError("storage backend refused")))
+    with pytest.raises(ValueError, match="storage backend refused"):
+        await svc.save(GEN, SCOPE, USER)
+
+
+async def test_save_404s_when_the_row_is_not_in_this_scope():
+    svc, repo, _p = build()
+    repo.rows.clear()  # promoted, but the row is not readable in this scope
+    with pytest.raises(AssetError) as ei:
+        await svc.save(GEN, SCOPE, USER)
+    assert ei.value.status == 404
+
+
+# ── save_as_asset ──────────────────────────────────────────────────────────
+
+
+async def test_save_as_asset_attaches_promoted_resource_and_sets_in_assets(fake_uow):
+    assets = FakeAssets()
+    svc, repo, _p = build(assets=assets)
+    out = await svc.save_as_asset(
+        GEN,
+        SCOPE,
+        USER,
+        SaveAsAssetRequest(asset_id=ASSET, slot="portrait"),
+    )
+    assert assets.created == []
+    (aid, sid, req, uid) = assets.attached[0]
+    assert (aid, sid, uid) == (int(ASSET), SCOPE, USER)
+    assert (req.resource_id, req.slot, req.loadout_id) == (RESOURCE, "portrait", None)
+    assert repo.state_writes == [(int(GEN), SCOPE, "in_assets")]
+    assert out["asset_id"] == ASSET
+    assert out["resource_id"] == RESOURCE
+    assert out["generation"]["review_state"] == "in_assets"
+    assert fake_uow.enters == 1
+
+
+async def test_save_as_asset_creates_the_asset_first_when_asked(fake_uow):
+    assets = FakeAssets()
+    svc, _repo, _p = build(assets=assets)
+    out = await svc.save_as_asset(
+        GEN,
+        SCOPE,
+        USER,
+        SaveAsAssetRequest(
+            new_asset=NewAssetSpec(asset_type="character", name="Harbour Girl"),
+            slot="reference",
+        ),
+    )
+    (scope, payload, uid) = assets.created[0]
+    assert (scope, payload.name, payload.asset_type, uid) == (
+        SCOPE,
+        "Harbour Girl",
+        "character",
+        USER,
+    )
+    assert assets.attached[0][0] == int(ASSET)
+    assert out["asset_id"] == ASSET
+
+
+async def test_save_as_asset_leaves_state_untouched_when_attach_fails(fake_uow):
+    assets = FakeAssets(
+        attach_raises=AssetError(422, "invalid_slot", "Slot 'x' is not valid")
+    )
+    svc, repo, _p = build(assets=assets)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="x")
+        )
+    assert ei.value.code == "invalid_slot"
+    assert repo.state_writes == []  # rollback is the UoW's job; we never wrote
+    assert repo.rows[int(GEN)]["review_state"] == "saved"
+    assert fake_uow.enters == 1 and fake_uow.exits == 1
+
+
+async def test_save_as_asset_propagates_a_create_conflict(fake_uow):
+    assets = FakeAssets(
+        create_raises=AssetError(409, "asset_exists", "already exists", {"a": 1})
+    )
+    svc, repo, _p = build(assets=assets)
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(
+            GEN,
+            SCOPE,
+            USER,
+            SaveAsAssetRequest(
+                new_asset=NewAssetSpec(asset_type="prop", name="Lantern")
+            ),
+        )
+    assert (ei.value.status, ei.value.code, ei.value.extra) == (
+        409,
+        "asset_exists",
+        {"a": 1},
+    )
+    assert assets.attached == [] and repo.state_writes == []
+
+
+async def test_save_as_asset_maps_promote_permission_error(fake_uow):
+    svc, _repo, _p = build(promote=FakePromote(PermissionError("no")))
+    with pytest.raises(AssetError) as ei:
+        await svc.save_as_asset(GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET))
+    assert ei.value.status == 403
+    assert fake_uow.enters == 1
+
+
+# ── delete ─────────────────────────────────────────────────────────────────
+
+
+async def test_delete_removes_the_row():
+    svc, repo, _p = build()
+    assert await svc.delete(GEN, SCOPE) is None
+    assert repo.deleted == [int(GEN)]
+
+
+async def test_delete_404s_when_nothing_matched():
+    svc, repo, _p = build()
+    repo.delete_returns[int(GEN)] = False
+    with pytest.raises(AssetError) as ei:
+        await svc.delete(GEN, SCOPE)
+    assert (ei.value.status, ei.value.code) == (404, "generation_not_found")
+
+
+# ── batch ──────────────────────────────────────────────────────────────────
+
+
+async def test_batch_attempts_every_id_and_reports_failures_with_codes():
+    good, bad = GEN, "800000000000000099"
+    svc, repo, _p = build(rows=[make_row(id=good)])
+    repo.delete_returns[int(bad)] = False
+    out = await svc.batch(BatchRequest(ids=[bad, good], action="delete"), SCOPE, USER)
+    # The failing id came FIRST — a batch does not stop at the first failure.
+    assert out["ok"] == [good]
+    assert out["failed"] == [
+        {"id": bad, "code": "generation_not_found", "detail": "Generation not found"}
+    ]
+    assert repo.deleted == [int(bad), int(good)]
+
+
+async def test_batch_save_reports_per_item_permission_failures():
+    svc, _repo, _p = build(promote=FakePromote(PermissionError("nope")))
+    out = await svc.batch(BatchRequest(ids=[GEN], action="save"), SCOPE, USER)
+    assert out["ok"] == []
+    assert out["failed"][0]["code"] == "not_authorised"
+
+
+async def test_batch_save_as_asset_uses_the_request_payload(fake_uow):
+    assets = FakeAssets()
+    svc, _repo, _p = build(assets=assets)
+    out = await svc.batch(
+        BatchRequest(
+            ids=[GEN],
+            action="save_as_asset",
+            save_as_asset=SaveAsAssetRequest(asset_id=ASSET, slot="portrait"),
+        ),
+        SCOPE,
+        USER,
+    )
+    assert out["ok"] == [GEN]
+    assert assets.attached[0][2].slot == "portrait"
+    assert fake_uow.enters == 1
+
+
+# ── cleanup ────────────────────────────────────────────────────────────────
+
+
+def _old_rows(n):
+    return [
+        make_row(
+            id=str(800000000000000000 + i),
+            created_at=NOW - datetime.timedelta(days=200),
+        )
+        for i in range(n)
+    ]
+
+
+async def test_cleanup_dry_run_deletes_nothing_and_samples_twelve():
+    svc, repo, _p = build(rows=_old_rows(20))
+    out = await svc.cleanup(CleanupRequest(older_than_days=30), SCOPE)
+    assert out["dry_run"] is True
+    assert out["count"] == 20
+    assert out["deleted"] == 0
+    assert len(out["sample"]) == 12
+    assert out["sample"][0]["title"]
+    assert repo.deleted == []
+    scope, older_than, limit = repo.cleanup_call
+    assert scope == SCOPE and limit == 2000
+    # 30 days back from "now", not from the row timestamps.
+    delta = datetime.datetime.now(datetime.timezone.utc) - older_than
+    assert datetime.timedelta(days=29) < delta < datetime.timedelta(days=31)
+
+
+async def test_cleanup_live_deletes_and_counts():
+    svc, repo, _p = build(rows=_old_rows(3))
+    out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=False), SCOPE)
+    assert out == {"dry_run": False, "count": 3, "sample": [], "deleted": 3}
+    assert len(repo.deleted) == 3
+
+
+async def test_cleanup_live_counts_only_the_rows_it_really_deleted():
+    rows = _old_rows(3)
+    svc, repo, _p = build(rows=rows)
+    repo.delete_returns[int(rows[1]["id"])] = False
+    out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=False), SCOPE)
+    assert (out["count"], out["deleted"]) == (3, 2)
+
+
+async def test_cleanup_skips_rows_that_are_already_reviewed():
+    svc, _repo, _p = build(
+        rows=[
+            make_row(
+                id="800000000000000010",
+                review_state="saved",
+                created_at=NOW - datetime.timedelta(days=200),
+            )
+        ]
+    )
+    out = await svc.cleanup(CleanupRequest(older_than_days=30), SCOPE)
+    assert out["count"] == 0
+
+
+# ── contract ───────────────────────────────────────────────────────────────
+
+
+async def test_a_wire_shape_row_round_trips_through_generated_item():
+    """A repo row as it reaches JSON (string ids, ISO created_at) validates.
+
+    The row shape is the boundary this service is most likely to break on —
+    ``GeneratedItem.model_validate`` has to accept exactly what
+    ``_normalize`` produces, extra repo-only columns and all.
+    """
+    row = make_row(created_at="2026-08-20T12:00:00+00:00")
+    svc, _repo, _p = build(rows=[row])
+    item = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
+    assert item["id"] == GEN and isinstance(item["id"], str)
+    assert item["created_at"] == NOW
+    assert item["review_state"] == "unreviewed"
+    # repo-only columns never reach the wire model
+    assert "file_path" not in item and "params" not in item
+    assert set(item["source"]) == {
+        "kind",
+        "label",
+        "canvas_id",
+        "node_id",
+        "shot_id",
+        "conversation_id",
+        "deep_link",
+    }
+
+
+async def test_names_by_ids_short_circuits_on_an_empty_page():
+    """The service calls ``names_by_ids`` unconditionally — including for a page
+    with no canvas rows at all — so the real repo has to answer an empty id list
+    without a round-trip. (No DB engine is configured here: if it issued the
+    query, this test would error rather than pass.)"""
+    from app.repositories.canvas_repository import CanvasRepository
+
+    assert await CanvasRepository().names_by_ids([]) == {}
+
+
+async def test_a_page_with_no_canvas_rows_still_makes_exactly_one_lookup():
+    canvases = FakeCanvases()
+    svc, _repo, _p = build(rows=[make_row(origin_kind="agent_run", canvas_id=None)])
+    svc.canvases = canvases
+    item = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
+    assert item["source"]["label"] == "Chat generation"
+    assert canvases.calls == [[]]
