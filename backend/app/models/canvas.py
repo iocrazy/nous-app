@@ -50,8 +50,24 @@ class Canvases(Base):
             ondelete="CASCADE",
             name="canvases_episode_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["asset_id"],
+            ["public.assets.id"],
+            ondelete="SET NULL",
+            name="canvases_asset_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="canvases_pkey"),
+        CheckConstraint(
+            "kind IN ('smart', 'lite', 'classic', 'character', 'location', "
+            "'prop', 'costume', 'storyboard')",
+            name="canvases_kind_check",
+        ),
         Index("idx_canvases_project", "project_id"),
+        Index(
+            "idx_canvases_asset",
+            "asset_id",
+            postgresql_where=text("asset_id IS NOT NULL"),
+        ),
         {"schema": "public"},
     )
 
@@ -73,6 +89,9 @@ class Canvases(Base):
     kind: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'smart'::text")
     )
+    # mig 446: owning asset for an entity workshop canvas (decision 13). NULL for
+    # ordinary canvases; project_id stays the project it was opened from.
+    asset_id: Mapped[int | None] = mapped_column(BigInteger)
     viewport_json: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,

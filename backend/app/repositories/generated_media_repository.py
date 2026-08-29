@@ -52,6 +52,8 @@ _GM_COLS = (
     GeneratedMedia.parent_resource_id,
     GeneratedMedia.derivation_kind,
     GeneratedMedia.promoted_resource_id,
+    GeneratedMedia.review_state,
+    GeneratedMedia.source_asset_id,
     GeneratedMedia.conversation_id,
     GeneratedMedia.created_at,
 )
@@ -64,6 +66,7 @@ _BIGINT_COLS = (
     "canvas_id",
     "parent_resource_id",
     "promoted_resource_id",
+    "source_asset_id",
     "conversation_id",
 )
 _UUID_COLS = ("creator_id", "agent_id")
