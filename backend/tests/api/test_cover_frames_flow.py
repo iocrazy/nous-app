@@ -79,7 +79,7 @@ async def test_extract_creates_a_flow_and_hangs_the_row_on_it(
     manager.create_flow.assert_awaited_once()
     flow_kwargs = manager.create_flow.await_args.kwargs
     assert flow_kwargs["user_id"] == USER_ID
-    assert flow_kwargs["name"] == "Cover frames: clip.mp4"
+    assert flow_kwargs["name"] == "Frame samples: clip.mp4"
 
     assert len(created) == 1, "抽帧没有建 task_tracking 行"
     assert (

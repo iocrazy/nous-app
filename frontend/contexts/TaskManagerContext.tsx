@@ -1013,8 +1013,8 @@ export function taskTypeLabel(type: TaskType): string {
     case 'asset_classify': return 'Auto Tag';
     case 'agent': return 'Agent';
     case 'canvas_gen': return 'Canvas Generate';
-    case 'cover_gen': return 'Cover Studio';
-    case 'cover_frames': return 'Cover Frames';
+    case 'cover_gen': return 'AI Cover';
+    case 'cover_frames': return 'Frame Samples';
     case 'canvas_graph_run': return 'Canvas Run';
     case 'canvas_timeline': return 'Timeline Film';
     case 'publish': return 'Publish';

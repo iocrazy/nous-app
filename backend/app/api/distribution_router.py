@@ -1528,12 +1528,12 @@ async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
     # create_flow 是 best-effort（失败返回 None）——分组是呈现，不该阻断派工。
     flow_id = await get_task_manager().create_flow(
         user_id=user["id"],
-        name=f"Cover frames: {source.filename}",
+        name=f"Frame samples: {source.filename}",
     )
     await get_task_manager().create(
         user_id=user["id"],
         task_type=COVER_FRAMES_TASK_TYPE,  # ≤20 chars (VARCHAR(20))
-        title=f"Cover frames: {source.filename}"[:200],
+        title=f"Frame samples: {source.filename}"[:200],
         subtitle="Sampling frames",
         resource_id=str(body.resource_id),
         dbos_workflow_id=wf_id,
@@ -1772,7 +1772,13 @@ async def generate_cover(body: CoverGenerateRequest, user: CurrentUserDep):
     task_id = await get_task_manager().create(
         user_id=user["id"],
         task_type="cover_gen",  # ≤20 chars (task_tracking.task_type VARCHAR(20))
-        title=f"Cover stage {body.stage}",
+        # Named for what the user sees, not the pipeline step: "AI cover ·
+        # drafts" is the 2x2 grid, "AI cover · final" the redrawn pick. (The
+        # frame-sampling task is "Frame samples: …" — the two were being read
+        # as the same thing when both said "Cover".)
+        title=(
+            f"AI cover · {'drafts' if body.stage == 1 else 'final'} · {body.topic[:60]}"
+        ),
         subtitle=body.topic[:80],
         dbos_workflow_id=wf_id,
         metadata={
