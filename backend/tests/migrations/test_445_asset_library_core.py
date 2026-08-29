@@ -22,6 +22,7 @@ Skips cleanly when INTEGRATION_DATABASE_URL is unset.
 from __future__ import annotations
 
 import os
+import re
 
 import asyncpg
 import pytest
@@ -46,6 +47,24 @@ _TABLES = (
     "canvas_asset_refs",
 )
 
+# Every value canvases.kind may hold after mig 446. Spelled out rather than
+# checked one value at a time: this constraint is rewritten by DROP + ADD, and
+# has been six times now (280, 357, 358, 362, 421, 446). Each rewrite restates
+# the whole list from scratch, so its real failure mode is a value silently
+# going missing — which an "is 'costume' in there?" assertion cannot see.
+_EXPECTED_CANVAS_KINDS = frozenset(
+    {
+        "smart",
+        "lite",
+        "classic",
+        "character",
+        "location",
+        "prop",
+        "storyboard",  # mig 421
+        "costume",  # mig 446
+    }
+)
+
 
 @pytest.fixture
 async def conn():
@@ -56,7 +75,7 @@ async def conn():
         await c.close()
 
 
-async def _columns(conn, table: str) -> dict[str, dict]:
+async def _columns(conn, table: str) -> dict[str, asyncpg.Record]:
     rows = await conn.fetch(
         "SELECT column_name, data_type, is_nullable FROM information_schema.columns"
         " WHERE table_schema = 'public' AND table_name = $1",
@@ -152,9 +171,44 @@ async def test_generated_media_review_state_default(conn):
 async def test_canvases_asset_id_and_costume_kind(conn):
     cols = await _columns(conn, "canvases")
     assert cols["asset_id"]["is_nullable"] == "YES"
-    rows = await conn.fetch(
-        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint"
+    definition = await conn.fetchval(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint"
         " WHERE conrelid = 'public.canvases'::regclass"
         " AND conname = 'canvases_kind_check'"
     )
-    assert rows and "'costume'" in rows[0]["def"]
+    assert definition, "canvases_kind_check is gone"
+    # The only single-quoted literals in this constraint are the kind values.
+    kinds = set(re.findall(r"'([^']*)'", definition))
+    assert kinds == _EXPECTED_CANVAS_KINDS, (
+        f"dropped: {sorted(_EXPECTED_CANVAS_KINDS - kinds)}, "
+        f"unexpected: {sorted(kinds - _EXPECTED_CANVAS_KINDS)}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("table", "constraint"),
+    [
+        ("generated_media", "generated_media_source_asset_id_fkey"),
+        ("canvases", "canvases_asset_id_fkey"),
+    ],
+)
+async def test_new_asset_fks_null_out_on_delete(conn, table, constraint):
+    """Deleting an asset must blank the pointer, never cascade.
+
+    ON DELETE CASCADE here would make deleting one asset destroy the
+    generations it was dispatched from and the canvases that referenced it —
+    and both are independently owned rows that outlive the asset.
+    """
+    # ::text because pg_constraint.confdeltype is `"char"`, which asyncpg hands
+    # back as bytes — comparing that to 'n' fails for the wrong reason.
+    action = await conn.fetchval(
+        "SELECT c.confdeltype::text FROM pg_constraint c"
+        " JOIN pg_class t ON t.oid = c.conrelid"
+        " WHERE t.relnamespace = 'public'::regnamespace AND t.relname = $1"
+        " AND c.conname = $2 AND c.contype = 'f'",
+        table,
+        constraint,
+    )
+    assert action == "n", (
+        f"{constraint} has ON DELETE {action!r}, expected 'n' (SET NULL)"
+    )
