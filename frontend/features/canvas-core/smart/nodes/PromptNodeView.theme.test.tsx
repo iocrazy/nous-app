@@ -62,15 +62,17 @@ afterEach(() => {
 });
 
 describe('PromptNodeView theme-safe text classes', () => {
-  it('body textarea uses a single flipped-ladder ink value (no dark: override)', () => {
+  it('body editor uses a single flipped-ladder ink value (no dark: override)', () => {
     const { container } = render(
       <ReactFlowProvider>
         <PromptNodeView {...baseProps} id="p1" type="prompt" data={DATA} />
       </ReactFlowProvider>,
     );
-    const textarea = container.querySelector('textarea');
-    expect(textarea).toBeTruthy();
-    const cls = textarea!.className;
+    // The body is a tiptap contenteditable now; the colour requirement is
+    // unchanged and still lives on the editable element.
+    const body = container.querySelector('[data-testid="prompt-body-editor"]');
+    expect(body).toBeTruthy();
+    const cls = body!.className;
     // ink-800 flips to #f0f0f2 in light mode — invisible body text.
     expect(cls).not.toMatch(/text-ink-[6789]\d\d/);
     expect(cls).not.toContain('dark:text-ink');

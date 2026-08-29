@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import {
   afterEach,
@@ -95,6 +95,31 @@ const baseProps = {
 // Shot node edit
 // ============================================================
 
+/** Type into the prompt body.
+ *
+ * It is a tiptap (contenteditable) surface, not a form control, so
+ * `fireEvent.change` does nothing — ProseMirror reads the DOM and syncs its
+ * document, which writing textContent and firing `input` simulates. The
+ * assertions around this are unchanged: editing the body must patch the node
+ * and must not push undo history.
+ *
+ * ProseMirror syncs on a microtask, which this suite's fake timers cannot
+ * advance, so the wait runs on real timers and `restoreFakeTimers` puts them
+ * back for the rest of the suite.
+ */
+async function typeIntoPromptBody(text: string): Promise<void> {
+  vi.useRealTimers();
+  const el = screen.getByLabelText('Prompt body');
+  const block = el.querySelector('p');
+  if (!block) throw new Error('prompt body has no paragraph to type into');
+  block.textContent = text;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function restoreFakeTimers(): void {
+  vi.useFakeTimers();
+}
+
 describe('ShotNodeView — edit affordances', () => {
   it('typing into title patches the node data via the store', () => {
     seedNode('shot1', 'shot', {
@@ -164,7 +189,7 @@ describe('PromptNodeView — edit affordances', () => {
     run_error: null,
   };
 
-  it('typing into the body patches', () => {
+  it('typing into the body patches', async () => {
     seedNode('p1', 'prompt', { ...defaultData });
     render(
       <Wrap>
@@ -176,14 +201,15 @@ describe('PromptNodeView — edit affordances', () => {
         />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: 'describe a robot' },
+    await typeIntoPromptBody('describe a robot');
+    await waitFor(() => {
+      const node = useCanvasCoreStore.getState().nodes[0] as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(node.data.body).toBe('describe a robot');
     });
-    const node = useCanvasCoreStore.getState().nodes[0] as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(node.data.body).toBe('describe a robot');
+    restoreFakeTimers();
   });
 
   it('changing provider via dropdown patches provider_slug', () => {
@@ -468,7 +494,7 @@ describe('LoopNodeView IC card', () => {
 // ============================================================
 
 describe('inline edits do NOT push undo history', () => {
-  it('typing into prompt body does not bump canUndo', () => {
+  it('typing into prompt body does not bump canUndo', async () => {
     seedNode('p1', 'prompt', {
       body: '',
       provider_slug: '',
@@ -497,9 +523,15 @@ describe('inline edits do NOT push undo history', () => {
         />
       </Wrap>,
     );
-    fireEvent.change(screen.getByLabelText('Prompt body'), {
-      target: { value: 'x' },
+    await typeIntoPromptBody('x');
+    await waitFor(() => {
+      const node = useCanvasCoreStore.getState().nodes[0] as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(node.data.body).toBe('x');
     });
+    restoreFakeTimers();
     // patchNode is the inline-edit path; the store contract is that
     // patchNode never pushes onto history (runtime/inline state is
     // not user-undoable).

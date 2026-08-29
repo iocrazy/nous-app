@@ -62,11 +62,13 @@ it('split-enabled prompt shows the separator row with a live item count', () => 
   expect(screen.getByTestId('prompt-split-toggle')).toBeInTheDocument();
 });
 
-it('persists a dragged textarea height (IC promptH)', () => {
+it('persists a dragged body height (IC promptH)', () => {
   seed(false);
   const p = props('p2');
   render(<ReactFlowProvider><PromptNodeView {...p} /></ReactFlowProvider>);
-  const ta = screen.getByRole('textbox', { name: /prompt/i });
+  // The body is a contenteditable now, which has no resizer of its own — the
+  // drag handle lives on the wrapper, so that is what reports the height.
+  const ta = screen.getByTestId('prompt-body-resizer');
   ta.getBoundingClientRect = () =>
     ({ height: 180, width: 300, top: 0, left: 0, right: 300, bottom: 180, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
   fireEvent.mouseUp(ta);

@@ -9,12 +9,15 @@
 // output slots), exactly like a panel-born run in Infinite.
 
 import { Image as ImageIcon, Library, Play, Video } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
 import { rerunPrompt } from '../regenerate';
 import { AssetPromptPicker } from './AssetPromptPicker';
+import { MentionImageGrid } from './MentionImageGrid';
+import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
+import type { PromptImageRef } from './promptImageRefs';
 import { GenFooterControls } from './GenFooterControls';
 import { UiSelect } from '../../../../components/ui';
 import { useGenerationModels } from './useGenerationModels';
@@ -47,6 +50,16 @@ export function AttachedComposerPanel({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [sourceUrl, setSourceUrl] = useState<string | null>(
     inputUrls[0] ?? null,
+  );
+  // @-mention over this node's own images. They are already the node's, so
+  // mentioning one costs nothing — no import, no URL rewriting. The asset
+  // library is deliberately not offered here yet (it is being reworked).
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const editorRef = useRef<PromptBodyEditorHandle | null>(null);
+  const mentionImages = useMemo<PromptImageRef[]>(
+    () =>
+      inputUrls.map((url, i) => ({ url, alias: `Image ${i + 1}`, kind: 'image' })),
+    [inputUrls],
   );
   const allModels = useGenerationModels(kind);
   // actual_provider never reaches the client (2026-08-14 leak tripwire —
@@ -181,14 +194,40 @@ export function AttachedComposerPanel({
         </div>
       )}
 
-      <textarea
-        className="nodrag nowheel mb-1.5 min-h-[3rem] w-full resize-y rounded-lg border border-canvas-line bg-transparent p-2 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
-        placeholder="Describe what to generate from this…"
-        aria-label="Attached prompt"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        rows={3}
-      />
+      {/* relative so the mention grid's `bottom-full` anchors to this box */}
+      <div className="relative mb-1.5 rounded-lg border border-canvas-line p-2">
+        <PromptBodyEditor
+          ref={editorRef}
+          testId="attached-prompt-editor"
+          ariaLabel="Attached prompt"
+          value={body}
+          onChange={setBody}
+          onAtTyped={() => setMentionOpen(true)}
+          onMentionQueryChange={(q) => {
+            if (q === null) setMentionOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (mentionOpen && event.key === 'Escape') {
+              setMentionOpen(false);
+              return true;
+            }
+            return false;
+          }}
+          placeholder="Describe what to generate from this…"
+        />
+        {mentionOpen && (
+          <MentionImageGrid
+            images={mentionImages}
+            onPick={(img) => {
+              editorRef.current?.insertImage(img);
+              // Mentioning an image also makes it the i2i source, matching
+              // what clicking its chip in the input row above does.
+              setSourceUrl(img.url);
+              setMentionOpen(false);
+            }}
+          />
+        )}
+      </div>
       {!libraryOpen ? (
         <button
           type="button"

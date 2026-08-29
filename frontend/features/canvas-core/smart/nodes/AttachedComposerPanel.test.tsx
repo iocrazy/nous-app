@@ -3,7 +3,7 @@
  * prompt seeded with the panel values and dispatches it immediately.
  */
 
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const rerunPrompt = vi.fn();
@@ -48,6 +48,24 @@ afterEach(() => {
   useCanvasCoreStore.getState().reset();
 });
 
+/** Type into the attached prompt.
+ *
+ * It is a tiptap (contenteditable) surface now, not a textarea, so
+ * `fireEvent.change` cannot drive it — ProseMirror syncs from the DOM, which
+ * is what writing textContent and firing `input` simulates. The assertions
+ * around this are unchanged: Run must carry the typed body through.
+ */
+async function typeAttachedPrompt(text: string): Promise<void> {
+  const el = screen.getByRole('textbox', { name: 'Attached prompt' });
+  const block = el.querySelector('p');
+  if (!block) throw new Error('attached prompt has no paragraph to type into');
+  await act(async () => {
+    block.textContent = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 describe('AttachedComposerPanel', () => {
   it('renders kind tabs, input chips, prompt, model/ratio/count and Run', () => {
     seed();
@@ -64,12 +82,10 @@ describe('AttachedComposerPanel', () => {
     expect(screen.getByTestId('pill-model')).toBeTruthy();
   });
 
-  it('Run spawns a wired, seeded prompt and dispatches it', () => {
+  it('Run spawns a wired, seeded prompt and dispatches it', async () => {
     seed();
     render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A, URL_B]} pinned />);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Attached prompt' }), {
-      target: { value: 'make it rainy' },
-    });
+    await typeAttachedPrompt('make it rainy');
     // Second thumbnail becomes the source.
     fireEvent.click(screen.getAllByTestId('composer-input-thumb')[1]);
     fireEvent.click(screen.getByTestId('composer-run'));
@@ -112,16 +128,14 @@ describe('AttachedComposerPanel', () => {
   });
 });
 
-it('video Run carries video_mode + resolution picked in the duration panel', () => {
+it('video Run carries video_mode + resolution picked in the duration panel', async () => {
   seed();
   render(<AttachedComposerPanel nodeId="m1" inputUrls={[URL_A, URL_B]} pinned />);
   fireEvent.click(screen.getByTestId('composer-kind-video'));
   fireEvent.click(screen.getByTestId('pill-vres'));
   fireEvent.click(screen.getAllByTestId('vres-option')[1]); // 720P
   fireEvent.click(screen.getByTestId('composer-mode-frames').querySelector('input')!);
-  fireEvent.change(screen.getByRole('textbox', { name: 'Attached prompt' }), {
-    target: { value: 'morph' },
-  });
+  await typeAttachedPrompt('morph');
   fireEvent.click(screen.getByTestId('composer-run'));
   const s = useCanvasCoreStore.getState();
   const prompt = s.nodes.find(

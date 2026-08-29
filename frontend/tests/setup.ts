@@ -52,6 +52,38 @@ for (const target of targets) {
   });
 }
 
+// jsdom implements neither `Range.getClientRects` nor `Element.getClientRects`
+// on every node type, and ProseMirror calls them while scrolling a selection
+// into view — from a transaction, so the TypeError surfaces as an UNHANDLED
+// exception rather than a test failure. The tests still pass; vitest reports
+// "N errors" and exits non-zero, which reads as a red build with nothing red
+// in it. Real browsers have the API (the e2e suite exercises the same code
+// paths), so this is an environment gap, not product behaviour worth mocking
+// away in a way that could hide a genuine layout bug.
+const emptyRect = (): DOMRect =>
+  ({
+    x: 0, y: 0, width: 0, height: 0,
+    top: 0, right: 0, bottom: 0, left: 0,
+    toJSON: () => ({}),
+  }) as DOMRect;
+
+for (const proto of [Range.prototype, Element.prototype] as const) {
+  if (typeof (proto as { getClientRects?: unknown }).getClientRects !== 'function') {
+    Object.defineProperty(proto, 'getClientRects', {
+      value: () => Object.assign([], { item: () => null, length: 0 }),
+      writable: true,
+      configurable: true,
+    });
+  }
+  if (typeof (proto as { getBoundingClientRect?: unknown }).getBoundingClientRect !== 'function') {
+    Object.defineProperty(proto, 'getBoundingClientRect', {
+      value: emptyRect,
+      writable: true,
+      configurable: true,
+    });
+  }
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   // Cheap reset — keeps the shim alive but isolates test state.
