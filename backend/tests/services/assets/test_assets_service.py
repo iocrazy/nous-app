@@ -9,6 +9,7 @@ import pytest
 from app.repositories.assets_repository import DuplicateAssetName
 from app.schemas.assets import (
     AssetCreate,
+    AssetUpdate,
     AttachFileRequest,
     LinkRequest,
     LoadoutCreate,
@@ -63,19 +64,41 @@ class FakeAssetsRepo:
         self.rows[self._next] = row
         return row
 
+    @staticmethod
+    def _visible(row, scope_id):
+        """Mirrors the real predicate: or_(scope_id == X, is_system_preset)."""
+        return row["scope_id"] == scope_id or row["is_system_preset"]
+
     async def get(self, asset_id, scope_id):
         r = self.rows.get(int(asset_id))
-        return r if r and r["scope_id"] == scope_id else None
+        return r if r and self._visible(r, scope_id) else None
 
     async def list(self, scope_id, **kw):
-        return [r for r in self.rows.values() if r["scope_id"] == scope_id]
+        return [r for r in self.rows.values() if self._visible(r, scope_id)]
 
     async def update(self, asset_id, scope_id, fields):
-        self.rows[int(asset_id)].update(fields)
-        return self.rows[int(asset_id)]
+        # The real UPDATE carries a scope predicate and returns None when it
+        # matches nothing (presets have scope_id NULL, so they never match).
+        r = self.rows.get(int(asset_id))
+        if r is None or r["scope_id"] != scope_id:
+            return None
+        r.update(fields)
+        return r
 
     async def soft_delete(self, asset_id, scope_id):
-        return self.rows.pop(int(asset_id), None) is not None
+        r = self.rows.get(int(asset_id))
+        if r is None or r["scope_id"] != scope_id:
+            return False
+        del self.rows[int(asset_id)]
+        return True
+
+    def make_preset(self, asset_id):
+        """A system preset carries is_system_preset AND scope_id NULL — the
+        assets_scope_or_preset CHECK forbids any other combination."""
+        row = self.rows[int(asset_id)]
+        row["is_system_preset"] = True
+        row["scope_id"] = None
+        return row
 
     async def slot_counts(self, ids):
         return {}
@@ -90,6 +113,7 @@ class FakeAssetsRepo:
 class FakeRelationsRepo:
     def __init__(self):
         self.files, self.links, self.loadouts, self.refs = [], [], {}, []
+        self.strip_calls = []
         self._next = 5000
         self.in_scope_resources = {727145299382534146}
 
@@ -111,7 +135,17 @@ class FakeRelationsRepo:
         return row
 
     async def detach(self, asset_id, resource_id, slot):
-        return True
+        before = len(self.files)
+        self.files = [
+            f
+            for f in self.files
+            if not (
+                f["asset_id"] == asset_id
+                and f["resource_id"] == resource_id
+                and f["slot"] == slot
+            )
+        ]
+        return len(self.files) < before
 
     async def list_files(self, asset_id):
         return [f for f in self.files if f["asset_id"] == asset_id]
@@ -122,7 +156,17 @@ class FakeRelationsRepo:
         return row
 
     async def remove_link(self, f, t, rel):
-        return True
+        before = len(self.links)
+        self.links = [
+            x
+            for x in self.links
+            if not (
+                x["from_asset_id"] == f
+                and x["to_asset_id"] == t
+                and x["relation"] == rel
+            )
+        ]
+        return len(self.links) < before
 
     async def list_links(self, asset_id):
         return (
@@ -154,8 +198,14 @@ class FakeRelationsRepo:
         return row
 
     async def update_loadout(self, lid, asset_id, fields):
-        self.loadouts[lid].update(fields)
-        return self.loadouts[lid]
+        # The real UPDATE has .where(asset_id == ...) and returns None when the
+        # loadout is unknown or belongs to another asset; the empty-fields path
+        # looks it up through list_loadouts(asset_id) and is equally filtered.
+        row = self.loadouts.get(lid)
+        if row is None or row["asset_id"] != asset_id:
+            return None
+        row.update(fields)
+        return row
 
     async def delete_loadout(self, lid, asset_id):
         row = self.loadouts.get(lid)
@@ -178,6 +228,7 @@ class FakeRelationsRepo:
         return True
 
     async def strip_from_loadouts(self, asset_id, costume_id=None, prop_id=None):
+        self.strip_calls.append((asset_id, costume_id, prop_id))
         return 0
 
     project_teams = {55: SCOPE, 56: 999}
@@ -192,7 +243,9 @@ class FakeRelationsRepo:
         return True
 
     async def unlink_project(self, a, p):
-        return True
+        before = len(self.refs)
+        self.refs = [r for r in self.refs if r != (a, p)]
+        return len(self.refs) < before
 
     async def list_project_ids(self, a):
         return [p for (x, p) in self.refs if x == a]
@@ -353,9 +406,11 @@ async def test_cannot_delete_default_loadout(svc):
 
 
 @pytest.mark.asyncio
-async def test_update_loadout_set_default_on_foreign_loadout_404(svc):
-    """set_default returns False when the loadout is another asset's — 404, and
-    the foreign asset keeps its own default (nothing was written)."""
+async def test_update_loadout_on_foreign_loadout_404(svc):
+    """A loadout owned by another asset is invisible to this asset's UPDATE: the
+    repo's asset_id predicate matches nothing and returns None, so the 404 fires
+    at the `if not lo` check — set_default is never reached. The foreign asset
+    keeps its own default because nothing was written."""
     a = await svc.create_asset(
         SCOPE, AssetCreate(asset_type="character", name="A"), USER
     )
@@ -369,6 +424,28 @@ async def test_update_loadout_set_default_on_foreign_loadout_404(svc):
         )
     assert ei.value.status == 404 and ei.value.code == "loadout_not_found"
     assert (await svc.relations.list_loadouts(int(b["id"])))[0]["is_default"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_loadout_404_when_set_default_reports_no_write(svc):
+    """Defense in depth for the OTHER way set_default can report failure: the
+    UPDATE above succeeded, so ownership looked fine, but set_default's own
+    SELECT ... FOR UPDATE found nothing and wrote nothing (the row vanished in
+    between). A False there must not be swallowed into a fake success."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    other = await svc.create_loadout(int(c["id"]), SCOPE, LoadoutCreate(name="Night"))
+
+    async def wrote_nothing(loadout_id, asset_id):
+        return False
+
+    svc.relations.set_default = wrote_nothing
+    with pytest.raises(AssetError) as ei:
+        await svc.update_loadout(
+            int(c["id"]), SCOPE, int(other["id"]), LoadoutUpdate(is_default=True)
+        )
+    assert ei.value.status == 404 and ei.value.code == "loadout_not_found"
 
 
 @pytest.mark.asyncio
@@ -422,7 +499,7 @@ async def test_system_preset_is_readonly(svc):
         AssetCreate(asset_type="prompt", name="Grid", source="system_preset"),
         USER,
     )
-    svc.assets.rows[int(p["id"])]["is_system_preset"] = True
+    svc.assets.make_preset(p["id"])
     from app.schemas.assets import AssetUpdate
 
     with pytest.raises(AssetError) as ei:
@@ -439,7 +516,7 @@ async def test_delete_asset_refuses_system_preset(svc):
         AssetCreate(asset_type="prompt", name="Grid", source="system_preset"),
         USER,
     )
-    svc.assets.rows[int(p["id"])]["is_system_preset"] = True
+    svc.assets.make_preset(p["id"])
     with pytest.raises(AssetError) as ei:
         await svc.delete_asset(int(p["id"]), SCOPE)
     assert ei.value.status == 403 and ei.value.code == "system_preset_readonly"
@@ -456,3 +533,97 @@ async def test_delete_asset_soft_deletes_ordinary_asset(svc):
     with pytest.raises(AssetError) as ei:
         await svc.delete_asset(int(a["id"]), SCOPE)
     assert ei.value.status == 404 and ei.value.code == "asset_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_asset_404_when_row_vanishes_before_update(svc):
+    """assets_repository.update returns Optional — the row can be soft-deleted
+    between _require and the UPDATE. That must surface as 404, not as a
+    TypeError from feeding None into _derived (a 500)."""
+    a = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="prop", name="Blade"), USER
+    )
+    inner = svc.assets.update
+
+    async def racing_update(asset_id, scope_id, fields):
+        svc.assets.rows.pop(int(asset_id), None)  # concurrent soft delete
+        return await inner(asset_id, scope_id, fields)
+
+    svc.assets.update = racing_update
+    with pytest.raises(AssetError) as ei:
+        await svc.update_asset(int(a["id"]), SCOPE, AssetUpdate(description="x"))
+    assert ei.value.status == 404 and ei.value.code == "asset_not_found"
+
+
+@pytest.mark.asyncio
+async def test_detach_file_404_when_not_attached(svc):
+    a = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="A"), USER
+    )
+    rid = 727145299382534146
+    await svc.attach_file(
+        int(a["id"]), SCOPE, AttachFileRequest(resource_id=str(rid), slot="sheet"), USER
+    )
+    await svc.detach_file(int(a["id"]), SCOPE, rid, "sheet")  # positive control
+    assert svc.relations.files == []
+    with pytest.raises(AssetError) as ei:
+        await svc.detach_file(int(a["id"]), SCOPE, rid, "sheet")
+    assert ei.value.status == 404 and ei.value.code == "file_not_attached"
+
+
+@pytest.mark.asyncio
+async def test_remove_link_404_when_link_absent(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    robe = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="costume", name="Robe"), USER
+    )
+    with pytest.raises(AssetError) as ei:
+        await svc.remove_link(int(c["id"]), SCOPE, int(robe["id"]), "wears")
+    assert ei.value.status == 404 and ei.value.code == "link_not_found"
+    assert svc.relations.strip_calls == []  # no link removed → nothing stripped
+
+
+@pytest.mark.asyncio
+async def test_remove_link_strips_costume_for_wears(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    robe = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="costume", name="Robe"), USER
+    )
+    await svc.add_link(
+        int(c["id"]), SCOPE, LinkRequest(to_asset_id=robe["id"], relation="wears")
+    )
+    await svc.remove_link(int(c["id"]), SCOPE, int(robe["id"]), "wears")
+    # (asset_id, costume_id, prop_id) — a costume must never arrive as prop_id.
+    assert svc.relations.strip_calls == [(int(c["id"]), int(robe["id"]), None)]
+
+
+@pytest.mark.asyncio
+async def test_remove_link_strips_prop_for_holds(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    blade = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="prop", name="Blade"), USER
+    )
+    await svc.add_link(
+        int(c["id"]), SCOPE, LinkRequest(to_asset_id=blade["id"], relation="holds")
+    )
+    await svc.remove_link(int(c["id"]), SCOPE, int(blade["id"]), "holds")
+    assert svc.relations.strip_calls == [(int(c["id"]), None, int(blade["id"]))]
+
+
+@pytest.mark.asyncio
+async def test_unlink_project_404_when_not_linked(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    await svc.link_project(int(c["id"]), SCOPE, 55, USER)
+    await svc.unlink_project(int(c["id"]), SCOPE, 55)  # positive control
+    assert svc.relations.refs == []
+    with pytest.raises(AssetError) as ei:
+        await svc.unlink_project(int(c["id"]), SCOPE, 55)
+    assert ei.value.status == 404 and ei.value.code == "project_ref_not_found"

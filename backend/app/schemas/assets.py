@@ -6,9 +6,14 @@ Snowflake ids are strings at this boundary (bigIntSafeFetch discipline).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+# Snowflake ids ride as strings here (bigIntSafeFetch discipline), but the
+# service int()s them. Without this the first non-numeric body value is a
+# ValueError deep in the service — a 500 where the caller should have got a 422.
+SnowflakeId = Annotated[str, Field(pattern=r"^[0-9]{1,20}$")]
 
 AssetType = Literal["character", "location", "prop", "costume", "prompt", "audio"]
 AssetSource = Literal[
@@ -47,7 +52,7 @@ class AssetUpdate(BaseModel):
     prompt_positive_zh: Optional[str] = Field(default=None, max_length=20000)
     prompt_negative_zh: Optional[str] = Field(default=None, max_length=20000)
     platform_params: Optional[Dict[str, Any]] = None
-    cover_file_id: Optional[str] = None
+    cover_file_id: Optional[SnowflakeId] = None
     tags: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
 
@@ -106,15 +111,15 @@ class AssetLinkResponse(BaseModel):
 
 class LoadoutCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    costume_ids: List[str] = Field(default_factory=list)
-    prop_ids: List[str] = Field(default_factory=list)
+    costume_ids: List[SnowflakeId] = Field(default_factory=list)
+    prop_ids: List[SnowflakeId] = Field(default_factory=list)
     prompt_extra: Optional[str] = Field(default=None, max_length=20000)
 
 
 class LoadoutUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    costume_ids: Optional[List[str]] = None
-    prop_ids: Optional[List[str]] = None
+    costume_ids: Optional[List[SnowflakeId]] = None
+    prop_ids: Optional[List[SnowflakeId]] = None
     prompt_extra: Optional[str] = Field(default=None, max_length=20000)
     is_default: Optional[bool] = None
     sort_order: Optional[int] = None
@@ -140,9 +145,9 @@ class AssetDetailResponse(AssetResponse):
 
 
 class AttachFileRequest(BaseModel):
-    resource_id: str
+    resource_id: SnowflakeId
     slot: str = Field(default="unsorted", min_length=1)
-    loadout_id: Optional[str] = None
+    loadout_id: Optional[SnowflakeId] = None
     note: Optional[str] = Field(default=None, max_length=2000)
 
 
@@ -151,9 +156,9 @@ class AttachFilesBatchRequest(BaseModel):
 
 
 class LinkRequest(BaseModel):
-    to_asset_id: str
+    to_asset_id: SnowflakeId
     relation: LinkRelation
 
 
 class ProjectRefRequest(BaseModel):
-    project_id: str
+    project_id: SnowflakeId

@@ -131,6 +131,11 @@ class AssetsService:
                 "Name already used by another asset of this type",
                 {"existing_asset_id": str(e.existing_id)},
             )
+        if not updated:
+            # The row was soft-deleted (or left the scope) between _require and
+            # the UPDATE. update() returns Optional; feeding None to _derived
+            # would be a TypeError → 500 instead of the honest 404.
+            raise AssetError(404, "asset_not_found", "Asset not found")
         return (await self._derived([updated]))[0]
 
     async def delete_asset(self, asset_id: int, scope_id: int) -> None:

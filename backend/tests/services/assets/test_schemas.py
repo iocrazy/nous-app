@@ -14,7 +14,10 @@ from app.schemas.assets import (
     AssetUpdate,
     AttachFileRequest,
     LinkRelation,
+    LinkRequest,
     LoadoutCreate,
+    LoadoutUpdate,
+    ProjectRefRequest,
 )
 
 
@@ -67,6 +70,46 @@ def test_asset_response_allows_null_scope_for_system_presets():
     )
     assert r.scope_id is None
     assert AssetDetailResponse.model_fields["scope_id"].is_required() is False
+
+
+def test_snowflake_id_fields_reject_non_numeric():
+    """Every request-side id is int()-ed downstream; a non-numeric value has to
+    fail here as a 422, not as a ValueError inside the service (a 500)."""
+    with pytest.raises(ValidationError):
+        AttachFileRequest(resource_id="abc")
+    with pytest.raises(ValidationError):
+        AttachFileRequest(resource_id="727145299382534145", loadout_id="abc")
+    with pytest.raises(ValidationError):
+        LoadoutCreate(name="Night", costume_ids=["abc"])
+    with pytest.raises(ValidationError):
+        LoadoutUpdate(prop_ids=["12x"])
+    with pytest.raises(ValidationError):
+        LinkRequest(to_asset_id="", relation="wears")
+    with pytest.raises(ValidationError):
+        ProjectRefRequest(project_id="55; DROP TABLE assets")
+    with pytest.raises(ValidationError):
+        AssetUpdate(cover_file_id="not-an-id")
+
+
+def test_snowflake_id_fields_accept_digit_strings():
+    """Positive control — the pattern must not reject the real wire shape."""
+    assert AttachFileRequest(resource_id="727145299382534145").resource_id == (
+        "727145299382534145"
+    )
+    assert LoadoutCreate(
+        name="Night", costume_ids=["1", "727145299382534145"]
+    ).costume_ids == [
+        "1",
+        "727145299382534145",
+    ]
+    assert (
+        LinkRequest(to_asset_id="727145299382534146", relation="wears").relation
+        == "wears"
+    )
+    assert ProjectRefRequest(project_id="55").project_id == "55"
+    assert AssetUpdate(cover_file_id="727145299382534147").cover_file_id == (
+        "727145299382534147"
+    )
 
 
 def test_literals_match_model_constants():
