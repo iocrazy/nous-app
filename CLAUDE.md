@@ -338,6 +338,7 @@ supabase db push
 | `application_logs` | 后端应用日志（全量） | — |
 | `frontend_error_logs` | 前端错误日志 | — |
 | `api_request_logs` | API 请求日志 | — |
+| `assets` / `asset_files` / `asset_links` / `asset_loadouts` / `asset_project_refs` | 资产库语义层（角色/场景/道具/服装/提示词/音频实体；文件只挂关联不搬家）— 见 `docs/superpowers/specs/2026-08-28-asset-library-loadout-design.md` | BIGINT Snowflake |
 
 **重要关系**：
 - `resources.media_id` → `parsed_media.id`（一个 resource 对应一个 parsed_media）
@@ -589,6 +590,13 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 | `/projects` | GET/POST | 项目列表/创建 |
 | `/projects/{id}` | GET/PATCH/DELETE | 项目 CRUD |
 | `/projects/{id}/files` | GET/POST | 项目文件 |
+
+## Asset Library (P0 数据层) — mig 445/446
+
+- 语义实体在 `assets`，文件通过 `asset_files` 的 slot 挂上来（`resources` 行不动，见 `app/services/assets/slots.py` 的 slot 表与 readiness 派生）；`asset_loadouts` 是角色的「造型」子集，必须是 `asset_links` 的子集，解链时 `strip_from_loadouts` 同步剔除。
+- `scope_id` 指向 `teams`，**仅系统预设为 NULL**（`assets_scope_or_preset` CHECK），预设对所有 scope 可读且只读。两个唯一索引都是 partial（`WHERE deleted_at IS NULL` / `WHERE is_default`）—— 软删除会释放同名占用。
+- 两个 repository 的 ORM 语句唯一的真执行覆盖是 `backend/tests/db/test_assets_repository_integration.py`（挂在 `schema-drift.yml` 上，需 `INTEGRATION_DATABASE_URL`）；单测里的 session 是桩的，跑绿不代表 Postgres 接受。
+- P0 只到数据层 + `/api/v1/assets` 基础 API，无 UI；后续分期见 spec §9。
 
 ## AI Library (Phase 1) — Agent Framework
 
