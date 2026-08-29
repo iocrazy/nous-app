@@ -116,6 +116,21 @@ def _cursor_ts(ts: str) -> datetime.datetime:
 _SHOT_ORIGIN_KINDS = ("shot_generate", "shot_video")
 
 
+def _promote_review_state():
+    """The review_state expression ``mark_promoted`` writes.
+
+    Promotion may only advance ``unreviewed`` -> ``saved``. Every other state
+    re-reads the column, so ``in_assets`` (and ``deleted``) can never be
+    downgraded by a promote. Factored out and kept pure so the transition is
+    asserted on the compiled SQL -- a flat ``'saved'`` literal here has to
+    fail a test, not merely be caught in review.
+    """
+    return case(
+        (GeneratedMedia.review_state == "unreviewed", "saved"),
+        else_=GeneratedMedia.review_state,
+    )
+
+
 def _inbox_filters(
     *,
     scope_id: int,
@@ -354,13 +369,7 @@ class GeneratedMediaRepository:
                         .where(GeneratedMedia.id == gen_id)
                         .values(
                             promoted_resource_id=resource_id,
-                            review_state=case(
-                                (
-                                    GeneratedMedia.review_state == "unreviewed",
-                                    "saved",
-                                ),
-                                else_=GeneratedMedia.review_state,
-                            ),
+                            review_state=_promote_review_state(),
                         )
                         .returning(*_GM_COLS)
                     )

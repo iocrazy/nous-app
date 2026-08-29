@@ -1,12 +1,14 @@
 import datetime as dt
 
 from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects import postgresql
 
 from app.models import GeneratedMedia
 from app.repositories.generated_media_repository import (
     GeneratedMediaRepository,
     _inbox_filters,
+    _promote_review_state,
 )
 
 
@@ -91,3 +93,24 @@ def test_repo_exposes_new_methods():
         "list_older_unreviewed",
     ):
         assert callable(getattr(repo, name))
+
+
+def test_promote_never_downgrades_in_assets():
+    """Promotion may only advance unreviewed -> saved.
+
+    Asserted on the compiled UPDATE, not on the Python: a flat
+    ``.values(review_state='saved')`` would silently downgrade a row already
+    in_assets, and this is the only thing in the suite that can catch it.
+    """
+    stmt = sa_update(GeneratedMedia).values(review_state=_promote_review_state())
+    sql = str(
+        stmt.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    # (a) the only branch that writes a literal is the unreviewed one
+    assert (
+        "WHEN (public.generated_media.review_state = 'unreviewed') THEN 'saved'" in sql
+    )
+    # (b) every other state re-reads the column instead of being overwritten
+    assert "ELSE public.generated_media.review_state" in sql
