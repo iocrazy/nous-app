@@ -4,14 +4,45 @@
 pub mod errors;
 pub mod ffmpeg;
 pub mod hls;
+mod http_io;
 
 use std::path::Path;
+use std::sync::OnceLock;
 
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use tokio::runtime::Runtime;
 
 use ffmpeg::FfmpegWrapper;
 use hls::HlsSegmenter;
+
+/// 进程级共享的 multi-thread tokio runtime，`fetch_to_file` 与 `put_file`
+/// 共用同一个实例。
+///
+/// `put_file` 在 HLS 发布场景下会被高频调用（一次发布 ~300 个 segment），
+/// 每次都 `Runtime::new()` 会在 48 核机器上起 48 个 worker 线程 —— 300
+/// 次调用就是 14,400 次线程创建，仅线程 churn 就有几百毫秒开销。
+/// `fetch_to_file` 原本每次调用单独起一个 runtime——没有正当理由维持两套
+/// 策略（隔离性论点不成立：panic 边界本来就是每次 Python 调用，两种写法
+/// 后果一样），统一成一套更简单。
+///
+/// 用 `OnceLock` 懒加载单例代替。**不要**在外面包一层 `Mutex`：
+/// multi-thread runtime 本身支持多个调用线程各自 `block_on` 不同的
+/// future 并被 worker 池并行调度；加锁会把这些调用串行化，
+/// 且不会被死锁类测试发现（回归会体现为吞吐下降，不是挂死）。
+/// 并发释放 GIL + runtime 未被隐性串行化，由 `test_put_file_releases_gil`
+/// 和 `test_fetch_releases_gil` 各自显式计时验证。
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn shared_runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build shared tokio runtime")
+    })
+}
 
 // ─── Python-exposed functions ───────────────────────────────────────────────
 
@@ -147,6 +178,38 @@ fn cleanup_segments(dir_path: &str) -> PyResult<()> {
     Ok(())
 }
 
+/// 流式拉取 `url` 并写入 `dst`，返回写入字节数。
+///
+/// 字节完全不经过 Python 解释器；Python 侧只负责算出签名 URL 与 headers。
+/// 失败路径会自动清理半成品文件（见 `http_io::fetch_to_file`）。
+#[pyfunction]
+fn fetch_to_file(
+    py: Python<'_>,
+    url: &str,
+    headers: Vec<(String, String)>,
+    dst: &str,
+) -> PyResult<u64> {
+    py.allow_threads(|| {
+        shared_runtime()
+            .block_on(http_io::fetch_to_file(url, headers, dst))
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })
+}
+
+/// 把本地文件 `src` 流式 PUT 到 `url`。
+///
+/// 字节完全不经过 Python 解释器；Python 侧只负责算出签名 URL 与
+/// headers。用进程级共享 runtime（见 `shared_runtime`），不为每次调用
+/// 单独起一个 multi-thread runtime。
+#[pyfunction]
+fn put_file(py: Python<'_>, src: &str, url: &str, headers: Vec<(String, String)>) -> PyResult<()> {
+    py.allow_threads(|| {
+        shared_runtime()
+            .block_on(http_io::put_file(src, url, headers))
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })
+}
+
 /// Nous core module — high-performance media processing via Rust + FFmpeg.
 #[pymodule]
 fn nous_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -156,5 +219,7 @@ fn nous_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(segment_video, m)?)?;
     m.add_function(wrap_pyfunction!(is_segmented, m)?)?;
     m.add_function(wrap_pyfunction!(cleanup_segments, m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_to_file, m)?)?;
+    m.add_function(wrap_pyfunction!(put_file, m)?)?;
     Ok(())
 }
