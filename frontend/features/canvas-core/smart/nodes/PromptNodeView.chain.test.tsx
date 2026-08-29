@@ -68,9 +68,18 @@ it('persists a dragged body height (IC promptH)', () => {
   render(<ReactFlowProvider><PromptNodeView {...p} /></ReactFlowProvider>);
   // The body is a contenteditable now, which has no resizer of its own — the
   // drag handle lives on the wrapper, so that is what reports the height.
+  //
+  // The press must START on the grip (bottom-right corner) and the height
+  // must actually change across it. Anything looser would let a plain click
+  // rewrite the height, which is exactly the bug this guards: at 75% canvas
+  // zoom five clicks walked a node from 417px down to 188px.
   const ta = screen.getByTestId('prompt-body-resizer');
   ta.getBoundingClientRect = () =>
-    ({ height: 180, width: 300, top: 0, left: 0, right: 300, bottom: 180, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    ({ height: 120, width: 300, top: 0, left: 0, right: 300, bottom: 120, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  Object.defineProperty(ta, 'offsetHeight', { value: 120, configurable: true });
+  fireEvent.mouseDown(ta, { clientX: 295, clientY: 115 });
+  // …dragged taller…
+  Object.defineProperty(ta, 'offsetHeight', { value: 180, configurable: true });
   fireEvent.mouseUp(ta);
   const node = useCanvasCoreStore.getState().nodes.find(
     (n) => (n as { id: string }).id === 'p2',

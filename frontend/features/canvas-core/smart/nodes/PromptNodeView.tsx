@@ -39,6 +39,9 @@ import { getResourceCoverUrl, type PromptAsset } from '../../../../services/reso
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
+/** Hit area of the browser's `resize` grip, in CSS px. */
+const GRIP_PX = 18;
+
 type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
@@ -169,6 +172,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
   // ── Image chips in the body ──────────────────────────────────────────────
   const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
+  /** Body height when a press on the resize grip started — see the resizer. */
+  const pressHeightRef = useRef<number | null>(null);
   // Seeded once: the document owns the chips from then on.
   const seededChips = useRef<PromptImageRef[]>(
     (image_refs ?? []) as PromptImageRef[],
@@ -603,9 +608,35 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           data-testid="prompt-body-resizer"
           className="nodrag nowheel min-h-[3.5rem] w-full resize-y overflow-auto"
           style={body_h ? { height: body_h } : undefined}
+          // IC promptH: persist the height the user DRAGS the box to.
+          //
+          // Persist only when the height actually changed during this press.
+          // Comparing against the stored `body_h` instead made every plain
+          // click rewrite the height, because the measurement and the stored
+          // value are in different units: the canvas scales its surface with
+          // a CSS transform, so `getBoundingClientRect()` reports SCALED
+          // pixels while `style.height` is written unscaled. At 75% zoom five
+          // clicks walked a node from 417px down to 188px. `offsetHeight` is
+          // layout pixels (transform-independent), and a before/after
+          // comparison needs no agreement with the stored value at all —
+          // a click leaves the height untouched, so nothing is written.
+          onMouseDown={(e) => {
+            // Only a press that STARTS on the resize grip counts. The grip is
+            // the bottom-right corner the browser draws for `resize-y`;
+            // anywhere else is ordinary text interaction, and focusing the
+            // editor can itself shift the box a little — which is why a
+            // before/after comparison alone still let clicks rewrite the
+            // height.
+            const r = e.currentTarget.getBoundingClientRect();
+            const onGrip = e.clientX >= r.right - GRIP_PX && e.clientY >= r.bottom - GRIP_PX;
+            pressHeightRef.current = onGrip ? e.currentTarget.offsetHeight : null;
+          }}
           onMouseUp={(e) => {
-            const h = Math.round(e.currentTarget.getBoundingClientRect().height);
-            if (h > 0 && h !== body_h) patch({ body_h: h });
+            const before = pressHeightRef.current;
+            pressHeightRef.current = null;
+            if (before === null) return;
+            const h = Math.round(e.currentTarget.offsetHeight);
+            if (h > 0 && h !== Math.round(before)) patch({ body_h: h });
           }}
         >
           <PromptBodyEditor
