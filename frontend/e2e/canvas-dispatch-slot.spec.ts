@@ -137,3 +137,30 @@ test('the slot does not wait for results — it is there while pending', async (
     'the pending slot vanished while the run was still going',
   ).toHaveCount(2);
 });
+
+test('the new edge shows the running dash-flow, pointing at the pending slot', async ({
+  page,
+}) => {
+  // The dashed flowing wire already existed (`mh-edge-active`); what was
+  // missing was an edge on the OUTPUT side to carry it, because there was no
+  // slot to point at. Verify the run now reads as going somewhere.
+  await openCanvas(page);
+  await page.getByTestId('prompt-node-run').click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(2, { timeout: 8000 });
+
+  const edge = page.locator('.react-flow__edge').first();
+  await expect(edge).toBeVisible();
+  await expect(edge, 'the outgoing edge is not in the running state').toHaveClass(
+    /mh-edge-active/,
+  );
+
+  // And it really renders as a moving dashed stroke, not just a class name.
+  const stroke = await edge
+    .locator('.react-flow__edge-path')
+    .evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { dash: cs.strokeDasharray, animation: cs.animationName };
+    });
+  expect(stroke.dash, 'edge is solid, not dashed').not.toBe('none');
+  expect(stroke.animation, 'dash-flow animation is not running').toContain('mh-edge-flow');
+});
