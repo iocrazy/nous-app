@@ -9,7 +9,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
-import { envelopeFetch, GeneratedApiError } from './apiEnvelope';
+import { envelopeFetch, GeneratedApiError, jsonHeaders } from './apiEnvelope';
 // The six types are NOT re-declared here: `assetSlots.ts` is already the
 // frontend's single mirror of the backend table, and a second copy in this
 // file would be a second thing to forget when a type is added.
@@ -106,7 +106,7 @@ export async function createAsset(
 ): Promise<AssetSummary> {
   return envelopeFetch<AssetSummary>(`${BASE()}?${query(scopeId)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+    headers: jsonHeaders(await getAuthHeaders()),
     body: JSON.stringify(body),
   });
 }

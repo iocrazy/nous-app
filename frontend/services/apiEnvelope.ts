@@ -6,6 +6,8 @@
 // one place, so /assets and /generated cannot drift into reporting the same
 // refusal two different ways.
 
+import { reportApiNetworkFailure } from '../utils/apiConfig';
+
 /**
  * A typed refusal from /assets or /generated.
  *
@@ -106,6 +108,13 @@ export async function envelopeFetch<T>(url: string, init?: RequestInit): Promise
     res = await fetch(url, init);
   } catch (err) {
     console.error('[apiEnvelope] request never reached the server:', url, err);
+    // Feed the dual-channel failover. `reportApiNetworkFailure` counts ONLY
+    // fetch-level failures (two consecutive ones flip the app to the
+    // Cloudflare fallback); an HTTP error is the origin answering, so it must
+    // NOT be reported here. Skipping this call would leave these two clients
+    // as the one pair of surfaces that keeps hammering a dead primary while
+    // the rest of the app has already failed over.
+    reportApiNetworkFailure();
     throw new GeneratedApiError(
       NETWORK_STATUS,
       'network',
@@ -113,4 +122,20 @@ export async function envelopeFetch<T>(url: string, init?: RequestInit): Promise
     );
   }
   return unwrapEnvelope<T>(res);
+}
+
+/**
+ * Auth headers + `Content-Type: application/json`, as a real `Headers`.
+ *
+ * NOT `{'Content-Type': ..., ...auth}`: `parserService.getAuthHeaders` is typed
+ * `Promise<HeadersInit>`, which admits a `Headers` instance and a `string[][]`
+ * as well as a plain object — and spreading either of those yields `{}`, i.e.
+ * every request silently loses its Authorization and 401s. `new Headers(...)`
+ * normalizes all three shapes. TypeScript does not catch the spread, so this
+ * is pinned by test instead.
+ */
+export function jsonHeaders(auth: HeadersInit): Headers {
+  const headers = new Headers(auth);
+  headers.set('Content-Type', 'application/json');
+  return headers;
 }

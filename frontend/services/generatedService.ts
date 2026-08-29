@@ -12,7 +12,7 @@
 
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
-import { envelopeFetch, GeneratedApiError } from './apiEnvelope';
+import { envelopeFetch, GeneratedApiError, jsonHeaders } from './apiEnvelope';
 import type { AssetType } from '../components/assets/assetSlots';
 
 export { GeneratedApiError };
@@ -169,7 +169,7 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
   if (body === undefined) return envelopeFetch<T>(url, { method: 'POST', headers: auth });
   return envelopeFetch<T>(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...auth },
+    headers: jsonHeaders(auth),
     body: JSON.stringify(body),
   });
 }

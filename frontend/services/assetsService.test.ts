@@ -9,13 +9,19 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { reportApiNetworkFailure } from '../utils/apiConfig';
+import { getAuthHeaders } from './parserService';
 import { createAsset, fetchAsset, searchAssets } from './assetsService';
 import { GeneratedApiError } from './apiEnvelope';
 
-vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
-vi.mock('./parserService', () => ({
-  getAuthHeaders: vi.fn().mockResolvedValue({ Authorization: 'Bearer test' }),
+vi.mock('../utils/apiConfig', () => ({
+  getApiUrl: () => 'https://api.test',
+  reportApiNetworkFailure: vi.fn(),
 }));
+vi.mock('./parserService', () => ({ getAuthHeaders: vi.fn() }));
+
+const authMock = vi.mocked(getAuthHeaders);
+const failoverMock = vi.mocked(reportApiNetworkFailure);
 
 const SCOPE = '727145299382534200';
 
@@ -73,8 +79,17 @@ function calledUrl(spy: ReturnType<typeof stubFetch>): URL {
   return new URL(url);
 }
 
+function calledHeader(spy: ReturnType<typeof stubFetch>, name: string): string | null {
+  const [, init] = spy.mock.calls[0] as [string, RequestInit | undefined];
+  return new Headers(init?.headers).get(name);
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
+  // See generatedService.test.ts: set per test, because a getAuthHeaders that
+  // resolves `undefined` produces a request with no auth and no failure.
+  authMock.mockResolvedValue({ Authorization: 'Bearer test' });
+  failoverMock.mockClear();
 });
 
 describe('searchAssets', () => {
@@ -184,5 +199,62 @@ describe('fetchAsset', () => {
     const asset = await fetchAsset(SCOPE, '727145299382534201');
 
     expect(asset.loadouts).toEqual([]);
+  });
+});
+
+describe('auth headers', () => {
+  it('rides on the search GET', async () => {
+    const spy = stubFetch({ success: true, data: [] });
+
+    await searchAssets(SCOPE);
+
+    expect(authMock).toHaveBeenCalled();
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+
+  it('rides on the create POST, alongside the JSON content type', async () => {
+    const spy = stubFetch({ success: true, data: ASSET_ROW }, 201);
+
+    await createAsset(SCOPE, { asset_type: 'character', name: 'Lin' });
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+    expect(calledHeader(spy, 'Content-Type')).toBe('application/json');
+  });
+
+  it('rides on the detail GET', async () => {
+    const spy = stubFetch({ success: true, data: ASSET_ROW });
+
+    await fetchAsset(SCOPE, '727145299382534201');
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+
+  it('survives getAuthHeaders returning a Headers instance', async () => {
+    authMock.mockResolvedValueOnce(new Headers({ Authorization: 'Bearer hdr' }));
+    const spy = stubFetch({ success: true, data: ASSET_ROW }, 201);
+
+    await createAsset(SCOPE, { asset_type: 'character', name: 'Lin' });
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer hdr');
+    expect(calledHeader(spy, 'Content-Type')).toBe('application/json');
+  });
+});
+
+describe('failover reporting', () => {
+  it('reports a fetch-level failure exactly once', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await searchAssets(SCOPE).catch(() => {});
+
+    expect(failoverMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT report the 409 — the origin answered', async () => {
+    stubFetch(ERROR_409, 409);
+
+    await createAsset(SCOPE, { asset_type: 'character', name: 'Lin' }).catch(() => {});
+
+    expect(failoverMock).not.toHaveBeenCalled();
   });
 });

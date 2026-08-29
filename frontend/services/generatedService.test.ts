@@ -9,6 +9,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { reportApiNetworkFailure } from '../utils/apiConfig';
+import { getAuthHeaders } from './parserService';
 import {
   batchGenerated,
   cleanupGenerated,
@@ -20,10 +22,14 @@ import {
   saveGenerationAsAsset,
 } from './generatedService';
 
-vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
-vi.mock('./parserService', () => ({
-  getAuthHeaders: vi.fn().mockResolvedValue({ Authorization: 'Bearer test' }),
+vi.mock('../utils/apiConfig', () => ({
+  getApiUrl: () => 'https://api.test',
+  reportApiNetworkFailure: vi.fn(),
 }));
+vi.mock('./parserService', () => ({ getAuthHeaders: vi.fn() }));
+
+const authMock = vi.mocked(getAuthHeaders);
+const failoverMock = vi.mocked(reportApiNetworkFailure);
 
 const SCOPE = '727145299382534200';
 
@@ -167,8 +173,23 @@ function calledInit(spy: ReturnType<typeof stubFetch>): RequestInit {
   return init;
 }
 
+function calledHeader(spy: ReturnType<typeof stubFetch>, name: string): string | null {
+  const [, init] = spy.mock.calls[0] as [string, RequestInit | undefined];
+  // Read through `Headers` so the assertion holds whichever HeadersInit shape
+  // the client passed — the point is what the REQUEST carries, not how it was
+  // spelled.
+  return new Headers(init?.headers).get(name);
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
+  // Set explicitly per test rather than once in the vi.mock factory: the
+  // factory runs once, so a reset between tests would leave getAuthHeaders
+  // resolving `undefined` — and since spreading/merging `undefined` is silent,
+  // every header assertion below would still pass against a request carrying
+  // no auth at all.
+  authMock.mockResolvedValue({ Authorization: 'Bearer test' });
+  failoverMock.mockClear();
 });
 
 // ── list ────────────────────────────────────────────────────────────────────
@@ -412,5 +433,77 @@ describe('GeneratedApiError', () => {
     expect(err).toBeInstanceOf(GeneratedApiError);
     expect(err.code).toBe('network');
     expect(err.status).toBe(0);
+  });
+});
+
+// ── auth headers ────────────────────────────────────────────────────────────
+
+describe('auth headers', () => {
+  it('rides on a GET', async () => {
+    const spy = stubFetch(PAGE_BODY);
+
+    await fetchGenerated(SCOPE);
+
+    expect(authMock).toHaveBeenCalled();
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+
+  it('rides on a POST, alongside the JSON content type', async () => {
+    const spy = stubFetch(CLEANUP_BODY);
+
+    await cleanupGenerated(SCOPE, { dry_run: true });
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+    expect(calledHeader(spy, 'Content-Type')).toBe('application/json');
+  });
+
+  it('rides on a bodyless POST', async () => {
+    const spy = stubFetch(SAVE_BODY);
+
+    await saveGeneration(SCOPE, '727145299382534146');
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+
+  it('survives getAuthHeaders returning a Headers instance', async () => {
+    // `getAuthHeaders` is typed `Promise<HeadersInit>`, which admits this.
+    // Object-spreading a Headers yields {} — every request would 401 and no
+    // type error would be raised, so the shape is pinned here.
+    authMock.mockResolvedValueOnce(new Headers({ Authorization: 'Bearer hdr' }));
+    const spy = stubFetch(CLEANUP_BODY);
+
+    await cleanupGenerated(SCOPE, { dry_run: true });
+
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer hdr');
+    expect(calledHeader(spy, 'Content-Type')).toBe('application/json');
+  });
+});
+
+// ── dual-channel failover signal ────────────────────────────────────────────
+
+describe('failover reporting', () => {
+  it('reports a fetch-level failure exactly once', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await fetchGeneratedCounts(SCOPE).catch(() => {});
+
+    expect(failoverMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT report an HTTP error — the origin answered', async () => {
+    stubFetch({ detail: 'Internal Server Error' }, 500);
+
+    await fetchGeneratedCounts(SCOPE).catch(() => {});
+
+    expect(failoverMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT report an envelope refusal either', async () => {
+    stubFetch(ERROR_403, 403);
+
+    await fetchGenerated(SCOPE).catch(() => {});
+
+    expect(failoverMock).not.toHaveBeenCalled();
   });
 });
