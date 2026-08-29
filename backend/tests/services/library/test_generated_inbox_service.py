@@ -71,7 +71,8 @@ def make_row(**kw) -> dict:
 
 
 class FakeGenRepo:
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, log=None):
+        self.log = log if log is not None else []
         self.rows: dict[int, dict] = {int(r["id"]): r for r in (rows or [])}
         self.deleted: list[int] = []
         self.state_writes: list[tuple[int, int, str]] = []
@@ -93,6 +94,7 @@ class FakeGenRepo:
         return self.rows.pop(int(gen_id), None) is not None
 
     async def set_review_state(self, gen_id, scope_id, state):
+        self.log.append(f"set_review_state:{state}")
         self.state_writes.append((int(gen_id), int(scope_id), state))
         r = self.rows.get(int(gen_id))
         if not r or int(r["scope_id"]) != int(scope_id):
@@ -115,11 +117,13 @@ class FakeGenRepo:
 class FakePromote:
     """Stands in for PromoteGeneratedMediaService (returns a resource row)."""
 
-    def __init__(self, raises=None):
+    def __init__(self, raises=None, log=None):
         self.raises = raises
+        self.log = log if log is not None else []
         self.calls: list[dict] = []
 
     async def promote(self, *, gen_id, user_id, target_scope_id):
+        self.log.append("promote")
         self.calls.append(
             {"gen_id": gen_id, "user_id": user_id, "target_scope_id": target_scope_id}
         )
@@ -133,19 +137,22 @@ class FakePromote:
 
 
 class FakeAssets:
-    def __init__(self, attach_raises=None, create_raises=None):
+    def __init__(self, attach_raises=None, create_raises=None, log=None):
         self.attach_raises = attach_raises
         self.create_raises = create_raises
+        self.log = log if log is not None else []
         self.created: list[tuple] = []
         self.attached: list[tuple] = []
 
     async def create_asset(self, scope_id, payload, user_id):
+        self.log.append("create_asset")
         if self.create_raises:
             raise self.create_raises
         self.created.append((int(scope_id), payload, user_id))
         return {"id": ASSET, "name": payload.name, "asset_type": payload.asset_type}
 
     async def attach_file(self, asset_id, scope_id, req, user_id):
+        self.log.append("attach_file")
         if self.attach_raises:
             raise self.attach_raises
         self.attached.append((int(asset_id), int(scope_id), req, user_id))
@@ -169,28 +176,37 @@ class FakeUnitOfWork:
         self.enters = 0
         self.exits = 0
         self.exit_excs: list = []
+        # Shared ordering log — the fakes append to it too, so a test can
+        # assert what ran INSIDE the transaction and what ran before it.
+        self.log: list[str] = []
 
     def __call__(self):
         return self
 
     async def __aenter__(self):
         self.enters += 1
+        self.log.append("uow_enter")
         return None
 
     async def __aexit__(self, exc_type, exc, tb):
         self.exits += 1
         self.exit_excs.append(exc_type)
+        self.log.append("uow_exit" if exc_type is None else "uow_rollback")
         return False
 
 
-def build(rows=None, promote=None, assets=None, canvases=None):
-    repo = FakeGenRepo(rows if rows is not None else [make_row()])
+def build(rows=None, promote=None, assets=None, canvases=None, log=None):
+    log = log if log is not None else []
+    repo = FakeGenRepo(rows if rows is not None else [make_row()], log=log)
     promote = promote or FakePromote()
+    promote.log = log
     promote.rows = repo.rows
+    assets = assets or FakeAssets()
+    assets.log = log
     svc = GeneratedInboxService(
         gen_repo=repo,
         promote=promote,
-        assets=assets or FakeAssets(),
+        assets=assets,
         canvases=canvases or FakeCanvases(),
     )
     return svc, repo, promote
@@ -323,7 +339,7 @@ async def test_save_404s_when_the_row_is_not_in_this_scope():
 
 async def test_save_as_asset_attaches_promoted_resource_and_sets_in_assets(fake_uow):
     assets = FakeAssets()
-    svc, repo, _p = build(assets=assets)
+    svc, repo, _p = build(assets=assets, log=fake_uow.log)
     out = await svc.save_as_asset(
         GEN,
         SCOPE,
@@ -339,11 +355,21 @@ async def test_save_as_asset_attaches_promoted_resource_and_sets_in_assets(fake_
     assert out["resource_id"] == RESOURCE
     assert out["generation"]["review_state"] == "in_assets"
     assert fake_uow.enters == 1
+    # promote runs BEFORE the transaction opens: its `SET LOCAL ROLE
+    # service_role` (canvas-origin rows) and its storage I/O must not ride
+    # inside the transaction that then writes the asset rows.
+    assert fake_uow.log == [
+        "promote",
+        "uow_enter",
+        "attach_file",
+        "set_review_state:in_assets",
+        "uow_exit",
+    ]
 
 
 async def test_save_as_asset_creates_the_asset_first_when_asked(fake_uow):
     assets = FakeAssets()
-    svc, _repo, _p = build(assets=assets)
+    svc, _repo, _p = build(assets=assets, log=fake_uow.log)
     out = await svc.save_as_asset(
         GEN,
         SCOPE,
@@ -362,21 +388,33 @@ async def test_save_as_asset_creates_the_asset_first_when_asked(fake_uow):
     )
     assert assets.attached[0][0] == int(ASSET)
     assert out["asset_id"] == ASSET
+    assert fake_uow.log == [
+        "promote",
+        "uow_enter",
+        "create_asset",
+        "attach_file",
+        "set_review_state:in_assets",
+        "uow_exit",
+    ]
 
 
 async def test_save_as_asset_leaves_state_untouched_when_attach_fails(fake_uow):
     assets = FakeAssets(
         attach_raises=AssetError(422, "invalid_slot", "Slot 'x' is not valid")
     )
-    svc, repo, _p = build(assets=assets)
+    svc, repo, _p = build(assets=assets, log=fake_uow.log)
     with pytest.raises(AssetError) as ei:
         await svc.save_as_asset(
             GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET, slot="x")
         )
     assert ei.value.code == "invalid_slot"
     assert repo.state_writes == []  # rollback is the UoW's job; we never wrote
+    # The accepted weaker guarantee: promote is already committed, so the row
+    # sits at `saved` — a legitimate state. What must never happen is
+    # `in_assets` with nothing attached.
     assert repo.rows[int(GEN)]["review_state"] == "saved"
     assert fake_uow.enters == 1 and fake_uow.exits == 1
+    assert fake_uow.log == ["promote", "uow_enter", "attach_file", "uow_rollback"]
 
 
 async def test_save_as_asset_propagates_a_create_conflict(fake_uow):
@@ -402,11 +440,12 @@ async def test_save_as_asset_propagates_a_create_conflict(fake_uow):
 
 
 async def test_save_as_asset_maps_promote_permission_error(fake_uow):
-    svc, _repo, _p = build(promote=FakePromote(PermissionError("no")))
+    svc, _repo, _p = build(promote=FakePromote(PermissionError("no")), log=fake_uow.log)
     with pytest.raises(AssetError) as ei:
         await svc.save_as_asset(GEN, SCOPE, USER, SaveAsAssetRequest(asset_id=ASSET))
     assert ei.value.status == 403
-    assert fake_uow.enters == 1
+    # promote is outside the transaction, so a rejected promote never opens one.
+    assert fake_uow.enters == 0
 
 
 # ── delete ─────────────────────────────────────────────────────────────────
@@ -451,7 +490,7 @@ async def test_batch_save_reports_per_item_permission_failures():
 
 async def test_batch_save_as_asset_uses_the_request_payload(fake_uow):
     assets = FakeAssets()
-    svc, _repo, _p = build(assets=assets)
+    svc, _repo, _p = build(assets=assets, log=fake_uow.log)
     out = await svc.batch(
         BatchRequest(
             ids=[GEN],
@@ -464,6 +503,39 @@ async def test_batch_save_as_asset_uses_the_request_payload(fake_uow):
     assert out["ok"] == [GEN]
     assert assets.attached[0][2].slot == "portrait"
     assert fake_uow.enters == 1
+
+
+async def test_batch_builds_no_cards_for_the_ids_it_only_reports(fake_uow):
+    """A batch reports ids, so it must not pay for a card per item.
+
+    Each decoration is a ``names_by_ids`` round-trip; at the schema's 200-id
+    ceiling that is 200 queries whose only output is discarded.
+    """
+    canvases = FakeCanvases()
+    rows = [make_row(id=str(800000000000000000 + i)) for i in range(5)]
+    svc, _repo, _p = build(rows=rows, canvases=canvases, log=fake_uow.log)
+    out = await svc.batch(
+        BatchRequest(ids=[r["id"] for r in rows], action="save"), SCOPE, USER
+    )
+    assert out["ok"] == [r["id"] for r in rows]
+    assert canvases.calls == []
+
+
+async def test_batch_save_as_asset_builds_no_cards_either(fake_uow):
+    canvases = FakeCanvases()
+    rows = [make_row(id=str(800000000000000000 + i)) for i in range(3)]
+    svc, _repo, _p = build(rows=rows, canvases=canvases, log=fake_uow.log)
+    await svc.batch(
+        BatchRequest(
+            ids=[r["id"] for r in rows],
+            action="save_as_asset",
+            save_as_asset=SaveAsAssetRequest(asset_id=ASSET),
+        ),
+        SCOPE,
+        USER,
+    )
+    assert canvases.calls == []
+    assert fake_uow.enters == 3  # one transaction per item, not one for all
 
 
 # ── cleanup ────────────────────────────────────────────────────────────────

@@ -183,32 +183,63 @@ class GeneratedInboxService:
 
     # ── single-item actions ────────────────────────────────────────────────
 
-    async def save(self, gen_id: int | str, scope_id: int, user_id: str) -> dict:
-        """Promote into the resource library. State advances to ``saved``
-        inside ``mark_promoted`` — never written here."""
+    async def _save_core(
+        self, gen_id: int | str, scope_id: int, user_id: str
+    ) -> dict[str, Any]:
+        """Promote and re-read. Returns the RAW repo row, undecorated.
+
+        Split from :meth:`save` so ``batch`` can run it N times without paying
+        for a card it throws away (each decoration is a ``names_by_ids``).
+        """
         await self._promoted_resource(gen_id, scope_id, user_id)
         row = await self.gen_repo.get(int(gen_id), int(scope_id))
         if row is None:
             raise self._not_in_scope()
+        return row
+
+    async def save(self, gen_id: int | str, scope_id: int, user_id: str) -> dict:
+        """Promote into the resource library. State advances to ``saved``
+        inside ``mark_promoted`` — never written here."""
+        row = await self._save_core(gen_id, scope_id, user_id)
         return (await self._decorate([row], str(scope_id)))[0]
 
-    async def save_as_asset(
+    async def _save_as_asset_core(
         self,
         gen_id: int | str,
         scope_id: int,
         user_id: str,
         req: SaveAsAssetRequest,
-    ) -> dict:
-        """Promote, attach to an asset slot, and mark the row ``in_assets``.
+    ) -> dict[str, Any]:
+        """Promote, attach to an asset slot, mark ``in_assets``. Raw row out.
 
-        All four steps share one transaction. Any exception propagates with the
-        transaction rolled back — in particular ``in_assets`` is never written
-        when the attach raised, so a rejected slot cannot leave a row claiming
-        to be in the asset library.
+        **``promote`` runs OUTSIDE the unit of work, deliberately.** Three
+        reasons, each of which bit us the moment it was inside:
+
+        1. For canvas-origin rows ``promote`` issues ``SET LOCAL ROLE
+           service_role`` (promote_generated_media_service.py). ``write_scope()``
+           joins an ambient UoW and ``SET LOCAL`` is TRANSACTION-scoped, so the
+           escalation would outlive the promote and cover ``create_asset`` /
+           ``attach_file`` / ``set_review_state`` / the COMMIT.
+        2. Its internal "canvas backlink failed — non-fatal" guard stops being
+           non-fatal in a shared transaction: the failed statement poisons the
+           whole transaction (``InFailedSqlTransaction``), killing a save that
+           was supposed to survive it — and, being no ``AssetError``, aborting a
+           whole batch with it.
+        3. It does storage I/O (hash, download/copy, upload). Holding a write
+           transaction open across a network round-trip is how a slow object
+           store becomes lock contention.
+
+        The accepted cost is a weaker guarantee: if the attach fails, the row
+        stays ``saved`` with a promoted resource behind it. That is a legitimate
+        state — exactly what a plain :meth:`save` produces — and the user can
+        retry (``promote`` is idempotent via its ``promoted_resource_id``
+        short-circuit). What can never happen is the harmful direction:
+        ``in_assets`` without an attachment, because that write is the last
+        thing in the transaction the attach shares.
         """
+        resource = await self._promoted_resource(gen_id, scope_id, user_id)
+        resource_id = str(resource["id"])
         async with unit_of_work():
-            resource = await self._promoted_resource(gen_id, scope_id, user_id)
-            resource_id = str(resource["id"])
             if req.new_asset is not None:
                 created = await self.assets.create_asset(
                     int(scope_id),
@@ -237,11 +268,22 @@ class GeneratedInboxService:
             )
             if updated is None:
                 raise self._not_in_scope()
-            item = (await self._decorate([updated], str(scope_id)))[0]
+        return {"row": updated, "asset_id": asset_id, "resource_id": resource_id}
+
+    async def save_as_asset(
+        self,
+        gen_id: int | str,
+        scope_id: int,
+        user_id: str,
+        req: SaveAsAssetRequest,
+    ) -> dict:
+        """:meth:`_save_as_asset_core` plus the card. See the core's docstring
+        for the transaction boundary and the guarantee it buys."""
+        out = await self._save_as_asset_core(gen_id, scope_id, user_id, req)
         return {
-            "generation": item,
-            "asset_id": asset_id,
-            "resource_id": resource_id,
+            "generation": (await self._decorate([out["row"]], str(scope_id)))[0],
+            "asset_id": out["asset_id"],
+            "resource_id": out["resource_id"],
         }
 
     async def delete(self, gen_id: int | str, scope_id: int) -> None:
@@ -263,6 +305,10 @@ class GeneratedInboxService:
         the caller. Only :class:`AssetError` lands in ``failed``; an unexpected
         exception aborts the batch, since dressing a bug up as a per-item code
         would hide it.
+
+        Runs the UNDECORATED cores: only ids are reported, so building a card
+        per item — a ``names_by_ids`` round-trip each — would be work thrown
+        away, up to 200 times over.
         """
         ok: list[str] = []
         failed: list[dict[str, str]] = []
@@ -270,9 +316,9 @@ class GeneratedInboxService:
             gen_id = str(raw_id)
             try:
                 if req.action == "save":
-                    await self.save(gen_id, scope_id, user_id)
+                    await self._save_core(gen_id, scope_id, user_id)
                 elif req.action == "save_as_asset":
-                    await self.save_as_asset(
+                    await self._save_as_asset_core(
                         gen_id, scope_id, user_id, req.save_as_asset
                     )
                 else:
