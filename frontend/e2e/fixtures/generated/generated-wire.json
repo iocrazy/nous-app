@@ -1,0 +1,225 @@
+{
+ "GET /generated": {
+  "success": true,
+  "data": {
+   "items": [
+    {
+     "id": "727145299382534145",
+     "scope_id": "727145299382534200",
+     "media_kind": "image",
+     "mime": "image/png",
+     "prompt": "Prompt 0. more",
+     "model": "gpt-image-2",
+     "provider": "openai",
+     "origin_kind": "canvas_run",
+     "canvas_id": "325005725244722",
+     "node_id": "n9",
+     "created_at": "2026-08-28T10:00:00Z",
+     "promoted_resource_id": null,
+     "review_state": "unreviewed",
+     "source_asset_id": "727145299382534201",
+     "source": {
+      "kind": "canvas_run",
+      "label": "EP1 \u00b7 Storyboard \u00b7 Canvas",
+      "canvas_id": "325005725244722",
+      "node_id": "n9",
+      "shot_id": null,
+      "conversation_id": null,
+      "deep_link": "/team/727145299382534200/canvas/325005725244722?node=n9"
+     },
+     "title": "Prompt 0"
+    },
+    {
+     "id": "727145299382534146",
+     "scope_id": "727145299382534200",
+     "media_kind": "image",
+     "mime": "image/png",
+     "prompt": "Prompt 1. more",
+     "model": "gpt-image-2",
+     "provider": "openai",
+     "origin_kind": "chat_upload",
+     "canvas_id": null,
+     "node_id": null,
+     "created_at": "2026-08-28T10:01:00Z",
+     "promoted_resource_id": "727145299382534301",
+     "review_state": "saved",
+     "source_asset_id": null,
+     "source": {
+      "kind": "chat_upload",
+      "label": "Chat upload",
+      "canvas_id": null,
+      "node_id": null,
+      "shot_id": null,
+      "conversation_id": null,
+      "deep_link": null
+     },
+     "title": "Prompt 1"
+    },
+    {
+     "id": "727145299382534147",
+     "scope_id": "727145299382534200",
+     "media_kind": "image",
+     "mime": "image/png",
+     "prompt": "Prompt 2. more",
+     "model": "gpt-image-2",
+     "provider": "openai",
+     "origin_kind": "shot_generate",
+     "canvas_id": null,
+     "node_id": null,
+     "created_at": "2026-08-28T10:02:00Z",
+     "promoted_resource_id": "727145299382534302",
+     "review_state": "in_assets",
+     "source_asset_id": null,
+     "source": {
+      "kind": "shot_generate",
+      "label": "Storyboard \u00b7 Shot 7012",
+      "canvas_id": null,
+      "node_id": null,
+      "shot_id": null,
+      "conversation_id": null,
+      "deep_link": null
+     },
+     "title": "Prompt 2"
+    }
+   ],
+   "next_cursor": null
+  }
+ },
+ "GET /generated/counts": {
+  "success": true,
+  "data": {
+   "unreviewed": 12,
+   "saved": 87,
+   "in_assets": 41
+  }
+ },
+ "POST /generated/{id}/save": {
+  "success": true,
+  "data": {
+   "id": "727145299382534146",
+   "scope_id": "727145299382534200",
+   "media_kind": "image",
+   "mime": "image/png",
+   "prompt": "Prompt 1. more",
+   "model": "gpt-image-2",
+   "provider": "openai",
+   "origin_kind": "canvas_run",
+   "canvas_id": "325005725244722",
+   "node_id": "n9",
+   "created_at": "2026-08-28T10:01:00Z",
+   "promoted_resource_id": "727145299382534301",
+   "review_state": "saved",
+   "source_asset_id": null,
+   "source": {
+    "kind": "canvas_run",
+    "label": "EP1 \u00b7 Storyboard \u00b7 Canvas",
+    "canvas_id": "325005725244722",
+    "node_id": "n9",
+    "shot_id": null,
+    "conversation_id": null,
+    "deep_link": "/team/727145299382534200/canvas/325005725244722?node=n9"
+   },
+   "title": "Prompt 1"
+  }
+ },
+ "POST /generated/{id}/save-as-asset (201)": {
+  "success": true,
+  "data": {
+   "generation": {
+    "id": "727145299382534145",
+    "scope_id": "727145299382534200",
+    "media_kind": "image",
+    "mime": "image/png",
+    "prompt": "Prompt 0. more",
+    "model": "gpt-image-2",
+    "provider": "openai",
+    "origin_kind": "canvas_run",
+    "canvas_id": "325005725244722",
+    "node_id": "n9",
+    "created_at": "2026-08-28T10:00:00Z",
+    "promoted_resource_id": "727145299382534301",
+    "review_state": "in_assets",
+    "source_asset_id": "727145299382534201",
+    "source": {
+     "kind": "canvas_run",
+     "label": "EP1 \u00b7 Storyboard \u00b7 Canvas",
+     "canvas_id": "325005725244722",
+     "node_id": "n9",
+     "shot_id": null,
+     "conversation_id": null,
+     "deep_link": null
+    },
+    "title": "Prompt 0"
+   },
+   "asset_id": "727145299382534201",
+   "resource_id": "727145299382534301"
+  }
+ },
+ "POST /generated/batch": {
+  "success": true,
+  "data": {
+   "ok": [
+    "727145299382534145"
+   ],
+   "failed": [
+    {
+     "id": "727145299382534146",
+     "code": "invalid_slot",
+     "detail": "Slot 'flat' is not valid for character"
+    }
+   ]
+  }
+ },
+ "POST /generated/cleanup (dry)": {
+  "success": true,
+  "data": {
+   "dry_run": true,
+   "count": 3,
+   "sample": [
+    {
+     "id": "727145299382534145",
+     "scope_id": "727145299382534200",
+     "media_kind": "image",
+     "mime": "image/png",
+     "prompt": "Prompt 0. more",
+     "model": "gpt-image-2",
+     "provider": "openai",
+     "origin_kind": "canvas_run",
+     "canvas_id": "325005725244722",
+     "node_id": "n9",
+     "created_at": "2026-08-28T10:00:00Z",
+     "promoted_resource_id": null,
+     "review_state": "unreviewed",
+     "source_asset_id": "727145299382534201",
+     "source": {
+      "kind": "canvas_run",
+      "label": "EP1 \u00b7 Storyboard \u00b7 Canvas",
+      "canvas_id": "325005725244722",
+      "node_id": "n9",
+      "shot_id": null,
+      "conversation_id": null,
+      "deep_link": "/team/727145299382534200/canvas/325005725244722?node=n9"
+     },
+     "title": "Prompt 0"
+    }
+   ],
+   "deleted": 0,
+   "truncated": false
+  }
+ },
+ "error 403": {
+  "success": false,
+  "error": {
+   "code": "not_a_member",
+   "detail": "You are not a member of this scope"
+  }
+ },
+ "error 409": {
+  "success": false,
+  "error": {
+   "code": "asset_exists",
+   "detail": "An asset with this name and type already exists in this scope",
+   "existing_asset_id": "727145299382534201"
+  }
+ }
+}
