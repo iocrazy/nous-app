@@ -578,7 +578,7 @@ describe('CoverStudioOverlay — v4 layout', () => {
 
     fireEvent.change(select, { target: { value: 'neon-cover' } });
     // The description lives in the (?) tip next to the label now.
-    const tips = screen.getAllByTestId('cs-help').map((el) => el.getAttribute('title') ?? '');
+    const tips = screen.getAllByTestId('cs-help').map((el) => el.getAttribute('aria-label') ?? '');
     expect(tips.some((tip) => tip.includes('Neon palette'))).toBe(true);
     fireEvent.click(screen.getByTestId('cover-generate'));
 

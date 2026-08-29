@@ -149,7 +149,7 @@ const selectedTabNames = (): string[] =>
 /** The notes under the phone live in (?) tips now: their text is the tip's title. */
 const tipText = (): string =>
   Array.from(document.querySelectorAll('.cs-help'))
-    .map((el) => el.getAttribute('title') ?? '')
+    .map((el) => el.getAttribute('aria-label') ?? '')
     .join('\n');
 const tipHas = (text: string): boolean => tipText().includes(text);
 

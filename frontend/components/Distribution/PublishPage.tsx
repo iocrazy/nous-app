@@ -2687,8 +2687,10 @@ export const PublishPage: React.FC = () => {
           {!isImages && (
             <div className="fcard">
               <h4>
-                {t('distribution.publish.cover', 'Cover')}
-                <HelpTip text={t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')} />
+                <span className="ttl">
+                  {t('distribution.publish.cover', 'Cover')}
+                  <HelpTip text={t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')} />
+                </span>
                 <span className="aux" data-testid="cover-status">
                   {covers?.vertical && covers?.horizontal
                     ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')

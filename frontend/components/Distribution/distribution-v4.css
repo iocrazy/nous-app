@@ -807,3 +807,13 @@
 .dist-v4 .pv-note-tip .cs-help { display: inline-flex; color: var(--content-4); cursor: help; }
 .dist-v4 .pv-note-tip .cs-help:hover { color: var(--accent); }
 .dist-v4 .fcard h4 .cs-help { display: inline-flex; margin-left: 5px; color: var(--content-4); cursor: help; vertical-align: middle; }
+
+/* Headings, one system (2026-08-29): a card's title is a SECTION title —
+   14px, weight 600, page ink, no uppercase — the way the platform's own form
+   sets 扩展信息 / 发布设置. Field labels inside a card are lighter, so the two
+   levels read as two levels. The (?) sits flush after the words. */
+.dist-v4 .fcard h4 { font-size: 14px; font-weight: 600; color: var(--content); text-transform: none; letter-spacing: 0; }
+.dist-v4 .fcard h4 .ttl { display: inline-flex; align-items: center; min-width: 0; }
+.dist-v4 .fcard h4 .cs-help { margin-left: 4px; }
+.dist-v4 .frow .lbl b { font-weight: 500; font-size: 13px; color: var(--content-2); }
+.dist-v4 .pv-note-tip .cs-help { margin-left: 2px; }
