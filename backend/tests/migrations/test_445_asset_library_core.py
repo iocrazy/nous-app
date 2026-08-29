@@ -1,23 +1,41 @@
-"""Verify mig 445 creates the asset-library core tables with the exact shape
-the ORM models in app/models/assets.py mirror (schema-drift gates 1-6)."""
+"""Guard for migrations 445 + 446 — the asset-library schema.
+
+WHAT THIS FILE IS *NOT*
+───────────────────────
+It is not a column-by-column mirror of the ORM models. That is
+``tests/db/test_schema_drift.py``'s job, and it does it exhaustively for every
+table in the schema. Duplicating it here would only produce a second diff to
+refresh whenever a column moves.
+
+What this file checks is the part the drift test cannot see, because it is not
+expressible in a SQLAlchemy model: RLS being enabled and its policies naming
+``service_role`` only, the ``WHERE`` predicates that make the unique indexes
+partial (drop the predicate and the drift test still passes while a
+soft-deleted row permanently squats its name), and the CHECK constraint bodies.
+
+Runs against the CI-built ephemeral schema (ci_bootstrap.sql →
+schema_baseline.sql → migrations above the watermark), same as
+``test_schema_drift.py`` and ``tests/db/test_social_accounts_realtime_rls.py``.
+Skips cleanly when INTEGRATION_DATABASE_URL is unset.
+"""
 
 from __future__ import annotations
 
 import os
 
+import asyncpg
 import pytest
 
-from app.db import engine as db_engine
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.asyncio,
+_TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
+
+pytestmark.append(
     pytest.mark.skipif(
-        not os.environ.get("SUPAVISOR_DATABASE_URL")
-        and not os.environ.get("INTEGRATION_DATABASE_URL"),
-        reason="integration DB URL not set",
-    ),
-]
+        not _TEST_DSN,
+        reason="INTEGRATION_DATABASE_URL unset — needs a CI-built Postgres",
+    )
+)
 
 _TABLES = (
     "assets",
@@ -29,75 +47,114 @@ _TABLES = (
 )
 
 
-async def _columns(table: str) -> dict[str, dict]:
-    rows = await db_engine.fetch_all(
-        "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
-        "WHERE table_schema='public' AND table_name=:t",
-        {"t": table},
+@pytest.fixture
+async def conn():
+    c = await asyncpg.connect(_TEST_DSN)
+    try:
+        yield c
+    finally:
+        await c.close()
+
+
+async def _columns(conn, table: str) -> dict[str, dict]:
+    rows = await conn.fetch(
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns"
+        " WHERE table_schema = 'public' AND table_name = $1",
+        table,
     )
     return {r["column_name"]: r for r in rows}
 
 
+# ── mig 445: the six core tables ────────────────────────────────────────
+
+
 @pytest.mark.parametrize("table", _TABLES)
-async def test_table_exists(table):
-    cols = await _columns(table)
+async def test_table_exists(conn, table):
+    cols = await _columns(conn, table)
     assert cols, f"{table} missing"
 
 
-async def test_assets_columns():
-    cols = await _columns("assets")
+async def test_assets_columns(conn):
+    cols = await _columns(conn, "assets")
     assert cols["asset_type"]["is_nullable"] == "NO"
     assert cols["prompt_positive"]["is_nullable"] == "YES"
     assert cols["attrs"]["data_type"] == "jsonb"
     assert cols["deleted_at"]["is_nullable"] == "YES"
 
 
-async def test_assets_unique_name_per_scope_type_is_partial():
-    rows = await db_engine.fetch_all(
-        "SELECT indexdef FROM pg_indexes WHERE tablename='assets' "
-        "AND indexname='uq_assets_scope_type_name'",
-        {},
+async def test_assets_unique_name_per_scope_type_is_partial(conn):
+    rows = await conn.fetch(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'"
+        " AND tablename = 'assets' AND indexname = 'uq_assets_scope_type_name'"
     )
     assert rows and "WHERE (deleted_at IS NULL)" in rows[0]["indexdef"]
 
 
-async def test_asset_loadouts_single_default_per_asset():
-    rows = await db_engine.fetch_all(
-        "SELECT indexdef FROM pg_indexes WHERE tablename='asset_loadouts' "
-        "AND indexname='uq_loadout_default'",
-        {},
+async def test_asset_loadouts_single_default_per_asset(conn):
+    rows = await conn.fetch(
+        "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public'"
+        " AND tablename = 'asset_loadouts' AND indexname = 'uq_loadout_default'"
     )
     assert rows and "WHERE is_default" in rows[0]["indexdef"]
 
 
-async def test_assets_scope_nullable_only_for_presets():
-    cols = await _columns("assets")
+async def test_assets_scope_nullable_only_for_presets(conn):
+    cols = await _columns(conn, "assets")
     assert cols["scope_id"]["is_nullable"] == "YES"
-    rows = await db_engine.fetch_all(
-        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
-        "WHERE conrelid='assets'::regclass AND conname='assets_scope_or_preset'",
-        {},
+    rows = await conn.fetch(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint"
+        " WHERE conrelid = 'public.assets'::regclass"
+        " AND conname = 'assets_scope_or_preset'"
     )
     assert rows and "is_system_preset" in rows[0]["def"]
 
 
 @pytest.mark.parametrize("table", _TABLES)
-async def test_rls_enabled_service_role_only(table):
-    rows = await db_engine.fetch_all(
-        "SELECT relrowsecurity FROM pg_class WHERE relname=:t", {"t": table}
+async def test_rls_enabled_service_role_only(conn, table):
+    enabled = await conn.fetchval(
+        "SELECT relrowsecurity FROM pg_class"
+        " WHERE relnamespace = 'public'::regnamespace AND relname = $1",
+        table,
     )
-    assert rows and rows[0]["relrowsecurity"] is True
-    pols = await db_engine.fetch_all(
-        "SELECT policyname, roles::text AS roles FROM pg_policies WHERE tablename=:t",
-        {"t": table},
+    assert enabled is True, f"{table} has RLS disabled"
+    pols = await conn.fetch(
+        "SELECT policyname, roles::text AS roles FROM pg_policies"
+        " WHERE schemaname = 'public' AND tablename = $1",
+        table,
     )
     assert len(pols) == 1 and "service_role" in pols[0]["roles"]
 
 
-async def test_asset_links_relation_check():
-    rows = await db_engine.fetch_all(
-        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
-        "WHERE conrelid='asset_links'::regclass AND conname='asset_links_relation_check'",
-        {},
+async def test_asset_links_relation_check(conn):
+    rows = await conn.fetch(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint"
+        " WHERE conrelid = 'public.asset_links'::regclass"
+        " AND conname = 'asset_links_relation_check'"
     )
     assert rows and "wears" in rows[0]["def"] and "voice_of" in rows[0]["def"]
+
+
+# ── mig 446: generated_media + canvases extensions ──────────────────────
+
+
+async def test_generated_media_review_state_default(conn):
+    cols = await _columns(conn, "generated_media")
+    assert cols["review_state"]["is_nullable"] == "NO"
+    assert cols["source_asset_id"]["is_nullable"] == "YES"
+    default = await conn.fetchval(
+        "SELECT column_default FROM information_schema.columns"
+        " WHERE table_schema = 'public' AND table_name = 'generated_media'"
+        " AND column_name = 'review_state'"
+    )
+    assert "'unreviewed'" in (default or "")
+
+
+async def test_canvases_asset_id_and_costume_kind(conn):
+    cols = await _columns(conn, "canvases")
+    assert cols["asset_id"]["is_nullable"] == "YES"
+    rows = await conn.fetch(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint"
+        " WHERE conrelid = 'public.canvases'::regclass"
+        " AND conname = 'canvases_kind_check'"
+    )
+    assert rows and "'costume'" in rows[0]["def"]
