@@ -1682,6 +1682,98 @@
     "textTooLargeToEdit": "文件过大，无法内联预览或编辑。",
     "previewFailed": "预览加载失败"
   },
+  "generated": {
+    "title": "Generated",
+    "unreviewedChip": "{{n}} 项待处理",
+    "loadMore": "加载更多",
+    "tab": {
+      "unreviewed": "待处理",
+      "saved": "已保存",
+      "inAssets": "已归入资产",
+      "all": "全部"
+    },
+    "state": {
+      "new": "新",
+      "saved": "已保存",
+      "asset": "资产",
+      "deleted": "已删除"
+    },
+    "source": {
+      "canvas_run": "画布",
+      "canvas_upload": "画布上传",
+      "shot_generate": "分镜图片",
+      "shot_video": "分镜视频",
+      "agent_run": "Agent",
+      "chat_upload": "对话上传"
+    },
+    "type": {
+      "image": "图片",
+      "video": "视频"
+    },
+    "since": {
+      "24h": "最近 24 小时",
+      "7d": "最近 7 天",
+      "30d": "最近 30 天"
+    },
+    "filter": {
+      "source": "来源",
+      "project": "项目",
+      "type": "类型",
+      "model": "模型",
+      "date": "日期",
+      "anyProject": "全部项目",
+      "anyType": "全部类型",
+      "anyModel": "全部模型",
+      "anyDate": "不限时间",
+      "noModels": "本页没有模型信息"
+    },
+    "action": {
+      "save": "保存",
+      "saveAsAsset": "存为资产…",
+      "delete": "删除",
+      "inMyUploads": "已在我的上传",
+      "openAsset": "打开资产"
+    },
+    "card": {
+      "select": "选择 {{title}}",
+      "confirmDelete": "确认删除",
+      "openCanvasNodeHint": "跳转到画布中的该节点",
+      "openSourceHint": "跳转到生成来源"
+    },
+    "batch": {
+      "selected": "已选 {{n}} 项",
+      "clear": "取消选择",
+      "done": "成功 {{ok}} 项",
+      "partial": "成功 {{ok}} 项，失败 {{failed}} 项",
+      "confirmDelete": "确认删除 {{n}} 项"
+    },
+    "empty": {
+      "unreviewed": "没有待处理的产出",
+      "project": "只有画布产出可以按项目筛选",
+      "filtered": "没有符合筛选条件的产出"
+    },
+    "cleanup": {
+      "open": "批量清理…",
+      "title": "清理产出",
+      "hint": "删除早于指定天数且仍待处理的产出。已保存和已归入资产的内容不受影响。",
+      "olderThan": "早于（天）",
+      "preview": "预览",
+      "confirm": "删除 {{n}} 项",
+      "matched": "匹配到 {{n}} 项待处理产出",
+      "empty": "没有需要清理的内容",
+      "truncated": "本次仅统计前 2000 项，清理后可再执行一次。",
+      "deleted": "已删除 {{n}} 项"
+    },
+    "err": {
+      "generic": "操作失败，请重试。",
+      "network": "请求没有到达服务器，请检查网络。",
+      "not_a_member": "你不是该工作区的成员。",
+      "not_found": "该产出已不存在。",
+      "asset_exists": "该作用域下已存在同名同类型的资产。",
+      "invalid_slot": "该槽位不适用于此资产类型。",
+      "unreadable_body": "服务器返回了无法解析的内容。"
+    }
+  },
   "smartFolder": {
     "createTitle": "创建智能文件夹",
     "editTitle": "编辑智能文件夹",

@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
+import { GeneratedView } from './resources/generated/GeneratedView';
 import { ModuleDisabledPage } from './ModuleDisabledPage';
 import { useModuleStatus } from '../hooks/useModuleStatus';
 import { semanticSearch, hybridSearch } from '../services/searchService';
@@ -519,8 +520,7 @@ export const ResourcesViewInner: React.FC = () => {
         {isDownloadsView ? (
           mediaParserVisible ? <DownloadsView /> : <ModuleDisabledPage />
         ) : isGeneratedView ? (
-          // Placeholder — Task 9 replaces this with <GeneratedView />.
-          <div data-testid="generated-view" />
+          <GeneratedView />
         ) : (
           <>
             {canUpload && (

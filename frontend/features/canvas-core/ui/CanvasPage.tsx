@@ -555,6 +555,40 @@ export function CanvasView({
     onFocusHandled?.();
   }, [focusShotId, loadStatus, reconcileDone, rfReady, onFocusHandled]);
 
+  // `?node=<id>` — the landing half of the Generated inbox's deep link
+  // (`/team/{scope}/canvas/{id}?node=n9`). Unlike `focusShotId` this id is a
+  // canvas node id straight out of `nodes_json`, so no `shot-` prefixing.
+  //
+  // Latched per PARAM VALUE, not per canvas: navigating from one inbox card
+  // to another on the same canvas changes only the query string, and that
+  // second click must move the viewport too. Re-selecting on every render, on
+  // the other hand, would fight the user's own clicks.
+  const nodeParam = searchParams.get('node');
+  const nodeParamHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nodeParam) return;
+    if (loadStatus !== 'ready' || !reconcileDone) return;
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    if (nodeParamHandledRef.current === nodeParam) return;
+    nodeParamHandledRef.current = nodeParam;
+
+    const exists = useCanvasCoreStore
+      .getState()
+      .nodes.some((n) => (n as Record<string, unknown>).id === nodeParam);
+    if (!exists) {
+      // A stale link (node deleted, wrong canvas) leaves the canvas exactly
+      // as the user found it — same fire-and-forget contract as `focusShotId`.
+      console.warn('[CanvasView] ?node= names no node on this canvas', {
+        canvasId,
+        nodeParam,
+      });
+      return;
+    }
+    useCanvasCoreStore.getState().setSelection([nodeParam]);
+    instance.fitView({ nodes: [{ id: nodeParam }], duration: 400, padding: 0.35 });
+  }, [nodeParam, loadStatus, reconcileDone, rfReady, canvasId]);
+
   if (loadStatus === 'loading' || loadStatus === 'idle') {
     return <CanvasStatus title="Loading canvas…" tone="info" />;
   }

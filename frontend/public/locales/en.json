@@ -1682,6 +1682,98 @@
     "textTooLargeToEdit": "File is too large to preview or edit inline.",
     "previewFailed": "Failed to load preview"
   },
+  "generated": {
+    "title": "Generated",
+    "unreviewedChip": "{{n}} unreviewed",
+    "loadMore": "Load More",
+    "tab": {
+      "unreviewed": "Unreviewed",
+      "saved": "Saved",
+      "inAssets": "In Assets",
+      "all": "All"
+    },
+    "state": {
+      "new": "New",
+      "saved": "Saved",
+      "asset": "Asset",
+      "deleted": "Deleted"
+    },
+    "source": {
+      "canvas_run": "Canvas",
+      "canvas_upload": "Canvas Upload",
+      "shot_generate": "Storyboard Image",
+      "shot_video": "Storyboard Video",
+      "agent_run": "Agent",
+      "chat_upload": "Chat Upload"
+    },
+    "type": {
+      "image": "Image",
+      "video": "Video"
+    },
+    "since": {
+      "24h": "Last 24 Hours",
+      "7d": "Last 7 Days",
+      "30d": "Last 30 Days"
+    },
+    "filter": {
+      "source": "Source",
+      "project": "Project",
+      "type": "Type",
+      "model": "Model",
+      "date": "Date",
+      "anyProject": "Any Project",
+      "anyType": "Any Type",
+      "anyModel": "Any Model",
+      "anyDate": "Any Time",
+      "noModels": "No Models On This Page"
+    },
+    "action": {
+      "save": "Save",
+      "saveAsAsset": "As Asset…",
+      "delete": "Delete",
+      "inMyUploads": "In My Uploads",
+      "openAsset": "Open asset"
+    },
+    "card": {
+      "select": "Select {{title}}",
+      "confirmDelete": "Confirm Delete",
+      "openCanvasNodeHint": "Opens the canvas at this node",
+      "openSourceHint": "Opens where this was generated"
+    },
+    "batch": {
+      "selected": "{{n}} selected",
+      "clear": "Clear",
+      "done": "{{ok}} done",
+      "partial": "{{ok}} done, {{failed}} failed",
+      "confirmDelete": "Confirm Delete ({{n}})"
+    },
+    "empty": {
+      "unreviewed": "Nothing To Review",
+      "project": "Only Canvas Generations Can Be Filtered By Project",
+      "filtered": "No Generations Match These Filters"
+    },
+    "cleanup": {
+      "open": "Clean Up…",
+      "title": "Clean Up Generated",
+      "hint": "Deletes unreviewed generations older than the given number of days. Saved items and items in assets are never touched.",
+      "olderThan": "Older Than (Days)",
+      "preview": "Preview",
+      "confirm": "Delete {{n}}",
+      "matched": "{{n}} Unreviewed Generations Match",
+      "empty": "Nothing To Clean Up",
+      "truncated": "Showing the first 2000 — run clean up again for the rest.",
+      "deleted": "{{n}} deleted"
+    },
+    "err": {
+      "generic": "Something went wrong. Please try again.",
+      "network": "The request never reached the server. Check your connection.",
+      "not_a_member": "You are not a member of this workspace.",
+      "not_found": "That generation no longer exists.",
+      "asset_exists": "An asset with this name and type already exists here.",
+      "invalid_slot": "That slot is not valid for this asset type.",
+      "unreadable_body": "The server sent a response we could not read."
+    }
+  },
   "smartFolder": {
     "createTitle": "Create Smart Folder",
     "editTitle": "Edit Smart Folder",
