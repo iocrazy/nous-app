@@ -338,7 +338,7 @@ supabase db push
 | `application_logs` | 后端应用日志（全量） | — |
 | `frontend_error_logs` | 前端错误日志 | — |
 | `api_request_logs` | API 请求日志 | — |
-| `assets` / `asset_files` / `asset_links` / `asset_loadouts` / `asset_project_refs` | 资产库语义层（角色/场景/道具/服装/提示词/音频实体；文件只挂关联不搬家）— 见 `docs/superpowers/specs/2026-08-28-asset-library-loadout-design.md` | BIGINT Snowflake |
+| `assets` / `asset_files` / `asset_links` / `asset_loadouts` / `asset_project_refs` / `canvas_asset_refs` | 资产库语义层（角色/场景/道具/服装/提示词/音频实体；文件只挂关联不搬家；`canvas_asset_refs` 是画布→资产的反查镜像，对应 `canvas_resource_refs`）— 见 `docs/superpowers/specs/2026-08-28-asset-library-loadout-design.md` | BIGINT Snowflake |
 
 **重要关系**：
 - `resources.media_id` → `parsed_media.id`（一个 resource 对应一个 parsed_media）

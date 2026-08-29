@@ -80,9 +80,15 @@ CREATE UNIQUE INDEX uq_assets_scope_type_name ON assets(COALESCE(scope_id, 0), a
 -- 前端不得 supabase.from('assets'…) 直读，一律走 /api/v1/assets。
 ```
 
+迁移落地的**约束名**（schema drift 门禁与 `tests/migrations/test_445_asset_library_core.py` 都按名断言，改名即改契约）：`assets_asset_type_check`、`assets_source_check`、`assets_scope_or_preset`。
+
 `uq_assets_scope_type_name` 是决策 14 的"同名提示"落点：API 捕获 23505 后返回 `409 {existing_asset_id}`，前端弹"已存在，是否关联"。
 
 **系统预设**（`is_system_preset=true, scope_id NULL`）是唯一的全局行：列表查询 `scope_id = :scope OR is_system_preset`，只读，Duplicate 落到调用者 scope。
+
+wire 形状上 `scope_id` 因此**也是可空的**（`AssetResponse.scope_id: Optional[str]`）—— 预设那一行的 `scope_id` 是 NULL，声明成必填会让第一个预设直接 500。
+
+「只读」是**每一条写路径**的约束，不只是 `PATCH`/`DELETE`：`asset_files` / `asset_links` / `asset_loadouts` / `asset_project_refs` 都只按 `asset_id` 键控，没有 scope 谓词兜底，所以 service 侧统一走 `_require_writable()`（= 取行 + 预设则 403 `system_preset_readonly`），漏一条就是跨租户写 + 跨租户 id 泄露。
 
 ### 3.2 `asset_files` — 文件挂到槽位
 
@@ -104,6 +110,7 @@ CREATE INDEX idx_asset_files_resource ON asset_files(resource_id);
 - **不搬文件**：只写这张表，`resource_items.folder_id` 不动。
 - 删 `resources` 行 → 级联消失；从实体移除 → 只删这行。
 - 同一 `resource_id` 可出现在多个 `asset_id` 下（决策 5）。
+- ⚠️ **主键 `(asset_id, resource_id, slot)` 不含 `loadout_id`**，其直接后果是：**同一张图不能在同一个槽位下同时属于两个 loadout**。挂第二次只会 upsert 掉第一行的 `loadout_id`。这在 P0 是刻意接受的（loadout 绑定只用在 character 的 `worn`/`stills`），但**是否要放开留作 P4 问题** —— 只有画布 / loadout UI 真跑起来才知道它咬不咬人。要放开就得把 `loadout_id` 提进主键，那会同时改变 upsert 语义。
 
 ### 3.3 `asset_links` — 实体间关系
 
@@ -118,6 +125,8 @@ CREATE TABLE asset_links (
 );
 CREATE INDEX idx_asset_links_to ON asset_links(to_asset_id, relation);
 ```
+
+落地的约束名：`asset_links_relation_check`（relation 取值）、`asset_links_no_self`（`from <> to`）。
 
 | relation | from → to | 校验 |
 |---|---|---|
@@ -147,6 +156,9 @@ CREATE UNIQUE INDEX uq_loadout_default ON asset_loadouts(asset_id) WHERE is_defa
 
 - 建角色时自动建一个 `Default`（空配装）。
 - `costume_ids / prop_ids ⊆ links` 由 service 校验；解除 wears 时从所有 loadout 里剔除。
+- 额外索引：`idx_asset_loadouts_asset (asset_id, sort_order)`。
+- ⚠️ **`uq_loadout_default` 是 partial unique *index*，PostgreSQL 逐行检查、无法 deferrable**。所以 `set_default` 必须**先清兄弟行、再置目标行**；反过来写在常规路径上必然撞上仍然存在的旧 default。归属判定（这个 loadout 是不是这个 asset 的）用一次 `SELECT … FOR UPDATE` 探针在任何写之前做完 —— 否则「不属于本 asset」这条路径会把角色留在**一个 default 都没有**的状态。
+- `is_default=false` **不是一个操作**：唯一索引意味着「恰好一个 default」，只有「把另一个设为 default」，没有「取消 default」。PATCH 体里的 `is_default=false` 因此被丢弃，是刻意的。
 
 ### 3.5 `asset_project_refs` — 项目引用
 
@@ -160,6 +172,8 @@ CREATE TABLE asset_project_refs (
 );
 CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 ```
+
+`canvas_asset_refs` 侧另有 `idx_car_asset (asset_id)`（按资产反查画布）。
 
 项目工作区的人物 / 场景库 / 道具 / 服装页 = `assets JOIN asset_project_refs WHERE project_id = ?`。在项目里 New → 建 asset + 写一行 ref。Link from library → 只写 ref。Unlink → 只删 ref。
 
@@ -182,7 +196,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 
 - `canvases` 加 `asset_id BIGINT NULL REFERENCES assets(id) ON DELETE SET NULL`；`kind` CHECK 增 `'costume'`（`project_id` 保持 NOT NULL，记录从哪个项目打开的）。
 - **新表 `canvas_asset_refs`**（镜像 `canvas_resource_refs`）：`(canvas_id, asset_id, node_id, loadout_id)`；`CanvasService.save` 从 `nodes_json` 提取 `type='asset'` 节点维护，失败不阻塞保存，可 backfill。
-- `generated_media` 加 `review_state TEXT NOT NULL DEFAULT 'unreviewed' CHECK (IN ('unreviewed','saved','in_assets','deleted'))` 与 `source_asset_id BIGINT NULL`（从资产节点/实体画布生成时预填）；`origin_kind` 枚举扩到 `canvas_run | agent_run | storyboard | cover_studio | chat_upload`。
+- `generated_media` 加 `review_state TEXT NOT NULL DEFAULT 'unreviewed' CHECK (IN ('unreviewed','saved','in_assets','deleted'))` 与 `source_asset_id BIGINT NULL`（从资产节点/实体画布生成时预填）。
+  ⚠️ **`origin_kind` 不加 CHECK，也没有「扩枚举」这回事**（P0 实证纠偏）：该列自 mig 307 起就是裸 `TEXT NOT NULL`，`schema_baseline.sql` 确认从未有过 CHECK；而 `idx_genmedia_node_shot`（mig 354）的谓词是 `origin_kind IN ('shot_generate','shot_video')` —— 这两个值不在本文档原先列出的枚举里。对一个从没有约束的列「扩枚举」等于**新加限制**，会当场把活数据判违规。`origin_kind` 因此保持**代码级枚举、数据库不设约束**。
 - **Chat Uploads 迁入 `generated_media`**：temp 文件夹里的 `resources` 逐行登记为 `origin_kind='chat_upload'`、`promoted_resource_id` 指向自身、`review_state='saved'`（它们本来就在 resources）。temp 文件夹本身保留为普通文件夹"Chat uploads"（在 My Uploads 下可见），不再有特殊语义；`tempResources` 代码路径退役。
 - `tags.prompt_trigger` 与 `resources.gen_prompt*` **保留不动**——文件级 prompt 仍可搜；提示词**模板**才是 `assets(type=prompt)`。
 
@@ -203,6 +218,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 6. Chat Uploads 登记（§3.7）。
 7. `canvas_asset_refs` 从 `nodes_json` 重建（此时应为空，占位）。
 
+⚠️ **P0 的 planner 不处理个人项目**（`projects.team_id IS NULL`）：它们进一个**独立**的 `skipped_personal_project` 桶（与 `skipped_unknown_project` 分开计数，两者都写进 dry-run 的 Task Center subtitle，否则一个以个人项目为主的工作区会显示成「0 assets from 42 rows」，读起来就是「没东西可迁」）。上面第 1/2 步写的「项目所属 team **或个人 team**」是 **P3 才决定**的映射 —— 把个人项目映射到 owner 的个人 team 需要先确定合并语义（同一个人在多个个人项目里的同名角色算不算一个），这个决定不在 P0 的范围里。
+
 每步可重跑；跑完对账：`count(assets where source='migrated') = count(project_characters) + count(project_lib_entities) − 合并数`。
 
 ## 5. API（`/api/v1`）
@@ -211,12 +228,12 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 
 | 端点 | 说明 |
 |---|---|
-| `GET /assets?scope_id&type&project_id&readiness&tag&q&sort` | 图鉴列表；返回派生 `readiness / missing / project_ids / file_counts_by_slot / loadout_count` |
+| `GET /assets?scope_id&type&project_id&q&limit&offset` | 图鉴列表；返回派生 `readiness / missing / project_ids / file_counts_by_slot / loadout_count`。**`readiness` / `tag` / `sort` 三个筛选参数是 P2**，P0 只实现前五个 |
 | `POST /assets` | 建实体；同名 → `409 {existing_asset_id}` |
 | `GET /assets/{id}` | 实体页全量：files by slot、links（含反向 worn_by/held_by）、loadouts、project refs、used_in（canvas_asset_refs + storyboard 引用）、generation_history（generated_media by source_asset_id） |
 | `PATCH /assets/{id}` | 头部字段 / 提示词 / attrs；system preset 拒绝 |
 | `DELETE /assets/{id}` | 软删；画布节点回读得到 `asset_removed` |
-| `POST /assets/{id}/duplicate` | 复制实体（文件关联复制、links 复制、loadouts 复制），`duplicated_from` |
+| `POST /assets/{id}/duplicate` | **P2**（P0 不实现：系统预设还不存在，而 Duplicate 的第一用途就是「预设落到自己 scope」）。复制实体（文件关联复制、links 复制、loadouts 复制），`duplicated_from` |
 | `POST /assets/{id}/files` `{resource_id, slot, loadout_id?}` | 挂文件（=归入资产）；批量 `{items:[…]}` |
 | `DELETE /assets/{id}/files/{resource_id}/{slot}` | 解关联 |
 | `POST /assets/{id}/links` `{to_asset_id, relation}` / `DELETE …` | 关系 |
@@ -301,7 +318,7 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 - `save-as-asset` 是一个事务：promote 失败不写 `asset_files`；写 `asset_files` 失败回滚 promote 状态（`review_state` 不变）。
 - `canvas_asset_refs` 维护失败只记日志，不阻塞画布保存；backfill 可重建。
 - readiness 永远派生，不缓存进列；列表端点用一条带 `EXISTS` 的查询算。
-- 边界 mock 用真实 wire 形状：`assets.id` 与 `canvases` 一样在 router 显式 `str()`；`asset_files.resource_id` 同。测试 fixture 必须覆盖数字 id 分支（2026-08-12 教训）。
+- 边界 mock 用真实 wire 形状：`assets.id` 与 `canvases` 一样显式 `str()`，但落点是 **repository 的序列化边界**（`_serialize` / `_serialize_file` / `_serialize_link` / `_serialize_loadout`），不是 router —— 数组元素（`costume_ids` / `prop_ids`）也在那里逐个 `str()`；`asset_files.resource_id` 同。测试 fixture 必须覆盖数字 id 分支（2026-08-12 教训）。
 - 投递协议超限**不静默截断**：返回 `dropped: [{resource_id, reason}]`，节点显示。
 
 ## 8. 测试
