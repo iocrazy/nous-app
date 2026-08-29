@@ -627,3 +627,60 @@ async def test_unlink_project_404_when_not_linked(svc):
     with pytest.raises(AssetError) as ei:
         await svc.unlink_project(int(c["id"]), SCOPE, 55)
     assert ei.value.status == 404 and ei.value.code == "project_ref_not_found"
+
+
+# ── response contract ──────────────────────────────────────────────────────
+#
+# The routes carry no ``response_model`` (an Envelope[T] wrapper is deferred),
+# so nothing else pins the wire shape against the declared schemas. Without
+# this, AssetResponse & friends are referenced only by their own unit tests and
+# could drift from what the service actually emits and the router serialises —
+# the "backend returns a field the schema never described" failure mode, which
+# produces no signal at all until a consumer reads the missing key.
+
+
+@pytest.mark.asyncio
+async def test_service_payloads_satisfy_declared_response_schemas(svc):
+    from app.schemas.assets import (
+        AssetDetailResponse,
+        AssetFileResponse,
+        AssetLinkResponse,
+        AssetResponse,
+        LoadoutResponse,
+    )
+
+    created = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
+    )
+    AssetResponse.model_validate(created)
+    aid = int(created["id"])
+
+    costume = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="costume", name="Black Robe"), USER
+    )
+    AssetResponse.model_validate(costume)
+
+    attached = await svc.attach_file(
+        aid,
+        SCOPE,
+        AttachFileRequest(resource_id="727145299382534146", slot="sheet"),
+        USER,
+    )
+    AssetFileResponse.model_validate(attached)
+
+    linked = await svc.add_link(
+        aid, SCOPE, LinkRequest(to_asset_id=costume["id"], relation="wears")
+    )
+    AssetLinkResponse.model_validate(linked)
+
+    loadout = await svc.create_loadout(
+        aid, SCOPE, LoadoutCreate(name="Battle", costume_ids=[costume["id"]])
+    )
+    LoadoutResponse.model_validate(loadout)
+
+    detail = await svc.get_asset(aid, SCOPE)
+    parsed = AssetDetailResponse.model_validate(detail)
+    # The nested collections are the part a bare AssetResponse would not cover.
+    assert len(parsed.files) == 1 and len(parsed.links) == 1
+    assert len(parsed.loadouts) == 2  # Default + Battle
+    assert parsed.linked_by == []

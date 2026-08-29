@@ -11,13 +11,13 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.core.deps import AuthDep
 from app.core.scope_guards import verify_project_read_access
-from app.db.session import read_scope
+from app.db.session import read_scope, unit_of_work
 from app.models import Projects, TeamMembers
 from app.schemas.assets import (
     AssetCreate,
@@ -30,8 +30,16 @@ from app.schemas.assets import (
     ProjectRefRequest,
 )
 from app.services.assets.assets_service import AssetError, AssetsService
+from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(tags=["assets"])
+
+# I-1: every id that reaches ``int()`` must be pinned at the boundary. A bare
+# ``str`` query param accepts "abc", and the ValueError then surfaces from
+# ``_is_member``/the service as an unhandled 500 instead of the 422 the caller
+# earned. Mirrors ``SnowflakeId`` in app/schemas/assets.py, which does the same
+# job for request bodies.
+_SNOWFLAKE = r"^[0-9]{1,20}$"
 
 
 def _service() -> AssetsService:
@@ -79,11 +87,11 @@ def _err(e: AssetError) -> JSONResponse:
 @router.get("/assets")
 async def list_assets(
     auth: AuthDep,
-    scope_id: str = Query(...),
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
     type: Optional[str] = Query(
         None, pattern="^(character|location|prop|costume|prompt|audio)$"
     ),
-    project_id: Optional[str] = Query(None),
+    project_id: Optional[str] = Query(None, pattern=_SNOWFLAKE),
     q: Optional[str] = Query(None, max_length=200),
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -104,7 +112,9 @@ async def list_assets(
 
 
 @router.post("/assets", status_code=status.HTTP_201_CREATED)
-async def create_asset(payload: AssetCreate, auth: AuthDep, scope_id: str = Query(...)):
+async def create_asset(
+    payload: AssetCreate, auth: AuthDep, scope_id: str = Query(..., pattern=_SNOWFLAKE)
+):
     sid = await _gate(scope_id, auth)
     try:
         return _ok(await _service().create_asset(sid, payload, auth.user_id), 201)
@@ -114,7 +124,8 @@ async def create_asset(payload: AssetCreate, auth: AuthDep, scope_id: str = Quer
 
 @router.get("/projects/{project_id}/assets")
 async def list_project_assets(
-    project_id: str,
+    project_id: str = Path(..., pattern=_SNOWFLAKE),
+    *,
     auth: AuthDep,
     type: Optional[str] = Query(
         None, pattern="^(character|location|prop|costume|prompt|audio)$"
@@ -123,16 +134,23 @@ async def list_project_assets(
     # Guard returns None (raises 404/403 itself); load the project's team after.
     await verify_project_read_access(project_id, auth)
     async with read_scope() as session:
-        team_id = (
+        row = (
             await session.execute(
-                select(Projects.team_id).where(Projects.id == int(project_id))
+                select(Projects.owner_id, Projects.team_id).where(
+                    Projects.id == int(project_id)
+                )
             )
-        ).scalar_one_or_none()
+        ).first()
+    if row is None:  # pragma: no cover - the guard above already 404s
+        raise HTTPException(status_code=404, detail="Project not found")
+    owner_id, team_id = row
     if team_id is None:
-        # Personal project (projects.team_id NULL) → the caller's personal team.
-        from app.services.library.resources_service import _resolve_personal_team_id
-
-        team_id = int(await _resolve_personal_team_id(auth.user_id))
+        # Personal project (projects.team_id NULL) → the OWNER's personal team,
+        # not the caller's. The guard admits collaborators via project_members,
+        # and resolving the caller's own team for them would look up assets in
+        # the wrong scope and answer {success:true, data:[]} — a wrong answer
+        # that reads exactly like an empty library.
+        team_id = int(await _resolve_personal_team_id(str(owner_id)))
     try:
         rows = await _service().list_assets(
             int(team_id),
@@ -151,7 +169,9 @@ async def list_project_assets(
 
 
 @router.get("/assets/{asset_id}")
-async def get_asset(asset_id: int, auth: AuthDep, scope_id: str = Query(...)):
+async def get_asset(
+    asset_id: int, auth: AuthDep, scope_id: str = Query(..., pattern=_SNOWFLAKE)
+):
     sid = await _gate(scope_id, auth)
     try:
         return _ok(await _service().get_asset(asset_id, sid))
@@ -161,7 +181,10 @@ async def get_asset(asset_id: int, auth: AuthDep, scope_id: str = Query(...)):
 
 @router.patch("/assets/{asset_id}")
 async def update_asset(
-    asset_id: int, payload: AssetUpdate, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    payload: AssetUpdate,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -171,7 +194,9 @@ async def update_asset(
 
 
 @router.delete("/assets/{asset_id}")
-async def delete_asset(asset_id: int, auth: AuthDep, scope_id: str = Query(...)):
+async def delete_asset(
+    asset_id: int, auth: AuthDep, scope_id: str = Query(..., pattern=_SNOWFLAKE)
+):
     sid = await _gate(scope_id, auth)
     try:
         await _service().delete_asset(asset_id, sid)
@@ -188,15 +213,23 @@ async def attach_files(
     asset_id: int,
     payload: Union[AttachFilesBatchRequest, AttachFileRequest],
     auth: AuthDep,
-    scope_id: str = Query(...),
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     svc = _service()
     try:
         if isinstance(payload, AttachFilesBatchRequest):
+            # I-2: all-or-nothing. Each attach_file goes through the repo's
+            # write_scope(), which commits on its own unless an ambient
+            # unit_of_work() is open — so without this block, item N failing
+            # would leave items 1..N-1 committed while the caller sees only an
+            # error envelope: a partial write reported as total failure.
+            # unit_of_work(): "Repo writes called inside this block share ONE
+            # transaction (atomic: any raise rolls back all)."
             out: List[Dict[str, Any]] = []
-            for item in payload.items:
-                out.append(await svc.attach_file(asset_id, sid, item, auth.user_id))
+            async with unit_of_work():
+                for item in payload.items:
+                    out.append(await svc.attach_file(asset_id, sid, item, auth.user_id))
             return _ok(out, 201)
         return _ok(await svc.attach_file(asset_id, sid, payload, auth.user_id), 201)
     except AssetError as e:
@@ -209,7 +242,7 @@ async def detach_file(
     resource_id: int,
     slot: str,
     auth: AuthDep,
-    scope_id: str = Query(...),
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -224,7 +257,10 @@ async def detach_file(
 
 @router.post("/assets/{asset_id}/links", status_code=status.HTTP_201_CREATED)
 async def add_link(
-    asset_id: int, payload: LinkRequest, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    payload: LinkRequest,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -239,7 +275,7 @@ async def remove_link(
     to_asset_id: int,
     relation: str,
     auth: AuthDep,
-    scope_id: str = Query(...),
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -254,7 +290,10 @@ async def remove_link(
 
 @router.post("/assets/{asset_id}/loadouts", status_code=status.HTTP_201_CREATED)
 async def create_loadout(
-    asset_id: int, payload: LoadoutCreate, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    payload: LoadoutCreate,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -269,7 +308,7 @@ async def update_loadout(
     loadout_id: int,
     payload: LoadoutUpdate,
     auth: AuthDep,
-    scope_id: str = Query(...),
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -280,7 +319,10 @@ async def update_loadout(
 
 @router.delete("/assets/{asset_id}/loadouts/{loadout_id}")
 async def delete_loadout(
-    asset_id: int, loadout_id: int, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    loadout_id: int,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
@@ -295,7 +337,10 @@ async def delete_loadout(
 
 @router.post("/assets/{asset_id}/project-refs", status_code=status.HTTP_201_CREATED)
 async def link_project(
-    asset_id: int, payload: ProjectRefRequest, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    payload: ProjectRefRequest,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     await verify_project_read_access(payload.project_id, auth)
@@ -310,7 +355,10 @@ async def link_project(
 
 @router.delete("/assets/{asset_id}/project-refs/{project_id}")
 async def unlink_project(
-    asset_id: int, project_id: int, auth: AuthDep, scope_id: str = Query(...)
+    asset_id: int,
+    project_id: int,
+    auth: AuthDep,
+    scope_id: str = Query(..., pattern=_SNOWFLAKE),
 ):
     sid = await _gate(scope_id, auth)
     try:
