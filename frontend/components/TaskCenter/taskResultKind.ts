@@ -1,6 +1,6 @@
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
-export type ResultKind = 'media' | 'agent' | 'transcript' | 'summary' | 'vision' | 'canvasGen' | 'generic';
+export type ResultKind = 'media' | 'agent' | 'transcript' | 'summary' | 'vision' | 'canvasGen' | 'coverFrames' | 'generic';
 
 /**
  * Which detail body renders a task's result. Media types need a produced
@@ -25,6 +25,9 @@ export function taskResultKind(
     case 'cover_gen':
       // Result lives in task metadata (durable result_url), no resource row.
       return 'canvasGen';
+    case 'cover_frames':
+      // The sampled frames ride in metadata.cover_frames as small data URLs.
+      return 'coverFrames';
     case 'ai_transcription':
       return task.resource_id ? 'transcript' : 'generic';
     case 'ai_summary':

@@ -34,6 +34,7 @@ export type TaskType =
   // and the classic canvas DBOS graph run.
   | 'canvas_gen'
   | 'cover_gen'
+  | 'cover_frames'
   | 'canvas_graph_run'
   | 'canvas_timeline'
   // Agent execution (chat / issue turns) — sourced from agent_runs, not
@@ -120,6 +121,8 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'asset_classify':
     case 'agent':
     case 'canvas_gen':
+    case 'cover_gen':
+    case 'cover_frames':
     case 'canvas_graph_run':
     case 'canvas_timeline':
       return 'ai';
@@ -911,6 +914,9 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     canvas_gen: 0,
 
     cover_gen: 0,
+
+
+    cover_frames: 0,
     canvas_graph_run: 0,
     canvas_timeline: 0,
     publish: 0,
@@ -1007,6 +1013,8 @@ export function taskTypeLabel(type: TaskType): string {
     case 'asset_classify': return 'Auto Tag';
     case 'agent': return 'Agent';
     case 'canvas_gen': return 'Canvas Generate';
+    case 'cover_gen': return 'Cover Studio';
+    case 'cover_frames': return 'Cover Frames';
     case 'canvas_graph_run': return 'Canvas Run';
     case 'canvas_timeline': return 'Timeline Film';
     case 'publish': return 'Publish';
