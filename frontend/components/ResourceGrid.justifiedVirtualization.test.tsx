@@ -43,11 +43,6 @@ vi.mock('../hooks/useFilterBarVisibility', () => ({
   useFilterBarVisibility: () => ({ visible: false, toggle: vi.fn() }),
 }));
 
-vi.mock('../services/tempTtlService', () => ({
-  tempTtlService: {
-    getChatTempTtl: vi.fn().mockResolvedValue({ ttl_days: -1 }),
-  },
-}));
 
 // Mock useGridVirtualizer to return exactly 3 virtual rows × 2 columns.
 // BEFORE implementation: this mock is never imported by ResourceGrid, so
@@ -131,9 +126,6 @@ vi.mock('./ResourceFetchUrlModal', () => ({
   ResourceFetchUrlModal: () => null,
 }));
 
-vi.mock('./TempResourceActions', () => ({
-  TempResourceActions: () => null,
-}));
 
 // ── Test data ──────────────────────────────────────────────────────────────────
 
@@ -160,7 +152,6 @@ const buildCtx = (overrides: Record<string, unknown> = {}) => ({
   isResourcesView: true,
   isRecycleView: false,
   isSharedView: false,
-  isTempView: false,
   loading: false,
   viewMode: 'justified' as const,
   setViewMode: vi.fn(),
@@ -193,7 +184,6 @@ const buildCtx = (overrides: Record<string, unknown> = {}) => ({
   handleRestoreResource: vi.fn(),
   handlePermanentDelete: vi.fn(),
   reloadResources: vi.fn(),
-  reloadTemp: vi.fn(),
   ...overrides,
 });
 

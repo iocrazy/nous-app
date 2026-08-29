@@ -30,11 +30,6 @@ import { useResourceTouch } from '../hooks/useResourceTouch';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { GalleryUploadDialog } from './GalleryUploadDialog';
-import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
-import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
-import { fetchGenerations, type GenerationItem } from '../services/generatedMediaService';
-import { GenerationsGrid } from './resources/GenerationsGrid';
-import type { Resource } from '../types';
 import {
   moveResourceItem,
   moveFolder,
@@ -53,10 +48,9 @@ export const ResourcesViewInner: React.FC = () => {
   const {
     isPersonal, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
     resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isTempView, isProjectAssetsView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, canUpload,
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
-    tempResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
     resourceTagNamesMap, allTags, loading, setLoading, folderChain,
     recycleFolderId, setRecycleFolderId, recycleFolderItems,
@@ -449,88 +443,6 @@ export const ResourcesViewInner: React.FC = () => {
     },
   }), [trashedFolderPreviews, loadFolders, loadChildFolders, setSelectedFolder]);
 
-  // ─── Temp view: sorted resources (no folders) ────────
-  const tempSortedItems = useMemo(() => {
-    const items = [...tempResources];
-    switch (sortBy) {
-      case 'newest': return items.sort((a, b) => new Date(b.resource?.created_at ?? b.created_at).getTime() - new Date(a.resource?.created_at ?? a.created_at).getTime());
-      case 'oldest': return items.sort((a, b) => new Date(a.resource?.created_at ?? a.created_at).getTime() - new Date(b.resource?.created_at ?? b.created_at).getTime());
-      case 'name-az': return items.sort((a, b) => (a.resource?.filename ?? '').localeCompare(b.resource?.filename ?? ''));
-      case 'name-za': return items.sort((a, b) => (b.resource?.filename ?? '').localeCompare(a.resource?.filename ?? ''));
-      case 'largest': return items.sort((a, b) => (b.resource?.file_size_bytes ?? 0) - (a.resource?.file_size_bytes ?? 0));
-      case 'smallest': return items.sort((a, b) => (a.resource?.file_size_bytes ?? 0) - (b.resource?.file_size_bytes ?? 0));
-      default: return items;
-    }
-  }, [tempResources, sortBy]);
-
-  const tempAllSelectableIds = useMemo(
-    () => tempSortedItems.map((i) => `item:${i.id}`),
-    [tempSortedItems],
-  );
-
-  const tempBreadcrumbSegments = useMemo(
-    () => [{ label: t('resources.temp'), href: resPath('/resources/temp') }],
-    [t, resPath],
-  );
-
-  // ─── Project Assets view: tree selection + canvas-assets fetch ────────
-  const [paSelection, setPaSelection] = useState<ProjectAssetsSelection>({ kind: 'chat-uploads' });
-  const [canvasAssets, setCanvasAssets] = useState<CanvasAssetItem[]>([]);
-  const [canvasAssetsLoading, setCanvasAssetsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isProjectAssetsView || paSelection.kind !== 'canvas') return;
-    let cancelled = false;
-    setCanvasAssetsLoading(true);
-    fetchCanvasAssets(paSelection.canvasId)
-      .then((items) => { if (!cancelled) setCanvasAssets(items); })
-      .catch((err) => { console.error('[ProjectAssets] canvas assets load failed:', err); if (!cancelled) setCanvasAssets([]); })
-      .finally(() => { if (!cancelled) setCanvasAssetsLoading(false); });
-    return () => { cancelled = true; };
-  }, [isProjectAssetsView, paSelection]);
-
-  // ─── Generations sub-view ─────────────────────────────────────────────
-  const [generationItems, setGenerationItems] = useState<GenerationItem[]>([]);
-  const [generationsLoading, setGenerationsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isProjectAssetsView || paSelection.kind !== 'generations') return;
-    let cancelled = false;
-    setGenerationsLoading(true);
-    fetchGenerations()
-      .then((page) => { if (!cancelled) setGenerationItems(page.items); })
-      .catch((err) => { console.error('[ProjectAssets] generations load failed:', err); if (!cancelled) setGenerationItems([]); })
-      .finally(() => { if (!cancelled) setGenerationsLoading(false); });
-    return () => { cancelled = true; };
-  }, [isProjectAssetsView, paSelection]);
-
-  // Adapter: Chat Uploads reuses tempSortedItems; a canvas selection adapts
-  // CanvasAssetItem → ResourceItem so ResourceGrid can render it unchanged.
-  const projectAssetsItems = useMemo<typeof tempSortedItems>(() => {
-    if (paSelection.kind === 'chat-uploads') return tempSortedItems;
-    return canvasAssets.map((a) => ({
-      id: a.id,
-      resource_id: a.id,
-      scope_id: scopeId,
-      folder_id: null,
-      library_id: null,
-      added_by: null,
-      created_at: a.created_at,
-      // Only the fields ResourceGrid/ResourceCard actually read are filled.
-      // Resource has ~20 required columns the grid ignores, so cast the
-      // nested object rather than fabricate meaningless defaults.
-      resource: {
-        id: a.id,
-        filename: a.filename,
-        file_type: a.file_type,
-        mime_type: a.mime_type,
-        thumbnail_path: a.thumbnail_path,
-        cover_image_path: a.cover_image_path,
-        created_at: a.created_at,
-      } as Resource,
-    }));
-  }, [paSelection, canvasAssets, tempSortedItems, scopeId]);
-
   // ─── ResourceGrid props ───────────────────────────────
   const gridProps = useMemo(() => ({
     breadcrumbSegments, filteredFolders, sortedItems, recycleSubFolders, trashedFolderPreviews,
@@ -599,18 +511,6 @@ export const ResourcesViewInner: React.FC = () => {
     handleTouchDragMove, handleTouchDragEnd,
   ]);
 
-  // Temp view props — same shape as gridProps but with no folders, temp
-  // resources as items, and a custom breadcrumb.
-  const tempGridProps = useMemo(() => ({
-    ...gridProps,
-    breadcrumbSegments: tempBreadcrumbSegments,
-    filteredFolders: [] as import('../types').Folder[],
-    sortedItems: tempSortedItems,
-    allSelectableIds: tempAllSelectableIds,
-    // disable upload drag-drop in temp view — uploads go via chat only
-    canUploadDrop: false,
-  }), [gridProps, tempBreadcrumbSegments, tempSortedItems, tempAllSelectableIds]);
-
   // ─── Render ───────────────────────────────────────────
 
   return (
@@ -618,46 +518,9 @@ export const ResourcesViewInner: React.FC = () => {
       <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
         {isDownloadsView ? (
           mediaParserVisible ? <DownloadsView /> : <ModuleDisabledPage />
-        ) : isProjectAssetsView ? (
-          <div className="flex flex-1 min-h-0">
-            <ProjectAssetsTree
-              selection={paSelection}
-              onSelect={(sel) => {
-                if (sel.kind === 'canvas') {
-                  setCanvasAssets([]);
-                  setCanvasAssetsLoading(true);
-                }
-                setPaSelection(sel);
-              }}
-              chatUploadsCount={tempSortedItems.length}
-            />
-            <div className="flex-1 min-w-0 overflow-y-auto">
-              {paSelection.kind === 'generations' ? (
-                generationsLoading ? (
-                  <div className="p-6 text-ink-500">{t('common.loading')}</div>
-                ) : generationItems.length === 0 ? (
-                  <div className="p-6 text-ink-500">{t('projectAssets.noGenerations', 'No generations yet')}</div>
-                ) : (
-                  <GenerationsGrid
-                    items={generationItems}
-                    onItemsChange={setGenerationItems}
-                    addToast={addToast}
-                  />
-                )
-              ) : canvasAssetsLoading && paSelection.kind === 'canvas' ? (
-                <div className="p-6 text-ink-500">{t('common.loading')}</div>
-              ) : (
-                <ResourceGrid
-                  {...tempGridProps}
-                  breadcrumbSegments={[{ label: t('resources.projectAssets') }]}
-                  sortedItems={projectAssetsItems}
-                  allSelectableIds={projectAssetsItems.map((i) => `item:${i.id}`)}
-                />
-              )}
-            </div>
-          </div>
-        ) : isTempView ? (
-          <ResourceGrid {...tempGridProps} />
+        ) : isGeneratedView ? (
+          // Placeholder — Task 9 replaces this with <GeneratedView />.
+          <div data-testid="generated-view" />
         ) : (
           <>
             {canUpload && (
@@ -680,8 +543,8 @@ export const ResourcesViewInner: React.FC = () => {
         selectedIds={selectedIds}
         isRecycleView={isRecycleView}
         isDownloadsView={isDownloadsView}
-        currentItems={isTempView ? tempSortedItems : currentItems}
-        sortedItems={isTempView ? tempSortedItems : sortedItems}
+        currentItems={currentItems}
+        sortedItems={sortedItems}
         recycleSubFolders={recycleSubFolders}
         childFolders={childFolders}
         isPersonal={isPersonal}

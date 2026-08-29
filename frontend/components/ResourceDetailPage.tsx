@@ -62,10 +62,11 @@ import {
   translateGenPrompt,
   classifyResource,
   GALLERY_MIME,
+  fetchResourceCanvasRefs,
+  type CanvasBackRef,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
-import { fetchResourceCanvasRefs, type CanvasBackRef } from '../services/projectAssetsService';
 import { EagleTagPicker } from './EagleTagPicker';
 import { PromptSection } from './resources/PromptSection';
 import { canGenerateForResource } from './resources/ResourcePromptSection';
@@ -1918,7 +1919,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           {canvasRefs.length > 0 && (
             <div className={`px-4 mt-3 border-t ${cBorder800_60} pt-3`}>
               <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
-                {t('projectAssets.appearsInCanvases', { count: canvasRefs.length })}
+                {t('resources.appearsInCanvases', { count: canvasRefs.length })}
               </h4>
               <div className="flex flex-col gap-1">
                 {canvasRefs.map((ref) => (
@@ -1928,7 +1929,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     className={`flex items-center gap-2 text-sm ${cText300} ${cHover100} text-left`}
                   >
                     <span className="flex-1 truncate">{ref.canvas_name}</span>
-                    <span className={`text-xs ${cFaint}`}>{t(`projectAssets.role.${ref.role}`)}</span>
+                    <span className={`text-xs ${cFaint}`}>{t(`resources.canvasRefRole.${ref.role}`)}</span>
                   </button>
                 ))}
               </div>

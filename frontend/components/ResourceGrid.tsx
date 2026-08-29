@@ -43,9 +43,6 @@ import type { ChipId } from './resources/filter/types';
 import type { UseFilterBarConfigReturn } from '../hooks/useFilterBarConfig';
 import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
-import { TempResourceActions } from './TempResourceActions';
-import { ttlBadgeText } from '../utils/tempTtl';
-import { tempTtlService } from '../services/tempTtlService';
 import { useGridVirtualizer } from '../hooks/useGridVirtualizer';
 import { useJustifiedVirtualizer } from '../hooks/useJustifiedVirtualizer';
 
@@ -282,8 +279,8 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const { t } = useTranslation();
   const ctx = useResourcesContext();
   const {
-    isPersonal, scopeId, selectedFolderId, selectedLibraryId, selectedSmartFolderId,
-    isResourcesView, isRecycleView, isSharedView, isTempView,
+    selectedFolderId, selectedLibraryId, selectedSmartFolderId,
+    isResourcesView, isRecycleView, isSharedView,
     loading, viewMode, setViewMode, flattenFolders, setFlattenFolders, sortBy, setSortBy,
     searchQuery, folderChain, folderPreviews,
     selectedResource, setSelectedResource,
@@ -297,21 +294,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
     handleTrashResource: handleTrash,
     handleRestoreResource: handleRestore,
     handlePermanentDelete,
-    reloadResources,
-    reloadTemp,
   } = ctx;
-
-  // PR-E: temp_ttl service + child panels still speak the legacy
-  // 'personal' | 'team' scope_type (UUID-keyed user_settings exception).
-  // Derive it locally from the isPersonal discriminator.
-  const scopeType: 'personal' | 'team' = isPersonal ? 'personal' : 'team';
 
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
 
   // ─── Hide 'temp' from the top-level My Uploads FOLDERS grid ───────
-  // Only filter at the root level (no folder selected) — navigating INTO
-  // the temp folder explicitly must still work via the sidebar "Temp" item.
+  // Only filter at the root level (no folder selected) — the folder itself is
+  // still reachable by URL, and its contents are listed by the Generated inbox.
   // Folder single-click opens the info panel, which shrinks the grid and
   // reflows the auto-fill columns — moving the card out from under the second
   // click of a double-click, so the dblclick never fires (or hits a neighbour).
@@ -342,27 +332,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   const visibleFolders = isResourcesView && !selectedFolderId && !selectedSmartFolderId && !selectedLibraryId
     ? filteredFolders.filter((f) => f.name !== 'temp')
     : filteredFolders;
-
-  // ─── Temp: TTL badge + Save actions ────────────
-  // Two ways to be "in temp": navigating into the temp folder (legacy), or the
-  // dedicated Temp sidebar view (isTempView, no selectedFolder). Both need the
-  // TTL badge + promote-to-permanent action — gating on inTempFolder alone
-  // regressed the Temp sidebar view (#360).
-  const inTempFolder = selectedFolder?.name === 'temp';
-  const isTempContext = inTempFolder || isTempView;
-  const [scopeTtl, setScopeTtl] = useState<number | null>(null);
-  useEffect(() => {
-    if (!isTempContext || !scopeType || !scopeId) return;
-    let cancelled = false;
-    tempTtlService.getChatTempTtl(scopeType, scopeId).then((r) => {
-      if (cancelled) return;
-      setScopeTtl(r.ttl_days === -1 ? null : r.ttl_days);
-    }).catch((err) => {
-      console.warn('[ChatTtl] fetch failed:', err);
-      /* badge falls back to '' on error */
-    });
-    return () => { cancelled = true; };
-  }, [isTempContext, scopeType, scopeId]);
 
   // Filter bar visibility — search-row toggle remembers the choice in
   // localStorage. Hidden in shared / recycle views where filters don't
@@ -1162,7 +1131,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                             }}
                           >
                             {rowItems.map((item, idx) => {
-                              const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
                               const ar = justifiedAspectRatios[row.start + idx] || 1;
                               return (
                               <div
@@ -1203,21 +1171,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           compositeId={`item:${item.id}`}
                           isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                         />
-                        {isTempContext && (
-                          <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
-                            {badge && (
-                              <span className="text-xs text-warn flex-1 truncate">
-                                {badge}
-                              </span>
-                            )}
-                            <TempResourceActions
-                              resourceId={item.resource_id}
-                              scopeType={scopeType}
-                              scopeId={scopeId}
-                              onDone={isTempView ? reloadTemp : reloadResources}
-                            />
-                          </div>
-                        )}
                         </div>
                               );
                             })}
@@ -1252,7 +1205,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                             }}
                           >
                             {rowItems.map((item) => {
-                              const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
                               return (
                               <div key={item.id} {...getItemTouchHandlers('file', item)}>
                               <ResourceCard
@@ -1287,21 +1239,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                                 compositeId={`item:${item.id}`}
                                 isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                               />
-                              {isTempContext && (
-                                <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
-                                  {badge && (
-                                    <span className="text-xs text-warn flex-1 truncate">
-                                      {badge}
-                                    </span>
-                                  )}
-                                  <TempResourceActions
-                                    resourceId={item.resource_id}
-                                    scopeType={scopeType}
-                                    scopeId={scopeId}
-                                    onDone={isTempView ? reloadTemp : reloadResources}
-                                  />
-                                </div>
-                              )}
                               </div>
                               );
                             })}
@@ -1318,7 +1255,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                       {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                         const item = sortedItems[virtualRow.index];
                         if (!item) return null;
-                        const badge = isTempContext ? ttlBadgeText(item.created_at, scopeTtl) : '';
                         return (
                           <div
                             key={virtualRow.key}
@@ -1366,21 +1302,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                             compositeId={`item:${item.id}`}
                             isTranscoding={!!item.resource?.id && transcodingResourceIds.has(String(item.resource.id))}
                           />
-                          {isTempContext && (
-                            <div className="flex items-center gap-2 px-4 py-1.5 border-t border-ink-800/50">
-                              {badge && (
-                                <span className="text-xs text-warn flex-1 truncate">
-                                  {badge}
-                                </span>
-                              )}
-                              <TempResourceActions
-                                resourceId={item.resource_id}
-                                scopeType={scopeType}
-                                scopeId={scopeId}
-                                onDone={isTempView ? reloadTemp : reloadResources}
-                              />
-                            </div>
-                          )}
                           </div>
                           </div>
                         );
@@ -1398,11 +1319,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   <Trash2 size={48} className="text-ink-700 mb-4" />
                   <p className="text-ink-500 text-sm">{t('resources.recycleBinEmpty')}</p>
                 </>
-              ) : isTempView ? (
-                <>
-                  <Clock size={48} className="text-ink-700 mb-4" />
-                  <p className="text-ink-500 text-sm">{t('resources.tempEmpty')}</p>
-                </>
               ) : (
                 <>
                   <FolderOpen size={48} className="text-ink-700 mb-4" />
@@ -1415,7 +1331,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         )}
 
         {/* Keyset pagination sentinel — observed by the infinite-scroll effect
-            above. Only the Resources library paginates; recycle/temp load
+            above. Only the Resources library paginates; the recycle bin loads
             eagerly. Unmounts when the scope is drained (hasMore=false). */}
         {(isResourcesView || isRecycleView) && (hasMore || isLoadingMore) && (
           <div ref={loadMoreRef} className="w-full flex justify-center py-6">

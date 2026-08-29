@@ -12,7 +12,7 @@ import {
   ChevronRight,
   Pencil,
   Loader2,
-  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { formatCappedCount } from '../utils/cappedCount';
 import { useTranslation } from 'react-i18next';
@@ -80,11 +80,12 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     isRecycleView,
     isSharedView,
     isDownloadsView,
-    isProjectAssetsView,
+    isGeneratedView,
     resPath,
     navigate,
     myResourcesCount,
     downloadsCount,
+    generatedUnreviewedCount,
   } = useResourcesContext();
 
   // Module Control Center display switch — My Downloads is the media-parser
@@ -295,13 +296,22 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               </button>
             </div>
 
-            {/* Project Assets — canvas-grouped assets + chat uploads */}
+            {/* Generated — the AI-output inbox (replaces Project Assets).
+                The pill counts UNREVIEWED items only, and is omitted entirely
+                when the count is 0 or not yet known: a "0" badge would be a
+                permanent decoration, and a badge on `null` would assert a
+                number we failed to fetch. */}
             <button
-              onClick={() => navigate(resPath('/resources/project-assets'))}
-              className={sidebarItemClass(isProjectAssetsView)}
+              onClick={() => navigate(resPath('/resources/generated'))}
+              className={sidebarItemClass(isGeneratedView)}
             >
-              <Layers size={15} className="shrink-0 opacity-70" />
-              <span className="flex-1 truncate">{t('resources.projectAssets')}</span>
+              <Sparkles size={15} className="shrink-0 opacity-70" />
+              <span className="flex-1 truncate">{t('resources.generated', 'Generated')}</span>
+              {generatedUnreviewedCount !== null && generatedUnreviewedCount > 0 && (
+                <span className="text-[10px] min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-warn-soft text-warn border border-warn-line font-medium tabular-nums">
+                  {formatCappedCount(generatedUnreviewedCount)}
+                </span>
+              )}
             </button>
 
           </>
