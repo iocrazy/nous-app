@@ -21,6 +21,9 @@ worse, silently do the wrong thing) on the server:
   * ``strip_from_loadouts`` rewrites ``ARRAY(BigInteger)`` columns (case 8).
   * repo writes inside an ambient ``unit_of_work()`` must join that transaction,
     so one raise rolls the whole batch back (case 10 — Task 9 review ruling I-2).
+  * the three derived-count GROUP BYs every list page runs (``slot_counts`` /
+    ``project_ids`` / ``loadout_counts``) really produce the folded wire row,
+    and ``readiness`` is derived from the first of them (case 11).
 
 Transport: asyncpg on ``INTEGRATION_DATABASE_URL`` for fixture setup and for the
 assertions; the repos themselves go through ``app.db.session`` (SQLAlchemy async
@@ -573,3 +576,89 @@ async def test_batch_attach_inside_unit_of_work_rolls_back_on_error(orm_dsn, pg,
         "SELECT count(*) FROM asset_files WHERE asset_id = $1", aid
     )
     assert remaining == 0  # the two successful attaches rolled back with the third
+
+
+# ── 11. the three derived-count GROUP BYs every list page runs ─────────────
+
+
+@_skip
+async def test_list_assets_derives_slot_project_and_loadout_counts(orm_dsn, pg, fx):
+    """``slot_counts`` / ``project_ids`` / ``loadout_counts`` run on EVERY list
+    page and had never been executed by Postgres (review M9).
+
+    All three are GROUP BY / IN queries whose result is keyed by ``asset_id`` and
+    then folded into the wire row by ``with_derived``. A stubbed session cannot
+    say whether ``func.count()`` comes back as an int, whether the per-slot
+    grouping really splits ``sheet`` from ``stills``, or whether the ids survive
+    as BIGINTs — and ``readiness`` is derived from ``slot_counts``, so a wrong
+    count here silently mislabels an asset ``draft`` on the shelf.
+
+    Exercised through ``AssetsService.list_assets`` (not the repo methods on
+    their own) because the fold is what the client actually receives.
+    ``link_project`` / ``project_team_id`` ride along — both previously
+    unexecuted too.
+    """
+    from app.schemas.assets import AssetCreate, AttachFileRequest
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team_id, uid, pid = fx["team_id"], fx["user_id"], fx["project_id"]
+    r0, r1, r2 = fx["resource_ids"]
+
+    # create_asset also writes the Default loadout → loadout #1.
+    asset = await service.create_asset(
+        team_id,
+        AssetCreate(asset_type="character", name=_uniq("Derived Counts")),
+        uid,
+    )
+    aid = int(asset["id"])
+    # readiness starts draft: the primary slot ('sheet') is empty.
+    assert asset["readiness"] == {"state": "draft", "missing": ["sheet"]}
+    assert asset["file_counts_by_slot"] == {}
+    assert asset["loadout_count"] == 1
+
+    for rid, slot in ((r0, "sheet"), (r1, "sheet"), (r2, "stills")):
+        await service.attach_file(
+            aid, team_id, AttachFileRequest(resource_id=str(rid), slot=slot), uid
+        )
+    await service.link_project(aid, team_id, pid, uid)
+    await service.relations.create_loadout(aid, {"name": "Night Watch"})
+
+    rows = await service.list_assets(
+        team_id, asset_type="character", project_id=None, q=None, limit=200, offset=0
+    )
+    row = next(r for r in rows if int(r["id"]) == aid)
+
+    assert row["file_counts_by_slot"] == {"sheet": 2, "stills": 1}
+    assert row["project_ids"] == [str(pid)]  # serialized, not a JSON number
+    assert row["loadout_count"] == 2
+    assert row["readiness"] == {"state": "ready", "missing": []}
+
+    # The project_id FILTER shares the subquery those refs feed; prove it selects
+    # this asset and that an unrelated project id selects nothing.
+    filtered = await service.list_assets(
+        team_id, asset_type=None, project_id=pid, q=None, limit=200, offset=0
+    )
+    assert [int(r["id"]) for r in filtered] == [aid]
+    assert (
+        await service.list_assets(
+            team_id, asset_type=None, project_id=pid + 1, q=None, limit=200, offset=0
+        )
+        == []
+    )
+
+    # Ground truth straight from the server, in case the fold ever lies.
+    assert dict(
+        (r["slot"], r["n"])
+        for r in await pg.fetch(
+            "SELECT slot, count(*) AS n FROM asset_files WHERE asset_id = $1 "
+            "GROUP BY slot",
+            aid,
+        )
+    ) == {"sheet": 2, "stills": 1}
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1", aid
+        )
+        == 2
+    )
