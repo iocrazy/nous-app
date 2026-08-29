@@ -125,6 +125,12 @@ class PromoteGeneratedMediaService:
         # gen_id does not become a resource lookup for an unrelated caller.
         # The target-scope check is deliberately NOT run on this path: it
         # gates writes INTO a scope, and this path writes nothing.
+        # AUTHORIZATION NOTE: for an already-promoted row the gate is
+        # source-SCOPE membership, not conversation membership — so a team
+        # member who never joined the conversation CAN resolve an already-
+        # promoted chat attachment. That is intended: the resource lives in
+        # that team's library and is already readable by any member through
+        # /resources, and this path hands back that same row without copying.
         if gen.get("promoted_resource_id"):
             if not await self._can_read_source_scope(
                 gen,

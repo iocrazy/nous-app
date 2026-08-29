@@ -111,3 +111,30 @@ async def test_unpromoted_chat_upload_without_conversation_still_raises(monkeypa
     )
     with pytest.raises(PermissionError, match="conversation_id"):
         await svc.promote(gen_id=7, user_id="u-1", target_scope_id=GEN_SCOPE)
+
+
+async def test_team_member_who_is_not_a_participant_can_short_circuit(monkeypatch):
+    """I5: the discriminating direction of the hoist, pinned deliberately.
+
+    Hoisting the short-circuit above the ``chat_upload`` branch changed WHICH
+    check guards an already-promoted row: it was conversation membership, it
+    is now source-scope membership. This is the case that tells the two apart
+    — a real ``conversation_id`` the caller is NOT a member of, in a team they
+    ARE a member of. Intended: the resource already lives in that team's
+    library and is readable through ``/resources``; this path copies nothing.
+    """
+    svc, conv_repo = _wire(
+        monkeypatch,
+        gen=_gen_row(conversation_id="12345"),
+        resource={"id": 555, "filename": "abc.png"},
+    )
+    conv_repo.is_member.return_value = False
+
+    out = await svc.promote(gen_id=7, user_id="u-1", target_scope_id=GEN_SCOPE)
+
+    assert out == {"id": 555, "filename": "abc.png"}
+    # the gate that actually ran is the scope one …
+    conv_repo.is_team_member.assert_awaited()
+    # … and conversation membership was never consulted, so its False answer
+    # could not have been what allowed this.
+    conv_repo.is_member.assert_not_awaited()

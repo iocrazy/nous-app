@@ -40,7 +40,6 @@ vi.mock('./TaskCenter/TaskCenter', () => ({ TaskCenter: () => null }));
 vi.mock('./TagsSettings', () => ({ TagsSettings: () => null }));
 vi.mock('./ApiDocsPanel', () => ({ ApiDocsPanel: () => null }));
 vi.mock('./CookiesSettings', () => ({ CookiesSettings: () => null }));
-vi.mock('./ChatTempTtlPanel', () => ({ ChatTempTtlPanel: () => null }));
 vi.mock('../hooks/useWorkspaceScope', () => ({
   useWorkspaceScope: () => ({ effectiveTeamId: null }),
 }));
