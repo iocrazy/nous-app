@@ -263,11 +263,35 @@ class AssetRelationsRepository:
         async with read_scope() as session:
             return [_row(o) for o in (await session.execute(stmt)).scalars().all()]
 
-    async def set_default(self, loadout_id: int, asset_id: int) -> None:
+    async def set_default(self, loadout_id: int, asset_id: int) -> bool:
+        """Make ``loadout_id`` the asset's default, in one transaction.
+
+        Returns ``False`` when the loadout is not owned by ``asset_id`` (or
+        does not exist) — **nothing changed** in that case, so the asset keeps
+        whatever default it had. ``True`` = it is now the only default.
+
+        Ownership is settled by a ``SELECT ... FOR UPDATE`` *before* any write,
+        so the "not owned" path cannot leave the asset with no default at all.
+        The siblings are cleared before the target is set: ``uq_loadout_default``
+        (mig 445 line 75) is a partial unique *index*, which PostgreSQL checks
+        row-by-row and cannot defer — setting the target first would collide
+        with the existing default on the common path.
+        """
         async with write_scope() as session:
+            owned = (
+                await session.execute(
+                    select(AssetLoadouts.id)
+                    .where(AssetLoadouts.id == int(loadout_id))
+                    .where(AssetLoadouts.asset_id == int(asset_id))
+                    .with_for_update()
+                )
+            ).first()
+            if owned is None:
+                return False
             await session.execute(
                 sa_update(AssetLoadouts)
                 .where(AssetLoadouts.asset_id == int(asset_id))
+                .where(AssetLoadouts.id != int(loadout_id))
                 .values(is_default=False)
             )
             await session.execute(
@@ -276,6 +300,7 @@ class AssetRelationsRepository:
                 .where(AssetLoadouts.asset_id == int(asset_id))
                 .values(is_default=True)
             )
+            return True
 
     async def strip_from_loadouts(
         self,
@@ -285,11 +310,28 @@ class AssetRelationsRepository:
         prop_id: Optional[int] = None,
     ) -> int:
         """Remove a costume/prop id from every loadout of ``asset_id`` (called
-        when the corresponding link is removed). Returns rows touched."""
+        when the corresponding link is removed). Returns rows touched.
+
+        The read runs on the *same* session as the writes, under
+        ``FOR UPDATE`` row locks: each UPDATE rewrites the whole array from the
+        snapshot, so reading in a separate transaction would silently overwrite
+        any concurrent loadout edit landing in between (lost update).
+        """
         touched = 0
-        rows = await self.list_loadouts(asset_id)
         async with write_scope() as session:
-            for r in rows:
+            objs = (
+                (
+                    await session.execute(
+                        select(AssetLoadouts)
+                        .where(AssetLoadouts.asset_id == int(asset_id))
+                        .with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for obj in objs:
+                r = _row(obj)
                 new_c = [
                     c
                     for c in r["costume_ids"]
