@@ -18,7 +18,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Camera, Check, Upload, User } from 'lucide-react';
+import { Camera, Check, Upload, User, ZoomIn, ZoomOut } from 'lucide-react';
 
 import { getSupabaseClient } from '../../../supabaseClient';
 import { getResourceFileUrl } from '../../../services/resourceService';
@@ -68,6 +68,7 @@ interface Props {
     sourceId: string,
     timestampSeconds: number,
     focus: CropFocus,
+    zoom: number,
   ) => Promise<void>;
   /** A picture from disk becomes the cover as-is. */
   onUploadCover?: (file: File) => Promise<void>;
@@ -103,6 +104,10 @@ export function CoverFrameGrabber({
   // Where the crop box is anchored, normalised to the VIDEO picture (not the
   // stage box — the video is letterboxed inside it). Centre until dragged.
   const [focus, setFocus] = useState<CropFocus>(CENTRE);
+  // Zoom, the platform's way: the crop box stays put and the PICTURE grows
+  // and can be dragged behind it. 1 = the box is as large as the picture
+  // allows; 2 = the picture is twice as big inside the same box.
+  const [zoom, setZoom] = useState(1);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startX: number; startY: number; focus: CropFocus } | null>(null);
@@ -170,6 +175,7 @@ export function CoverFrameGrabber({
     setDuration(0);
     setGrabError(null);
     setFocus(CENTRE);
+    setZoom(1);
     setVideoSize(null);
   }, [active?.id]);
 
@@ -187,18 +193,50 @@ export function CoverFrameGrabber({
     return { left: (sw - w) / 2, top: (sh - h) / 2, width: w, height: h };
   }, [videoSize]);
 
-  /** Crop-box geometry: the largest `aspect` box inside the picture, centred
-   *  on `focus` and clamped so it never leaves the picture. */
-  const guideStyle = (): React.CSSProperties | undefined => {
+  /** The crop box: the largest `aspect` box the picture allows, fixed in the
+   *  middle of the stage. Zoom and focus move the PICTURE under it. */
+  const boxRect = () => {
     const pic = pictureRect();
-    if (!pic) return undefined;
+    if (!pic) return null;
     const target = aspect === '4:3' ? 4 / 3 : 3 / 4;
     const picAspect = pic.width / pic.height;
     const w = picAspect > target ? pic.height * target : pic.width;
     const h = picAspect > target ? pic.height : pic.width / target;
-    const left = pic.left + Math.min(Math.max(focus.x * pic.width - w / 2, 0), pic.width - w);
-    const top = pic.top + Math.min(Math.max(focus.y * pic.height - h / 2, 0), pic.height - h);
-    return { left, top, width: w, height: h };
+    return { left: pic.left + (pic.width - w) / 2, top: pic.top + (pic.height - h) / 2, width: w, height: h };
+  };
+  const guideStyle = (): React.CSSProperties | undefined => boxRect() ?? undefined;
+
+  /** Where the window the server will crop sits, in picture-normalised
+   *  coordinates — the same maths as `center_crop_region(focus, zoom)`. */
+  const cropWindow = () => {
+    const pic = pictureRect();
+    const box = boxRect();
+    if (!pic || !box) return null;
+    const w = box.width / pic.width / zoom;
+    const h = box.height / pic.height / zoom;
+    const x = Math.min(Math.max(focus.x - w / 2, 0), 1 - w);
+    const y = Math.min(Math.max(focus.y - h / 2, 0), 1 - h);
+    return { x, y, w, h };
+  };
+
+  /** Scale + shift the video so the crop window fills the fixed box. */
+  const videoStyle = (): React.CSSProperties | undefined => {
+    const pic = pictureRect();
+    const box = boxRect();
+    const win = cropWindow();
+    if (!pic || !box || !win) return undefined;
+    // The window's centre, in stage pixels at zoom 1 …
+    const cx = pic.left + (win.x + win.w / 2) * pic.width;
+    const cy = pic.top + (win.y + win.h / 2) * pic.height;
+    // … must land on the box centre after scaling about the stage centre.
+    const stage = stageRef.current;
+    const sx = (stage?.clientWidth ?? 0) / 2;
+    const sy = (stage?.clientHeight ?? 0) / 2;
+    const bx = box.left + box.width / 2;
+    const by = box.top + box.height / 2;
+    const tx = bx - (sx + (cx - sx) * zoom);
+    const ty = by - (sy + (cy - sy) * zoom);
+    return { transform: `translate(${tx}px, ${ty}px) scale(${zoom})`, transformOrigin: 'center center' };
   };
 
   const moveFocus = useCallback((dx: number, dy: number) => {
@@ -214,9 +252,11 @@ export function CoverFrameGrabber({
     const d = drag.current;
     const pic = pictureRect();
     if (!d || !pic) return;
+    // Dragging moves the PICTURE (the box stays): drag right → picture goes
+    // right → the window's centre moves left in picture coordinates.
     setFocus({
-      x: clamp01(d.focus.x + (e.clientX - d.startX) / pic.width),
-      y: clamp01(d.focus.y + (e.clientY - d.startY) / pic.height),
+      x: clamp01(d.focus.x - (e.clientX - d.startX) / (pic.width * zoom)),
+      y: clamp01(d.focus.y - (e.clientY - d.startY) / (pic.height * zoom)),
     });
   };
   const onGuidePointerUp = () => {
@@ -279,7 +319,7 @@ export function CoverFrameGrabber({
     setUsing(true);
     setGrabError(null);
     try {
-      await onUseAsCover(active.id, at, focus);
+      await onUseAsCover(active.id, at, focus, zoom);
     } catch (err) {
       console.error('[CoverFrameGrabber] use-as-cover failed:', err);
       setGrabError(
@@ -291,7 +331,7 @@ export function CoverFrameGrabber({
     } finally {
       setUsing(false);
     }
-  }, [active, onUseAsCover, using, current, focus, t]);
+  }, [active, onUseAsCover, using, current, focus, zoom, t]);
 
   const uploadCover = useCallback(
     async (file: File) => {
@@ -449,6 +489,7 @@ export function CoverFrameGrabber({
             preload="metadata"
             controls={false}
             data-testid="cover-grab-video"
+            style={embedded ? videoStyle() : undefined}
             onLoadedMetadata={(e) => {
               setDuration(e.currentTarget.duration || 0);
               setVideoSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
@@ -471,10 +512,11 @@ export function CoverFrameGrabber({
               style={guideStyle()}
               role="slider"
               tabIndex={0}
-              aria-label={t('distribution.coverStudio.cropBox', 'Crop box — drag or use the arrow keys')}
+              aria-label={t('distribution.coverStudio.cropBox', 'Crop box — drag the picture or use the arrow keys')}
               aria-valuetext={`${Math.round(focus.x * 100)}%, ${Math.round(focus.y * 100)}%`}
               data-focus-x={focus.x.toFixed(2)}
               data-focus-y={focus.y.toFixed(2)}
+              data-zoom={zoom.toFixed(1)}
               data-testid="cover-crop-guide"
               onPointerDown={onGuidePointerDown}
               onPointerMove={onGuidePointerMove}
@@ -484,6 +526,28 @@ export function CoverFrameGrabber({
             />
           )}
         </div>
+
+        {embedded && (
+          <div className="cs-zoom" data-testid="cover-zoom">
+            <button type="button" aria-label={t('distribution.coverStudio.zoomOut', 'Zoom out')} onClick={() => setZoom((z) => Math.max(1, +(z - 0.25).toFixed(2)))}>
+              <ZoomOut size={13} />
+            </button>
+            <input
+              type="range"
+              min={1}
+              max={4}
+              step={0.05}
+              value={zoom}
+              aria-label={t('distribution.coverStudio.zoom', 'Zoom')}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              data-testid="cover-zoom-slider"
+            />
+            <button type="button" aria-label={t('distribution.coverStudio.zoomIn', 'Zoom in')} onClick={() => setZoom((z) => Math.min(4, +(z + 0.25).toFixed(2)))}>
+              <ZoomIn size={13} />
+            </button>
+            <span className="val">{zoom.toFixed(1)}×</span>
+          </div>
+        )}
 
         <div
           className={`cs-track ${strip.candidates.length > 0 ? 'strip' : ''}`}

@@ -1620,6 +1620,7 @@ async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
                     user_id=user["id"],
                     focus_x=0.5 if body.focus_x is None else float(body.focus_x),
                     focus_y=0.5 if body.focus_y is None else float(body.focus_y),
+                    zoom=1.0 if body.zoom is None else float(body.zoom),
                 )
     except CoverFrameError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e

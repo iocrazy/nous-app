@@ -28,6 +28,7 @@ import { needsReconnect } from './accountStatus';
 import { SocialAccount, LibraryVideo, SelfDeclaration, TopicRef } from '../../types';
 import { CoverSlots, type CoverOrientation, type CoverPair } from './CoverSlots';
 import { clearPublishDraft, readPublishDraft, writePublishDraft } from './publishDraft';
+import { HelpTip } from './CoverStudio/HelpTip';
 import { CoverStudioOverlay } from './CoverStudio/CoverStudioOverlay';
 import { PublishPreview, type PreviewSoundtrack } from './PublishPreview';
 import { UiSelect } from '../ui/primitives';
@@ -2687,6 +2688,7 @@ export const PublishPage: React.FC = () => {
             <div className="fcard">
               <h4>
                 {t('distribution.publish.cover', 'Cover')}
+                <HelpTip text={t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')} />
                 <span className="aux" data-testid="cover-status">
                   {covers?.vertical && covers?.horizontal
                     ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')
@@ -2716,11 +2718,11 @@ export const PublishPage: React.FC = () => {
                     return next.vertical || next.horizontal ? next : null;
                   })}
                 />
-                <p className="cover-hint">
-                  {selectedVideoObjs.length === 0
-                    ? t('distribution.publish.coverNeedsVideo', 'Select a video above first — the cover comes from it.')
-                    : t('distribution.publish.coverHint', 'Click a slot to open Cover Studio — crop a frame, upload a picture, or let the model draw one. Either slot is enough to publish.')}
-                </p>
+                {selectedVideoObjs.length === 0 && (
+                  <p className="cover-hint">
+                    {t('distribution.publish.coverNeedsVideo', 'Select a video above first — the cover comes from it.')}
+                  </p>
+                )}
               </div>
               <CoverStudioOverlay
                 open={coverStudioTab !== null}

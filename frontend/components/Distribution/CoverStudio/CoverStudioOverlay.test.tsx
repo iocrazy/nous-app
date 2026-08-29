@@ -508,6 +508,7 @@ describe('CoverStudioOverlay — v4 layout', () => {
         timestamp_seconds: 3.1,
         focus_x: 0.25,
         focus_y: 0.75,
+        zoom: 1,
       }),
     );
     await waitFor(() => expect(onApply).toHaveBeenCalledWith({ vertical: '7001' }));

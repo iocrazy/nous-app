@@ -110,6 +110,8 @@ class CoverSelectRequest(BaseModel):
     # 裁切锚点（归一化 0..1，框中心）。缺省居中。工作室里拖动裁切框就是在改它。
     focus_x: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     focus_y: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    # 缩放条：1 = 框尽量大；2 = 框边长减半；上限 4。缺省 1。
+    zoom: Optional[float] = Field(default=None, ge=1.0, le=4.0)
     publish_task_id: Optional[str] = Field(
         default=None,
         description=(

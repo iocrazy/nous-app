@@ -425,3 +425,9 @@ Optional，所以直接以 None 起它，不为了满足一个路由前缀去造
 - **轮次不再只活在内存**：`covers/generate` 把 `params.cover = {stage, aspect, source_video_id, topic, style, selected_draft, grid_gen_id}` 落进 `generated_media.params`；`GET /generated-media?cover_source=<video id>` 按视频列出历史；工作室打开时重建轮次（成品按 `grid_gen_id` 挂回网格，缺网格的成品自成一轮），轮次 id = 网格的 generated_media id，本轮新生成的与服务端历史按 id 合并不重复。
 - **发布页草稿**（`publishDraft.ts`，localStorage 按 scope）：所选视频/账号、标题、描述、话题、可见范围、封面、自主声明、模式；到页即恢复并显示"已恢复草稿 · 清除"；发布成功即清除。不存定时时间与上传中状态。
 - **任务中心**：`cover_gen` 与 `canvas_gen` 同一结果体，显示 `result_url` 缩略图与 prompt。
+
+## 补记 2026-08-28（二）：缩放裁切、抖音式预览卡、说明改 (?)
+
+- **裁切加缩放（抖音方式）**：框固定在舞台中央（画面允许的最大画幅框），画面按 zoom（1–4×）放大并可拖动选中心；服务端 `covers/select` 新增 `zoom`，`center_crop_region(focus, zoom)`：满画幅窗口边长除以 zoom、以焦点为中心、钳在图内。
+- **发布页手机预览按平台画法**：去掉用户卡的紫色高亮框；卡片脚部 = 标题（空则占位）+ 头像（有账号用真头像，否则平台的空白圆）+ 昵称 + 空心 ♡ 与 0（未发布作品的真实数）；占位卡也画虚线标题、空白头像与 ♡0。
+- **发布页说明改 (?)**：封面卡的操作说明、预览下方的三段说明合并进 `HelpTip`；只有"先选视频"这种阻断原因仍以文字显示。

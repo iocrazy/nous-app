@@ -238,8 +238,12 @@ def center_crop_region(
     target_aspect: float,
     focus_x: float = 0.5,
     focus_y: float = 0.5,
+    zoom: float = 1.0,
 ) -> CropRegion:
-    """求"能塞进源图的最大 target_aspect 矩形"，以 ``(focus_x, focus_y)`` 为锚点。
+    """求"能塞进源图的最大 target_aspect 矩形"再按 ``zoom`` 缩小，以 ``(focus_x, focus_y)`` 为锚点。
+
+    ``zoom`` 是工作室里的缩放条：1 = 框尽量大（老行为），2 = 框的边长减半（图放大
+    一倍看起来），上限 4。放大后框仍钳在图内。
 
     返回归一化 ``[0,1]`` 区域，直接喂给 ``crop_normalized``。锚点默认 0.5/0.5 =
     居中；用户在工作室里拖动裁切框时传的是框中心的归一化坐标，窗口跟着它走，
@@ -269,6 +273,8 @@ def center_crop_region(
             status_code=400,
             detail=f"crop focus out of range: ({focus_x}, {focus_y})",
         )
+    if not (1.0 <= zoom <= 4.0):
+        raise CoverFrameError(status_code=400, detail=f"crop zoom out of range: {zoom}")
     if source_width <= 0 or source_height <= 0:
         raise CoverFrameError(
             status_code=400,
@@ -281,14 +287,16 @@ def center_crop_region(
 
     source_aspect = source_width / source_height
     if source_aspect > target_aspect:
-        # 源比目标更宽 → 保满高度，窗口沿 x 跟着锚点走。
-        width = target_aspect / source_aspect
-        x = min(max(focus_x - width / 2.0, 0.0), 1.0 - width)
-        return CropRegion(x=x, y=0.0, width=width, height=1.0)
-    # 源比目标更高（或恰好相等）→ 保满宽度，窗口沿 y 跟着锚点走。
-    height = min(source_aspect / target_aspect, 1.0)
+        # 源比目标更宽 → 满高度的框，再按 zoom 缩小；两轴都跟着锚点走。
+        width = (target_aspect / source_aspect) / zoom
+        height = 1.0 / zoom
+    else:
+        # 源比目标更高（或恰好相等）→ 满宽度的框，再按 zoom 缩小。
+        width = 1.0 / zoom
+        height = min(source_aspect / target_aspect, 1.0) / zoom
+    x = min(max(focus_x - width / 2.0, 0.0), 1.0 - width)
     y = min(max(focus_y - height / 2.0, 0.0), 1.0 - height)
-    return CropRegion(x=0.0, y=y, width=1.0, height=height)
+    return CropRegion(x=x, y=y, width=width, height=height)
 
 
 def _decode_data_url(data_url: str) -> Optional[bytes]:
@@ -640,6 +648,7 @@ async def _crop_and_persist_pair(
     library_id: Optional[str],
     stem: str,
     focus: tuple[float, float] = (0.5, 0.5),
+    zoom: float = 1.0,
 ) -> dict[str, str]:
     """一帧 → 竖版 3:4 + 横版 4:3，各落成一个 resources 行，返回两个 id。
 
@@ -656,7 +665,7 @@ async def _crop_and_persist_pair(
         ("vertical", COVER_VERTICAL_ASPECT),
         ("horizontal", COVER_HORIZONTAL_ASPECT),
     ):
-        region = center_crop_region(width, height, aspect, focus[0], focus[1])
+        region = center_crop_region(width, height, aspect, focus[0], focus[1], zoom)
         try:
             cropped = crop_normalized(frame_bytes, region, mime_type=_COVER_MIME)
         except CropError as exc:
@@ -685,6 +694,7 @@ async def derive_cover_pair(
     repo: Optional[ResourceRepoProtocol] = None,
     focus_x: float = 0.5,
     focus_y: float = 0.5,
+    zoom: float = 1.0,
 ) -> CoverPair:
     """按时间点重抽那一帧，以 ``(focus_x, focus_y)`` 为锚点裁成 3:4 与 4:3 两张封面。
 
@@ -728,6 +738,7 @@ async def derive_cover_pair(
         library_id=source.library_id,
         stem=stem,
         focus=(focus_x, focus_y),
+        zoom=zoom,
     )
     return CoverPair(
         vertical_resource_id=ids["vertical"],

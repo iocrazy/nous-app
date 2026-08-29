@@ -468,6 +468,8 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
+      "aboutPreview": "About this preview",
+      "previewNoCoverShort": "No cover set yet",
       "draftRestored": "Draft restored from {{when}} — everything you had typed and picked is back.",
       "draftDiscard": "Discard draft",
       "coverNeedsVideo": "Pick a video above first — cover frames are sampled from it.",
@@ -749,6 +751,9 @@
       "endedAbandoned": "This publish stopped waiting for a code."
     },
     "coverStudio": {
+      "zoom": "Zoom",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
       "elapsed": "{{s}}s elapsed",
       "progressHint": "One image with four drafts usually takes a minute or two. You can keep editing the prompt meanwhile.",
       "draftingPct": "Drawing… {{pct}}%",
@@ -783,7 +788,7 @@
       "libraryNoVideos": "No videos in your library yet.",
       "changeVideo": "Change video",
       "modelNote": "Same list as Settings → platform models: switch a model off there and it leaves this menu.",
-      "cropBox": "Crop box — drag or use the arrow keys",
+      "cropBox": "Crop box — drag the picture or use the arrow keys",
       "willFillPublishH": "Fills the horizontal cover slot on the publish page",
       "coverTabs": "Cover",
       "tabVertical": "Vertical cover 3:4",
