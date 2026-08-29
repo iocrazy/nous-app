@@ -32,6 +32,14 @@ from app.models import (
 )
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
+# How many rows one cleanup pass may look at. Defined HERE because this module
+# is what enforces it in SQL, and imported by
+# ``GeneratedInboxService.cleanup`` for both the call and its ``truncated``
+# flag: if the caller's number and this cap ever drifted apart, ``truncated``
+# would be computed against a page size the query cannot produce and would
+# silently read False forever — "that was all of them" when it was not.
+CLEANUP_SCAN_LIMIT = 2000
+
 # The projection every read returns (matches the legacy _COLS order; the
 # object-store-only content_sha256 stays internal, exactly as before).
 _GM_COLS = (
@@ -566,7 +574,7 @@ class GeneratedMediaRepository:
             .where(GeneratedMedia.review_state == "unreviewed")
             .where(GeneratedMedia.created_at < older_than)
             .order_by(GeneratedMedia.created_at.asc())
-            .limit(max(1, min(int(limit), 2000)))
+            .limit(max(1, min(int(limit), CLEANUP_SCAN_LIMIT)))
         )
         async with read_scope() as session:
             rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]

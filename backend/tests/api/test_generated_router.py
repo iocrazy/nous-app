@@ -209,6 +209,71 @@ async def test_absent_origin_kind_is_none_not_empty_list(app):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["Canvas_Run", "canvas-run", "canvas run", "a" * 41])
+async def test_bad_origin_kind_is_422(app, bad):
+    """Every origin_kind a writer emits is lowercase-with-underscores. A
+    caller typo answered with an empty page reads exactly like "nothing
+    generated here yet" — the wrong answer that looks right. ``Query`` has no
+    per-item bound (``max_length`` there counts LIST items), so the bound
+    lives on the item type."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&origin_kind={bad}")
+    assert r.status_code == 422, r.text
+    assert not [call for call in app.state.fake.calls if call[0] == "list"]
+
+
+@pytest.mark.asyncio
+async def test_one_bad_origin_kind_rejects_the_whole_request(app):
+    """Not "drop the bad one and filter by the rest": a silently narrowed
+    filter returns a plausible page that answers a question nobody asked."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(
+            f"/api/v1/generated?scope_id={SCOPE}&origin_kind=canvas_run&origin_kind=X"
+        )
+    assert r.status_code == 422
+    assert not [call for call in app.state.fake.calls if call[0] == "list"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "good", ["canvas_run", "chat_upload", "shot_generate", "unknown"]
+)
+async def test_real_origin_kinds_still_pass(app, good):
+    """The bound must not reject what the writers actually store — including
+    ``unknown``, the label the service substitutes for a NULL column."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&origin_kind={good}")
+    assert r.status_code == 200, r.text
+    assert _filters(app)["origin_kinds"] == [good]
+
+
+@pytest.mark.asyncio
+async def test_naive_since_is_read_as_utc(app):
+    """A ``since`` with no offset is UTC, not the server's local zone. The
+    difference is a silent window shift of however many hours the deploy host
+    happens to be from UTC — same 200, different rows."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&since=2026-08-01T00:00:00")
+    assert r.status_code == 200, r.text
+    since = _filters(app)["since"]
+    assert since.tzinfo is not None
+    assert since == datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_aware_since_keeps_its_offset(app):
+    """Normalising the naive case must not rewrite an explicit offset."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(
+            f"/api/v1/generated?scope_id={SCOPE}&since=2026-08-01T08:00:00%2B08:00"
+        )
+    assert r.status_code == 200, r.text
+    since = _filters(app)["since"]
+    assert since == datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
+    assert since.utcoffset() == datetime.timedelta(hours=8)
+
+
+@pytest.mark.asyncio
 async def test_remaining_filters_are_typed(app):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get(

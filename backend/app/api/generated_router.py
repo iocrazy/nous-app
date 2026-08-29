@@ -25,6 +25,7 @@ import datetime
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Query
+from pydantic import StringConstraints
 
 from app.api.assets_router import (
     IdPath,
@@ -55,6 +56,20 @@ router = APIRouter(prefix="/generated", tags=["generated"])
 # ``None`` for that and accepts no other spelling.
 StateQuery = Annotated[str, Query(pattern="^(unreviewed|saved|in_assets|all)$")]
 
+# ``Query(max_length=...)`` on a ``List[str]`` constrains the LIST (how many
+# items), never an item — so the bound has to live on the item type. Every
+# origin_kind the writers emit is lowercase-with-underscores; anything else is
+# a caller typo or an injection probe, and answering it with an empty inbox
+# would read exactly like "nothing generated here yet".
+OriginKindQuery = Annotated[
+    List[
+        Annotated[
+            str, StringConstraints(min_length=1, max_length=40, pattern=r"^[a-z_]+$")
+        ]
+    ],
+    Query(),
+]
+
 
 def _service() -> GeneratedInboxService:
     return GeneratedInboxService()
@@ -65,7 +80,7 @@ async def list_generated(
     auth: AuthDep,
     scope_id: ScopeIdQuery,
     state: StateQuery = "unreviewed",
-    origin_kind: List[str] = Query(default=[]),
+    origin_kind: OriginKindQuery = [],
     project_id: OptSnowflakeQuery = None,
     media_kind: Optional[str] = Query(None, max_length=40),
     model: Optional[str] = Query(None, max_length=200),
@@ -73,6 +88,11 @@ async def list_generated(
     cursor: Optional[str] = Query(None, max_length=500),
     limit: int = Query(60, ge=1, le=200),
 ):
+    # A naive ``since`` is read as UTC. Falling through to the DB with the
+    # server's local zone would silently shift the window by hours — a wrong
+    # answer that looks like a correct one.
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=datetime.timezone.utc)
     try:
         sid = await _gate(scope_id, auth)
         page = await _service().list(

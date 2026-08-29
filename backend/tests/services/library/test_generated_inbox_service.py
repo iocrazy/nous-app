@@ -17,6 +17,7 @@ import datetime
 
 import pytest
 
+from app.repositories.generated_media_repository import CLEANUP_SCAN_LIMIT
 from app.schemas.generated import (
     BatchRequest,
     CleanupRequest,
@@ -561,7 +562,7 @@ async def test_cleanup_dry_run_deletes_nothing_and_samples_twelve():
     assert out["sample"][0]["title"]
     assert repo.deleted == []
     scope, older_than, limit = repo.cleanup_call
-    assert scope == SCOPE and limit == 2000
+    assert scope == SCOPE and limit == CLEANUP_SCAN_LIMIT
     # 30 days back from "now", not from the row timestamps.
     delta = datetime.datetime.now(datetime.timezone.utc) - older_than
     assert datetime.timedelta(days=29) < delta < datetime.timedelta(days=31)
@@ -596,7 +597,7 @@ async def test_cleanup_flags_a_pass_that_hit_the_scan_cap(monkeypatch, dry_run):
     caller that deletes ``count`` rows and stops would leave the rest behind
     while reporting the cleanup as complete.
     """
-    monkeypatch.setattr(mod, "_CLEANUP_SCAN_LIMIT", 3)
+    monkeypatch.setattr(mod, "CLEANUP_SCAN_LIMIT", 3)
     svc, _repo, _p = build(rows=_old_rows(3))
     out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=dry_run), SCOPE)
     assert out["count"] == 3 and out["truncated"] is True
@@ -606,6 +607,29 @@ async def test_cleanup_does_not_flag_a_pass_that_fits():
     svc, _repo, _p = build(rows=_old_rows(3))
     out = await svc.cleanup(CleanupRequest(older_than_days=30), SCOPE)
     assert out["truncated"] is False
+
+
+def test_the_scan_cap_and_the_truncated_flag_are_one_constant():
+    """The number the service ASKS for and the number the SQL will give are
+    the same object, not two copies that agree today.
+
+    If the request grew past the repo's cap, every pass would come back short
+    of what ``truncated`` compares against — the flag would read ``False``
+    forever and a partial cleanup would report itself complete. Nothing else
+    in the suite can see that: the repo is a fake everywhere above, so it
+    happily returns whatever ``limit`` asks for.
+    """
+    import inspect
+
+    from app.repositories import generated_media_repository as repo_mod
+
+    assert mod.CLEANUP_SCAN_LIMIT is repo_mod.CLEANUP_SCAN_LIMIT
+    # The SQL cap is expressed in terms of the constant, not a literal — a
+    # re-hardcoded ``2000`` here is the drift this test exists to catch.
+    src = inspect.getsource(repo_mod.GeneratedMediaRepository.list_older_unreviewed)
+    assert "CLEANUP_SCAN_LIMIT" in src
+    cleanup_src = inspect.getsource(mod.GeneratedInboxService.cleanup)
+    assert cleanup_src.count("CLEANUP_SCAN_LIMIT") >= 2  # the call and the flag
 
 
 async def test_cleanup_skips_rows_that_are_already_reviewed():

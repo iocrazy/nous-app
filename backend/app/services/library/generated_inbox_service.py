@@ -31,7 +31,10 @@ from typing import Any, Optional
 
 from app.db.session import unit_of_work
 from app.repositories.canvas_repository import CanvasRepository
-from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.repositories.generated_media_repository import (
+    CLEANUP_SCAN_LIMIT,
+    GeneratedMediaRepository,
+)
 from app.schemas.assets import AssetCreate, AttachFileRequest
 from app.schemas.generated import (
     BatchRequest,
@@ -48,10 +51,11 @@ from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
 )
 
-# One cleanup pass looks at at most this many rows (the repo caps at the same
-# number). ``count`` is therefore "matched in this pass", not "matched ever" —
-# a second run picks up the rest.
-_CLEANUP_SCAN_LIMIT = 2000
+# One cleanup pass looks at at most this many rows. The number is the repo's
+# own SQL cap (``CLEANUP_SCAN_LIMIT``), imported rather than repeated so the
+# request and the cap cannot drift — see the comment at its definition.
+# ``count`` is therefore "matched in this pass", not "matched ever" — a second
+# run picks up the rest.
 # The preview a dry run shows. Enough to recognise what is about to go.
 _CLEANUP_SAMPLE = 12
 # An origin_kind that is NULL/blank in the database would render as an empty
@@ -333,23 +337,23 @@ class GeneratedInboxService:
         """Purge old unreviewed generations. Dry run by default (the schema's
         default), so a caller that forgets the flag gets a preview.
 
-        ``count`` is what this pass matched (capped at ``_CLEANUP_SCAN_LIMIT``),
+        ``count`` is what this pass matched (capped at ``CLEANUP_SCAN_LIMIT``),
         and ``deleted`` counts rows the delete actually removed — the two are
         reported separately rather than assumed equal, so a row that vanished
         underneath us is visible instead of inflating the total. ``truncated``
         says the cap was reached, so the caller can tell "that was all of them"
-        apart from "that was the first 2000".
+        apart from "that was the first ``CLEANUP_SCAN_LIMIT``".
         """
         older_than = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
             days=int(req.older_than_days)
         )
         rows = await self.gen_repo.list_older_unreviewed(
-            int(scope_id), older_than, limit=_CLEANUP_SCAN_LIMIT
+            int(scope_id), older_than, limit=CLEANUP_SCAN_LIMIT
         )
         # A full page means the scan hit its cap, so there may be more behind
         # it. ``>=`` rather than ``==``: a repo that ever over-returns should
         # still flag the pass as partial, not silently claim it saw everything.
-        truncated = len(rows) >= _CLEANUP_SCAN_LIMIT
+        truncated = len(rows) >= CLEANUP_SCAN_LIMIT
         if req.dry_run:
             sample = await self._decorate(rows[:_CLEANUP_SAMPLE], str(scope_id))
             return CleanupResponse(
