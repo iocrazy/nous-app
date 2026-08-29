@@ -174,9 +174,9 @@ RUN curl -fsSL -o /tmp/gis.tgz "${NPM_REGISTRY}/gpt-image-2-skill-linux-x64-stat
 # Install uv package manager
 RUN pip install uv
 
-# Install nous-core Rust module from build stage
+# nous-core Rust module from the build stage. The wheel is copied here but
+# INSTALLED AFTER `uv sync` (below) — see the note there for why.
 COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
-RUN pip install /tmp/nous_core*.whl && rm -f /tmp/nous_core*.whl
 
 # Install yt-dlp and faster-whisper
 RUN pip install yt-dlp==2024.12.23 faster-whisper==1.1.0
@@ -198,6 +198,18 @@ RUN rm -rf .venv
 
 # Install Python dependencies
 RUN uv sync
+
+# Install the nous-core wheel INTO THE VENV, not the system interpreter.
+# The app runs as /app/.venv/bin/python and that venv is built by `uv sync`
+# with include-system-site-packages = false, so anything pip-installed into
+# /usr/local/lib/pythonX/site-packages is invisible to it. This install must
+# therefore come AFTER `rm -rf .venv && uv sync` — before it, the venv either
+# does not exist yet or is about to be deleted.
+# (yt-dlp / faster-whisper stay on the system interpreter above: they are used
+# as CLI binaries on PATH, not imported by the app.)
+RUN uv pip install --python /app/.venv/bin/python /tmp/nous_core*.whl \
+    && rm -f /tmp/nous_core*.whl \
+    && /app/.venv/bin/python -c "import nous_core; assert hasattr(nous_core, 'fetch_to_file')"
 
 # Create downloads directory
 RUN mkdir -p /app/downloads
