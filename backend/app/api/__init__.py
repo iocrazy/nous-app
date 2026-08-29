@@ -15,6 +15,12 @@ from app.api.ai_memory_router import router as ai_memory_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.api_key_router import router as api_key_router
+
+# Aliased to ``assets_api_router`` (not ``assets_router``) for the same reason
+# as ``distribution_api_router`` below: reusing the submodule basename here
+# would overwrite the ``app.api.assets_router`` module attribute with the
+# APIRouter instance, breaking ``from app.api import assets_router as ar``.
+from app.api.assets_router import router as assets_api_router
 from app.api.beat_memos_router import router as beat_memos_router
 from app.api.beat_templates_router import router as beat_templates_router
 from app.api.canvases_router import router as canvases_router
@@ -136,6 +142,7 @@ api_router.include_router(router=canvases_router, tags=["Canvas"])
 api_router.include_router(router=_project_assets_router, tags=["Project Assets"])
 
 api_router.include_router(router=generated_media_router, tags=["Generated Media"])
+api_router.include_router(router=assets_api_router, tags=["Assets"])
 api_router.include_router(router=cover_templates_router, tags=["Cover Templates"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])

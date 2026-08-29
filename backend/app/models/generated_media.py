@@ -7,6 +7,7 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -31,10 +32,31 @@ class GeneratedMedia(Base):
             ondelete="SET NULL",
             name="generated_media_conversation_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["source_asset_id"],
+            ["public.assets.id"],
+            ondelete="SET NULL",
+            name="generated_media_source_asset_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="generated_media_pkey"),
+        CheckConstraint(
+            "review_state IN ('unreviewed','saved','in_assets','deleted')",
+            name="generated_media_review_state_check",
+        ),
         Index("idx_genmedia_scope_created", "scope_id", "created_at"),
         Index("idx_genmedia_origin_run", "origin_run_id"),
         Index("idx_genmedia_canvas", "canvas_id"),
+        Index(
+            "idx_genmedia_scope_state_created",
+            "scope_id",
+            "review_state",
+            text("created_at DESC"),
+        ),
+        Index(
+            "idx_genmedia_source_asset",
+            "source_asset_id",
+            postgresql_where=text("source_asset_id IS NOT NULL"),
+        ),
         {"schema": "public"},
     )
 
@@ -63,6 +85,12 @@ class GeneratedMedia(Base):
     parent_resource_id: Mapped[int | None] = mapped_column(BigInteger)
     derivation_kind: Mapped[str | None] = mapped_column(Text)
     promoted_resource_id: Mapped[int | None] = mapped_column(BigInteger)
+    # mig 446: Generated inbox state — 'unreviewed'|'saved'|'in_assets'|'deleted'.
+    review_state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'unreviewed'")
+    )
+    # mig 446: the asset this generation was dispatched from (pre-fills Save-as-Asset).
+    source_asset_id: Mapped[int | None] = mapped_column(BigInteger)
     # Chat provenance (mig 327 renamed channel_id → conversation_id). Was
     # missing from this model (drift) — added when the repo moved to select().
     conversation_id: Mapped[int | None] = mapped_column(BigInteger)

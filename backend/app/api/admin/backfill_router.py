@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.utils.admin_helpers import create_audit_log
+from app.workflows.backfill_assets_from_project_entities import (
+    backfill_assets_from_project_entities,
+)
 from app.workflows.backfill_issue_scope import backfill_issue_scope_workflow
 from app.workflows.backfill_normalize_personal_project_team_ids import (
     backfill_normalize_personal_project_team_ids_workflow,
@@ -47,20 +50,29 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     ),
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
+    "assets_from_project_entities": backfill_assets_from_project_entities,
 }
 
 
 def workflow_kwargs(
     name: str, body: "BackfillRequest", admin_user_id: str
 ) -> dict[str, Any]:
-    """Build the workflow kwargs; pass the admin's id to workflows that take
-    ``run_user_id`` so their task_tracking row has a real auth.users owner
-    (the all-zero system id violates the FK and the row is never created)."""
+    """Build the workflow kwargs from the parameters the target actually takes.
+
+    ``run_user_id``: pass the admin's id to workflows that accept it so their
+    task_tracking row has a real auth.users owner (the all-zero system id
+    violates the FK and the row is never created).
+
+    ``limit``: not every backfill can honour one — a planner that groups rows
+    globally would emit a wrong plan from a partial scan — so it is passed only
+    where it exists rather than blowing up the dispatch with a TypeError."""
     import inspect
 
-    kwargs: dict[str, Any] = {"dry_run": body.dry_run, "limit": body.limit}
-    target = inspect.unwrap(_BACKFILLS[name])
-    if "run_user_id" in inspect.signature(target).parameters:
+    params = inspect.signature(inspect.unwrap(_BACKFILLS[name])).parameters
+    kwargs: dict[str, Any] = {"dry_run": body.dry_run}
+    if "limit" in params:
+        kwargs["limit"] = body.limit
+    if "run_user_id" in params:
         kwargs["run_user_id"] = admin_user_id
     return kwargs
 

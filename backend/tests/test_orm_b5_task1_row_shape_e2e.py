@@ -223,7 +223,8 @@ CREATE TABLE generated_media (
     agent_id TEXT, canvas_id INTEGER, node_id TEXT, prompt TEXT,
     model TEXT, provider TEXT, params TEXT, cost_cents REAL,
     parent_resource_id INTEGER, derivation_kind TEXT,
-    promoted_resource_id INTEGER, conversation_id INTEGER,
+    promoted_resource_id INTEGER, review_state TEXT, source_asset_id INTEGER,
+    conversation_id INTEGER,
     created_at TIMESTAMP
 )
 """

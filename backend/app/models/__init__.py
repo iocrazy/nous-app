@@ -61,6 +61,14 @@ from app.models.alerting import (  # noqa: F401
     AlertHistory,
     AlertRules,
 )
+from app.models.assets import (  # noqa: F401
+    AssetFiles,
+    AssetLinks,
+    AssetLoadouts,
+    AssetProjectRefs,
+    Assets,
+    CanvasAssetRefs,
+)
 from app.models.billing import (  # noqa: F401
     CreditPricing,
     CreditTransactions,
@@ -289,6 +297,13 @@ __all__ = [
     # alerting
     "AlertHistory",
     "AlertRules",
+    # assets (mig 445)
+    "AssetFiles",
+    "AssetLinks",
+    "AssetLoadouts",
+    "AssetProjectRefs",
+    "Assets",
+    "CanvasAssetRefs",
     # billing
     "CreditPricing",
     "CreditTransactions",
