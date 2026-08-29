@@ -33,6 +33,10 @@ from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.generated_media_router import router as generated_media_router
+
+# Aliased for the same reason as ``assets_api_router`` above: the bare
+# basename would shadow the ``app.api.generated_router`` module attribute.
+from app.api.generated_router import router as generated_api_router
 from app.api.inbox_router import router as inbox_router
 from app.api.inspiration_router import router as inspiration_router
 from app.api.invites_router import router as invites_router
@@ -143,6 +147,7 @@ api_router.include_router(router=_project_assets_router, tags=["Project Assets"]
 
 api_router.include_router(router=generated_media_router, tags=["Generated Media"])
 api_router.include_router(router=assets_api_router, tags=["Assets"])
+api_router.include_router(router=generated_api_router, tags=["Generated Inbox"])
 api_router.include_router(router=cover_templates_router, tags=["Cover Templates"])
 
 api_router.include_router(router=resources_router, tags=["Resources"])

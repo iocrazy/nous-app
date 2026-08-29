@@ -570,7 +570,13 @@ async def test_cleanup_dry_run_deletes_nothing_and_samples_twelve():
 async def test_cleanup_live_deletes_and_counts():
     svc, repo, _p = build(rows=_old_rows(3))
     out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=False), SCOPE)
-    assert out == {"dry_run": False, "count": 3, "sample": [], "deleted": 3}
+    assert out == {
+        "dry_run": False,
+        "count": 3,
+        "sample": [],
+        "deleted": 3,
+        "truncated": False,
+    }
     assert len(repo.deleted) == 3
 
 
@@ -580,6 +586,26 @@ async def test_cleanup_live_counts_only_the_rows_it_really_deleted():
     repo.delete_returns[int(rows[1]["id"])] = False
     out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=False), SCOPE)
     assert (out["count"], out["deleted"]) == (3, 2)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+async def test_cleanup_flags_a_pass_that_hit_the_scan_cap(monkeypatch, dry_run):
+    """A capped pass reports ``count`` for the window it saw, not for the scope.
+
+    Without ``truncated`` the two are indistinguishable on the wire, and a
+    caller that deletes ``count`` rows and stops would leave the rest behind
+    while reporting the cleanup as complete.
+    """
+    monkeypatch.setattr(mod, "_CLEANUP_SCAN_LIMIT", 3)
+    svc, _repo, _p = build(rows=_old_rows(3))
+    out = await svc.cleanup(CleanupRequest(older_than_days=30, dry_run=dry_run), SCOPE)
+    assert out["count"] == 3 and out["truncated"] is True
+
+
+async def test_cleanup_does_not_flag_a_pass_that_fits():
+    svc, _repo, _p = build(rows=_old_rows(3))
+    out = await svc.cleanup(CleanupRequest(older_than_days=30), SCOPE)
+    assert out["truncated"] is False
 
 
 async def test_cleanup_skips_rows_that_are_already_reviewed():

@@ -169,6 +169,11 @@ class CleanupResponse(BaseModel):
     count: int
     sample: List[GeneratedItem] = Field(default_factory=list)
     deleted: int = 0
+    # One pass scans a bounded window, so ``count`` is "matched in this pass",
+    # not "matched ever". Without this flag a capped pass and an exhaustive one
+    # are indistinguishable on the wire, and a UI would report the cleanup as
+    # finished while rows remain.
+    truncated: bool = False
 
 
 class BatchFailure(BaseModel):

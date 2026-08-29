@@ -336,7 +336,9 @@ class GeneratedInboxService:
         ``count`` is what this pass matched (capped at ``_CLEANUP_SCAN_LIMIT``),
         and ``deleted`` counts rows the delete actually removed — the two are
         reported separately rather than assumed equal, so a row that vanished
-        underneath us is visible instead of inflating the total.
+        underneath us is visible instead of inflating the total. ``truncated``
+        says the cap was reached, so the caller can tell "that was all of them"
+        apart from "that was the first 2000".
         """
         older_than = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
             days=int(req.older_than_days)
@@ -344,15 +346,27 @@ class GeneratedInboxService:
         rows = await self.gen_repo.list_older_unreviewed(
             int(scope_id), older_than, limit=_CLEANUP_SCAN_LIMIT
         )
+        # A full page means the scan hit its cap, so there may be more behind
+        # it. ``>=`` rather than ``==``: a repo that ever over-returns should
+        # still flag the pass as partial, not silently claim it saw everything.
+        truncated = len(rows) >= _CLEANUP_SCAN_LIMIT
         if req.dry_run:
             sample = await self._decorate(rows[:_CLEANUP_SAMPLE], str(scope_id))
             return CleanupResponse(
-                dry_run=True, count=len(rows), sample=sample, deleted=0
+                dry_run=True,
+                count=len(rows),
+                sample=sample,
+                deleted=0,
+                truncated=truncated,
             ).model_dump()
         deleted = 0
         for row in rows:
             if await self.gen_repo.delete(int(row["id"]), int(scope_id)):
                 deleted += 1
         return CleanupResponse(
-            dry_run=False, count=len(rows), sample=[], deleted=deleted
+            dry_run=False,
+            count=len(rows),
+            sample=[],
+            deleted=deleted,
+            truncated=truncated,
         ).model_dump()
