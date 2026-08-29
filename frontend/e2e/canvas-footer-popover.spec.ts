@@ -98,19 +98,34 @@ test('the popover survives the pointer travelling from the pill onto it', async 
   await expect(page.getByTestId('count-option')).toHaveCount(0);
 });
 
-test('the popover opens below the pills, not over the prompt', async ({ page }) => {
+test('the popover opens ABOVE its pill and is aligned to it (IC parity)', async ({ page }) => {
   await openCanvas(page);
   const pill = page.getByTestId('pill-count');
   await pill.click();
 
   const pillBox = await pill.boundingBox();
-  const optionBox = await page.getByTestId('count-option').first().boundingBox();
-  if (!pillBox || !optionBox) throw new Error('missing box');
+  const panel = await page
+    .getByTestId('count-option')
+    .first()
+    .evaluate((el) => {
+      const box = (el.closest('div[class*="absolute"]') as HTMLElement).getBoundingClientRect();
+      return { x: box.x, y: box.y, bottom: box.bottom };
+    });
+  if (!pillBox) throw new Error('missing box');
 
+  // Upward: IC opens these above the pill row.
   expect(
-    optionBox.y,
-    `popover top (${optionBox.y}) is above the pill (${pillBox.y}) — it still opens upward over the prompt`,
-  ).toBeGreaterThan(pillBox.y);
+    panel.bottom,
+    `popover bottom (${panel.bottom}) is below the pill top (${pillBox.y}) — it is not opening upward`,
+  ).toBeLessThanOrEqual(pillBox.y + 1);
+
+  // Anchored to THIS pill, not to the left edge of the whole row. The count
+  // pill is the right-most one, so a row-anchored popover lands far to its
+  // left — that was the reported drift.
+  expect(
+    Math.abs(panel.x - pillBox.x),
+    `popover left (${panel.x}) is ${Math.round(Math.abs(panel.x - pillBox.x))}px from its pill (${pillBox.x}) — it is anchored to the row, not the trigger`,
+  ).toBeLessThan(24);
 });
 
 test('a HOVER-opened popover follows the pointer away (IC parity)', async ({ page }) => {

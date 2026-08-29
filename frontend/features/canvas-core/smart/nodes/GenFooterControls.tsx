@@ -108,6 +108,10 @@ export function GenFooterControls({
   // The control looks dead to anyone who clicks instead of hovering, and the
   // only way in — hover — drops the menu again the moment the pointer moves.
   const [pinned, setPinned] = useState(false);
+  // Horizontal offset of the pill that opened the popover, so the menu sits
+  // above ITS trigger. `left-0` pinned every menu to the left edge of the
+  // whole pill row, which is why they drifted off to the side.
+  const [anchorLeft, setAnchorLeft] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Click-away closes whichever popover is open.
@@ -123,15 +127,22 @@ export function GenFooterControls({
     return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
 
+  /** Remember where the trigger sits inside the row. */
+  const anchorTo = (el: HTMLElement | null) => {
+    if (el) setAnchorLeft(el.offsetLeft);
+  };
   /** Click: pin this popover open, or dismiss it if it was already pinned. */
-  const toggle = (key: PopKey) => {
+  const toggle = (key: PopKey, el: HTMLElement | null) => {
+    anchorTo(el);
     setOpen((cur) => (cur === key && pinned ? null : key));
     setPinned((wasPinned) => !(open === key && wasPinned));
   };
   /** Hover: open, but only while nothing is pinned — a pinned menu must not
    *  be yanked away by the pointer brushing a neighbouring pill. */
-  const hoverOpen = (key: PopKey) => {
-    if (!pinned) setOpen(key);
+  const hoverOpen = (key: PopKey, el: HTMLElement | null) => {
+    if (pinned) return;
+    anchorTo(el);
+    setOpen(key);
   };
   const pick = (patch: Partial<PromptGenSettings>) => {
     onChange(patch);
@@ -160,8 +171,8 @@ export function GenFooterControls({
       <Pill
         testid="pill-model"
         ariaLabel="Generation model"
-        onClick={() => toggle('model')}
-        onHover={() => hoverOpen('model')}
+        onClick={(e) => toggle('model', e.currentTarget)}
+        onHover={(e) => hoverOpen('model', e.currentTarget)}
         disabled={disabled}
         className="min-w-0 flex-1"
       >
@@ -171,8 +182,8 @@ export function GenFooterControls({
       <Pill
         testid="pill-size"
         ariaLabel="Aspect ratio"
-        onClick={() => toggle('size')}
-        onHover={() => hoverOpen('size')}
+        onClick={(e) => toggle('size', e.currentTarget)}
+        onHover={(e) => hoverOpen('size', e.currentTarget)}
         disabled={disabled}
       >
         <Scan size={11} />
@@ -185,8 +196,8 @@ export function GenFooterControls({
         <Pill
           testid="pill-vres"
           ariaLabel="Video resolution"
-          onClick={() => toggle('vres')}
-        onHover={() => hoverOpen('vres')}
+          onClick={(e) => toggle('vres', e.currentTarget)}
+        onHover={(e) => hoverOpen('vres', e.currentTarget)}
           disabled={disabled}
         >
           <Monitor size={11} />
@@ -194,7 +205,7 @@ export function GenFooterControls({
         </Pill>
       )}
       {open === 'vres' && !isImage && (
-        <Pop title="Video Resolution">
+        <Pop title="Video Resolution" left={anchorLeft}>
           <div className="flex w-40 flex-col gap-1">
             {[undefined, '720p', '1080p', '4k'].map((r) => (
               <button
@@ -219,8 +230,8 @@ export function GenFooterControls({
         <Pill
           testid="pill-duration"
           ariaLabel="Clip duration"
-          onClick={() => toggle('duration')}
-        onHover={() => hoverOpen('duration')}
+          onClick={(e) => toggle('duration', e.currentTarget)}
+        onHover={(e) => hoverOpen('duration', e.currentTarget)}
           disabled={disabled}
         >
           <Timer size={11} />
@@ -234,8 +245,8 @@ export function GenFooterControls({
         <Pill
           testid="pill-quality"
           ariaLabel="Quality"
-          onClick={() => toggle('quality')}
-        onHover={() => hoverOpen('quality')}
+          onClick={(e) => toggle('quality', e.currentTarget)}
+        onHover={(e) => hoverOpen('quality', e.currentTarget)}
           disabled={disabled}
         >
           <SlidersHorizontal size={11} />
@@ -246,8 +257,8 @@ export function GenFooterControls({
         <Pill
           testid="pill-count"
           ariaLabel="Image count"
-          onClick={() => toggle('count')}
-        onHover={() => hoverOpen('count')}
+          onClick={(e) => toggle('count', e.currentTarget)}
+        onHover={(e) => hoverOpen('count', e.currentTarget)}
           disabled={disabled}
         >
           <Copy size={11} />
@@ -256,7 +267,7 @@ export function GenFooterControls({
       )}
 
       {open === 'model' && (
-        <Pop title="Model">
+        <Pop title="Model" left={anchorLeft}>
           <div className="flex max-h-56 w-56 flex-col gap-0.5 overflow-y-auto">
             <PopRow
               label="Catalog default"
@@ -279,7 +290,7 @@ export function GenFooterControls({
         </Pop>
       )}
       {open === 'duration' && !isImage && (
-        <Pop title="Duration">
+        <Pop title="Duration" left={anchorLeft}>
           <div className="w-44">
             <div className="grid grid-cols-4 gap-1">
               {DURATIONS.map((d) => (
@@ -320,7 +331,7 @@ export function GenFooterControls({
         </Pop>
       )}
       {open === 'size' && (
-        <Pop title="Size">
+        <Pop title="Size" left={anchorLeft}>
           {/* IC 尺寸选择: roomy two-column panel — ratios left, resolution
               ladder right; HOVER selects (滑动到即选择), click closes. */}
           <div className="flex w-[380px] gap-3">
@@ -377,7 +388,7 @@ export function GenFooterControls({
         </Pop>
       )}
       {open === 'quality' && (
-        <Pop title="Quality">
+        <Pop title="Quality" left={anchorLeft}>
           <div className="flex gap-1">
             {QUALITIES.map((q) => (
               <button
@@ -398,7 +409,7 @@ export function GenFooterControls({
         </Pop>
       )}
       {open === 'count' && (
-        <Pop title="Count">
+        <Pop title="Count" left={anchorLeft}>
           <div className="grid w-40 grid-cols-4 gap-1">
             {Array.from({ length: 8 }, (_, i) => i + 1).map((n) => (
               <button
@@ -432,9 +443,9 @@ function Pill({
   className = '',
 }: {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   /** IC hover-to-open: pointer entering the pill opens its popover. */
-  onHover?: () => void;
+  onHover?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   testid: string;
   ariaLabel?: string;
@@ -455,10 +466,20 @@ function Pill({
   );
 }
 
-function Pop({ title, children }: { title: string; children: React.ReactNode }) {
-  // Opens DOWNWARD: anchored above (`bottom-full`) it covered the prompt box
-  // and its image chips, and collided with the mention popover. Below the
-  // pills there is only canvas.
+function Pop({
+  title,
+  left,
+  children,
+}: {
+  title: string;
+  /** Offset of the pill that opened this, within the row. */
+  left: number;
+  children: React.ReactNode;
+}) {
+  // Opens UPWARD, directly above its trigger — that is what IC does.
+  //
+  // `left-0` used to pin every menu to the left edge of the whole pill row,
+  // so a menu opened from a right-hand pill appeared far off to the left.
   //
   // The offset to the pills is PADDING, not margin. Hover-to-open is IC
   // parity, and the row closes on mouseleave — with a margin, the pointer
@@ -466,7 +487,7 @@ function Pop({ title, children }: { title: string; children: React.ReactNode }) 
   // fires mouseleave, and the menu vanishes mid-reach. Padding keeps the same
   // visual gap inside the container, so the path stays covered.
   return (
-    <div className="absolute left-0 top-full z-50 pt-2">
+    <div className="absolute bottom-full z-50 pb-2" style={{ left }}>
       <div className="canvas-island rounded-xl p-2">
         <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-canvas-muted">
           {title}

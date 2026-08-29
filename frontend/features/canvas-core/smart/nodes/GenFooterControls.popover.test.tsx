@@ -9,9 +9,10 @@
  *    not to drop mouseleave but to remove the dead space: `padding` keeps the
  *    same visual offset while the container covers the path the pointer takes.
  *
- * 2. The popover covers the prompt box and its image chips. It opens upward
- *    into the text; the mention popover was moved downward for the same
- *    reason, and these should agree.
+ * 2. The popover is anchored to the whole pill row (`left-0`), not to the
+ *    pill that opened it, so it drifts off to the left. IC puts it directly
+ *    above its trigger. Direction stays UP — that is what IC does and what an
+ *    earlier revision of this change got backwards.
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -121,16 +122,28 @@ describe('GenFooterControls popovers', () => {
     expect(countOpen(), 'hover-opened popover should close on leave').toBe(false);
   });
 
-  it('opens downward, so it does not cover the prompt box above it', () => {
+  it('opens upward, above the pills — as IC does', () => {
     renderFooter();
     openCount();
     const panel = screen.getAllByTestId('count-option')[0].closest('div[class*="absolute"]');
     expect(panel, 'could not find the positioned popover').not.toBeNull();
+    expect(panel!.className, 'popover no longer opens upward').toContain('bottom-full');
+  });
+
+  it('is positioned against its trigger, not pinned to the row', () => {
+    // jsdom has no layout, so the alignment itself is an e2e assertion; what
+    // is checkable here is that the popover carries an explicit offset rather
+    // than the `left-0` that stuck it to the whole row.
+    renderFooter();
+    openCount();
+    const panel = screen
+      .getAllByTestId('count-option')[0]
+      .closest('div[class*="absolute"]') as HTMLElement;
     expect(
-      panel!.className,
-      'popover still anchored above the pills — it covers the prompt',
-    ).not.toContain('bottom-full');
-    expect(panel!.className).toContain('top-full');
+      panel.className,
+      'still hard-pinned to the row with left-0',
+    ).not.toMatch(/\bleft-0\b/);
+    expect(panel.style.left, 'no explicit anchor offset was applied').not.toBe('');
   });
 
   it('only one popover is open at a time', () => {
