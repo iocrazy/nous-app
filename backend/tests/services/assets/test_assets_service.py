@@ -112,11 +112,16 @@ class FakeAssetsRepo:
 
     async def update(self, asset_id, scope_id, fields):
         # The real UPDATE carries a scope predicate and returns None when it
-        # matches nothing (presets have scope_id NULL, so they never match).
+        # matches nothing (presets have scope_id NULL, so they never match) —
+        # and stamps ``updated_at`` in the same statement (``assets`` ships no
+        # touch trigger, mig 445), which is the only reason a header write
+        # moves the "recent" shelf. Mirrored here so a caller that forgets to
+        # go through the repo cannot look like it bumped the clock.
         r = self.rows.get(int(asset_id))
         if r is None or r["scope_id"] != scope_id:
             return None
         r.update(fields)
+        r["updated_at"] = datetime.datetime.now(datetime.timezone.utc)
         return r
 
     async def soft_delete(self, asset_id, scope_id):

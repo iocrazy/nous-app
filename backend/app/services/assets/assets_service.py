@@ -33,8 +33,17 @@ from app.schemas.assets import (
     LinkRequest,
     LoadoutCreate,
     LoadoutUpdate,
+    PromptTranslateRequest,
 )
-from app.services.assets.slots import is_valid_slot, link_allowed
+from app.services.assets.slots import PRIMARY_SLOT, is_valid_slot, link_allowed
+from app.services.library.resource_ai_ops import (
+    CaptionAgentFailed,
+    CaptionSourceUnavailable,
+    build_translate_plan,
+    caption_resource_for_caller,
+    is_provider_failure,
+    translate_fields,
+)
 from app.services.library.resources_service import _resolve_personal_team_id
 
 
@@ -85,6 +94,24 @@ DUPLICATED_FIELDS = (
     "prompt_negative_zh",
     "platform_params",
     "tags",
+)
+
+
+# The asset shelf's own (en_field, zh_field) pairs, handed to the SHARED
+# ``build_translate_plan`` (which defaults to the ``resources`` column names).
+# One planner for both surfaces: the "skip an empty source" rule is the same
+# rule, and a second copy is how the two quietly stop agreeing.
+ASSET_PROMPT_FIELD_PAIRS = [
+    ("prompt_positive", "prompt_positive_zh"),
+    ("prompt_negative", "prompt_negative_zh"),
+]
+
+# Said when the agent ran but produced nothing. Deliberately the same wording
+# the resources endpoint uses for its 502 — it is the same misconfiguration,
+# and the user fixes it in the same place.
+_TRANSLATE_EMPTY = (
+    "Translation produced no result — check the translation agent's provider "
+    "configuration in Settings → AI"
 )
 
 
@@ -617,6 +644,173 @@ class AssetsService:
             )
         await self.relations.delete_loadout(int(loadout_id), int(asset_id))
         await self.relations.touch_asset(int(asset_id))
+
+    # ── prompt AI (translate / regenerate) ─────────────────────────────────
+
+    async def translate_prompt(
+        self,
+        asset_id: int,
+        scope_id: int,
+        payload: PromptTranslateRequest,
+        user_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Translate this asset's prompt into the other language (spec §5.1).
+
+        Drives the user's assigned ``translation`` agent through the SAME
+        callable the resources surface uses (``resource_ai_ops``), so both
+        surfaces resolve the same provider, honour the same fallback pool and
+        neutralize the prompt text the same way.
+
+        Two rules the wire contract depends on:
+
+        * a non-empty target is never overwritten unless ``force`` — and the
+          skipped field is not even SENT, because paying for a provider call
+          whose result is then discarded is the same bug, only quieter;
+        * nothing left to do is a typed 422, not a 200 over an unchanged row.
+
+        ``AllModelsFailed`` / ``LLMCallError`` become a 503 carrying the
+        provider's own message. Any OTHER exception propagates: a defect of
+        ours must not reach the user as "check your provider configuration".
+        """
+        row = await self._require_writable(asset_id, scope_id)
+        plan = build_translate_plan(
+            row, payload.target_lang, field_pairs=ASSET_PROMPT_FIELD_PAIRS
+        )
+        if not payload.force:
+            plan = [p for p in plan if not (row.get(p[1]) or "").strip()]
+        if not plan:
+            raise AssetError(
+                422,
+                "nothing_to_translate",
+                (
+                    "Nothing to translate — the source prompt is empty, or the "
+                    "target already has text (send force=true to overwrite it)"
+                ),
+            )
+
+        try:
+            # No ``resource_id``: it lands verbatim in the ``agent_runs``
+            # metadata, and an asset id filed under that key would be a wrong
+            # answer to anyone tracing a run back to a resource.
+            patch = await translate_fields(
+                plan, target_lang=payload.target_lang, user_id=user_id
+            )
+        except Exception as exc:
+            if not is_provider_failure(exc):
+                raise
+            raise AssetError(
+                503,
+                "translate_unavailable",
+                str(exc) or "The translation agent is unavailable",
+            )
+        if not patch:
+            raise AssetError(503, "translate_unavailable", _TRANSLATE_EMPTY)
+        return await self._write_prompt(asset_id, scope_id, patch)
+
+    async def regenerate_prompt(
+        self, asset_id: int, scope_id: int, user_id: str
+    ) -> Dict[str, Any]:
+        """Reverse-engineer ``prompt_positive`` from the asset's primary file.
+
+        The file is the lowest-``sort_order`` attachment in
+        ``PRIMARY_SLOT[asset_type]`` — the same slot ``readiness`` calls this
+        asset's defining image. Read from the slot table rather than
+        re-declared here: a second copy of "a character's sheet" is how the
+        two drift apart.
+
+        Unlike the resources ``Generate prompt`` action (which dispatches the
+        ``caption_asset`` DBOS workflow and answers with a task id), this runs
+        the agent IN-REQUEST — the caller needs the written asset back, not a
+        task to poll. See ``resource_ai_ops`` for that trade-off.
+        """
+        row = await self._require_writable(asset_id, scope_id)
+        # Direct indexing, not ``.get``: asset_type is pinned by a DB CHECK and
+        # by the schema Literal, so a miss is a code defect that must fail
+        # loudly rather than resolve to a plausible-looking "not applicable".
+        primary = PRIMARY_SLOT[row["asset_type"]]
+        if primary is None:
+            raise AssetError(
+                422,
+                "not_applicable",
+                "Prompt assets have no image to reverse-engineer — their "
+                "prompt IS the asset",
+            )
+
+        candidates = [
+            f
+            for f in await self.relations.list_files(int(asset_id))
+            if f["slot"] == primary
+        ]
+        if not candidates:
+            raise AssetError(
+                422,
+                "no_primary_file",
+                f"Attach a file to the '{primary}' slot first",
+            )
+        # ``min`` is stable, so ties keep the repo's (slot, sort_order,
+        # attached_at) ordering instead of an arbitrary one.
+        resource_id = int(
+            min(candidates, key=lambda f: f.get("sort_order") or 0)["resource_id"]
+        )
+        # attach_file scope-checked this resource once, at attach time. It can
+        # have left the scope since, and this path hands its BYTES to a vision
+        # model and writes the result onto the asset.
+        if not await self.relations.resource_in_scope(resource_id, int(scope_id)):
+            raise AssetError(
+                404, "resource_not_found", "The primary file is no longer in this scope"
+            )
+
+        try:
+            # ``user_id`` is required, not Optional like the translate path's:
+            # the file read underneath is visibility-checked PER CALLER, and
+            # there is no honest answer to "which caller" without one.
+            caption = await caption_resource_for_caller(str(resource_id), user_id)
+        except CaptionSourceUnavailable as exc:
+            # "this file will never be captionable" — a 4xx the user can act
+            # on, never the 503 that sends them to Settings → AI.
+            raise AssetError(422, "file_not_captionable", str(exc))
+        except CaptionAgentFailed as exc:
+            raise AssetError(503, "caption_unavailable", str(exc))
+        except Exception as exc:
+            if not is_provider_failure(exc):
+                raise
+            raise AssetError(
+                503,
+                "caption_unavailable",
+                str(exc) or "The caption agent is unavailable",
+            )
+
+        patch: Dict[str, Any] = {}
+        if caption.get("en"):
+            patch["prompt_positive"] = caption["en"]
+        if caption.get("zh"):
+            patch["prompt_positive_zh"] = caption["zh"]
+        if not patch:  # pragma: no cover - caption_resource_for_caller raises first
+            raise AssetError(
+                503,
+                "caption_unavailable",
+                "The caption agent returned no prompt — check the model "
+                "assigned to Caption in Settings → AI",
+            )
+        return await self._write_prompt(asset_id, scope_id, patch)
+
+    async def _write_prompt(
+        self, asset_id: int, scope_id: int, patch: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Commit a prompt patch and answer with the DETAIL row.
+
+        ``assets.update`` stamps ``updated_at`` itself (mig 445 ships no touch
+        trigger), so no separate ``touch_asset`` — and the detail row is what
+        both callers hand back: the client re-renders the asset it just had the
+        agent rewrite, and a second round trip for it would be a gap the UI
+        fills by guessing.
+        """
+        updated = await self.assets.update(int(asset_id), int(scope_id), patch)
+        if not updated:
+            # Soft-deleted (or moved out of scope) between _require_writable
+            # and the UPDATE — the honest 404, not a TypeError in _derived.
+            raise AssetError(404, "asset_not_found", "Asset not found")
+        return await self.get_asset(int(asset_id), int(scope_id))
 
     # ── project refs ───────────────────────────────────────────────────────
 

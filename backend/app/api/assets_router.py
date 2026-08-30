@@ -53,6 +53,7 @@ from app.schemas.assets import (
     LoadoutResponse,
     LoadoutUpdate,
     ProjectRefRequest,
+    PromptTranslateRequest,
     RemovedResponse,
     UnlinkedResponse,
     within_int64,
@@ -90,6 +91,16 @@ _ERRORS: Dict[Union[int, str], Dict[str, Any]] = {
     404: {"model": ErrorEnvelope},
     409: {"model": ErrorEnvelope},
     422: {"model": ErrorEnvelope},
+}
+
+# The two agent-backed routes can additionally answer 503 (the translation /
+# caption agent is unreachable). Documented only where it is REACHABLE: adding
+# it to ``_ERRORS`` would advertise a provider outage on ``DELETE /assets/{id}``,
+# which cannot produce one — an OpenAPI contract that over-promises failures is
+# as misleading as one that hides them.
+_AI_ERRORS: Dict[Union[int, str], Dict[str, Any]] = {
+    **_ERRORS,
+    503: {"model": ErrorEnvelope},
 }
 
 
@@ -517,6 +528,58 @@ async def delete_loadout(
     except AssetError as e:
         return _err(e)
     return _ok({"deleted": True})
+
+
+# ── prompt AI ───────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/assets/{asset_id}/prompt/translate",
+    response_model=Envelope[AssetDetailResponse],
+    responses=_AI_ERRORS,
+)
+async def translate_prompt(
+    asset_id: IdPath,
+    payload: PromptTranslateRequest,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+):
+    """Translate this asset's prompt into the other language.
+
+    ``target_lang`` picks the direction; the source side is never modified and
+    a target that already holds text is skipped unless ``force`` (see
+    :class:`PromptTranslateRequest`). Nothing left to translate is a 422
+    ``nothing_to_translate``, and an unreachable translation agent is a 503
+    ``translate_unavailable`` carrying the provider's own message — both are
+    typed refusals rather than a 200 over an unchanged asset.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().translate_prompt(asset_id, sid, payload, auth.user_id)
+        )
+    except AssetError as e:
+        return _err(e)
+
+
+@router.post(
+    "/assets/{asset_id}/prompt/regenerate",
+    response_model=Envelope[AssetDetailResponse],
+    responses=_AI_ERRORS,
+)
+async def regenerate_prompt(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """Reverse-engineer ``prompt_positive`` from the asset's primary-slot file.
+
+    Runs the caption vision agent IN-REQUEST (seconds to tens of seconds) and
+    answers with the written asset — the resources surface's equivalent action
+    dispatches a workflow and returns a task id instead; see
+    ``services/library/resource_ai_ops.py`` for why the two differ.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().regenerate_prompt(asset_id, sid, auth.user_id))
+    except AssetError as e:
+        return _err(e)
 
 
 # ── project refs ────────────────────────────────────────────────────────────

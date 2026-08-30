@@ -224,6 +224,8 @@ async def test_non_member_403(app):
         ("delete", "/api/v1/assets/5/loadouts/6?scope_id=666"),
         ("post", "/api/v1/assets/5/project-refs?scope_id=666"),
         ("delete", "/api/v1/assets/5/project-refs/7?scope_id=666"),
+        ("post", "/api/v1/assets/5/prompt/translate?scope_id=666"),
+        ("post", "/api/v1/assets/5/prompt/regenerate?scope_id=666"),
     ],
 )
 async def test_every_gated_route_uses_the_error_envelope(app, method, url):
@@ -233,6 +235,10 @@ async def test_every_gated_route_uses_the_error_envelope(app, method, url):
             "links": {"to_asset_id": "6", "relation": "wears"},
             "loadouts": {"name": "Night"},
             "project-refs": {"project_id": "7"},
+            # Body validation runs BEFORE the handler, so a route with a
+            # required body needs a VALID one here or the gate never gets to
+            # answer and this sweep would pin a 422 instead of the 403.
+            "prompt/translate": {"target_lang": "zh"},
         }
     }
     json_body = None

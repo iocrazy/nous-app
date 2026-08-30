@@ -237,6 +237,30 @@ class DuplicateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
 
 
+class PromptTranslateRequest(BaseModel):
+    """POST /assets/{id}/prompt/translate body.
+
+    ``target_lang='zh'`` reads ``prompt_positive`` / ``prompt_negative`` and
+    writes the ``_zh`` columns; ``'en'`` reads the ``_zh`` columns and writes
+    the EN side. The source side is never modified.
+
+    ``force`` is the ONLY way to overwrite a target that already holds text.
+    Without it a translate run would silently replace a hand-written Chinese
+    prompt with a machine one, with no undo and a 200 — so the default skips
+    filled targets, and when that leaves nothing the answer is a typed 422
+    (``nothing_to_translate``) rather than a cheerful no-op.
+
+    ``extra="forbid"`` for the same reason as :class:`AssetUpdate`: a typo'd
+    ``{"targetlang": "zh"}`` must not fall through to a default and report
+    success for a direction nobody asked for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_lang: Literal["zh", "en"]
+    force: bool = False
+
+
 # ── response envelopes ─────────────────────────────────────────────────────
 # Every /assets route answers ``{success, data}`` on the way out and
 # ``{success:false, error:{code, detail, ...}}`` on refusal. Declaring both as
