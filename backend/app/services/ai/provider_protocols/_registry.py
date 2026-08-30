@@ -13,6 +13,7 @@ from app.services.ai.provider_protocols.codex_local import CodexLocalProtocol
 from app.services.ai.provider_protocols.deepseek import DeepSeekProtocol
 from app.services.ai.provider_protocols.doubao import DoubaoProtocol
 from app.services.ai.provider_protocols.jimeng import JimengProtocol
+from app.services.ai.provider_protocols.jimeng_local import JimengLocalProtocol
 from app.services.ai.provider_protocols.modelscope import ModelScopeProtocol
 from app.services.ai.provider_protocols.openai import OpenAIProtocol
 from app.services.ai.provider_protocols.qwen import QwenProtocol
@@ -26,6 +27,7 @@ PROTOCOLS: tuple[ProviderProtocol, ...] = (
     ModelScopeProtocol(),
     ArkProtocol(),
     JimengProtocol(),
+    JimengLocalProtocol(),
     CodexProtocol(),
     CodexLocalProtocol(),
 )

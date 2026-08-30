@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from app.services.ai.provider_protocols.base import ProviderProtocol
+from app.services.ai.provider_protocols.base import (
+    ALL_RATIOS,
+    ProviderCapabilities,
+    ProviderProtocol,
+)
 from app.services.media.parsers.video_providers.base import (
     BaseImageProvider,
     ImageGenResult,
@@ -61,7 +65,7 @@ class _CodexImageAdapter(BaseImageProvider):
             image_path=result.local_path,
             provider="codex",
             model=model or "",
-            metadata={"mime": result.mime},
+            metadata={"mime": result.mime, **(result.raw or {})},
         )
 
     async def check_status(self, task_id: str) -> TaskStatus:
@@ -83,6 +87,15 @@ class CodexProtocol(ProviderProtocol):
     model_types = ("image",)
     aliases = ()
     generation_family = "codex"
+    capabilities = ProviderCapabilities(
+        ratios=ALL_RATIOS,
+        quality=True,
+        resolution=False,  # the model picks the pixel size; --size is ignored
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="prompt_hint",
+    )
 
     def build_image_provider(self, row: dict[str, Any]) -> Any:
         from app.services.media.parsers.video_providers.codex_cli import (

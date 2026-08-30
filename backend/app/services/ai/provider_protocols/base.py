@@ -9,7 +9,14 @@ import this package without a load-time cycle.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
+
+from app.services.generation.aspect import ASPECT_RATIOS
+
+# Derived, never re-typed: the canvas vocabulary lives in aspect.py, and a
+# second literal here is exactly the drift this contract exists to end.
+ALL_RATIOS: frozenset[str] = frozenset(ASPECT_RATIOS)
 
 
 class ProtocolCapabilityError(RuntimeError):
@@ -40,6 +47,46 @@ class ProviderNotConfiguredError(ValueError):
         )
 
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """What a generation provider can actually honour.
+
+    Declared in code next to the implementation — a capability is a property
+    of the code, not configuration; putting it in the catalog table would
+    invent a third place that can disagree with the other two.
+    """
+
+    ratios: frozenset[str]
+    quality: bool
+    resolution: bool
+    max_refs: int
+    negative: bool
+    video_modes: frozenset[str]
+    honours_ratio: Literal["native", "prompt_hint", "none"]
+
+    @classmethod
+    def none(cls) -> "ProviderCapabilities":
+        """The restrictive default: supports nothing. A protocol that forgets to
+        declare drops every knob loudly (dropped_knobs) instead of ignoring
+        them quietly — the failure mode this whole contract exists to end.
+
+        Returns the module-level singleton so callers can use ``is`` to ask
+        "did this protocol actually declare anything?" — an equal-but-distinct
+        instance would answer that question wrong."""
+        return _NONE
+
+
+_NONE = ProviderCapabilities(
+    ratios=frozenset(),
+    quality=False,
+    resolution=False,
+    max_refs=0,
+    negative=False,
+    video_modes=frozenset(),
+    honours_ratio="none",
+)
+
+
 class ProviderProtocol:
     """One provider protocol. Metadata mirrors Phase 1's dataclass fields;
     build hooks own the per-protocol adapter/provider construction."""
@@ -52,6 +99,10 @@ class ProviderProtocol:
     is_chat_key: bool = False
     generation_family: Optional[str] = None
     is_default: bool = False
+    # Generation protocols override this. The default supports nothing, so a
+    # protocol that forgets to declare fails loudly rather than promising
+    # knobs it will silently discard.
+    capabilities: ProviderCapabilities = _NONE
 
     # ---- capability hooks (default: unsupported) --------------------
     def build_chat_adapter(

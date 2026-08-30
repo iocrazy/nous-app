@@ -24,17 +24,21 @@ through the Tier-1 generated-media store which mints the durable same-origin
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from dbos import DBOS
 from loguru import logger
 
+from app.services.generation.request import GenerationRequest
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 from app.workflows.script_shot_generate import _reap_scratch_dir
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
 
 _KIND_MIME = {"image": "image/png", "video": "video/mp4"}
 _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
@@ -43,15 +47,28 @@ _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 _LOCAL_ENGINES = {"codex-local": "codex", "jimeng-local": "dreamina"}
 
 
-async def _local_engine(model_name: str, media_type: str) -> tuple[str, str] | None:
+async def _local_engine(
+    model_name: str, media_type: str, user_id: Optional[str] = None
+) -> tuple[str, str] | None:
     """(engine, actual_model) when the picked catalog row runs on the user's
-    own machine via the paired daemon; None for server-side providers."""
+    own machine via the paired daemon; None for server-side providers.
+
+    Owner scoping (migration 431) is enforced here too, with ``db_registry``'s
+    OWN predicate rather than a second copy of it — two visibility rules that
+    have to agree is how this class of bug comes back. This check used to be
+    reachable only for images and only after ``resolve_image_provider``; the
+    local check now runs first and for video as well, so a row the requester
+    cannot see must look like "not a local row at all" and fall through to the
+    normal resolver, which raises its own scoped error.
+    """
     try:
         from app.services.media.parsers.video_providers import db_registry
 
         rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
         for row in rows:
             if str(row.get("name")) == model_name:
+                if not db_registry._visible_to(row, user_id):  # noqa: SLF001
+                    return None
                 engine = _LOCAL_ENGINES.get(
                     str(row.get("actual_provider") or "").lower()
                 )
@@ -61,6 +78,28 @@ async def _local_engine(model_name: str, media_type: str) -> tuple[str, str] | N
     except Exception:
         return None
     return None
+
+
+async def _capabilities_for(actual_provider: str) -> "ProviderCapabilities":
+    """Capabilities of the protocol serving `actual_provider`; restrictive
+    default when unknown (drops loudly rather than ignoring quietly)."""
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
+
+    proto = resolve_generation_protocol((actual_provider or "").lower())
+    return proto.capabilities if proto else ProviderCapabilities.none()
+
+
+def _actual_provider_of(provider: Any) -> str:
+    """The catalog key a built image provider was resolved from.
+
+    ``db_registry`` stamps it on as ``provider_key`` at build time (the only
+    place that still holds the catalog row). Anything else — a hand-built
+    provider, a test double — resolves to no protocol and therefore to
+    ``ProviderCapabilities.none()``, which drops every knob AND names them in
+    ``dropped_knobs``: wrong, but loudly wrong.
+    """
+    return str(getattr(provider, "provider_key", "") or "")
 
 
 def _absolute_media_url(url: str) -> str:
@@ -91,72 +130,31 @@ async def generate_canvas_media_step(
     """
     from app.services.media.parsers.video_providers import db_registry
 
-    if kind == "video":
-        from app.services.library.generated_media_service import (
-            generated_media_local_path,
-        )
-
-        provider, actual_model = await db_registry.resolve_video_provider(
-            model or None, user_id=user_id
-        )
-        # ``model`` is the picker's CATALOG ROW NAME (that's what resolve
-        # matched on); upstream must get the row's actual_model. Sending the
-        # row name upstream was the 2026-08-18 codex HTTP-400 incident.
-        gen_model = actual_model or model
-        # IC video modes: params.video_mode picks the CLI command family —
-        # 'frames' maps the first two refs to first/last (frames2video),
-        # 'multimodal' hands ALL refs over (multimodal2video 全能参考);
-        # otherwise the single source drives image2video / text2video.
-        from contextlib import AsyncExitStack
-
-        raw_refs = params.get("source_urls")
-        ref_urls = [
-            u
-            for u in (raw_refs if isinstance(raw_refs, list) else [])
-            if isinstance(u, str) and u
-        ][:9] or ([source_url] if source_url else [])
-        video_mode = str(params.get("video_mode") or "")
-        raw_duration = params.get("duration")
-        async with AsyncExitStack() as stack:
-            local_refs: list[str] = []
-            for u in ref_urls:
-                local = await stack.enter_async_context(
-                    generated_media_local_path(u, media_kind="image")
-                )
-                if local:
-                    local_refs.append(local)
-            kwargs: dict = {
-                "prompt": prompt,
-                "aspect": str(params.get("aspect") or ""),
-                "model_version": gen_model or None,
-                "duration": int(raw_duration) if raw_duration else None,
-                "resolution": str(params.get("resolution") or "") or None,
-            }
-            if video_mode == "frames" and len(local_refs) >= 2:
-                kwargs["first_frame"] = local_refs[0]
-                kwargs["last_frame"] = local_refs[1]
-            elif video_mode == "multimodal" and local_refs:
-                kwargs["image_paths"] = local_refs
-            else:
-                kwargs["image_path"] = local_refs[0] if local_refs else None
-            result = await provider.generate_video(**kwargs)
-        local_path = getattr(result, "local_path", None)
-        if not local_path:
-            raise RuntimeError("video provider returned no file")
-        return {
-            "media_kind": "video",
-            "local_path": local_path,
-            "remote_url": None,
-            "provider": "jimeng-cli",
-            "model": gen_model or "",
-        }
+    # Parse the caller's knobs ONCE; branches read this object rather than
+    # re-deriving their own dict out of ``params`` (the drift this contract
+    # exists to end). All four arms now do the same three things — resolve a
+    # provider, ``reconcile`` against its capabilities, build from ``eff`` —
+    # and every one of them returns the resulting ``dropped_knobs``:
+    #   - the DAEMON branch (first below — "whose machine?" is the routing
+    #     question, asked before the kind-specific server branches) reconciles
+    #     once above its codex/dreamina split, so both arms report the same
+    #     ``dropped_knobs`` and both build from ``eff`` alone;
+    #   - server VIDEO reconciles against the video provider's capabilities;
+    #   - server IMAGE (last) against the image provider's.
+    req = GenerationRequest.from_params(
+        kind=kind, prompt=prompt, model=model, params=params, source_url=source_url
+    )
 
     # C 方案: a catalog row whose actual_provider is 'codex-local' is not a
     # server-side provider at all — the work runs on the USER's machine via
     # their paired daemon (spec §6). Offline is a typed failure at dispatch
     # time, not a hang.
     local = (
-        await _local_engine(model, kind if kind in ("image", "video") else "image")
+        await _local_engine(
+            model,
+            kind if kind in ("image", "video") else "image",
+            user_id=user_id,
+        )
         if (model or "").strip()
         else None
     )
@@ -164,15 +162,21 @@ async def generate_canvas_media_step(
         engine, engine_model = local
         from app.services.codex.daemon_dispatch import dispatch_to_daemon
 
-        raw_refs = params.get("source_urls")
-        ref_urls = [
-            u
-            for u in (raw_refs if isinstance(raw_refs, list) else [])
-            if isinstance(u, str) and u
-        ][:9] or ([source_url] if source_url else [])
-        ref_urls = [_absolute_media_url(u) for u in ref_urls]
+        # Capabilities live under the catalog's actual_provider, so map the
+        # engine back to it. Neither name in hand is that key: ``engine_model``
+        # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
+        # to work — "codex" happens to hit the SERVER protocol (same knobs
+        # today, a coincidence), while "dreamina" hits nothing. A miss
+        # collapses to ``none()``, which drops the ratio again — the very bug
+        # this branch is here to fix.
+        caps = await _capabilities_for(
+            "codex-local" if engine == "codex" else "jimeng-local"
+        )
+        eff, dropped = req.reconcile(caps)
 
         if engine == "dreamina":
+            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+
             # Build the exact dreamina argv server-side (single source of
             # truth: the same pure builders the server provider uses). Refs
             # become {ref:N} placeholders the daemon swaps for local paths.
@@ -182,24 +186,40 @@ async def generate_canvas_media_step(
             )
 
             placeholders = [f"{{ref:{i}}}" for i in range(len(ref_urls))]
-            if kind == "video":
+            if eff.kind == "video":
+                # Same three-way choice the server video branch makes: frames
+                # → first/last (frames2video), multimodal → every ref
+                # (multimodal2video 全能参考), otherwise the single source
+                # drives image2video / text2video. Handing every ref to
+                # ``image_paths`` regardless — what this did before — turned a
+                # first/last-frame request into a multimodal one in silence.
+                frame_kwargs: dict
+                if eff.video_mode == "frames" and len(placeholders) >= 2:
+                    frame_kwargs = {
+                        "first_frame": placeholders[0],
+                        "last_frame": placeholders[1],
+                    }
+                elif eff.video_mode == "multimodal" and placeholders:
+                    frame_kwargs = {"image_paths": placeholders}
+                else:
+                    frame_kwargs = {
+                        "image_path": placeholders[0] if placeholders else None
+                    }
                 submit_args = build_video_args(
-                    prompt=prompt,
-                    aspect=str(params.get("aspect") or params.get("ratio") or ""),
+                    prompt=eff.prompt,
+                    aspect=eff.ratio or "",
                     poll=90,
-                    image_paths=placeholders,
-                    duration=(
-                        int(params["duration"]) if params.get("duration") else None
-                    ),
+                    duration=eff.duration,
                     model_version=engine_model or None,
-                    resolution=str(params.get("resolution") or "") or None,
+                    resolution=eff.resolution,
+                    **frame_kwargs,
                 )
             else:
                 submit_args = build_image_args(
-                    prompt=prompt,
-                    aspect=str(params.get("ratio") or ""),
+                    prompt=eff.prompt,
+                    aspect=eff.ratio or "",
                     poll=60,
-                    resolution_type=str(params.get("resolution") or "") or None,
+                    resolution_type=eff.resolution,
                     model_version=engine_model or None,
                 )
             payload = {
@@ -209,13 +229,15 @@ async def generate_canvas_media_step(
                 "ref_urls": ref_urls,
             }
         else:
-            payload = {
-                "engine": "codex",
-                "prompt": prompt,
-                "size": str(params.get("size") or ""),
-                "model": str(params.get("actual_model") or ""),
-                "ref_urls": ref_urls,
-            }
+            # Every knob the caller picked, reconciled once and sent as one
+            # shape. It used to read ``params.get("size")`` (the frontend only
+            # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
+            # sets it) — both resolved to "" and the daemon fell back to its
+            # own default, which is why a 16:9 pick came back portrait.
+            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+            payload = eff.to_codex_daemon_payload(
+                engine_model=engine_model, ref_urls=ref_urls
+            )
 
         result = await dispatch_to_daemon(
             user_id=str(user_id),
@@ -230,6 +252,69 @@ async def generate_canvas_media_step(
             "existing_gen_id": result.get("gen_id"),
             "provider": f"{engine}-local",
             "model": model or "",
+            "dropped_knobs": dropped,
+        }
+
+    if kind == "video":
+        from app.services.library.generated_media_service import (
+            generated_media_local_path,
+        )
+
+        provider, actual_model = await db_registry.resolve_video_provider(
+            model or None, user_id=user_id
+        )
+        # ``model`` is the picker's CATALOG ROW NAME (that's what resolve
+        # matched on); upstream must get the row's actual_model. Sending the
+        # row name upstream was the 2026-08-18 codex HTTP-400 incident.
+        gen_model = actual_model or model
+        # Same reconcile the image branch does, against the video protocol's
+        # capabilities: a mode or ratio this provider cannot honour is dropped
+        # HERE and NAMED. Before this, the branch read ``params`` raw and
+        # always reported an empty ``dropped_knobs`` — a frames2video request
+        # to a provider without frames2video went out as one anyway.
+        caps = await _capabilities_for(_actual_provider_of(provider))
+        eff, dropped = req.reconcile(caps)
+        # IC video modes: eff.video_mode picks the CLI command family —
+        # 'frames' maps the first two refs to first/last (frames2video),
+        # 'multimodal' hands ALL refs over (multimodal2video 全能参考);
+        # otherwise the single source drives image2video / text2video.
+        # ``reconcile`` has already emptied ``eff.refs`` for a provider that
+        # declares no video mode at all, so that arm downloads nothing.
+        from contextlib import AsyncExitStack
+
+        async with AsyncExitStack() as stack:
+            local_refs: list[str] = []
+            for u in eff.refs:
+                local = await stack.enter_async_context(
+                    generated_media_local_path(u, media_kind="image")
+                )
+                if local:
+                    local_refs.append(local)
+            kwargs: dict = {
+                "prompt": eff.prompt,
+                "aspect": eff.ratio or "",
+                "model_version": gen_model or None,
+                "duration": eff.duration,
+                "resolution": eff.resolution,
+            }
+            if eff.video_mode == "frames" and len(local_refs) >= 2:
+                kwargs["first_frame"] = local_refs[0]
+                kwargs["last_frame"] = local_refs[1]
+            elif eff.video_mode == "multimodal" and local_refs:
+                kwargs["image_paths"] = local_refs
+            else:
+                kwargs["image_path"] = local_refs[0] if local_refs else None
+            result = await provider.generate_video(**kwargs)
+        local_path = getattr(result, "local_path", None)
+        if not local_path:
+            raise RuntimeError("video provider returned no file")
+        return {
+            "media_kind": "video",
+            "local_path": local_path,
+            "remote_url": None,
+            "provider": "jimeng-cli",
+            "model": gen_model or "",
+            "dropped_knobs": dropped,
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
@@ -237,26 +322,26 @@ async def generate_canvas_media_step(
     )
     # Same row-name-vs-actual_model rule as the video branch above.
     gen_model = actual_model or model
+    # Knobs this provider cannot honour are dropped HERE, once, and named in
+    # ``dropped_knobs`` — a 21:9 that ark would quietly render as a square is
+    # a lie the caller never sees otherwise.
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    eff, dropped = req.reconcile(caps)
     # Multi-reference i2i (IC 图1/图2 semantics): the prompt's full input
     # set rides in params.source_urls; each durable url is materialized to
     # a LOCAL file for providers whose CLI only eats files (codex). The
     # original remote url still goes out as reference_image_url for
-    # URL-based providers (ark). IC caps references at 9.
+    # URL-based providers (ark). IC caps references at 9. Iterating
+    # ``eff.refs`` means a provider with max_refs=0 never downloads one.
     from contextlib import AsyncExitStack
 
     from app.services.library.generated_media_service import (
         generated_media_local_path,
     )
 
-    raw_refs = params.get("source_urls")
-    ref_urls = [
-        u
-        for u in (raw_refs if isinstance(raw_refs, list) else [])
-        if isinstance(u, str) and u
-    ][:9] or ([source_url] if source_url else [])
     async with AsyncExitStack() as stack:
         local_refs: list[str] = []
-        for u in ref_urls:
+        for u in eff.refs:
             local = await stack.enter_async_context(
                 generated_media_local_path(u, media_kind="image")
             )
@@ -265,13 +350,13 @@ async def generate_canvas_media_step(
         result = await provider.generate(
             prompt,
             gen_model,
-            aspect_ratio=str(params.get("ratio") or ""),
-            reference_image_url=source_url,
+            aspect_ratio=eff.ratio or "",
+            reference_image_url=source_url if eff.refs else None,
             reference_image_paths=local_refs or None,
             # IC ⑨ quality pill — consumed by the codex adapter, ignored by
             # providers without a quality knob (ark/jimeng take **kwargs).
-            quality=str(params.get("quality") or "") or None,
-            resolution=str(params.get("resolution") or "") or None,
+            quality=eff.quality,
+            resolution=eff.resolution,
         )
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None
@@ -283,6 +368,7 @@ async def generate_canvas_media_step(
         "remote_url": remote_url,
         "provider": getattr(result, "provider", "") or "",
         "model": gen_model or "",
+        "dropped_knobs": dropped,
     }
 
 
@@ -314,6 +400,7 @@ async def persist_canvas_generation_step(
             "media_kind": media_kind,
             "provider": str(media.get("provider") or ""),
             "model": str(media.get("model") or ""),
+            "dropped_knobs": list(media.get("dropped_knobs") or []),
         }
 
     local_path = media.get("local_path")
@@ -360,6 +447,7 @@ async def persist_canvas_generation_step(
             "generated_media_id": gen_id,
             "result_url": result_url,
             "media_kind": media_kind,
+            "dropped_knobs": list(media.get("dropped_knobs") or []),
         }
     finally:
         if local_path:
@@ -380,6 +468,9 @@ async def record_canvas_generation_result_step(result: Dict[str, Any]) -> None:
             "result_url": result.get("result_url"),
             "generated_media_id": result.get("generated_media_id"),
             "media_kind": result.get("media_kind"),
+            # Business decoration only (route C): the lifecycle columns stay
+            # the trigger's. An empty list is the honest "nothing dropped".
+            "dropped_knobs": list(result.get("dropped_knobs") or []),
         },
     )
 

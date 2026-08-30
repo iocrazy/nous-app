@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.ai.provider_protocols.base import ProviderProtocol
+from app.services.ai.provider_protocols.base import (
+    ProviderCapabilities,
+    ProviderProtocol,
+)
 
 
 class ArkProtocol(ProviderProtocol):
@@ -12,6 +15,16 @@ class ArkProtocol(ProviderProtocol):
     model_types = ("image", "video")
     aliases = ("doubao",)
     generation_family = "ark"
+    capabilities = ProviderCapabilities(
+        # Exactly ark_image._ASPECT_TO_SIZE's keys — five, not eight.
+        ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),
+        quality=False,
+        resolution=False,
+        max_refs=0,  # /images/generations is pure text-to-image
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
 
     def build_image_provider(self, row: dict[str, Any]) -> Any:
         from app.services.media.parsers.video_providers.ark_image import (

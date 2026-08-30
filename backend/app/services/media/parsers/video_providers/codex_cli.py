@@ -31,6 +31,11 @@ from typing import List, Optional, Tuple
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
+from app.services.generation.aspect import ASPECT_RATIOS as _ASPECT_TO_RATIO
+from app.services.generation.aspect import ASPECT_TOLERANCE as _ASPECT_TOLERANCE
+from app.services.generation.aspect import CODEX_DEFAULT_SIZE as _DEFAULT_SIZE
+from app.services.generation.aspect import CODEX_SIZES as _ASPECT_TO_SIZE
+from app.services.generation.aspect import aspect_instruction as _aspect_instruction
 
 
 @dataclass
@@ -56,28 +61,13 @@ class CodexCliError(RuntimeError):
         self.stderr = stderr
 
 
-# aspect → a size string for ``--size``.
+# The aspect tables now live in ``app/services/generation/aspect.py`` —
+# ``ASPECT_PHRASES`` (was ``_ASPECT_TO_PHRASE`` here), ``ASPECT_RATIOS``,
+# ``CODEX_SIZES``. The evidence for why they say what they say stays here,
+# with the provider it was measured against.
 #
-# ⚠️ On THIS provider ``--size`` is not honoured — measured 2026-08-23, see
-# ``_ASPECT_TO_PHRASE`` below for the evidence and the actual mechanism. The
-# argument is still sent because it is free, it is the documented contract of
-# the CLI, and a future fix on the upstream side would start working with no
-# change here. It is NOT what makes the output the right shape.
-_ASPECT_TO_SIZE = {
-    "21:9": "1536x1024",
-    "16:9": "1536x1024",
-    "3:2": "1536x1024",
-    "4:3": "1536x1024",
-    "1:1": "1024x1024",
-    "3:4": "1024x1536",
-    "2:3": "1024x1536",
-    "9:16": "1024x1536",
-}
-_DEFAULT_SIZE = "1024x1024"
-
-# aspect → the words that actually control the output shape.
-#
-# ★ Why the prompt and not ``--size`` (measured 2026-08-23, five probes):
+# ★ Why the aspect lives in the PROMPT and not in ``--size`` (measured
+# 2026-08-23, five probes against the real CLI):
 #
 #     --size 999x999                  → CLI: "must use width and height values
 #                                        that are multiples of 16"  (so the
@@ -97,54 +87,18 @@ _DEFAULT_SIZE = "1024x1024"
 # The damage was silent and already shipped: all four codex images in prod came
 # back at a ratio nobody asked for — three requested 16:9 landscape and are
 # PORTRAIT (1184x1328, 1147x1371, 1199x1312), one requested 1:1 and is 0.80.
-# `ok:true` every time. Hence both halves of this fix: say it in words, then
-# CHECK the result and say so when it still did not comply.
-_ASPECT_TO_PHRASE = {
-    "21:9": "21:9 ultra-wide landscape (much wider than tall)",
-    "16:9": "16:9 landscape (wider than tall)",
-    "3:2": "3:2 landscape (wider than tall)",
-    "4:3": "4:3 landscape (wider than tall)",
-    "1:1": "1:1 square (equal width and height)",
-    "3:4": "3:4 portrait (taller than wide)",
-    "2:3": "2:3 portrait (taller than wide)",
-    "9:16": "9:16 tall portrait (much taller than wide)",
-}
-
-# Numeric width/height target per aspect, for verifying what came back.
-_ASPECT_TO_RATIO = {
-    "21:9": 21 / 9,
-    "16:9": 16 / 9,
-    "3:2": 3 / 2,
-    "4:3": 4 / 3,
-    "1:1": 1.0,
-    "3:4": 3 / 4,
-    "2:3": 2 / 3,
-    "9:16": 9 / 16,
-}
-
-# How far off the requested ratio still counts as compliance. The model picks
-# its own pixel dimensions (1086x1448 rather than a round 1024x1365), so an
-# exact match is not the bar; 6% is loose enough for that rounding and tight
-# enough that a flipped orientation — the failure actually observed — can never
-# slip through (3:4 vs 4:3 is 78% apart).
-_ASPECT_TOLERANCE = 0.06
-
-
-def _aspect_instruction(aspect: str) -> str:
-    """The sentence appended to the prompt to pin the output shape.
-
-    Appended, never prepended, and only when the aspect is known: the user's
-    own words stay first and intact. An unknown or empty aspect adds nothing —
-    "let the model choose" is a real request (IC 自适应 sends an empty aspect
-    on purpose) and inventing a shape for it would be worse than silence.
-    """
-    phrase = _ASPECT_TO_PHRASE.get((aspect or "").strip())
-    if not phrase:
-        return ""
-    return (
-        f"\n\nOutput image aspect ratio: {phrase}. "
-        "The whole image must have this shape."
-    )
+# `ok:true` every time. Hence both halves of this fix: say it in words
+# (``_aspect_instruction``), then CHECK the result (``_ASPECT_TO_RATIO`` +
+# ``_ASPECT_TOLERANCE``) and say so when it still did not comply.
+#
+# ``_ASPECT_TO_SIZE`` is still sent because it is free, it is the documented
+# contract of the CLI, and a future fix upstream would start working with no
+# change here. It is NOT what makes the output the right shape.
+#
+# The tolerance is 6%: the model picks its own pixel dimensions (1086x1448
+# rather than a round 1024x1365), so an exact match is not the bar; 6% is loose
+# enough for that rounding and tight enough that a flipped orientation — the
+# failure actually observed — can never slip through (3:4 vs 4:3 is 78% apart).
 
 
 def _measure(path: str) -> Optional[Tuple[int, int]]:

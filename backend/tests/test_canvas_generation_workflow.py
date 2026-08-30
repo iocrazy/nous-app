@@ -13,9 +13,28 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.services.ai.provider_protocols.base import ALL_RATIOS, ProviderCapabilities
+from app.services.generation.request import GenerationRequest
 from app.workflows.canvas_generation import (
+    _actual_provider_of,
+    _capabilities_for,
     generate_canvas_media_step,
     persist_canvas_generation_step,
+)
+
+# A provider that honours every knob. These tests were written before
+# capabilities existed, so their SimpleNamespace provider resolves to
+# ProviderCapabilities.none() and every knob they pass gets reconciled away.
+# Patching this in supplies information they never had — it does not relax
+# what they assert.
+_EVERYTHING = ProviderCapabilities(
+    ratios=ALL_RATIOS,
+    quality=True,
+    resolution=True,
+    max_refs=9,
+    negative=True,
+    video_modes=frozenset({"frames", "multimodal"}),
+    honours_ratio="native",
 )
 
 
@@ -36,9 +55,15 @@ async def test_image_step_returns_remote_url_from_ark():
             return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
         )
     )
-    with patch(
-        "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
-        new=AsyncMock(return_value=(provider, "seedream-4")),
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "seedream-4")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="image",
@@ -95,6 +120,10 @@ async def test_video_step_bridges_source_and_runs_i2v():
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/9/media.png"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
         ),
     ):
         out = await generate_canvas_media_step(
@@ -244,6 +273,10 @@ async def test_video_step_never_sends_catalog_row_name_upstream():
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm(None),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="video",
@@ -277,6 +310,10 @@ async def test_image_step_materializes_source_urls_for_local_ref_providers():
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
         ),
     ):
         await generate_canvas_media_step(
@@ -314,6 +351,10 @@ async def test_video_step_multimodal_materializes_all_refs(monkeypatch):
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
         ),
     ):
         out = await generate_canvas_media_step(
@@ -356,6 +397,10 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/N/media.png"),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         await generate_canvas_media_step(
             kind="video",
@@ -376,3 +421,906 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
     assert call["first_frame"] == "/data/gen/N/media.png"
     assert call["last_frame"] == "/data/gen/N/media.png"
     assert call["resolution"] == "720p"
+
+
+@pytest.mark.asyncio
+async def test_server_video_branch_drops_unsupported_mode_and_refs_and_reports_them():
+    """A video provider declaring NO video_modes cannot take refs at all
+    (Task 6: video refs ride on video_modes, not max_refs). Asking for
+    frames2video must therefore reach the provider as a plain text2video —
+    no first/last frame, no image_path — and BOTH losses must be named."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/v.mp4", mime="video/mp4")
+        )
+    )
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=True,
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "3.0")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate_video.await_args.kwargs
+    assert "first_frame" not in kw
+    assert "image_paths" not in kw
+    # refs were dropped, so nothing was materialised for the single-source arm
+    assert kw["image_path"] is None
+    assert kw["aspect"] == "16:9"  # supported ratio survives reconcile
+    assert out["dropped_knobs"] == ["refs", "video_mode"]
+
+
+@pytest.mark.asyncio
+async def test_server_video_branch_keeps_refs_when_provider_has_some_video_mode():
+    """The provider supports multimodal but not frames: the mode is dropped
+    (and named) while the refs SURVIVE — they fall through to the single
+    source arm. The unsupported ratio goes too, so ``aspect`` must be empty
+    rather than the 21:9 the caller asked for."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(return_value=SimpleNamespace(local_path="/tmp/v2.mp4"))
+    )
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=True,
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset({"multimodal"}),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "3.0")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="drift",
+            model="",
+            params={
+                "aspect": "21:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "duration": 5,
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate_video.await_args.kwargs
+    assert "first_frame" not in kw
+    assert kw["image_path"] == "/data/gen/ref.png"
+    assert kw["aspect"] == ""
+    assert kw["resolution"] == "720p"
+    assert kw["duration"] == 5
+    assert out["dropped_knobs"] == ["ratio", "video_mode"]
+
+
+@pytest.mark.asyncio
+async def test_server_video_arm_looks_capabilities_up_by_the_right_key():
+    """The server video twin of ``tests:1015``: the REAL capability lookup at
+    its REAL call site, with nothing patched over ``_capabilities_for``.
+
+    Every other server-video test supplies caps through an arg-ignoring mock,
+    so none of them can tell which key ``_capabilities_for`` is handed. A
+    wrong key (``gen_model``/``model`` instead of the stamped
+    ``provider_key``) resolves to no protocol, collapses to
+    ``ProviderCapabilities.none()``, and silently degrades EVERY live server
+    video job to text2video — while those mocked tests stay green. This one
+    goes red: under a wrong key ``dropped_knobs`` becomes
+    ``["ratio", "refs", "video_mode"]`` and no frame reaches the provider.
+    """
+    from app.services.media.parsers.video_providers import db_registry
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
+
+    # A real server-side jimeng-cli row: actual_provider 'jimeng' is the
+    # JimengProtocol alias, so resolve_video_provider builds and STAMPS for
+    # real, and _local_engine correctly declines it (not a *-local row).
+    row = {
+        "name": "jimeng-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng",
+        "actual_model": "3.0",
+        "owner_user_id": None,
+    }
+    generate_video = AsyncMock(
+        return_value=SimpleNamespace(local_path="/tmp/jv/real.mp4")
+    )
+    with (
+        patch.object(db_registry, "_enabled_rows", new=AsyncMock(return_value=[row])),
+        patch.object(JimengCliProvider, "generate_video", new=generate_video),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="pan",
+            model="jimeng-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    kw = generate_video.await_args.kwargs
+    # jimeng really declares ALL_RATIOS + resolution + both video modes, so a
+    # correct lookup honours every knob asked for here.
+    assert kw["aspect"] == "16:9"
+    assert kw["resolution"] == "720p"
+    assert kw["first_frame"] == "/data/gen/N/media.png"
+    assert kw["last_frame"] == "/data/gen/N/media.png"
+    assert out["dropped_knobs"] == []
+    assert out["local_path"] == "/tmp/jv/real.mp4"
+
+
+@pytest.mark.asyncio
+async def test_image_step_reports_dropped_knobs_for_ark_and_sends_only_supported_ones():
+    """ark: 5 ratios, no quality/resolution, no refs. Asking for 21:9 + quality
+    must NOT silently reach the provider — and must be named in the result."""
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
+        )
+    )
+    ark_caps = ProviderCapabilities(
+        ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),
+        quality=False,
+        resolution=False,
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "seedream-4")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=ark_caps),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="",
+            params={
+                "ratio": "21:9",
+                "quality": "high",
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate.await_args.kwargs
+    assert kw["aspect_ratio"] == ""  # 21:9 dropped, nothing invented
+    assert kw["quality"] is None
+    assert kw["reference_image_paths"] is None
+    assert out["dropped_knobs"] == ["ratio", "quality", "refs"]
+
+
+@pytest.mark.asyncio
+async def test_image_step_dropped_knobs_is_empty_when_everything_is_supported():
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
+        )
+    )
+    full = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=True,
+        resolution=True,
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "m")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=full),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="",
+            params={"ratio": "16:9"},
+            source_url=None,
+        )
+    assert provider.generate.await_args.kwargs["aspect_ratio"] == "16:9"
+    assert out["dropped_knobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_record_step_writes_dropped_knobs_into_task_metadata():
+    from app.workflows.canvas_generation import record_canvas_generation_result_step
+
+    manager = SimpleNamespace(patch_metadata=AsyncMock())
+    with (
+        patch("dbos.DBOS.workflow_id", "wf-1"),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            return_value=manager,
+        ),
+    ):
+        await record_canvas_generation_result_step(
+            {
+                "result_url": "/r",
+                "generated_media_id": 1,
+                "media_kind": "image",
+                "dropped_knobs": ["quality"],
+            }
+        )
+    patched = manager.patch_metadata.await_args.args[1]
+    assert patched["dropped_knobs"] == ["quality"]
+
+
+@pytest.mark.asyncio
+async def test_real_ark_row_reaches_the_image_step_with_arks_real_capabilities():
+    """The whole point of the contract, through the REAL chain — no
+    ``_capabilities_for`` patch, only the catalog lookup is stubbed.
+
+    A built provider does not remember which catalog row made it, so
+    ``db_registry`` stamps ``provider_key`` on at build time. Delete that
+    stamp and ``_actual_provider_of`` returns "", no protocol resolves,
+    capabilities collapse to ``none()`` — and 16:9 gets dropped too. That is
+    the production regression this test exists to catch; every other
+    capability test here patches ``_capabilities_for`` and therefore cannot
+    see it.
+    """
+    from app.services.media.parsers.video_providers import db_registry
+
+    ark_row = {
+        "name": "seedream-4-ark",
+        "type": "image",
+        "is_enabled": True,
+        "actual_provider": "ark",
+        "actual_model": "seedream-4",
+        "api_key": "k",
+        "base_url": "https://ark.example/api/v3",
+        "owner_user_id": None,
+    }
+    with patch.object(
+        db_registry, "_enabled_rows", new=AsyncMock(return_value=[ark_row])
+    ):
+        provider, actual_model = await db_registry.resolve_image_provider(
+            "seedream-4-ark"
+        )
+
+    assert actual_model == "seedream-4"
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    # ark's five, from ark_image._ASPECT_TO_SIZE — not the eight-ratio
+    # canvas vocabulary, and emphatically not none().
+    assert caps.ratios == frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"})
+    assert caps is not ProviderCapabilities.none()
+
+    # And the behaviour that matters: a ratio ark HAS survives, one it
+    # lacks is dropped by name.
+    supported = GenerationRequest.from_params(
+        kind="image", prompt="p", model="", params={"ratio": "16:9"}, source_url=None
+    ).reconcile(caps)
+    unsupported = GenerationRequest.from_params(
+        kind="image", prompt="p", model="", params={"ratio": "21:9"}, source_url=None
+    ).reconcile(caps)
+    assert supported == (supported[0], [])
+    assert supported[0].ratio == "16:9"
+    assert unsupported[1] == ["ratio"]
+
+
+@pytest.mark.asyncio
+async def test_real_jimeng_row_reaches_the_video_resolver_with_its_capabilities():
+    """Same stamp, video resolver — so Task 7's video branch inherits a
+    working capability lookup instead of rediscovering the same hole."""
+    from app.services.media.parsers.video_providers import db_registry
+
+    jimeng_row = {
+        "name": "jimeng-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng-cli",
+        "actual_model": "seedance2.0fast",
+        "owner_user_id": None,
+    }
+    with patch.object(
+        db_registry, "_enabled_rows", new=AsyncMock(return_value=[jimeng_row])
+    ):
+        provider, actual_model = await db_registry.resolve_video_provider(
+            "jimeng-video"
+        )
+
+    assert actual_model == "seedance2.0fast"
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    assert caps is not ProviderCapabilities.none()
+    assert "16:9" in caps.ratios
+
+
+@pytest.mark.asyncio
+async def test_codex_daemon_branch_sends_ratio_model_quality_not_size_only():
+    """Before: payload = {prompt, size: params.get('size') -> '', model:
+    params.get('actual_model') -> ''}. The user's 16:9, model pick and
+    quality never left the server — that is the reported bug (a landscape
+    request coming back portrait)."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "99"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(
+                return_value=ProviderCapabilities(
+                    ratios=frozenset({"16:9"}),
+                    quality=True,
+                    resolution=False,
+                    max_refs=9,
+                    negative=False,
+                    video_modes=frozenset(),
+                    honours_ratio="prompt_hint",
+                )
+            ),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={
+                "ratio": "16:9",
+                "quality": "high",
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    p = captured["payload"]
+    assert p["engine"] == "codex"
+    assert p["ratio"] == "16:9"
+    assert p["size"] == "1536x1024"  # old daemons keep working
+    assert p["quality"] == "high"
+    assert p["model"] == "gpt-image-2"  # catalog row, not params.actual_model
+    assert "16:9 landscape" in p["prompt"]
+    assert p["ref_urls"][0].startswith("http")  # absolutised for the daemon
+    assert out["provider"] == "codex-local"
+    assert out["dropped_knobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_codex_daemon_branch_looks_capabilities_up_by_provider_key():
+    """Through the REAL capability lookup — no ``_capabilities_for`` patch.
+
+    Inside ``if local:`` the only names in hand are the ENGINE ('codex') and
+    the upstream model ('gpt-image-2'); the protocol key is neither. Look the
+    capabilities up by ``engine_model`` and nothing resolves — ``none()``,
+    which drops the ratio again, the same bug wearing a different hat. (By
+    ``engine`` it only *appears* to work: "codex" hits the SERVER protocol,
+    which declares the same knobs today; "dreamina" hits nothing at all.)
+
+    So: 9:16 survives to the daemon as both ``ratio`` and ``size``, and
+    ``resolution`` — which codex-local declares it cannot honour — comes back
+    named in ``dropped_knobs`` rather than being discarded in silence.
+    """
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "99"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={"ratio": "9:16", "resolution": "2k"},
+            source_url=None,
+            user_id="u1",
+        )
+
+    assert captured["payload"]["ratio"] == "9:16"
+    assert captured["payload"]["size"] == "1024x1536"
+    assert out["dropped_knobs"] == ["resolution"]
+
+
+_JIMENG_LOCAL_CAPS = ProviderCapabilities(
+    ratios=frozenset({"16:9"}),
+    quality=False,
+    resolution=True,
+    max_refs=0,  # about the IMAGE CLI; video refs ride on video_modes
+    negative=False,
+    video_modes=frozenset({"frames", "multimodal"}),
+    honours_ratio="native",
+)
+
+
+@pytest.mark.asyncio
+async def test_dreamina_daemon_video_frames_mode_uses_first_and_last_placeholders():
+    """video_mode=frames on the daemon → frames2video with the first two refs
+    as {ref:0}/{ref:1}. It used to hand every ref to ``image_paths``, so a
+    first/last-frame request silently became a multimodal one."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "5"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("dreamina", "3.0")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="jimeng-local-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    payload = captured["payload"]
+    args = payload["submit_args"]
+    assert args[0] == "frames2video"
+    assert "--first={ref:0}" in args
+    assert "--last={ref:1}" in args
+    assert "--video_resolution=720p" in args
+    assert "--model_version=3.0" in args
+    # max_refs=0 is about the image CLI — it must not empty a frames job.
+    assert len(payload["ref_urls"]) == 2
+    assert payload["ref_urls"][0].startswith("http")
+    assert payload["media_kind"] == "video"
+    assert out["dropped_knobs"] == []
+    assert out["provider"] == "dreamina-local"
+
+
+@pytest.mark.asyncio
+async def test_dreamina_daemon_video_multimodal_mode_hands_over_every_ref():
+    """video_mode=multimodal → multimodal2video with ALL refs as --image."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "6"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("dreamina", "3.0")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
+        ),
+    ):
+        await generate_canvas_media_step(
+            kind="video",
+            prompt="omni",
+            model="jimeng-local-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "multimodal",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                    "/api/v1/generated-media/3/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    args = captured["payload"]["submit_args"]
+    assert args[0] == "multimodal2video"
+    assert [a for a in args if a.startswith("--image=")] == [
+        "--image={ref:0}",
+        "--image={ref:1}",
+        "--image={ref:2}",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dreamina_daemon_video_mode_dropped_when_provider_lacks_it():
+    """A provider declaring no video modes must not receive a frames job —
+    and the caller must be TOLD, not left to infer it from the output."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "5"}
+
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=True,
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),  # no frames support
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("dreamina", "3.0")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="jimeng-local-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    assert captured["payload"]["submit_args"][0] != "frames2video"
+    assert "video_mode" in out["dropped_knobs"]
+    assert "refs" in out["dropped_knobs"]
+
+
+@pytest.mark.asyncio
+async def test_jimeng_local_video_row_reaches_the_daemon_not_the_video_resolver():
+    """Reachability, through the REAL ``_local_engine`` and the REAL capability
+    lookup. Before the hoist the ``kind == "video"`` branch returned above the
+    local-engine check, so a jimeng-local video row could only ever raise out
+    of ``resolve_video_provider`` — the daemon arm was dead code."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "77"}
+
+    from app.services.media.parsers.video_providers import db_registry
+
+    row = {
+        "name": "jimeng-local-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng-local",
+        "actual_model": "3.0",
+        "owner_user_id": None,
+    }
+    resolver = AsyncMock()
+    with (
+        patch.object(db_registry, "_enabled_rows", new=AsyncMock(return_value=[row])),
+        patch.object(db_registry, "resolve_video_provider", new=resolver),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="jimeng-local-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    resolver.assert_not_awaited()
+    assert captured["payload"]["engine"] == "dreamina"
+    assert captured["payload"]["submit_args"][0] == "frames2video"
+    assert out["existing_gen_id"] == "77"
+    # jimeng-local really does declare max_refs=0; the real caps must still let
+    # a frames job through.
+    assert out["dropped_knobs"] == []
+
+
+def test_jimeng_local_protocol_offers_video_now_that_it_is_routable():
+    """``model_types`` was narrowed to image-only *because* video was
+    unroutable. The hoist removes that reason, so the admin dropdown may
+    offer it again."""
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    proto = resolve_generation_protocol("jimeng-local")
+    assert proto is not None
+    assert proto.model_types == ("image", "video")
+
+
+@pytest.mark.asyncio
+async def test_server_video_path_untouched_when_no_local_engine_matches():
+    """The hoist's regression risk: a server-side video row must still take
+    the ``resolve_video_provider`` branch, with the same call and result."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/jv/server.mp4")
+        )
+    )
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "seedance2.0fast")),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="pan",
+            model="jimeng-cli-seedance",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    call = provider.generate_video.await_args.kwargs
+    assert call["first_frame"] == "/data/gen/N/media.png"
+    assert call["last_frame"] == "/data/gen/N/media.png"
+    assert call["aspect"] == "16:9"
+    assert out["provider"] == "jimeng-cli"
+    assert out["local_path"] == "/tmp/jv/server.mp4"
+    assert out["dropped_knobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_dreamina_daemon_image_refs_are_dropped_and_named_not_sent_dead():
+    """The other side of the kind split. dreamina's IMAGE argv genuinely has
+    nowhere to put a ref (``build_image_args`` emits text2image only), so refs
+    used to ride along in ``ref_urls`` for the daemon to download and never
+    use. Now max_refs=0 drops them — and ``dropped_knobs`` says so."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "8"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("dreamina", "3.0")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_JIMENG_LOCAL_CAPS),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="jimeng-local-image",
+            params={
+                "ratio": "16:9",
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    assert captured["payload"]["submit_args"][0] == "text2image"
+    assert captured["payload"]["ref_urls"] == []
+    assert out["dropped_knobs"] == ["refs"]
+
+
+@pytest.mark.asyncio
+async def test_owner_scoped_local_video_row_routes_for_its_owner_only():
+    """Owner scoping (migration 431) must survive the hoist.
+
+    ``resolve_video_provider`` filters through ``_visible_rows``; the daemon
+    check now runs BEFORE it, so if ``_local_engine`` matched on row name
+    alone, any user naming another user's private jimeng-local row would get
+    it routed to their own daemon. The requester's own credentials are used
+    either way — what leaks is the private row's identity and its use by a
+    non-owner.
+
+    Asserting the dispatch never happens, not merely that something raised:
+    "it raised" can be true for entirely the wrong reason.
+    """
+    dispatches: list[dict] = []
+
+    async def fake_dispatch(**kw):
+        dispatches.append(kw)
+        return {"gen_id": "88"}
+
+    from app.services.media.parsers.video_providers import db_registry
+
+    private_row = {
+        "name": "jimeng-local-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng-local",
+        "actual_model": "3.0",
+        "owner_user_id": "owner-1",
+    }
+
+    def patches():
+        """The same three patches, entered once per user."""
+        return (
+            patch.object(
+                db_registry, "_enabled_rows", new=AsyncMock(return_value=[private_row])
+            ),
+            patch(
+                "app.services.codex.daemon_dispatch.dispatch_to_daemon",
+                new=fake_dispatch,
+            ),
+            patch(
+                "app.workflows.canvas_generation._resolve_personal_team_id",
+                new=AsyncMock(return_value=7),
+            ),
+        )
+
+    call = dict(
+        kind="video",
+        prompt="walk",
+        model="jimeng-local-video",
+        params={"aspect": "16:9"},
+        source_url=None,
+    )
+
+    owner_a, owner_b, owner_c = patches()
+    with owner_a, owner_b, owner_c:
+        out = await generate_canvas_media_step(**call, user_id="owner-1")
+    assert len(dispatches) == 1
+    assert dispatches[0]["payload"]["engine"] == "dreamina"
+    assert out["existing_gen_id"] == "88"
+
+    dispatches.clear()
+    intruder_a, intruder_b, intruder_c = patches()
+    with intruder_a, intruder_b, intruder_c:
+        with pytest.raises(RuntimeError) as err:
+            await generate_canvas_media_step(**call, user_id="intruder-2")
+
+    assert dispatches == []  # the daemon was never asked to do anything
+    # Fell through to the normal resolver and hit ITS scoped error — no new
+    # error path invented here.
+    assert "private to another user" in str(err.value)
