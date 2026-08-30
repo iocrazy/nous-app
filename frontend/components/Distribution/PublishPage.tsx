@@ -1519,6 +1519,14 @@ export const PublishPage: React.FC = () => {
           current || (page.charts[0] ? musicChartKey(page.charts[0]) : ''),
         );
         setMusicChartsState('ready');
+        // The cache is a day old (DEFAULT_TTL_HOURS): re-read the platform
+        // once per panel open, in the background, so the lists move without
+        // the user having to know there is a cache. Never on a cold cache —
+        // that first read is the user's explicit "Read charts".
+        if (page.stale && !page.never_harvested && musicAutoRefreshedFor.current !== browseAccount.id) {
+          musicAutoRefreshedFor.current = browseAccount.id;
+          void runMusicChartRefresh();
+        }
       })
       .catch((err) => {
         if (seq !== musicChartsSeq.current) return;
@@ -1527,9 +1535,14 @@ export const PublishPage: React.FC = () => {
         console.error('distribution: music charts failed', err);
         setMusicChartsState('error');
       });
+  // runMusicChartRefresh is a plain closure recreated every render; keying on
+  // it would re-run this load on every keystroke. The effect is deliberately
+  // "on panel open / on account change" only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [musicPanelOpen, targetAccounts]);
 
   /** Harvest now. Expensive and it leaves a draft — the copy says so. */
+  const musicAutoRefreshedFor = useRef<string | null>(null);
   const runMusicChartRefresh = async () => {
     const browseAccount = targetAccounts[0];
     if (!browseAccount || musicRefreshing) return;
@@ -3260,6 +3273,24 @@ export const PublishPage: React.FC = () => {
                             </button>
                           );
                         })}
+                        {musicChartsMeta?.lastSuccessAt && (
+                          <span className="music-fresh" data-testid="music-fresh">
+                            {musicRefreshing
+                              ? t('distribution.publish.musicChartsReading', 'Reading…')
+                              : t('distribution.publish.musicChartsUpdated', {
+                                  defaultValue: 'Updated {{when}}',
+                                  when: new Date(musicChartsMeta.lastSuccessAt).toLocaleString(),
+                                })}
+                            <button
+                              type="button"
+                              disabled={musicRefreshing}
+                              onClick={() => void runMusicChartRefresh()}
+                              data-testid="music-refresh"
+                            >
+                              {t('distribution.publish.musicChartsRefresh', 'Refresh')}
+                            </button>
+                          </span>
+                        )}
                       </div>
                     )}
 

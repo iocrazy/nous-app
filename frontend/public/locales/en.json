@@ -468,6 +468,8 @@
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
+      "musicChartsUpdated": "Updated {{when}}",
+      "musicChartsRefresh": "Refresh",
       "sectionBasics": "Basics",
       "sectionExtended": "Extended info",
       "sectionSettings": "Publish settings",

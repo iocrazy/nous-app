@@ -833,3 +833,9 @@
 .dist-v4 .frow .lbl .cs-help:hover .cs-tip,
 .dist-v4 .frow .lbl .cs-help:focus-visible .cs-tip,
 .dist-v4 .frow .lbl .cs-help:focus .cs-tip { display: block; }
+
+/* Chart freshness (2026-08-30): the lists are a per-account cache with a 24h
+   TTL; say when they were read and offer a re-read right where the tabs are. */
+.dist-v4 .music-fresh { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--content-4); white-space: nowrap; }
+.dist-v4 .music-fresh button { border: 0; background: transparent; color: var(--content-2); font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
+.dist-v4 .music-fresh button:disabled { opacity: .5; cursor: default; }
