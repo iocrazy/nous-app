@@ -42,9 +42,23 @@ interface Ctx {
 }
 let ctx: Ctx;
 
+// Deliberately NOT `new Response(blob)`: jsdom's Blob has no `stream()`, and
+// node 22's undici calls it when constructing a Response from a Blob (node 24
+// takes another path — which is why this only ever went red on CI, where
+// .nvmrc pins 22). The component reads exactly `ok` and `blob()` off what
+// apiFetch returns, so hand it those and stay off the runtime's Response.
 const okResponse = () =>
-  new Response(new Blob(['png-bytes'], { type: 'image/png' }), { status: 200 });
-const badResponse = () => new Response('bad gateway', { status: 502 });
+  ({
+    ok: true,
+    status: 200,
+    blob: async () => new Blob(['png-bytes'], { type: 'image/png' }),
+  }) as unknown as Response;
+const badResponse = () =>
+  ({
+    ok: false,
+    status: 502,
+    blob: async () => new Blob([], { type: 'text/plain' }),
+  }) as unknown as Response;
 
 beforeEach(() => {
   apiFetch.mockReset();
