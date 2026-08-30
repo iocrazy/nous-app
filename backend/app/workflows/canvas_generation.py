@@ -119,9 +119,14 @@ async def generate_canvas_media_step(
 
     # Parse the caller's knobs ONCE; branches read this object rather than
     # re-deriving their own dict out of ``params`` (the drift this contract
-    # exists to end). Only the server IMAGE branch reconciles against
-    # provider capabilities so far — the other three still send what they
-    # always sent and report an empty ``dropped_knobs``.
+    # exists to end). Where the four branches stand:
+    #   - server VIDEO (first below): no reconcile, still reads ``params``,
+    #     always an empty ``dropped_knobs``;
+    #   - the DAEMON branch reconciles once above its codex/dreamina split, so
+    #     both arms report the same ``dropped_knobs``: the codex arm sends
+    #     ``eff`` alone, while the dreamina arm still builds its argv from
+    #     ``params`` (its refs deliberately — see the comment there);
+    #   - server IMAGE (last): reconciles and sends ``eff``.
     req = GenerationRequest.from_params(
         kind=kind, prompt=prompt, model=model, params=params, source_url=source_url
     )
