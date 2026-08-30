@@ -1,0 +1,277 @@
+"""Slot generation prompts + reference ordering (spec §5.1 "Generate missing").
+
+Pure functions; no DB, no network, no provider. Everything here answers one
+question — "given this asset, what exactly do we ask the image model for, and
+which of its files ride along as references?" — so it can be read, diffed and
+unit-tested without standing up a provider.
+
+Two rules this module exists to keep honest:
+
+* **a slot with no template is a typed refusal, not an empty prompt.** Sending
+  a blank (or asset-prompt-only) request to a paid provider produces a
+  plausible-looking image that has nothing to do with the slot, and nothing on
+  the path would report that. ``SlotNotGeneratable`` is raised instead, and the
+  service turns it into a 422 the user can act on.
+* **composition order is fixed** (spec §6.3): asset ``prompt_positive`` →
+  loadout ``prompt_extra`` → each linked costume/prop ``prompt_positive`` → the
+  slot template. The template is deliberately LAST: it is the statement about
+  framing/coverage, and a costume prompt landing after it would override the
+  very thing the slot is for. Negatives are the UNION (asset ∪ template),
+  deduped — a template negative must never delete the user's own.
+
+Model Experience note: these strings are model-visible, but they are not part
+of the system prompt — they ride as the ``prompt`` argument of one image
+generation call, so they neither share nor invalidate the chat KV cache.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from app.services.assets.slots import PRIMARY_SLOT, SLOTS, UNSORTED
+
+
+class SlotNotGeneratable(Exception):
+    """This (asset_type, slot) has no generation template — by design.
+
+    ``audio`` and ``prompt`` assets have nothing to draw; ``unsorted`` is "a
+    file with no home" rather than a thing to produce; and a character's
+    ``worn`` slot is filled by generating the COSTUME's ``worn`` (that template
+    knows which garment is the subject).
+    """
+
+    def __init__(self, slot: str):
+        self.slot = slot
+        super().__init__(f"slot {slot!r} is not generatable")
+
+
+# Negatives every template carries. Kept separate from the per-template set so
+# a template only has to state what is specific to IT.
+_BASE_NEGATIVE: tuple[str, ...] = (
+    "text",
+    "watermark",
+    "signature",
+    "logo",
+    "lowres",
+    "jpeg artifacts",
+    "deformed hands",
+    "extra limbs",
+)
+
+# (asset_type, slot) → (positive template, slot-specific negatives).
+# Prose, deliberately: it is what the model reads. Assertions against it are
+# tokenize-style (see the test module's docstring), so tuning a sentence
+# churns one line rather than refreshing a snapshot.
+_TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
+    # ── character ──────────────────────────────────────────────────────────
+    ("character", "sheet"): (
+        "character sheet: one chest-up close-up on the left, and full-body "
+        "front, side and back three views on the right, consistent identity "
+        "and costume across every view, even studio lighting, neutral light "
+        "grey background, full figure visible with no cropping",
+        ("cropped", "multiple characters", "inconsistent face", "busy background"),
+    ),
+    ("character", "expressions"): (
+        "expression sheet: a 2x3 grid of six head-and-shoulders portraits of "
+        "the same character — neutral, happy, angry, sad, surprised and "
+        "thoughtful — identical framing, identical lighting and identical "
+        "identity in every cell, neutral light grey background",
+        ("cropped", "multiple characters", "inconsistent face", "busy background"),
+    ),
+    ("character", "stills"): (
+        "cinematic still of this character in an in-world setting, single "
+        "subject, film lighting, shallow depth of field, natural pose",
+        ("multiple characters", "inconsistent face", "studio backdrop"),
+    ),
+    ("character", "extras"): (
+        "reference detail shots of this character — hands, hair, accessories "
+        "and footwear in close-up, consistent identity, plain background",
+        ("full body shot", "busy background", "multiple characters"),
+    ),
+    # ── location ───────────────────────────────────────────────────────────
+    ("location", "establishing"): (
+        "establishing wide shot of this location, full spatial context, "
+        "natural depth, cinematic lighting, no people in frame",
+        ("people", "characters", "cropped", "close-up"),
+    ),
+    ("location", "keyframes"): (
+        "the same place from the same vantage point at a different time of "
+        "day, identical architecture and layout, only the light and mood "
+        "change, cinematic lighting",
+        ("people", "different location", "inconsistent geometry"),
+    ),
+    ("location", "details"): (
+        "close-up detail shots of this location — materials, textures, props "
+        "and surfaces — consistent with the establishing shot",
+        ("wide shot", "people", "different location"),
+    ),
+    ("location", "layout"): (
+        "top-down orthographic layout plan of this location, floor plan view, "
+        "rooms and circulation labelled by shape, flat even lighting",
+        ("perspective view", "people", "dramatic lighting"),
+    ),
+    # ── prop ───────────────────────────────────────────────────────────────
+    ("prop", "turnaround"): (
+        "product turnaround of this prop: four angles — front, side, back and "
+        "three-quarter — in one row, consistent scale and lighting across all "
+        "four, neutral light grey background",
+        ("multiple objects", "hands", "busy background", "cropped"),
+    ),
+    ("prop", "in_scene"): (
+        "cinematic still of this prop in use inside its in-world setting, "
+        "natural scale against its surroundings, film lighting",
+        ("multiple objects", "studio backdrop"),
+    ),
+    ("prop", "details"): (
+        "close-up detail shots of this prop — materials, wear, markings and "
+        "mechanism — consistent with the turnaround",
+        ("wide shot", "busy background", "multiple objects"),
+    ),
+    # ── costume ────────────────────────────────────────────────────────────
+    ("costume", "flat"): (
+        "flat lay of this costume, front and back laid out side by side, no "
+        "body inside the garment, symmetrical arrangement, even overhead "
+        "lighting, neutral light grey background",
+        ("mannequin", "person", "body", "busy background", "cropped"),
+    ),
+    ("costume", "worn"): (
+        "this costume worn by a full-body figure, front three-quarter view, "
+        "the garment reading clearly as the subject, even studio lighting, "
+        "neutral light grey background",
+        ("multiple characters", "cropped", "busy background"),
+    ),
+    ("costume", "details"): (
+        "close-up detail shots of this costume — fabric, seams, fastenings "
+        "and trim — consistent with the flat lay",
+        ("wide shot", "busy background", "full body shot"),
+    ),
+}
+
+# Negatives arrive as free text the user typed; split on the two separators a
+# prompt field actually carries.
+_NEGATIVE_SPLIT = re.compile(r"[,\n]+")
+
+
+def _dedupe(fragments: Iterable[str]) -> List[str]:
+    """Strip, drop blanks, drop case-insensitive repeats, keep first spelling."""
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in fragments:
+        text = (raw or "").strip().strip(",").strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def slot_prompt(
+    asset_row: Dict[str, Any],
+    slot: str,
+    loadout_row: Optional[Dict[str, Any]] = None,
+    linked_prompts: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
+    """Compose the positive/negative prompt pair for one (asset, slot).
+
+    ``linked_prompts`` are the ``prompt_positive`` values of the costumes and
+    props this run dresses the asset in — resolved by the caller (from the
+    loadout when one is given, from every ``wears``/``holds`` link otherwise),
+    because THAT needs the database and this does not.
+
+    Raises ``SlotNotGeneratable`` when the pair has no template.
+    """
+    asset_type = str(asset_row.get("asset_type") or "")
+    template = _TEMPLATES.get((asset_type, slot))
+    if template is None:
+        raise SlotNotGeneratable(slot)
+    body, template_negatives = template
+
+    positive = ", ".join(
+        _dedupe(
+            [
+                asset_row.get("prompt_positive") or "",
+                (loadout_row or {}).get("prompt_extra") or "",
+                *[p or "" for p in (linked_prompts or [])],
+                body,
+            ]
+        )
+    )
+    negative = ", ".join(
+        _dedupe(
+            [
+                *_NEGATIVE_SPLIT.split(asset_row.get("prompt_negative") or ""),
+                *template_negatives,
+                *_BASE_NEGATIVE,
+            ]
+        )
+    )
+    return {"positive": positive, "negative": negative}
+
+
+def _slot_priority(asset_type: str) -> List[str]:
+    """Reference priority for a type: primary → worn → stills → the rest.
+
+    Spec §6.3. ``worn`` and ``stills`` are named ahead of the declaration order
+    because they carry the two things a generation most needs to stay
+    consistent with — what the subject is wearing, and how it reads on camera.
+    """
+    if asset_type not in SLOTS:
+        # Same posture as ``slots.readiness``: a typo'd type must fail loudly
+        # rather than come back as a well-formed, plausible-looking [].
+        raise ValueError(f"unknown asset_type: {asset_type!r}")
+    seq: List[str] = []
+    primary = PRIMARY_SLOT.get(asset_type)
+    if primary:
+        seq.append(primary)
+    for slot in ("worn", "stills", *SLOTS[asset_type], UNSORTED):
+        if slot not in seq:
+            seq.append(slot)
+    return seq
+
+
+def reference_order(
+    files_by_slot: Dict[str, List[Dict[str, Any]]],
+    asset_type: str,
+    max_refs: int,
+) -> List[int]:
+    """Pick the reference resource ids to send, in priority order, capped.
+
+    ``max_refs`` is a PROVIDER limit (seedream-4 takes 3), so the overflow is
+    dropped from the tail of the priority — the primary image is the one thing
+    that must never be the one left out.
+
+    The same resource attached to two slots consumes ONE reference slot: a
+    provider handed the same image twice spends the cap without gaining
+    information.
+    """
+    order = _slot_priority(asset_type)
+    # A slot the priority list does not know about (a file left over from a
+    # renamed slot) still gets its turn, last and in a deterministic order —
+    # dropping it silently would be a reference the user attached and never
+    # sees used.
+    order += sorted(set(files_by_slot) - set(order))
+
+    if max_refs <= 0:
+        return []
+    out: List[int] = []
+    seen: set[int] = set()
+    for slot in order:
+        rows = files_by_slot.get(slot) or []
+        # Stable sort: ties keep the caller's order (``list_files`` already
+        # orders by slot, sort_order, attached_at).
+        for row in sorted(rows, key=lambda r: r.get("sort_order") or 0):
+            resource_id = int(row["resource_id"])
+            if resource_id in seen:
+                continue
+            seen.add(resource_id)
+            out.append(resource_id)
+            if len(out) >= max_refs:
+                return out
+    return out
+
+
+__all__ = ["SlotNotGeneratable", "reference_order", "slot_prompt"]

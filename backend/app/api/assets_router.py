@@ -47,6 +47,9 @@ from app.schemas.assets import (
     DuplicateRequest,
     Envelope,
     ErrorEnvelope,
+    GenerateSlotPreview,
+    GenerateSlotRequest,
+    GenerateSlotResponse,
     LinkedResponse,
     LinkRequest,
     LoadoutCreate,
@@ -578,6 +581,71 @@ async def regenerate_prompt(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
     try:
         sid = await _gate(scope_id, auth)
         return _ok(await _service().regenerate_prompt(asset_id, sid, auth.user_id))
+    except AssetError as e:
+        return _err(e)
+
+
+# ── slot generation ─────────────────────────────────────────────────────────
+
+SlotQuery = Annotated[str, Query(min_length=1, max_length=40)]
+
+
+@router.get(
+    "/assets/{asset_id}/generate-slot/preview",
+    response_model=Envelope[GenerateSlotPreview],
+    responses=_ERRORS,
+)
+async def preview_generate_slot(
+    asset_id: IdPath,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    slot: SlotQuery,
+    loadout_id: OptSnowflakeQuery = None,
+):
+    """The dry run of ``POST /generate-slot`` — the exact prompt and reference
+    list that request would send, with no provider call and no writes.
+
+    It exists so the user can read what a paid generation is about to ask for
+    (and which of the asset's files ride along) BEFORE paying for it. Built by
+    the same service code as the run itself: a preview computed by a second
+    implementation is a preview of something else.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().preview_generate_slot(asset_id, sid, slot, loadout_id)
+        )
+    except AssetError as e:
+        return _err(e)
+
+
+@router.post(
+    "/assets/{asset_id}/generate-slot",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=Envelope[GenerateSlotResponse],
+    responses=_AI_ERRORS,
+)
+async def generate_slot(
+    asset_id: IdPath,
+    payload: GenerateSlotRequest,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+):
+    """ "Generate missing" — fill a slot from the asset's own prompt + files.
+
+    202, not 201: the products do NOT become part of the asset. They land in
+    the Generated inbox as ``unreviewed`` carrying ``source_asset_id``, and the
+    user picks which one gets attached (``POST /generated/{id}/save-as-asset``).
+
+    Per-unit failures ride in ``failed`` alongside the ids that succeeded — a
+    partially successful run says WHICH units failed rather than silently
+    returning fewer images than were asked (and paid) for. Every unit failing
+    is a 503 ``generation_failed`` carrying the provider's own message, never
+    a 202 over an empty list.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().generate_slot(asset_id, sid, auth.user_id, payload))
     except AssetError as e:
         return _err(e)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional
 
+from app.core.config import settings
 from app.db.engine import is_configured
 from app.db.session import maybe_unit_of_work
 from app.repositories.asset_relations_repository import (
@@ -25,17 +26,34 @@ from app.repositories.assets_repository import (
     _serialize,
     with_derived,
 )
+from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.assets import (
     AssetCreate,
     AssetUpdate,
     AttachFileRequest,
     DuplicateRequest,
+    GenerateSlotRequest,
     LinkRequest,
     LoadoutCreate,
     LoadoutUpdate,
     PromptTranslateRequest,
 )
+from app.services.ai.media.image_generation_service import (
+    _DEFAULT_IMAGE_MODEL as DEFAULT_IMAGE_MODEL,
+)
+from app.services.ai.media.image_generation_service import (
+    ImageGenerationService,
+)
+from app.services.assets.slot_generation import (
+    SlotNotGeneratable,
+    reference_order,
+    slot_prompt,
+)
 from app.services.assets.slots import PRIMARY_SLOT, is_valid_slot, link_allowed
+from app.services.library.generated_media_service import (
+    GenerationOrigin,
+    register_generated_media,
+)
 from app.services.library.resource_ai_ops import (
     CaptionAgentFailed,
     CaptionAgentPaused,
@@ -115,15 +133,45 @@ _TRANSLATE_EMPTY = (
     "configuration in Settings → AI"
 )
 
+# How many of the asset's own files ride along as references. 3 is the lowest
+# common ceiling across the image providers wired today (seedream-4 accepts
+# three); sending more is not "more context", it is a provider-side error or a
+# silently truncated list. ``reference_order`` drops the overflow from the TAIL
+# of the priority so the primary image is never the one left behind.
+MAX_SLOT_REFERENCES = 3
+
+# The MIME every generated image is registered under — the same constant the
+# canvas and shot-generate paths use (``_KIND_MIME``/``mime="image/png"``), so
+# all three land the same way in Tier-1.
+_GENERATED_IMAGE_MIME = "image/png"
+
+
+def _unit_failure(index: int, code: str, exc: Exception) -> Dict[str, Any]:
+    """One entry of the per-unit failure ledger.
+
+    ``str(exc)`` is empty for a bare ``RuntimeError()``; falling back to the
+    class name keeps "something failed and we cannot say what" out of the
+    response — a blank detail is the silent no-op with extra steps.
+    """
+    return {
+        "index": index,
+        "code": code,
+        "detail": str(exc) or exc.__class__.__name__,
+    }
+
 
 class AssetsService:
     def __init__(
         self,
         assets_repo: Optional[AssetsRepository] = None,
         relations_repo: Optional[AssetRelationsRepository] = None,
+        generated_repo: Optional[GeneratedMediaRepository] = None,
     ):
         self.assets = assets_repo or AssetsRepository()
         self.relations = relations_repo or AssetRelationsRepository()
+        # Only ``generate_slot`` uses it (to stamp source_asset_id on the rows
+        # it just created); injectable for the same reason as the other two.
+        self.generated = generated_repo or GeneratedMediaRepository()
 
     # ── helpers ────────────────────────────────────────────────────────────
 
@@ -825,6 +873,266 @@ class AssetsService:
             # and the UPDATE — the honest 404, not a TypeError in _derived.
             raise AssetError(404, "asset_not_found", "Asset not found")
         return await self.get_asset(int(asset_id), int(scope_id))
+
+    # ── slot generation ────────────────────────────────────────────────────
+
+    def _reference_url(self, resource_id: int) -> str:
+        """The provider-facing URL of one reference file.
+
+        ``/api/v1/resources/{id}/cover`` is UNAUTHENTICATED (same posture as
+        the generated-media ``/cover``), which is what makes it usable by a
+        provider that PULLS the reference rather than accepting an upload —
+        an ``Authorization`` header cannot be attached to a url handed to
+        someone else's API. ``MEDIA_PUBLIC_URL`` is the externally reachable
+        base the gateway proxies to the backend (``location /``), i.e. the
+        same base the transcription and publish paths hand out.
+        """
+        base = str(settings.MEDIA_PUBLIC_URL or "").rstrip("/")
+        return f"{base}/api/v1/resources/{int(resource_id)}/cover"
+
+    async def _linked_prompts(
+        self, row: Dict[str, Any], scope_id: int, loadout: Optional[Dict[str, Any]]
+    ) -> List[str]:
+        """The ``prompt_positive`` of the costumes/props this run dresses in.
+
+        With a loadout: exactly its ``costume_ids`` then its ``prop_ids``, in
+        the stored order — the loadout is a FILTER, so a costume linked to the
+        character but left OUT of the picked outfit must not leak in. Without
+        one: every ``wears`` then every ``holds`` target, each sorted by id so
+        two identical requests compose the same prompt.
+
+        A target outside the caller's scope is skipped (its prompt is not
+        theirs to read), as is one with an empty prompt.
+        """
+        asset_id = int(row["id"])
+        if loadout is not None:
+            target_ids = [int(c) for c in (loadout.get("costume_ids") or [])] + [
+                int(pr) for pr in (loadout.get("prop_ids") or [])
+            ]
+        else:
+            target_ids = sorted(
+                await self.relations.link_targets(asset_id, "wears")
+            ) + sorted(await self.relations.link_targets(asset_id, "holds"))
+        out: List[str] = []
+        for target_id in target_ids:
+            target = await self.assets.get(int(target_id), int(scope_id))
+            if not target:
+                continue
+            text = (target.get("prompt_positive") or "").strip()
+            if text:
+                out.append(text)
+        return out
+
+    async def _slot_plan(
+        self,
+        row: Dict[str, Any],
+        scope_id: int,
+        slot: str,
+        loadout_id: Optional[Any],
+    ) -> Dict[str, Any]:
+        """Everything a generate-slot run would send — shared by preview and run.
+
+        Preview IS the dry run of the paid call, so it must be built by the
+        same code: a preview computed by a second implementation is a preview
+        of something else.
+        """
+        asset_id = int(row["id"])
+        asset_type = row["asset_type"]
+        if not is_valid_slot(asset_type, slot):
+            raise AssetError(
+                422,
+                "invalid_slot",
+                f"Slot '{slot}' is not valid for {asset_type}",
+            )
+        loadout: Optional[Dict[str, Any]] = None
+        if loadout_id is not None:
+            owned = {
+                int(lo["id"]): lo for lo in await self.relations.list_loadouts(asset_id)
+            }
+            loadout = owned.get(int(loadout_id))
+            if loadout is None:
+                raise AssetError(
+                    422, "loadout_mismatch", "Loadout does not belong to this asset"
+                )
+        try:
+            prompt = slot_prompt(
+                row,
+                slot,
+                loadout_row=loadout,
+                linked_prompts=await self._linked_prompts(row, scope_id, loadout),
+            )
+        except SlotNotGeneratable:
+            # A valid slot with nothing to draw (audio / prompt assets, the
+            # unsorted bucket, a character's ``worn``). Its own code, because
+            # "no such slot" would send the user looking for a typo.
+            raise AssetError(
+                422,
+                "slot_not_generatable",
+                f"The '{slot}' slot of a {asset_type} asset cannot be generated",
+            )
+
+        files_by_slot: Dict[str, List[Dict[str, Any]]] = {}
+        for f in await self.relations.list_files(asset_id):
+            files_by_slot.setdefault(f["slot"], []).append(f)
+        refs = reference_order(files_by_slot, asset_type, max_refs=MAX_SLOT_REFERENCES)
+        return {
+            "positive": prompt["positive"],
+            "negative": prompt["negative"],
+            "reference_resource_ids": [str(r) for r in refs],
+            # No model is chosen for a preview: the effective one is resolved
+            # from the mediahub_models catalog at generation time, and echoing
+            # the legacy ``dall-e-3`` sentinel here would name a model that is
+            # not what runs.
+            "model": None,
+        }
+
+    async def preview_generate_slot(
+        self,
+        asset_id: int,
+        scope_id: int,
+        slot: str,
+        loadout_id: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """What ``generate_slot`` WOULD send — no provider call, no writes.
+
+        ``_require``, not ``_require_writable``: reading the composed prompt of
+        a system preset writes nothing, and refusing it would hide from the
+        user the very thing they duplicate a preset to get.
+        """
+        row = await self._require(asset_id, scope_id)
+        return await self._slot_plan(row, int(scope_id), slot, loadout_id)
+
+    async def generate_slot(
+        self,
+        asset_id: int,
+        scope_id: int,
+        user_id: str,
+        req: GenerateSlotRequest,
+    ) -> Dict[str, Any]:
+        """Generate ``count`` images for one slot into the Generated inbox.
+
+        Each unit is an independent provider call; a failure in one is
+        RECORDED against its index and the rest continue. A run that quietly
+        returned fewer ids than asked would be indistinguishable from one the
+        user asked fewer of — and they paid for the difference (CLAUDE.md
+        "触发路径必须类型化失败回显").
+
+        Nothing is attached to the asset here. The products land in the
+        Generated inbox as ``unreviewed`` with ``source_asset_id`` set, so the
+        user reviews them and picks — "Generate missing" must never silently
+        fill a slot with an image nobody looked at.
+
+        Every unit failing is a 503 carrying the FIRST provider message plus
+        the whole ledger, never a 202 over an empty list.
+        """
+        row = await self._require_writable(asset_id, scope_id)
+        plan = await self._slot_plan(row, int(scope_id), req.slot, req.loadout_id)
+        refs = plan["reference_resource_ids"]
+        # One reference url: the generic provider signature takes a single
+        # ``reference_image_url``. Multi-reference delivery (the bundle
+        # protocol, spec §6.3) is a separate endpoint; sending only the first
+        # — the primary slot's file — is the deliberate subset, not an
+        # oversight.
+        reference_image_url = self._reference_url(int(refs[0])) if refs else None
+        model = req.model or DEFAULT_IMAGE_MODEL
+        node_id = f"asset:{int(asset_id)}:{req.slot}"
+
+        generation_ids: List[str] = []
+        failed: List[Dict[str, Any]] = []
+        for index in range(int(req.count)):
+            try:
+                result = await ImageGenerationService().generate_image(
+                    project_id="asset",
+                    node_id=node_id,
+                    prompt=plan["positive"],
+                    model=model,
+                    provider_name=None,
+                    reference_image_url=reference_image_url,
+                    user_id=user_id,
+                )
+            except Exception as exc:  # provider / catalog failure for THIS unit
+                failed.append(_unit_failure(index, "generation_failed", exc))
+                continue
+            produced_url = (result or {}).get("image_url") or None
+            produced_path = (result or {}).get("image_path") or None
+            if not produced_url and not produced_path:
+                # Ours to name: passing None on to the ingest raises there, and
+                # the failure would be filed as "we could not store it" when
+                # nothing was produced to store.
+                failed.append(
+                    {
+                        "index": index,
+                        "code": "generation_failed",
+                        "detail": "Image provider returned neither a url nor a file",
+                    }
+                )
+                continue
+            try:
+                created = await register_generated_media(
+                    user_id=str(user_id),
+                    scope_id=int(scope_id),
+                    # Exactly one: URL providers (ark) answer with a url, the
+                    # local-CLI adapters (jimeng/codex) wrote a file instead.
+                    source_url=produced_url,
+                    source_path=None if produced_url else produced_path,
+                    mime=_GENERATED_IMAGE_MIME,
+                    origin=GenerationOrigin(
+                        kind="agent_run",
+                        node_id=node_id,
+                        prompt=plan["positive"],
+                        # What actually RAN, not what was asked for: the
+                        # catalog resolves the ``dall-e-3`` sentinel to
+                        # whatever image model the admin enabled, and the
+                        # inbox column is what the UI shows and what a
+                        # "generate another like this" would read back.
+                        model=(result or {}).get("model") or model,
+                        provider=(result or {}).get("provider") or None,
+                        params={
+                            "target_slot": req.slot,
+                            "loadout_id": (
+                                str(req.loadout_id) if req.loadout_id else None
+                            ),
+                            "negative": plan["negative"],
+                        },
+                    ),
+                )
+                gen_id = (created or {}).get("id")
+                if gen_id is None:
+                    raise RuntimeError("register_generated_media returned no id")
+                # A row the Assets tab can never find is worse than none: the
+                # user paid for it and it shows up nowhere they were looking.
+                if (
+                    await self.generated.set_source_asset(int(gen_id), int(asset_id))
+                    is None
+                ):
+                    raise RuntimeError(
+                        f"generated_media {gen_id} vanished before source_asset_id "
+                        "could be stamped"
+                    )
+            except Exception as exc:
+                failed.append(_unit_failure(index, "register_failed", exc))
+                continue
+            generation_ids.append(str(gen_id))
+
+        if not generation_ids:
+            raise AssetError(
+                503,
+                "generation_failed",
+                (
+                    failed[0]["detail"]
+                    if failed
+                    else "No images were generated for this slot"
+                ),
+                {"failed": failed},
+            )
+        # Relation-shaped write: the asset itself did not change, but the shelf
+        # orders by updated_at and an asset just generated for has moved.
+        await self.relations.touch_asset(int(asset_id))
+        return {
+            "generation_ids": generation_ids,
+            "failed": failed,
+            "inbox_state": "unreviewed",
+        }
 
     # ── project refs ───────────────────────────────────────────────────────
 

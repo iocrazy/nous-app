@@ -619,6 +619,32 @@ class GeneratedMediaRepository:
             )
         return _normalize(dict(row)) if row else None
 
+    async def set_source_asset(self, gen_id: int, asset_id: int) -> Optional[dict]:
+        """Stamp which asset a generation was made FOR. None when nothing matched.
+
+        Deliberately NOT scope-predicated: the only caller
+        (``AssetsService.generate_slot``) has just inserted this row itself,
+        with the scope it validated — a second scope filter here could only
+        turn "the row I just created" into a silent no-op if the two
+        derivations of the scope ever disagreed, which is the failure this
+        method must not be able to hide. It answers None when the id does not
+        exist so the caller can report a typed failure rather than assume.
+        """
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        sa_update(GeneratedMedia)
+                        .where(GeneratedMedia.id == int(gen_id))
+                        .values(source_asset_id=int(asset_id))
+                        .returning(*_GM_COLS)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _normalize(dict(row)) if row else None
+
     async def count_by_state(self, scope_id: int) -> dict[str, int]:
         """Per-state counts. Always returns all four keys (0 when absent)."""
         stmt = (

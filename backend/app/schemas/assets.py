@@ -261,6 +261,66 @@ class PromptTranslateRequest(BaseModel):
     force: bool = False
 
 
+class GenerateSlotRequest(BaseModel):
+    """POST /assets/{id}/generate-slot body.
+
+    ``count`` is capped at 4 because every unit is a paid provider call made
+    IN-REQUEST; a larger fan-out belongs in a workflow, not a request handler.
+
+    ``model`` omitted means "the catalog default" — the image provider chain
+    resolves whatever model the admin enabled, so a caller does NOT have to
+    know a provider's model id to generate.
+
+    ``extra="forbid"`` for the same reason as :class:`AssetUpdate`: a typo'd
+    ``{"loadout": "..."}`` must not answer 202 having generated with no
+    loadout at all — a run that cost money and did something other than what
+    was asked.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slot: str = Field(..., min_length=1, max_length=40)
+    loadout_id: Optional[SnowflakeId] = None
+    model: Optional[str] = Field(default=None, max_length=100)
+    count: int = Field(1, ge=1, le=4)
+
+
+class GenerateSlotPreview(BaseModel):
+    """What a generate-slot run WOULD send — the dry run of the paid call.
+
+    ``model`` is null unless the caller pinned one: the effective model is
+    resolved from the ``mediahub_models`` catalog at generation time, and
+    echoing the legacy ``dall-e-3`` sentinel here would name a model that is
+    not what runs.
+    """
+
+    positive: str
+    negative: str
+    reference_resource_ids: List[str] = Field(default_factory=list)
+    model: Optional[str] = None
+
+
+class GenerateSlotFailure(BaseModel):
+    """One failed unit of a generate-slot run.
+
+    ``index`` is the position in the requested ``count``, so a partially
+    successful run says WHICH units failed rather than "2 of 3 worked".
+    """
+
+    index: int
+    code: str
+    detail: str
+
+
+class GenerateSlotResponse(BaseModel):
+    """202 body. ``failed`` is present even when empty — a caller must not
+    have to infer "did any of them fail?" from ``len(generation_ids)``."""
+
+    generation_ids: List[str] = Field(default_factory=list)
+    failed: List[GenerateSlotFailure] = Field(default_factory=list)
+    inbox_state: Literal["unreviewed"] = "unreviewed"
+
+
 # ── response envelopes ─────────────────────────────────────────────────────
 # Every /assets route answers ``{success, data}`` on the way out and
 # ``{success:false, error:{code, detail, ...}}`` on refusal. Declaring both as
