@@ -273,6 +273,10 @@ async def test_video_step_never_sends_catalog_row_name_upstream():
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm(None),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="video",
@@ -530,6 +534,75 @@ async def test_server_video_branch_keeps_refs_when_provider_has_some_video_mode(
     assert kw["resolution"] == "720p"
     assert kw["duration"] == 5
     assert out["dropped_knobs"] == ["ratio", "video_mode"]
+
+
+@pytest.mark.asyncio
+async def test_server_video_arm_looks_capabilities_up_by_the_right_key():
+    """The server video twin of ``tests:1015``: the REAL capability lookup at
+    its REAL call site, with nothing patched over ``_capabilities_for``.
+
+    Every other server-video test supplies caps through an arg-ignoring mock,
+    so none of them can tell which key ``_capabilities_for`` is handed. A
+    wrong key (``gen_model``/``model`` instead of the stamped
+    ``provider_key``) resolves to no protocol, collapses to
+    ``ProviderCapabilities.none()``, and silently degrades EVERY live server
+    video job to text2video — while those mocked tests stay green. This one
+    goes red: under a wrong key ``dropped_knobs`` becomes
+    ``["ratio", "refs", "video_mode"]`` and no frame reaches the provider.
+    """
+    from app.services.media.parsers.video_providers import db_registry
+    from app.services.media.parsers.video_providers.jimeng_cli import (
+        JimengCliProvider,
+    )
+
+    # A real server-side jimeng-cli row: actual_provider 'jimeng' is the
+    # JimengProtocol alias, so resolve_video_provider builds and STAMPS for
+    # real, and _local_engine correctly declines it (not a *-local row).
+    row = {
+        "name": "jimeng-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng",
+        "actual_model": "3.0",
+        "owner_user_id": None,
+    }
+    generate_video = AsyncMock(
+        return_value=SimpleNamespace(local_path="/tmp/jv/real.mp4")
+    )
+    with (
+        patch.object(db_registry, "_enabled_rows", new=AsyncMock(return_value=[row])),
+        patch.object(JimengCliProvider, "generate_video", new=generate_video),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="pan",
+            model="jimeng-video",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    kw = generate_video.await_args.kwargs
+    # jimeng really declares ALL_RATIOS + resolution + both video modes, so a
+    # correct lookup honours every knob asked for here.
+    assert kw["aspect"] == "16:9"
+    assert kw["resolution"] == "720p"
+    assert kw["first_frame"] == "/data/gen/N/media.png"
+    assert kw["last_frame"] == "/data/gen/N/media.png"
+    assert out["dropped_knobs"] == []
+    assert out["local_path"] == "/tmp/jv/real.mp4"
 
 
 @pytest.mark.asyncio

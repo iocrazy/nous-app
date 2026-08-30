@@ -39,11 +39,24 @@ def test_codex_family_matrix():
     for key in ("codex", "codex-local"):
         caps = _proto(key).capabilities
         assert caps.ratios == ALL_RATIOS
-        assert caps.quality is True
         assert caps.resolution is False  # "尺寸由模型定"
         assert caps.max_refs == 9
         assert caps.negative is False
         assert caps.honours_ratio == "prompt_hint"
+
+
+def test_codex_quality_is_declared_per_transport_not_per_cli():
+    """The one knob the two codex rows do NOT share, and it is deliberate.
+
+    Server ``codex`` appends ``--quality`` (``codex_cli.py``); the paired
+    daemon's ``runImageJob`` (``tools/codex-daemon/index.mjs``) never does, so
+    a quality sent there is discarded where nobody can see it. Declaring False
+    for codex-local puts it in ``dropped_knobs`` instead. P3 flips this back
+    in the same change that adds ``--quality`` to that argv — asserting them
+    equal again is only correct once the daemon really forwards it.
+    """
+    assert _proto("codex").capabilities.quality is True
+    assert _proto("codex-local").capabilities.quality is False
 
 
 def test_jimeng_family_matrix():
@@ -100,7 +113,8 @@ def test_capabilities_drive_reconcile_through_the_real_consumer():
     )
     expected = {
         "codex": ["resolution"],
-        "codex-local": ["resolution"],
+        # codex-local loses quality too — the daemon never forwards it.
+        "codex-local": ["quality", "resolution"],
         "jimeng-cli": ["quality"],
         "jimeng-local": ["quality"],
         # 21:9 is not one of ark's five ratios, so it goes too.
