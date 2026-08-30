@@ -253,6 +253,11 @@ async def generate_canvas_media_step(
             "provider": f"{engine}-local",
             "model": model or "",
             "dropped_knobs": dropped,
+            # Both halves ride along as JSON-safe primitives: DBOS persists a
+            # step's return value, and the record downstream is only worth
+            # keeping if it can tell "we never sent it" from "they ignored it".
+            "requested_params": req.knobs_dict(),
+            "effective_params": eff.knobs_dict(),
         }
 
     if kind == "video":
@@ -315,6 +320,8 @@ async def generate_canvas_media_step(
             "provider": "jimeng-cli",
             "model": gen_model or "",
             "dropped_knobs": dropped,
+            "requested_params": req.knobs_dict(),
+            "effective_params": eff.knobs_dict(),
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
@@ -369,7 +376,40 @@ async def generate_canvas_media_step(
         "provider": getattr(result, "provider", "") or "",
         "model": gen_model or "",
         "dropped_knobs": dropped,
+        "requested_params": req.knobs_dict(),
+        "effective_params": eff.knobs_dict(),
     }
+
+
+async def _outcome_of(media: Dict[str, Any], media_kind: str) -> Dict[str, Any]:
+    """The four-key outcome block for a product that has just been made.
+
+    Measurement is best-effort by construction: the asset already exists and
+    has already been paid for, so a probe that cannot read it records
+    ``measured: null`` (and therefore no verdict) rather than failing a run
+    that succeeded. Remote-url products (ark) are not on disk at this point,
+    so they take that same honest ``null`` — P2 measures what it can reach.
+    """
+    from app.services.generation.measure import measure_image, measure_video
+    from app.services.generation.outcome import build_outcome_params_from_dicts
+
+    measured = None
+    local_path = media.get("local_path")
+    if local_path:
+        try:
+            measured = (
+                measure_image(str(local_path))
+                if media_kind == "image"
+                else await measure_video(str(local_path))
+            )
+        except Exception as exc:  # a broken probe must not break a good run
+            logger.warning("[canvas_generation][persist] measure failed: {}", exc)
+    return build_outcome_params_from_dicts(
+        requested=media.get("requested_params") or {},
+        effective=media.get("effective_params") or {},
+        dropped=list(media.get("dropped_knobs") or []),
+        measured=measured,
+    )
 
 
 @DBOS.step()
@@ -386,6 +426,10 @@ async def persist_canvas_generation_step(
     Registration is REQUIRED (it is the only way to mint a servable URL for
     local files, and it makes remote products durable too) — any failure
     raises (route C). The jimeng scratch dir is reaped after ingest.
+
+    The product is measured here, on the way in, and the outcome block is
+    merged into the params the row keeps: this is the last point where the
+    file is still on disk (``finally`` reaps the scratch dir below).
     """
     # C 方案: a daemon-produced file was already registered by the upload
     # endpoint (it holds the bytes, we never did) — skip re-registration and
@@ -409,6 +453,7 @@ async def persist_canvas_generation_step(
             raise ValueError("canvas generation persist has no user_id")
         media_kind = str(media.get("media_kind") or "image")
         scope_id = int(await _resolve_personal_team_id(str(user_id)))
+        params = {**(params or {}), **await _outcome_of(media, media_kind)}
         row = await register_generated_media(
             user_id=str(user_id),
             scope_id=scope_id,

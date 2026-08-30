@@ -1324,3 +1324,184 @@ async def test_owner_scoped_local_video_row_routes_for_its_owner_only():
     # Fell through to the normal resolver and hit ITS scoped error — no new
     # error path invented here.
     assert "private to another user" in str(err.value)
+
+
+def _real_png(width: int, height: int, tmp_path) -> str:
+    """A real PNG on disk at the requested size.
+
+    Real bytes, not a stub: the whole point of the outcome record is that
+    the shape comes from pixels a decoder actually read, so a test that
+    faked the measurement would be pinning nothing.
+    """
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + b"\x00\x00\x00" * width for _ in range(height))
+    body = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+    body += chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    path = tmp_path / f"{width}x{height}.png"
+    path.write_bytes(body)
+    return str(path)
+
+
+def _persist_patches(register):
+    """The two seams every persist test needs: the store and the team lookup."""
+    return (
+        patch("app.workflows.canvas_generation.register_generated_media", new=register),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value="7"),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_persist_writes_the_outcome_block_for_a_server_image(tmp_path):
+    """The record must say what was asked, what was sent, and what arrived."""
+    register = AsyncMock(return_value={"id": 1})
+    media = {
+        "media_kind": "image",
+        "local_path": _real_png(1536, 864, tmp_path),
+        "remote_url": None,
+        "provider": "codex",
+        "model": "gpt-image-2",
+        "dropped_knobs": [],
+        "requested_params": {"ratio": "16:9"},
+        "effective_params": {"ratio": "16:9"},
+    }
+    store, team = _persist_patches(register)
+    with store, team:
+        await persist_canvas_generation_step(
+            media=media,
+            user_id="u1",
+            canvas_id=1,
+            node_id="n1",
+            prompt="a cat",
+            params={"ratio": "16:9"},
+        )
+
+    outcome = register.await_args.kwargs["origin"].params
+    assert outcome["requested"]["ratio"] == "16:9"
+    assert outcome["effective"]["ratio"] == "16:9"
+    assert outcome["dropped"] == []
+    assert outcome["measured"] == {"width": 1536, "height": 864}
+    assert outcome["honored"] is True
+    # The caller's own params are kept, not replaced by the outcome block.
+    assert outcome["ratio"] == "16:9"
+
+
+@pytest.mark.asyncio
+async def test_persist_records_a_dishonoured_shape_without_failing_the_run(tmp_path):
+    """A wrong shape is recorded, never raised: the image is already paid for."""
+    register = AsyncMock(return_value={"id": 1})
+    media = {
+        "media_kind": "image",
+        # The real codex-local output for a 16:9 request (2026-08-29 ground truth).
+        "local_path": _real_png(1199, 1312, tmp_path),
+        "remote_url": None,
+        "provider": "codex-local",
+        "model": "gpt-image-2",
+        "dropped_knobs": [],
+        "requested_params": {"ratio": "16:9"},
+        "effective_params": {"ratio": "16:9"},
+    }
+    store, team = _persist_patches(register)
+    with store, team:
+        out = await persist_canvas_generation_step(
+            media=media,
+            user_id="u1",
+            canvas_id=1,
+            node_id="n1",
+            prompt="a cat",
+            params={"ratio": "16:9"},
+        )
+
+    assert out["generated_media_id"] == 1  # the run still succeeded
+    outcome = register.await_args.kwargs["origin"].params
+    assert outcome["measured"] == {"width": 1199, "height": 1312}
+    assert outcome["honored"] is False
+
+
+@pytest.mark.asyncio
+async def test_persist_still_registers_when_measurement_fails():
+    """An unreadable product is recorded as unmeasured, with no verdict."""
+    register = AsyncMock(return_value={"id": 1})
+    media = {
+        "media_kind": "image",
+        "local_path": "/nonexistent/never.png",
+        "remote_url": None,
+        "provider": "codex",
+        "model": "m",
+        "dropped_knobs": [],
+        "requested_params": {"ratio": "16:9"},
+        "effective_params": {"ratio": "16:9"},
+    }
+    store, team = _persist_patches(register)
+    with store, team:
+        out = await persist_canvas_generation_step(
+            media=media,
+            user_id="u1",
+            canvas_id=1,
+            node_id="n1",
+            prompt="a cat",
+            params={"ratio": "16:9"},
+        )
+
+    assert out["generated_media_id"] == 1
+    outcome = register.await_args.kwargs["origin"].params
+    assert outcome["measured"] is None
+    # No verdict — "we could not look" is not "they ignored us".
+    assert outcome["honored"] is None
+
+
+@pytest.mark.asyncio
+async def test_image_step_returns_the_knobs_it_asked_for_and_the_ones_it_sent():
+    """The step carries both halves across the DBOS boundary, as primitives."""
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="https://cdn/a.png", provider="ark")
+        )
+    )
+    # Ark honours ratio but has no quality knob, so quality is asked-for-only.
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=False,
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "seedream-4.0")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="ark-row",
+            params={"ratio": "16:9", "quality": "high"},
+            source_url=None,
+        )
+
+    assert out["requested_params"] == {"ratio": "16:9", "quality": "high"}
+    assert out["effective_params"] == {"ratio": "16:9"}
+    assert out["dropped_knobs"] == ["quality"]
+    # DBOS persists step returns: primitives only, never a request object.
+    for block in (out["requested_params"], out["effective_params"]):
+        assert all(isinstance(v, (str, int, bool)) for v in block.values())
