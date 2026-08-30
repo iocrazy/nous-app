@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from app.services.ai.provider_protocols.base import ProviderProtocol
+from app.services.ai.provider_protocols.base import (
+    ALL_RATIOS,
+    ProviderCapabilities,
+    ProviderProtocol,
+)
 from app.services.media.parsers.video_providers.base import (
     BaseImageProvider,
     ImageGenResult,
@@ -60,6 +64,17 @@ class JimengProtocol(ProviderProtocol):
     model_types = ("image", "video")
     aliases = ("jimeng",)
     generation_family = "jimeng-cli"
+    capabilities = ProviderCapabilities(
+        ratios=ALL_RATIOS,
+        quality=False,
+        resolution=True,
+        # The image CLI is pure text2image — build_image_args takes no --image.
+        # Video refs (first/last frame, multimodal) ride on video_modes instead.
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset({"frames", "multimodal"}),
+        honours_ratio="native",
+    )
 
     def build_image_provider(self, row: dict[str, Any]) -> Any:
         from app.services.media.parsers.video_providers.jimeng_cli import (
