@@ -44,6 +44,7 @@ from app.schemas.assets import (
     AttachFilesBatchRequest,
     DeletedResponse,
     DetachedResponse,
+    DuplicateRequest,
     Envelope,
     ErrorEnvelope,
     LinkedResponse,
@@ -314,6 +315,34 @@ async def update_asset(
     try:
         sid = await _gate(scope_id, auth)
         return _ok(await _service().update_asset(asset_id, sid, payload))
+    except AssetError as e:
+        return _err(e)
+
+
+@router.post(
+    "/assets/{asset_id}/duplicate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Envelope[AssetDetailResponse],
+    responses=_ERRORS,
+)
+async def duplicate_asset(
+    asset_id: IdPath,
+    payload: DuplicateRequest,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+):
+    """Copy an asset (files / links / loadouts and all) into this scope.
+
+    Answers the DETAIL envelope, not the summary one: the caller opens the copy
+    next, and a second round trip for the relations it just asked to be created
+    is a gap the client would have to fill by guessing.
+
+    System presets are duplicable by any member — every direct write to one is
+    a 403, so this is the only way to edit them.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().duplicate(asset_id, sid, auth.user_id, payload))
     except AssetError as e:
         return _err(e)
 

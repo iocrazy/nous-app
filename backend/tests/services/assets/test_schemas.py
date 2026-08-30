@@ -21,6 +21,7 @@ from app.schemas.assets import (
     AssetType,
     AssetUpdate,
     AttachFileRequest,
+    DuplicateRequest,
     Envelope,
     ErrorEnvelope,
     LinkRelation,
@@ -139,6 +140,7 @@ def test_literals_match_model_constants():
         (AssetUpdate, {"prompt_postive": "typo"}),
         (LoadoutUpdate, {"costumeids": ["1"]}),
         (LoadoutUpdate, {"isdefault": True}),
+        (DuplicateRequest, {"nmae": "Sang Yao copy"}),
     ],
 )
 def test_patch_models_forbid_unknown_fields(model, payload):
@@ -147,6 +149,21 @@ def test_patch_models_forbid_unknown_fields(model, payload):
     with pytest.raises(ValidationError) as ei:
         model(**payload)
     assert "extra" in str(ei.value).lower()
+
+
+# ── duplicate: the only knob is the new name ───────────────────────────────
+
+
+def test_duplicate_request_name_is_optional_and_bounded():
+    """Omitted name = "{source} (copy)", decided by the service. An empty
+    string is NOT that default — it would be a nameless asset — so it is a 422
+    like every other blank name on this surface."""
+    assert DuplicateRequest().name is None
+    assert DuplicateRequest(name="Sang Yao (v2)").name == "Sang Yao (v2)"
+    with pytest.raises(ValidationError):
+        DuplicateRequest(name="")
+    with pytest.raises(ValidationError):
+        DuplicateRequest(name="x" * 201)
 
 
 # ── M1: ids must fit BIGINT, not just "20 digits" ──────────────────────────

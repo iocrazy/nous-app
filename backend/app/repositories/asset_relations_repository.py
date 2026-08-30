@@ -125,7 +125,16 @@ class AssetRelationsRepository:
         loadout_id: Optional[int] = None,
         note: Optional[str] = None,
         attached_by: Optional[str] = None,
+        sort_order: int = 0,
     ) -> Dict[str, Any]:
+        """Attach a resource to a slot (idempotent on the PK).
+
+        ``sort_order`` is a parameter only because ``duplicate`` has to
+        reproduce the source's manual ordering; the interactive attach path
+        leaves it at the column default. It is deliberately NOT in the
+        ON CONFLICT ``set_``: re-attaching an already-attached file must not
+        silently reshuffle the slot the user arranged by hand.
+        """
         stmt = pg_insert(AssetFiles).values(
             asset_id=int(asset_id),
             resource_id=int(resource_id),
@@ -133,6 +142,7 @@ class AssetRelationsRepository:
             loadout_id=int(loadout_id) if loadout_id is not None else None,
             note=note,
             attached_by=attached_by,
+            sort_order=int(sort_order),
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[

@@ -66,6 +66,37 @@ class FakeAssetsRepo:
         self.rows[self._next] = row
         return row
 
+    async def find_by_name(self, scope_id, asset_type, name):
+        for r in self.rows.values():
+            if (
+                r["scope_id"] == scope_id
+                and r["asset_type"] == asset_type
+                and r["name"].lower() == name.lower()
+            ):
+                return r
+        return None
+
+    async def create_raw(self, fields):
+        """Mirrors the real INSERT taking the FULL column dict (scope_id /
+        source / duplicated_from / is_system_preset are the caller's, not a
+        schema default) — and, like it, raises WITHOUT a follow-up lookup for
+        the existing id: that query would run on an already-aborted
+        transaction. The uniqueness key is the real index's,
+        ``COALESCE(scope_id,0) + asset_type + lower(name)``.
+        """
+        key = (
+            fields.get("scope_id") or 0,
+            fields["asset_type"],
+            fields["name"].lower(),
+        )
+        for r in self.rows.values():
+            if (r["scope_id"] or 0, r["asset_type"], r["name"].lower()) == key:
+                raise DuplicateAssetName(existing_id=0)
+        self._next += 1
+        row = self._row(id=self._next, **fields)
+        self.rows[self._next] = row
+        return row
+
     @staticmethod
     def _visible(row, scope_id):
         """Mirrors the real predicate: or_(scope_id == X, is_system_preset)."""
@@ -139,7 +170,7 @@ class FakeRelationsRepo:
             "resource_id": resource_id,
             "slot": slot,
             "loadout_id": kw.get("loadout_id"),
-            "sort_order": 0,
+            "sort_order": kw.get("sort_order", 0),
             "note": kw.get("note"),
             "attached_by": kw.get("attached_by"),
             "attached_at": NOW,

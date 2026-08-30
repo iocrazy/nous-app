@@ -133,6 +133,19 @@ class _FakeService:
     async def add_link(self, asset_id, scope_id, req):
         raise AssetError(422, "link_not_allowed", "no", {})
 
+    async def duplicate(self, asset_id, scope_id, user_id, req):
+        self.calls.append(
+            ("duplicate", scope_id, {"asset_id": asset_id, "name": req.name})
+        )
+        if asset_id == 409:
+            raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
+        return detail_row(
+            id="99",
+            name=req.name or "Sang Yao (copy)",
+            source="duplicated",
+            duplicated_from=str(asset_id),
+        )
+
 
 @pytest.fixture
 def app(monkeypatch):
@@ -201,6 +214,7 @@ async def test_non_member_403(app):
         ("get", "/api/v1/assets?scope_id=666"),
         ("get", "/api/v1/assets/5?scope_id=666"),
         ("delete", "/api/v1/assets/5?scope_id=666"),
+        ("post", "/api/v1/assets/5/duplicate?scope_id=666"),
         ("post", "/api/v1/assets/5/files?scope_id=666"),
         ("delete", "/api/v1/assets/5/files/6/sheet?scope_id=666"),
         ("post", "/api/v1/assets/5/links?scope_id=666"),

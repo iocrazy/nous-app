@@ -218,6 +218,25 @@ class ProjectRefRequest(BaseModel):
     project_id: SnowflakeId
 
 
+class DuplicateRequest(BaseModel):
+    """POST /assets/{id}/duplicate body — the copy's name, and nothing else.
+
+    Everything else about the copy is derived from the source (that is the
+    point), so this is the whole knob. Omitting ``name`` means "{source}
+    (copy)"; an EMPTY string does not, and is refused like every other blank
+    name on this surface rather than producing an unnamed asset.
+
+    ``extra="forbid"`` for the same reason as :class:`AssetUpdate`: a typo'd
+    ``{"naem": "..."}`` would otherwise answer 201 having quietly used the
+    default name — a request that did something other than what was asked and
+    reported success.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
 # ── response envelopes ─────────────────────────────────────────────────────
 # Every /assets route answers ``{success, data}`` on the way out and
 # ``{success:false, error:{code, detail, ...}}`` on refusal. Declaring both as

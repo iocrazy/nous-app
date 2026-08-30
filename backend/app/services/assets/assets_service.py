@@ -8,8 +8,11 @@ no silent no-ops (CLAUDE.md "触发路径必须类型化失败回显").
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
+from app.db.engine import is_configured
+from app.db.session import maybe_unit_of_work
 from app.repositories.asset_relations_repository import (
     AssetRelationsRepository,
     _serialize_file,
@@ -26,6 +29,7 @@ from app.schemas.assets import (
     AssetCreate,
     AssetUpdate,
     AttachFileRequest,
+    DuplicateRequest,
     LinkRequest,
     LoadoutCreate,
     LoadoutUpdate,
@@ -60,6 +64,27 @@ CLEARABLE_FIELDS = frozenset(
         "prompt_positive_zh",
         "prompt_negative_zh",
     }
+)
+
+# The header a duplicate carries over verbatim. Everything NOT here is decided
+# by ``duplicate`` (name / source / duplicated_from / is_system_preset /
+# scope_id / cover_file_id) or left to the column default (id, the timestamps,
+# ``sort_order`` — a manual shelf position belongs to the row that earned it).
+# An explicit tuple rather than "every column except…": a new column added to
+# ``assets`` should have to be classified once, here, instead of joining the
+# copy silently.
+DUPLICATED_FIELDS = (
+    "asset_type",
+    "subtype",
+    "role_tag",
+    "description",
+    "attrs",
+    "prompt_positive",
+    "prompt_negative",
+    "prompt_positive_zh",
+    "prompt_negative_zh",
+    "platform_params",
+    "tags",
 )
 
 
@@ -224,6 +249,192 @@ class AssetsService:
             # would be a TypeError → 500 instead of the honest 404.
             raise AssetError(404, "asset_not_found", "Asset not found")
         return (await self._derived([updated]))[0]
+
+    async def duplicate(
+        self,
+        asset_id: int,
+        scope_id: int,
+        user_id: Optional[str],
+        req: DuplicateRequest,
+    ) -> Dict[str, Any]:
+        """Copy an asset into the caller's scope, whole (spec §5.1 / P2).
+
+        ``_require``, NOT ``_require_writable``: duplicating a system preset is
+        exactly how a preset gets edited — every direct write to one is a 403 —
+        so any member may copy one. The COPY is a normal row of the caller's
+        scope (``is_system_preset=False``, ``scope_id`` = theirs).
+
+        What comes along, and what deliberately does not:
+
+        * header — ``DUPLICATED_FIELDS`` verbatim (deep-copied: ``attrs`` /
+          ``tags`` / ``platform_params`` are mutable, and handing the new row
+          the SAME object would make an edit to the copy rewrite the original).
+        * ``cover_file_id`` — only if the resource is in the caller's scope.
+          A preset's cover is not, and carrying the id over unchecked would be
+          the cross-tenant reference ``update_asset`` already refuses.
+        * loadouts — name / prompt_extra / sort_order / costume_ids / prop_ids,
+          ``is_default`` preserved, **the default created first**
+          (``uq_loadout_default`` is a partial unique index PostgreSQL checks
+          row by row and cannot defer). This is also why the row is inserted
+          through the repo instead of ``create_asset``: that one adds a
+          "Default" loadout of its own, which would be a second default.
+        * files — same resource / slot / sort_order / note, with
+          ``loadout_id`` REMAPPED onto the new loadout rows. Copying it
+          verbatim would leave the copy's files pointing at the SOURCE's
+          loadouts: a copy that looks complete and behaves as someone else's.
+          A file whose resource is not in the caller's scope is skipped (a
+          preset has none, and the copy must not reference what the caller
+          cannot see).
+        * links — OUTGOING only. An incoming link is someone else's statement
+          about the source; copying it would make that audio voice two
+          characters.
+        * project refs — not copied. A copy is not yet used anywhere.
+
+        All of it in ONE transaction: a half-copied asset (header committed,
+        files not) is worse than no copy, because it is a row the user has to
+        find and delete by hand.
+        """
+        src = await self._require(asset_id, scope_id)
+        name = req.name or f"{src['name']} (copy)"
+
+        fields: Dict[str, Any] = {
+            key: copy.deepcopy(src[key]) for key in DUPLICATED_FIELDS
+        }
+        fields.update(
+            {
+                "scope_id": int(scope_id),
+                "name": name,
+                "source": "duplicated",
+                "duplicated_from": int(src["id"]),
+                "is_system_preset": False,
+                "created_by": user_id,
+                "cover_file_id": await self._cover_for_copy(src, scope_id),
+            }
+        )
+
+        async with maybe_unit_of_work(is_configured()):
+            clash = await self.assets.find_by_name(
+                int(scope_id), src["asset_type"], name
+            )
+            if clash:
+                raise AssetError(
+                    409,
+                    "asset_exists",
+                    "An asset with this name and type already exists in this scope",
+                    {"existing_asset_id": str(clash["id"])},
+                )
+            try:
+                row = await self.assets.create_raw(fields)
+            except DuplicateAssetName as e:
+                # Lost the race with a concurrent insert between the check and
+                # this one. ``create_raw`` cannot look the winner's id up (its
+                # transaction is aborted), so the 409 goes out without the
+                # extra rather than not at all.
+                raise AssetError(
+                    409,
+                    "asset_exists",
+                    "An asset with this name and type already exists in this scope",
+                    (
+                        {"existing_asset_id": str(e.existing_id)}
+                        if e.existing_id
+                        else {}
+                    ),
+                )
+            new_id = int(row["id"])
+            loadout_map = await self._copy_loadouts(
+                int(asset_id), new_id, row["asset_type"]
+            )
+            await self._copy_files(
+                int(asset_id), new_id, scope_id, loadout_map, user_id
+            )
+            outgoing, _incoming = await self.relations.list_links(int(asset_id))
+            for link in outgoing:
+                await self.relations.add_link(
+                    new_id, int(link["to_asset_id"]), link["relation"]
+                )
+        # No touch_asset: the row was INSERTed in this same transaction, so its
+        # updated_at is already now() — the bump exists for relation writes
+        # against a row whose header did not change.
+        return await self.get_asset(new_id, int(scope_id))
+
+    async def _cover_for_copy(
+        self, src: Dict[str, Any], scope_id: int
+    ) -> Optional[int]:
+        cover = src.get("cover_file_id")
+        if cover is None:
+            return None
+        if not await self.relations.resource_in_scope(int(cover), int(scope_id)):
+            return None
+        return int(cover)
+
+    async def _copy_loadouts(
+        self, src_id: int, new_id: int, asset_type: str
+    ) -> Dict[int, int]:
+        """Copy every loadout, default first; returns old id → new id.
+
+        The ordering is not cosmetic — see ``duplicate``'s docstring. The
+        source list is re-sorted here rather than trusted: ``list_loadouts``
+        does order default-first today, but this invariant must not depend on
+        a repo ORDER BY staying that way.
+        """
+        rows = sorted(
+            await self.relations.list_loadouts(src_id),
+            key=lambda lo: (not lo["is_default"], lo.get("sort_order", 0)),
+        )
+        if not rows and asset_type == "character":
+            # ``create_asset`` guarantees every character has a default loadout.
+            # A source seeded without one (a preset) must not produce a copy
+            # that breaks the invariant for every path that assumes it.
+            await self.relations.create_loadout(
+                new_id, {"name": "Default", "is_default": True}
+            )
+            return {}
+        mapping: Dict[int, int] = {}
+        for lo in rows:
+            created = await self.relations.create_loadout(
+                new_id,
+                {
+                    "name": lo["name"],
+                    "is_default": bool(lo["is_default"]),
+                    "costume_ids": [int(c) for c in (lo.get("costume_ids") or [])],
+                    "prop_ids": [int(p) for p in (lo.get("prop_ids") or [])],
+                    "prompt_extra": lo.get("prompt_extra"),
+                    "sort_order": lo.get("sort_order", 0),
+                },
+            )
+            mapping[int(lo["id"])] = int(created["id"])
+        return mapping
+
+    async def _copy_files(
+        self,
+        src_id: int,
+        new_id: int,
+        scope_id: int,
+        loadout_map: Dict[int, int],
+        user_id: Optional[str],
+    ) -> None:
+        for f in await self.relations.list_files(src_id):
+            if not await self.relations.resource_in_scope(
+                int(f["resource_id"]), int(scope_id)
+            ):
+                continue
+            old_lo = f.get("loadout_id")
+            # ``.get`` rather than ``[...]``: every loadout of the source is in
+            # the map, so a miss means the SOURCE row already pointed at a
+            # foreign loadout (``attach_file`` refuses to create one). Copying
+            # that dangling id forward would carry the inconsistency into the
+            # new asset; the copy drops it instead.
+            await self.relations.attach(
+                new_id,
+                int(f["resource_id"]),
+                f["slot"],
+                loadout_id=(
+                    loadout_map.get(int(old_lo)) if old_lo is not None else None
+                ),
+                note=f.get("note"),
+                attached_by=user_id,
+                sort_order=f.get("sort_order", 0),
+            )
 
     async def delete_asset(self, asset_id: int, scope_id: int) -> None:
         # soft_delete's scope predicate never matches a preset (scope_id NULL),

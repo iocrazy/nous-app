@@ -24,6 +24,10 @@ worse, silently do the wrong thing) on the server:
   * the three derived-count GROUP BYs every list page runs (``slot_counts`` /
     ``project_ids`` / ``loadout_counts``) really produce the folded wire row,
     and ``readiness`` is derived from the first of them (case 11).
+  * ``duplicate`` writes four tables in one transaction: its loadout copies must
+    not trip ``uq_loadout_default``, its file rows must land on the COPY's
+    loadouts, and its 409 must stay typed instead of becoming a
+    PendingRollbackError on the aborted transaction (cases 14, 15).
 
 Transport: asyncpg on ``INTEGRATION_DATABASE_URL`` for fixture setup and for the
 assertions; the repos themselves go through ``app.db.session`` (SQLAlchemy async
@@ -737,3 +741,164 @@ async def test_relation_write_bumps_the_assets_updated_at(orm_dsn, pg, fx):
 
     after = await pg.fetchval("SELECT updated_at FROM assets WHERE id = $1", aid)
     assert after > before, "attaching a file left the asset's clock stale"
+
+
+# ── 14. duplicate: the whole copy, with the loadout ids remapped ───────────
+
+
+@_skip
+async def test_duplicate_copies_files_links_and_loadouts_with_ids_remapped(
+    orm_dsn, pg, fx
+):
+    """``duplicate`` writes into four tables in one transaction, and two of its
+    rules are PostgreSQL facts the stubbed unit suite cannot check:
+
+      * the copied loadouts must not violate ``uq_loadout_default`` — a partial
+        unique index the server checks row by row and cannot defer, which is why
+        the default is created FIRST;
+      * ``asset_files.loadout_id`` must land on the COPY's loadout row. A
+        verbatim copy would still satisfy the FK (the source's loadout exists),
+        so nothing but reading the row back proves the remap happened.
+    """
+    from app.schemas.assets import (
+        AssetCreate,
+        AttachFileRequest,
+        DuplicateRequest,
+        LinkRequest,
+        LoadoutCreate,
+        LoadoutUpdate,
+    )
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    r_sheet, r_worn, _unused = fx["resource_ids"]
+
+    src = await service.create_asset(
+        team,
+        AssetCreate(
+            asset_type="character",
+            name=_uniq("Duplicable"),
+            attrs={"height": "tall"},
+            tags={"role": ["hero"]},
+        ),
+        uid,
+    )
+    costume = await service.create_asset(
+        team, AssetCreate(asset_type="costume", name=_uniq("Night Cloak")), uid
+    )
+    aid = int(src["id"])
+    await service.add_link(
+        aid, team, LinkRequest(to_asset_id=costume["id"], relation="wears")
+    )
+    night = await service.create_loadout(
+        aid, team, LoadoutCreate(name="Night raid", costume_ids=[costume["id"]])
+    )
+    # The default is now the SECOND loadout created — so a copy made in source
+    # order would insert a non-default first and the default second.
+    await service.update_loadout(
+        aid, team, int(night["id"]), LoadoutUpdate(is_default=True)
+    )
+    await service.attach_file(
+        aid, team, AttachFileRequest(resource_id=str(r_sheet), slot="sheet"), uid
+    )
+    await service.attach_file(
+        aid,
+        team,
+        AttachFileRequest(resource_id=str(r_worn), slot="worn", loadout_id=night["id"]),
+        uid,
+    )
+    await service.link_project(aid, team, fx["project_id"], uid)
+
+    copied = await service.duplicate(aid, team, uid, DuplicateRequest())
+    new_id = int(copied["id"])
+
+    assert copied["source"] == "duplicated"
+    assert copied["duplicated_from"] == src["id"]
+    assert copied["is_system_preset"] is False
+    assert copied["attrs"] == {"height": "tall"}
+    assert copied["tags"] == {"role": ["hero"]}
+
+    rows = await pg.fetch(
+        "SELECT name, is_default FROM asset_loadouts WHERE asset_id = $1 "
+        "ORDER BY name",
+        new_id,
+    )
+    assert [(r["name"], r["is_default"]) for r in rows] == [
+        ("Default", False),
+        ("Night raid", True),
+    ], "the copy must carry both loadouts and exactly one default"
+
+    new_night = await pg.fetchval(
+        "SELECT id FROM asset_loadouts WHERE asset_id = $1 AND name = 'Night raid'",
+        new_id,
+    )
+    worn = await pg.fetchval(
+        "SELECT loadout_id FROM asset_files WHERE asset_id = $1 AND slot = 'worn'",
+        new_id,
+    )
+    assert int(worn) == int(new_night)
+    assert int(worn) != int(night["id"]), "the file still points at the SOURCE"
+    sheet = await pg.fetchrow(
+        "SELECT loadout_id, resource_id FROM asset_files "
+        "WHERE asset_id = $1 AND slot = 'sheet'",
+        new_id,
+    )
+    assert sheet["loadout_id"] is None and int(sheet["resource_id"]) == r_sheet
+
+    links = await pg.fetch(
+        "SELECT to_asset_id, relation FROM asset_links WHERE from_asset_id = $1",
+        new_id,
+    )
+    assert [(str(r["to_asset_id"]), r["relation"]) for r in links] == [
+        (costume["id"], "wears")
+    ]
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_project_refs WHERE asset_id = $1", new_id
+        )
+        == 0
+    ), "project refs are the source's usage, not the copy's"
+
+
+# ── 15. duplicate: a name collision is a typed 409, not an aborted tx ───────
+
+
+@_skip
+async def test_duplicate_name_collision_is_a_typed_409_and_writes_nothing(
+    orm_dsn, pg, fx
+):
+    """``create``'s 409 path resolves the existing id by SELECTing AFTER the
+    IntegrityError — which inside ``duplicate``'s transaction would be a
+    PendingRollbackError (an untyped 500), because the failed INSERT already
+    aborted it. So ``duplicate`` asks ``find_by_name`` BEFORE inserting and
+    ``create_raw`` never asks after. Only a real server can tell the two apart:
+    against a stub, both answer 409.
+    """
+    from app.schemas.assets import AssetCreate, DuplicateRequest
+    from app.services.assets.assets_service import AssetError, AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    base = _uniq("Bamboo Grove")
+
+    src = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=base), uid
+    )
+    clash = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=f"{base} (copy)"), uid
+    )
+
+    with pytest.raises(AssetError) as excinfo:
+        await service.duplicate(int(src["id"]), team, uid, DuplicateRequest())
+
+    assert excinfo.value.status == 409 and excinfo.value.code == "asset_exists"
+    assert excinfo.value.extra["existing_asset_id"] == clash["id"]
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND asset_type = "
+            "'location' AND deleted_at IS NULL",
+            team,
+        )
+        == 2
+    ), "the refused duplicate must not have left a row behind"

@@ -124,6 +124,37 @@ class AssetsRepository:
             )
             raise DuplicateAssetName(existing_id=int(existing["id"]) if existing else 0)
 
+    async def create_raw(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """INSERT from an explicit FULL column dict (``scope_id`` /
+        ``source`` / ``duplicated_from`` / ``is_system_preset`` included).
+
+        ``create`` exists for the schema-shaped path, where the caller only
+        supplies ``AssetCreate`` fields and the row's provenance is implied.
+        ``duplicate`` owns all of it, so it hands over the whole dict.
+
+        The other difference is load-bearing: a ``uq_assets_scope_type_name``
+        hit raises ``DuplicateAssetName`` with ``existing_id=0`` — **no
+        follow-up SELECT for the real id**. This runs inside the caller's
+        ``unit_of_work()``, where the IntegrityError has ALREADY aborted the
+        transaction: any further statement on that session is a
+        PendingRollbackError (an untyped 500) instead of the typed 409 the
+        caller earned. The caller resolves the existing id with
+        ``find_by_name`` BEFORE inserting; reaching this raise means a
+        concurrent insert won the race between that check and this one, and the
+        409 goes out without the id rather than not at all.
+        """
+        try:
+            async with write_scope() as session:
+                obj = Assets(**fields)
+                session.add(obj)
+                await session.flush()
+                await session.refresh(obj)
+                return _row_dict(obj)
+        except IntegrityError as e:
+            if "uq_assets_scope_type_name" not in str(e.orig):
+                raise
+            raise DuplicateAssetName(existing_id=0)
+
     async def find_by_name(
         self, scope_id: int, asset_type: str, name: str
     ) -> Optional[Dict[str, Any]]:

@@ -18,16 +18,20 @@ Four additions, each of which used to have a silent failure mode:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from app.schemas.assets import (
     AssetCreate,
     AssetUpdate,
     AttachFileRequest,
+    DuplicateRequest,
     LinkRequest,
     LoadoutCreate,
     LoadoutUpdate,
 )
+from app.services.assets import assets_service
 from app.services.assets.assets_service import AssetError, AssetsService
 from tests.services.assets.test_assets_service import (
     SCOPE,
@@ -280,3 +284,287 @@ async def test_tag_filter_is_delegated_to_sql(svc):
     await _two_prompts(svc)
     await svc.list_assets(SCOPE, tag="hero")
     assert svc.assets.list_calls[-1]["tag"] == "hero"
+
+
+# ── duplicate (P2 Task 2) ──────────────────────────────────────────────────
+# A copy is only useful if it is a WHOLE copy: the header fields, the files at
+# their slots, the loadouts with their default, and the loadout each file
+# belongs to. The loadout remap is the part that silently degrades — copying
+# asset_files verbatim would leave the new asset's files pointing at the
+# SOURCE's loadout rows, so the copy would look complete and behave as if its
+# costumes belonged to someone else.
+
+R_WORN = "727145299382534147"
+COVER = "727145299382534148"
+
+
+async def _duplicable_character(svc):
+    """A character carrying one of everything the copy has to decide about.
+
+    Note the default is deliberately NOT the first loadout created: the fake
+    ``list_loadouts`` returns insertion order (the real one sorts default
+    first), so a service that copies in list order would create a non-default
+    row first — and against Postgres that is fine only by luck. Ordering the
+    default first is asserted below.
+    """
+    svc.relations.in_scope_resources |= {int(R_WORN), int(COVER)}
+    ch = await _character(svc, name="Sang Yao")
+    aid = int(ch["id"])
+    costume = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="costume", name="Night Cloak"), USER
+    )
+    await svc.add_link(
+        aid, SCOPE, LinkRequest(to_asset_id=costume["id"], relation="wears")
+    )
+    night = await svc.create_loadout(
+        aid, SCOPE, LoadoutCreate(name="Night raid", costume_ids=[costume["id"]])
+    )
+    await svc.update_loadout(
+        aid, SCOPE, int(night["id"]), LoadoutUpdate(is_default=True)
+    )
+    await svc.attach_file(
+        aid, SCOPE, AttachFileRequest(resource_id=IN_SCOPE_RESOURCE, slot="sheet"), USER
+    )
+    await svc.attach_file(
+        aid,
+        SCOPE,
+        AttachFileRequest(resource_id=R_WORN, slot="worn", loadout_id=night["id"]),
+        USER,
+    )
+    # An INCOMING link (audio voices this character) — must not be copied.
+    audio = await svc.create_asset(
+        SCOPE,
+        AssetCreate(asset_type="audio", name="Sang Yao VO", subtype="voice"),
+        USER,
+    )
+    await svc.add_link(
+        int(audio["id"]), SCOPE, LinkRequest(to_asset_id=ch["id"], relation="voice_of")
+    )
+    await svc.link_project(aid, SCOPE, 55, USER)
+    await svc.update_asset(aid, SCOPE, AssetUpdate(cover_file_id=COVER))
+    return await svc.get_asset(aid, SCOPE)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_copies_the_header_and_marks_provenance(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert out["name"] == "Sang Yao (copy)"
+    assert out["source"] == "duplicated"
+    assert out["duplicated_from"] == src["id"]
+    assert out["is_system_preset"] is False
+    assert out["scope_id"] == str(SCOPE)
+    assert out["id"] != src["id"]
+    for field in (
+        "asset_type",
+        "subtype",
+        "role_tag",
+        "description",
+        "attrs",
+        "prompt_positive",
+        "prompt_negative",
+        "prompt_positive_zh",
+        "prompt_negative_zh",
+        "platform_params",
+        "tags",
+    ):
+        assert out[field] == src[field], field
+
+
+@pytest.mark.asyncio
+async def test_duplicate_honours_an_explicit_name(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(
+        int(src["id"]), SCOPE, USER, DuplicateRequest(name="Sang Yao (v2)")
+    )
+    assert out["name"] == "Sang Yao (v2)"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_copies_the_mutable_json_by_value(svc):
+    """attrs/tags/platform_params are dicts. Handing the new row the SAME object
+    would make an edit to the copy silently rewrite the original."""
+    src = await _character(
+        svc, name="Shared Json", attrs={"height": "tall"}, tags={"role": ["hero"]}
+    )
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    svc.assets.rows[int(out["id"])]["attrs"]["height"] = "short"
+    svc.assets.rows[int(out["id"])]["tags"]["role"].append("villain")
+    assert svc.assets.rows[int(src["id"])]["attrs"] == {"height": "tall"}
+    assert svc.assets.rows[int(src["id"])]["tags"] == {"role": ["hero"]}
+
+
+@pytest.mark.asyncio
+async def test_duplicate_of_a_preset_lands_in_the_callers_scope_as_an_editable_row(svc):
+    """Duplicating IS how a preset gets edited (_require_writable refuses every
+    write to one), so this path must be open to any member — and the result must
+    be a normal, writable row of the caller's scope."""
+    preset = await _character(svc, name="Preset Hero")
+    svc.assets.make_preset(int(preset["id"]))
+    out = await svc.duplicate(int(preset["id"]), SCOPE, USER, DuplicateRequest())
+    assert out["is_system_preset"] is False
+    assert out["scope_id"] == str(SCOPE)
+    assert out["source"] == "duplicated"
+    # and it is writable, unlike its source
+    await svc.update_asset(int(out["id"]), SCOPE, AssetUpdate(description="mine now"))
+    with pytest.raises(AssetError) as ei:
+        await svc.update_asset(int(preset["id"]), SCOPE, AssetUpdate(description="no"))
+    assert ei.value.code == "system_preset_readonly"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_of_an_asset_outside_the_scope_is_404(svc):
+    src = await _character(svc, name="Someone Elses")
+    svc.assets.rows[int(src["id"])]["scope_id"] = 999
+    with pytest.raises(AssetError) as ei:
+        await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert ei.value.status == 404 and ei.value.code == "asset_not_found"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_name_collision_is_409_with_the_existing_id(svc):
+    src = await _character(svc, name="Sang Yao")
+    clash = await _character(svc, name="Sang Yao (copy)")
+    with pytest.raises(AssetError) as ei:
+        await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert ei.value.status == 409 and ei.value.code == "asset_exists"
+    assert ei.value.extra["existing_asset_id"] == clash["id"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_copies_loadouts_default_first_and_adds_no_extra_default(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    new_id = int(out["id"])
+    created = [lo for lo in svc.relations.loadouts.values() if lo["asset_id"] == new_id]
+    assert [lo["name"] for lo in created] == ["Night raid", "Default"], (
+        "the default must be created FIRST — uq_loadout_default is a partial "
+        "unique index Postgres checks row by row and cannot defer"
+    )
+    assert [lo["is_default"] for lo in created] == [True, False]
+    assert len(created) == len(src["loadouts"]), "no auto-Default on top of the copy"
+    night = created[0]
+    src_night = next(lo for lo in src["loadouts"] if lo["name"] == "Night raid")
+    assert night["costume_ids"] == [int(c) for c in src_night["costume_ids"]]
+    assert night["prompt_extra"] == src_night["prompt_extra"]
+    assert night["sort_order"] == src_night["sort_order"]
+
+
+@pytest.mark.asyncio
+async def test_a_character_without_loadouts_still_gets_its_default(svc):
+    """``create_asset`` guarantees every character has one; a preset seeded
+    without loadouts must not produce a copy that breaks the invariant."""
+    src = await _character(svc, name="Loadoutless")
+    for lid in [
+        lo["id"]
+        for lo in svc.relations.loadouts.values()
+        if lo["asset_id"] == int(src["id"])
+    ]:
+        del svc.relations.loadouts[lid]
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    created = [
+        lo for lo in svc.relations.loadouts.values() if lo["asset_id"] == int(out["id"])
+    ]
+    assert [(lo["name"], lo["is_default"]) for lo in created] == [("Default", True)]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_remaps_each_file_onto_the_new_loadout(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    new_id = int(out["id"])
+    new_night = next(
+        lo
+        for lo in svc.relations.loadouts.values()
+        if lo["asset_id"] == new_id and lo["name"] == "Night raid"
+    )
+    src_night = next(lo for lo in src["loadouts"] if lo["name"] == "Night raid")
+    by_slot = {f["slot"]: f for f in out["files"]}
+    assert set(by_slot) == {"sheet", "worn"}
+    assert by_slot["sheet"]["loadout_id"] is None, "a null loadout stays null"
+    assert by_slot["worn"]["loadout_id"] == str(new_night["id"])
+    assert by_slot["worn"]["loadout_id"] != src_night["id"], (
+        "copying the loadout_id verbatim points the copy's file at the SOURCE's "
+        "loadout row"
+    )
+    assert by_slot["sheet"]["resource_id"] == IN_SCOPE_RESOURCE
+    assert by_slot["worn"]["resource_id"] == R_WORN
+
+
+@pytest.mark.asyncio
+async def test_duplicate_skips_a_file_whose_resource_is_not_in_the_scope(svc):
+    src = await _duplicable_character(svc)
+    svc.relations.in_scope_resources -= {int(R_WORN)}
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert [f["slot"] for f in out["files"]] == ["sheet"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_copies_outgoing_links_only(svc):
+    src = await _duplicable_character(svc)
+    assert src["linked_by"], "the fixture must have an incoming link to prove this"
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert [(link["to_asset_id"], link["relation"]) for link in out["links"]] == [
+        (link["to_asset_id"], link["relation"]) for link in src["links"]
+    ]
+    assert out["linked_by"] == [], (
+        "an incoming link says someone ELSE points here; copying it would make "
+        "the audio voice two characters"
+    )
+
+
+@pytest.mark.asyncio
+async def test_duplicate_does_not_copy_project_refs(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert (int(src["id"]), 55) in svc.relations.refs
+    assert [r for r in svc.relations.refs if r[0] == int(out["id"])] == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_keeps_an_in_scope_cover(svc):
+    src = await _duplicable_character(svc)
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert out["cover_file_id"] == COVER
+
+
+@pytest.mark.asyncio
+async def test_duplicate_drops_a_cover_the_caller_cannot_see(svc):
+    """The source may be a preset (or a row whose cover has since left the
+    scope). Carrying the id over unchecked is a cross-tenant reference — the
+    same 404 ``update_asset`` refuses, so here it is dropped rather than copied.
+    """
+    src = await _duplicable_character(svc)
+    svc.relations.in_scope_resources -= {int(COVER)}
+    out = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert out["cover_file_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_whole_copy_happens_inside_one_unit_of_work(svc, monkeypatch):
+    """A half-copied asset (header committed, files not) is worse than no copy:
+    it is a row the user must find and delete by hand."""
+    src = await _duplicable_character(svc)
+    events: list[tuple] = []
+
+    def _snapshot():
+        return (
+            len(svc.assets.rows),
+            len(svc.relations.loadouts),
+            len(svc.relations.files),
+            len(svc.relations.links),
+        )
+
+    @asynccontextmanager
+    async def _spy(enabled):
+        events.append(("enter", _snapshot()))
+        yield None
+        events.append(("exit", _snapshot()))
+
+    monkeypatch.setattr(assets_service, "maybe_unit_of_work", _spy)
+    await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert [e[0] for e in events] == ["enter", "exit"], "exactly one transaction"
+    before, after = events[0][1], events[1][1]
+    assert all(
+        a > b for a, b in zip(after, before)
+    ), "the asset row AND every relation copy must land inside the transaction"

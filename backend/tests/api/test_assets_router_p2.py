@@ -234,3 +234,60 @@ async def test_service_asset_error_from_the_list_still_maps(app):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/api/v1/assets?scope_id=9000")
     assert r.status_code == 403 and r.json()["error"]["code"] == "not_a_member"
+
+
+# ── POST /assets/{id}/duplicate ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_duplicate_answers_201_with_the_new_asset_detail(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/v1/assets/5/duplicate?scope_id=9000", json={})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["success"] is True
+    assert body["data"]["id"] == "99"
+    assert body["data"]["source"] == "duplicated"
+    assert body["data"]["duplicated_from"] == "5"
+    # The detail envelope, not the summary one: the caller opens the copy next.
+    assert body["data"]["loadouts"] == [] and body["data"]["files"] == []
+    assert app.state.fake.calls[0] == ("duplicate", 9000, {"asset_id": 5, "name": None})
+
+
+@pytest.mark.asyncio
+async def test_duplicate_passes_an_explicit_name_through(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets/5/duplicate?scope_id=9000", json={"name": "Sang Yao (v2)"}
+        )
+    assert r.status_code == 201, r.text
+    assert r.json()["data"]["name"] == "Sang Yao (v2)"
+    assert app.state.fake.calls[0][2]["name"] == "Sang Yao (v2)"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_name_collision_keeps_the_error_envelope(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post("/api/v1/assets/409/duplicate?scope_id=9000", json={})
+    assert r.status_code == 409
+    assert r.json() == {
+        "success": False,
+        "error": {
+            "code": "asset_exists",
+            "detail": "exists",
+            "existing_asset_id": "7",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_duplicate_rejects_an_unknown_body_field(app):
+    """``extra="forbid"``: a typo'd ``naem`` would otherwise answer 201 with a
+    copy under the DEFAULT name — a request that did something else and said
+    it succeeded."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets/5/duplicate?scope_id=9000", json={"naem": "typo"}
+        )
+    assert r.status_code == 422, r.text
+    assert app.state.fake.calls == []
