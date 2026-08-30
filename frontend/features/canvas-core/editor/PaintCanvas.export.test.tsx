@@ -1,54 +1,69 @@
 /**
- * Exporting a brush composite when the base image is not CORS-readable.
+ * Exporting a brush composite: the base image is FETCHED, not read off the
+ * <img>.
  *
- * Reported: "I drew something and then Apply Brush does nothing."
+ * Reported (with screenshot): "the brushed result has no base image, only the
+ * strokes" — and, moments earlier, "the main image vanished for a second
+ * until I pressed undo".
  *
- * The base image is loaded `crossOrigin="anonymous"` first; a host without
- * CORS headers rejects that, so the component falls back to a plain load. A
- * plain-loaded cross-origin image TAINTS the canvas it is drawn onto, and
- * `toBlob` on a tainted canvas throws — the export resolves to null and the
- * Apply handler silently does nothing. Nothing is logged where the user can
- * see it; the button just feels dead.
+ * Root cause, measured on prod: a request carrying an `Origin` header (which
+ * is what `crossOrigin="anonymous"` sends) intermittently gets a 502 from the
+ * edge, while the same URL without `Origin` returns 200 every time. The old
+ * design loaded the DISPLAY image with `crossOrigin` so the canvas could read
+ * it back; one blip → onError → the component flipped to a plain load for
+ * good (that's the flash) and every later export was overlay-only.
  *
- * The existing code meant to "degrade to overlay-only", but guarded the wrong
- * call: `drawImage` does NOT throw on a cross-origin image — it succeeds and
- * quietly taints. So that fallback never ran.
- *
- * Contract: when the base could not be loaded CORS-clean, export the
- * annotation layer alone. An overlay is worth strictly more than nothing.
+ * New contract:
+ *   - The display <img> never carries `crossOrigin`. Showing a picture needs
+ *     no pixel access, so it must not depend on CORS at all.
+ *   - `exportComposite` fetches the bytes itself through `apiFetch` (auth +
+ *     the dual-channel failover the app already has), draws from a blob URL
+ *     (same-origin, so no taint), and retries once on failure.
+ *   - When the base cannot be fetched, it says so: `{ blob, baseIncluded:
+ *     false }`. The caller decides — and must not save an overlay-only image
+ *     as if it were the result.
  */
 
 import { createRef } from 'react';
 import { fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const apiFetch = vi.fn<(path: string, opts?: unknown) => Promise<Response>>();
+vi.mock('../../../services/apiClient', () => ({
+  apiFetch: (path: string, opts?: unknown) => apiFetch(path, opts),
+}));
+vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => `https://api.test${u}` }));
+
 import { PaintCanvas, type PaintCanvasHandle } from './PaintCanvas';
 
 interface Ctx {
   drawImage: ReturnType<typeof vi.fn>;
-  clearRect: ReturnType<typeof vi.fn>;
-  getImageData: ReturnType<typeof vi.fn>;
-  putImageData: ReturnType<typeof vi.fn>;
-  beginPath: ReturnType<typeof vi.fn>;
   [k: string]: unknown;
 }
-
 let ctx: Ctx;
-/** True once the origin refused a CORS-clean load, so the base image would
- *  taint anything it is drawn onto — exactly how a browser behaves. */
-let corsBlocked = false;
-/** Set by drawing the blocked base image. Not a knob: tainting is a
- *  CONSEQUENCE of compositing that image, which is the causality the fix
- *  depends on. */
-let tainted = false;
+
+// Deliberately NOT `new Response(blob)`: jsdom's Blob has no `stream()`, and
+// node 22's undici calls it when constructing a Response from a Blob (node 24
+// takes another path — which is why this only ever went red on CI, where
+// .nvmrc pins 22). The component reads exactly `ok` and `blob()` off what
+// apiFetch returns, so hand it those and stay off the runtime's Response.
+const okResponse = () =>
+  ({
+    ok: true,
+    status: 200,
+    blob: async () => new Blob(['png-bytes'], { type: 'image/png' }),
+  }) as unknown as Response;
+const badResponse = () =>
+  ({
+    ok: false,
+    status: 502,
+    blob: async () => new Blob([], { type: 'text/plain' }),
+  }) as unknown as Response;
 
 beforeEach(() => {
-  corsBlocked = false;
-  tainted = false;
+  apiFetch.mockReset();
   ctx = {
-    drawImage: vi.fn((source: unknown) => {
-      if (corsBlocked && source instanceof HTMLImageElement) tainted = true;
-    }),
+    drawImage: vi.fn(),
     clearRect: vi.fn(),
     getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
     putImageData: vi.fn(),
@@ -68,10 +83,23 @@ beforeEach(() => {
   };
   HTMLCanvasElement.prototype.getContext = vi.fn(() => ctx) as never;
   HTMLCanvasElement.prototype.toBlob = vi.fn(function (this: HTMLCanvasElement, cb) {
-    // A tainted canvas throws SecurityError on toBlob — that is the whole bug.
-    if (tainted) throw new Error('SecurityError: tainted canvas');
     (cb as (b: Blob | null) => void)(new Blob(['x'], { type: 'image/png' }));
   }) as never;
+  // jsdom has no createImageBitmap / object URLs; the component decodes the
+  // fetched blob through an <img>, which we complete by hand.
+  globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock') as never;
+  globalThis.URL.revokeObjectURL = vi.fn() as never;
+  Object.defineProperty(HTMLImageElement.prototype, 'src', {
+    configurable: true,
+    set(this: HTMLImageElement, v: string) {
+      this.setAttribute('src', v);
+      // Decoding "succeeds" on the next tick.
+      setTimeout(() => this.onload?.(new Event('load')), 0);
+    },
+    get(this: HTMLImageElement) {
+      return this.getAttribute('src') ?? '';
+    },
+  });
 });
 
 afterEach(() => {
@@ -81,52 +109,66 @@ afterEach(() => {
 function renderCanvas() {
   const ref = createRef<PaintCanvasHandle>();
   const view = render(
-    <PaintCanvas ref={ref} src="https://api.example.com/img.png" tool="free" color="#f00" size={4} />,
+    <PaintCanvas ref={ref} src="/api/v1/generated-media/7/cover" tool="free" color="#f00" size={4} />,
   );
   const img = view.container.querySelector('img') as HTMLImageElement;
-  // Give the overlay a size, as a loaded image would.
   Object.defineProperty(img, 'naturalWidth', { value: 100, configurable: true });
   Object.defineProperty(img, 'naturalHeight', { value: 80, configurable: true });
+  fireEvent.load(img);
   return { ref, img, view };
 }
 
-describe('PaintCanvas.exportComposite — cross-origin fallback', () => {
-  it('includes the base image when it loaded CORS-clean', async () => {
-    const { ref, img } = renderCanvas();
-    fireEvent.load(img);
+describe('PaintCanvas — display never depends on CORS', () => {
+  it('renders the base image without a crossOrigin attribute', () => {
+    const { img } = renderCanvas();
+    expect(
+      img.getAttribute('crossorigin'),
+      'display image still loaded with crossOrigin — one edge blip and it degrades for good',
+    ).toBeNull();
+  });
+});
 
-    const blob = await ref.current!.exportComposite();
-    expect(blob, 'export produced nothing on the happy path').not.toBeNull();
-    // base + annotation layer
-    expect(ctx.drawImage).toHaveBeenCalledTimes(2);
+describe('PaintCanvas.exportComposite — fetches the base itself', () => {
+  it('fetches the base through apiFetch and composites base + annotations', async () => {
+    apiFetch.mockResolvedValueOnce(okResponse());
+    const { ref } = renderCanvas();
+
+    const out = await ref.current!.exportComposite();
+
+    expect(apiFetch).toHaveBeenCalledWith('/api/v1/generated-media/7/cover', expect.anything());
+    expect(out.blob).not.toBeNull();
+    expect(out.baseIncluded).toBe(true);
+    expect(ctx.drawImage, 'base + overlay').toHaveBeenCalledTimes(2);
   });
 
-  it('still produces a blob when the base could not be loaded CORS-clean', async () => {
-    const { ref, img } = renderCanvas();
-    // The anonymous attempt is rejected by a host without CORS headers, so
-    // the component falls back to a plain load. From here, compositing that
-    // image taints the canvas.
-    corsBlocked = true;
-    fireEvent.error(img);
-    fireEvent.load(img);
+  it('retries once when the first fetch fails — the edge is flaky, not broken', async () => {
+    apiFetch.mockResolvedValueOnce(badResponse()).mockResolvedValueOnce(okResponse());
+    const { ref } = renderCanvas();
 
-    const blob = await ref.current!.exportComposite();
-    expect(
-      blob,
-      'export returned null — Apply Brush silently does nothing for the user',
-    ).not.toBeNull();
+    const out = await ref.current!.exportComposite();
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(out.baseIncluded, 'gave up after a single failed fetch').toBe(true);
   });
 
-  it('exports the annotation layer ALONE in that case, never the tainting base', async () => {
-    const { ref, img } = renderCanvas();
-    corsBlocked = true;
-    fireEvent.error(img);
-    fireEvent.load(img);
+  it('reports baseIncluded=false when the base cannot be fetched at all', async () => {
+    apiFetch.mockResolvedValue(badResponse());
+    const { ref } = renderCanvas();
 
-    await ref.current!.exportComposite();
-    expect(
-      ctx.drawImage,
-      'the base image was still drawn — that is what taints the canvas',
-    ).toHaveBeenCalledTimes(1);
+    const out = await ref.current!.exportComposite();
+
+    expect(out.blob, 'the annotation layer itself is still exportable').not.toBeNull();
+    expect(out.baseIncluded, 'silently claimed the base was there').toBe(false);
+    expect(ctx.drawImage, 'must not draw the (unreadable) display image').toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a thrown fetch the same as a bad status', async () => {
+    apiFetch.mockRejectedValue(new Error('network'));
+    const { ref } = renderCanvas();
+
+    const out = await ref.current!.exportComposite();
+
+    expect(out.blob).not.toBeNull();
+    expect(out.baseIncluded).toBe(false);
   });
 });

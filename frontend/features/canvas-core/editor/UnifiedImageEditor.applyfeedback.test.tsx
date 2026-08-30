@@ -1,17 +1,18 @@
 /**
- * Apply must never fail silently.
+ * Apply must never fail silently — and must never SAVE the wrong thing
+ * silently either.
  *
- * Reported: "I drew with the brush and then Apply Brush does nothing."
+ * Reported: "I drew with the brush and then Apply Brush does nothing." Then,
+ * with a screenshot: "the brushed result has no base image, only the strokes."
  *
- * The brush path is four optional links deep —
- *   `paintRef.current?.exportComposite()` → `if (blob)` → `onBrushCommit?.()`
- * — and every one of them fails by doing nothing at all. Whatever the cause on
- * a given machine (canvas taint, a missing handler, an export that returns
- * null), the user sees an identical dead button and we get no signal back.
+ * The brush path is a chain of optional links; every one of them used to
+ * fail by doing nothing. Worse, when the base image could not be read the
+ * export quietly shipped the annotation layer alone and the editor saved THAT
+ * as the result — an overlay on a transparent background, presented as the
+ * user's picture.
  *
- * This is the "typed failure feedback" rule from CLAUDE.md: a user action that
- * cannot complete must SAY so. It also turns the next report into a sentence
- * we can act on instead of "the button doesn't work".
+ * Contract: a failed export gets a visible reason; an export that could not
+ * include the base image is NOT committed, and the reason says so.
  */
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -19,8 +20,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => u }));
 
-// A paint canvas whose export fails the way a tainted one does.
-let exportResult: Blob | null = null;
+let exportResult: { blob: Blob | null; baseIncluded: boolean } = {
+  blob: null,
+  baseIncluded: false,
+};
 vi.mock('./PaintCanvas', async () => {
   const React = await import('react');
   return {
@@ -28,9 +31,6 @@ vi.mock('./PaintCanvas', async () => {
       props: { onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void },
       ref: React.Ref<unknown>,
     ) {
-      // Report a stroke ONCE so Apply is enabled. `props` is a fresh object
-      // every render, so depending on it here re-fires the parent's setState
-      // forever — mount-only is what the real component does too.
       const notified = React.useRef(false);
       React.useEffect(() => {
         if (notified.current) return;
@@ -52,6 +52,8 @@ vi.mock('./PaintCanvas', async () => {
 
 import { UnifiedImageEditor } from './UnifiedImageEditor';
 
+const png = () => new Blob(['x'], { type: 'image/png' });
+
 function openBrush(onBrushCommit = vi.fn()) {
   render(
     <UnifiedImageEditor
@@ -68,20 +70,31 @@ function openBrush(onBrushCommit = vi.fn()) {
 
 describe('Apply feedback', () => {
   it('tells the user when the brush export produced nothing', async () => {
-    exportResult = null;
-    openBrush();
+    exportResult = { blob: null, baseIncluded: false };
+    const onBrushCommit = openBrush();
 
     fireEvent.click(screen.getByTestId('editor-apply'));
 
     const alert = await screen.findByRole('alert');
-    expect(
-      alert.textContent,
-      'no visible reason was given — the button just looks broken',
-    ).toBeTruthy();
+    expect(alert.textContent, 'no visible reason — the button just looks broken').toBeTruthy();
+    expect(onBrushCommit).not.toHaveBeenCalled();
   });
 
-  it('does not show an error when the export succeeds', async () => {
-    exportResult = new Blob(['x'], { type: 'image/png' });
+  it('does NOT save an overlay-only export, and says why', async () => {
+    // The base image could not be fetched. Saving the strokes on a transparent
+    // background as "the result" is exactly the screenshot the user sent.
+    exportResult = { blob: png(), baseIncluded: false };
+    const onBrushCommit = openBrush();
+
+    fireEvent.click(screen.getByTestId('editor-apply'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/base image/i);
+    expect(onBrushCommit, 'committed an overlay-only image').not.toHaveBeenCalled();
+  });
+
+  it('commits and shows no error when the base was included', async () => {
+    exportResult = { blob: png(), baseIncluded: true };
     const onBrushCommit = openBrush();
 
     fireEvent.click(screen.getByTestId('editor-apply'));
@@ -91,12 +104,12 @@ describe('Apply feedback', () => {
   });
 
   it('clears a previous error once a later apply works', async () => {
-    exportResult = null;
+    exportResult = { blob: png(), baseIncluded: false };
     const onBrushCommit = openBrush();
     fireEvent.click(screen.getByTestId('editor-apply'));
     await screen.findByRole('alert');
 
-    exportResult = new Blob(['x'], { type: 'image/png' });
+    exportResult = { blob: png(), baseIncluded: true };
     fireEvent.click(screen.getByTestId('editor-apply'));
 
     await waitFor(() => expect(onBrushCommit).toHaveBeenCalled());

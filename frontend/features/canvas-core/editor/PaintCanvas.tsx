@@ -27,6 +27,40 @@ import {
 } from 'react';
 
 import { mediaSrc } from '../smart/mediaUrl';
+import { apiFetch } from '../../../services/apiClient';
+
+/** Fetch the base image as a decodable bitmap, or null when it cannot be had.
+ *  Relative `/api/...` sources go through `apiFetch` (auth + failover); other
+ *  URLs use a plain CORS fetch. Retries once. */
+async function fetchBaseBitmap(src: string): Promise<HTMLImageElement | null> {
+  const attempt = async (): Promise<Blob | null> => {
+    try {
+      const res = src.startsWith('/api/')
+        ? await apiFetch(src, { method: 'GET' })
+        : await fetch(mediaSrc(src), { mode: 'cors' });
+      if (!res.ok) return null;
+      return await res.blob();
+    } catch (err) {
+      console.error('[paint] base fetch failed', err);
+      return null;
+    }
+  };
+  const blob = (await attempt()) ?? (await attempt());
+  if (!blob) return null;
+  const url = URL.createObjectURL(blob);
+  try {
+    return await new Promise<HTMLImageElement | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  } finally {
+    // Revoke on the next tick: the bitmap is decoded by then and drawImage
+    // does not need the URL any more.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+}
 import type { PaintShapeTool } from './PaintTool';
 
 const HISTORY_MAX = 40;
@@ -37,7 +71,12 @@ export interface PaintCanvasHandle {
   clear(): void;
   isEmpty(): boolean;
   /** Base image + drawing overlay → PNG blob (null when nothing drawn). */
-  exportComposite(): Promise<Blob | null>;
+  /**
+   * Composite base + annotations. `baseIncluded=false` means the base image
+   * could not be fetched and only the annotation layer is in `blob` —
+   * callers must not present that as the finished picture.
+   */
+  exportComposite(): Promise<{ blob: Blob | null; baseIncluded: boolean }>;
 }
 
 function circledNumber(n: number): string {
@@ -56,16 +95,12 @@ export const PaintCanvas = forwardRef<
   }
 >(function PaintCanvas({ src, alt = '', tool, color, size, onHistoryChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  // crossOrigin lets exportComposite read the pixels back, but a host that
-  // does not send CORS headers REJECTS the request outright and the image
-  // never paints (2026-08-22: brush tab showed a broken-image icon). Try
-  // anonymous first, fall back to a plain load — the export path then
-  // degrades to overlay-only instead of failing to show anything.
-  const [anonymous, setAnonymous] = useState(true);
-  // The imperative handle closes over state, so export must read this through
-  // a ref or it will act on a stale value.
-  const anonymousRef = useRef(true);
-  anonymousRef.current = anonymous;
+  // The display image is a plain <img>: showing a picture needs no pixel
+  // access, so it must not depend on CORS. The previous design loaded it with
+  // crossOrigin so the canvas could read it back — and one intermittent 502
+  // on an Origin-bearing request (measured on prod, 2026-08-29) flipped the
+  // component into "overlay only" for good, with a visible flash as the
+  // element re-mounted. Export fetches its own bytes instead; see below.
   const imgRef = useRef<HTMLImageElement | null>(null);
   const undoStack = useRef<ImageData[]>([]);
   const redoStack = useRef<ImageData[]>([]);
@@ -309,46 +344,34 @@ export const PaintCanvas = forwardRef<
     },
     async exportComposite() {
       const c = canvasRef.current;
-      const img = imgRef.current;
-      if (!c || !img || !c.width) return null;
+      if (!c || !c.width) return { blob: null, baseIncluded: false };
       const out = document.createElement('canvas');
       out.width = c.width;
       out.height = c.height;
       const ctx = out.getContext('2d');
-      if (!ctx) return null;
+      if (!ctx) return { blob: null, baseIncluded: false };
 
-      // Only composite the base when it was loaded CORS-clean.
-      //
-      // A plain-loaded cross-origin image does NOT throw here — `drawImage`
-      // succeeds and quietly TAINTS the canvas, and the failure only surfaces
-      // later as a SecurityError from `toBlob`. The previous code guarded
-      // this call instead, so its "overlay only" fallback never ran: export
-      // returned null and Apply Brush silently did nothing.
-      //
-      // Skipping the base keeps the canvas clean, so the annotation layer
-      // still exports. An overlay is worth strictly more than nothing.
-      if (anonymousRef.current) {
-        try {
-          ctx.drawImage(img, 0, 0, out.width, out.height);
-        } catch (err) {
-          console.error('[paint] base image not exportable, overlay only', err);
-        }
+      // Fetch the base through the API client rather than reading the
+      // display <img>: that goes through auth and the dual-channel failover,
+      // and a blob URL is same-origin, so drawing it never taints the canvas.
+      // One retry: the failure this guards against is an edge blip, not a
+      // dead resource.
+      const base = await fetchBaseBitmap(src);
+      if (base) {
+        ctx.drawImage(base, 0, 0, out.width, out.height);
       } else {
-        console.warn(
-          '[paint] base image is not CORS-readable; exporting the annotation layer only',
-        );
+        console.warn('[paint] base image could not be fetched; exporting annotations only');
       }
       ctx.drawImage(c, 0, 0);
-      return new Promise((resolve) => {
+      const blob = await new Promise<Blob | null>((resolve) => {
         try {
           out.toBlob(resolve, 'image/png');
         } catch (err) {
-          // Defence in depth: we should no longer be tainted, but a null here
-          // would be an invisible dead end for the user either way.
-          console.error('[paint] export failed (tainted canvas)', err);
+          console.error('[paint] export failed', err);
           resolve(null);
         }
       });
+      return { blob, baseIncluded: base !== null };
     },
   }));
 
@@ -364,15 +387,10 @@ export const PaintCanvas = forwardRef<
   return (
     <div className="relative inline-block max-h-full max-w-full select-none">
       <img
-        key={anonymous ? 'anon' : 'plain'}
         ref={imgRef}
         src={mediaSrc(src)}
         alt={alt}
         draggable={false}
-        {...(anonymous ? { crossOrigin: 'anonymous' as const } : {})}
-        onError={() => {
-          if (anonymous) setAnonymous(false);
-        }}
         className="pointer-events-none block max-h-[62vh] max-w-full object-contain"
         onLoad={(e) => {
           const img = e.currentTarget;

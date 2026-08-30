@@ -201,10 +201,17 @@ export function UnifiedImageEditor({
       }
       void paint
         .exportComposite()
-        .then((blob) => {
+        .then(({ blob, baseIncluded }) => {
           if (!blob) {
+            setApplyError('Could not export the drawing — try again.');
+            return;
+          }
+          if (!baseIncluded) {
+            // Refuse rather than save strokes on a transparent background and
+            // call it the result. The base fetch already retried once; a
+            // second Apply is the user's retry.
             setApplyError(
-              'Could not export the drawing. The image may be blocked from being read back; try reopening the editor.',
+              'The base image could not be fetched, so the drawing was not saved. Try Apply again.',
             );
             return;
           }
