@@ -338,11 +338,11 @@ describe('PublishPage — image posts, once the backend declares support', () =>
     // is a statement about images mode and not about a query that finds
     // nothing anywhere.
     expect(formSections()).toEqual([
-      'Content', 'Cover', 'Title', 'Description', 'More options', 'Distribution mode',
+      'Content', 'Cover', 'Title', 'Description', 'Extended info', 'Publish settings', 'More options', 'Distribution mode',
     ]);
 
     fireEvent.click(imagesTab());
-    expect(formSections()).toEqual(['Content', 'Title', 'Description', 'More options']);
+    expect(formSections()).toEqual(['Content', 'Title', 'Description', 'Extended info', 'Publish settings', 'More options']);
 
     // The fact the removed card carried is still stated — in the Summary,
     // beside the rest of the post's facts.

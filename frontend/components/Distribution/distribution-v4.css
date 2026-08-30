@@ -817,3 +817,9 @@
 .dist-v4 .fcard h4 .cs-help { margin-left: 4px; }
 .dist-v4 .frow .lbl b { font-weight: 500; font-size: 13px; color: var(--content-2); }
 .dist-v4 .pv-note-tip .cs-help { margin-left: 2px; }
+
+/* Section groups the platform's way (2026-08-30): 基础信息 / 扩展信息 / 发布设置.
+   A section head is a big bold line above a run of cards; the two settings
+   cards carry their own heading like every other card. */
+.dist-v4 .section-head { font-size: 16px; font-weight: 650; color: var(--content); margin: 4px 0 10px; }
+.dist-v4 .frow .lbl b .cs-help { margin-left: 4px; vertical-align: -1px; }

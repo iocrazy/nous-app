@@ -65,3 +65,23 @@
   display: block;
   transform: translateX(-50%) translateY(0);
 }
+
+/* Edge-aware anchoring (set by HelpTip on hover/focus). */
+.cs-help.from-left .cs-tip {
+  left: -6px;
+  transform: none;
+}
+.cs-help.from-left .cs-tip::after {
+  left: 12px;
+  margin-left: 0;
+}
+.cs-help.from-right .cs-tip {
+  left: auto;
+  right: -6px;
+  transform: none;
+}
+.cs-help.from-right .cs-tip::after {
+  left: auto;
+  right: 12px;
+  margin-left: 0;
+}
