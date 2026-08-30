@@ -13,7 +13,15 @@ import {
   Pencil,
   Loader2,
   Sparkles,
+  Boxes,
+  Users,
+  MapPin,
+  Package,
+  Shirt,
+  FileText,
+  AudioLines,
 } from 'lucide-react';
+import { ASSET_TYPES, type AssetType } from './assets/assetSlots';
 import { formatCappedCount } from '../utils/cappedCount';
 import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
@@ -44,6 +52,18 @@ const sidebarItemClass = (active: boolean) =>
       ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
       : 'text-content-2 hover:bg-island-2 hover:text-content-2'
   }`;
+
+// type → rail icon. Keyed by AssetType so a seventh type added to the slot
+// table fails to compile here rather than rendering an iconless row.
+// Lucide only (CLAUDE.md: no emoji in UI).
+const ASSET_TYPE_ICON: Record<AssetType, React.ComponentType<{ size?: number; className?: string }>> = {
+  character: Users,
+  location: MapPin,
+  prop: Package,
+  costume: Shirt,
+  prompt: FileText,
+  audio: AudioLines,
+};
 
 // Section label (island redesign D3) — visual grouping only, no behavior.
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -81,11 +101,14 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     isSharedView,
     isDownloadsView,
     isGeneratedView,
+    isAssetsView,
+    selectedAssetType,
     resPath,
     navigate,
     myResourcesCount,
     downloadsCount,
     generatedUnreviewedCount,
+    assetCounts,
   } = useResourcesContext();
 
   // Module Control Center display switch — My Downloads is the media-parser
@@ -114,6 +137,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
 
   // ── Local UI state ──
   const [librariesExpanded, setLibrariesExpanded] = useState(true);
+  const [assetsExpanded, setAssetsExpanded] = useState(true);
   const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(true);
   const [creatingLibrary, setCreatingLibrary] = useState(false);
   const [newLibraryName, setNewLibraryName] = useState('');
@@ -323,6 +347,70 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
             </span>
           )}
         </button>
+
+        {/* Assets — the asset library (P2). Like Generated, rendered OUTSIDE
+            the personal/team split: `assets.scope_id` IS a team id, so the
+            routes, the view flag and fetchAssetCounts all work in both scopes.
+            The parent row navigates to the landing page AND toggles the
+            children, because a group whose only affordance is expansion hides
+            the "everything" view behind six type-specific ones. */}
+        <div className="flex items-center justify-between pr-1">
+          <button
+            onClick={() => {
+              navigate(resPath('/resources/assets'));
+              setAssetsExpanded(true);
+            }}
+            className={sidebarItemClass(isAssetsView && !selectedAssetType)}
+          >
+            <Boxes size={15} className="shrink-0 opacity-70" />
+            <span className="flex-1 truncate">{t('resources.assets', 'Assets')}</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setAssetsExpanded((v) => !v);
+            }}
+            className={`p-1 ${cText600} ${cHover300} ${cHoverSurface800} rounded-md transition-colors shrink-0`}
+            aria-label={t('resources.assets', 'Assets')}
+            aria-expanded={assetsExpanded}
+          >
+            <ChevronDown
+              size={12}
+              className={`shrink-0 ${cText500} transition-transform duration-200 ${assetsExpanded ? '' : '-rotate-90'}`}
+            />
+          </button>
+        </div>
+
+        {/* One child per asset type, in slot-table order. The count rides as
+            plain text (not a pill) — these are inventory sizes, not a backlog
+            demanding attention, and six warn-toned pills would drown the one
+            pill above that does mean "act on me".
+            A count is omitted when it is 0 or not yet known: `assetCounts` is
+            null while loading OR after a failed fetch, and rendering six zeros
+            on a fetch we never got back would assert an empty library. */}
+        {assetsExpanded && (
+          <div className={`ml-3 border-l ${cBorderChild} pl-0.5`}>
+            {ASSET_TYPES.map((type) => {
+              const Icon = ASSET_TYPE_ICON[type];
+              const count = assetCounts?.[type];
+              return (
+                <button
+                  key={type}
+                  onClick={() => navigate(resPath(`/resources/assets/${type}`))}
+                  className={sidebarItemClass(isAssetsView && selectedAssetType === type)}
+                >
+                  <Icon size={14} className="shrink-0 opacity-60" />
+                  <span className="flex-1 truncate">{t(`assets.types.${type}`)}</span>
+                  {count !== undefined && count > 0 && (
+                    <span className={`text-[11px] ${cText500} tabular-nums`}>
+                      {formatCappedCount(count)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── Divider ── */}
         <div className={`mx-1 my-2.5 border-t ${cBorderSection}`} />

@@ -1672,6 +1672,7 @@
     "systemFolderLocked": "System folder — cannot be renamed, moved or trashed",
     "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
     "generated": "Generated",
+    "assets": "Assets",
     "appearsInCanvases_one": "Appears in {{count}} canvas",
     "appearsInCanvases_other": "Appears in {{count}} canvases",
     "canvasRefRole": {
@@ -1686,6 +1687,16 @@
     "saveFailed": "Failed to save",
     "textTooLargeToEdit": "File is too large to preview or edit inline.",
     "previewFailed": "Failed to load preview"
+  },
+  "assets": {
+    "types": {
+      "character": "Characters",
+      "location": "Locations",
+      "prop": "Props",
+      "costume": "Costumes",
+      "prompt": "Prompts",
+      "audio": "Audio"
+    }
   },
   "generated": {
     "title": "Generated",

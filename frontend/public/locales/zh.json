@@ -1672,6 +1672,7 @@
     "systemFolderLocked": "系统文件夹 —— 不能重命名、移动或放入回收站",
     "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
     "generated": "生成内容",
+    "assets": "资产库",
     "appearsInCanvases_one": "出现在 {{count}} 个画布",
     "appearsInCanvases_other": "出现在 {{count}} 个画布",
     "canvasRefRole": {
@@ -1686,6 +1687,16 @@
     "saveFailed": "保存失败",
     "textTooLargeToEdit": "文件过大，无法内联预览或编辑。",
     "previewFailed": "预览加载失败"
+  },
+  "assets": {
+    "types": {
+      "character": "角色",
+      "location": "场景",
+      "prop": "道具",
+      "costume": "服装",
+      "prompt": "提示词",
+      "audio": "音频"
+    }
   },
   "generated": {
     "title": "生成内容",
