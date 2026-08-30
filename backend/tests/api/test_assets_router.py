@@ -13,10 +13,91 @@ from app.core.deps import get_auth
 from app.services.assets.assets_service import AssetError
 
 USER = "11111111-1111-1111-1111-111111111111"
+NOW = "2026-08-29T00:00:00+00:00"
 
 
 class _AuthStub:
     user_id = USER
+
+
+# Every /assets route now declares ``response_model=Envelope[...]``, so FastAPI
+# validates what the service handed back. A fake that answers with a convenient
+# three-key dict would fail that validation — and the failure would be the
+# fake's, not the router's. These builders mirror the real serialized row
+# (``_serialize(with_derived(...))`` / ``_serialize_file`` / ``_serialize_link``
+# / ``_serialize_loadout``) field for field: CLAUDE.md "边界 mock 必须用真实
+# JSON 形状".
+
+
+def asset_row(**over):
+    row = {
+        "id": "1",
+        "scope_id": "9000",
+        "asset_type": "character",
+        "subtype": None,
+        "name": "Sang Yao",
+        "role_tag": "",
+        "description": "",
+        "attrs": {},
+        "prompt_positive": None,
+        "prompt_negative": None,
+        "prompt_positive_zh": None,
+        "prompt_negative_zh": None,
+        "platform_params": {},
+        "cover_file_id": None,
+        "source": "manual",
+        "duplicated_from": None,
+        "is_system_preset": False,
+        "tags": {},
+        "sort_order": 0,
+        "created_by": USER,
+        "created_at": NOW,
+        "updated_at": NOW,
+        "deleted_at": None,
+        "readiness": {"state": "draft", "missing": ["sheet"]},
+        "file_counts_by_slot": {},
+        "project_ids": [],
+        "loadout_count": 1,
+    }
+    row.update(over)
+    return row
+
+
+def detail_row(**over):
+    row = asset_row(files=[], links=[], linked_by=[], loadouts=[])
+    row.update(over)
+    return row
+
+
+def file_row(**over):
+    row = {
+        "asset_id": "5",
+        "resource_id": "727145299382534146",
+        "slot": "sheet",
+        "loadout_id": None,
+        "sort_order": 0,
+        "note": None,
+        "attached_by": USER,
+        "attached_at": NOW,
+    }
+    row.update(over)
+    return row
+
+
+def loadout_row(**over):
+    row = {
+        "id": "6",
+        "asset_id": "5",
+        "name": "Night raid",
+        "is_default": False,
+        "costume_ids": [],
+        "prop_ids": [],
+        "prompt_extra": None,
+        "sort_order": 0,
+        "created_at": NOW,
+    }
+    row.update(over)
+    return row
 
 
 class _FakeService:
@@ -26,23 +107,17 @@ class _FakeService:
 
     async def list_assets(self, scope_id, **f):
         self.calls.append(("list", scope_id, f))
-        return [{"id": "1", "name": "Sang Yao", "asset_type": "character"}]
+        return [asset_row()]
 
     async def create_asset(self, scope_id, payload, user_id):
         if payload.name == "dup":
             raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
-        return {"id": "2", "name": payload.name, "asset_type": payload.asset_type}
+        return asset_row(id="2", name=payload.name, asset_type=payload.asset_type)
 
     async def get_asset(self, asset_id, scope_id):
         if asset_id == 404:
             raise AssetError(404, "asset_not_found", "nope")
-        return {
-            "id": str(asset_id),
-            "files": [],
-            "links": [],
-            "linked_by": [],
-            "loadouts": [],
-        }
+        return detail_row(id=str(asset_id))
 
     # Set to a resource_id that should blow up, to exercise the batch path.
     fail_on_resource_id = None
@@ -51,11 +126,9 @@ class _FakeService:
         self.attach_attempts.append(req.resource_id)
         if req.resource_id == self.fail_on_resource_id:
             raise AssetError(404, "resource_not_found", "nope")
-        return {
-            "asset_id": str(asset_id),
-            "resource_id": req.resource_id,
-            "slot": req.slot,
-        }
+        return file_row(
+            asset_id=str(asset_id), resource_id=req.resource_id, slot=req.slot
+        )
 
     async def add_link(self, asset_id, scope_id, req):
         raise AssetError(422, "link_not_allowed", "no", {})

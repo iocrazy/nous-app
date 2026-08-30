@@ -47,6 +47,22 @@ class AssetError(Exception):
         super().__init__(f"{code}: {detail}")
 
 
+# The nullable columns — the only ones an explicit null may clear. Everything
+# else on ``assets`` is NOT NULL, so a null aimed at it is a typed 422 rather
+# than an IntegrityError (500) or a silently dropped key (a no-op reported as
+# success). Mirrors the AssetUpdate docstring.
+CLEARABLE_FIELDS = frozenset(
+    {
+        "subtype",
+        "cover_file_id",
+        "prompt_positive",
+        "prompt_negative",
+        "prompt_positive_zh",
+        "prompt_negative_zh",
+    }
+)
+
+
 class AssetsService:
     def __init__(
         self,
@@ -114,9 +130,42 @@ class AssetsService:
             )
         return (await self._derived([row]))[0]
 
-    async def list_assets(self, scope_id: int, **filters) -> List[Dict[str, Any]]:
-        rows = await self.assets.list(int(scope_id), **filters)
-        return await self._derived(rows)
+    async def list_assets(
+        self,
+        scope_id: int,
+        *,
+        readiness: Optional[str] = None,
+        sort: str = "recent",
+        **filters,
+    ) -> List[Dict[str, Any]]:
+        """List a scope's assets.
+
+        ``readiness`` and ``sort="readiness"`` are handled HERE, not in SQL:
+        readiness is derived per row (``with_derived`` folds the batch slot
+        counts in), so there is no column to filter or order by. Everything
+        else — ``asset_type`` / ``project_id`` / ``q`` / ``tag`` / the two SQL
+        orderings / limit / offset — is delegated unchanged.
+
+        Known limitation: because the readiness filter runs after the page has
+        been fetched, it thins THAT page rather than paging over the filtered
+        set. A caller asking for 60 drafts can get fewer back with more still
+        behind the offset. Making it exact needs the primary-slot count in the
+        query (a join this repo does not have yet).
+        """
+        rows = await self.assets.list(
+            int(scope_id),
+            sort=("recent" if sort == "readiness" else sort),
+            **filters,
+        )
+        out = await self._derived(rows)
+        if readiness:
+            out = [r for r in out if r["readiness"]["state"] == readiness]
+        if sort == "readiness":
+            # Drafts first: the point of this ordering is surfacing what is
+            # still missing. Python's sort is stable, so rows keep the repo's
+            # "recent" order inside each group.
+            out.sort(key=lambda r: 0 if r["readiness"]["state"] == "draft" else 1)
+        return out
 
     async def get_asset(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
         row = await self._require(asset_id, scope_id)
@@ -134,8 +183,31 @@ class AssetsService:
         self, asset_id: int, scope_id: int, payload: AssetUpdate
     ) -> Dict[str, Any]:
         await self._require_writable(asset_id, scope_id)
-        fields = payload.model_dump(exclude_none=True)
-        if "cover_file_id" in fields:
+        # exclude_unset == model_fields_set: omitted keys never reach the
+        # UPDATE, an explicit null does (see AssetUpdate's docstring). With
+        # exclude_none the two were indistinguishable and "clear this field"
+        # answered 200 while changing nothing.
+        fields = payload.model_dump(exclude_unset=True)
+        nulled = sorted(
+            k for k, v in fields.items() if v is None and k not in CLEARABLE_FIELDS
+        )
+        if nulled:
+            raise AssetError(
+                422,
+                "field_not_nullable",
+                "These fields cannot be cleared: " + ", ".join(nulled),
+                {"fields": nulled},
+            )
+        if fields.get("cover_file_id") is not None:
+            # A cover is a resource reference; without this check an asset could
+            # point at another team's file — a 200 for a cross-tenant read.
+            # A null skips it: there is no resource to be in scope.
+            if not await self.relations.resource_in_scope(
+                int(fields["cover_file_id"]), int(scope_id)
+            ):
+                raise AssetError(
+                    404, "resource_not_found", "Cover file not found in this scope"
+                )
             fields["cover_file_id"] = int(fields["cover_file_id"])
         try:
             updated = await self.assets.update(int(asset_id), int(scope_id), fields)
@@ -200,6 +272,7 @@ class AssetsService:
             note=req.note,
             attached_by=user_id,
         )
+        await self.relations.touch_asset(int(asset_id))
         return _serialize_file(f)
 
     async def detach_file(
@@ -210,6 +283,7 @@ class AssetsService:
             raise AssetError(
                 404, "file_not_attached", "File is not attached to this slot"
             )
+        await self.relations.touch_asset(int(asset_id))
 
     # ── links ──────────────────────────────────────────────────────────────
 
@@ -229,11 +303,11 @@ class AssetsService:
                 f"{req.relation} is not allowed from "
                 f"{src['asset_type']}/{src.get('subtype') or '-'} to {dst['asset_type']}",
             )
-        return _serialize_link(
-            await self.relations.add_link(
-                int(asset_id), int(req.to_asset_id), req.relation
-            )
+        link = await self.relations.add_link(
+            int(asset_id), int(req.to_asset_id), req.relation
         )
+        await self.relations.touch_asset(int(asset_id))
+        return _serialize_link(link)
 
     async def remove_link(
         self, asset_id: int, scope_id: int, to_asset_id: int, relation: str
@@ -251,6 +325,7 @@ class AssetsService:
             await self.relations.strip_from_loadouts(
                 int(asset_id), prop_id=int(to_asset_id)
             )
+        await self.relations.touch_asset(int(asset_id))
 
     # ── loadouts ───────────────────────────────────────────────────────────
 
@@ -287,6 +362,7 @@ class AssetsService:
                 "prompt_extra": payload.prompt_extra,
             },
         )
+        await self.relations.touch_asset(int(asset_id))
         return _serialize_loadout(lo)
 
     async def update_loadout(
@@ -311,6 +387,7 @@ class AssetsService:
             if not await self.relations.set_default(int(loadout_id), int(asset_id)):
                 raise AssetError(404, "loadout_not_found", "Loadout not found")
             lo = {**lo, "is_default": True}
+        await self.relations.touch_asset(int(asset_id))
         return _serialize_loadout(lo)
 
     async def delete_loadout(
@@ -328,6 +405,7 @@ class AssetsService:
                 422, "cannot_delete_default", "Make another loadout default first"
             )
         await self.relations.delete_loadout(int(loadout_id), int(asset_id))
+        await self.relations.touch_asset(int(asset_id))
 
     # ── project refs ───────────────────────────────────────────────────────
 
@@ -354,6 +432,7 @@ class AssetsService:
                 "Project belongs to a different team than this asset",
             )
         await self.relations.link_project(int(asset_id), int(project_id), user_id)
+        await self.relations.touch_asset(int(asset_id))
 
     @staticmethod
     async def _owner_personal_team(owner_id: Optional[str]) -> int:
@@ -386,3 +465,4 @@ class AssetsService:
             raise AssetError(
                 404, "project_ref_not_found", "Asset is not linked to this project"
             )
+        await self.relations.touch_asset(int(asset_id))

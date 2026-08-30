@@ -26,6 +26,7 @@ OTHER_OWNER = "22222222-2222-2222-2222-222222222222"
 class FakeAssetsRepo:
     def __init__(self):
         self.rows: dict[int, dict] = {}
+        self.list_calls: list[dict] = []
         self._next = 1000
 
     def _row(self, **kw):
@@ -75,6 +76,7 @@ class FakeAssetsRepo:
         return r if r and self._visible(r, scope_id) else None
 
     async def list(self, scope_id, **kw):
+        self.list_calls.append(kw)
         return [r for r in self.rows.values() if self._visible(r, scope_id)]
 
     async def update(self, asset_id, scope_id, fields):
@@ -115,11 +117,21 @@ class FakeRelationsRepo:
     def __init__(self):
         self.files, self.links, self.loadouts, self.refs = [], [], {}, []
         self.strip_calls = []
+        self.touched: list[int] = []
+        self.scope_checks: list[tuple[int, int]] = []
         self._next = 5000
         self.in_scope_resources = {727145299382534146}
 
     async def resource_in_scope(self, resource_id, scope_id):
+        self.scope_checks.append((int(resource_id), int(scope_id)))
         return int(resource_id) in self.in_scope_resources
+
+    async def touch_asset(self, asset_id):
+        """``assets`` ships no touch trigger (mig 445), so every relation write
+        bumps ``updated_at`` itself. Recorded here so the tests can assert the
+        bump happened per write instead of trusting the call site."""
+        self.touched.append(int(asset_id))
+        return True
 
     async def attach(self, asset_id, resource_id, slot, **kw):
         row = {

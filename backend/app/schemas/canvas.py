@@ -13,6 +13,10 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+# One definition of "a snowflake id on the wire" for the whole app boundary —
+# re-declaring the pattern here is how the two copies drift apart.
+from app.schemas.assets import SnowflakeId
+
 # 'character' (mig 357) reuses the smart pipeline with the CharacterNode +
 # preset agent workflow on top (character canvas epic 2026-07-13).
 # 'classic' (canvas 1.0 engine) is RETIRED (mig 361 soft-deleted every
@@ -45,6 +49,15 @@ class CanvasResponse(BaseModel):
     )
     name: str
     kind: CanvasKind
+    asset_id: Optional[str] = Field(
+        None,
+        description=(
+            "Snowflake bigint, serialized as string; set when the canvas belongs "
+            "to an asset (canvases.asset_id, mig 446). Declared because "
+            "``_to_response`` emits it — the 409 conflict body builds a "
+            "CanvasResponse, and an undeclared key would be dropped there."
+        ),
+    )
     viewport_json: Dict[str, Any]
     nodes_json: List[Dict[str, Any]]
     connections_json: List[Dict[str, Any]]
@@ -73,6 +86,12 @@ class CanvasCreate(BaseModel):
     name: str = "Untitled"
     kind: CreatableCanvasKind = "smart"
     viewport_json: Optional[Dict[str, Any]] = None
+    # The asset this canvas belongs to (``canvases.asset_id``, mig 446). Optional:
+    # most canvases belong to a project only. ``SnowflakeId`` (not a bare str) so
+    # a non-numeric or past-BIGINT value is a 422 here instead of a ValueError in
+    # the repo's ``int()`` — the same boundary every other asset id is pinned at.
+    # The route checks the asset is in the project's scope before persisting it.
+    asset_id: Optional[SnowflakeId] = None
 
 
 class CanvasUpdate(BaseModel):

@@ -67,6 +67,7 @@ class FakeCanvasRepository:
         kind: str,
         created_by: Optional[str],
         viewport_json: Optional[Dict[str, Any]] = None,
+        asset_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         return self._seed(
             project_id=project_id,
@@ -74,6 +75,7 @@ class FakeCanvasRepository:
             kind=kind,
             created_by=created_by,
             viewport_json=viewport_json or {"x": 0, "y": 0, "zoom": 1},
+            asset_id=asset_id,
         )
 
     async def update_with_lock(
@@ -206,6 +208,32 @@ class TestCanvasCreate:
         assert row["kind"] == "character"
         assert row["name"] == "My Board"
         assert row["viewport_json"]["zoom"] == 1.5
+
+    @pytest.mark.asyncio
+    async def test_create_carries_the_asset_id_through(self, svc):
+        """A canvas can belong to an asset (mig 446 ``canvases.asset_id``). The
+        column exists, so a create that drops the field silently produces an
+        unowned canvas — indistinguishable from one nobody asked to own."""
+        service, _ = svc
+        data = CanvasCreate(name="Sang Yao board", asset_id="727145299382534145")
+        row = await service.create_in_project("8888", data, created_by="u-3")
+        assert row["asset_id"] == 727145299382534145  # int at the repo boundary
+
+    @pytest.mark.asyncio
+    async def test_create_without_asset_id_leaves_it_null(self, svc):
+        service, _ = svc
+        row = await service.create_in_project("8888", CanvasCreate(), created_by="u-4")
+        assert row["asset_id"] is None
+
+    def test_create_rejects_a_non_numeric_asset_id(self):
+        """The id reaches ``int()`` in the repo; a bare str would make that a
+        500 instead of the 422 the caller earned."""
+        with pytest.raises(ValidationError):
+            CanvasCreate(asset_id="not-an-id")
+
+    def test_create_rejects_an_asset_id_past_int64(self):
+        with pytest.raises(ValidationError):
+            CanvasCreate(asset_id="99999999999999999999")
 
     def test_create_rejects_retired_classic_kind(self):
         # Classic (canvas 1.0 engine) is retired — new canvases must not be

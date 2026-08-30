@@ -6,7 +6,7 @@ Snowflake ids are strings at this boundary (bigIntSafeFetch discipline).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -58,7 +58,19 @@ class AssetCreate(BaseModel):
 
 
 class AssetUpdate(BaseModel):
-    """PATCH payload — None means "leave unchanged".
+    """PATCH payload — **omit = unchanged, explicit null = clear**.
+
+    The two are told apart by ``model_fields_set`` (the service dumps with
+    ``exclude_unset=True``), not by the value: an omitted key never reaches the
+    UPDATE, while ``{"cover_file_id": null}`` writes NULL. Before that, both
+    read as ``None`` and "remove this asset's cover / subtype / prompt" was
+    unreachable through the API — the request answered 200 and changed nothing.
+
+    Only the nullable columns can be cleared —
+    ``subtype / cover_file_id / prompt_positive / prompt_negative /
+    prompt_positive_zh / prompt_negative_zh``. A null aimed at a NOT NULL
+    column (``name``, ``attrs``, ``tags``, …) is a typed 422
+    (``field_not_nullable``), never a dropped key.
 
     ``extra="forbid"``: without it ``{"promptpositive": "..."}`` answered 200
     with the asset untouched, so a typo'd field was indistinguishable from a
@@ -125,6 +137,10 @@ class AssetFileResponse(BaseModel):
     loadout_id: Optional[str] = None
     sort_order: int = 0
     note: Optional[str] = None
+    # Declared because ``_serialize_file`` emits it: once the routes carry a
+    # response_model, any key missing from the model is silently dropped from
+    # the wire — a removal no test or log would report.
+    attached_by: Optional[str] = None
     attached_at: datetime
 
 
@@ -132,6 +148,8 @@ class AssetLinkResponse(BaseModel):
     from_asset_id: str
     to_asset_id: str
     relation: LinkRelation
+    # Same reason as AssetFileResponse.attached_by — ``_serialize_link`` emits it.
+    created_at: Optional[datetime] = None
 
 
 class LoadoutCreate(BaseModel):
@@ -198,3 +216,52 @@ class LinkRequest(BaseModel):
 
 class ProjectRefRequest(BaseModel):
     project_id: SnowflakeId
+
+
+# ── response envelopes ─────────────────────────────────────────────────────
+# Every /assets route answers ``{success, data}`` on the way out and
+# ``{success:false, error:{code, detail, ...}}`` on refusal. Declaring both as
+# models is what makes FastAPI VALIDATE the payload (a service that stops
+# emitting ``readiness`` now fails loudly instead of shipping a half row) and
+# what puts a real schema in the OpenAPI document the frontend types read off.
+
+T = TypeVar("T")
+
+
+class Envelope(BaseModel, Generic[T]):
+    """Success wrapper. ``success`` is always True here — a failure is an
+    :class:`ErrorEnvelope`, returned as a raw JSONResponse so it bypasses this
+    model rather than being coerced into it."""
+
+    success: bool = True
+    data: T
+
+
+class ErrorEnvelope(BaseModel):
+    """Refusal wrapper. ``error`` stays an open dict on purpose: each
+    ``AssetError`` carries ``code`` + ``detail`` plus its own extras
+    (``existing_asset_id``, ``costume_ids``, …), and narrowing the model would
+    drop exactly the field a client needs to act on."""
+
+    success: bool = False
+    error: Dict[str, Any]
+
+
+class DeletedResponse(BaseModel):
+    deleted: bool = True
+
+
+class DetachedResponse(BaseModel):
+    detached: bool = True
+
+
+class RemovedResponse(BaseModel):
+    removed: bool = True
+
+
+class LinkedResponse(BaseModel):
+    linked: bool = True
+
+
+class UnlinkedResponse(BaseModel):
+    unlinked: bool = True

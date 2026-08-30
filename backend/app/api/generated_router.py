@@ -173,8 +173,7 @@ async def save_as_asset(
             ),
             "asset_id": out["asset_id"],
             "resource_id": out["resource_id"],
-        },
-        201,
+        }
     )
 
 

@@ -370,6 +370,7 @@ class CanvasRepository:
         kind: str,
         created_by: Optional[str],
         viewport_json: Optional[Dict[str, Any]] = None,
+        asset_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Insert a new canvas; defaults flow from the column DEFAULTs
         when fields are omitted."""
@@ -382,6 +383,8 @@ class CanvasRepository:
             payload["created_by"] = created_by
         if viewport_json is not None:
             payload["viewport_json"] = viewport_json
+        if asset_id is not None:
+            payload["asset_id"] = _bigint(asset_id)
         try:
             async with write_scope() as session:
                 result = await session.execute(

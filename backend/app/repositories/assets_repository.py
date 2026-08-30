@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
@@ -69,6 +69,40 @@ def with_derived(
     return out
 
 
+# ``tags`` is a jsonb OBJECT of groups → arrays ({"role": ["hero"], "era": [...]}),
+# so ``@>`` cannot answer "does any group contain this value" without knowing the
+# group name. jsonpath can: ``$.*`` walks the group values and ``[*]`` their
+# members (lax mode, the default, also matches a group whose value is a bare
+# scalar). The path is OUR constant — a literal_column, never caller text — while
+# the value rides in as a bound parameter via jsonb_build_object.
+_TAG_JSONPATH = literal_column("'$.*[*] ? (@ == $v)'::jsonpath")
+
+
+def _tag_match(tag: str):
+    return func.jsonb_path_exists(
+        Assets.tags, _TAG_JSONPATH, func.jsonb_build_object("v", tag)
+    )
+
+
+def _order_by(sort: str):
+    """ORDER BY for the two orderings SQL can answer.
+
+    ``readiness`` is DERIVED per row (``with_derived``), so it is not here: the
+    service asks for ``recent`` and re-sorts after deriving. An unknown value
+    raises rather than falling back — a sort that silently answers a different
+    question looks exactly like one that worked.
+
+    Note ``sort_order`` is deliberately NOT a leading key any more (it was, when
+    there was a single implicit ordering): a manual-order column ahead of the
+    requested sort would make "by name" mean "by name inside manual buckets".
+    """
+    if sort == "recent":
+        return (Assets.updated_at.desc(), Assets.id.desc())
+    if sort == "name":
+        return (func.lower(Assets.name).asc(), Assets.id.asc())
+    raise ValueError(f"unsupported sort: {sort!r}")
+
+
 class AssetsRepository:
     TABLE = "assets"
 
@@ -119,16 +153,21 @@ class AssetsRepository:
             obj = (await session.execute(stmt)).scalar_one_or_none()
         return _row_dict(obj) if obj else None
 
-    async def list(
+    def _list_stmt(
         self,
         scope_id: int,
         *,
         asset_type: Optional[str] = None,
         project_id: Optional[int] = None,
         q: Optional[str] = None,
+        tag: Optional[str] = None,
+        sort: str = "recent",
         limit: int = 60,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ):
+        """The SELECT behind :meth:`list`, split out so it can be compiled and
+        asserted without a database (tests/services/assets/test_assets_repository_sql.py).
+        """
         limit = max(1, min(int(limit), 200))
         stmt = (
             select(Assets)
@@ -152,13 +191,13 @@ class AssetsRepository:
             stmt = stmt.where(
                 or_(Assets.name.ilike(like), Assets.description.ilike(like))
             )
-        stmt = (
-            stmt.order_by(
-                Assets.sort_order.asc(), Assets.updated_at.desc(), Assets.id.desc()
-            )
-            .limit(limit)
-            .offset(max(0, int(offset)))
-        )
+        if tag:
+            stmt = stmt.where(_tag_match(tag))
+        stmt = stmt.order_by(*_order_by(sort)).limit(limit).offset(max(0, int(offset)))
+        return stmt
+
+    async def list(self, scope_id: int, **filters: Any) -> List[Dict[str, Any]]:
+        stmt = self._list_stmt(int(scope_id), **filters)
         async with read_scope() as session:
             objs = (await session.execute(stmt)).scalars().all()
         return [_row_dict(o) for o in objs]

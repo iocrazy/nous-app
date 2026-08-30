@@ -15,7 +15,7 @@ import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -25,6 +25,7 @@ from app.models import (
     AssetLinks,
     AssetLoadouts,
     AssetProjectRefs,
+    Assets,
     Projects,
     ResourceItems,
 )
@@ -77,6 +78,32 @@ def _row(obj) -> Dict[str, Any]:
 
 
 class AssetRelationsRepository:
+    # ── the parent row's clock ─────────────────────────────────────────────
+
+    async def touch_asset(self, asset_id: int) -> bool:
+        """Bump ``assets.updated_at`` — every relation write owes this.
+
+        ``assets`` deliberately ships NO touch trigger (mig 445), and the
+        relation tables are separate rows, so attaching a file / linking a
+        costume / adding a loadout left the asset's own ``updated_at`` at
+        whatever the last header edit set. The visible cost was the shelf:
+        ``sort=recent`` orders by that column, so an asset the user had just
+        finished filling in did not move.
+
+        No scope predicate on purpose — like the batch derived lookups in
+        ``assets_repository``, this keys on an asset_id the caller has ALREADY
+        resolved through ``_require_writable``. Never call it with an id
+        straight off the wire.
+        """
+        async with write_scope() as session:
+            res = await session.execute(
+                sa_update(Assets)
+                .where(Assets.id == int(asset_id))
+                .where(Assets.deleted_at.is_(None))
+                .values(updated_at=func.now())
+            )
+            return (res.rowcount or 0) > 0
+
     # ── files ──────────────────────────────────────────────────────────────
 
     async def resource_in_scope(self, resource_id: int, scope_id: int) -> bool:

@@ -662,3 +662,78 @@ async def test_list_assets_derives_slot_project_and_loadout_counts(orm_dsn, pg, 
         )
         == 2
     )
+
+
+# ── 12. the tag filter's jsonpath is accepted (and matches) by PostgreSQL ───
+
+
+@_skip
+async def test_tag_filter_matches_any_group_and_rejects_a_miss(orm_dsn, pg, fx):
+    """``jsonb_path_exists(tags, '$.*[*] ? (@ == $v)', jsonb_build_object('v', …))``
+    is the one P2 predicate SQLAlchemy cannot vouch for: the jsonpath is a
+    server-parsed literal, so a typo compiles fine here and only fails (or
+    silently matches nothing) on the server.
+
+    Also pins the lax-mode claim in ``_tag_match``'s comment — ``[*]`` applied
+    to a group whose value is a bare scalar still matches, so a tag written
+    ``{"mood": "warm"}`` is findable exactly like ``{"role": ["hero"]}``.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    tagged = await _make_asset(
+        repo,
+        fx,
+        "character",
+        _uniq("Tagged"),
+        tags={"role": ["hero", "lead"], "era": ["ming"]},
+    )
+    scalar = await _make_asset(
+        repo, fx, "location", _uniq("Scalar Tag"), tags={"mood": "warm"}
+    )
+    await _make_asset(repo, fx, "prop", _uniq("Untagged"))
+
+    async def ids(tag):
+        return {
+            int(r["id"]) for r in await repo.list(fx["team_id"], tag=tag, limit=200)
+        }
+
+    assert int(tagged["id"]) in await ids("hero")  # first member of a group
+    assert int(tagged["id"]) in await ids("ming")  # a different group entirely
+    assert int(scalar["id"]) in await ids("warm")  # scalar group value
+    assert await ids("villain") == set()  # a value nobody carries
+    # The group NAME is not a value — matching it would make the filter answer
+    # a question nobody asked.
+    assert int(tagged["id"]) not in await ids("role")
+
+
+# ── 13. touch_asset really moves the parent row's clock ────────────────────
+
+
+@_skip
+async def test_relation_write_bumps_the_assets_updated_at(orm_dsn, pg, fx):
+    """``assets`` ships no touch trigger (mig 445), so ``updated_at`` moves only
+    because ``touch_asset`` issues its own UPDATE — which nothing but a real
+    server can confirm (``func.now()`` is resolved by PostgreSQL).
+    """
+    from app.schemas.assets import AttachFileRequest
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    created = await service.assets.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Touched")},
+        fx["user_id"],
+    )
+    aid = int(created["id"])
+    before = await pg.fetchval("SELECT updated_at FROM assets WHERE id = $1", aid)
+
+    await service.attach_file(
+        aid,
+        fx["team_id"],
+        AttachFileRequest(resource_id=str(fx["resource_ids"][0]), slot="sheet"),
+        fx["user_id"],
+    )
+
+    after = await pg.fetchval("SELECT updated_at FROM assets WHERE id = $1", aid)
+    assert after > before, "attaching a file left the asset's clock stale"

@@ -27,6 +27,8 @@ from app.core.scope_guards import (
     verify_project_read_access,
     verify_project_write_access,
 )
+from app.repositories.asset_relations_repository import AssetRelationsRepository
+from app.repositories.assets_repository import AssetsRepository
 from app.repositories.canvas_repository import CanvasRepository
 from app.repositories.episode_repository import get_episode_repository
 from app.schemas.canvas import (
@@ -45,6 +47,7 @@ from app.schemas.canvas_run import (
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
 from app.services.infra.unified_task_manager import get_task_manager
+from app.services.library.resources_service import _resolve_personal_team_id
 from app.services.modules.gate import require_module
 
 router = APIRouter(dependencies=[Depends(require_module("projects"))])
@@ -72,6 +75,8 @@ def _to_response(row: dict, *, can_edit: bool | None = None) -> dict:
         out["project_id"] = str(out["project_id"])
     if "episode_id" in out and out["episode_id"] is not None:
         out["episode_id"] = str(out["episode_id"])
+    if "asset_id" in out and out["asset_id"] is not None:
+        out["asset_id"] = str(out["asset_id"])
     if "created_by" in out and out["created_by"] is not None:
         out["created_by"] = str(out["created_by"])
     if can_edit is not None:
@@ -673,6 +678,42 @@ async def list_project_canvas_trash(
     return {"success": True, "data": data}
 
 
+async def _require_asset_in_project_scope(project_id: str, asset_id: str) -> None:
+    """404 unless ``asset_id`` is readable from the project's asset scope.
+
+    ``canvases.asset_id`` (mig 446) FKs to ``assets(id)`` and the FK does not
+    care whose asset it is — so without this a member of team A could hang their
+    canvas off team B's asset and get a 201 for it.
+
+    An asset's scope is a ``teams.id``. A project's is its ``team_id``, or, when
+    that is NULL (a personal project), the OWNER's personal team — the same
+    resolution ``GET /projects/{id}/assets`` performs; using the CALLER's team
+    would check the wrong scope for a collaborator. ``AssetsRepository.get``
+    also admits global system presets (scope_id NULL), which are readable from
+    every scope by design.
+
+    Every refusal is the same 404: whether the id does not exist, is soft
+    deleted, or belongs to another team is not something the caller is entitled
+    to tell apart.
+    """
+    exists, team_id, owner_id = await AssetRelationsRepository().project_team_id(
+        int(project_id)
+    )
+    if not exists:  # pragma: no cover - the write guard above already 404s
+        raise HTTPException(status_code=404, detail="project not found")
+    if team_id is None:
+        if owner_id is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        try:
+            team_id = int(await _resolve_personal_team_id(str(owner_id)))
+        except ValueError:
+            # Legacy owner with no personal team: no scope to check against, so
+            # no asset can be proven to belong here.
+            raise HTTPException(status_code=404, detail="asset_not_found")
+    if await AssetsRepository().get(int(asset_id), int(team_id)) is None:
+        raise HTTPException(status_code=404, detail="asset_not_found")
+
+
 @router.post("/projects/{project_id}/canvases")
 async def create_project_canvas(
     auth: AuthDep,
@@ -680,6 +721,8 @@ async def create_project_canvas(
     project_id: str = Path(..., description="Snowflake project ID"),
 ) -> dict:
     await verify_project_write_access(project_id=project_id, auth=auth)
+    if payload.asset_id is not None:
+        await _require_asset_in_project_scope(project_id, payload.asset_id)
     svc = CanvasService()
     row = await svc.create_in_project(project_id, payload, created_by=auth.user_id)
     if row is None:

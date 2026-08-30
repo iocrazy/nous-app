@@ -8,11 +8,15 @@ from app.models.assets import ASSET_SOURCES, ASSET_TYPES, LINK_RELATIONS
 from app.schemas.assets import (
     AssetCreate,
     AssetDetailResponse,
+    AssetFileResponse,
+    AssetLinkResponse,
     AssetResponse,
     AssetSource,
     AssetType,
     AssetUpdate,
     AttachFileRequest,
+    Envelope,
+    ErrorEnvelope,
     LinkRelation,
     LinkRequest,
     LoadoutCreate,
@@ -169,3 +173,86 @@ def test_loadout_id_lists_are_bounded_too():
     with pytest.raises(ValidationError):
         LoadoutCreate(name="Night", costume_ids=["99999999999999999999"])
     assert LoadoutCreate(name="Night", costume_ids=[_MAX_OK])
+
+
+# ── P2: the response envelope is a model, not a hand-rolled dict ───────────
+
+
+def test_envelope_defaults_to_success_and_carries_typed_data():
+    env = Envelope[AssetFileResponse](
+        data={
+            "asset_id": "1",
+            "resource_id": "2",
+            "slot": "sheet",
+            "attached_at": datetime(2026, 8, 29, 12, 0, 0),
+        }
+    )
+    assert env.success is True
+    assert env.data.slot == "sheet"
+
+
+def test_error_envelope_defaults_to_failure():
+    err = ErrorEnvelope(error={"code": "not_a_member", "detail": "nope"})
+    assert err.success is False
+    assert err.error["code"] == "not_a_member"
+
+
+def test_file_and_link_models_carry_every_field_the_serializers_emit():
+    """``response_model`` DROPS undeclared keys silently. ``_serialize_file``
+    emits ``attached_by`` and ``_serialize_link`` emits ``created_at``; if the
+    models omitted them the fields would vanish from the wire the day the
+    envelope landed — a removal nothing would report."""
+    from app.repositories.asset_relations_repository import (
+        _serialize_file,
+        _serialize_link,
+    )
+
+    now = datetime(2026, 8, 29, 12, 0, 0)
+    file_keys = set(
+        _serialize_file(
+            {
+                "asset_id": 1,
+                "resource_id": 2,
+                "slot": "sheet",
+                "loadout_id": None,
+                "sort_order": 0,
+                "note": None,
+                "attached_by": None,
+                "attached_at": now,
+            }
+        )
+    )
+    link_keys = set(
+        _serialize_link(
+            {
+                "from_asset_id": 1,
+                "to_asset_id": 2,
+                "relation": "wears",
+                "created_at": now,
+            }
+        )
+    )
+    assert file_keys <= set(AssetFileResponse.model_fields)
+    assert link_keys <= set(AssetLinkResponse.model_fields)
+
+
+# ── P2: omit = unchanged, explicit null = clear ────────────────────────────
+
+
+def test_asset_update_distinguishes_omitted_from_explicit_null():
+    """``exclude_none`` cannot tell the two apart — which is why clearing a
+    field was unreachable through PATCH before P2."""
+    omitted = AssetUpdate(name="Sang Yao")
+    cleared = AssetUpdate(name="Sang Yao", subtype=None)
+    assert "subtype" not in omitted.model_fields_set
+    assert "subtype" in cleared.model_fields_set
+    assert cleared.model_dump(exclude_unset=True) == {
+        "name": "Sang Yao",
+        "subtype": None,
+    }
+
+
+def test_asset_update_docstring_states_the_null_semantics():
+    """The semantics live where the payload is declared, not in one call site."""
+    doc = (AssetUpdate.__doc__ or "").lower()
+    assert "omit" in doc and "null" in doc and "clear" in doc
