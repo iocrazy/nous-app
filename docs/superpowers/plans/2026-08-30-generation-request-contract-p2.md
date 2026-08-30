@@ -797,7 +797,17 @@ Expected: 全过；三个 lint rc=0。
 |---|---|---|
 | codex-local | 16:9 | `honored` 有值（true/false 都算通过——**关键是有记录**） |
 | jimeng-cli 或 jimeng-local | 16:9 | `honored=true` |
-| doubao/ark | 16:9 | `honored=true` |
+| doubao/ark | 16:9 | `measured: null` / `honored: null`（**结构性如此，不是失败**） |
+
+⚠️ **ark 那一行原本写的是 `honored=true`，那是本计划的错，不是实现的缺陷。** 测量发生在
+`persist_canvas_generation_step` 里，只对 `local_path` 生效；ark 返回的是 remote_url，
+那一刻产物的字节根本不在我们手上，所以 `measured` 必然为 null，`honored` 也就没有裁决——
+按 Task 2 的契约，"没看" 与 "看了不符" 必须是两个不同的值。原来那行写成 `honored=true`
+是**不可能通过的验收**，照着跑只会把一个正确的实现判成坏的。
+
+这一条与 spec §6.2 「其余三条必须相符」**有出入**：§6.2 假定每个 provider 都能量到像素，
+而 remote-url 类 provider 结构上量不到。ingest 之后再量是可行的后续（`register_generated_media`
+确实会把远端字节抓下来），但那是共享咽喉点，而 ark 近 90 天生产流量为零 —— 不在本期扩围。
 
 ```bash
 docker exec nous-db psql -U postgres -p 55434 -d postgres -Atc "
@@ -810,7 +820,8 @@ WHERE created_at > now() - interval '1 hour' AND params ? 'honored'
 ORDER BY created_at DESC;"
 ```
 
-Expected：每行 `honored` 非空、`origin_kind='canvas_run'`（含 daemon 那张）、`got` 与 `want` 对得上或被如实记为 false。
+Expected：daemon 与 jimeng 两行 `honored` 非空、`got` 与 `want` 对得上或被如实记为 false；
+ark 那行 `honored` 与 `got` 都为空（见上）。三行 `origin_kind` 均为 `canvas_run`（含 daemon 那张）。
 
 **对照（改动前的地面真值，2026-08-29 实测）**：同样的查询返回 **0 行**——`aspect_honored` 从未落过库，daemon 产物一律 `canvas_upload` 且 prompt/model/ratio 全空。
 
@@ -833,7 +844,7 @@ gh pr create --base master --title "feat(gen): 出图生成请求契约 P2 —�
 - §3.3 量（Pillow/ffprobe）→ Task 1 ✅；比（6% 容差，沿用同一常数）→ Task 1 ✅；记（四键进 `params`）→ Task 2/3 ✅
 - §3.3 daemon 归因反查 → Task 4 ✅（走 ticket，不新增表）
 - §3.3「记录，不拦截」→ Task 3 Step 1 的第二、三条测试直接钉住 ✅
-- §6.2 真栈逐 provider 量像素 → Task 5 Step 2 ✅
+- §6.2 真栈逐 provider 量像素 → Task 5 Step 2 ✅（**remote-url provider 除外**：那一刻字节不在手上，如实记 null；见 Step 2 的说明）
 - §6.4 daemon 归因用 SQL 断言、以旧的 `canvas_upload` 空归因作反例 → Task 5 Step 2 ✅
 - `codex.py` 的 `result.raw` 透传已在 P1 Task 3 完成，本期不重做 ✅
 

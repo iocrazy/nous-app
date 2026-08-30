@@ -260,7 +260,13 @@ async def generate_canvas_media_step(
                 "canvas_id": canvas_id,
                 "node_id": node_id,
                 "prompt": prompt,
-                "model": model or "",
+                # The RESOLVED model, exactly as the server branches record
+                # ``gen_model = actual_model or model``. Writing the catalog
+                # ROW NAME here (what this used to do) made
+                # ``generated_media.model`` mean two different things
+                # depending on which branch wrote the row — unqueryable, and
+                # querying these records is the whole point.
+                "model": engine_model or model or "",
                 "provider": f"{engine}-local",
                 "requested": req.knobs_dict(),
                 "effective": eff.knobs_dict(),
@@ -273,7 +279,7 @@ async def generate_canvas_media_step(
             "remote_url": None,
             "existing_gen_id": result.get("gen_id"),
             "provider": f"{engine}-local",
-            "model": model or "",
+            "model": engine_model or model or "",
             "dropped_knobs": dropped,
             # Both halves ride along as JSON-safe primitives: DBOS persists a
             # step's return value, and the record downstream is only worth
@@ -411,6 +417,16 @@ async def _outcome_of(media: Dict[str, Any], media_kind: str) -> Dict[str, Any]:
     ``measured: null`` (and therefore no verdict) rather than failing a run
     that succeeded. Remote-url products (ark) are not on disk at this point,
     so they take that same honest ``null`` — P2 measures what it can reach.
+
+    That null is STRUCTURAL for remote-url providers, not a probe that
+    happened to fail: we do not hold the bytes here at all. Measuring after
+    ingest is a real follow-up — ``register_generated_media`` does fetch them
+    — but it is a shared choke point every generation goes through, and the
+    one provider it would serve has had no production traffic in 90 days, so
+    it is deliberately out of this branch's scope. Any query over these
+    records must therefore treat ``honored: null`` as "no verdict", never as
+    a failure (see the plan's Task 5 Step 2, and its divergence from spec
+    §6.2's "其余三条必须相符").
     """
     from app.services.generation.measure import measure_image, measure_video
     from app.services.generation.outcome import build_outcome_params_from_dicts

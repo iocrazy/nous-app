@@ -1463,6 +1463,82 @@ async def test_persist_still_registers_when_measurement_fails():
     assert outcome["honored"] is None
 
 
+@pytest.mark.parametrize(
+    "media_kind,measurer",
+    [("image", "measure_image"), ("video", "measure_video")],
+)
+@pytest.mark.asyncio
+async def test_persist_survives_a_measurer_that_raises(
+    tmp_path, monkeypatch, media_kind, measurer
+):
+    """A probe that RAISES must not take a paid-for generation down with it.
+
+    The sibling test above hands over a nonexistent path, which ``measure_*``
+    rejects up front and returns ``None`` from — so it never reaches the
+    handler at all. This one makes the measurer raise, which is the case that
+    would otherwise turn a finished, billed run into a failed one. Same
+    guarantee the daemon path pins in test_daemon_result_attribution.py.
+    """
+    from app.services.generation import measure as measure_mod
+
+    # Counted, because a real ``measure_video`` on a PNG would also yield
+    # None: without this the video arm could not tell "the exception was
+    # swallowed" from "the probe simply failed", and the exception is what
+    # is under test.
+    calls: list[str] = []
+
+    def _boom(*_a, **_kw):
+        calls.append(measurer)
+        raise RuntimeError("ffprobe died on a stuck mount")
+
+    async def _aboom(*_a, **_kw):
+        calls.append(measurer)
+        raise RuntimeError("ffprobe died on a stuck mount")
+
+    monkeypatch.setattr(
+        measure_mod, measurer, _boom if measurer == "measure_image" else _aboom
+    )
+
+    register = AsyncMock(return_value={"id": 1})
+    media = {
+        "media_kind": media_kind,
+        # A REAL, readable 1536x864 file: an unpatched measurer would return
+        # a measurement here and honored=True, so these assertions can only
+        # pass because the raise was swallowed.
+        "local_path": _real_png(1536, 864, tmp_path),
+        "remote_url": None,
+        "provider": "codex",
+        "model": "gpt-image-2",
+        "dropped_knobs": [],
+        "requested_params": {"ratio": "16:9"},
+        "effective_params": {"ratio": "16:9"},
+    }
+    store, team = _persist_patches(register)
+    with store, team:
+        out = await persist_canvas_generation_step(
+            media=media,
+            user_id="u1",
+            canvas_id=1,
+            node_id="n1",
+            prompt="a cat",
+            params={"ratio": "16:9"},
+        )
+
+    assert calls == [measurer]  # the raising probe really did run
+    assert out["generated_media_id"] == 1  # the run still succeeded
+    register.assert_awaited_once()
+
+    outcome = register.await_args.kwargs["origin"].params
+    # Present and null, not absent, and emphatically not False: nothing was
+    # checked, so nothing was violated.
+    assert "measured" in outcome and outcome["measured"] is None
+    assert "honored" in outcome and outcome["honored"] is None
+    assert outcome["honored"] is not False
+    # What we already knew survives losing the verdict.
+    assert outcome["requested"] == {"ratio": "16:9"}
+    assert outcome["effective"] == {"ratio": "16:9"}
+
+
 @pytest.mark.asyncio
 async def test_image_step_returns_the_knobs_it_asked_for_and_the_ones_it_sent():
     """The step carries both halves across the DBOS boundary, as primitives."""

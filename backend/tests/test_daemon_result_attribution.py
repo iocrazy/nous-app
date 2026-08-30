@@ -285,7 +285,10 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
     assert attribution["canvas_id"] == 42 and attribution["node_id"] == "n1"
     assert attribution["prompt"] == "a cat"
     assert attribution["provider"] == "codex-local"
-    assert attribution["model"] == "codex-local-image"
+    # The RESOLVED model, not the catalog row name ("codex-local-image") —
+    # the same thing every server branch records, so one column means one
+    # thing no matter which branch wrote the row.
+    assert attribution["model"] == "gpt-image-2"
     assert attribution["requested"]["ratio"] == "16:9"
     assert attribution["effective"]["ratio"] == "16:9"
     # negative is not in this provider's capabilities → dropped, and the
