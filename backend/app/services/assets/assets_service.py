@@ -38,6 +38,7 @@ from app.schemas.assets import (
 from app.services.assets.slots import PRIMARY_SLOT, is_valid_slot, link_allowed
 from app.services.library.resource_ai_ops import (
     CaptionAgentFailed,
+    CaptionAgentPaused,
     CaptionSourceUnavailable,
     build_translate_plan,
     caption_resource_for_caller,
@@ -679,12 +680,20 @@ class AssetsService:
         if not payload.force:
             plan = [p for p in plan if not (row.get(p[1]) or "").strip()]
         if not plan:
+            # The two ways to get here need DIFFERENT next steps, so they get
+            # different sentences: with ``force`` the targets were never
+            # consulted, so pointing at force=true would be advice the caller
+            # has already taken.
             raise AssetError(
                 422,
                 "nothing_to_translate",
                 (
-                    "Nothing to translate — the source prompt is empty, or the "
-                    "target already has text (send force=true to overwrite it)"
+                    "Nothing to translate — both the positive and negative "
+                    "prompts are empty on the source side"
+                    if payload.force
+                    else "Nothing to translate — the source prompt is empty, "
+                    "or the target already has text (send force=true to "
+                    "overwrite it)"
                 ),
             )
 
@@ -769,6 +778,11 @@ class AssetsService:
             # "this file will never be captionable" — a 4xx the user can act
             # on, never the 503 that sends them to Settings → AI.
             raise AssetError(422, "file_not_captionable", str(exc))
+        except CaptionAgentPaused as exc:
+            # Its own code: "resume the caption agent" is a different action
+            # from "the provider is unreachable", and the UI can only say so
+            # if the two do not share a code.
+            raise AssetError(503, "caption_paused", str(exc))
         except CaptionAgentFailed as exc:
             raise AssetError(503, "caption_unavailable", str(exc))
         except Exception as exc:

@@ -73,6 +73,18 @@ class CaptionAgentFailed(Exception):
     """The agent ran and produced nothing usable (a 5xx)."""
 
 
+class CaptionAgentPaused(Exception):
+    """The caption agent is paused (``ai_agents.paused_reason``) — the run was
+    refused pre-flight by ``RunRecorder``, before any model call.
+
+    Its own type because the fix is a DIFFERENT action from every other 5xx
+    here: resume the agent (or raise its budget), not "check whether the model
+    supports vision". ``CaptionService.caption`` swallows ``AgentPausedError``
+    into a plain ``None``, so this is recovered from the agent row rather than
+    from the exception — see :func:`_agent_paused_reason`.
+    """
+
+
 def is_provider_failure(exc: BaseException) -> bool:
     """True for the LLM-class failures every AI caller must surface verbatim.
 
@@ -170,9 +182,10 @@ async def caption_resource_for_caller(resource_id: str, user_id: str) -> Dict[st
     /assets router does not open, and the former carries the
     owner-or-teammate visibility predicate this path needs anyway.
 
-    Raises :class:`CaptionSourceUnavailable` when there is nothing to look at
-    and :class:`CaptionAgentFailed` when the agent produced nothing;
-    provider failures propagate raw.
+    Raises :class:`CaptionSourceUnavailable` when there is nothing to look at,
+    :class:`CaptionAgentPaused` when the agent is paused and
+    :class:`CaptionAgentFailed` when it ran and produced nothing; provider
+    failures propagate raw.
     """
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.ai.caption import CaptionService
@@ -223,6 +236,15 @@ async def caption_resource_for_caller(resource_id: str, user_id: str) -> Dict[st
         if value:
             out[key] = value
     if not out:
+        # Empty is AMBIGUOUS at this layer: a paused agent and a model that
+        # answered nothing usable both arrive as a falsy result. Ask the agent
+        # row which one it was rather than reporting the more common guess.
+        paused = await _agent_paused_reason(cfg.agent_slug or "caption")
+        if paused:
+            raise CaptionAgentPaused(
+                f"The caption agent is paused ({paused}) — resume it in "
+                f"Settings → AI"
+            )
         logger.warning(
             f"[CaptionResource] agent returned no usable prompt for "
             f"resource {resource_id}"
@@ -233,3 +255,22 @@ async def caption_resource_for_caller(resource_id: str, user_id: str) -> Dict[st
             "reachable (Settings → AI)"
         )
     return out
+
+
+async def _agent_paused_reason(agent_slug: str) -> Optional[str]:
+    """``ai_agents.paused_reason`` for the resolved agent, or None.
+
+    Asked ONLY on the empty-result path. ``RunRecorder`` refuses a paused agent
+    pre-flight (``AgentPausedError``), and both ``CaptionService.caption`` and
+    ``TranslateService.translate`` catch that and return ``None`` — so at this
+    layer "paused" is byte-identical to "the model produced nothing". Reading
+    the reason back ('budget' / 'manual') is what separates them.
+
+    A lookup failure is NOT a pause: ``get_by_slug`` already logs and returns
+    None on error, and treating that as "not paused" keeps the caller on the
+    generic 5xx rather than inventing a pause that may not exist.
+    """
+    from app.repositories.agent_repository import get_agent_repository
+
+    agent = await get_agent_repository().get_by_slug(agent_slug)
+    return (agent or {}).get("paused_reason") or None

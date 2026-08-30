@@ -38,6 +38,7 @@ from app.services.assets import assets_service
 from app.services.assets.assets_service import AssetError, AssetsService
 from app.services.library.resource_ai_ops import (
     CaptionAgentFailed,
+    CaptionAgentPaused,
     CaptionSourceUnavailable,
     build_translate_plan,
 )
@@ -210,6 +211,25 @@ async def test_nothing_to_translate_when_every_source_is_empty(svc, translate):
         await svc.translate_prompt(int(a["id"]), SCOPE, _req("zh"), USER)
     assert ei.value.status == 422 and ei.value.code == "nothing_to_translate"
     assert not translate.calls, "no provider call for an empty plan"
+
+
+@pytest.mark.asyncio
+async def test_nothing_to_translate_names_force_only_when_force_was_not_used(
+    svc, translate
+):
+    """With ``force`` the targets were never consulted, so "send force=true"
+    would be advice the caller has already taken — and the real cause (both
+    sources are empty) would go unsaid."""
+    a = await _asset(svc)
+    with pytest.raises(AssetError) as plain:
+        await svc.translate_prompt(int(a["id"]), SCOPE, _req("zh"), USER)
+    with pytest.raises(AssetError) as forced:
+        await svc.translate_prompt(int(a["id"]), SCOPE, _req("zh", force=True), USER)
+
+    assert plain.value.code == forced.value.code == "nothing_to_translate"
+    assert "force=true" in plain.value.detail
+    assert "force=true" not in forced.value.detail
+    assert "empty on the source side" in forced.value.detail
 
 
 @pytest.mark.asyncio
@@ -390,6 +410,24 @@ async def test_regenerate_when_the_agent_fails_is_503(svc, monkeypatch):
         await svc.regenerate_prompt(int(a["id"]), SCOPE, USER)
     assert ei.value.status == 503 and ei.value.code == "caption_unavailable"
     assert "returned nothing" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_paused_caption_agent_gets_its_own_code(svc, monkeypatch):
+    """ "Resume the caption agent" is a different action from "the provider is
+    unreachable". Sharing ``caption_unavailable`` would make the UI unable to
+    say which one happened — and a paused agent is the one the user can fix in
+    one click."""
+    monkeypatch.setattr(
+        assets_service,
+        "caption_resource_for_caller",
+        FakeCaption(raises=CaptionAgentPaused("The caption agent is paused (budget)")),
+    )
+    a = await _with_primary_file(svc)
+    with pytest.raises(AssetError) as ei:
+        await svc.regenerate_prompt(int(a["id"]), SCOPE, USER)
+    assert ei.value.status == 503 and ei.value.code == "caption_paused"
+    assert "budget" in ei.value.detail
 
 
 @pytest.mark.asyncio

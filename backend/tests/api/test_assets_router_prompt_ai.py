@@ -142,6 +142,21 @@ async def test_provider_outage_is_a_503_in_the_error_envelope(app, url):
 
 
 @pytest.mark.asyncio
+async def test_paused_agent_keeps_its_own_code_on_the_wire(app):
+    """The 503 body is where the UI learns WHICH 503 it is."""
+    app.state.fake.raises = AssetError(
+        503, "caption_paused", "The caption agent is paused (budget)"
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(REGENERATE)
+    assert r.status_code == 503
+    assert r.json()["error"] == {
+        "code": "caption_paused",
+        "detail": "The caption agent is paused (budget)",
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "url,code",
     [
