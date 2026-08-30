@@ -12,6 +12,7 @@ from app.models.assets import (
     Assets,
 )
 from app.schemas.assets import (
+    AssetCountsResponse,
     AssetCreate,
     AssetDetailResponse,
     AssetFileResponse,
@@ -309,3 +310,31 @@ def test_asset_update_docstring_states_the_null_semantics():
     """The semantics live where the payload is declared, not in one call site."""
     doc = (AssetUpdate.__doc__ or "").lower()
     assert "omit" in doc and "null" in doc and "clear" in doc
+
+
+# ── P2: the counts payload carries one field per asset type ────────────────
+
+
+def test_asset_counts_response_covers_exactly_the_asset_types():
+    """The sidebar renders one badge per key of this model.
+
+    A type added to ``ASSET_TYPES`` but not here would be counted by the
+    repository and then DROPPED by the response model on the way out — the
+    library would gain a type the sidebar cannot show, with nothing failing.
+    """
+    assert set(AssetCountsResponse.model_fields) == set(ASSET_TYPES)
+
+
+def test_asset_counts_response_defaults_every_type_to_zero():
+    """A type the repository omitted must read as 0, not as a missing key: the
+    client branches on `count > 0` to decide whether to draw a badge, and
+    `undefined > 0` is a silently different answer from `0 > 0`."""
+    out = AssetCountsResponse().model_dump()
+    assert out == {t: 0 for t in ASSET_TYPES}
+
+
+def test_asset_counts_response_rejects_a_non_integer_tally():
+    """Response-model validation is the point of declaring it — a service that
+    answered with a string must fail loudly, not ship a NaN badge."""
+    with pytest.raises(ValidationError):
+        AssetCountsResponse(character="many")

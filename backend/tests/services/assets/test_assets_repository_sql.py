@@ -70,3 +70,37 @@ def test_unknown_sort_raises_instead_of_falling_back():
     for — and look exactly like a working one."""
     with pytest.raises(ValueError):
         _sql(sort="readiness")
+
+
+# ── count_by_type (the sidebar badges) ─────────────────────────────────────
+
+
+def _counts_sql() -> str:
+    stmt = AssetsRepository()._count_by_type_stmt(SCOPE)
+    return str(stmt.compile(dialect=postgresql.dialect()))
+
+
+def test_count_by_type_groups_by_type():
+    sql = _counts_sql()
+    assert "count(*)" in sql
+    assert "GROUP BY public.assets.asset_type" in sql
+
+
+def test_count_by_type_excludes_soft_deleted_rows():
+    """A trashed asset must not keep inflating its badge — the badge is what
+    tells the user the delete took effect."""
+    assert "public.assets.deleted_at IS NULL" in _counts_sql()
+
+
+def test_count_by_type_excludes_system_presets():
+    """``assets_scope_or_preset`` is an OR, so a preset MAY carry a scope_id:
+    the scope predicate alone would not keep global rows out of a team's own
+    tally. This is the predicate that does."""
+    assert "public.assets.is_system_preset IS false" in _counts_sql()
+
+
+def test_count_by_type_is_scoped_and_binds_the_scope_id():
+    sql = _counts_sql()
+    assert "public.assets.scope_id = " in sql
+    # The scope is a bound parameter, never spliced into the SQL text.
+    assert str(SCOPE) not in sql

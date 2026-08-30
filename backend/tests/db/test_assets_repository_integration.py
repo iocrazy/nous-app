@@ -902,3 +902,98 @@ async def test_duplicate_name_collision_is_a_typed_409_and_writes_nothing(
         )
         == 2
     ), "the refused duplicate must not have left a row behind"
+
+
+# ── 16. count_by_type: scope-only, preset-free, soft-delete-aware ──────────
+
+
+@_skip
+async def test_count_by_type_ignores_presets_other_scopes_and_trashed_rows(
+    orm_dsn, pg, fx
+):
+    """The three exclusions the sidebar badges rest on, against a real server.
+
+    Each one is a way the badge could over-count while every unit test stayed
+    green, because a stubbed session replays whatever rows the test author
+    thought the query would return:
+
+    * a **system preset** is global — ``list()`` unions it into every scope, so
+      counting it would give every team the same non-zero floor no action of
+      theirs can move. The preset here carries a ``scope_id`` (the
+      ``assets_scope_or_preset`` CHECK is an OR, so that is legal), which is
+      precisely the row a scope-only predicate would wrongly count;
+    * a **soft-deleted** asset must stop counting the moment it is trashed —
+      the badge is how the user sees the delete took effect;
+    * another scope's assets must not leak in at all.
+
+    Zero-fill is asserted too: ``audio`` has no rows here and must read 0, not
+    be missing.
+    """
+    from app.db.session import write_scope
+    from app.models import Assets
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team = fx["team_id"]
+
+    a = await _make_asset(repo, fx, "character", _uniq("Counted Lead"))
+    await _make_asset(repo, fx, "character", _uniq("Counted Second"))
+    await _make_asset(repo, fx, "location", _uniq("Counted Grove"))
+    trashed = await _make_asset(repo, fx, "prop", _uniq("Counted Blade"))
+
+    # A preset that DOES carry this scope's id — the row a predicate that only
+    # filtered on scope_id would happily count.
+    async with write_scope() as session:
+        session.add(
+            Assets(
+                scope_id=team,
+                asset_type="prompt",
+                name=_uniq("Preset In Scope"),
+                is_system_preset=True,
+                source="system_preset",
+                prompt_positive="cinematic lighting",
+                created_by=fx["user_id"],
+            )
+        )
+        await session.flush()
+
+    # A second team's asset, to prove the scope predicate is doing work.
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Asset Counts Other Team",
+        fx["user_id"],
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        await repo.create(
+            int(other_team),
+            {"asset_type": "character", "name": _uniq("Not Ours")},
+            fx["user_id"],
+        )
+
+        before = await repo.count_by_type(team)
+        assert before["character"] == 2, before
+        assert before["location"] == 1 and before["prop"] == 1
+        # The in-scope preset is NOT counted, even though it is in this scope.
+        assert before["prompt"] == 0, before
+        # A type with no rows reads 0 rather than being absent.
+        assert before["audio"] == 0 and "audio" in before
+
+        await repo.soft_delete(int(trashed["id"]), team)
+        after = await repo.count_by_type(team)
+        assert after["prop"] == 0, "a trashed asset kept counting"
+        assert after["character"] == 2, "soft delete moved an unrelated tally"
+
+        # Negative control: the row really is still on disk, so the drop above
+        # is the predicate working, not the fixture having vanished.
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM assets WHERE id = $1", int(trashed["id"])
+            )
+            == 1
+        )
+        assert int(a["id"]) > 0
+    finally:
+        await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))

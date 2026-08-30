@@ -34,6 +34,7 @@ from app.db.session import read_scope, unit_of_work
 from app.models import Projects, TeamMembers
 from app.schemas.assets import (
     SNOWFLAKE_PATTERN,
+    AssetCountsResponse,
     AssetCreate,
     AssetDetailResponse,
     AssetFileResponse,
@@ -294,6 +295,38 @@ async def list_project_assets(
     except AssetError as e:
         return _err(e)
     return _ok(rows)
+
+
+# ── counts ──────────────────────────────────────────────────────────────────
+#
+# ⚠️ ORDER IS LOAD-BEARING. FastAPI matches routes in registration order, so
+# this MUST stay above ``/assets/{asset_id}``: registered after it, the literal
+# "counts" would be captured as an ``asset_id``, and because that path param is
+# an ``int`` the request would answer 422 "not a valid integer" — a validation
+# error about an id nobody sent. Pinned by
+# ``tests/api/test_assets_counts.py::test_counts_is_not_captured_as_an_asset_id``.
+
+
+@router.get(
+    "/assets/counts",
+    response_model=Envelope[AssetCountsResponse],
+    responses=_ERRORS,
+)
+async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
+    """Per-type tallies for the scope's own assets — the sidebar's six badges.
+
+    Counts this scope's non-deleted assets only. Global system presets are
+    NOT included: they are visible from every scope and belong to none, so
+    folding them in would give every team the same non-zero floor that no
+    action of theirs can move. The shelf list DOES union them in, so a type's
+    list can hold more rows than its badge says — the badge answers "how many
+    of ours".
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().count_by_type(sid))
+    except AssetError as e:
+        return _err(e)
 
 
 # ── single asset ────────────────────────────────────────────────────────────

@@ -306,6 +306,21 @@ class AssetsService:
             out.sort(key=lambda r: 0 if r["readiness"]["state"] == "draft" else 1)
         return out
 
+    async def count_by_type(self, scope_id: int) -> Dict[str, int]:
+        """Per-type tallies for one scope — the sidebar's six badges.
+
+        Deliberately NOT ``len(list_assets(type=...))`` six times: that would
+        be six paginated queries whose ``limit`` caps the answer at 200, so a
+        library with 300 characters would report 200 and look like it had
+        stopped growing.
+
+        Known divergence, by design: the shelf ``list_assets`` returns unions
+        the global system presets in, so a type's list can be LONGER than its
+        badge. The badge answers "how many of ours", which is the number that
+        changes when the user creates or deletes something.
+        """
+        return await self.assets.count_by_type(int(scope_id))
+
     async def get_asset(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
         row = await self._require(asset_id, scope_id)
         out = (await self._derived([row]))[0]

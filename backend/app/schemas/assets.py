@@ -130,6 +130,28 @@ class AssetResponse(BaseModel):
     loadout_count: int = 0
 
 
+class AssetCountsResponse(BaseModel):
+    """GET /assets/counts — one non-deleted, non-preset count per asset type.
+
+    Six explicit fields rather than ``Dict[str, int]``: this is the payload
+    FastAPI validates on the way out, and a free-form dict would let a service
+    that stopped emitting ``costume`` ship a body the sidebar then renders as a
+    missing badge. Every field defaults to 0 so "no rows of this type" and "the
+    key was omitted" cannot look the same to the client.
+
+    The field set is pinned against ``models.assets.ASSET_TYPES`` by
+    ``tests/services/assets/test_schemas.py`` — adding a seventh type to the
+    slot table fails that test until this model carries it too.
+    """
+
+    character: int = 0
+    location: int = 0
+    prop: int = 0
+    costume: int = 0
+    prompt: int = 0
+    audio: int = 0
+
+
 class AssetFileResponse(BaseModel):
     asset_id: str
     resource_id: str

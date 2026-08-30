@@ -109,6 +109,23 @@ class _FakeService:
         self.calls.append(("list", scope_id, f))
         return [asset_row()]
 
+    # Overridable per test; the default is a full six-key tally so callers that
+    # do not care about counts still get a body the response model accepts.
+    counts = None
+
+    async def count_by_type(self, scope_id):
+        self.calls.append(("count_by_type", scope_id))
+        if self.counts is not None:
+            return self.counts
+        return {
+            "character": 2,
+            "location": 1,
+            "prop": 0,
+            "costume": 0,
+            "prompt": 3,
+            "audio": 0,
+        }
+
     async def create_asset(self, scope_id, payload, user_id):
         if payload.name == "dup":
             raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
@@ -212,6 +229,7 @@ async def test_non_member_403(app):
     "method,url",
     [
         ("get", "/api/v1/assets?scope_id=666"),
+        ("get", "/api/v1/assets/counts?scope_id=666"),
         ("get", "/api/v1/assets/5?scope_id=666"),
         ("delete", "/api/v1/assets/5?scope_id=666"),
         ("post", "/api/v1/assets/5/duplicate?scope_id=666"),

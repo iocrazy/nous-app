@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.session import read_scope, write_scope
 from app.models import AssetFiles, AssetLoadouts, AssetProjectRefs, Assets
+from app.models.assets import ASSET_TYPES
 from app.services.assets.slots import readiness
 
 _BIGINT_COLS = ("id", "scope_id", "cover_file_id", "duplicated_from")
@@ -265,6 +266,44 @@ class AssetsRepository:
                 else None
             )
             raise DuplicateAssetName(existing_id=int(existing["id"]) if existing else 0)
+
+    def _count_by_type_stmt(self, scope_id: int):
+        """The SELECT behind :meth:`count_by_type`, split out so it can be
+        compiled and asserted without a database (mirrors ``_list_stmt``)."""
+        return (
+            select(Assets.asset_type, func.count())
+            .where(Assets.scope_id == int(scope_id))
+            # System presets are GLOBAL — ``list`` unions them into every
+            # scope, but they are nobody's own assets, so a per-scope tally
+            # must not claim them. ``assets_scope_or_preset`` is an OR, so a
+            # preset MAY carry a scope_id; the scope predicate alone would
+            # therefore not be enough and this is not belt-and-braces.
+            .where(Assets.is_system_preset.is_(False))
+            .where(Assets.deleted_at.is_(None))
+            .group_by(Assets.asset_type)
+        )
+
+    async def count_by_type(self, scope_id: int) -> Dict[str, int]:
+        """``{asset_type: n}`` for one scope, zero-filled over every type.
+
+        Zero-filled on purpose: a GROUP BY answers only for types that have at
+        least one row, and handing the caller a dict missing ``costume``
+        instead of ``costume: 0`` makes "none yet" indistinguishable from "this
+        type does not exist" at every call site. The fill list comes from
+        ``models.assets.ASSET_TYPES`` — the same tuple the DB CHECK and the
+        slot tables are pinned against (test_slots.py) — so a seventh type
+        cannot be added to the backend while this method keeps answering with
+        six keys.
+        """
+        out: Dict[str, int] = {t: 0 for t in ASSET_TYPES}
+        async with read_scope() as session:
+            for asset_type, n in (
+                await session.execute(self._count_by_type_stmt(int(scope_id)))
+            ).all():
+                # An asset_type outside the table would be a row the slot code
+                # cannot describe; count it rather than dropping it silently.
+                out[str(asset_type)] = int(n)
+        return out
 
     async def soft_delete(self, asset_id: int, scope_id: int) -> bool:
         async with write_scope() as session:
