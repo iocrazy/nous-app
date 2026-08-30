@@ -40,7 +40,7 @@ export function AttachedComposerPanel({
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [body, setBody] = useState('');
   const [model, setModel] = useState('');
-  const [ratio, setRatio] = useState('1:1');
+  const [ratio, setRatio] = useState('auto');
   const [count, setCount] = useState(1);
   const [quality, setQuality] = useState<string | undefined>(undefined);
   const [resolution, setResolution] = useState<string | undefined>(undefined);

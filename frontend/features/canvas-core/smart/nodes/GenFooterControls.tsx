@@ -35,8 +35,13 @@ export interface GenFooterControlsProps {
   disabled?: boolean;
 }
 
-/** Semantic label per ratio (IC 尺寸选择 right-hand hints). */
+/** Semantic label per ratio (IC 尺寸选择 right-hand hints).
+ *
+ *  `auto` leads: a prompt should follow the image feeding it unless the user
+ *  says otherwise. It carries no numeric value, so `nearestRatio` skips it
+ *  when snapping a measured size onto this list. */
 export const RATIO_LABELS: Record<string, string> = {
+  auto: 'Match input',
   '1:1': 'Square',
   '2:3': 'Portrait',
   '3:2': 'Landscape',
@@ -151,7 +156,8 @@ export function GenFooterControls({
   };
 
   const isImage = gen.kind === 'image';
-  const ratioValue = (isImage ? gen.ratio : gen.aspect) ?? '1:1';
+  // Unset means "follow the source" — see autoRatio.isAutoRatio.
+  const ratioValue = (isImage ? gen.ratio : gen.aspect) ?? 'auto';
   const modelLabel =
     models.find((m) => m.name === gen.model)?.display_name ||
     gen.model ||

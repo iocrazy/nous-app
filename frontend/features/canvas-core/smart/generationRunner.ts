@@ -13,6 +13,7 @@ import {
   PollStopped,
 } from '../services/canvasGenerationService';
 import type { PromptCaller, RunnerResult } from './runner';
+import { isAutoRatio, measureRatio } from './autoRatio';
 
 export interface GenerationRunnerDeps {
   canvasId: string | null;
@@ -72,7 +73,24 @@ export function withGenerationRunner(
 
     try {
       const params: Record<string, unknown> = {};
-      if (gen.kind === 'image' && gen.ratio) params.ratio = gen.ratio;
+      if (gen.kind === 'image') {
+        // `auto` (and an unset value) means "match the image feeding this
+        // prompt". Resolved HERE rather than when the node was created: the
+        // wired input can change afterwards, and a ratio frozen at creation
+        // would quietly stop matching what the user sees.
+        //
+        // An explicit choice is never overridden, and an unmeasurable source
+        // sends no ratio at all rather than a guess.
+        if (isAutoRatio(gen.ratio)) {
+          const followed = ctx.source_url ?? ctx.source_urls?.[0];
+          if (followed) {
+            const measured = await measureRatio(followed);
+            if (measured) params.ratio = measured;
+          }
+        } else if (gen.ratio) {
+          params.ratio = gen.ratio;
+        }
+      }
       if (gen.kind === 'image' && gen.quality) params.quality = gen.quality;
       if (gen.kind === 'image' && ctx.source_urls?.length)
         params.source_urls = ctx.source_urls;

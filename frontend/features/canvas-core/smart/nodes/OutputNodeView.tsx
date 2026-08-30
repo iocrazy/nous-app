@@ -374,7 +374,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         if (extId) {
           createPromptFromNode(extId, {
             body: 'Remove the white area and fill the scene naturally',
-            gen: { kind: 'image', model: '', ratio: '1:1', count: 1 },
+            gen: { kind: 'image', model: '', ratio: 'auto', count: 1 },
             source_ref: newUrl,
           });
         }
