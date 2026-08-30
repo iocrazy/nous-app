@@ -8,9 +8,8 @@ from app.services.ai.provider_protocols.base import (
 
 
 class JimengLocalProtocol(ProviderProtocol):
-    """Image generation on the user's OWN machine via the paired nous-codex
-    daemon driving the dreamina CLI. (The daemon can also do video; the
-    routing order does not let a video row reach it yet — see ``model_types``.)
+    """Image AND video generation on the user's OWN machine via the paired
+    nous-codex daemon driving the dreamina CLI.
 
     ``jimeng-local`` has been a live ``mediahub_models.actual_provider`` value
     all along (``canvas_generation._LOCAL_ENGINES`` routes it to the daemon),
@@ -32,15 +31,13 @@ class JimengLocalProtocol(ProviderProtocol):
         "dreamina CLI on the user's paired device (OAuth session is the "
         "credential; nous never sees it). Image generation."
     )
-    # Image only, though the daemon itself can do video: ``canvas_generation``
-    # takes its ``kind == "video"`` branch — which resolves through
-    # ``db_registry.resolve_video_provider``, and that rejects any family other
-    # than "jimeng-cli" — and returns BEFORE it ever reaches the ``_local_engine``
-    # check. So a jimeng-local video row is unreachable by construction: listing
-    # "video" here would put an option in the admin dropdown that can only ever
-    # raise. Widen this the same change that hoists the local-engine check above
-    # the video branch, not before.
-    model_types = ("image",)
+    # Both, now that ``canvas_generation`` asks "whose machine?" BEFORE it
+    # splits on kind: a jimeng-local video row reaches the daemon arm instead
+    # of falling into ``resolve_video_provider`` (which rejects any family
+    # other than "jimeng-cli") and raising. This was image-only for exactly as
+    # long as that video row was unroutable — listing an option the dropdown
+    # could only ever fail on is worse than not listing it.
+    model_types = ("image", "video")
     generation_family = "jimeng-local"
     # Same knobs as the server-side jimeng-cli protocol — it is the same CLI,
     # just executed on the user's machine (spec §3.2 groups them on one row).
@@ -49,7 +46,9 @@ class JimengLocalProtocol(ProviderProtocol):
         quality=False,
         resolution=True,
         # The image CLI is pure text2image — build_image_args takes no --image.
-        # Video refs (first/last frame, multimodal) ride on video_modes instead.
+        # ``max_refs`` is read as an IMAGE cap only (see
+        # ``GenerationRequest.reconcile``); video refs (first/last frame,
+        # multimodal) are governed by ``video_modes`` below.
         max_refs=0,
         negative=False,
         video_modes=frozenset({"frames", "multimodal"}),

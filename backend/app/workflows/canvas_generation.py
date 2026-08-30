@@ -119,17 +119,123 @@ async def generate_canvas_media_step(
 
     # Parse the caller's knobs ONCE; branches read this object rather than
     # re-deriving their own dict out of ``params`` (the drift this contract
-    # exists to end). Where the four branches stand:
-    #   - server VIDEO (first below): no reconcile, still reads ``params``,
-    #     always an empty ``dropped_knobs``;
-    #   - the DAEMON branch reconciles once above its codex/dreamina split, so
-    #     both arms report the same ``dropped_knobs``: the codex arm sends
-    #     ``eff`` alone, while the dreamina arm still builds its argv from
-    #     ``params`` (its refs deliberately — see the comment there);
+    # exists to end). Where the branches stand:
+    #   - the DAEMON branch (first below — "whose machine?" is the routing
+    #     question, asked before the kind-specific server branches) reconciles
+    #     once above its codex/dreamina split, so both arms report the same
+    #     ``dropped_knobs`` and both build from ``eff`` alone;
+    #   - server VIDEO: no reconcile, still reads ``params``, always an empty
+    #     ``dropped_knobs``;
     #   - server IMAGE (last): reconciles and sends ``eff``.
     req = GenerationRequest.from_params(
         kind=kind, prompt=prompt, model=model, params=params, source_url=source_url
     )
+
+    # C 方案: a catalog row whose actual_provider is 'codex-local' is not a
+    # server-side provider at all — the work runs on the USER's machine via
+    # their paired daemon (spec §6). Offline is a typed failure at dispatch
+    # time, not a hang.
+    local = (
+        await _local_engine(model, kind if kind in ("image", "video") else "image")
+        if (model or "").strip()
+        else None
+    )
+    if local:
+        engine, engine_model = local
+        from app.services.codex.daemon_dispatch import dispatch_to_daemon
+
+        # Capabilities live under the catalog's actual_provider, so map the
+        # engine back to it. Neither name in hand is that key: ``engine_model``
+        # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
+        # to work — "codex" happens to hit the SERVER protocol (same knobs
+        # today, a coincidence), while "dreamina" hits nothing. A miss
+        # collapses to ``none()``, which drops the ratio again — the very bug
+        # this branch is here to fix.
+        caps = await _capabilities_for(
+            "codex-local" if engine == "codex" else "jimeng-local"
+        )
+        eff, dropped = req.reconcile(caps)
+
+        if engine == "dreamina":
+            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+
+            # Build the exact dreamina argv server-side (single source of
+            # truth: the same pure builders the server provider uses). Refs
+            # become {ref:N} placeholders the daemon swaps for local paths.
+            from app.services.media.parsers.video_providers.jimeng_cli import (
+                build_image_args,
+                build_video_args,
+            )
+
+            placeholders = [f"{{ref:{i}}}" for i in range(len(ref_urls))]
+            if eff.kind == "video":
+                # Same three-way choice the server video branch makes: frames
+                # → first/last (frames2video), multimodal → every ref
+                # (multimodal2video 全能参考), otherwise the single source
+                # drives image2video / text2video. Handing every ref to
+                # ``image_paths`` regardless — what this did before — turned a
+                # first/last-frame request into a multimodal one in silence.
+                frame_kwargs: dict
+                if eff.video_mode == "frames" and len(placeholders) >= 2:
+                    frame_kwargs = {
+                        "first_frame": placeholders[0],
+                        "last_frame": placeholders[1],
+                    }
+                elif eff.video_mode == "multimodal" and placeholders:
+                    frame_kwargs = {"image_paths": placeholders}
+                else:
+                    frame_kwargs = {
+                        "image_path": placeholders[0] if placeholders else None
+                    }
+                submit_args = build_video_args(
+                    prompt=eff.prompt,
+                    aspect=eff.ratio or "",
+                    poll=90,
+                    duration=eff.duration,
+                    model_version=engine_model or None,
+                    resolution=eff.resolution,
+                    **frame_kwargs,
+                )
+            else:
+                submit_args = build_image_args(
+                    prompt=eff.prompt,
+                    aspect=eff.ratio or "",
+                    poll=60,
+                    resolution_type=eff.resolution,
+                    model_version=engine_model or None,
+                )
+            payload = {
+                "engine": "dreamina",
+                "submit_args": submit_args,
+                "media_kind": kind,
+                "ref_urls": ref_urls,
+            }
+        else:
+            # Every knob the caller picked, reconciled once and sent as one
+            # shape. It used to read ``params.get("size")`` (the frontend only
+            # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
+            # sets it) — both resolved to "" and the daemon fell back to its
+            # own default, which is why a 16:9 pick came back portrait.
+            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+            payload = eff.to_codex_daemon_payload(
+                engine_model=engine_model, ref_urls=ref_urls
+            )
+
+        result = await dispatch_to_daemon(
+            user_id=str(user_id),
+            scope_id=int(await _resolve_personal_team_id(str(user_id))),
+            kind=kind if kind in ("image", "video") else "image",
+            payload=payload,
+        )
+        return {
+            "media_kind": kind if kind in ("image", "video") else "image",
+            "local_path": None,
+            "remote_url": None,
+            "existing_gen_id": result.get("gen_id"),
+            "provider": f"{engine}-local",
+            "model": model or "",
+            "dropped_knobs": dropped,
+        }
 
     if kind == "video":
         from app.services.library.generated_media_service import (
@@ -190,109 +296,6 @@ async def generate_canvas_media_step(
             "provider": "jimeng-cli",
             "model": gen_model or "",
             "dropped_knobs": [],
-        }
-
-    # C 方案: a catalog row whose actual_provider is 'codex-local' is not a
-    # server-side provider at all — the work runs on the USER's machine via
-    # their paired daemon (spec §6). Offline is a typed failure at dispatch
-    # time, not a hang.
-    local = (
-        await _local_engine(model, kind if kind in ("image", "video") else "image")
-        if (model or "").strip()
-        else None
-    )
-    if local:
-        engine, engine_model = local
-        from app.services.codex.daemon_dispatch import dispatch_to_daemon
-
-        # Capabilities live under the catalog's actual_provider, so map the
-        # engine back to it. Neither name in hand is that key: ``engine_model``
-        # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
-        # to work — "codex" happens to hit the SERVER protocol (same knobs
-        # today, a coincidence), while "dreamina" hits nothing. A miss
-        # collapses to ``none()``, which drops the ratio again — the very bug
-        # this branch is here to fix.
-        caps = await _capabilities_for(
-            "codex-local" if engine == "codex" else "jimeng-local"
-        )
-        eff, dropped = req.reconcile(caps)
-
-        if engine == "dreamina":
-            # Deliberately NOT ``eff.refs`` yet — nobody forgot. jimeng-local
-            # declares max_refs=0, a cap written about its text2image CLI
-            # (build_image_args takes no --image), while its VIDEO refs ride
-            # on video_modes as first/last frame or multimodal. Reconciling
-            # against it here would silently empty a frames2video job's refs.
-            # Fixed in ``reconcile`` itself (max_refs governs images; video
-            # refs follow video_modes), after which this reverts to eff.refs.
-            raw_refs = params.get("source_urls")
-            ref_urls = [
-                u
-                for u in (raw_refs if isinstance(raw_refs, list) else [])
-                if isinstance(u, str) and u
-            ][:9] or ([source_url] if source_url else [])
-            ref_urls = [_absolute_media_url(u) for u in ref_urls]
-
-            # Build the exact dreamina argv server-side (single source of
-            # truth: the same pure builders the server provider uses). Refs
-            # become {ref:N} placeholders the daemon swaps for local paths.
-            from app.services.media.parsers.video_providers.jimeng_cli import (
-                build_image_args,
-                build_video_args,
-            )
-
-            placeholders = [f"{{ref:{i}}}" for i in range(len(ref_urls))]
-            if kind == "video":
-                submit_args = build_video_args(
-                    prompt=prompt,
-                    aspect=str(params.get("aspect") or params.get("ratio") or ""),
-                    poll=90,
-                    image_paths=placeholders,
-                    duration=(
-                        int(params["duration"]) if params.get("duration") else None
-                    ),
-                    model_version=engine_model or None,
-                    resolution=str(params.get("resolution") or "") or None,
-                )
-            else:
-                submit_args = build_image_args(
-                    prompt=prompt,
-                    aspect=str(params.get("ratio") or ""),
-                    poll=60,
-                    resolution_type=str(params.get("resolution") or "") or None,
-                    model_version=engine_model or None,
-                )
-            payload = {
-                "engine": "dreamina",
-                "submit_args": submit_args,
-                "media_kind": kind,
-                "ref_urls": ref_urls,
-            }
-        else:
-            # Every knob the caller picked, reconciled once and sent as one
-            # shape. It used to read ``params.get("size")`` (the frontend only
-            # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
-            # sets it) — both resolved to "" and the daemon fell back to its
-            # own default, which is why a 16:9 pick came back portrait.
-            ref_urls = [_absolute_media_url(u) for u in eff.refs]
-            payload = eff.to_codex_daemon_payload(
-                engine_model=engine_model, ref_urls=ref_urls
-            )
-
-        result = await dispatch_to_daemon(
-            user_id=str(user_id),
-            scope_id=int(await _resolve_personal_team_id(str(user_id))),
-            kind=kind if kind in ("image", "video") else "image",
-            payload=payload,
-        )
-        return {
-            "media_kind": kind if kind in ("image", "video") else "image",
-            "local_path": None,
-            "remote_url": None,
-            "existing_gen_id": result.get("gen_id"),
-            "provider": f"{engine}-local",
-            "model": model or "",
-            "dropped_knobs": dropped,
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(

@@ -119,7 +119,17 @@ class GenerationRequest:
         if eff.resolution and not caps.resolution:
             eff = replace(eff, resolution=None)
             dropped.append("resolution")
-        if len(eff.refs) > caps.max_refs:
+        # Refs are governed by a DIFFERENT field per kind, and conflating the
+        # two truncates real work: ``max_refs`` describes the image path (
+        # jimeng-local declares 0 because its text2image CLI takes no --image),
+        # while VIDEO refs ride on ``video_modes`` as first/last frame or
+        # multimodal. Applying the image cap to a frames2video job emptied it.
+        # The global 9 ceiling is enforced upstream in ``from_params``.
+        if eff.kind == "video":
+            if eff.refs and not caps.video_modes:
+                eff = replace(eff, refs=())
+                dropped.append("refs")
+        elif len(eff.refs) > caps.max_refs:
             eff = replace(eff, refs=eff.refs[: caps.max_refs])
             dropped.append("refs")
         if eff.negative and not caps.negative:

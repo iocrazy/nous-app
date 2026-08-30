@@ -242,3 +242,54 @@ def test_duration_zero_is_none_whether_string_or_int():
     )
     assert as_str.duration is None
     assert as_int.duration is None
+
+
+def test_reconcile_video_keeps_refs_when_provider_declares_video_modes():
+    """``max_refs`` is a statement about the IMAGE path. jimeng-local declares
+    max_refs=0 (its text2image CLI takes no --image) while its VIDEO refs ride
+    on video_modes as first/last frame or multimodal — applying the image cap
+    to a frames2video job would empty it."""
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={"video_mode": "frames", "source_urls": ["/u/1", "/u/2"]},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(
+        Caps(max_refs=0, video_modes=frozenset({"frames", "multimodal"}))
+    )
+    assert eff.refs == ("/u/1", "/u/2")
+    assert dropped == []
+
+
+def test_reconcile_video_without_video_modes_drops_refs_and_names_them():
+    """No declared video mode = no declared way to consume a ref. Dropping is
+    right; dropping SILENTLY is not — ``refs`` must be named."""
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={"source_urls": ["/u/1", "/u/2"]},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(Caps(max_refs=9, video_modes=frozenset()))
+    assert eff.refs == ()
+    assert dropped == ["refs"]
+
+
+def test_reconcile_image_refs_still_capped_by_max_refs_even_with_video_modes():
+    """The other half of the split: ``video_modes`` must not leak into the
+    image path, where ``max_refs`` remains the only governor."""
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"source_urls": ["/u/1", "/u/2", "/u/3"]},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(
+        Caps(max_refs=1, video_modes=frozenset({"frames", "multimodal"}))
+    )
+    assert eff.refs == ("/u/1",)
+    assert dropped == ["refs"]
