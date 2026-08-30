@@ -4,9 +4,14 @@
 nowhere else — which legacy temp uploads get a ``generated_media`` row, and
 which already-registered rows get flipped to ``in_assets`` — so both are
 pinned here, including the re-run (idempotency) shape.
+
+``TestSystemScopeWrapping`` covers the one thing the pure planner cannot:
+that the workflow enters a system scope before it touches the DB.
 """
 
 from types import SimpleNamespace
+
+import pytest
 
 from app.api.admin.backfill_router import _BACKFILLS, workflow_kwargs
 from app.workflows.backfill_generated_inbox import plan_inbox_backfill
@@ -189,3 +194,114 @@ class TestTempSweeperIsNotScheduled:
         from app.workflows import temp_resource_sweeper
 
         assert callable(temp_resource_sweeper.sweep_temp_resources)
+
+
+class TestSystemScopeWrapping:
+    """The DB halves must run under an ambient system scope.
+
+    ``_load_inputs`` selects from ``Resources``, a ``UserScoped`` model, and
+    production runs with ``SCOPE_ENFORCE_RESOURCES=True`` — with no scope set
+    the very first SELECT raises ``UnscopedQueryError`` and the run dies
+    before reading a row (observed in production, 2026-08-29).
+
+    Asserted as an **ordered event log** rather than "the workflow returned
+    something": a stubbed ``_load_inputs`` succeeds with or without a scope,
+    so only the ordering can tell the two apart. Falsifiability: drop the
+    ``async with system_request_scope(...)`` from the workflow and both tests
+    below fail on the missing ``scope_enter``.
+    """
+
+    @staticmethod
+    def _harness(monkeypatch, events):
+        """Patch DBOS, the task manager, the scope, and both DB halves."""
+        import inspect
+        from contextlib import asynccontextmanager
+        from unittest.mock import MagicMock, patch
+
+        import app.workflows.backfill_generated_inbox as m
+
+        @asynccontextmanager
+        async def fake_scope(reason: str):
+            events.append(("scope_enter", reason))
+            try:
+                yield
+            finally:
+                events.append(("scope_exit", reason))
+
+        async def fake_load_inputs():
+            events.append(("load_inputs", None))
+            return [_res(1)], {}, set()
+
+        async def fake_apply(plan, run_user_id):
+            events.append(("apply", run_user_id))
+            return {
+                "registered": len(plan["to_register"]),
+                "marked_in_assets": 0,
+                "registered_ids": [],
+                "marked_ids": [],
+            }
+
+        class _Manager:
+            async def create(self, **kw):
+                events.append(("manager_create", kw.get("user_id")))
+
+            async def start(self, task_id, **kw):
+                events.append(("manager_start", task_id))
+
+            async def complete(self, task_id, **kw):
+                events.append(("manager_complete", task_id))
+
+            async def patch_metadata(self, task_id, patch_):
+                events.append(("manager_patch_metadata", task_id))
+
+        monkeypatch.setattr(m, "system_request_scope", fake_scope)
+        monkeypatch.setattr(m, "_load_inputs", fake_load_inputs)
+        monkeypatch.setattr(m, "_apply", fake_apply)
+
+        dbos = MagicMock()
+        dbos.workflow_id = "wf-backfill-inbox-1"
+        return (
+            m,
+            patch.object(m, "DBOS", dbos),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=_Manager(),
+            ),
+            inspect,
+        )
+
+    @pytest.mark.asyncio
+    async def test_dry_run_reads_inside_a_system_scope(self, monkeypatch):
+        events = []
+        m, p_dbos, p_manager, inspect = self._harness(monkeypatch, events)
+        with p_dbos, p_manager:
+            out = await inspect.unwrap(m.backfill_generated_inbox)(dry_run=True)
+
+        assert out["counts"]["to_register"] == 1
+        names = [e[0] for e in events]
+        # The read is inside the scope, and the scope closes after it.
+        assert names.index("scope_enter") < names.index("load_inputs")
+        assert names.index("load_inputs") < names.index("scope_exit")
+        # The reason is the audit trail a system scope is required to carry.
+        assert ("scope_enter", "backfill-generated-inbox") in events
+        # Task Center writes touch task_tracking, which is not scope-enforced:
+        # they stay outside so the scope covers exactly the enforced work.
+        assert names.index("manager_start") < names.index("scope_enter")
+        assert names.index("scope_exit") < names.index("manager_complete")
+
+    @pytest.mark.asyncio
+    async def test_live_run_writes_inside_the_same_system_scope(self, monkeypatch):
+        """``_apply`` writes ``generated_media`` rows keyed off scoped reads —
+        it must be under the scope too, not just the planning read."""
+        events = []
+        m, p_dbos, p_manager, inspect = self._harness(monkeypatch, events)
+        with p_dbos, p_manager:
+            out = await inspect.unwrap(m.backfill_generated_inbox)(
+                dry_run=False, run_user_id="admin-uuid"
+            )
+
+        assert out["applied"]["registered"] == 1
+        names = [e[0] for e in events]
+        assert names.index("scope_enter") < names.index("apply")
+        assert names.index("apply") < names.index("scope_exit")
+        assert ("apply", "admin-uuid") in events

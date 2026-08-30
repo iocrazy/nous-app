@@ -2,8 +2,8 @@
 
 THE BACKFILL PARADIGM (see ``backfill_issue_scope.py``): a DBOS workflow,
 ``dry_run=True`` by default, row-wise idempotent, failures raise, Task Center
-visible. The planner is pure so every decision it makes is testable without a
-database.
+visible, **DB work under an explicit system scope**. The planner is pure so
+every decision it makes is testable without a database.
 
 Two independent halves, reported separately (a run can be entirely one of
 them, and collapsing the counts would hide that):
@@ -43,6 +43,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 
+from app.db.scope import system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     AssetFiles,
@@ -315,14 +316,26 @@ async def backfill_generated_inbox(
 
     out: Dict[str, Any] = {"dry_run": dry_run}
     try:
-        temp_resources, gen_by_resource, with_asset_files = await _load_inputs()
-        plan = plan_inbox_backfill(temp_resources, gen_by_resource, with_asset_files)
-        logger.info(
-            "[backfill-inbox] plan counts={} dry_run={}", plan["counts"], dry_run
-        )
-        out["counts"] = plan["counts"]
-        if not dry_run:
-            out["applied"] = await _apply(plan, owner)
+        # Both DB halves run under an explicit system scope: ``Resources`` is a
+        # ``UserScoped`` model and production has ``SCOPE_ENFORCE_RESOURCES=True``,
+        # so an unscoped SELECT raises ``UnscopedQueryError`` — the whole run
+        # fails before it reads a single row. A reconciliation is global by
+        # definition, so the scope is ``system``, not a user's. Entered inside
+        # the async body so the ContextVar lands in this workflow's event loop
+        # (same stance as ``scheduled_cleanup.cleanup_trashed_resources_step``).
+        # The Task Center ``manager.*`` calls stay outside — they touch
+        # ``task_tracking``, which is not scope-enforced.
+        async with system_request_scope(reason="backfill-generated-inbox"):
+            temp_resources, gen_by_resource, with_asset_files = await _load_inputs()
+            plan = plan_inbox_backfill(
+                temp_resources, gen_by_resource, with_asset_files
+            )
+            logger.info(
+                "[backfill-inbox] plan counts={} dry_run={}", plan["counts"], dry_run
+            )
+            out["counts"] = plan["counts"]
+            if not dry_run:
+                out["applied"] = await _apply(plan, owner)
     except Exception:
         # Persist whatever was computed before the crash, then raise —
         # 路线 C rule 4: the trigger writes phase=failed, we never do.
