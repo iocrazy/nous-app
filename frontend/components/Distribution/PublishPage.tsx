@@ -2383,6 +2383,7 @@ export const PublishPage: React.FC = () => {
               </button>
             </div>
           )}
+          <div className="section-head" data-testid="publish-section-basics">{t('distribution.publish.sectionBasics', 'Basics')}</div>
           <div className="fcard">
             <h4>
               {t('distribution.publish.content', 'Content')}
@@ -2885,21 +2886,11 @@ export const PublishPage: React.FC = () => {
             )}
           </div>
 
-          <div className="fcard">
-            <div className="frow">
-              <div className="lbl"><b>{t('distribution.publish.visibility', 'Visibility')}</b></div>
-              <div className="seg">
-                {VIS.map((v) => (
-                  <button key={v} type="button" className={visibility === v ? 'on' : ''} onClick={() => setVisibility(v)}>
-                    {visLabel(v)}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="fcard" data-testid="publish-section-extended">
+            <h4>{t('distribution.publish.sectionExtended', 'Extended info')}</h4>
             <div className="frow">
               <div className="lbl">
-                <b>{t('distribution.publish.aiContent', 'AI-generated content')}</b>
-                <span>{t('distribution.publish.aiContentDesc', 'Preselects the matching self declaration below.')}</span>
+                <b>{t('distribution.publish.aiContent', 'AI-generated content')}<HelpTip text={t('distribution.publish.aiContentDesc', 'Preselects the matching self declaration below.')} /></b>
               </div>
               <button
                 type="button"
@@ -2912,13 +2903,10 @@ export const PublishPage: React.FC = () => {
             </div>
             <div className="frow" style={{ display: 'block' }}>
               <div className="lbl" style={{ marginBottom: 7 }}>
-                <b>{t('distribution.publish.selfDeclaration', 'Self declaration')}</b>
-                <span>
-                  {t(
+                <b>{t('distribution.publish.selfDeclaration', 'Self declaration')}<HelpTip text={t(
                     'distribution.publish.selfDeclarationDesc',
                     'Douyin content declaration. Leave unset to keep the platform default.',
-                  )}
-                </span>
+                  )} /></b>
               </div>
               {/* UiSelect, not a bare <select>: a native dropdown paints with
                   the OS widget (its own highlight colour, its own font) and was
@@ -2951,14 +2939,25 @@ export const PublishPage: React.FC = () => {
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="fcard" data-testid="publish-section-settings">
+            <h4>{t('distribution.publish.sectionSettings', 'Publish settings')}</h4>
+            <div className="frow">
+              <div className="lbl"><b>{t('distribution.publish.visibility', 'Visibility')}</b></div>
+              <div className="seg">
+                {VIS.map((v) => (
+                  <button key={v} type="button" className={visibility === v ? 'on' : ''} onClick={() => setVisibility(v)}>
+                    {visLabel(v)}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="frow">
               <div className="lbl">
-                <b>{t('distribution.publish.allowDownloadsLabel', 'Allow downloads')}</b>
-                <span>
-                  {isImages
+                <b>{t('distribution.publish.allowDownloadsLabel', 'Allow downloads')}<HelpTip text={isImages
                     ? t('distribution.publish.allowDownloadsDescImages', 'Viewers can save the images to their device')
-                    : t('distribution.publish.allowDownloadsDesc', 'Viewers can save the video to their device')}
-                </span>
+                    : t('distribution.publish.allowDownloadsDesc', 'Viewers can save the video to their device')} /></b>
               </div>
               <button
                 type="button"
@@ -2971,14 +2970,11 @@ export const PublishPage: React.FC = () => {
             </div>
             <div className="frow" style={{ display: 'block' }}>
               <div className="lbl" style={{ marginBottom: 7 }}>
-                <b>{t('distribution.publish.publishTime', 'Publish time')}</b>
-                <span>
-                  {t(
+                <b>{t('distribution.publish.publishTime', 'Publish time')}<HelpTip text={t(
                     'distribution.publish.scheduleWindow',
                     'Anything outside {{min}} to {{max}} from now is greyed out — the platform refuses it, and the extra lead time leaves room for the upload.',
                     { min: minLeadWords, max: maxAheadWords },
-                  )}
-                </span>
+                  )} /></b>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <div className="seg">
