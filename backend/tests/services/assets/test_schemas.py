@@ -4,7 +4,13 @@ from typing import get_args
 import pytest
 from pydantic import ValidationError
 
-from app.models.assets import ASSET_SOURCES, ASSET_TYPES, LINK_RELATIONS
+from app.models.assets import (
+    ASSET_SOURCES,
+    ASSET_TYPES,
+    LINK_RELATIONS,
+    AssetLoadouts,
+    Assets,
+)
 from app.schemas.assets import (
     AssetCreate,
     AssetDetailResponse,
@@ -20,6 +26,7 @@ from app.schemas.assets import (
     LinkRelation,
     LinkRequest,
     LoadoutCreate,
+    LoadoutResponse,
     LoadoutUpdate,
     ProjectRefRequest,
 )
@@ -234,6 +241,35 @@ def test_file_and_link_models_carry_every_field_the_serializers_emit():
     )
     assert file_keys <= set(AssetFileResponse.model_fields)
     assert link_keys <= set(AssetLinkResponse.model_fields)
+
+
+def test_asset_response_declares_every_asset_column_and_derived_key():
+    """The same silent-drop guard, for the asset row itself.
+
+    ``_serialize`` emits EVERY ``assets`` column, and ``with_derived`` adds four
+    keys on top — but ``Envelope[AssetResponse]`` only forwards what the model
+    declares. Without this test, the next migration that adds a column to
+    ``assets`` would have the repo emit it, the response model drop it, the
+    frontend never see it, and nothing anywhere fail.
+
+    ``deleted_at`` is the single deliberate exclusion: rows reaching a response
+    are the live ones (every read filters ``deleted_at IS NULL``), so the field
+    is always null and carries no information.
+    """
+    emitted = ({c.name for c in Assets.__table__.columns} - {"deleted_at"}) | {
+        "readiness",
+        "file_counts_by_slot",
+        "project_ids",
+        "loadout_count",
+    }
+    assert emitted <= set(AssetResponse.model_fields)
+
+
+def test_loadout_response_declares_every_loadout_column():
+    """Same guard for ``asset_loadouts`` — ``_serialize_loadout`` emits the whole
+    row, and the create/update/detail routes answer with this model."""
+    emitted = {c.name for c in AssetLoadouts.__table__.columns}
+    assert emitted <= set(LoadoutResponse.model_fields)
 
 
 # ── P2: omit = unchanged, explicit null = clear ────────────────────────────
