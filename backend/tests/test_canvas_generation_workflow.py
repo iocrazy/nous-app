@@ -592,3 +592,115 @@ async def test_real_jimeng_row_reaches_the_video_resolver_with_its_capabilities(
     caps = await _capabilities_for(_actual_provider_of(provider))
     assert caps is not ProviderCapabilities.none()
     assert "16:9" in caps.ratios
+
+
+@pytest.mark.asyncio
+async def test_codex_daemon_branch_sends_ratio_model_quality_not_size_only():
+    """Before: payload = {prompt, size: params.get('size') -> '', model:
+    params.get('actual_model') -> ''}. The user's 16:9, model pick and
+    quality never left the server — that is the reported bug (a landscape
+    request coming back portrait)."""
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "99"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(
+                return_value=ProviderCapabilities(
+                    ratios=frozenset({"16:9"}),
+                    quality=True,
+                    resolution=False,
+                    max_refs=9,
+                    negative=False,
+                    video_modes=frozenset(),
+                    honours_ratio="prompt_hint",
+                )
+            ),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={
+                "ratio": "16:9",
+                "quality": "high",
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+            user_id="u1",
+        )
+
+    p = captured["payload"]
+    assert p["engine"] == "codex"
+    assert p["ratio"] == "16:9"
+    assert p["size"] == "1536x1024"  # old daemons keep working
+    assert p["quality"] == "high"
+    assert p["model"] == "gpt-image-2"  # catalog row, not params.actual_model
+    assert "16:9 landscape" in p["prompt"]
+    assert p["ref_urls"][0].startswith("http")  # absolutised for the daemon
+    assert out["provider"] == "codex-local"
+    assert out["dropped_knobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_codex_daemon_branch_looks_capabilities_up_by_provider_key():
+    """Through the REAL capability lookup — no ``_capabilities_for`` patch.
+
+    Inside ``if local:`` the only names in hand are the ENGINE ('codex') and
+    the upstream model ('gpt-image-2'); the protocol key is neither. Look the
+    capabilities up by ``engine_model`` and nothing resolves — ``none()``,
+    which drops the ratio again, the same bug wearing a different hat. (By
+    ``engine`` it only *appears* to work: "codex" hits the SERVER protocol,
+    which declares the same knobs today; "dreamina" hits nothing at all.)
+
+    So: 9:16 survives to the daemon as both ``ratio`` and ``size``, and
+    ``resolution`` — which codex-local declares it cannot honour — comes back
+    named in ``dropped_knobs`` rather than being discarded in silence.
+    """
+    captured: dict = {}
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "99"}
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._resolve_personal_team_id",
+            new=AsyncMock(return_value=7),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={"ratio": "9:16", "resolution": "2k"},
+            source_url=None,
+            user_id="u1",
+        )
+
+    assert captured["payload"]["ratio"] == "9:16"
+    assert captured["payload"]["size"] == "1024x1536"
+    assert out["dropped_knobs"] == ["resolution"]

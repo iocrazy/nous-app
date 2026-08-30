@@ -200,15 +200,34 @@ async def generate_canvas_media_step(
         engine, engine_model = local
         from app.services.codex.daemon_dispatch import dispatch_to_daemon
 
-        raw_refs = params.get("source_urls")
-        ref_urls = [
-            u
-            for u in (raw_refs if isinstance(raw_refs, list) else [])
-            if isinstance(u, str) and u
-        ][:9] or ([source_url] if source_url else [])
-        ref_urls = [_absolute_media_url(u) for u in ref_urls]
+        # Capabilities live under the catalog's actual_provider, so map the
+        # engine back to it. Neither name in hand is that key: ``engine_model``
+        # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
+        # to work — "codex" happens to hit the SERVER protocol (same knobs
+        # today, a coincidence), while "dreamina" hits nothing. A miss
+        # collapses to ``none()``, which drops the ratio again — the very bug
+        # this branch is here to fix.
+        caps = await _capabilities_for(
+            "codex-local" if engine == "codex" else "jimeng-local"
+        )
+        eff, dropped = req.reconcile(caps)
 
         if engine == "dreamina":
+            # Deliberately NOT ``eff.refs`` yet — nobody forgot. jimeng-local
+            # declares max_refs=0, a cap written about its text2image CLI
+            # (build_image_args takes no --image), while its VIDEO refs ride
+            # on video_modes as first/last frame or multimodal. Reconciling
+            # against it here would silently empty a frames2video job's refs.
+            # Fixed in ``reconcile`` itself (max_refs governs images; video
+            # refs follow video_modes), after which this reverts to eff.refs.
+            raw_refs = params.get("source_urls")
+            ref_urls = [
+                u
+                for u in (raw_refs if isinstance(raw_refs, list) else [])
+                if isinstance(u, str) and u
+            ][:9] or ([source_url] if source_url else [])
+            ref_urls = [_absolute_media_url(u) for u in ref_urls]
+
             # Build the exact dreamina argv server-side (single source of
             # truth: the same pure builders the server provider uses). Refs
             # become {ref:N} placeholders the daemon swaps for local paths.
@@ -245,13 +264,15 @@ async def generate_canvas_media_step(
                 "ref_urls": ref_urls,
             }
         else:
-            payload = {
-                "engine": "codex",
-                "prompt": prompt,
-                "size": str(params.get("size") or ""),
-                "model": str(params.get("actual_model") or ""),
-                "ref_urls": ref_urls,
-            }
+            # Every knob the caller picked, reconciled once and sent as one
+            # shape. It used to read ``params.get("size")`` (the frontend only
+            # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
+            # sets it) — both resolved to "" and the daemon fell back to its
+            # own default, which is why a 16:9 pick came back portrait.
+            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+            payload = eff.to_codex_daemon_payload(
+                engine_model=engine_model, ref_urls=ref_urls
+            )
 
         result = await dispatch_to_daemon(
             user_id=str(user_id),
@@ -266,7 +287,7 @@ async def generate_canvas_media_step(
             "existing_gen_id": result.get("gen_id"),
             "provider": f"{engine}-local",
             "model": model or "",
-            "dropped_knobs": [],
+            "dropped_knobs": dropped,
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
