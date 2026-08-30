@@ -46,6 +46,8 @@ from app.db.scope import SYSTEM, UnscopedQueryError, current_scope, system_reque
 from app.models import Resources
 
 REFS = [727145299382534146, 727145299382534147]
+# What the real caller (``AssetsService._REFERENCE_READ_REASON``) passes.
+REASON = "assets-generate-slot: resolve reference media paths"
 
 
 class _FakeSession:
@@ -89,7 +91,9 @@ async def test_reference_read_runs_under_system_scope_when_enforced(monkeypatch)
     _patch_read_scope(monkeypatch, seen)
     monkeypatch.setattr(repo_mod, "is_enforced", lambda table: True)
 
-    await repo_mod.AssetRelationsRepository().resource_media_rows(REFS)
+    await repo_mod.AssetRelationsRepository().resource_media_rows(
+        REFS, system_reason=REASON
+    )
 
     assert seen.get("scope") is SYSTEM, (
         f"ambient scope was {seen.get('scope')!r} during resource_media_rows, "
@@ -113,8 +117,39 @@ async def test_the_wrap_is_asked_about_resources_specifically(monkeypatch):
         return True
 
     monkeypatch.setattr(repo_mod, "is_enforced", _spy)
-    await repo_mod.AssetRelationsRepository().resource_media_rows(REFS)
+    await repo_mod.AssetRelationsRepository().resource_media_rows(
+        REFS, system_reason=REASON
+    )
     assert asked == ["resources"]
+
+
+@pytest.mark.asyncio
+async def test_the_audit_reason_is_the_callers_not_a_hardcoded_one(monkeypatch):
+    """``system_reason`` is required keyword-only for a reason: the audit line
+    belongs to whoever decided the cross-user read was legitimate. Hardcoding
+    it in the repo would file a second caller's read under THIS caller's
+    justification — a true-looking audit line about the wrong access."""
+    from contextlib import asynccontextmanager
+
+    seen: dict = {}
+    reasons: list[str] = []
+    _patch_read_scope(monkeypatch, seen)
+    monkeypatch.setattr(repo_mod, "is_enforced", lambda table: True)
+
+    @asynccontextmanager
+    async def _spy(reason):
+        reasons.append(reason)
+        async with system_request_scope(reason=reason):
+            yield
+
+    monkeypatch.setattr(repo_mod, "system_request_scope", _spy)
+
+    await repo_mod.AssetRelationsRepository().resource_media_rows(
+        REFS, system_reason="some-other-caller: a different justification"
+    )
+
+    assert reasons == ["some-other-caller: a different justification"]
+    assert seen.get("scope") is SYSTEM
 
 
 # ── B. flag off stays byte-for-byte legacy ─────────────────────────────────
@@ -126,7 +161,9 @@ async def test_no_scope_is_opened_when_enforcement_is_off(monkeypatch):
     _patch_read_scope(monkeypatch, seen)
     monkeypatch.setattr(repo_mod, "is_enforced", lambda table: False)
 
-    await repo_mod.AssetRelationsRepository().resource_media_rows(REFS)
+    await repo_mod.AssetRelationsRepository().resource_media_rows(
+        REFS, system_reason=REASON
+    )
 
     assert seen.get("scope") is None, (
         "an ambient scope was opened with enforcement off — the gate exists to "
@@ -140,7 +177,10 @@ async def test_an_empty_reference_list_never_touches_the_database(monkeypatch):
     _patch_read_scope(monkeypatch, seen)
     monkeypatch.setattr(repo_mod, "is_enforced", lambda table: True)
 
-    assert await repo_mod.AssetRelationsRepository().resource_media_rows([]) == {}
+    empty = await repo_mod.AssetRelationsRepository().resource_media_rows(
+        [], system_reason=REASON
+    )
+    assert empty == {}
     assert "scope" not in seen
 
 
@@ -180,3 +220,19 @@ async def test_system_scope_gets_the_same_select_past_the_choke_point(
         with pytest.raises(OperationalError) as exc:
             await sqlite_session.execute(select(Resources.id).where(Resources.id == 1))
     assert "no such table" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_the_choke_point_discriminates_by_table(sqlite_session, monkeypatch):
+    """CONTROL for the negative control: the guard raises for SCOPED tables
+    specifically, not for every statement. Without this, the raise above would
+    also be produced by a choke point that had gone blanket-deny, and the
+    SYSTEM wrap would be credited with fixing something it did not."""
+    from app.models import AssetFiles  # plain Base — no scope mixin
+
+    monkeypatch.setattr("app.db.scope._is_enforced", lambda table: True)
+    with pytest.raises(OperationalError) as exc:
+        await sqlite_session.execute(
+            select(AssetFiles.asset_id).where(AssetFiles.asset_id == 1)
+        )
+    assert "no such table" in str(exc.value), "expected the DB to be what stops it"

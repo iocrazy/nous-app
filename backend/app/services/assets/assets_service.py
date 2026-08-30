@@ -143,6 +143,12 @@ _TRANSLATE_EMPTY = (
 # of the priority so the primary image is never the one left behind.
 MAX_SLOT_REFERENCES = 3
 
+# The audit line the cross-user reference read is logged under. Owned by this
+# call site, not by the repo: it names WHY this particular read is a legitimate
+# system read (the asset passed _require_writable, the ids came from
+# asset_files), which is exactly what a second caller must not inherit.
+_REFERENCE_READ_REASON = "assets-generate-slot: resolve reference media paths"
+
 # The MIME every generated image is registered under — the same constant the
 # canvas and shot-generate paths use (``_KIND_MIME``/``mime="image/png"``), so
 # all three land the same way in Tier-1.
@@ -950,7 +956,10 @@ class AssetsService:
         """
         local_paths: List[str] = []
         skipped: List[Dict[str, Any]] = []
-        rows = await self.relations.resource_media_rows([int(r) for r in resource_ids])
+        rows = await self.relations.resource_media_rows(
+            [int(r) for r in resource_ids],
+            system_reason=_REFERENCE_READ_REASON,
+        )
         for resource_id in resource_ids:
             row = rows.get(int(resource_id))
             if not row:

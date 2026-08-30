@@ -164,7 +164,7 @@ class FakeRelationsRepo:
         # a plain image original, which is what an attached file usually is.
         self.resource_media: dict[int, dict] = {}
 
-    async def resource_media_rows(self, resource_ids):
+    async def resource_media_rows(self, resource_ids, *, system_reason):
         """Mirrors the real repo: a MISSING id is simply absent from the dict
         (that is how the caller learns "resource_not_found"), never a row of
         Nones.
@@ -174,8 +174,11 @@ class FakeRelationsRepo:
         table the assets router touches, and a dict lookup passes no choke
         point. That wiring is pinned by
         ``tests/test_assets_reference_scope_wiring.py``; do not read a green
-        run here as evidence the production read is scoped.
+        run here as evidence the production read is scoped. ``system_reason``
+        IS mirrored as required keyword-only, so a caller that forgets to name
+        its audit reason fails here too.
         """
+        assert system_reason, "the cross-user read must carry an audit reason"
         out = {}
         for raw in resource_ids:
             rid = int(raw)

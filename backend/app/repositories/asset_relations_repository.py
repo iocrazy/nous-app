@@ -120,7 +120,7 @@ class AssetRelationsRepository:
             return (await session.execute(stmt)).first() is not None
 
     async def resource_media_rows(
-        self, resource_ids: List[int]
+        self, resource_ids: List[int], *, system_reason: str
     ) -> Dict[int, Dict[str, Any]]:
         """The stored media columns of the given resources, keyed by id.
 
@@ -150,6 +150,12 @@ class AssetRelationsRepository:
         and be reported as ``resource_not_found`` — a wrong reason about a
         reference that exists.
 
+        ``system_reason`` is REQUIRED and keyword-only: it is the audit line
+        every ``system_request_scope`` entry logs, and a hardcoded one here
+        would make a second caller's deliberate cross-user read show up in the
+        log as this one. The reason belongs to whoever decided the read was
+        legitimate, so it travels from the call site.
+
         Gated on ``is_enforced`` (not unconditional) purely to stay
         byte-for-byte legacy where the flag really is off, e.g. this repo's
         own local/test default.
@@ -169,9 +175,7 @@ class AssetRelationsRepository:
             Resources.cover_image_path,
         ).where(Resources.id.in_([int(r) for r in resource_ids]))
         scope_cm = (
-            system_request_scope(
-                reason="assets-generate-slot: resolve reference media paths"
-            )
+            system_request_scope(reason=system_reason)
             if is_enforced("resources")
             else nullcontext()
         )
