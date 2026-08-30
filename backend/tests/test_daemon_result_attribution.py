@@ -305,3 +305,68 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
         "effective",
         "dropped",
     }
+
+
+@pytest.mark.parametrize(
+    "mime,measurer",
+    [("image/png", "measure_image"), ("video/mp4", "measure_video")],
+)
+@pytest.mark.asyncio
+async def test_a_measurer_that_raises_never_takes_the_upload_down_with_it(
+    fake_redis, client, captured_register, monkeypatch, mime, measurer
+):
+    """The product already exists and the user already paid for it.
+
+    A probe that returns ``None`` is the measure module's own documented
+    contract; an exception ESCAPING it is the case that would turn a
+    successful, billed generation into a failed upload. The record loses its
+    verdict — ``measured``/``honored`` both null — and nothing else.
+    """
+    from app.api.codex_daemon_router import mint_upload_ticket
+    from app.services.generation import measure as measure_mod
+
+    # Counted, because the video arm would otherwise pass either way: a real
+    # ffprobe on a PNG named .mp4 also yields None, so without this the test
+    # could never tell "the exception was swallowed" from "the probe simply
+    # failed" — and it is the exception arm that is under test.
+    calls: list[str] = []
+
+    def _boom(*_a, **_kw):
+        calls.append(measurer)
+        raise RuntimeError("ffprobe died on a stuck mount")
+
+    async def _aboom(*_a, **_kw):
+        calls.append(measurer)
+        raise RuntimeError("ffprobe died on a stuck mount")
+
+    monkeypatch.setattr(
+        measure_mod, measurer, _boom if measurer == "measure_image" else _aboom
+    )
+
+    ticket = await mint_upload_ticket(
+        user_id="u1", scope_id=7, job_id="j1", attribution=ATTRIBUTION
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out", _png(1536, 864), mime)},
+        data={"ticket": ticket},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["gen_id"] == "99"
+    assert calls == [measurer]  # the raising probe really did run
+
+    # The row was still written, and it is still attributed.
+    origin = captured_register["origin"]
+    assert origin.kind == "canvas_run"
+    assert origin.canvas_id == 42 and origin.model == "gpt-image-2"
+
+    # No verdict — and the keys are PRESENT and null, not absent. A missing
+    # key reads as "this record predates the contract"; null reads as "we
+    # could not tell", which is the true thing to say here.
+    assert "measured" in origin.params and origin.params["measured"] is None
+    assert "honored" in origin.params and origin.params["honored"] is None
+    # Emphatically not False: nothing was checked, so nothing was violated.
+    assert origin.params["honored"] is not False
+    # What we DID know still survives.
+    assert origin.params["requested"] == {"ratio": "16:9"}
+    assert origin.params["effective"] == {"ratio": "16:9"}
