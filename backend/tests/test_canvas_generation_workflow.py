@@ -1048,3 +1048,77 @@ async def test_dreamina_daemon_image_refs_are_dropped_and_named_not_sent_dead():
     assert captured["payload"]["submit_args"][0] == "text2image"
     assert captured["payload"]["ref_urls"] == []
     assert out["dropped_knobs"] == ["refs"]
+
+
+@pytest.mark.asyncio
+async def test_owner_scoped_local_video_row_routes_for_its_owner_only():
+    """Owner scoping (migration 431) must survive the hoist.
+
+    ``resolve_video_provider`` filters through ``_visible_rows``; the daemon
+    check now runs BEFORE it, so if ``_local_engine`` matched on row name
+    alone, any user naming another user's private jimeng-local row would get
+    it routed to their own daemon. The requester's own credentials are used
+    either way — what leaks is the private row's identity and its use by a
+    non-owner.
+
+    Asserting the dispatch never happens, not merely that something raised:
+    "it raised" can be true for entirely the wrong reason.
+    """
+    dispatches: list[dict] = []
+
+    async def fake_dispatch(**kw):
+        dispatches.append(kw)
+        return {"gen_id": "88"}
+
+    from app.services.media.parsers.video_providers import db_registry
+
+    private_row = {
+        "name": "jimeng-local-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng-local",
+        "actual_model": "3.0",
+        "owner_user_id": "owner-1",
+    }
+
+    def patches():
+        """The same three patches, entered once per user."""
+        return (
+            patch.object(
+                db_registry, "_enabled_rows", new=AsyncMock(return_value=[private_row])
+            ),
+            patch(
+                "app.services.codex.daemon_dispatch.dispatch_to_daemon",
+                new=fake_dispatch,
+            ),
+            patch(
+                "app.workflows.canvas_generation._resolve_personal_team_id",
+                new=AsyncMock(return_value=7),
+            ),
+        )
+
+    call = dict(
+        kind="video",
+        prompt="walk",
+        model="jimeng-local-video",
+        params={"aspect": "16:9"},
+        source_url=None,
+    )
+
+    owner_a, owner_b, owner_c = patches()
+    with owner_a, owner_b, owner_c:
+        out = await generate_canvas_media_step(**call, user_id="owner-1")
+    assert len(dispatches) == 1
+    assert dispatches[0]["payload"]["engine"] == "dreamina"
+    assert out["existing_gen_id"] == "88"
+
+    dispatches.clear()
+    intruder_a, intruder_b, intruder_c = patches()
+    with intruder_a, intruder_b, intruder_c:
+        with pytest.raises(RuntimeError) as err:
+            await generate_canvas_media_step(**call, user_id="intruder-2")
+
+    assert dispatches == []  # the daemon was never asked to do anything
+    # Fell through to the normal resolver and hit ITS scoped error — no new
+    # error path invented here.
+    assert "private to another user" in str(err.value)

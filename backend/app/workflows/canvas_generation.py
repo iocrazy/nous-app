@@ -47,15 +47,28 @@ _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
 _LOCAL_ENGINES = {"codex-local": "codex", "jimeng-local": "dreamina"}
 
 
-async def _local_engine(model_name: str, media_type: str) -> tuple[str, str] | None:
+async def _local_engine(
+    model_name: str, media_type: str, user_id: Optional[str] = None
+) -> tuple[str, str] | None:
     """(engine, actual_model) when the picked catalog row runs on the user's
-    own machine via the paired daemon; None for server-side providers."""
+    own machine via the paired daemon; None for server-side providers.
+
+    Owner scoping (migration 431) is enforced here too, with ``db_registry``'s
+    OWN predicate rather than a second copy of it — two visibility rules that
+    have to agree is how this class of bug comes back. This check used to be
+    reachable only for images and only after ``resolve_image_provider``; the
+    local check now runs first and for video as well, so a row the requester
+    cannot see must look like "not a local row at all" and fall through to the
+    normal resolver, which raises its own scoped error.
+    """
     try:
         from app.services.media.parsers.video_providers import db_registry
 
         rows = await db_registry._enabled_rows(media_type)  # noqa: SLF001
         for row in rows:
             if str(row.get("name")) == model_name:
+                if not db_registry._visible_to(row, user_id):  # noqa: SLF001
+                    return None
                 engine = _LOCAL_ENGINES.get(
                     str(row.get("actual_provider") or "").lower()
                 )
@@ -136,7 +149,11 @@ async def generate_canvas_media_step(
     # their paired daemon (spec §6). Offline is a typed failure at dispatch
     # time, not a hang.
     local = (
-        await _local_engine(model, kind if kind in ("image", "video") else "image")
+        await _local_engine(
+            model,
+            kind if kind in ("image", "video") else "image",
+            user_id=user_id,
+        )
         if (model or "").strip()
         else None
     )
