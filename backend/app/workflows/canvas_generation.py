@@ -24,17 +24,21 @@ through the Tier-1 generated-media store which mints the durable same-origin
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from dbos import DBOS
 from loguru import logger
 
+from app.services.generation.request import GenerationRequest
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
 )
 from app.services.library.resources_service import _resolve_personal_team_id
 from app.workflows.script_shot_generate import _reap_scratch_dir
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
 
 _KIND_MIME = {"image": "image/png", "video": "video/mp4"}
 _KIND_ENDPOINT = {"image": "cover", "video": "stream"}
@@ -61,6 +65,25 @@ async def _local_engine(model_name: str, media_type: str) -> tuple[str, str] | N
     except Exception:
         return None
     return None
+
+
+async def _capabilities_for(actual_provider: str) -> "ProviderCapabilities":
+    """Capabilities of the protocol serving `actual_provider`; restrictive
+    default when unknown (drops loudly rather than ignoring quietly)."""
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
+
+    proto = resolve_generation_protocol((actual_provider or "").lower())
+    return proto.capabilities if proto else ProviderCapabilities.none()
+
+
+def _actual_provider_of(provider: Any) -> str:
+    """The catalog key a built image provider was resolved from. Providers
+    built by a protocol carry it as `provider_key`; older ones fall back to
+    their `provider` name (codex / jimeng-cli / ark ⇒ doubao)."""
+    key = getattr(provider, "provider_key", None) or getattr(provider, "provider", "")
+    key = key or ""
+    return {"ark": "doubao"}.get(str(key), str(key))
 
 
 def _absolute_media_url(url: str) -> str:
@@ -90,6 +113,15 @@ async def generate_canvas_media_step(
     wins over the catalog row's ``actual_model``.
     """
     from app.services.media.parsers.video_providers import db_registry
+
+    # Parse the caller's knobs ONCE; branches read this object rather than
+    # re-deriving their own dict out of ``params`` (the drift this contract
+    # exists to end). Only the server IMAGE branch reconciles against
+    # provider capabilities so far — the other three still send what they
+    # always sent and report an empty ``dropped_knobs``.
+    req = GenerationRequest.from_params(
+        kind=kind, prompt=prompt, model=model, params=params, source_url=source_url
+    )
 
     if kind == "video":
         from app.services.library.generated_media_service import (
@@ -149,6 +181,7 @@ async def generate_canvas_media_step(
             "remote_url": None,
             "provider": "jimeng-cli",
             "model": gen_model or "",
+            "dropped_knobs": [],
         }
 
     # C 方案: a catalog row whose actual_provider is 'codex-local' is not a
@@ -230,6 +263,7 @@ async def generate_canvas_media_step(
             "existing_gen_id": result.get("gen_id"),
             "provider": f"{engine}-local",
             "model": model or "",
+            "dropped_knobs": [],
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
@@ -237,26 +271,26 @@ async def generate_canvas_media_step(
     )
     # Same row-name-vs-actual_model rule as the video branch above.
     gen_model = actual_model or model
+    # Knobs this provider cannot honour are dropped HERE, once, and named in
+    # ``dropped_knobs`` — a 21:9 that ark would quietly render as a square is
+    # a lie the caller never sees otherwise.
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    eff, dropped = req.reconcile(caps)
     # Multi-reference i2i (IC 图1/图2 semantics): the prompt's full input
     # set rides in params.source_urls; each durable url is materialized to
     # a LOCAL file for providers whose CLI only eats files (codex). The
     # original remote url still goes out as reference_image_url for
-    # URL-based providers (ark). IC caps references at 9.
+    # URL-based providers (ark). IC caps references at 9. Iterating
+    # ``eff.refs`` means a provider with max_refs=0 never downloads one.
     from contextlib import AsyncExitStack
 
     from app.services.library.generated_media_service import (
         generated_media_local_path,
     )
 
-    raw_refs = params.get("source_urls")
-    ref_urls = [
-        u
-        for u in (raw_refs if isinstance(raw_refs, list) else [])
-        if isinstance(u, str) and u
-    ][:9] or ([source_url] if source_url else [])
     async with AsyncExitStack() as stack:
         local_refs: list[str] = []
-        for u in ref_urls:
+        for u in eff.refs:
             local = await stack.enter_async_context(
                 generated_media_local_path(u, media_kind="image")
             )
@@ -265,13 +299,13 @@ async def generate_canvas_media_step(
         result = await provider.generate(
             prompt,
             gen_model,
-            aspect_ratio=str(params.get("ratio") or ""),
-            reference_image_url=source_url,
+            aspect_ratio=eff.ratio or "",
+            reference_image_url=source_url if eff.refs else None,
             reference_image_paths=local_refs or None,
             # IC ⑨ quality pill — consumed by the codex adapter, ignored by
             # providers without a quality knob (ark/jimeng take **kwargs).
-            quality=str(params.get("quality") or "") or None,
-            resolution=str(params.get("resolution") or "") or None,
+            quality=eff.quality,
+            resolution=eff.resolution,
         )
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None
@@ -283,6 +317,7 @@ async def generate_canvas_media_step(
         "remote_url": remote_url,
         "provider": getattr(result, "provider", "") or "",
         "model": gen_model or "",
+        "dropped_knobs": dropped,
     }
 
 
@@ -314,6 +349,7 @@ async def persist_canvas_generation_step(
             "media_kind": media_kind,
             "provider": str(media.get("provider") or ""),
             "model": str(media.get("model") or ""),
+            "dropped_knobs": list(media.get("dropped_knobs") or []),
         }
 
     local_path = media.get("local_path")
@@ -360,6 +396,7 @@ async def persist_canvas_generation_step(
             "generated_media_id": gen_id,
             "result_url": result_url,
             "media_kind": media_kind,
+            "dropped_knobs": list(media.get("dropped_knobs") or []),
         }
     finally:
         if local_path:
@@ -380,6 +417,9 @@ async def record_canvas_generation_result_step(result: Dict[str, Any]) -> None:
             "result_url": result.get("result_url"),
             "generated_media_id": result.get("generated_media_id"),
             "media_kind": result.get("media_kind"),
+            # Business decoration only (route C): the lifecycle columns stay
+            # the trigger's. An empty list is the honest "nothing dropped".
+            "dropped_knobs": list(result.get("dropped_knobs") or []),
         },
     )
 

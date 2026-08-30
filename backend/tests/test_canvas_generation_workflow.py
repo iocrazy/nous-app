@@ -13,9 +13,25 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.services.ai.provider_protocols.base import ALL_RATIOS, ProviderCapabilities
 from app.workflows.canvas_generation import (
     generate_canvas_media_step,
     persist_canvas_generation_step,
+)
+
+# A provider that honours every knob. These tests were written before
+# capabilities existed, so their SimpleNamespace provider resolves to
+# ProviderCapabilities.none() and every knob they pass gets reconciled away.
+# Patching this in supplies information they never had — it does not relax
+# what they assert.
+_EVERYTHING = ProviderCapabilities(
+    ratios=ALL_RATIOS,
+    quality=True,
+    resolution=True,
+    max_refs=9,
+    negative=True,
+    video_modes=frozenset({"frames", "multimodal"}),
+    honours_ratio="native",
 )
 
 
@@ -36,9 +52,15 @@ async def test_image_step_returns_remote_url_from_ark():
             return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
         )
     )
-    with patch(
-        "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
-        new=AsyncMock(return_value=(provider, "seedream-4")),
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "seedream-4")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="image",
@@ -278,6 +300,10 @@ async def test_image_step_materializes_source_urls_for_local_ref_providers():
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/ref.png"),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         await generate_canvas_media_step(
             kind="image",
@@ -376,3 +402,111 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
     assert call["first_frame"] == "/data/gen/N/media.png"
     assert call["last_frame"] == "/data/gen/N/media.png"
     assert call["resolution"] == "720p"
+
+
+@pytest.mark.asyncio
+async def test_image_step_reports_dropped_knobs_for_ark_and_sends_only_supported_ones():
+    """ark: 5 ratios, no quality/resolution, no refs. Asking for 21:9 + quality
+    must NOT silently reach the provider — and must be named in the result."""
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
+        )
+    )
+    ark_caps = ProviderCapabilities(
+        ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),
+        quality=False,
+        resolution=False,
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "seedream-4")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=ark_caps),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="",
+            params={
+                "ratio": "21:9",
+                "quality": "high",
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate.await_args.kwargs
+    assert kw["aspect_ratio"] == ""  # 21:9 dropped, nothing invented
+    assert kw["quality"] is None
+    assert kw["reference_image_paths"] is None
+    assert out["dropped_knobs"] == ["ratio", "quality", "refs"]
+
+
+@pytest.mark.asyncio
+async def test_image_step_dropped_knobs_is_empty_when_everything_is_supported():
+    provider = SimpleNamespace(
+        generate=AsyncMock(
+            return_value=SimpleNamespace(image_url="https://cdn/x.png", image_path=None)
+        )
+    )
+    full = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=True,
+        resolution=True,
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_image_provider",
+            new=AsyncMock(return_value=(provider, "m")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=full),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="",
+            params={"ratio": "16:9"},
+            source_url=None,
+        )
+    assert provider.generate.await_args.kwargs["aspect_ratio"] == "16:9"
+    assert out["dropped_knobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_record_step_writes_dropped_knobs_into_task_metadata():
+    from app.workflows.canvas_generation import record_canvas_generation_result_step
+
+    manager = SimpleNamespace(patch_metadata=AsyncMock())
+    with (
+        patch("dbos.DBOS.workflow_id", "wf-1"),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            return_value=manager,
+        ),
+    ):
+        await record_canvas_generation_result_step(
+            {
+                "result_url": "/r",
+                "generated_media_id": 1,
+                "media_kind": "image",
+                "dropped_knobs": ["quality"],
+            }
+        )
+    patched = manager.patch_metadata.await_args.args[1]
+    assert patched["dropped_knobs"] == ["quality"]
