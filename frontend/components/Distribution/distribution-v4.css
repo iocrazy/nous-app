@@ -823,3 +823,13 @@
    cards carry their own heading like every other card. */
 .dist-v4 .section-head { font-size: 16px; font-weight: 650; color: var(--content); margin: 4px 0 10px; }
 .dist-v4 .frow .lbl b .cs-help { margin-left: 4px; vertical-align: -1px; }
+/* (?) inside field labels (2026-08-30). `.frow .lbl span { display:block }`
+   above is the description line's rule; it also caught the tooltip's spans
+   and painted every bubble open, one line under its label. Pin the tooltip
+   parts explicitly and keep the label + (?) on one line. */
+.dist-v4 .frow .lbl b { display: inline-flex; align-items: center; gap: 0; }
+.dist-v4 .frow .lbl b .cs-help { display: inline-flex; margin: 0 0 0 4px; font-size: 0; line-height: 0; max-width: none; }
+.dist-v4 .frow .lbl .cs-help .cs-tip { display: none; margin: 0; font-size: 12px; line-height: 1.5; color: #fff; max-width: 280px; }
+.dist-v4 .frow .lbl .cs-help:hover .cs-tip,
+.dist-v4 .frow .lbl .cs-help:focus-visible .cs-tip,
+.dist-v4 .frow .lbl .cs-help:focus .cs-tip { display: block; }
