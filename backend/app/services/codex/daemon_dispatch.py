@@ -94,6 +94,7 @@ async def dispatch_to_daemon(
     payload: dict[str, Any],
     transport: Optional[DaemonTransport] = None,
     mint_ticket: Optional[Callable[..., Any]] = None,
+    attribution: Optional[dict[str, Any]] = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Send one job to the user's daemon and await its result.
@@ -101,6 +102,11 @@ async def dispatch_to_daemon(
     Raises ``DaemonOfflineError`` when nothing is connected, ``TimeoutError``
     when the daemon never answers, ``RuntimeError`` when it answers with a
     failure (message carries the daemon's typed code).
+
+    ``attribution`` is the job's generation context. It goes on the TICKET,
+    not into the job the daemon receives: the daemon never needs it, and the
+    upload endpoint — which is where the product becomes a row — is the only
+    place that does.
     """
     if transport is None:
         transport = RedisDaemonTransport()
@@ -115,7 +121,9 @@ async def dispatch_to_daemon(
         )
 
     job_id = str(uuid.uuid4())
-    ticket = mint_ticket(user_id=user_id, scope_id=scope_id, job_id=job_id)
+    ticket = mint_ticket(
+        user_id=user_id, scope_id=scope_id, job_id=job_id, attribution=attribution
+    )
     if asyncio.iscoroutine(ticket):
         ticket = await ticket
 

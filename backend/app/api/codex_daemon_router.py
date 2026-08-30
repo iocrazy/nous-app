@@ -143,17 +143,37 @@ async def pair_device(payload: PairRequest) -> dict:
     return {"data": {"device_id": str(device_id), "device_token": device_token}}
 
 
-async def mint_upload_ticket(*, user_id: str, scope_id: int, job_id: str) -> str:
+async def mint_upload_ticket(
+    *,
+    user_id: str,
+    scope_id: int,
+    job_id: str,
+    attribution: Optional[dict] = None,
+) -> str:
     """One-shot upload authority handed to the daemon inside a job (spec §5).
 
     The daemon has no nous session; this ticket is its only credential, so it
     is short-lived, single-use and carries the owner it will file under.
+
+    ``attribution`` rides along because the upload endpoint is where the
+    product becomes a row, and by then the job's context (which canvas, which
+    node, which knobs went out) exists only here. Without it a generated
+    image is indistinguishable in the database from a hand-uploaded one.
+    Only the eight keys ``dispatch_to_daemon`` puts in are carried — never
+    the job payload, which holds ref urls and the augmented prompt.
     """
     ticket = secrets.token_urlsafe(32)
+    claim: dict[str, Any] = {
+        "user_id": user_id,
+        "scope_id": scope_id,
+        "job_id": job_id,
+    }
+    if attribution:
+        claim["attribution"] = attribution
     redis = await get_async_redis()
     await redis.set(
         f"{UPLOAD_KEY_PREFIX}{ticket}",
-        json.dumps({"user_id": user_id, "scope_id": scope_id, "job_id": job_id}),
+        json.dumps(claim),
         ex=UPLOAD_TTL_SECONDS,
     )
     return ticket
@@ -178,16 +198,63 @@ async def _consume_upload_ticket(ticket: str) -> Optional[dict]:
         return None
 
 
+async def _outcome_for(path: str, media_kind: str, attribution: dict) -> dict:
+    """The four-key outcome block for a product the daemon just made.
+
+    Measurement is best-effort by construction — the asset already exists and
+    the user already paid for it, so a probe that cannot read the file records
+    ``measured: null`` (and therefore no verdict) rather than failing an
+    upload that otherwise succeeded. Same rule as the server path.
+    """
+    from app.services.generation.measure import measure_image, measure_video
+    from app.services.generation.outcome import build_outcome_params_from_dicts
+
+    measured = None
+    try:
+        measured = (
+            measure_image(path) if media_kind == "image" else await measure_video(path)
+        )
+    except Exception as exc:  # a broken probe must not break a good upload
+        logger.warning("[codex-daemon] measure failed: {}", exc)
+    return build_outcome_params_from_dicts(
+        requested=attribution.get("requested") or {},
+        effective=attribution.get("effective") or {},
+        dropped=list(attribution.get("dropped") or []),
+        measured=measured,
+    )
+
+
 async def _register_daemon_result(**kwargs: Any) -> dict:
     from app.services.library.generated_media_service import (
         GenerationOrigin,
+        media_kind_from_mime,
         register_generated_media,
     )
 
     params = kwargs.pop("origin_params", {})
-    return await register_generated_media(
-        origin=GenerationOrigin(kind="canvas_upload", params=params), **kwargs
-    )
+    attribution = kwargs.pop("attribution", None) or {}
+    if attribution:
+        media_kind = media_kind_from_mime(str(kwargs.get("mime") or ""))
+        outcome = await _outcome_for(
+            str(kwargs.get("source_path") or ""), media_kind, attribution
+        )
+        origin = GenerationOrigin(
+            kind="canvas_run",
+            canvas_id=attribution.get("canvas_id"),
+            node_id=attribution.get("node_id"),
+            prompt=attribution.get("prompt"),
+            model=attribution.get("model"),
+            provider=attribution.get("provider"),
+            # ``params`` last: produced_by/job_id are notes about HOW this
+            # arrived and must not be shadowed by an outcome key.
+            params={**outcome, **params},
+            derivation_kind=f"{media_kind}_gen",
+        )
+    else:
+        # No attribution: an older daemon, or a caller that is genuinely an
+        # upload. A thinner record beats a wrong one.
+        origin = GenerationOrigin(kind="canvas_upload", params=params)
+    return await register_generated_media(origin=origin, **kwargs)
 
 
 @router.post("/upload")
@@ -223,6 +290,7 @@ async def upload_daemon_result(
                 "produced_by": "codex-daemon",
                 "job_id": claim.get("job_id"),
             },
+            attribution=claim.get("attribution"),
         )
         gen_id = row.get("id")
         if gen_id is None:

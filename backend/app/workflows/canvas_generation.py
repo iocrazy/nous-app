@@ -121,12 +121,19 @@ async def generate_canvas_media_step(
     params: Dict[str, Any],
     source_url: Optional[str],
     user_id: Optional[str] = None,
+    canvas_id: Optional[int] = None,
+    node_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the DB-catalog provider; returns the raw product location.
 
     ``remote_url`` (Ark) and ``local_path`` (jimeng-cli) are mutually
     exclusive; exactly one is set on success. An explicit caller ``model``
     wins over the catalog row's ``actual_model``.
+
+    ``canvas_id``/``node_id`` are needed by the DAEMON branch alone: that
+    product is registered by the upload endpoint rather than by
+    ``persist_canvas_generation_step``, so the attribution the persist step
+    would have written has to travel out with the job instead.
     """
     from app.services.media.parsers.video_providers import db_registry
 
@@ -239,11 +246,26 @@ async def generate_canvas_media_step(
                 engine_model=engine_model, ref_urls=ref_urls
             )
 
+        # The same five identity fields ``persist_canvas_generation_step``
+        # stamps on a server-side product, plus the three-part contract. It
+        # rides the ticket because the daemon's upload — not this workflow —
+        # is what creates the row. Deliberately NOT the payload: that carries
+        # ref urls and the augmented prompt, and this sits in Redis.
         result = await dispatch_to_daemon(
             user_id=str(user_id),
             scope_id=int(await _resolve_personal_team_id(str(user_id))),
             kind=kind if kind in ("image", "video") else "image",
             payload=payload,
+            attribution={
+                "canvas_id": canvas_id,
+                "node_id": node_id,
+                "prompt": prompt,
+                "model": model or "",
+                "provider": f"{engine}-local",
+                "requested": req.knobs_dict(),
+                "effective": eff.knobs_dict(),
+                "dropped": dropped,
+            },
         )
         return {
             "media_kind": kind if kind in ("image", "video") else "image",
@@ -625,7 +647,7 @@ async def canvas_generation_workflow(
     source_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     media = await generate_canvas_media_step(
-        kind, prompt, model, params, source_url, user_id
+        kind, prompt, model, params, source_url, user_id, canvas_id, node_id
     )
     result = await persist_canvas_generation_step(
         media=media,
