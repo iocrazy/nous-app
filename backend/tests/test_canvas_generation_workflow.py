@@ -121,6 +121,10 @@ async def test_video_step_bridges_source_and_runs_i2v():
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/9/media.png"),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="video",
@@ -344,6 +348,10 @@ async def test_video_step_multimodal_materializes_all_refs(monkeypatch):
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/N/media.png"),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         out = await generate_canvas_media_step(
             kind="video",
@@ -385,6 +393,10 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/N/media.png"),
         ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
+        ),
     ):
         await generate_canvas_media_step(
             kind="video",
@@ -405,6 +417,119 @@ async def test_video_step_frames_mode_maps_first_last(monkeypatch):
     assert call["first_frame"] == "/data/gen/N/media.png"
     assert call["last_frame"] == "/data/gen/N/media.png"
     assert call["resolution"] == "720p"
+
+
+@pytest.mark.asyncio
+async def test_server_video_branch_drops_unsupported_mode_and_refs_and_reports_them():
+    """A video provider declaring NO video_modes cannot take refs at all
+    (Task 6: video refs ride on video_modes, not max_refs). Asking for
+    frames2video must therefore reach the provider as a plain text2video —
+    no first/last frame, no image_path — and BOTH losses must be named."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(
+            return_value=SimpleNamespace(local_path="/tmp/v.mp4", mime="video/mp4")
+        )
+    )
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=True,
+        max_refs=9,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "3.0")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="walk",
+            model="",
+            params={
+                "aspect": "16:9",
+                "video_mode": "frames",
+                "source_urls": [
+                    "/api/v1/generated-media/1/cover",
+                    "/api/v1/generated-media/2/cover",
+                ],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate_video.await_args.kwargs
+    assert "first_frame" not in kw
+    assert "image_paths" not in kw
+    # refs were dropped, so nothing was materialised for the single-source arm
+    assert kw["image_path"] is None
+    assert kw["aspect"] == "16:9"  # supported ratio survives reconcile
+    assert out["dropped_knobs"] == ["refs", "video_mode"]
+
+
+@pytest.mark.asyncio
+async def test_server_video_branch_keeps_refs_when_provider_has_some_video_mode():
+    """The provider supports multimodal but not frames: the mode is dropped
+    (and named) while the refs SURVIVE — they fall through to the single
+    source arm. The unsupported ratio goes too, so ``aspect`` must be empty
+    rather than the 21:9 the caller asked for."""
+    provider = SimpleNamespace(
+        generate_video=AsyncMock(return_value=SimpleNamespace(local_path="/tmp/v2.mp4"))
+    )
+    caps = ProviderCapabilities(
+        ratios=frozenset({"16:9"}),
+        quality=False,
+        resolution=True,
+        max_refs=0,
+        negative=False,
+        video_modes=frozenset({"multimodal"}),
+        honours_ratio="native",
+    )
+    with (
+        patch(
+            "app.services.media.parsers.video_providers.db_registry.resolve_video_provider",
+            new=AsyncMock(return_value=(provider, "3.0")),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=caps),
+        ),
+        patch(
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/ref.png"),
+        ),
+    ):
+        out = await generate_canvas_media_step(
+            kind="video",
+            prompt="drift",
+            model="",
+            params={
+                "aspect": "21:9",
+                "video_mode": "frames",
+                "resolution": "720p",
+                "duration": 5,
+                "source_urls": ["/api/v1/generated-media/1/cover"],
+            },
+            source_url=None,
+        )
+
+    kw = provider.generate_video.await_args.kwargs
+    assert "first_frame" not in kw
+    assert kw["image_path"] == "/data/gen/ref.png"
+    assert kw["aspect"] == ""
+    assert kw["resolution"] == "720p"
+    assert kw["duration"] == 5
+    assert out["dropped_knobs"] == ["ratio", "video_mode"]
 
 
 @pytest.mark.asyncio
@@ -977,6 +1102,10 @@ async def test_server_video_path_untouched_when_no_local_engine_matches():
         patch(
             "app.services.library.generated_media_service.generated_media_local_path",
             new=_fake_local_path_cm("/data/gen/N/media.png"),
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(return_value=_EVERYTHING),
         ),
     ):
         out = await generate_canvas_media_step(

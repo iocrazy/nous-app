@@ -132,14 +132,15 @@ async def generate_canvas_media_step(
 
     # Parse the caller's knobs ONCE; branches read this object rather than
     # re-deriving their own dict out of ``params`` (the drift this contract
-    # exists to end). Where the branches stand:
+    # exists to end). All four arms now do the same three things — resolve a
+    # provider, ``reconcile`` against its capabilities, build from ``eff`` —
+    # and every one of them returns the resulting ``dropped_knobs``:
     #   - the DAEMON branch (first below — "whose machine?" is the routing
     #     question, asked before the kind-specific server branches) reconciles
     #     once above its codex/dreamina split, so both arms report the same
     #     ``dropped_knobs`` and both build from ``eff`` alone;
-    #   - server VIDEO: no reconcile, still reads ``params``, always an empty
-    #     ``dropped_knobs``;
-    #   - server IMAGE (last): reconciles and sends ``eff``.
+    #   - server VIDEO reconciles against the video provider's capabilities;
+    #   - server IMAGE (last) against the image provider's.
     req = GenerationRequest.from_params(
         kind=kind, prompt=prompt, model=model, params=params, source_url=source_url
     )
@@ -266,39 +267,40 @@ async def generate_canvas_media_step(
         # matched on); upstream must get the row's actual_model. Sending the
         # row name upstream was the 2026-08-18 codex HTTP-400 incident.
         gen_model = actual_model or model
-        # IC video modes: params.video_mode picks the CLI command family —
+        # Same reconcile the image branch does, against the video protocol's
+        # capabilities: a mode or ratio this provider cannot honour is dropped
+        # HERE and NAMED. Before this, the branch read ``params`` raw and
+        # always reported an empty ``dropped_knobs`` — a frames2video request
+        # to a provider without frames2video went out as one anyway.
+        caps = await _capabilities_for(_actual_provider_of(provider))
+        eff, dropped = req.reconcile(caps)
+        # IC video modes: eff.video_mode picks the CLI command family —
         # 'frames' maps the first two refs to first/last (frames2video),
         # 'multimodal' hands ALL refs over (multimodal2video 全能参考);
         # otherwise the single source drives image2video / text2video.
+        # ``reconcile`` has already emptied ``eff.refs`` for a provider that
+        # declares no video mode at all, so that arm downloads nothing.
         from contextlib import AsyncExitStack
 
-        raw_refs = params.get("source_urls")
-        ref_urls = [
-            u
-            for u in (raw_refs if isinstance(raw_refs, list) else [])
-            if isinstance(u, str) and u
-        ][:9] or ([source_url] if source_url else [])
-        video_mode = str(params.get("video_mode") or "")
-        raw_duration = params.get("duration")
         async with AsyncExitStack() as stack:
             local_refs: list[str] = []
-            for u in ref_urls:
+            for u in eff.refs:
                 local = await stack.enter_async_context(
                     generated_media_local_path(u, media_kind="image")
                 )
                 if local:
                     local_refs.append(local)
             kwargs: dict = {
-                "prompt": prompt,
-                "aspect": str(params.get("aspect") or ""),
+                "prompt": eff.prompt,
+                "aspect": eff.ratio or "",
                 "model_version": gen_model or None,
-                "duration": int(raw_duration) if raw_duration else None,
-                "resolution": str(params.get("resolution") or "") or None,
+                "duration": eff.duration,
+                "resolution": eff.resolution,
             }
-            if video_mode == "frames" and len(local_refs) >= 2:
+            if eff.video_mode == "frames" and len(local_refs) >= 2:
                 kwargs["first_frame"] = local_refs[0]
                 kwargs["last_frame"] = local_refs[1]
-            elif video_mode == "multimodal" and local_refs:
+            elif eff.video_mode == "multimodal" and local_refs:
                 kwargs["image_paths"] = local_refs
             else:
                 kwargs["image_path"] = local_refs[0] if local_refs else None
@@ -312,7 +314,7 @@ async def generate_canvas_media_step(
             "remote_url": None,
             "provider": "jimeng-cli",
             "model": gen_model or "",
-            "dropped_knobs": [],
+            "dropped_knobs": dropped,
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
