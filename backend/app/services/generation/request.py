@@ -39,6 +39,22 @@ def _clean(value: Any) -> Optional[str]:
     return text or None
 
 
+def _positive_int(value: Any) -> Optional[int]:
+    """A duration only exists if it parses AND is positive.
+
+    Params reach us from JSON the frontend built, so this sees strings,
+    numbers, None and the occasional typo. Absent, unparsable and
+    non-positive all mean the same thing to every caller — no duration —
+    so they collapse to None here rather than raising out of from_params
+    and killing a workflow over one bad knob.
+    """
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 @dataclass(frozen=True)
 class GenerationRequest:
     kind: Literal["image", "video"]
@@ -69,7 +85,6 @@ class GenerationRequest:
             for u in (raw_refs if isinstance(raw_refs, list) else [])
             if isinstance(u, str) and u
         ][:MAX_REFS] or ([source_url] if source_url else [])
-        raw_duration = params.get("duration")
         mode = _clean(params.get("video_mode"))
         return cls(
             kind=k,
@@ -82,7 +97,7 @@ class GenerationRequest:
             refs=tuple(refs),
             negative=_clean(params.get("negative")),
             video_mode=mode if mode in ("frames", "multimodal") else None,  # type: ignore[arg-type]
-            duration=int(raw_duration) if raw_duration else None,
+            duration=_positive_int(params.get("duration")),
         )
 
     def reconcile(

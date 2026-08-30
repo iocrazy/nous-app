@@ -135,3 +135,110 @@ def test_codex_daemon_payload_without_ratio_sends_default_size_and_bare_prompt()
     assert payload["size"] == "1024x1024"
     assert payload["ratio"] is None
     assert payload["prompt"] == "a cat"
+
+
+def test_reconcile_drops_negative_when_provider_has_no_negative_prompt():
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"negative": "blurry, watermark"},
+        source_url=None,
+    )
+    assert req.negative == "blurry, watermark"
+    eff, dropped = req.reconcile(Caps())
+    assert eff.negative is None
+    assert dropped == ["negative"]
+
+
+def test_reconcile_keeps_negative_when_provider_supports_it():
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"negative": "blurry"},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(Caps(negative=True))
+    assert eff.negative == "blurry"
+    assert dropped == []
+
+
+def test_reconcile_drops_video_mode_the_provider_does_not_offer():
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={"video_mode": "multimodal"},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(Caps(video_modes=frozenset({"frames"})))
+    assert eff.video_mode is None
+    assert dropped == ["video_mode"]
+
+
+def test_reconcile_keeps_video_mode_the_provider_offers():
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={"video_mode": "frames"},
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(Caps(video_modes=frozenset({"frames"})))
+    assert eff.video_mode == "frames"
+    assert dropped == []
+
+
+def test_reconcile_reports_all_six_names_in_the_fixed_order():
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={
+            "aspect": "21:9",
+            "quality": "high",
+            "resolution": "4k",
+            "source_urls": ["/u/1"],
+            "negative": "blurry",
+            "video_mode": "frames",
+        },
+        source_url=None,
+    )
+    eff, dropped = req.reconcile(Caps())  # 六个旋钮一个都不支持
+    assert dropped == [
+        "ratio",
+        "quality",
+        "resolution",
+        "refs",
+        "negative",
+        "video_mode",
+    ]
+    assert (eff.ratio, eff.quality, eff.resolution) == (None, None, None)
+    assert eff.refs == ()
+    assert (eff.negative, eff.video_mode) == (None, None)
+
+
+def test_duration_parses_a_numeric_string():
+    req = GenerationRequest.from_params(
+        kind="video", prompt="p", model="m", params={"duration": "5"}, source_url=None
+    )
+    assert req.duration == 5
+
+
+def test_duration_of_garbage_is_none_not_an_exception():
+    req = GenerationRequest.from_params(
+        kind="video", prompt="p", model="m", params={"duration": "abc"}, source_url=None
+    )
+    assert req.duration is None
+
+
+def test_duration_zero_is_none_whether_string_or_int():
+    as_str = GenerationRequest.from_params(
+        kind="video", prompt="p", model="m", params={"duration": "0"}, source_url=None
+    )
+    as_int = GenerationRequest.from_params(
+        kind="video", prompt="p", model="m", params={"duration": 0}, source_url=None
+    )
+    assert as_str.duration is None
+    assert as_int.duration is None
