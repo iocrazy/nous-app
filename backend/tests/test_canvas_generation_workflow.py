@@ -14,7 +14,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.ai.provider_protocols.base import ALL_RATIOS, ProviderCapabilities
+from app.services.generation.request import GenerationRequest
 from app.workflows.canvas_generation import (
+    _actual_provider_of,
+    _capabilities_for,
     generate_canvas_media_step,
     persist_canvas_generation_step,
 )
@@ -510,3 +513,82 @@ async def test_record_step_writes_dropped_knobs_into_task_metadata():
         )
     patched = manager.patch_metadata.await_args.args[1]
     assert patched["dropped_knobs"] == ["quality"]
+
+
+@pytest.mark.asyncio
+async def test_real_ark_row_reaches_the_image_step_with_arks_real_capabilities():
+    """The whole point of the contract, through the REAL chain — no
+    ``_capabilities_for`` patch, only the catalog lookup is stubbed.
+
+    A built provider does not remember which catalog row made it, so
+    ``db_registry`` stamps ``provider_key`` on at build time. Delete that
+    stamp and ``_actual_provider_of`` returns "", no protocol resolves,
+    capabilities collapse to ``none()`` — and 16:9 gets dropped too. That is
+    the production regression this test exists to catch; every other
+    capability test here patches ``_capabilities_for`` and therefore cannot
+    see it.
+    """
+    from app.services.media.parsers.video_providers import db_registry
+
+    ark_row = {
+        "name": "seedream-4-ark",
+        "type": "image",
+        "is_enabled": True,
+        "actual_provider": "ark",
+        "actual_model": "seedream-4",
+        "api_key": "k",
+        "base_url": "https://ark.example/api/v3",
+        "owner_user_id": None,
+    }
+    with patch.object(
+        db_registry, "_enabled_rows", new=AsyncMock(return_value=[ark_row])
+    ):
+        provider, actual_model = await db_registry.resolve_image_provider(
+            "seedream-4-ark"
+        )
+
+    assert actual_model == "seedream-4"
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    # ark's five, from ark_image._ASPECT_TO_SIZE — not the eight-ratio
+    # canvas vocabulary, and emphatically not none().
+    assert caps.ratios == frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"})
+    assert caps is not ProviderCapabilities.none()
+
+    # And the behaviour that matters: a ratio ark HAS survives, one it
+    # lacks is dropped by name.
+    supported = GenerationRequest.from_params(
+        kind="image", prompt="p", model="", params={"ratio": "16:9"}, source_url=None
+    ).reconcile(caps)
+    unsupported = GenerationRequest.from_params(
+        kind="image", prompt="p", model="", params={"ratio": "21:9"}, source_url=None
+    ).reconcile(caps)
+    assert supported == (supported[0], [])
+    assert supported[0].ratio == "16:9"
+    assert unsupported[1] == ["ratio"]
+
+
+@pytest.mark.asyncio
+async def test_real_jimeng_row_reaches_the_video_resolver_with_its_capabilities():
+    """Same stamp, video resolver — so Task 7's video branch inherits a
+    working capability lookup instead of rediscovering the same hole."""
+    from app.services.media.parsers.video_providers import db_registry
+
+    jimeng_row = {
+        "name": "jimeng-video",
+        "type": "video",
+        "is_enabled": True,
+        "actual_provider": "jimeng-cli",
+        "actual_model": "seedance2.0fast",
+        "owner_user_id": None,
+    }
+    with patch.object(
+        db_registry, "_enabled_rows", new=AsyncMock(return_value=[jimeng_row])
+    ):
+        provider, actual_model = await db_registry.resolve_video_provider(
+            "jimeng-video"
+        )
+
+    assert actual_model == "seedance2.0fast"
+    caps = await _capabilities_for(_actual_provider_of(provider))
+    assert caps is not ProviderCapabilities.none()
+    assert "16:9" in caps.ratios

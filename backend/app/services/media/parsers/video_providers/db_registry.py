@@ -115,6 +115,21 @@ def _visible_rows(
     return visible
 
 
+def _stamp_provider_key(provider: object, actual_provider: str) -> None:
+    """Record which catalog row's ``actual_provider`` built this provider.
+
+    A built provider does NOT otherwise remember its own catalog key — the
+    protocol constructs a bare adapter (``ArkImageProvider``,
+    ``_CodexImageAdapter``, ...) and drops the row on the floor. Callers that
+    need the provider's declared capabilities (``canvas_generation``'s
+    ``_capabilities_for``) would then have nothing to resolve the protocol
+    back from, silently get ``ProviderCapabilities.none()``, and drop every
+    knob the user asked for. This function is the choke point: the one place
+    that both builds the provider and still holds the row.
+    """
+    provider.provider_key = actual_provider  # type: ignore[attr-defined]
+
+
 async def resolve_image_provider(
     name: Optional[str] = None,
     *,
@@ -149,6 +164,7 @@ async def resolve_image_provider(
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
     provider, actual_model = protocol.build_image_provider(row)
+    _stamp_provider_key(provider, actual_provider)
     logger.info(
         "Resolved image provider from catalog: {} (model={})",
         actual_provider,
@@ -190,6 +206,7 @@ async def resolve_video_provider(
             f"{actual_provider!r} (catalog row name={row.get('name')!r})"
         )
     provider, actual_model = protocol.build_video_provider(row)
+    _stamp_provider_key(provider, actual_provider)
     logger.info(
         "Resolved video provider from catalog: jimeng-cli (model={})", actual_model
     )

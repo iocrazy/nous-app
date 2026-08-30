@@ -78,12 +78,15 @@ async def _capabilities_for(actual_provider: str) -> "ProviderCapabilities":
 
 
 def _actual_provider_of(provider: Any) -> str:
-    """The catalog key a built image provider was resolved from. Providers
-    built by a protocol carry it as `provider_key`; older ones fall back to
-    their `provider` name (codex / jimeng-cli / ark ⇒ doubao)."""
-    key = getattr(provider, "provider_key", None) or getattr(provider, "provider", "")
-    key = key or ""
-    return {"ark": "doubao"}.get(str(key), str(key))
+    """The catalog key a built image provider was resolved from.
+
+    ``db_registry`` stamps it on as ``provider_key`` at build time (the only
+    place that still holds the catalog row). Anything else — a hand-built
+    provider, a test double — resolves to no protocol and therefore to
+    ``ProviderCapabilities.none()``, which drops every knob AND names them in
+    ``dropped_knobs``: wrong, but loudly wrong.
+    """
+    return str(getattr(provider, "provider_key", "") or "")
 
 
 def _absolute_media_url(url: str) -> str:
