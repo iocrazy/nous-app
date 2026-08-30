@@ -167,7 +167,15 @@ class FakeRelationsRepo:
     async def resource_media_rows(self, resource_ids):
         """Mirrors the real repo: a MISSING id is simply absent from the dict
         (that is how the caller learns "resource_not_found"), never a row of
-        Nones."""
+        Nones.
+
+        ⚠️ What this fake CANNOT mirror is the real method's
+        ``system_request_scope`` wrap — ``Resources`` is the one scope-enforced
+        table the assets router touches, and a dict lookup passes no choke
+        point. That wiring is pinned by
+        ``tests/test_assets_reference_scope_wiring.py``; do not read a green
+        run here as evidence the production read is scoped.
+        """
         out = {}
         for raw in resource_ids:
             rid = int(raw)

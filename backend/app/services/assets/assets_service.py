@@ -149,6 +149,16 @@ MAX_SLOT_REFERENCES = 3
 _GENERATED_IMAGE_MIME = "image/png"
 
 
+def _is_stored_path(value: Any) -> bool:
+    """A path of OURS (filesystem rel_path or ``sb://``), not a remote URL.
+
+    Scheme-exact and case-insensitive: a bare ``startswith("http")`` both lets
+    ``HTTPS://cdn…`` through and refuses a legitimate relative path that
+    happens to be named ``httpcache/x.png``.
+    """
+    return not str(value).lower().startswith(("http://", "https://"))
+
+
 def _reference_stored_path(row: Dict[str, Any]) -> Optional[str]:
     """The stored path of a resource's IMAGE bytes, or None.
 
@@ -159,15 +169,11 @@ def _reference_stored_path(row: Dict[str, Any]) -> Optional[str]:
     """
     mime = str(row.get("mime_type") or "").lower()
     file_path = row.get("file_path")
-    if (
-        file_path
-        and not str(file_path).startswith("http")
-        and mime.startswith("image/")
-    ):
+    if file_path and _is_stored_path(file_path) and mime.startswith("image/"):
         return str(file_path)
     for field in ("thumbnail_path", "cover_image_path"):
         value = row.get(field)
-        if value and not str(value).startswith("http"):
+        if value and _is_stored_path(value):
             return str(value)
     return None
 

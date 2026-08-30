@@ -12,6 +12,7 @@ so ``_serialize_loadout`` stringifies element-wise, not just the row's own ids.
 from __future__ import annotations
 
 import datetime
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import delete as sa_delete
@@ -19,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     AssetFiles,
@@ -124,7 +126,38 @@ class AssetRelationsRepository:
 
         Only what the reference-materialization step needs (``file_path`` /
         ``mime_type`` / the two derived-image columns). Batched: one statement
-        for the whole reference list rather than one per file.
+        for the whole reference list rather than one per file. A row that does
+        not exist is simply ABSENT from the result — that is how the caller
+        learns ``resource_not_found`` instead of getting a row of Nones.
+
+        **The SYSTEM wrap is LOAD-BEARING in production, not decorative.**
+        ``Resources`` carries ``UserScoped(creator_id)`` and this is the only
+        ``Resources`` read on the assets router, which binds no tenant scope
+        (no ``ScopedRequestDep``). ``SCOPE_ENFORCE_RESOURCES`` defaults to
+        false in code but production sets it true via ``secrets/backend.env``
+        (CLAUDE.md 部署陷阱: env overrides config.yml), so without this the
+        ``do_orm_execute`` choke point sees a scoped table touched with no
+        ambient scope and fail-closed raises ``UnscopedQueryError`` — an
+        unhandled 500 on every generate-slot run whose asset has a file
+        attached, i.e. every run the feature exists for. Same shape and same
+        reason as ``app/main.py``'s media-serve lookup.
+
+        SYSTEM rather than a per-user scope is the deliberate, auditable
+        cross-user read: the caller has already passed ``_require_writable``
+        on the asset, and the ids come from ``asset_files`` rather than from a
+        request body. Injecting ``creator_id == caller`` instead would make a
+        file attached from a TEAMMATE's resource vanish inside a team scope
+        and be reported as ``resource_not_found`` — a wrong reason about a
+        reference that exists.
+
+        Gated on ``is_enforced`` (not unconditional) purely to stay
+        byte-for-byte legacy where the flag really is off, e.g. this repo's
+        own local/test default.
+
+        Trashed resources are deliberately NOT filtered out: ``is_trashed`` is
+        a shelf state, while the bytes and the ``asset_files`` attachment both
+        still exist. Hiding them here would silently drop a reference the
+        asset page still shows as attached.
         """
         if not resource_ids:
             return {}
@@ -135,8 +168,16 @@ class AssetRelationsRepository:
             Resources.thumbnail_path,
             Resources.cover_image_path,
         ).where(Resources.id.in_([int(r) for r in resource_ids]))
-        async with read_scope() as session:
-            rows = (await session.execute(stmt)).mappings().all()
+        scope_cm = (
+            system_request_scope(
+                reason="assets-generate-slot: resolve reference media paths"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
         return {int(r["id"]): dict(r) for r in rows}
 
     async def attach(

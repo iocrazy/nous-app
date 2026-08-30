@@ -64,8 +64,9 @@ _BASE_NEGATIVE: tuple[str, ...] = (
 # The aspect is part of the TEMPLATE, not a caller knob: a costume flat lay
 # ("front and back laid out side by side") and a 2x3 expression grid want
 # different frames, and leaving both at the provider's 16:9 default crops the
-# grid or wastes half the flat lay. Grids are square, the flat lay is 3:2,
-# everything else is the cinematic default.
+# grid or wastes half the flat lay. The 2x3 expression grid is square, the
+# flat lay is 3:2, everything else — including the four-across prop
+# turnaround, which is a ROW and not a grid — is the cinematic default.
 # Prose, deliberately: it is what the model reads. Assertions against it are
 # tokenize-style (see the test module's docstring), so tuning a sentence
 # churns one line rather than refreshing a snapshot.
@@ -131,7 +132,11 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...], str]] = {
         "three-quarter — in one row, consistent scale and lighting across all "
         "four, neutral light grey background",
         ("multiple objects", "hands", "busy background", "cropped"),
-        "1:1",
+        # WIDE, not square: "in one row" is four frames across. A 1:1 canvas
+        # either crops the row or shrinks each angle to a quarter of the
+        # height it needs — the exact miscrop the per-template aspect exists
+        # to prevent. Only the 2x3 expression grid is genuinely square.
+        "16:9",
     ),
     ("prop", "in_scene"): (
         "cinematic still of this prop in use inside its in-world setting, "

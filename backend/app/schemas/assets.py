@@ -321,7 +321,11 @@ class GenerateSlotPreview(BaseModel):
         ),
     )
     aspect_ratio: str = Field(
-        "16:9",
+        # Required, no default: this model exists so FastAPI VALIDATES the
+        # payload on the way out. With a default, a service that stopped
+        # emitting the frame would silently ship "16:9" — the half-row failure
+        # the envelope was introduced to make loud.
+        ...,
         description=(
             "Frame the slot template asks for (grids 1:1, costume flat lay "
             "3:2, otherwise 16:9). Sent to the provider."

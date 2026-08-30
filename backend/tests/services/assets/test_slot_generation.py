@@ -85,14 +85,15 @@ def test_every_generatable_slot_has_a_non_empty_template(asset_type, slot):
     [
         ("character", "sheet", "16:9"),
         ("character", "expressions", "1:1"),
-        ("prop", "turnaround", "1:1"),
+        # A ROW of four angles, not a grid — square would crop it. The
+        # distinction is the point: "it has several panels" does not make a
+        # template square.
+        ("prop", "turnaround", "16:9"),
         ("costume", "flat", "3:2"),
         ("location", "establishing", "16:9"),
     ],
 )
-def test_the_grids_are_square_and_the_flat_lay_is_three_by_two(
-    asset_type, slot, expected
-):
+def test_the_frame_follows_the_layout_the_template_asks_for(asset_type, slot, expected):
     """The frame belongs to the TEMPLATE: a 2x3 expression grid and a
     front-and-back flat lay do not fit the same rectangle, and neither fits
     the provider default."""

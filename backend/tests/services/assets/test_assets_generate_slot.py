@@ -700,7 +700,7 @@ async def test_without_a_loadout_only_unpinned_files_are_referenced(svc):
         ("character", "Sang Yao", "sheet", "16:9"),
         ("character", "Sang Yao", "expressions", "1:1"),
         ("costume", "Cloak", "flat", "3:2"),
-        ("prop", "Jade Seal", "turnaround", "1:1"),
+        ("prop", "Jade Seal", "turnaround", "16:9"),
     ],
 )
 async def test_the_slot_decides_the_frame(
