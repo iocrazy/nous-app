@@ -8,6 +8,7 @@ size are all `None`, never a guess and never an exception that would fail
 an already-paid-for generation.
 """
 
+import os
 import shutil
 import struct
 import subprocess
@@ -130,3 +131,86 @@ async def test_measure_video_returns_none_for_a_non_video_rather_than_raising(tm
     bad = tmp_path / "bad.mp4"
     bad.write_bytes(b"not a video at all")
     assert await measure_video(str(bad)) is None
+
+
+# ── the duration is orthogonal to the shape ──────────────────────────────
+# ffprobe's literal answer for "I could not determine a duration" is the
+# string "N/A". Whether it reaches us depends on the JSON writer's
+# optional-field mode, which is a build default and not something our args
+# pin: ffprobe 8.0.1 (this host) and 7.1.5 (the backend image) both print
+# `"duration":"N/A"` for a duration-less stream when optional fields are
+# shown, and omit the key when they are not. So a build that shows them
+# hands us a string float() rejects — and a video whose width and height
+# read perfectly must not be recorded as unmeasurable because of it. That
+# would put `honored=None` ("we never asked") on a product that could have
+# been judged in violation.
+
+# Byte-for-byte what ffprobe 7.1.5 in the backend image prints for a raw
+# h264 stream with `-show_optional_fields always`.
+_FFPROBE_NA_DURATION = (
+    '{"programs":[],"stream_groups":[],'
+    '"streams":[{"width":64,"height":48}],'
+    '"format":{"duration":"N/A"}}'
+)
+
+
+def _ffprobe_answering(tmp_path, monkeypatch, body: str) -> None:
+    """Put a stand-in `ffprobe` first on PATH, answering with `body`.
+
+    Everything else stays real — create_subprocess_exec, the
+    safe_popen_kwargs splat, the decode and the JSON parse. Only the
+    binary's answer is chosen, because no file we can build locally makes
+    either ffprobe build print an unparseable duration under the args this
+    module actually passes.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    probe = bindir / "ffprobe"
+    probe.write_text("#!/bin/sh\ncat <<'JSON'\n" + body + "\nJSON\n")
+    probe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+
+
+async def test_measure_video_keeps_dimensions_when_the_duration_is_unreadable(
+    tmp_path, monkeypatch
+):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"stand-in for a real clip; the probe is faked, not the file")
+    _ffprobe_answering(tmp_path, monkeypatch, _FFPROBE_NA_DURATION)
+
+    got = await measure_video(str(clip))
+
+    assert got is not None, "a readable width/height must survive a bad duration"
+    assert (got.width, got.height) == (64, 48)
+    assert got.duration_s is None
+
+
+async def test_measure_video_gives_up_on_a_hung_probe_and_leaves_no_child(
+    tmp_path, monkeypatch
+):
+    """The timeout branch had no coverage, and it is the one that reaps.
+
+    A probe that never answers must end as `None` — and the child must be
+    gone when we return, not left holding the file. The real D-state case
+    (a probe that outlives SIGKILL on a stuck mount) cannot be staged from
+    userspace; what is pinned here is that we kill and then actually wait
+    for the exit, rather than firing a kill and walking away.
+    """
+    from app.services.generation import measure as measure_mod
+
+    pidfile = tmp_path / "probe.pid"
+    _ffprobe_answering(tmp_path, monkeypatch, "unused")
+    (tmp_path / "bin" / "ffprobe").write_text(
+        f"#!/bin/sh\necho $$ > {pidfile}\nexec sleep 30\n"
+    )
+    (tmp_path / "bin" / "ffprobe").chmod(0o755)
+    monkeypatch.setattr(measure_mod, "_FFPROBE_TIMEOUT_S", 0.5)
+
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"stand-in for a real clip; the probe is faked, not the file")
+
+    assert await measure_video(str(clip)) is None
+
+    pid = int(pidfile.read_text().strip())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)

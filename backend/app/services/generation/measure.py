@@ -24,6 +24,12 @@ from app.services.generation.aspect import ASPECT_RATIOS, ASPECT_TOLERANCE
 # big file. The wait is bounded so a hung probe cannot stall the workflow.
 _FFPROBE_TIMEOUT_S = 30
 
+# Second bound, for the kill that follows a timeout. A process wedged in
+# uninterruptible IO on a stuck mount never dies, and an unbounded wait
+# there would hang the caller on exactly the scenario the first bound
+# exists for — with not even a log line to show for it.
+_FFPROBE_REAP_TIMEOUT_S = 5
+
 
 @dataclass(frozen=True)
 class Measured:
@@ -100,13 +106,25 @@ async def measure_video(path: str) -> Optional[Measured]:
         stream = (data.get("streams") or [{}])[0]
         width = int(stream.get("width") or 0)
         height = int(stream.get("height") or 0)
-        raw_duration = (data.get("format") or {}).get("duration")
-        duration = float(raw_duration) if raw_duration else None
     except Exception as exc:
         logger.warning(
             "[measure] unreadable ffprobe output for {}: {}", path[:200], exc
         )
         return None
+    # Duration is orthogonal to shape and is reported on its own. ffprobe
+    # writes the string "N/A" when it cannot determine one; losing the
+    # dimensions over that would record a measurable product as
+    # unmeasurable, and downstream that reads as "we never asked" rather
+    # than "they ignored us" — the exact confusion this contract ends.
+    duration: Optional[float] = None
+    try:
+        raw_duration = (data.get("format") or {}).get("duration")
+        if raw_duration:
+            duration = float(raw_duration)
+    except Exception as exc:
+        logger.warning(
+            "[measure] unreadable ffprobe duration for {}: {}", path[:200], exc
+        )
     if width <= 0 or height <= 0:
         return None
     return Measured(width=width, height=height, duration_s=duration)
@@ -117,7 +135,7 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
     try:
         if proc.returncode is None:
             proc.kill()
-        await proc.wait()
+        await asyncio.wait_for(proc.wait(), timeout=_FFPROBE_REAP_TIMEOUT_S)
     except Exception as exc:  # already reaped, or unkillable — log, never raise
         logger.warning("[measure] could not reap ffprobe: {}", exc)
 
