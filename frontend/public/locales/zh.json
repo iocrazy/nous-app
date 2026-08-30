@@ -468,6 +468,8 @@
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
+      "musicChartsUpdated": "更新于 {{when}}",
+      "musicChartsRefresh": "刷新",
       "sectionBasics": "基础信息",
       "sectionExtended": "扩展信息",
       "sectionSettings": "发布设置",

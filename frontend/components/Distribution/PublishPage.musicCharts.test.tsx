@@ -471,3 +471,38 @@ describe('PublishPage music charts', () => {
     expect(alert.textContent).toMatch(/search still works/i);
   });
 });
+
+
+describe('music charts — freshness', () => {
+  const openPanel = async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.click(screen.getByTestId('music-panel-toggle'));
+    return within(await screen.findByTestId('music-panel'));
+  };
+
+  it('re-reads a stale cache once, in the background, when the panel opens', async () => {
+    refreshMusicCharts.mockClear();
+    fetchMusicCharts.mockResolvedValue(chartsPage([chart('recommend', '1', 'Recommended', [{ title: 'Old' }])], {
+      stale: true, never_harvested: false, last_success_at: '2026-08-19T10:00:00Z',
+    }));
+    refreshMusicCharts.mockResolvedValue(undefined);
+    await openPanel();
+    await waitFor(() => expect(refreshMusicCharts).toHaveBeenCalledTimes(1));
+  });
+
+  it('leaves a fresh cache alone, says when it was read, and offers Refresh', async () => {
+    refreshMusicCharts.mockClear();
+    fetchMusicCharts.mockResolvedValue(chartsPage([chart('recommend', '1', 'Recommended', [{ title: 'New' }])], {
+      stale: false, never_harvested: false, last_success_at: '2026-08-19T10:00:00Z',
+    }));
+    refreshMusicCharts.mockResolvedValue(undefined);
+    const panel = await openPanel();
+    await waitFor(() => expect(panel.getByTestId('music-fresh')).toBeInTheDocument());
+    expect(refreshMusicCharts).not.toHaveBeenCalled();
+    expect(panel.getByTestId('music-fresh').textContent).toMatch(/Updated/);
+    fireEvent.click(panel.getByTestId('music-refresh'));
+    await waitFor(() => expect(refreshMusicCharts).toHaveBeenCalledTimes(1));
+  });
+});
