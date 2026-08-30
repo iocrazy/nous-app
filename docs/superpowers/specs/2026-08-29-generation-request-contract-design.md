@@ -23,7 +23,7 @@
 | 旋钮 | codex 服务器 | codex-local | jimeng-cli | jimeng-local | doubao/ark |
 |---|---|---|---|---|---|
 | ratio | ✅（上游不采纳 `--size`，靠 prompt 短语缓解） | ❌ `canvas_generation.py:215` 发 `params.size`，前端只发 `ratio` | ✅ `--ratio` 原生 | ✅ | ⚠️ `_ASPECT_TO_SIZE` 只 5/8 档，`2:3/3:2/21:9` 静默落 1024² |
-| 参考图 | ✅ | ✅ | **❌ `jimeng.py:29-42` 不转发任何参考图，i2i 实为 t2i** | ✅ | ⚠️ `/images/generations` 纯 t2i，"accepted but not sent" |
+| 参考图 | ✅ | ✅ | ⚠️ **CLI 图片链路无 i2i**（`build_image_args` 纯 text2image，`--image` 只在视频命令里）；`jimeng.py` 不转发是结果不是原因 | ⚠️ 同左 | ⚠️ `/images/generations` 纯 t2i，"accepted but not sent" |
 | model | ✅ | ❌ 发 `params.actual_model`，前端从不设 → 空 → CLI 默认 | ✅ | ✅ | ✅ |
 | quality | ✅ | ❌ payload 无此字段 | ⚠️ | ⚠️ | ⚠️ |
 | resolution | ⚠️ "尺寸由模型定" | ❌ | ✅ | ✅ | ⚠️ |
@@ -31,7 +31,7 @@
 | negative prompt | ❌ | ❌ | ❌ | ❌ | ❌（三个底层 provider 与 daemon 均无 `negative` 一词；UI 有此框） |
 | 产出校验 / 归因 | 只进日志 | **全丢**：入库为 `origin_kind=canvas_upload`，prompt/model/ratio 全空 | 无 | 无 | 无 |
 
-6 个 ❌ 是真丢，7 个 ⚠️ 是假开关。模型目录（`mediahub_models`）里真实启用的出图 provider 就是这 5 个；nous-engine 尚不存在。
+5 个 ❌ 是真丢，9 个 ⚠️ 是假开关（写计划时核实：jimeng 图片 i2i 是 CLI 没有这个能力，归 ⚠️，不是转发漏了）。模型目录（`mediahub_models`）里真实启用的出图 provider 就是这 5 个；nous-engine 尚不存在。
 
 ### 1.3 为什么不逐个打补丁
 
@@ -95,7 +95,7 @@ class ProviderCapabilities:
 | provider | ratios | quality | resolution | max_refs | negative | video_modes | honours_ratio |
 |---|---|---|---|---|---|---|---|
 | codex / codex-local | 8 档 | ✅ / ✅（daemon 补发） | ✗ | 9 | ✗ | — | prompt_hint |
-| jimeng-cli / jimeng-local | 8 档 | ✗ | ✅ | 9（**服务器路径需先修 jimeng.py 转发**） | ✗ | frames, multimodal（daemon 补 `video_mode`） | native |
+| jimeng-cli / jimeng-local | 8 档 | ✗ | ✅ | **0**（图片 CLI 无 i2i；视频有 first/last/multi） | ✗ | frames, multimodal（daemon 补 `video_mode`） | native |
 | doubao/ark | **5 档** | ✗ | ✗ | **0** | ✗ | — | native |
 
 用在两处：
@@ -148,7 +148,7 @@ GenFooterControls(按 caps 渲染) → params → generationRunner(auto→具体
 
 | PR | 内容 | 大小 |
 |---|---|---|
-| **P1 契约 + 后端三分支** | `GenerationRequest` / `Capabilities` / `reconcile`；`canvas_generation` 三分支改读它；修 ❌ 中的 4 个（codex-local ratio/model/quality、jimeng 参考图、dreamina video_mode）；`codex.py` raw 透传 | 中 |
+| **P1 契约 + 后端三分支** | `GenerationRequest` / `Capabilities` / `reconcile`；`canvas_generation` 三分支改读它；修 ❌ 中的 4 个（codex-local ratio/model/quality、dreamina video_mode）+ jimeng 图片 `max_refs=0` 诚实声明；`codex.py` raw 透传 | 中 |
 | **P2 产出记录** | `register_generated_media` 量/比/记；daemon job 归因反查；两入口对齐 | 中 |
 | **P3 daemon 客户端** | index.mjs 新 payload + 画幅短语 + 版本闸门；服务器双发一版 | 小，但要用户升级 daemon |
 | **P4 UI 按能力渲染** | capabilities 端点 + `GenFooterControls` 隐藏逻辑 + 负向提示词框下架 + dropped 徽章 | 中 |
