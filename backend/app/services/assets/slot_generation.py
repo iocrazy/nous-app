@@ -59,11 +59,17 @@ _BASE_NEGATIVE: tuple[str, ...] = (
     "extra limbs",
 )
 
-# (asset_type, slot) → (positive template, slot-specific negatives).
+# (asset_type, slot) → (positive template, slot-specific negatives, aspect).
+#
+# The aspect is part of the TEMPLATE, not a caller knob: a costume flat lay
+# ("front and back laid out side by side") and a 2x3 expression grid want
+# different frames, and leaving both at the provider's 16:9 default crops the
+# grid or wastes half the flat lay. Grids are square, the flat lay is 3:2,
+# everything else is the cinematic default.
 # Prose, deliberately: it is what the model reads. Assertions against it are
 # tokenize-style (see the test module's docstring), so tuning a sentence
 # churns one line rather than refreshing a snapshot.
-_TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
+_TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...], str]] = {
     # ── character ──────────────────────────────────────────────────────────
     ("character", "sheet"): (
         "character sheet: one chest-up close-up on the left, and full-body "
@@ -71,6 +77,7 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         "and costume across every view, even studio lighting, neutral light "
         "grey background, full figure visible with no cropping",
         ("cropped", "multiple characters", "inconsistent face", "busy background"),
+        "16:9",
     ),
     ("character", "expressions"): (
         "expression sheet: a 2x3 grid of six head-and-shoulders portraits of "
@@ -78,38 +85,45 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         "thoughtful — identical framing, identical lighting and identical "
         "identity in every cell, neutral light grey background",
         ("cropped", "multiple characters", "inconsistent face", "busy background"),
+        "1:1",
     ),
     ("character", "stills"): (
         "cinematic still of this character in an in-world setting, single "
         "subject, film lighting, shallow depth of field, natural pose",
         ("multiple characters", "inconsistent face", "studio backdrop"),
+        "16:9",
     ),
     ("character", "extras"): (
         "reference detail shots of this character — hands, hair, accessories "
         "and footwear in close-up, consistent identity, plain background",
         ("full body shot", "busy background", "multiple characters"),
+        "16:9",
     ),
     # ── location ───────────────────────────────────────────────────────────
     ("location", "establishing"): (
         "establishing wide shot of this location, full spatial context, "
         "natural depth, cinematic lighting, no people in frame",
         ("people", "characters", "cropped", "close-up"),
+        "16:9",
     ),
     ("location", "keyframes"): (
         "the same place from the same vantage point at a different time of "
         "day, identical architecture and layout, only the light and mood "
         "change, cinematic lighting",
         ("people", "different location", "inconsistent geometry"),
+        "16:9",
     ),
     ("location", "details"): (
         "close-up detail shots of this location — materials, textures, props "
         "and surfaces — consistent with the establishing shot",
         ("wide shot", "people", "different location"),
+        "16:9",
     ),
     ("location", "layout"): (
         "top-down orthographic layout plan of this location, floor plan view, "
         "rooms and circulation labelled by shape, flat even lighting",
         ("perspective view", "people", "dramatic lighting"),
+        "16:9",
     ),
     # ── prop ───────────────────────────────────────────────────────────────
     ("prop", "turnaround"): (
@@ -117,16 +131,19 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         "three-quarter — in one row, consistent scale and lighting across all "
         "four, neutral light grey background",
         ("multiple objects", "hands", "busy background", "cropped"),
+        "1:1",
     ),
     ("prop", "in_scene"): (
         "cinematic still of this prop in use inside its in-world setting, "
         "natural scale against its surroundings, film lighting",
         ("multiple objects", "studio backdrop"),
+        "16:9",
     ),
     ("prop", "details"): (
         "close-up detail shots of this prop — materials, wear, markings and "
         "mechanism — consistent with the turnaround",
         ("wide shot", "busy background", "multiple objects"),
+        "16:9",
     ),
     # ── costume ────────────────────────────────────────────────────────────
     ("costume", "flat"): (
@@ -134,17 +151,20 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         "body inside the garment, symmetrical arrangement, even overhead "
         "lighting, neutral light grey background",
         ("mannequin", "person", "body", "busy background", "cropped"),
+        "3:2",
     ),
     ("costume", "worn"): (
         "this costume worn by a full-body figure, front three-quarter view, "
         "the garment reading clearly as the subject, even studio lighting, "
         "neutral light grey background",
         ("multiple characters", "cropped", "busy background"),
+        "16:9",
     ),
     ("costume", "details"): (
         "close-up detail shots of this costume — fabric, seams, fastenings "
         "and trim — consistent with the flat lay",
         ("wide shot", "busy background", "full body shot"),
+        "16:9",
     ),
 }
 
@@ -175,7 +195,15 @@ def slot_prompt(
     loadout_row: Optional[Dict[str, Any]] = None,
     linked_prompts: Optional[Sequence[str]] = None,
 ) -> Dict[str, str]:
-    """Compose the positive/negative prompt pair for one (asset, slot).
+    """Compose ``{positive, negative, aspect_ratio}`` for one (asset, slot).
+
+    ⚠️ ``negative`` is NOT a provider input: no image adapter in this repo
+    accepts a negative prompt (``grep -rn negative`` over ``video_providers/``
+    and ``provider_protocols/`` returns nothing). It is composed here and
+    RECORDED as ``generated_media.params["negative"]`` — provenance the user
+    can read and re-use, not something that shapes the image. Folding it into
+    the positive text would be worse than not having it: "no watermark" inside
+    a positive prompt is a request for a watermark on several models.
 
     ``linked_prompts`` are the ``prompt_positive`` values of the costumes and
     props this run dresses the asset in — resolved by the caller (from the
@@ -188,7 +216,7 @@ def slot_prompt(
     template = _TEMPLATES.get((asset_type, slot))
     if template is None:
         raise SlotNotGeneratable(slot)
-    body, template_negatives = template
+    body, template_negatives, aspect_ratio = template
 
     positive = ", ".join(
         _dedupe(
@@ -209,7 +237,11 @@ def slot_prompt(
             ]
         )
     )
-    return {"positive": positive, "negative": negative}
+    return {
+        "positive": positive,
+        "negative": negative,
+        "aspect_ratio": aspect_ratio,
+    }
 
 
 def _slot_priority(asset_type: str) -> List[str]:

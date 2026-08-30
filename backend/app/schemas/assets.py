@@ -286,7 +286,7 @@ class GenerateSlotRequest(BaseModel):
 
 
 class GenerateSlotPreview(BaseModel):
-    """What a generate-slot run WOULD send — the dry run of the paid call.
+    """What a generate-slot run would compose — the dry run of the paid call.
 
     ``model`` is null unless the caller pinned one: the effective model is
     resolved from the ``mediahub_models`` catalog at generation time, and
@@ -294,9 +294,39 @@ class GenerateSlotPreview(BaseModel):
     not what runs.
     """
 
-    positive: str
-    negative: str
-    reference_resource_ids: List[str] = Field(default_factory=list)
+    positive: str = Field(
+        ...,
+        description=(
+            "The prompt sent to the image provider — asset prompt, loadout "
+            "extra, linked costume/prop prompts, then the slot template."
+        ),
+    )
+    negative: str = Field(
+        ...,
+        description=(
+            "RECORDED PROVENANCE, NOT A PROVIDER INPUT. No image adapter in "
+            "this repo accepts a negative prompt, so this text is stored on "
+            "the generation as params.negative for the user to read and "
+            "re-use; it does not shape the image."
+        ),
+    )
+    reference_resource_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "The asset's own files that ride along as references, in priority "
+            "order (primary slot, worn, stills, the rest), capped at the "
+            "provider ceiling. Each is materialized to a local file and sent "
+            "as reference_image_paths — honored by the codex adapter; the "
+            "ark and jimeng adapters ignore references entirely."
+        ),
+    )
+    aspect_ratio: str = Field(
+        "16:9",
+        description=(
+            "Frame the slot template asks for (grids 1:1, costume flat lay "
+            "3:2, otherwise 16:9). Sent to the provider."
+        ),
+    )
     model: Optional[str] = None
 
 
@@ -312,12 +342,27 @@ class GenerateSlotFailure(BaseModel):
     detail: str
 
 
+class SkippedReference(BaseModel):
+    """A reference file that was chosen but could not be handed to the provider.
+
+    Its own list rather than an entry in ``failed``: the run SUCCEEDED, it just
+    generated with fewer references than the preview promised. Silently
+    dropping it is the "选了也生成了但图里没有" failure this repo has already
+    recorded once — the user sees an image that ignored the reference and has
+    no way to learn why.
+    """
+
+    resource_id: str
+    reason: str
+
+
 class GenerateSlotResponse(BaseModel):
     """202 body. ``failed`` is present even when empty — a caller must not
     have to infer "did any of them fail?" from ``len(generation_ids)``."""
 
     generation_ids: List[str] = Field(default_factory=list)
     failed: List[GenerateSlotFailure] = Field(default_factory=list)
+    skipped_references: List[SkippedReference] = Field(default_factory=list)
     inbox_state: Literal["unreviewed"] = "unreviewed"
 
 

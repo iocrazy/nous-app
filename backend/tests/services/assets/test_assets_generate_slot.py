@@ -24,6 +24,8 @@ The behaviours with a silent failure mode, pinned below:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from app.schemas.assets import (
@@ -89,11 +91,11 @@ class FakeRegister:
 
 class FakeGeneratedRepo:
     def __init__(self, missing=False):
-        self.stamped: list[tuple[int, int]] = []
+        self.stamped: list[tuple] = []
         self._missing = missing
 
-    async def set_source_asset(self, gen_id, asset_id):
-        self.stamped.append((int(gen_id), int(asset_id)))
+    async def set_source_asset(self, gen_id, asset_id, *, scope_id=None):
+        self.stamped.append((int(gen_id), int(asset_id), scope_id))
         return None if self._missing else {"id": str(gen_id)}
 
 
@@ -109,6 +111,25 @@ def svc(gen_repo):
         relations_repo=FakeRelationsRepo(),
         generated_repo=gen_repo,
     )
+
+
+@pytest.fixture(autouse=True)
+def materialized(monkeypatch, tmp_path):
+    """Fake ``media_storage.materialize`` — the ONE filesystem/object-store
+    touch on this path. Returns the list of stored paths it was asked for, so
+    a test can assert WHICH file was chosen by the ladder. Real temp files, so
+    the caller's ``os.path.isfile`` guard runs for real."""
+    asked: list[str] = []
+
+    @asynccontextmanager
+    async def _fake(file_path):
+        asked.append(str(file_path))
+        dest = tmp_path / str(file_path).replace("/", "_")
+        dest.write_bytes(b"png-bytes")
+        yield dest
+
+    monkeypatch.setattr(assets_service, "materialize", _fake)
+    return asked
 
 
 @pytest.fixture
@@ -311,7 +332,9 @@ async def test_generate_registers_each_unit_and_stamps_the_source_asset(
     assert out["inbox_state"] == "unreviewed"
     assert out["failed"] == []
     assert len(out["generation_ids"]) == 2
-    assert gen_repo.stamped == [(int(g), int(a["id"])) for g in out["generation_ids"]]
+    assert gen_repo.stamped == [
+        (int(g), int(a["id"]), SCOPE) for g in out["generation_ids"]
+    ]
 
     call = imagegen.calls[0]
     assert call["project_id"] == "asset"
@@ -498,3 +521,193 @@ async def test_the_loadout_id_is_recorded_on_every_generation(svc, imagegen, reg
     )
     for call in register.calls:
         assert call["origin"].params["loadout_id"] == str(lo["id"])
+
+
+# ── references actually reach the provider (fix round 1, C1) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_reference_files_are_materialized_and_sent_as_local_paths(
+    svc, imagegen, register, materialized
+):
+    """The url channel is vestigial: ark ignores it, jimeng never reads it,
+    codex takes it only when it names a local file. What has to arrive is
+    ``reference_image_paths``."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+
+    assert materialized == [f"library/{SHEET_FILE}/original.png"]
+    paths = imagegen.calls[0]["reference_image_paths"]
+    assert paths and len(paths) == 1
+    assert paths[0].endswith("original.png")
+    assert out["skipped_references"] == []
+    # …and the remote url still rides along for a future URL-based adapter.
+    assert imagegen.calls[0]["reference_image_url"].endswith(
+        f"/api/v1/resources/{SHEET_FILE}/cover"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_same_local_paths_serve_every_unit_of_the_run(
+    svc, imagegen, register, materialized
+):
+    """One AsyncExitStack around the whole loop: materializing per unit would
+    delete the temp file before the next call could read it."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    await svc.generate_slot(int(a["id"]), SCOPE, USER, _req(count=3))
+    assert len(materialized) == 1, "materialized once, not once per unit"
+    assert len({tuple(c["reference_image_paths"]) for c in imagegen.calls}) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unmaterializable_reference_is_dropped_and_REPORTED(
+    svc, imagegen, register, monkeypatch
+):
+    """ "选了也生成了但图里没有" — the recorded failure this list prevents."""
+
+    @asynccontextmanager
+    async def _boom(file_path):
+        raise OSError("object store unreachable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(assets_service, "materialize", _boom)
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+    # The run still succeeds — a worse picture is not a broken request.
+    assert len(out["generation_ids"]) == 1
+    assert out["skipped_references"] == [
+        {
+            "resource_id": SHEET_FILE,
+            "reason": "materialize_failed: object store unreachable",
+        }
+    ]
+    assert imagegen.calls[0]["reference_image_paths"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_resource_with_no_image_file_is_reported_not_silently_dropped(
+    svc, imagegen, register
+):
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    svc.relations.resource_media[int(SHEET_FILE)] = {
+        "file_path": "library/clip.mp4",
+        "mime_type": "video/mp4",
+        "thumbnail_path": None,
+        "cover_image_path": None,
+    }
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+    assert out["skipped_references"] == [
+        {"resource_id": SHEET_FILE, "reason": "no_image_file"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_video_backed_reference_falls_back_to_its_thumbnail(
+    svc, imagegen, register, materialized
+):
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    svc.relations.resource_media[int(SHEET_FILE)] = {
+        "file_path": "library/clip.mp4",
+        "mime_type": "video/mp4",
+        "thumbnail_path": "sb://library/derived/1/thumb.jpg",
+        "cover_image_path": None,
+    }
+    await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+    assert materialized == ["sb://library/derived/1/thumb.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_an_http_stored_value_is_never_handed_to_materialize(
+    svc, imagegen, register, materialized
+):
+    """An ``http`` column value is somebody else's URL, not a path of ours."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    svc.relations.resource_media[int(SHEET_FILE)] = {
+        "file_path": "https://cdn.example/x.png",
+        "mime_type": "image/png",
+        "thumbnail_path": None,
+        "cover_image_path": None,
+    }
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+    assert materialized == []
+    assert out["skipped_references"][0]["reason"] == "no_image_file"
+
+
+@pytest.mark.asyncio
+async def test_no_references_sends_no_paths_and_reports_no_skips(
+    svc, imagegen, register
+):
+    a = await _asset(svc)
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+    assert imagegen.calls[0]["reference_image_paths"] is None
+    assert imagegen.calls[0]["reference_image_url"] is None
+    assert out["skipped_references"] == []
+
+
+# ── loadout-scoped files (fix round 1, I3) ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_file_pinned_to_another_loadout_is_not_referenced(svc):
+    """The prompt already excludes loadout Y's costume; a reference pointing
+    at it would make one plan describe two outfits."""
+    a = await _asset(svc)
+    costume = await _asset(svc, asset_type="costume", name="Cloak")
+    await svc.add_link(
+        int(a["id"]),
+        SCOPE,
+        LinkRequest(to_asset_id=str(costume["id"]), relation="wears"),
+    )
+    lo_x = await svc.create_loadout(
+        int(a["id"]), SCOPE, LoadoutCreate(name="X", costume_ids=[str(costume["id"])])
+    )
+    lo_y = await svc.create_loadout(
+        int(a["id"]), SCOPE, LoadoutCreate(name="Y", costume_ids=[str(costume["id"])])
+    )
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    await _attach(svc, a["id"], SECOND_FILE, "worn", loadout_id=str(lo_x["id"]))
+    await _attach(svc, a["id"], THIRD_FILE, "worn", loadout_id=str(lo_y["id"]))
+
+    for_x = await svc.preview_generate_slot(
+        int(a["id"]), SCOPE, "sheet", str(lo_x["id"])
+    )
+    assert for_x["reference_resource_ids"] == [SHEET_FILE, SECOND_FILE]
+
+
+@pytest.mark.asyncio
+async def test_without_a_loadout_only_unpinned_files_are_referenced(svc):
+    a = await _asset(svc)
+    lo = (await svc.relations.list_loadouts(int(a["id"])))[0]
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    await _attach(svc, a["id"], SECOND_FILE, "worn", loadout_id=str(lo["id"]))
+    out = await svc.preview_generate_slot(int(a["id"]), SCOPE, "sheet", None)
+    assert out["reference_resource_ids"] == [SHEET_FILE]
+
+
+# ── aspect ratio (fix round 1, M6) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("asset_type", "name", "slot", "expected"),
+    [
+        ("character", "Sang Yao", "sheet", "16:9"),
+        ("character", "Sang Yao", "expressions", "1:1"),
+        ("costume", "Cloak", "flat", "3:2"),
+        ("prop", "Jade Seal", "turnaround", "1:1"),
+    ],
+)
+async def test_the_slot_decides_the_frame(
+    svc, imagegen, register, asset_type, name, slot, expected
+):
+    a = await _asset(svc, asset_type=asset_type, name=name)
+    preview = await svc.preview_generate_slot(int(a["id"]), SCOPE, slot, None)
+    assert preview["aspect_ratio"] == expected
+    await svc.generate_slot(int(a["id"]), SCOPE, USER, _req(slot=slot))
+    assert imagegen.calls[0]["aspect_ratio"] == expected

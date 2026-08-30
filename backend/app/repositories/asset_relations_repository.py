@@ -28,6 +28,7 @@ from app.models import (
     Assets,
     Projects,
     ResourceItems,
+    Resources,
 )
 
 
@@ -115,6 +116,28 @@ class AssetRelationsRepository:
         )
         async with read_scope() as session:
             return (await session.execute(stmt)).first() is not None
+
+    async def resource_media_rows(
+        self, resource_ids: List[int]
+    ) -> Dict[int, Dict[str, Any]]:
+        """The stored media columns of the given resources, keyed by id.
+
+        Only what the reference-materialization step needs (``file_path`` /
+        ``mime_type`` / the two derived-image columns). Batched: one statement
+        for the whole reference list rather than one per file.
+        """
+        if not resource_ids:
+            return {}
+        stmt = select(
+            Resources.id,
+            Resources.file_path,
+            Resources.mime_type,
+            Resources.thumbnail_path,
+            Resources.cover_image_path,
+        ).where(Resources.id.in_([int(r) for r in resource_ids]))
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return {int(r["id"]): dict(r) for r in rows}
 
     async def attach(
         self,

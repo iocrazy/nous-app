@@ -38,6 +38,7 @@ class _FakeSlotService:
         self.result = {
             "generation_ids": ["901", "902"],
             "failed": [],
+            "skipped_references": [],
             "inbox_state": "unreviewed",
         }
 
@@ -49,6 +50,7 @@ class _FakeSlotService:
             "positive": "a swordswoman, character sheet",
             "negative": "text, watermark",
             "reference_resource_ids": ["727145299382534146"],
+            "aspect_ratio": "16:9",
             "model": None,
         }
 
@@ -104,6 +106,7 @@ async def test_preview_200_returns_the_prompt_and_references(app):
     data = r.json()["data"]
     assert "character sheet" in data["positive"]
     assert data["reference_resource_ids"] == ["727145299382534146"]
+    assert data["aspect_ratio"] == "16:9"
     assert data["model"] is None
     assert app.state.fake.preview_calls == [(5, 9000, "sheet", None)]
 
@@ -147,6 +150,7 @@ async def test_generate_answers_202_with_the_inbox_state(app):
     data = r.json()["data"]
     assert data["generation_ids"] == ["901", "902"]
     assert data["failed"] == []
+    assert data["skipped_references"] == []
     assert data["inbox_state"] == "unreviewed"
     assert app.state.fake.generate_calls == [
         {
@@ -166,6 +170,7 @@ async def test_a_partially_failed_run_reports_the_ledger_on_the_wire(app):
     app.state.fake.result = {
         "generation_ids": ["901"],
         "failed": [{"index": 1, "code": "generation_failed", "detail": "provider 503"}],
+        "skipped_references": [],
         "inbox_state": "unreviewed",
     }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -244,3 +249,24 @@ async def test_an_out_of_range_loadout_id_is_refused_at_the_boundary(app):
             GENERATE, json={"slot": "sheet", "loadout_id": "99999999999999999999"}
         )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_reference_is_visible_on_the_wire(app):
+    """A run that generated without the asset's primary image must say so —
+    otherwise the user sees a picture that ignored their reference and has no
+    way to learn why."""
+    app.state.fake.result = {
+        "generation_ids": ["901"],
+        "failed": [],
+        "skipped_references": [
+            {"resource_id": "727145299382534146", "reason": "no_image_file"}
+        ],
+        "inbox_state": "unreviewed",
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(GENERATE, json={"slot": "sheet"})
+    assert r.status_code == 202, r.text
+    assert r.json()["data"]["skipped_references"] == [
+        {"resource_id": "727145299382534146", "reason": "no_image_file"}
+    ]

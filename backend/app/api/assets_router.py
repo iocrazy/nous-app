@@ -602,13 +602,24 @@ async def preview_generate_slot(
     slot: SlotQuery,
     loadout_id: OptSnowflakeQuery = None,
 ):
-    """The dry run of ``POST /generate-slot`` — the exact prompt and reference
-    list that request would send, with no provider call and no writes.
+    """The dry run of ``POST /generate-slot`` — what that request would
+    compose, with no provider call and no writes.
 
     It exists so the user can read what a paid generation is about to ask for
-    (and which of the asset's files ride along) BEFORE paying for it. Built by
-    the same service code as the run itself: a preview computed by a second
-    implementation is a preview of something else.
+    BEFORE paying for it. Built by the same service code as the run itself: a
+    preview computed by a second implementation is a preview of something else.
+
+    Read the fields for what they ARE, not by symmetry:
+
+    * ``positive`` and ``aspect_ratio`` go to the provider.
+    * ``negative`` does NOT — no image adapter in this repo accepts a negative
+      prompt. It is recorded on the generation as ``params.negative``,
+      provenance the user can read and re-use.
+    * ``reference_resource_ids`` are materialized to local files and sent as
+      ``reference_image_paths``; the codex adapter honours them, ark and
+      jimeng ignore references entirely. A reference that cannot be
+      materialized comes back in the RUN's ``skipped_references`` — the
+      preview lists intent, the run reports what actually went.
     """
     try:
         sid = await _gate(scope_id, auth)
@@ -642,6 +653,11 @@ async def generate_slot(
     returning fewer images than were asked (and paid) for. Every unit failing
     is a 503 ``generation_failed`` carrying the provider's own message, never
     a 202 over an empty list.
+
+    ``skipped_references`` is the same discipline one level down: the run
+    succeeded, but with fewer reference images than the preview listed, and it
+    says which and why rather than producing a picture that quietly ignored
+    the asset's primary image.
     """
     try:
         sid = await _gate(scope_id, auth)

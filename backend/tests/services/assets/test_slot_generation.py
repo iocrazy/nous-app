@@ -75,6 +75,28 @@ def test_every_generatable_slot_has_a_non_empty_template(asset_type, slot):
     out = slot_prompt(asset(asset_type), slot)
     assert out["positive"].strip(), f"{asset_type}/{slot} produced an empty prompt"
     assert out["negative"].strip(), f"{asset_type}/{slot} produced no negatives"
+    # An unset frame is not an option: leaving it to the provider's 16:9
+    # default is what crops a 2x3 grid.
+    assert out["aspect_ratio"] in ("1:1", "3:2", "16:9")
+
+
+@pytest.mark.parametrize(
+    ("asset_type", "slot", "expected"),
+    [
+        ("character", "sheet", "16:9"),
+        ("character", "expressions", "1:1"),
+        ("prop", "turnaround", "1:1"),
+        ("costume", "flat", "3:2"),
+        ("location", "establishing", "16:9"),
+    ],
+)
+def test_the_grids_are_square_and_the_flat_lay_is_three_by_two(
+    asset_type, slot, expected
+):
+    """The frame belongs to the TEMPLATE: a 2x3 expression grid and a
+    front-and-back flat lay do not fit the same rectangle, and neither fits
+    the provider default."""
+    assert slot_prompt(asset(asset_type), slot)["aspect_ratio"] == expected
 
 
 @pytest.mark.parametrize("slot", ("primary", "variants"))
@@ -101,6 +123,16 @@ def test_character_worn_is_refused_not_silently_empty():
     from the character would produce "the character, wearing nothing named"."""
     with pytest.raises(SlotNotGeneratable):
         slot_prompt(asset("character"), "worn")
+
+
+def test_every_generatable_pair_is_a_real_slot():
+    """The other direction of the sweep below, and the one the GENERATABLE
+    comment promises: ``slot_prompt`` never consults ``slots.py``, so a slot
+    RENAMED or REMOVED there would leave both the template table and this
+    suite green while the endpoint answers 422 ``invalid_slot`` for a slot the
+    templates still claim to cover."""
+    real = {(t, s) for t, slots in SLOTS.items() for s in slots}
+    assert set(GENERATABLE) <= real, sorted(set(GENERATABLE) - real)
 
 
 def test_the_slot_table_has_no_uncovered_slot():

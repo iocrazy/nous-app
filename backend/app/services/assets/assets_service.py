@@ -9,7 +9,9 @@ no silent no-ops (CLAUDE.md "触发路径必须类型化失败回显").
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Optional
+import os
+from contextlib import AsyncExitStack
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.db.engine import is_configured
@@ -54,6 +56,7 @@ from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
 )
+from app.services.library.media_storage import materialize
 from app.services.library.resource_ai_ops import (
     CaptionAgentFailed,
     CaptionAgentPaused,
@@ -144,6 +147,29 @@ MAX_SLOT_REFERENCES = 3
 # canvas and shot-generate paths use (``_KIND_MIME``/``mime="image/png"``), so
 # all three land the same way in Tier-1.
 _GENERATED_IMAGE_MIME = "image/png"
+
+
+def _reference_stored_path(row: Dict[str, Any]) -> Optional[str]:
+    """The stored path of a resource's IMAGE bytes, or None.
+
+    Ladder: the original when the row is itself an image, else its derived
+    thumbnail / cover (that is the only image a video-backed resource has).
+    An ``http`` value is somebody else's URL, not a path we can materialize.
+    Returning None is a REPORTED skip, never a silent drop.
+    """
+    mime = str(row.get("mime_type") or "").lower()
+    file_path = row.get("file_path")
+    if (
+        file_path
+        and not str(file_path).startswith("http")
+        and mime.startswith("image/")
+    ):
+        return str(file_path)
+    for field in ("thumbnail_path", "cover_image_path"):
+        value = row.get(field)
+        if value and not str(value).startswith("http"):
+            return str(value)
+    return None
 
 
 def _unit_failure(index: int, code: str, exc: Exception) -> Dict[str, Any]:
@@ -877,18 +903,81 @@ class AssetsService:
     # ── slot generation ────────────────────────────────────────────────────
 
     def _reference_url(self, resource_id: int) -> str:
-        """The provider-facing URL of one reference file.
+        """The provider-facing URL of the first reference file.
 
         ``/api/v1/resources/{id}/cover`` is UNAUTHENTICATED (same posture as
-        the generated-media ``/cover``), which is what makes it usable by a
-        provider that PULLS the reference rather than accepting an upload —
-        an ``Authorization`` header cannot be attached to a url handed to
-        someone else's API. ``MEDIA_PUBLIC_URL`` is the externally reachable
-        base the gateway proxies to the backend (``location /``), i.e. the
-        same base the transcription and publish paths hand out.
+        the generated-media ``/cover``) and ``MEDIA_PUBLIC_URL`` is the base
+        the gateway proxies to the backend (``location /``), so it IS
+        externally fetchable.
+
+        ⚠️ Reachability was never the binding question: **no image adapter in
+        this repo pulls a remote reference url.** ark accepts the kwarg for
+        signature parity and does not send it, jimeng never reads it, and
+        codex uses it only when it names a LOCAL file. The url is still sent
+        because it costs nothing and a future URL-based adapter would use it —
+        but the channel that actually works is ``reference_image_paths``, and
+        that is what ``_materialize_references`` produces.
         """
         base = str(settings.MEDIA_PUBLIC_URL or "").rstrip("/")
         return f"{base}/api/v1/resources/{int(resource_id)}/cover"
+
+    async def _materialize_references(
+        self, stack: AsyncExitStack, resource_ids: List[str]
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """Resolve reference resources to LOCAL files the provider can read.
+
+        Mirrors ``workflows/canvas_generation.py``: the only reference channel
+        that reaches a provider today is a local path, and an object-store row
+        has no local path until ``media_storage.materialize()`` has streamed
+        one out. The temp files must outlive every unit of the run, so the
+        caller owns the ``AsyncExitStack`` and it wraps the whole loop —
+        materializing per unit would delete the file before the next one.
+
+        ``materialize`` carries the containment guard (a ``..`` rel_path can
+        never escape ``DOWNLOAD_PATH``), so this does not re-implement it.
+
+        Returns ``(local_paths, skipped)``. A reference that cannot be
+        resolved is DROPPED AND REPORTED — the run still succeeds, but with
+        fewer references than the preview promised, and the caller is told
+        which and why. Silently dropping it is the recorded
+        "选了也生成了但图里没有" failure.
+        """
+        local_paths: List[str] = []
+        skipped: List[Dict[str, Any]] = []
+        rows = await self.relations.resource_media_rows([int(r) for r in resource_ids])
+        for resource_id in resource_ids:
+            row = rows.get(int(resource_id))
+            if not row:
+                skipped.append(
+                    {"resource_id": str(resource_id), "reason": "resource_not_found"}
+                )
+                continue
+            stored = _reference_stored_path(row)
+            if not stored:
+                skipped.append(
+                    {"resource_id": str(resource_id), "reason": "no_image_file"}
+                )
+                continue
+            try:
+                path = await stack.enter_async_context(materialize(stored))
+            except Exception as exc:
+                # One unreadable reference must not fail the run: generating
+                # with two of three references is a worse picture, not a
+                # broken request.
+                skipped.append(
+                    {
+                        "resource_id": str(resource_id),
+                        "reason": f"materialize_failed: {exc or type(exc).__name__}",
+                    }
+                )
+                continue
+            if not os.path.isfile(str(path)):
+                skipped.append(
+                    {"resource_id": str(resource_id), "reason": "file_missing"}
+                )
+                continue
+            local_paths.append(str(path))
+        return local_paths, skipped
 
     async def _linked_prompts(
         self, row: Dict[str, Any], scope_id: int, loadout: Optional[Dict[str, Any]]
@@ -973,11 +1062,23 @@ class AssetsService:
 
         files_by_slot: Dict[str, List[Dict[str, Any]]] = {}
         for f in await self.relations.list_files(asset_id):
+            pinned = f.get("loadout_id")
+            # A loadout-scoped file belongs to ONE outfit. The prompt already
+            # treats the loadout as a filter (``_linked_prompts``); letting a
+            # file pinned to a DIFFERENT loadout become a reference would make
+            # one plan describe two outfits — a costume in the picture that
+            # the prompt deliberately left out. With no loadout requested,
+            # only the unpinned files apply.
+            if pinned is not None and (
+                loadout is None or int(pinned) != int(loadout["id"])
+            ):
+                continue
             files_by_slot.setdefault(f["slot"], []).append(f)
         refs = reference_order(files_by_slot, asset_type, max_refs=MAX_SLOT_REFERENCES)
         return {
             "positive": prompt["positive"],
             "negative": prompt["negative"],
+            "aspect_ratio": prompt["aspect_ratio"],
             "reference_resource_ids": [str(r) for r in refs],
             # No model is chosen for a preview: the effective one is resolved
             # from the mediahub_models catalog at generation time, and echoing
@@ -1028,91 +1129,103 @@ class AssetsService:
         row = await self._require_writable(asset_id, scope_id)
         plan = await self._slot_plan(row, int(scope_id), req.slot, req.loadout_id)
         refs = plan["reference_resource_ids"]
-        # One reference url: the generic provider signature takes a single
-        # ``reference_image_url``. Multi-reference delivery (the bundle
-        # protocol, spec §6.3) is a separate endpoint; sending only the first
-        # — the primary slot's file — is the deliberate subset, not an
-        # oversight.
-        reference_image_url = self._reference_url(int(refs[0])) if refs else None
         model = req.model or DEFAULT_IMAGE_MODEL
         node_id = f"asset:{int(asset_id)}:{req.slot}"
 
         generation_ids: List[str] = []
         failed: List[Dict[str, Any]] = []
-        for index in range(int(req.count)):
-            try:
-                result = await ImageGenerationService().generate_image(
-                    project_id="asset",
-                    node_id=node_id,
-                    prompt=plan["positive"],
-                    model=model,
-                    provider_name=None,
-                    reference_image_url=reference_image_url,
-                    user_id=user_id,
-                )
-            except Exception as exc:  # provider / catalog failure for THIS unit
-                failed.append(_unit_failure(index, "generation_failed", exc))
-                continue
-            produced_url = (result or {}).get("image_url") or None
-            produced_path = (result or {}).get("image_path") or None
-            if not produced_url and not produced_path:
-                # Ours to name: passing None on to the ingest raises there, and
-                # the failure would be filed as "we could not store it" when
-                # nothing was produced to store.
-                failed.append(
-                    {
-                        "index": index,
-                        "code": "generation_failed",
-                        "detail": "Image provider returned neither a url nor a file",
-                    }
-                )
-                continue
-            try:
-                created = await register_generated_media(
-                    user_id=str(user_id),
-                    scope_id=int(scope_id),
-                    # Exactly one: URL providers (ark) answer with a url, the
-                    # local-CLI adapters (jimeng/codex) wrote a file instead.
-                    source_url=produced_url,
-                    source_path=None if produced_url else produced_path,
-                    mime=_GENERATED_IMAGE_MIME,
-                    origin=GenerationOrigin(
-                        kind="agent_run",
+        # ONE stack around the whole loop: the materialized temp files must
+        # stay on disk until the last unit has been generated. Opening it per
+        # unit would delete the reference before the next call reads it.
+        async with AsyncExitStack() as stack:
+            reference_paths, skipped_references = await self._materialize_references(
+                stack, refs
+            )
+            # The url is the vestigial channel (see ``_reference_url``); the
+            # local paths are the one adapters actually read.
+            reference_image_url = self._reference_url(int(refs[0])) if refs else None
+            for index in range(int(req.count)):
+                try:
+                    result = await ImageGenerationService().generate_image(
+                        project_id="asset",
                         node_id=node_id,
                         prompt=plan["positive"],
-                        # What actually RAN, not what was asked for: the
-                        # catalog resolves the ``dall-e-3`` sentinel to
-                        # whatever image model the admin enabled, and the
-                        # inbox column is what the UI shows and what a
-                        # "generate another like this" would read back.
-                        model=(result or {}).get("model") or model,
-                        provider=(result or {}).get("provider") or None,
-                        params={
-                            "target_slot": req.slot,
-                            "loadout_id": (
-                                str(req.loadout_id) if req.loadout_id else None
-                            ),
-                            "negative": plan["negative"],
-                        },
-                    ),
-                )
-                gen_id = (created or {}).get("id")
-                if gen_id is None:
-                    raise RuntimeError("register_generated_media returned no id")
-                # A row the Assets tab can never find is worse than none: the
-                # user paid for it and it shows up nowhere they were looking.
-                if (
-                    await self.generated.set_source_asset(int(gen_id), int(asset_id))
-                    is None
-                ):
-                    raise RuntimeError(
-                        f"generated_media {gen_id} vanished before source_asset_id "
-                        "could be stamped"
+                        model=model,
+                        provider_name=None,
+                        reference_image_url=reference_image_url,
+                        reference_image_paths=reference_paths or None,
+                        aspect_ratio=plan["aspect_ratio"],
+                        user_id=user_id,
                     )
-            except Exception as exc:
-                failed.append(_unit_failure(index, "register_failed", exc))
-                continue
-            generation_ids.append(str(gen_id))
+                except Exception as exc:  # provider / catalog failure, THIS unit
+                    failed.append(_unit_failure(index, "generation_failed", exc))
+                    continue
+                produced_url = (result or {}).get("image_url") or None
+                produced_path = (result or {}).get("image_path") or None
+                if not produced_url and not produced_path:
+                    # Ours to name: passing None on to the ingest raises there,
+                    # and the failure would be filed as "we could not store it"
+                    # when nothing was produced to store.
+                    failed.append(
+                        {
+                            "index": index,
+                            "code": "generation_failed",
+                            "detail": (
+                                "Image provider returned neither a url nor a file"
+                            ),
+                        }
+                    )
+                    continue
+                try:
+                    created = await register_generated_media(
+                        user_id=str(user_id),
+                        scope_id=int(scope_id),
+                        # Exactly one: URL providers (ark) answer with a url,
+                        # the local-CLI adapters (jimeng/codex) wrote a file.
+                        source_url=produced_url,
+                        source_path=None if produced_url else produced_path,
+                        mime=_GENERATED_IMAGE_MIME,
+                        origin=GenerationOrigin(
+                            kind="agent_run",
+                            node_id=node_id,
+                            prompt=plan["positive"],
+                            # What actually RAN, not what was asked for: the
+                            # catalog resolves the ``dall-e-3`` sentinel to
+                            # whatever image model the admin enabled, and the
+                            # inbox column is what the UI shows and what a
+                            # "generate another like this" would read back.
+                            model=(result or {}).get("model") or model,
+                            provider=(result or {}).get("provider") or None,
+                            params={
+                                "target_slot": req.slot,
+                                "loadout_id": (
+                                    str(req.loadout_id) if req.loadout_id else None
+                                ),
+                                # Recorded provenance, not a provider input —
+                                # no image adapter takes a negative prompt.
+                                "negative": plan["negative"],
+                            },
+                        ),
+                    )
+                    gen_id = (created or {}).get("id")
+                    if gen_id is None:
+                        raise RuntimeError("register_generated_media returned no id")
+                    # A row the Assets tab can never find is worse than none:
+                    # the user paid for it and it shows up nowhere they were
+                    # looking. Scoped, so a stamp can only ever land on a row
+                    # of the scope this request was gated on.
+                    stamped = await self.generated.set_source_asset(
+                        int(gen_id), int(asset_id), scope_id=int(scope_id)
+                    )
+                    if stamped is None:
+                        raise RuntimeError(
+                            f"generated_media {gen_id} vanished before "
+                            "source_asset_id could be stamped"
+                        )
+                except Exception as exc:
+                    failed.append(_unit_failure(index, "register_failed", exc))
+                    continue
+                generation_ids.append(str(gen_id))
 
         if not generation_ids:
             raise AssetError(
@@ -1123,7 +1236,7 @@ class AssetsService:
                     if failed
                     else "No images were generated for this slot"
                 ),
-                {"failed": failed},
+                {"failed": failed, "skipped_references": skipped_references},
             )
         # Relation-shaped write: the asset itself did not change, but the shelf
         # orders by updated_at and an asset just generated for has moved.
@@ -1131,6 +1244,7 @@ class AssetsService:
         return {
             "generation_ids": generation_ids,
             "failed": failed,
+            "skipped_references": skipped_references,
             "inbox_state": "unreviewed",
         }
 

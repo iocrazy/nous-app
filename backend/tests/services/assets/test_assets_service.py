@@ -157,6 +157,31 @@ class FakeRelationsRepo:
         self.scope_checks: list[tuple[int, int]] = []
         self._next = 5000
         self.in_scope_resources = {727145299382534146}
+        # resource_id -> the media columns the reference-materialization step
+        # reads. Column names/shape mirror the REAL projection
+        # (Resources.file_path / mime_type / thumbnail_path /
+        # cover_image_path); anything attached but not listed here defaults to
+        # a plain image original, which is what an attached file usually is.
+        self.resource_media: dict[int, dict] = {}
+
+    async def resource_media_rows(self, resource_ids):
+        """Mirrors the real repo: a MISSING id is simply absent from the dict
+        (that is how the caller learns "resource_not_found"), never a row of
+        Nones."""
+        out = {}
+        for raw in resource_ids:
+            rid = int(raw)
+            if rid in self.resource_media:
+                out[rid] = {"id": rid, **self.resource_media[rid]}
+            elif rid in self.in_scope_resources:
+                out[rid] = {
+                    "id": rid,
+                    "file_path": f"library/{rid}/original.png",
+                    "mime_type": "image/png",
+                    "thumbnail_path": None,
+                    "cover_image_path": None,
+                }
+        return out
 
     async def resource_in_scope(self, resource_id, scope_id):
         self.scope_checks.append((int(resource_id), int(scope_id)))

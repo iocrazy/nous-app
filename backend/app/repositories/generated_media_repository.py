@@ -619,30 +619,25 @@ class GeneratedMediaRepository:
             )
         return _normalize(dict(row)) if row else None
 
-    async def set_source_asset(self, gen_id: int, asset_id: int) -> Optional[dict]:
+    async def set_source_asset(
+        self, gen_id: int, asset_id: int, *, scope_id: Optional[int] = None
+    ) -> Optional[dict]:
         """Stamp which asset a generation was made FOR. None when nothing matched.
 
-        Deliberately NOT scope-predicated: the only caller
-        (``AssetsService.generate_slot``) has just inserted this row itself,
-        with the scope it validated — a second scope filter here could only
-        turn "the row I just created" into a silent no-op if the two
-        derivations of the scope ever disagreed, which is the failure this
-        method must not be able to hide. It answers None when the id does not
-        exist so the caller can report a typed failure rather than assume.
+        ``scope_id`` is optional but every caller should pass it: without a
+        scope predicate this is an UPDATE by primary key, and a future caller
+        handed a user-supplied ``gen_id`` could stamp a row in someone else's
+        scope. The default stays unscoped so the method's behaviour is decided
+        at the call site rather than by whether the argument was remembered —
+        and ``None`` (nothing matched) is returned in either case, so a caller
+        that passes the wrong scope gets a typed failure rather than silence.
         """
+        stmt = sa_update(GeneratedMedia).where(GeneratedMedia.id == int(gen_id))
+        if scope_id is not None:
+            stmt = stmt.where(GeneratedMedia.scope_id == int(scope_id))
+        stmt = stmt.values(source_asset_id=int(asset_id)).returning(*_GM_COLS)
         async with write_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        sa_update(GeneratedMedia)
-                        .where(GeneratedMedia.id == int(gen_id))
-                        .values(source_asset_id=int(asset_id))
-                        .returning(*_GM_COLS)
-                    )
-                )
-                .mappings()
-                .first()
-            )
+            row = (await session.execute(stmt)).mappings().first()
         return _normalize(dict(row)) if row else None
 
     async def count_by_state(self, scope_id: int) -> dict[str, int]:
