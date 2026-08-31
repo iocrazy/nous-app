@@ -241,6 +241,50 @@ async def list_generation_models(auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
+@router.get("/canvases/generation-capabilities")
+async def list_generation_capabilities(auth: AuthDep) -> dict:
+    """Per-model knob capabilities, keyed by catalog row name.
+
+    Server-side projection of each row's protocol capabilities, so the UI can
+    hide what a model cannot honour without ever learning ``actual_provider``
+    or re-implementing the registry lookup — one predicate, one place.
+    Visibility follows ``generation-models`` exactly (same repo call, same
+    Settings filter): a model the picker shows always has an entry here.
+
+    ``honours_ratio`` is deliberately NOT exposed: it describes an internal
+    strategy, not something the UI can act on.
+    """
+    from app.repositories import mediahub_model_repository as _repo_mod
+    from app.services.ai.platform_model_visibility import (
+        filter_platform_models_for_user,
+    )
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
+    from app.services.generation.aspect import ASPECT_RATIOS
+
+    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
+        viewer_user_id=auth.user_id
+    )
+    rows = await filter_platform_models_for_user(auth.user_id, rows)
+
+    order = list(ASPECT_RATIOS)  # stable declaration order for the UI grid
+    data: dict[str, dict] = {}
+    for r in rows:
+        if r.get("type") not in ("image", "video"):
+            continue
+        proto = resolve_generation_protocol((r.get("actual_provider") or "").lower())
+        caps = proto.capabilities if proto else ProviderCapabilities.none()
+        data[str(r.get("name"))] = {
+            "ratios": [x for x in order if x in caps.ratios],
+            "quality": caps.quality,
+            "resolution": caps.resolution,
+            "max_refs": caps.max_refs,
+            "negative": caps.negative,
+            "video_modes": sorted(caps.video_modes),
+        }
+    return {"success": True, "data": data}
+
+
 @router.get("/canvases/text-models")
 async def list_text_models(auth: AuthDep) -> dict:
     """Enabled ``llm`` rows from the mediahub_models catalog (public columns
