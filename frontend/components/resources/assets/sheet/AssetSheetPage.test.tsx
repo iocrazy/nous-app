@@ -149,7 +149,12 @@ function serveDetails(main: typeof CHARACTER_DETAIL, others: (typeof COSTUME_DET
 async function renderSheet(detail = CHARACTER_DETAIL, others = [COSTUME_DETAIL]) {
   serveDetails(detail, others);
   const utils = render(<AssetSheetPage assetId={detail.id} />);
-  await waitFor(() => expect(screen.getByTestId('asset-sheet')).toBeTruthy());
+  // Scoped to THIS render's container, not `screen`. A test that renders twice
+  // without unmounting (the readiness chip test does) would otherwise be
+  // satisfied instantly by the FIRST tree's `asset-sheet` and return before
+  // the second tree's detail had resolved — a race that fails roughly one run
+  // in ten, on an assertion about the second tree.
+  await waitFor(() => expect(within(utils.container).getByTestId('asset-sheet')).toBeTruthy());
   return utils;
 }
 
@@ -207,9 +212,11 @@ describe('skeleton', () => {
       id: CHARACTER_DETAIL.id,
       readiness: { state: 'draft', missing: ['sheet'] },
     });
-    await renderSheet(draft, [COSTUME_DETAIL]);
-    const chips = screen.getAllByTestId('sheet-readiness');
-    const last = chips[chips.length - 1];
+    const { container } = await renderSheet(draft, [COSTUME_DETAIL]);
+    // The second tree's own chip, addressed through its container rather than
+    // by document position — "the last one in the document" is a guess about
+    // mount order, not a claim about this render.
+    const last = within(container).getByTestId('sheet-readiness');
     expect(last).toHaveAttribute('data-readiness', 'draft');
     // `missing` is RENDERED, not counted: "Draft" alone tells the user they
     // cannot use the asset without telling them what to do about it.
@@ -619,6 +626,23 @@ describe('Open in canvas', () => {
     fireEvent.click(screen.getByTestId('open-in-canvas'));
     const picker = await screen.findByTestId('canvas-project-picker');
     await waitFor(() => expect(within(picker).getByRole('alert')).toBeTruthy());
+    expect(screen.queryByTestId('canvas-project-option')).toBeNull();
+  });
+
+  it('says the workspace has no projects when the list really is empty', async () => {
+    // The positive control for the other two: loading and failed each have
+    // their own branch, so "Create A Project First" must be reachable ONLY
+    // when the list resolved and resolved to nothing. Without this test the
+    // empty branch could be dead and the other two would still pass.
+    fetchProjects.mockResolvedValueOnce([]);
+    const orphan = makeDetail({ ...CHARACTER_DETAIL, id: CHARACTER_DETAIL.id, project_ids: [] });
+    await renderSheet(orphan, [COSTUME_DETAIL]);
+    fireEvent.click(screen.getByTestId('open-in-canvas'));
+
+    const picker = await screen.findByTestId('canvas-project-picker');
+    await waitFor(() => expect(picker).toHaveTextContent('Create A Project First'));
+    expect(picker).not.toHaveTextContent('Loading...');
+    expect(within(picker).queryByRole('alert')).toBeNull();
     expect(screen.queryByTestId('canvas-project-option')).toBeNull();
   });
 

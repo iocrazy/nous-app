@@ -78,11 +78,19 @@ function renderDialog(props: Partial<React.ComponentProps<typeof GenerateMissing
   );
 }
 
+/** Mirrors `GeneratedApiError`'s public shape: a code, the server's own
+ *  `detail` sentence, and the envelope's remaining keys as `extra`. The last
+ *  two are what the 503 carries its per-unit ledger in — a stub with only
+ *  `code` could not tell a dialog that reads them from one that does not. */
 class ApiError extends Error {
   code: string;
-  constructor(code: string) {
+  detail: string;
+  extra: Record<string, unknown>;
+  constructor(code: string, detail = '', extra: Record<string, unknown> = {}) {
     super(code);
     this.code = code;
+    this.detail = detail;
+    this.extra = extra;
   }
 }
 
@@ -299,6 +307,60 @@ describe('the result is three things, not one', () => {
     // different model or count.
     expect(screen.getByTestId('generate-preview')).toBeTruthy();
     expect(screen.getByTestId('generate-submit')).not.toBeDisabled();
+  });
+
+  it('a wholly failed run reports the provider reason and the whole ledger', async () => {
+    // The outcome that spent the most must not explain the least. With
+    // `count=1` EVERY total failure is a 503, so a dialog that stored only the
+    // code told the user less about a run that produced nothing than about one
+    // where 3 of 4 landed. `detail` is the provider's own sentence
+    // (`failed[0]["detail"]` server-side) and it is rendered ALONGSIDE the
+    // mapped code, not as its fallback — `assets.err.generation_failed` IS
+    // mapped, so a fallback would never fire and the reason would stay in the
+    // console.
+    generateSlot.mockRejectedValue(
+      new ApiError('generation_failed', 'insufficient balance', {
+        failed: [
+          { index: 0, code: 'generation_failed', detail: 'insufficient balance' },
+          { index: 1, code: 'register_failed', detail: 'store unavailable' },
+        ],
+        skipped_references: [
+          { resource_id: '727145299382534146', reason: 'materialize_failed: [Errno 2]' },
+        ],
+      }),
+    );
+    renderDialog();
+    await screen.findByTestId('generate-preview');
+    fireEvent.click(screen.getByTestId('generate-submit'));
+
+    const refusal = await screen.findByTestId('generate-refused');
+    expect(within(refusal).getByTestId('refused-detail')).toHaveTextContent(
+      'insufficient balance',
+    );
+    // The SAME per-unit renderer the 202 path uses.
+    const failed = within(refusal).getByTestId('refused-failed');
+    expect(within(failed).getAllByRole('listitem')).toHaveLength(2);
+    expect(failed).toHaveTextContent('Image 1 failed');
+    expect(failed).toHaveTextContent('Image 2 failed');
+    const skipped = within(refusal).getByTestId('refused-skipped');
+    expect(skipped).toHaveTextContent('727145299382534146');
+    expect(skipped).toHaveTextContent('materialize_failed: [Errno 2]');
+  });
+
+  it('a failure carrying no ledger renders the headline alone', async () => {
+    // A network error has no envelope, so there is nothing to narrow out of
+    // `extra`. The lists must be absent, not empty shells — and nothing may
+    // throw on the way there.
+    generateSlot.mockRejectedValue(new ApiError('network'));
+    renderDialog();
+    await screen.findByTestId('generate-preview');
+    fireEvent.click(screen.getByTestId('generate-submit'));
+
+    const refusal = await screen.findByTestId('generate-refused');
+    expect(refusal).toHaveTextContent('Nothing Was Generated');
+    expect(within(refusal).queryByTestId('refused-detail')).toBeNull();
+    expect(within(refusal).queryByTestId('refused-failed')).toBeNull();
+    expect(within(refusal).queryByTestId('refused-skipped')).toBeNull();
   });
 
   it('a retry clears the previous refusal', async () => {

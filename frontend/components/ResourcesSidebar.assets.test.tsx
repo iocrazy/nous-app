@@ -22,6 +22,7 @@ vi.mock('react-i18next', () => ({
     t: (k: string, d?: string) => {
       const labels: Record<string, string> = {
         'resources.assets': 'Assets',
+        'resources.assetsExpand': 'Expand Assets',
         'assets.types.character': 'Characters',
         'assets.types.location': 'Locations',
         'assets.types.prop': 'Props',
@@ -253,17 +254,33 @@ describe('ResourcesSidebar — Assets group', () => {
     }
   });
 
+  it('names the chevron distinctly from the navigation row', () => {
+    // Two buttons with the SAME accessible name inside one group leaves a
+    // screen-reader user unable to tell "go to Assets" from "collapse
+    // Assets", and forces every name-based locator (the prod walkthrough's
+    // included) into a positional `.first()` that silently starts clicking
+    // the wrong control the day DOM order changes.
+    setCtx();
+    render(<ResourcesSidebar {...baseProps} />);
+
+    expect(screen.getAllByRole('button', { name: 'Assets' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Expand Assets' })).toHaveLength(1);
+  });
+
   it('collapses and re-expands the six sub-items', () => {
     setCtx();
     render(<ResourcesSidebar {...baseProps} />);
 
-    const toggle = screen.getByRole('button', { name: 'Assets', expanded: true });
+    // The chevron's own name, distinct from the navigation row's: two buttons
+    // named "Assets" in one group is ambiguous to a screen reader and forces
+    // every name-based locator into a positional workaround.
+    const toggle = screen.getByRole('button', { name: 'Expand Assets', expanded: true });
     fireEvent.click(toggle);
     expect(rows().some((b) => (b.textContent ?? '').startsWith('Characters'))).toBe(false);
     // The parent row itself stays — collapsing must not hide the landing page.
     expect(row('Assets')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Assets', expanded: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Assets', expanded: false }));
     expect(row('Characters')).toBeTruthy();
   });
 });

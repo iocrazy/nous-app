@@ -38,6 +38,7 @@ const translate = (key: string, opts?: string | Record<string, unknown>): string
     'assets.empty.ofType': 'No {{type}} Yet',
     'assets.empty.filtered': 'No Assets Match These Filters',
     'assets.loadFailed': 'Could Not Load Assets',
+    'assets.readinessSortPaged': 'Readiness Sorting Only Orders One Page',
     'assets.filter.project': 'Project',
     'assets.filter.anyProject': 'Any Project',
     'assets.filter.readiness': 'Readiness',
@@ -371,6 +372,37 @@ describe('AssetShelf — pagination', () => {
     renderAt('/team/42/resources/assets/character');
     await waitFor(() => expect(screen.getByTestId('asset-card')).toBeTruthy());
     expect(screen.queryByText('Load More')).toBeNull();
+  });
+
+  it('refuses a second page under sort=readiness, and says why', async () => {
+    // `sort=readiness` orders drafts-first in PYTHON over the page that came
+    // back, so appending page 2 yields drafts, ready, drafts, ready — the
+    // ordering silently stops holding at row 60. Refusing the page is the
+    // honest answer; the hint is what keeps the refusal from reading as a
+    // broken button.
+    const full = Array.from({ length: 60 }, (_, i) => ({ ...CHARACTER, id: `7271452993825${i}` }));
+    listAssets.mockResolvedValue(full);
+    renderAt('/team/42/resources/assets/character?sort=readiness');
+    await waitFor(() => expect(screen.getAllByTestId('asset-card')).toHaveLength(60));
+
+    const button = screen.getByTestId('asset-load-more');
+    expect(button).toBeDisabled();
+    expect(screen.getByTestId('readiness-sort-paged')).toBeTruthy();
+    // A disabled button is an affordance, not a guarantee.
+    fireEvent.click(button);
+    expect(listAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-enables Load More the moment the sort moves off readiness', async () => {
+    // The other direction of the same branch: the refusal is a property of
+    // ONE sort, not a permanent cap on the shelf.
+    const full = Array.from({ length: 60 }, (_, i) => ({ ...CHARACTER, id: `7271452993825${i}` }));
+    listAssets.mockResolvedValue(full);
+    renderAt('/team/42/resources/assets/character?sort=recent');
+    await waitFor(() => expect(screen.getAllByTestId('asset-card')).toHaveLength(60));
+
+    expect(screen.getByTestId('asset-load-more')).toBeEnabled();
+    expect(screen.queryByTestId('readiness-sort-paged')).toBeNull();
   });
 });
 

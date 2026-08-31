@@ -45,6 +45,17 @@ describe('Asset library i18n parity', () => {
     expect(typeof at(zh, 'resources.assets')).toBe('string');
   });
 
+  it('the rail chevron has its OWN name, distinct from the entry', () => {
+    // Two buttons with the same accessible name in one group is ambiguous to a
+    // screen reader and forces every name-based locator into a positional
+    // `.first()`. A missing zh value here would silently restore the collision
+    // for zh users only.
+    expect(typeof at(en, 'resources.assetsExpand')).toBe('string');
+    expect(typeof at(zh, 'resources.assetsExpand')).toBe('string');
+    expect(at(en, 'resources.assetsExpand')).not.toBe(at(en, 'resources.assets'));
+    expect(at(zh, 'resources.assetsExpand')).not.toBe(at(zh, 'resources.assets'));
+  });
+
   it.each(ASSET_TYPES)('assets.types.%s resolves in both locales', (type) => {
     expect(typeof at(en, `assets.types.${type}`)).toBe('string');
     expect(typeof at(zh, `assets.types.${type}`)).toBe('string');
@@ -95,6 +106,10 @@ describe('Asset library i18n parity', () => {
     'assets.new',
     'assets.newOfType',
     'assets.loadMore',
+    // The hint under a disabled Load More. `sort=readiness` orders drafts-first
+    // per PAGE, so a second page would mis-order the shelf; without this line
+    // the button reads as broken rather than deliberately off.
+    'assets.readinessSortPaged',
     'assets.loadFailed',
     'assets.projectsUnavailable',
     'assets.importFromScript',

@@ -69,6 +69,14 @@ const PRIMARY_SLOT: Record<string, string | null> = {
  * stub actually holds. See the file header for why this is not a constant.
  */
 function readinessFor(row: WireAssetDetail): { state: 'ready' | 'draft'; missing: string[] } {
+  // `slots.py::readiness` RAISES on an unrecognized type, and the transcription
+  // has to raise too. Falling through to a plausible-looking `draft` would let
+  // a fixture with a typo'd or renamed type sail through this spec while the
+  // real backend answered 500 — the stub would be MORE permissive than what it
+  // stands in for, which is the one thing a stub must never be.
+  if (!(row.asset_type in PRIMARY_SLOT)) {
+    throw new Error(`unknown asset_type: ${row.asset_type}`);
+  }
   if (row.asset_type === 'prompt') {
     const ok = Boolean(row.prompt_positive && row.prompt_positive.trim());
     return { state: ok ? 'ready' : 'draft', missing: ok ? [] : ['prompt_positive'] };

@@ -549,6 +549,87 @@ async def test_reference_files_are_materialized_and_sent_as_local_paths(
 
 
 @pytest.mark.asyncio
+async def test_a_reference_that_left_the_scope_is_skipped_not_sent(
+    svc, imagegen, register, materialized
+):
+    """attach_file scope-checked this resource ONCE, at attach time.
+
+    ``delete_resource_item`` later drops the ``resource_items`` row (and the
+    trigger trashes the resource) while ``asset_files`` keeps its own — its FK
+    is on ``resources.id``, not on ``resource_items``. The row therefore still
+    EXISTS, which is why the fake keeps answering ``resource_media_rows`` for
+    it: without the service's own re-check the bytes would go to ark / codex /
+    jimeng and the derived image would land in the caller's inbox.
+
+    ``regenerate_prompt`` already refuses the same file with a 404
+    ``resource_not_found``. Two P2 paths, one question, one answer.
+    """
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+
+    # It leaves the scope. The ROW survives — that is the whole point.
+    svc.relations.in_scope_resources.discard(int(SHEET_FILE))
+    svc.relations.descoped_resources.add(int(SHEET_FILE))
+
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+
+    assert out["skipped_references"] == [
+        {"resource_id": SHEET_FILE, "reason": "resource_not_found"}
+    ]
+    # Nothing about it reached the provider — not the bytes…
+    assert materialized == []
+    assert imagegen.calls[0]["reference_image_paths"] is None
+    # …and not the unauthenticated /cover url that names it either.
+    assert imagegen.calls[0]["reference_image_url"] is None
+    # The run itself still succeeds: a missing reference is a worse picture,
+    # not a broken request (same contract as an unmaterializable one).
+    assert len(out["generation_ids"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_scope_recheck_asks_about_every_reference_in_the_caller_scope(
+    svc, imagegen, register
+):
+    """The guard is per-reference and asks with the REQUEST's scope.
+
+    A check that ran once for the first id, or asked with the asset's own
+    scope_id, would let a second stale reference through — and there is no
+    signal anywhere when that happens.
+    """
+    a = await _asset(svc)
+    for rid in (SHEET_FILE, SECOND_FILE):
+        await _attach(svc, a["id"], rid, "expressions")
+    svc.relations.scope_checks.clear()
+
+    await svc.generate_slot(int(a["id"]), SCOPE, USER, _req(slot="expressions"))
+
+    asked = [
+        c
+        for c in svc.relations.scope_checks
+        if c[0] in (int(SHEET_FILE), int(SECOND_FILE))
+    ]
+    assert sorted(asked) == sorted(
+        [(int(SHEET_FILE), int(SCOPE)), (int(SECOND_FILE), int(SCOPE))]
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_in_scope_reference_is_still_sent(
+    svc, imagegen, register, materialized
+):
+    """The positive control for the guard: it refuses stale references, not
+    every reference. Without this, deleting the whole materialize step would
+    pass the test above."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
+
+    assert out["skipped_references"] == []
+    assert materialized == [f"library/{SHEET_FILE}/original.png"]
+    assert imagegen.calls[0]["reference_image_paths"]
+
+
+@pytest.mark.asyncio
 async def test_the_same_local_paths_serve_every_unit_of_the_run(
     svc, imagegen, register, materialized
 ):

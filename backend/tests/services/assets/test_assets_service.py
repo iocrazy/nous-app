@@ -157,6 +157,19 @@ class FakeRelationsRepo:
         self.scope_checks: list[tuple[int, int]] = []
         self._next = 5000
         self.in_scope_resources = {727145299382534146}
+        # Resources whose ``resources`` ROW still exists but which have left
+        # the caller's scope (``delete_resource_item`` drops the
+        # ``resource_items`` row and the trigger trashes the resource; the
+        # ``asset_files`` row survives, its FK being on ``resources.id``).
+        #
+        # A separate set because the two real methods disagree ON PURPOSE and
+        # the fake has to disagree the same way: ``resource_in_scope`` joins
+        # ``resource_items`` and answers False, while ``resource_media_rows``
+        # selects on ``Resources.id.in_(...)`` with NO scope predicate at all
+        # and still returns the row. Folding both onto ``in_scope_resources``
+        # would make a "descoped reference is skipped" test pass whether or not
+        # the service re-checks — the fake would be doing the guard's job.
+        self.descoped_resources: set[int] = set()
         # resource_id -> the media columns the reference-materialization step
         # reads. Column names/shape mirror the REAL projection
         # (Resources.file_path / mime_type / thumbnail_path /
@@ -184,7 +197,7 @@ class FakeRelationsRepo:
             rid = int(raw)
             if rid in self.resource_media:
                 out[rid] = {"id": rid, **self.resource_media[rid]}
-            elif rid in self.in_scope_resources:
+            elif rid in self.in_scope_resources or rid in self.descoped_resources:
                 out[rid] = {
                     "id": rid,
                     "file_path": f"library/{rid}/original.png",

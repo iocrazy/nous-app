@@ -232,6 +232,19 @@ describe('ResourcesContext — generated count', () => {
     expect(spy.mock.calls[0][0]).toBe('[ResourcesContext] generated counts failed:');
     spy.mockRestore();
   });
+
+  it('asks for nothing while the scope is still unresolved', async () => {
+    // An empty `scopeId` is "we do not know yet", not "scope zero". Sending it
+    // makes `?scope_id=` a 422 on every cold load, and the only trace is a
+    // console.error the user never sees — a request that can only fail.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderAt('/team/42/resources/generated', '');
+
+    await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('null'));
+    expect(counts).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe('ResourcesContext — selection on entering Generated', () => {
@@ -355,6 +368,17 @@ describe('ResourcesContext — asset counts', () => {
     // never got an answer to.
     expect(screen.getByTestId('assetCounts').textContent).toBe('null');
     expect(spy.mock.calls[0][0]).toBe('[ResourcesContext] asset counts failed:');
+    spy.mockRestore();
+  });
+
+  it('asks for nothing while the scope is still unresolved', async () => {
+    // Same contract as the Generated pill: no scope yet is not scope zero.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderAssetsAt('/team/42/resources/assets', '');
+
+    await waitFor(() => expect(screen.getByTestId('assetCounts').textContent).toBe('null'));
+    expect(assetCounts).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 });

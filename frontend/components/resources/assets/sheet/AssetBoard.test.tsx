@@ -319,6 +319,47 @@ describe('Arrange', () => {
     expect(slotOrder()[0]).toBe('expressions');
   });
 
+  it('a drag with no write behind it survives an unrelated refetch', () => {
+    // The `committedRef.current === null` branch, which the two tests above
+    // never reach: they both wait for the PATCH first. A draft with no write
+    // outstanding is a drag IN PROGRESS — a refetch landing under it (the
+    // sheet reloads on any number of unrelated events) must not yank the pin
+    // out from under the user's hands.
+    const { rerender } = renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement,
+      { key: 'ArrowRight' },
+    );
+    // Inside the settle window: the move is on screen, nothing has been sent.
+    const dragged = slotOrder();
+    expect(dragged[0]).toBe('expressions');
+    expect(updateAsset).not.toHaveBeenCalled();
+
+    // A NEW detail object carrying a DIFFERENT order — `savedOrder` changes,
+    // so the effect runs; only the null guard stops it clearing the draft.
+    const elsewhere = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      attrs: { board_layout: { slot_order: ['worn', 'extras'] } },
+    });
+    rerender(
+      <AssetBoard
+        scopeId={SCOPE_ID}
+        detail={elsewhere}
+        loadoutId={null}
+        readOnly={false}
+        onAssetUpdated={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+
+    expect(slotOrder()).toEqual(dragged);
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
   it('a move that would leave the grid is not a request', () => {
     renderBoard();
     fireEvent.click(screen.getByTestId('board-arrange'));
