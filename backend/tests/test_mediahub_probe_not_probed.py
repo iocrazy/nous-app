@@ -103,9 +103,21 @@ async def test_unprobeable_type_returns_not_probed_without_touching_the_network(
     assert result["code"] is None
     assert result["error"] is None
     assert result["dims"] is None
-    # The detail names the type, so the admin reading the row learns which
-    # boundary was hit. It carries no host / base_url / credential.
-    assert result["detail"] == f"no protocol probe for type={typ}"
+    # The detail names the boundary that was hit, so the admin reading the row
+    # learns WHY nothing was checked. It carries no host / base_url /
+    # credential in either branch.
+    #
+    # ``image`` takes a different one on purpose: since the image probe exists
+    # (it is merely too costly to run hourly), the honest reason is "not on
+    # this path", not "no protocol exists". The property under test is the same
+    # for every type — not_probed, no code, nothing sent — and that is what the
+    # asserts above pin; only the sentence differs.
+    if typ == "image":
+        assert result["detail"] == (
+            "image probe runs only on an explicit Test (it costs a generation)"
+        )
+    else:
+        assert result["detail"] == f"no protocol probe for type={typ}"
 
 
 @pytest.mark.parametrize("typ", ["image", "video", "tts"])

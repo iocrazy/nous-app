@@ -15,6 +15,9 @@ class ArkProtocol(ProviderProtocol):
     model_types = ("image", "video")
     aliases = ("doubao",)
     generation_family = "ark"
+    # Ark's /images/generations is a plain synchronous HTTP call from this
+    # process, so a real generation probe can reach it (see ArkImageProvider).
+    supports_http_image_probe = True
     capabilities = ProviderCapabilities(
         # Exactly ark_image._ASPECT_TO_SIZE's keys — five, not eight.
         ratios=frozenset({"16:9", "9:16", "1:1", "4:3", "3:4"}),

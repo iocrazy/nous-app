@@ -99,6 +99,23 @@ class ProviderProtocol:
     is_chat_key: bool = False
     generation_family: Optional[str] = None
     is_default: bool = False
+
+    # Whether image generation for this family is an HTTP call made BY THIS
+    # PROCESS — the only shape a server-side health probe can reach.
+    #
+    # False for every CLI/daemon-backed family: ``codex`` and ``jimeng-cli``
+    # shell out to a local binary, ``codex-local`` dials the user's own paired
+    # device. Their catalog rows carry an empty ``base_url`` precisely because
+    # there is no endpoint, so a probe would not be "failing" — it would be
+    # inapplicable, which is what ``not_probed`` already means.
+    #
+    # Declared per protocol rather than inferred from ``base_url`` being
+    # non-empty: a row can be misconfigured with a stray base_url, and the
+    # question "can this family be probed at all" is a property of the
+    # implementation, not of one row. test_image_model_probe.py enumerates
+    # every generation protocol against an expected mapping, so adding an
+    # image family forces an explicit answer instead of inheriting False.
+    supports_http_image_probe: bool = False
     # Generation protocols override this. The default supports nothing, so a
     # protocol that forgets to declare fails loudly rather than promising
     # knobs it will silently discard.
