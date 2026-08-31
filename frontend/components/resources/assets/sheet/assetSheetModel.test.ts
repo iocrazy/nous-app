@@ -453,6 +453,14 @@ describe('deepEqual', () => {
   });
 
   it('distinguishes missing keys from undefined ones', () => {
+    // The case the name is about: a key that is PRESENT and undefined is not
+    // the same object as one where the key is absent. `a === b` is true for
+    // both lookups, so only the key count separates them.
+    expect(deepEqual({ a: undefined }, {})).toBe(false);
+    expect(deepEqual({}, { a: undefined })).toBe(false);
+    expect(deepEqual({ a: undefined }, { a: undefined })).toBe(true);
+    expect(deepEqual({ a: undefined }, { b: undefined })).toBe(false);
+    // And the plain different-key-count case.
     expect(deepEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
     expect(deepEqual({}, {})).toBe(true);
   });

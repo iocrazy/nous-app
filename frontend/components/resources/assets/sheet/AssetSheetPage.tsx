@@ -86,8 +86,14 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   const [selectedLoadoutId, setSelectedLoadoutId] = useState<string | null>(null);
   const [related, setRelated] = useState<Record<string, AssetRow | undefined>>({});
   const [projects, setProjects] = useState<Project[]>([]);
-  /** Distinct from `projects.length === 0`: the canvas picker must not present
-   *  a failed fetch as "this workspace has no projects". */
+  /**
+   * THREE states, not two. `projects.length === 0` alone conflates them, and
+   * the canvas picker says something different about each: still loading
+   * ("wait"), failed ("try again"), genuinely empty ("make a project"). The
+   * sheet renders as soon as the DETAIL fetch lands, which is a different
+   * request, so the picker really can be opened before this one resolves.
+   */
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsFailed, setProjectsFailed] = useState(false);
   /** Bumped to re-run the detail fetch after a write. */
   const [reloadTick, setReloadTick] = useState(0);
@@ -179,6 +185,7 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   // moment the chosen project's team does not hold the asset.
   useEffect(() => {
     let alive = true;
+    setProjectsLoading(true);
     fetchProjects(teamId ? { teamId } : undefined)
       .then((list) => {
         if (!alive) return;
@@ -190,6 +197,9 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
         if (!alive) return;
         setProjects([]);
         setProjectsFailed(true);
+      })
+      .finally(() => {
+        if (alive) setProjectsLoading(false);
       });
     return () => {
       alive = false;
@@ -442,6 +452,7 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
           loadout={activeLoadout}
           readOnly={readOnly}
           projects={projects}
+          projectsLoading={projectsLoading}
           projectsFailed={projectsFailed}
           projectNames={projectNames}
           busy={busy}

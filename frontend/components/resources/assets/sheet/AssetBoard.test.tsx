@@ -233,6 +233,92 @@ describe('Arrange', () => {
     expect(updateAsset).not.toHaveBeenCalled();
   });
 
+  it('an unmount mid-pause still writes the move', async () => {
+    // The one M4 path that silently LOSES a user's move if it regresses: the
+    // pin is already where they put it on screen, and the write is only
+    // waiting out the settle.
+    const { unmount } = renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement,
+      { key: 'ArrowRight' },
+    );
+    expect(updateAsset).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(updateAsset).toHaveBeenCalledTimes(1);
+    expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, CHARACTER_DETAIL.id, {
+      attrs: {
+        board_layout: { slot_order: ['expressions', 'stills', 'extras', 'worn', 'unsorted'] },
+      },
+    });
+  });
+
+  it('gives up the draft when the server comes back with a DIFFERENT order', async () => {
+    // Clearing the draft only on a match would wedge here: a second client (or
+    // an agent write) storing another order in the PATCH-to-refetch window
+    // would leave the board showing the user's arrangement indefinitely while
+    // the server holds another, with no error anywhere.
+    const { rerender } = renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement,
+      { key: 'ArrowRight' },
+    );
+    await waitFor(() => expect(updateAsset).toHaveBeenCalledTimes(1));
+    expect(slotOrder()[0]).toBe('expressions');
+
+    // The refetch lands carrying somebody else's arrangement.
+    const elsewhere = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      attrs: { board_layout: { slot_order: ['worn', 'extras'] } },
+    });
+    rerender(
+      <AssetBoard
+        scopeId={SCOPE_ID}
+        detail={elsewhere}
+        loadoutId={null}
+        readOnly={false}
+        onAssetUpdated={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+    await waitFor(() =>
+      expect(slotOrder()).toEqual(['worn', 'extras', 'stills', 'expressions', 'unsorted']),
+    );
+  });
+
+  it('keeps the draft while the write is still in flight (no flash back)', async () => {
+    // The other half of the same branch: a re-render that does NOT bring a new
+    // server order must leave the moved pin where the user put it.
+    const { rerender } = renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement,
+      { key: 'ArrowRight' },
+    );
+    await waitFor(() => expect(updateAsset).toHaveBeenCalledTimes(1));
+    rerender(
+      <AssetBoard
+        scopeId={SCOPE_ID}
+        detail={CHARACTER_DETAIL}
+        loadoutId={null}
+        readOnly={false}
+        onAssetUpdated={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+    expect(slotOrder()[0]).toBe('expressions');
+  });
+
   it('a move that would leave the grid is not a request', () => {
     renderBoard();
     fireEvent.click(screen.getByTestId('board-arrange'));

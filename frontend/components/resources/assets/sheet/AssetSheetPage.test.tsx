@@ -347,12 +347,17 @@ describe('loadout selection', () => {
       ).getByTestId('loadout-delete'),
     );
 
-    await waitFor(() => expect(screen.getAllByTestId('loadout-chip')).toHaveLength(1));
-    expect(
-      screen
-        .getAllByTestId('loadout-chip')
-        .find((el) => el.dataset.loadoutId === '727145299382534400'),
-    ).toHaveAttribute('data-active', 'true');
+    // The assertion has to be INSIDE the wait. The refetched one-chip render
+    // commits BEFORE the `[detail]` effect re-selects the default, so a
+    // waitFor that only gates on the chip count can return on that
+    // intermediate render and the next line reads the pre-fallback value —
+    // a ~50% flaky gate, which is no gate at all.
+    await waitFor(() => {
+      const chips = screen.getAllByTestId('loadout-chip');
+      expect(chips).toHaveLength(1);
+      expect(chips[0]).toHaveAttribute('data-loadout-id', '727145299382534400');
+      expect(chips[0]).toHaveAttribute('data-active', 'true');
+    });
   });
 });
 
@@ -534,6 +539,32 @@ describe('Open in canvas', () => {
     expect(
       screen.getAllByTestId('canvas-project-option').map((el) => el.dataset.projectId),
     ).toEqual(['55']);
+  });
+
+  it('says nothing about the workspace while the list is still loading', async () => {
+    // Three states, not two. The sheet renders as soon as the DETAIL fetch
+    // lands — a different request — so the picker really can be opened before
+    // the project list resolves, and "Create A Project First" is then a claim
+    // about the workspace that nothing has established.
+    let resolveProjects: (list: { id: number; name: string }[]) => void = () => {};
+    fetchProjects.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveProjects = resolve;
+      }),
+    );
+    const orphan = makeDetail({ ...CHARACTER_DETAIL, id: CHARACTER_DETAIL.id, project_ids: [] });
+    await renderSheet(orphan, [COSTUME_DETAIL]);
+    fireEvent.click(screen.getByTestId('open-in-canvas'));
+
+    const picker = await screen.findByTestId('canvas-project-picker');
+    expect(picker).toHaveTextContent('Loading...');
+    expect(picker).not.toHaveTextContent('Create A Project First');
+    expect(within(picker).queryByRole('alert')).toBeNull();
+
+    resolveProjects([{ id: 55, name: 'Bamboo Sea' }]);
+    await waitFor(() =>
+      expect(screen.getAllByTestId('canvas-project-option')).toHaveLength(1),
+    );
   });
 
   it('says the projects are unavailable rather than showing an empty workspace', async () => {

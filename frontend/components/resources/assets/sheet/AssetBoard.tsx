@@ -91,9 +91,14 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
   );
   const order = draftOrder ?? savedOrder;
 
+  /** The order our last PATCH sent, while we are still waiting to see it come
+   *  back. Null when there is no write of ours outstanding. */
+  const committedRef = useRef<string[] | null>(null);
+
   // A different asset discards a stale draft. Without this, opening a second
   // sheet would inherit the first one's in-progress arrangement.
   useEffect(() => {
+    committedRef.current = null;
     setDraftOrder(null);
     setArranging(false);
   }, [detail.id]);
@@ -104,14 +109,20 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
   const primarySlot = PRIMARY_SLOT[detail.asset_type];
   const main = primaryFile(detail, loadoutId);
 
-  // Once the server's own order matches the draft, the draft has nothing left
-  // to say. Clearing it only on a MATCH (rather than on save) avoids the flash
-  // back to the old arrangement between the PATCH resolving and the refetched
-  // detail arriving.
+  // A NEW server order arrived while a write of ours was in flight. Either it
+  // matches what we sent - our write landed, and dropping the draft now is
+  // invisible, which is the whole point of not dropping it at save time (that
+  // flashed the old arrangement back between the PATCH resolving and the
+  // refetch landing) - or it does not, because someone else wrote in that
+  // window, and then the server's order is the truth. Holding the draft in
+  // that second case would show the user an arrangement nothing has, forever,
+  // with no error: the wedge this branch exists to prevent.
+  //
+  // A draft with no write behind it is a drag in progress; it is left alone.
   useEffect(() => {
-    setDraftOrder((current) =>
-      current && current.join(' ') === savedOrder.join(' ') ? null : current,
-    );
+    if (committedRef.current === null) return;
+    committedRef.current = null;
+    setDraftOrder(null);
   }, [savedOrder]);
 
   const commitOrder = useCallback(
@@ -119,6 +130,7 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
       setDraftOrder(next);
       if (readOnly) return;
       setSaving(true);
+      committedRef.current = next;
       try {
         // The WHOLE attrs object: `AssetUpdate.attrs` replaces the column.
         const row = await updateAsset(scopeId, detail.id, {
@@ -129,6 +141,7 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
         // The board snaps back to the saved order: leaving the moved pin where
         // the user dropped it would show an arrangement the server does not
         // have.
+        committedRef.current = null;
         setDraftOrder(null);
         onError(err);
       } finally {

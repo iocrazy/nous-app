@@ -46,8 +46,10 @@ export interface SheetSidebarProps {
    * dead-end on an error toast.
    */
   projects: Project[];
-  /** Distinct from `projects.length === 0`: an empty workspace says "make a
-   *  project", a failed fetch says "try again". */
+  /** THREE states, never two. "Not yet known", "the fetch failed" and "this
+   *  workspace has none" each want a different sentence; folding any two of
+   *  them together states something untrue about the workspace. */
+  projectsLoading: boolean;
   projectsFailed: boolean;
   /** Project id -> name for the Used In chips. */
   projectNames: Record<string, string>;
@@ -69,6 +71,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
   loadout,
   readOnly,
   projects,
+  projectsLoading,
   projectsFailed,
   projectNames,
   onCopyLoadoutPrompt,
@@ -145,6 +148,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
         <OpenInCanvasLink
           detail={detail}
           projects={projects}
+          projectsLoading={projectsLoading}
           projectsFailed={projectsFailed}
           onOpenCanvas={onOpenCanvas}
           onError={onError}
@@ -232,6 +236,7 @@ interface OpenInCanvasLinkProps {
   detail: AssetRowDetail;
   /** The scope's projects, from the page. */
   projects: Project[];
+  projectsLoading: boolean;
   projectsFailed: boolean;
   onOpenCanvas: (canvasId: string) => void;
   onError: (err: unknown) => void;
@@ -252,6 +257,7 @@ interface OpenInCanvasLinkProps {
 const OpenInCanvasLink: React.FC<OpenInCanvasLinkProps> = ({
   detail,
   projects,
+  projectsLoading,
   projectsFailed,
   onOpenCanvas,
   onError,
@@ -305,7 +311,9 @@ const OpenInCanvasLink: React.FC<OpenInCanvasLinkProps> = ({
           <p className="mb-1 text-[11px] text-content-3">
             {t('assets.sheet.pickProject', 'Pick A Project For The Canvas')}
           </p>
-          {projectsFailed ? (
+          {projectsLoading ? (
+            <p className="text-[11px] text-content-4">{t('common.loading', 'Loading...')}</p>
+          ) : projectsFailed ? (
             <p role="alert" className="text-[11px] text-danger">
               {t('assets.projectsUnavailable', 'Projects unavailable')}
             </p>
