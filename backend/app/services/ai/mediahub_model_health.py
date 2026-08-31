@@ -23,7 +23,8 @@ hosts, private base_urls and upstream model ids), the code is what users see.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+import io
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import httpx
 
@@ -88,6 +89,31 @@ PROBE_FAILURE_CODES = (
     "bad_response",
     "other",
 )
+
+# ---------------------------------------------------------------- image probe
+#
+# Image models are NOT in PROBEABLE_TYPES and deliberately stay out of it: the
+# scheduled poll runs hourly per enabled model, and a text-to-image call costs
+# money and produces an asset every single time. So the image probe is gated on
+# an explicit ``allow_costly=True``, which ONLY the admin "Test" button passes.
+# The hourly poll keeps reporting image rows as ``not_probed``, unchanged.
+#
+# A deliberately NON-SQUARE aspect is requested. The failure this probe exists
+# to catch is "the generator ignored the size we asked for and returned its own
+# default", and that default is square — so asking for a square could not tell
+# an honored request from an ignored one. Asking for 16:9 can.
+_IMAGE_PROBE_ASPECT = "16:9"
+_IMAGE_PROBE_ASPECT_VALUE = 16 / 9
+# Generation is lossy about exact pixel counts (a provider may snap 1280x720 to
+# its nearest supported size), so compare the RATIO with a tolerance rather than
+# the pixels. 6% still separates 16:9 (1.778) from 4:3 (1.333) and 1:1.
+_IMAGE_PROBE_TOLERANCE = 0.06
+_IMAGE_PROBE_PROMPT = "a flat grey rectangle on a white background, no text"
+_IMAGE_PROBE_TIMEOUT = 90.0
+# The probe reads the produced image back to measure it. Cap what it will pull
+# into memory: the URL is upstream-controlled, and an unbounded read on a probe
+# that runs from an admin click is a free memory amplifier.
+_IMAGE_PROBE_MAX_BYTES = 25 * 1024 * 1024
 
 
 def classify_probe_failure(
@@ -162,8 +188,154 @@ def probe_result_status(result: Mapping[str, Any]) -> str:
     return "fail"
 
 
-async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
+async def _measure_generated_image(url: str) -> Tuple[int, int]:
+    """Download the produced image and return its REAL ``(width, height)``.
+
+    Measured from the bytes, never from what we asked for. ``ImageGenResult``
+    carries width/height parsed out of the requested ``size`` string — an echo
+    of the request, not an observation of the result — so trusting it would
+    make the aspect check assert that our own arithmetic is self-consistent.
+    """
+    async with httpx.AsyncClient(
+        timeout=_IMAGE_PROBE_TIMEOUT, follow_redirects=True
+    ) as client:
+        response = await client.get(url)
+    if response.status_code != 200:
+        raise _ImageProbeHTTPError(response.status_code)
+    body = response.content
+    if not body:
+        raise ValueError("image url returned 0 bytes")
+    if len(body) > _IMAGE_PROBE_MAX_BYTES:
+        raise ValueError(f"image exceeds the {_IMAGE_PROBE_MAX_BYTES}-byte probe cap")
+    from PIL import Image  # local import: only this branch needs it
+
+    with Image.open(io.BytesIO(body)) as im:
+        width, height = int(im.width), int(im.height)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"decoded a degenerate image ({width}x{height})")
+    return width, height
+
+
+class _ImageProbeHTTPError(Exception):
+    """Carries the status code so ``classify_probe_failure`` can use it."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code} fetching the produced image")
+        self.status_code = status_code
+
+
+async def _probe_image_model(row: Dict[str, Any], prov: str) -> Dict[str, Any]:
+    """Real text-to-image probe: generate one image, then measure it.
+
+    Two independent things are checked, and both must hold for ``ok``:
+
+    1. the provider produced bytes we can decode as an image at all, and
+    2. its aspect ratio matches the one that was requested.
+
+    (2) is the half that a reachability check would miss. A generator that
+    quietly substitutes its own default size answers 200 with a perfectly valid
+    image, so "the endpoint works" and "the endpoint does what we asked" are
+    genuinely different questions — and the second is the one that decides
+    whether a user gets the cover they chose.
+
+    Never raises; every failure comes back as ``ok=False`` plus a closed-enum
+    code, same contract as the other branches.
+    """
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    protocol = resolve_generation_protocol(prov)
+    if protocol is None or not protocol.supports_http_image_probe:
+        # Not a failure: there is no HTTP endpoint to reach. CLI-backed
+        # (``codex``, ``jimeng-cli``) and daemon-backed families live outside
+        # this process entirely. Names the provider and nothing else.
+        return {
+            "ok": False,
+            "not_probed": True,
+            "detail": f"no HTTP image endpoint (provider={prov})",
+            "error": None,
+            "code": None,
+            "dims": None,
+        }
+
+    try:
+        provider, actual_model = protocol.build_image_provider(row)
+        result = await provider.generate(
+            prompt=_IMAGE_PROBE_PROMPT,
+            model=actual_model,
+            aspect_ratio=_IMAGE_PROBE_ASPECT,
+        )
+        image_url = getattr(result, "image_url", None)
+        if not image_url:
+            return {
+                "ok": False,
+                "not_probed": False,
+                "detail": "",
+                "error": "generation returned no image url",
+                "code": "bad_response",
+                "dims": None,
+            }
+        width, height = await _measure_generated_image(image_url)
+    except _ImageProbeHTTPError as e:
+        return {
+            "ok": False,
+            "not_probed": False,
+            "detail": "",
+            "error": str(e),
+            "code": classify_probe_failure(status_code=e.status_code),
+            "dims": None,
+        }
+    except Exception as e:  # noqa: BLE001 — probe is best-effort
+        # Same "never a bare str(e)" rule as the outer handler: httpx timeouts
+        # stringify to an empty string, and a blank reason on a red light is
+        # indistinguishable from a model that is genuinely broken.
+        return {
+            "ok": False,
+            "not_probed": False,
+            "detail": "",
+            "error": f"{type(e).__name__}: {str(e) or '<no message>'}"[:200],
+            "code": classify_probe_failure(exc=e),
+            "dims": None,
+        }
+
+    got = width / height
+    honored = (
+        abs(got - _IMAGE_PROBE_ASPECT_VALUE) / _IMAGE_PROBE_ASPECT_VALUE
+        <= _IMAGE_PROBE_TOLERANCE
+    )
+    size = f"{width}x{height}"
+    if not honored:
+        return {
+            "ok": False,
+            "not_probed": False,
+            "detail": "",
+            # Says what was asked and what came back — the two numbers an admin
+            # needs to tell "the model is down" from "the model ignores size".
+            "error": (
+                f"asked for {_IMAGE_PROBE_ASPECT}, got {size} "
+                f"(ratio {got:.3f} vs {_IMAGE_PROBE_ASPECT_VALUE:.3f})"
+            ),
+            "code": "bad_response",
+            "dims": None,
+        }
+    return {
+        "ok": True,
+        "not_probed": False,
+        "detail": f"{size}, {_IMAGE_PROBE_ASPECT} honored",
+        "error": None,
+        "code": None,
+        "dims": None,
+    }
+
+
+async def probe_mediahub_model(
+    row: Dict[str, Any], *, allow_costly: bool = False
+) -> Dict[str, Any]:
     """Real connectivity probe for one platform model, by type.
+
+    ``allow_costly`` opts into probes that spend money and produce an asset —
+    today only text-to-image. It defaults to False so the hourly poll keeps its
+    behaviour by omission rather than by remembering to opt out; the admin
+    "Test" button is the single caller that passes True.
 
     Returns ``{ok, detail, error, dims, code, not_probed}``. Never raises — a
     transport/HTTP failure is reported as ``ok=False`` with the error text plus
@@ -194,6 +366,22 @@ async def probe_mediahub_model(row: Dict[str, Any]) -> Dict[str, Any]:
             "code": None,
             "dims": None,
         }
+
+    if typ == "image":
+        # Ahead of the PROBEABLE_TYPES gate, which would otherwise answer
+        # ``not_probed`` for every image row. ``image`` stays out of that set on
+        # purpose: it names the types the SCHEDULED poll may dial, and this
+        # branch is reachable only on an explicit admin request.
+        if not allow_costly:
+            return {
+                "ok": False,
+                "not_probed": True,
+                "detail": "image probe runs only on an explicit Test (it costs a generation)",
+                "error": None,
+                "code": None,
+                "dims": None,
+            }
+        return await _probe_image_model(row, prov)
 
     if typ not in PROBEABLE_TYPES:
         # Before the try block, and before any client is built: the point is not

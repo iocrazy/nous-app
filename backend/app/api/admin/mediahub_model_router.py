@@ -211,15 +211,22 @@ async def test_mediahub_model(model_id: str, auth: AdminAuthDep):
     The result is persisted on the row (last_test_status / detail / tested_at)
     so the admin's status dot + "last tested" hint survive navigation.
 
-    Types the probe has no protocol for (image / video / tts) are persisted as
+    Types the probe has no protocol for (video / tts) are persisted as
     ``not_probed`` rather than ``fail`` — see ``PROBEABLE_TYPES``.
+
+    Image rows ARE probed here, unlike on the hourly poll: this endpoint fires
+    once, on an explicit click, so it can afford a real generation. The probe
+    also measures the produced image and fails the row when the aspect ratio it
+    asked for was not honored.
     """
     repo = get_mediahub_model_repository()
     rows = await repo.list_all()
     row = next((r for r in rows if str(r.get("id")) == str(model_id)), None)
     if not row:
         raise HTTPException(status_code=404, detail="Model not found")
-    result = await _probe_mediahub_model(row)
+    # The one caller that opts into a costly probe: an admin clicked Test on
+    # this specific row. The hourly poll never does — see ``allow_costly``.
+    result = await _probe_mediahub_model(row, allow_costly=True)
 
     # Shared with the hourly poll: two hand-written copies of this mapping would
     # drift, and a manual Test that wrote ``fail`` where the poll writes

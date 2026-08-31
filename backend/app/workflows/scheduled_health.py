@@ -211,7 +211,7 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
     logic, no new table, no new scheduler. Each probe is a tiny ping
     (max_tokens=8 for chat); a failure is recorded, never raised.
 
-    Three buckets, not two: a type the probe has no protocol for is ``not_probed``
+    Three buckets, not two: a type this poll may not dial is ``not_probed``
     and belongs in neither. Counting it as failed is what kept three healthy
     image/video models red on the admin page and produced a WARNING per model
     per hour about nothing (2026-08-14).
@@ -228,6 +228,10 @@ async def probe_mediahub_models_step() -> dict[str, Any]:
 
     counts = {"ok": 0, "fail": 0, "not_probed": 0}
     for row in enabled:
+        # Deliberately WITHOUT ``allow_costly``: this loop runs hourly over every
+        # enabled model, and the image probe spends a real generation per call.
+        # Image rows stay ``not_probed`` here; the admin Test button is where a
+        # paid probe is affordable. test_image_model_probe.py pins this.
         result = await probe_mediahub_model(row)
         status = probe_result_status(result)
         detail = result.get("detail") or (result.get("error") or "")
