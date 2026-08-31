@@ -186,13 +186,14 @@ describe('PromptNodeView negative box vs capabilities', () => {
     expect(box!.value).toBe('lowres, watermark');
   });
 
-  it('offers no way to add one when the model cannot honour it', () => {
+  it('shows no negative box at all for a node that never had one', () => {
+    // Deliberately NOT asserting the absence of some named add-affordance:
+    // no such testid exists, so that assertion could never fail — including
+    // in the future it would be written for, where the affordance arrives
+    // under a different name. The pin here is the visible state; the note to
+    // whoever adds an entry point is the comment on this describe block.
     const { container } = mount(BASE_DATA);
     expect(negTextarea(container)).toBeNull();
-    expect(
-      container.querySelector('[data-testid="prompt-add-negative"]'),
-      'an add-negative affordance appeared for a model that says negative:false',
-    ).toBeNull();
   });
 
   it('renders exactly as it does today when capabilities are unknown', () => {

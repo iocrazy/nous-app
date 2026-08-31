@@ -50,12 +50,23 @@ export interface GenerationRunnerDeps {
       recoverable?: boolean;
     },
   ) => void;
-  /** What the backend could not honour (P4): the union of every task's
-   *  `metadata.dropped_knobs`, fired ONCE after the batch reaches a terminal
-   *  state. Fired even when the union is empty and even when every item
-   *  failed — "nothing was dropped" is an answer the caller needs (it clears
-   *  a previous run's badge), and whether an image came out is a separate
-   *  question from whether the request was honoured. */
+  /** What the backend could not honour (P4). Fires TWICE per run, and both
+   *  are load-bearing:
+   *
+   *  - once with `[]` the moment the run starts, BEFORE dispatch — the
+   *    previous run's answer stops describing this node the instant a new
+   *    run does. Without it the node shows `running` beside a verdict about
+   *    a finished run, and a dispatch that throws would leave that verdict
+   *    up forever;
+   *  - once at the terminal poll with the union across the fan-out — but
+   *    ONLY if some task actually reported the field. A batch whose polls
+   *    all broke observed nothing, and "we never got an answer" must not be
+   *    written down as "nothing was dropped".
+   *
+   *  An empty union from a task that DID report is still fired: that is a
+   *  real observation of a clean run. Fired for a failed run too — whether
+   *  an image came out is a separate question from whether the request was
+   *  honoured. */
   onDropped?: (promptId: string, knobs: string[]) => void;
 }
 
@@ -79,6 +90,13 @@ export function withGenerationRunner(
     }
 
     try {
+      // A new run starts: whatever the LAST run reported was ignored no
+      // longer describes this node. Cleared here rather than at the terminal
+      // poll so the badge is never displayed as truth beside a `running`
+      // status — and so a dispatch that throws below still clears it instead
+      // of leaving a stale verdict up indefinitely.
+      deps.onDropped?.(ctx.promptId, []);
+
       const params: Record<string, unknown> = {};
       if (gen.kind === 'image') {
         // `auto` (and an unset value) means "match the image feeding this
@@ -200,15 +218,23 @@ export function withGenerationRunner(
       // Union rather than last-writer-wins — a fan-out is one user action,
       // and a knob dropped by any of its items was dropped for the run.
       const droppedUnion: string[] = [];
+      let observed = false;
       for (const task of tasks) {
         const knobs = 'metadata' in task ? task.metadata?.dropped_knobs : undefined;
         if (!Array.isArray(knobs)) continue;
+        observed = true;
         for (const knob of knobs) {
           if (typeof knob === 'string' && !droppedUnion.includes(knob))
             droppedUnion.push(knob);
         }
       }
-      deps.onDropped?.(ctx.promptId, droppedUnion);
+      // Nobody reported: every poll broke (RECOVER_PHASE carries no metadata
+      // at all), or the rows predate the field. `[]` here would turn "we
+      // never got an answer" into "nothing was dropped" — the negative
+      // result this repo files under empty-output-is-not-a-negative-result.
+      // Staying silent leaves the dispatch-time clear standing, which reads
+      // as "unknown", which is what it is.
+      if (observed) deps.onDropped?.(ctx.promptId, droppedUnion);
 
       // Per-item independence (Infinite semantics, P0-2): completed items
       // always land; failed siblings are reported alongside, never allowed

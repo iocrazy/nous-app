@@ -373,6 +373,11 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
   // Reading one and not the other is how "the backend returns it, the frontend
   // never reads it" happens; the runner reads both at the same terminal point
   // and hands the union to the caller, which puts it on the node.
+  //
+  // Every run reports TWICE: `[]` at dispatch (the previous run's verdict
+  // stops applying the moment a new run starts) and the union at the terminal
+  // poll. The assertions below spell out both calls rather than looking only
+  // at the last one — the dispatch clear is behaviour, not noise.
   it('reports the knobs the backend ignored', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockResolvedValue({
@@ -391,7 +396,10 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(dropped).toEqual([['p1', ['quality']]]);
+    expect(dropped).toEqual([
+      ['p1', []],
+      ['p1', ['quality']],
+    ]);
   });
 
   it('unions the knobs across a fan-out instead of reporting only the last task', async () => {
@@ -413,7 +421,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
     });
     await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 2 } });
 
-    expect(dropped).toEqual([['ratio', 'quality', 'refs']]);
+    expect(dropped).toEqual([[], ['ratio', 'quality', 'refs']]);
   });
 
   it('reports an empty list when nothing was dropped, so a stale badge cannot survive a clean run', async () => {
@@ -430,7 +438,9 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
     });
     await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'jimeng-4', count: 1 } });
 
-    expect(dropped).toEqual([[]]);
+    // The SECOND [] is the one that matters: a task reported the field and it
+    // was empty. That is an observed clean run, not the dispatch clear.
+    expect(dropped).toEqual([[], []]);
   });
 
   it('still reports drops for a run whose items all failed', async () => {
@@ -454,7 +464,81 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(dropped).toEqual([['ratio']]);
+    expect(dropped).toEqual([[], ['ratio']]);
+  });
+
+  it('clears the previous run’s verdict at dispatch, before any poll settles', async () => {
+    // The window this covers is the whole of the next run: without the
+    // dispatch-time clear the node renders `running` beside a verdict about
+    // a run that is already over — a claim about work nobody has answered
+    // for yet.
+    dispatchGenerations.mockResolvedValue(['t1']);
+    let settle!: (v: unknown) => void;
+    pollGeneration.mockImplementation(
+      () => new Promise((res) => { settle = res; }),
+    );
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    const done = runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: 'ark', count: 1 },
+    });
+
+    // Wait until polling has actually STARTED (so dispatch is behind us) and
+    // then assert the clear is already recorded — that is what "before any
+    // poll settles" means, and it cannot pass by simply running too early.
+    await vi.waitFor(() => expect(pollGeneration).toHaveBeenCalled());
+    expect(dropped).toEqual([[]]);
+
+    settle({ phase: 'completed', metadata: { result_url: '/gm/1/cover', dropped_knobs: [] } });
+    await done;
+    expect(dropped).toEqual([[], []]);
+  });
+
+  it('clears it even when the dispatch itself fails', async () => {
+    // Nothing downstream of the dispatch runs, so a clear placed at the
+    // terminal poll would leave the stale verdict up for good.
+    dispatchGenerations.mockRejectedValue(new Error('network down'));
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: 'ark', count: 1 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(dropped).toEqual([[]]);
+  });
+
+  it('says nothing at the terminal poll when every poll broke — unknown is not “nothing was dropped”', async () => {
+    // A broken poll is not a failed task (P1-13): those tasks are still
+    // running server-side and nobody has reported their dropped knobs. Firing
+    // [] here would write that non-answer down as an observed clean run.
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration.mockRejectedValue(new Error('poll broke'));
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: 'ark', count: 2 },
+    });
+
+    expect(result.ok).toBe(false);
+    // EXACTLY one call: the dispatch clear. No second write at terminal —
+    // the badge stays cleared, which reads as "unknown", which it is.
+    expect(dropped).toEqual([[]]);
   });
 });
 
@@ -462,19 +546,47 @@ describe('every generation run site shows the dropped knobs', () => {
   // A source scan, in the dispatchEffects idiom: the failure this guards is a
   // NEW entry point that constructs the generation runner and quietly omits
   // the badge, which no behavioural test on the existing sites can catch.
-  const SITES = ['CanvasComposer.tsx', 'chainRun.ts', 'loopRun.ts', 'regenerate.ts'];
+  //
+  // It walks the WHOLE of canvas-core rather than one directory: a guard that
+  // reports clean because it never looked at the file is the shape this repo
+  // files under 「健康探针必须可证伪」. And it matches an `onDropped:`
+  // property with comments stripped first — a mention in a comment is not
+  // wiring, and a guard satisfied by prose guards nothing.
+  const SITES = [
+    'smart/CanvasComposer.tsx',
+    'smart/chainRun.ts',
+    'smart/loopRun.ts',
+    'smart/regenerate.ts',
+  ];
+
+  /** Every non-test .ts/.tsx under canvas-core, path relative to its root. */
+  function sourceFiles(root: string, readdirSync: typeof import('node:fs').readdirSync): string[] {
+    const out: string[] = [];
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walk(`${dir}/${entry.name}`, rel);
+        else if (/\.tsx?$/.test(entry.name) && !entry.name.includes('.test.')) out.push(rel);
+      }
+    };
+    walk(root, '');
+    return out;
+  }
+
+  const stripComments = (src: string) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
   it('every withGenerationRunner call site wires onDropped', async () => {
     const { readFileSync, readdirSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const here = join(__dirname);
-    const constructors = readdirSync(here).filter(
-      (f) =>
-        !f.includes('.test.') &&
+    const root = join(__dirname, '..');
+    const constructors = sourceFiles(root, readdirSync).filter(
+      (rel) =>
         // The module that DEFINES the wrapper obviously names it.
-        f !== 'generationRunner.ts' &&
-        /\.tsx?$/.test(f) &&
-        readFileSync(join(here, f), 'utf8').includes('withGenerationRunner('),
+        rel !== 'smart/generationRunner.ts' &&
+        stripComments(readFileSync(join(root, rel), 'utf8')).includes(
+          'withGenerationRunner(',
+        ),
     );
     expect(
       constructors.sort(),
@@ -482,9 +594,9 @@ describe('every generation run site shows the dropped knobs', () => {
     ).toEqual([...SITES].sort());
     for (const rel of SITES) {
       expect(
-        readFileSync(join(here, rel), 'utf8'),
+        stripComments(readFileSync(join(root, rel), 'utf8')),
         `${rel} constructs the generation runner without onDropped — its runs would drop knobs silently`,
-      ).toMatch(/onDropped/);
+      ).toMatch(/\bonDropped\s*:/);
     }
   });
 });
