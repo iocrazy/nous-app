@@ -599,6 +599,7 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 - slot 表在前后端各存一份（`app/services/assets/slots.py` 与 `frontend/components/assets/assetSlots.ts`）。改一边必须改另一边 —— `backend/tests/services/assets/test_slots_frontend_mirror.py` 直接读 TS 文件做比对（含顺序），前端自己那个测试是把同样的值又硬编码了一遍，单侧修改它照样绿。
 - P0 只到数据层 + `/api/v1/assets` 基础 API，无 UI；P1 已补上 Generated 收件箱（见下），其余分期见 spec §9。
 - **Generated 收件箱**（P1, 2026-08-29）= `generated_media` + `review_state`；API `/api/v1/generated`；Project Assets / Temp 视图已退役；temp sweeper 已停调度，清理走 `/generated/cleanup`（两步：先 dry-run 预览再确认，不自动、不静默 —— 这正是当年退役 TTL 的原因）。
+- **资产库 UI**（P2, 2026-08-30）：`资源库 → Assets` 三条路由 —— `resources/assets`（全部）/ `resources/assets/:assetType`（单类型货架）/ `resources/assets/item/:assetId`（实体页）。⚠️ 实体页侧栏的 `Send To Canvas` / `Send To Agent` 是**刻意 disabled** 的占位（title 写着 Arrives with P4 / P5），不是坏按钮——别当缺陷去修。
 
 ## AI Library (Phase 1) — Agent Framework
 
