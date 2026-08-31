@@ -184,3 +184,25 @@ async def test_honours_ratio_is_not_exposed(client, monkeypatch):
     data = resp.json()["data"]
     assert "honours_ratio" not in data["codex-local-image"]
     assert "honours_ratio" not in data["mediahub-doubao-seedream-t2i"]
+
+
+@pytest.mark.asyncio
+async def test_capability_keys_match_the_picker_row_for_row(client, monkeypatch):
+    """The binding constraint, asserted against the other endpoint itself.
+
+    Both endpoints read ``_visible_generation_rows``, so today this cannot
+    drift — but this test is what goes red if someone re-inlines one side and
+    adds a condition to only one of them. The silent failure it guards is a
+    picker entry with no caps entry: the UI then shows a knob it was told to
+    hide, and nothing else in the stack says a word.
+    """
+    _catalog(monkeypatch, _ROWS)
+    _gate(monkeypatch, disabled=frozenset({"mediahub-doubao-seedream-t2i"}))
+
+    caps = await client.get("/api/v1/canvases/generation-capabilities")
+    models = await client.get("/api/v1/canvases/generation-models")
+
+    assert caps.status_code == 200 and models.status_code == 200
+    picker = {row["name"] for row in models.json()["data"]}
+    assert picker == {"codex-local-image"}  # the fixture really did filter
+    assert set(caps.json()["data"]) == picker

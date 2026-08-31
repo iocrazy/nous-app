@@ -218,25 +218,36 @@ _GENERATION_MODEL_PUBLIC_FIELDS = (
 )
 
 
-@router.get("/canvases/generation-models")
-async def list_generation_models(auth: AuthDep) -> dict:
-    """Image/video rows from the mediahub_models catalog (public columns
-    only — no api_key/base_url) for the composer's model picker."""
+async def _visible_generation_rows(user_id: str) -> list[dict]:
+    """The image/video catalog rows this user may see, in one place.
+
+    ``generation-models`` and ``generation-capabilities`` MUST agree row for
+    row — a picker entry with no caps entry means the UI shows a knob it was
+    told to hide. Two hand-rolled copies of "list, filter by Settings, keep
+    image/video" is exactly the "two predicates that must agree" shape that
+    drifts silently, so both endpoints call this and neither re-derives it.
+    """
     from app.repositories import mediahub_model_repository as _repo_mod
     from app.services.ai.platform_model_visibility import (
         filter_platform_models_for_user,
     )
 
     rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
-        viewer_user_id=auth.user_id
+        viewer_user_id=user_id
     )
     # The user's Settings → platform-model card (master switch + per-model
     # blacklist) applies here too; the picker must show what Settings shows.
-    rows = await filter_platform_models_for_user(auth.user_id, rows)
+    rows = await filter_platform_models_for_user(user_id, rows)
+    return [r for r in rows if r.get("type") in ("image", "video")]
+
+
+@router.get("/canvases/generation-models")
+async def list_generation_models(auth: AuthDep) -> dict:
+    """Image/video rows from the mediahub_models catalog (public columns
+    only — no api_key/base_url) for the composer's model picker."""
     data = [
         {k: r.get(k) for k in _GENERATION_MODEL_PUBLIC_FIELDS}
-        for r in rows
-        if r.get("type") in ("image", "video")
+        for r in await _visible_generation_rows(auth.user_id)
     ]
     return {"success": True, "data": data}
 
@@ -248,30 +259,20 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
     Server-side projection of each row's protocol capabilities, so the UI can
     hide what a model cannot honour without ever learning ``actual_provider``
     or re-implementing the registry lookup — one predicate, one place.
-    Visibility follows ``generation-models`` exactly (same repo call, same
-    Settings filter): a model the picker shows always has an entry here.
+    Visibility follows ``generation-models`` exactly because both read
+    ``_visible_generation_rows``: a model the picker shows always has an
+    entry here.
 
     ``honours_ratio`` is deliberately NOT exposed: it describes an internal
     strategy, not something the UI can act on.
     """
-    from app.repositories import mediahub_model_repository as _repo_mod
-    from app.services.ai.platform_model_visibility import (
-        filter_platform_models_for_user,
-    )
     from app.services.ai.provider_protocols import resolve_generation_protocol
     from app.services.ai.provider_protocols.base import ProviderCapabilities
     from app.services.generation.aspect import ASPECT_RATIOS
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
-        viewer_user_id=auth.user_id
-    )
-    rows = await filter_platform_models_for_user(auth.user_id, rows)
-
     order = list(ASPECT_RATIOS)  # stable declaration order for the UI grid
     data: dict[str, dict] = {}
-    for r in rows:
-        if r.get("type") not in ("image", "video"):
-            continue
+    for r in await _visible_generation_rows(auth.user_id):
         proto = resolve_generation_protocol((r.get("actual_provider") or "").lower())
         caps = proto.capabilities if proto else ProviderCapabilities.none()
         data[str(r.get("name"))] = {
