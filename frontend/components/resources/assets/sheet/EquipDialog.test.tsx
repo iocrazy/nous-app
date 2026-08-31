@@ -177,6 +177,133 @@ describe('what cannot be picked, and why it is still shown', () => {
   });
 });
 
+describe('attaching can be a MOVE, and it has to say so', () => {
+  // The server's upsert conflicts on (asset_id, resource_id, slot) with
+  // `loadout_id` in its SET clause, so re-attaching a file that is already on
+  // this slot under another loadout REWRITES that column — the file leaves the
+  // outfit it was in. Eligibility read per (slot, loadout) would have offered
+  // it as a plain candidate and called the result an addition.
+  //
+  // `727145299382534160` is the fixture's `worn` file under loadout ...400.
+  // `727145299382534162` is the fixture's `worn` file under NO loadout.
+  const IN_400 = '727145299382534160';
+  const IN_NONE = '727145299382534162';
+
+  it('A to B: the row is labelled and the move is announced before the click that commits it', async () => {
+    searchState.data.results = [makeResult({ id: IN_400, name: 'night-robe-back.png' })];
+    renderDialog({ slot: 'worn', loadoutId: '727145299382534401', loadoutName: 'Night raid' });
+
+    const row = screen.getByTestId('equip-candidate');
+    // Offered, not hidden: moving a file between outfits is a real thing to
+    // want. It is the SILENCE that was the defect.
+    expect(row).not.toBeDisabled();
+    expect(row).toHaveAttribute('data-moves', 'true');
+    // Named, not "another loadout": the user has to know which outfit empties.
+    expect(within(row).getByTestId('equip-elsewhere')).toHaveTextContent('In Default');
+    expect(screen.queryByTestId('equip-move-warning')).toBeNull();
+
+    fireEvent.click(row);
+
+    const warning = screen.getByTestId('equip-move-warning');
+    expect(warning).toHaveTextContent('night-robe-back.png will move from Default to Night raid');
+
+    fireEvent.click(screen.getByTestId('equip-submit'));
+    await waitFor(() => expect(attachFiles).toHaveBeenCalled());
+    // The toast counts it as a move, not as an addition.
+    expect(addToast).toHaveBeenCalledWith('Moved 1 To worn', 'success');
+  });
+
+  it('null to X: "shows under every outfit" becoming "this outfit only" is announced too', async () => {
+    searchState.data.results = [makeResult({ id: IN_NONE, name: 'scar-detail.png' })];
+    renderDialog({ slot: 'worn', loadoutId: '727145299382534401', loadoutName: 'Night raid' });
+
+    const row = screen.getByTestId('equip-candidate');
+    expect(row).toHaveAttribute('data-moves', 'true');
+    // `loadout_id: null` is a PLACEMENT (shows under every outfit), not an
+    // absence — reading it as "not attached" is what made this silent.
+    expect(within(row).getByTestId('equip-elsewhere')).toHaveTextContent('In Every Loadout');
+
+    fireEvent.click(row);
+    expect(screen.getByTestId('equip-move-warning')).toHaveTextContent(
+      'scar-detail.png will move from Every Loadout to Night raid',
+    );
+  });
+
+  it('X to null: dropping the loadout is a move in the other direction', async () => {
+    // Reachable whenever a `worn` attach happens with no loadout selected.
+    searchState.data.results = [makeResult({ id: IN_400, name: 'night-robe-back.png' })];
+    renderDialog({ slot: 'worn', loadoutId: null, loadoutName: null });
+
+    fireEvent.click(screen.getByTestId('equip-candidate'));
+    expect(screen.getByTestId('equip-move-warning')).toHaveTextContent(
+      'night-robe-back.png will move from Default to Every Loadout',
+    );
+  });
+
+  it('counts additions and moves separately in the toast', async () => {
+    searchState.data.results = [
+      makeResult({ id: IN_400, name: 'night-robe-back.png' }),
+      makeResult({ id: '900000000000000009', name: 'brand-new.png' }),
+    ];
+    renderDialog({ slot: 'worn', loadoutId: '727145299382534401', loadoutName: 'Night raid' });
+    const rows = screen.getAllByTestId('equip-candidate');
+    fireEvent.click(rows[0]);
+    fireEvent.click(rows[1]);
+    fireEvent.click(screen.getByTestId('equip-submit'));
+
+    await waitFor(() => expect(attachFiles).toHaveBeenCalled());
+    // "Attached 2" would be a true number attached to a false claim.
+    expect(addToast).toHaveBeenCalledWith('Attached 1 To worn, Moved 1', 'success');
+  });
+
+  it('an addition is still just an addition', async () => {
+    // The negative control: without it, a bug that called EVERY attach a move
+    // would pass every test above.
+    searchState.data.results = [makeResult({ id: '900000000000000009' })];
+    renderDialog({ slot: 'worn', loadoutId: '727145299382534401', loadoutName: 'Night raid' });
+    const row = screen.getByTestId('equip-candidate');
+    expect(row).toHaveAttribute('data-moves', 'false');
+    fireEvent.click(row);
+    expect(screen.queryByTestId('equip-move-warning')).toBeNull();
+    fireEvent.click(screen.getByTestId('equip-submit'));
+    await waitFor(() => expect(attachFiles).toHaveBeenCalled());
+    expect(addToast).toHaveBeenCalledWith('Attached 1 To worn', 'success');
+  });
+});
+
+describe('a pick never becomes invisible', () => {
+  it('stays on screen, and deselectable, when the search no longer returns it', async () => {
+    renderDialog();
+    fireEvent.click(screen.getAllByTestId('equip-candidate')[0]);
+
+    // A new query that returns something else entirely.
+    searchState.data = {
+      results: [makeResult({ id: '900000000000000007', name: 'unrelated.png' })],
+      counts: {},
+      next_cursor: null,
+    };
+    fireEvent.change(screen.getByTestId('equip-search'), { target: { value: 'unrelated' } });
+
+    const pinned = await screen.findByTestId('equip-picked');
+    const pick = within(pinned).getByTestId('equip-candidate');
+    expect(pick).toHaveAttribute('data-resource-id', '900000000000000001');
+    // The counter was already accurate; what was missing was any way to SEE
+    // or undo the pick it was counting.
+    expect(screen.getByText('1 Selected')).toBeTruthy();
+
+    fireEvent.click(pick);
+    expect(screen.getByText('0 Selected')).toBeTruthy();
+    expect(screen.queryByTestId('equip-picked')).toBeNull();
+  });
+
+  it('does not pin a pick the current results already show', async () => {
+    renderDialog();
+    fireEvent.click(screen.getAllByTestId('equip-candidate')[0]);
+    // Otherwise every pick would render twice.
+    expect(screen.queryByTestId('equip-picked')).toBeNull();
+  });
+});
+
 describe('the loadout only reaches `worn`', () => {
   it('stamps the selected loadout on a worn attach', async () => {
     renderDialog({ slot: 'worn', loadoutId: '727145299382534401', loadoutName: 'Night raid' });

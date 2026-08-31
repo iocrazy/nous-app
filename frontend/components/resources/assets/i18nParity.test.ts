@@ -251,6 +251,13 @@ describe('Asset library i18n parity', () => {
     'assets.equip.attach',
     'assets.equip.attached',
     'assets.equip.nothingAttached',
+    'assets.equip.everyLoadout',
+    'assets.equip.anotherLoadout',
+    'assets.equip.inPlacement',
+    'assets.equip.willMove',
+    'assets.equip.stillSelected',
+    'assets.equip.movedOnly',
+    'assets.equip.attachedAndMoved',
     'assets.gen.title',
     'assets.gen.positive',
     'assets.gen.negative',
@@ -270,6 +277,7 @@ describe('Asset library i18n parity', () => {
     'assets.gen.attached',
     'assets.gen.attachFailed',
     'assets.gen.attachOutcome',
+    'assets.gen.nothingGenerated',
     'assets.history.title',
     'assets.history.empty',
     'assets.history.unavailable',
@@ -318,6 +326,10 @@ describe('Asset library i18n parity', () => {
       'assets.gen.attached': ['n', 'slot'],
       'assets.gen.attachFailed': ['n'],
       'assets.gen.attachOutcome': ['ok', 'bad'],
+      'assets.equip.inPlacement': ['placement'],
+      'assets.equip.willMove': ['name', 'from', 'to'],
+      'assets.equip.movedOnly': ['m', 'slot'],
+      'assets.equip.attachedAndMoved': ['n', 'm', 'slot'],
     };
     for (const [key, vars] of Object.entries(placeholders)) {
       for (const tree of [en, zh]) {

@@ -102,6 +102,27 @@ describe('the fetch', () => {
     );
   });
 
+  it('is fetched ONCE, not once per render', async () => {
+    // Same hazard class as the `t`-identity loop next door in
+    // `GenerateMissingDialog`: this panel sits in a sidebar that re-renders on
+    // every detail load, and an effect whose deps were not both primitive
+    // (or that reached for `t`) would re-request forever. Rerendering with a
+    // FRESH element is what makes the guard non-vacuous — a stable one would
+    // not re-run the component body at all.
+    const { rerender } = renderPanel();
+    await screen.findAllByTestId('history-item');
+    for (let i = 0; i < 3; i += 1) {
+      rerender(
+        <GenerationHistoryPanel
+          scopeId={SCOPE_ID}
+          assetId={ASSET_ID}
+          onOpenInbox={onOpenInbox}
+        />,
+      );
+    }
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));
+  });
+
   it('opens the inbox from a tile and from the link', async () => {
     renderPanel();
     const tiles = await screen.findAllByTestId('history-item');

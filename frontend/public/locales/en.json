@@ -1795,7 +1795,14 @@
       "selected": "{{n}} Selected",
       "attach": "Attach",
       "attached": "Attached {{n}} To {{slot}}",
-      "nothingAttached": "Nothing Was Attached."
+      "nothingAttached": "Nothing Was Attached.",
+      "everyLoadout": "Every Loadout",
+      "anotherLoadout": "Another Loadout",
+      "inPlacement": "In {{placement}}",
+      "willMove": "{{name}} will move from {{from}} to {{to}}",
+      "stillSelected": "Selected, Not In These Results",
+      "movedOnly": "Moved {{m}} To {{slot}}",
+      "attachedAndMoved": "Attached {{n}} To {{slot}}, Moved {{m}}"
     },
     "gen": {
       "title": "Generate {{slot}}",
@@ -1816,7 +1823,8 @@
       "attachNow": "Attach Now",
       "attached": "Attached {{n}} To {{slot}}",
       "attachFailed": "{{n}} Could Not Be Attached",
-      "attachOutcome": "{{ok}} attached, {{bad}} refused"
+      "attachOutcome": "{{ok}} attached, {{bad}} refused",
+      "nothingGenerated": "Nothing Was Generated."
     },
     "history": {
       "title": "Generated From This",

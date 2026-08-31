@@ -714,16 +714,14 @@ describe('the deferred surfaces', () => {
     expect(tile).toHaveAttribute('data-generation-id', '800000000000000001');
   });
 
-  it('a history tile navigates to the unreviewed inbox', async () => {
-    fetchGenerated.mockResolvedValue({ items: [], next_cursor: null });
-  searchState.data = { results: [], counts: {}, next_cursor: null };
-  searchState.loading = false;
-  searchState.error = null;
+  it('an asset that has generated nothing says so', async () => {
+    // Named for what it checks. Tile navigation is the panel's own question
+    // and lives in `GenerationHistoryPanel.test.tsx`; here the point is that
+    // the panel mounts on the page and its empty state is reached, not
+    // errored past. (`beforeEach` already resets `fetchGenerated` and
+    // `searchState` — repeating that here read like it mattered.)
     await renderSheet();
     await waitFor(() => expect(fetchGenerated).toHaveBeenCalled());
-    // Nothing to click when the history is empty, so the link that always
-    // exists is the dialogs' — asserted in the wiring block below. Here the
-    // point is only that an empty history says so rather than erroring.
     expect(screen.getByTestId('generation-history')).toHaveTextContent('Nothing Generated Yet');
   });
 });

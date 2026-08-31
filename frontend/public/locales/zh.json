@@ -1795,7 +1795,14 @@
       "selected": "已选 {{n}} 个",
       "attach": "关联",
       "attached": "已把 {{n}} 个文件关联到 {{slot}}",
-      "nothingAttached": "没有任何文件被关联。"
+      "nothingAttached": "没有任何文件被关联。",
+      "everyLoadout": "所有造型",
+      "anotherLoadout": "另一个造型",
+      "inPlacement": "位于 {{placement}}",
+      "willMove": "{{name}} 将从 {{from}} 移动到 {{to}}",
+      "stillSelected": "已选中，但不在当前结果里",
+      "movedOnly": "已把 {{m}} 个文件移动到 {{slot}}",
+      "attachedAndMoved": "已把 {{n}} 个文件关联到 {{slot}}，另移动 {{m}} 个"
     },
     "gen": {
       "title": "生成 {{slot}}",
@@ -1816,7 +1823,8 @@
       "attachNow": "立即关联",
       "attached": "已把 {{n}} 张关联到 {{slot}}",
       "attachFailed": "{{n}} 张未能关联",
-      "attachOutcome": "{{ok}} 张已关联，{{bad}} 张被拒绝"
+      "attachOutcome": "{{ok}} 张已关联，{{bad}} 张被拒绝",
+      "nothingGenerated": "没有生成任何图。"
     },
     "history": {
       "title": "由它生成的",

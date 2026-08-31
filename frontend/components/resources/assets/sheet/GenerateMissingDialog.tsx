@@ -102,9 +102,18 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
    * request loop that also reset the count picker under the user's hands
    * (same reasoning as `useAssetFailureReporter`'s ref).
    */
-  const [previewRefusalCode, setPreviewRefusalCode] = useState<string | null>(null);
-  /** Distinguishes "refused with a code" from "refused with nothing typed". */
-  const [previewFailed, setPreviewFailed] = useState(false);
+  const [refusal, setRefusal] = useState<{
+    /**
+     * WHICH request was refused, because the two render in different places:
+     * a refused PREVIEW replaces the preview (there is nothing to configure),
+     * a refused RUN sits under it (the settings are still there to change and
+     * retry). `phase` is a single value, so the two can never be on screen at
+     * once and they can share one `data-testid`.
+     */
+    phase: 'preview' | 'run';
+    /** Null when the failure carried no typed code at all. */
+    code: string | null;
+  } | null>(null);
   const [model, setModel] = useState('');
   const [count, setCount] = useState(1);
   const [running, setRunning] = useState(false);
@@ -125,8 +134,7 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
     if (!open) return;
     let alive = true;
     setPreview(null);
-    setPreviewRefusalCode(null);
-    setPreviewFailed(false);
+    setRefusal(null);
     setPreviewLoading(true);
     setResult(null);
     setAttached(null);
@@ -142,8 +150,7 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
       .catch((err: unknown) => {
         if (!alive) return;
         console.error('[GenerateMissingDialog] preview failed:', err);
-        setPreviewRefusalCode((err as { code?: string } | null)?.code ?? null);
-        setPreviewFailed(true);
+        setRefusal({ phase: 'preview', code: (err as { code?: string } | null)?.code ?? null });
       })
       .finally(() => {
         if (alive) setPreviewLoading(false);
@@ -163,6 +170,7 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
     setRunning(true);
     setResult(null);
     setAttached(null);
+    setRefusal(null);
     try {
       const out = await generateSlot(scopeId, detail.id, {
         slot,
@@ -180,7 +188,13 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
         'success',
       );
     } catch (err) {
+      // BOTH: the shared reporter logs and toasts, and the dialog says it
+      // where the user is standing. A run that failed wholly is a 503 over an
+      // empty list - the settings that produced it are still on screen, and a
+      // toast that has already faded leaves them with no reason to change any
+      // of them. Same standard `EquipDialog` holds itself to.
       onError(err);
+      setRefusal({ phase: 'run', code: (err as { code?: string } | null)?.code ?? null });
     } finally {
       setRunning(false);
     }
@@ -267,15 +281,15 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
             <Loader2 size={14} className="animate-spin" aria-hidden="true" />
             {t('common.loading', 'Loading...')}
           </p>
-        ) : previewFailed ? (
+        ) : refusal?.phase === 'preview' ? (
           <p
             role="alert"
             data-testid="generate-refused"
-            data-code={previewRefusalCode ?? ''}
+            data-code={refusal.code ?? ''}
             className="py-4 text-xs text-danger"
           >
-            {previewRefusalCode
-              ? t(`assets.err.${previewRefusalCode}`, t('assets.err.generic'))
+            {refusal.code
+              ? t(`assets.err.${refusal.code}`, t('assets.err.generic'))
               : t('assets.err.generic')}
           </p>
         ) : preview ? (
@@ -468,6 +482,20 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
               </button>
             </div>
           </section>
+        )}
+
+        {refusal?.phase === 'run' && (
+          <p
+            role="alert"
+            data-testid="generate-refused"
+            data-code={refusal.code ?? ''}
+            className="rounded-lg border border-danger-line bg-danger-soft px-2.5 py-1.5 text-[11px] text-danger"
+          >
+            {t('assets.gen.nothingGenerated', 'Nothing Was Generated')}{' '}
+            {refusal.code
+              ? t(`assets.err.${refusal.code}`, t('assets.err.generic'))
+              : t('assets.err.generic')}
+          </p>
         )}
 
         <div className="flex items-center justify-end gap-2">

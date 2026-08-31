@@ -279,14 +279,39 @@ describe('the result is three things, not one', () => {
     expect(skipped).toHaveTextContent('file missing from the object store');
   });
 
-  it('a wholly failed run is reported, not rendered as a result', async () => {
-    // Every unit failing is a 503, never a 202 over an empty list.
+  it('a wholly failed run says so IN the dialog, not only in a toast', async () => {
+    // Every unit failing is a 503, never a 202 over an empty list. The
+    // settings that produced it are still on screen, so a toast that has
+    // already faded leaves the user no reason to change any of them — the
+    // same standard `EquipDialog` holds itself to for a refused batch.
     generateSlot.mockRejectedValue(new ApiError('generation_failed'));
     renderDialog();
     await screen.findByTestId('generate-preview');
     fireEvent.click(screen.getByTestId('generate-submit'));
-    await waitFor(() => expect(onError).toHaveBeenCalled());
+
+    const refusal = await screen.findByTestId('generate-refused');
+    expect(refusal).toHaveAttribute('data-code', 'generation_failed');
+    expect(refusal).toHaveTextContent('Nothing Was Generated');
+    // BOTH: the shared reporter still logs and toasts.
+    expect(onError).toHaveBeenCalled();
     expect(screen.queryByTestId('generate-result')).toBeNull();
+    // The preview and its settings survive, so the run can be retried with a
+    // different model or count.
+    expect(screen.getByTestId('generate-preview')).toBeTruthy();
+    expect(screen.getByTestId('generate-submit')).not.toBeDisabled();
+  });
+
+  it('a retry clears the previous refusal', async () => {
+    generateSlot.mockRejectedValueOnce(new ApiError('generation_failed'));
+    renderDialog();
+    await screen.findByTestId('generate-preview');
+    fireEvent.click(screen.getByTestId('generate-submit'));
+    await screen.findByTestId('generate-refused');
+
+    fireEvent.click(screen.getByTestId('generate-submit'));
+    await screen.findByTestId('generate-result');
+    // A stale refusal next to a fresh success is a contradiction on screen.
+    expect(screen.queryByTestId('generate-refused')).toBeNull();
   });
 });
 
