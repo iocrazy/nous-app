@@ -164,6 +164,10 @@ export function GenFooterControls({
   // Image and video share ONE grid; only the source list differs, so this is
   // the single filter point for both. `auto` is a frontend concept (follow
   // the input) that the backend never lists, so it always survives.
+  //
+  // Deliberately an INTERSECTION, walked from the frontend list: a ratio the
+  // backend grows that has no `RATIO_LABELS` entry cannot be drawn here, so
+  // it is not offered. Widening the vocabulary is a change to that constant.
   const offeredRatios = (
     isImage
       ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
@@ -171,6 +175,20 @@ export function GenFooterControls({
   ).filter(({ value: r }) => caps === null || r === 'auto' || caps.ratios.includes(r));
   // Unset means "follow the source" — see autoRatio.isAutoRatio.
   const ratioValue = (isImage ? gen.ratio : gen.aspect) ?? 'auto';
+  // One gate for the resolution column AND the pill's summary suffix: a
+  // summary still saying "1K" after we hid the knob is the other half of the
+  // same fake switch (ark picks its own pixel size, so the claim may be false).
+  const showResolution = caps === null || caps.resolution;
+  // A stored ratio this model does not offer. The value STANDS — rewriting it
+  // to 'auto' here would lie in the other direction (dispatch reads gen.ratio,
+  // and 'auto' claims follow-the-input), and resetting it on a model switch
+  // would mutate the user's data as a side effect of display. So mark it: the
+  // user learns the pick will not be honoured BEFORE spending a run on it.
+  // The post-run half of that loop is the dropped-knob badge.
+  const ratioStranded =
+    caps !== null &&
+    ratioValue !== 'auto' &&
+    !offeredRatios.some((o) => o.value === ratioValue);
   const modelLabel =
     models.find((m) => m.name === gen.model)?.display_name ||
     gen.model ||
@@ -207,8 +225,16 @@ export function GenFooterControls({
       >
         <Scan size={11} />
         <span>
-          {ratioValue}
-          {isImage ? ` · ${(gen.resolution ?? '1k').toUpperCase()}` : ''}
+          <span
+            data-testid="pill-ratio"
+            className={ratioStranded ? 'text-warn' : undefined}
+            title={ratioStranded ? 'Not supported by this model' : undefined}
+          >
+            {ratioValue}
+          </span>
+          {isImage && showResolution
+            ? ` · ${(gen.resolution ?? '1k').toUpperCase()}`
+            : ''}
         </span>
       </Pill>
       {!isImage && (
@@ -377,7 +403,7 @@ export function GenFooterControls({
                 </button>
               ))}
             </div>
-            {isImage && (caps === null || caps.resolution) && (
+            {isImage && showResolution && (
               <div className="flex w-36 flex-col gap-1">
                 {RESOLUTIONS.map((res) => (
                   <button

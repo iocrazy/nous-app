@@ -114,6 +114,41 @@ describe('GenFooterControls honours model capabilities', () => {
     expect(ratioTexts().some((t) => t.includes('21:9'))).toBe(true);
   });
 
+  it('the pill summary drops the resolution suffix a model has no knob for', () => {
+    // The column is gone because ark's pixel size is the model's to pick —
+    // then the summary must not keep asserting "1K" beside the ratio. Half a
+    // fake switch is still a fake switch.
+    caps = ARK;
+    renderBar({ resolution: '2k' });
+    expect(screen.getByTestId('pill-size').textContent).not.toContain('2K');
+  });
+
+  it('caps unknown: the resolution suffix stays exactly as today', () => {
+    caps = null;
+    renderBar({ resolution: '2k' });
+    expect(screen.getByTestId('pill-size').textContent).toContain('2K');
+  });
+
+  it('marks a stored ratio the model no longer offers, without rewriting it', () => {
+    // The node really does hold '21:9'; showing anything else would lie in
+    // the other direction. So we keep the value and mark it — the user sees
+    // that this pick will not be honoured before spending a run on it.
+    caps = ARK;
+    renderBar({ ratio: '21:9' });
+    const shown = screen.getByTestId('pill-ratio');
+    expect(shown.textContent).toBe('21:9');
+    expect(shown.className).toContain('text-warn');
+    expect(shown.getAttribute('title')).toBe('Not supported by this model');
+  });
+
+  it('leaves an offered ratio unmarked', () => {
+    caps = ARK;
+    renderBar({ ratio: '16:9' });
+    const shown = screen.getByTestId('pill-ratio');
+    expect(shown.className).not.toContain('text-warn');
+    expect(shown.getAttribute('title')).toBeNull();
+  });
+
   it('video: the aspect grid is the same grid, so it filters the same way', () => {
     // Image and video share ONE `ratio-option` block; only the source list
     // differs (FOOTER_RATIOS vs VIDEO_RATIOS), so one filter covers both.
