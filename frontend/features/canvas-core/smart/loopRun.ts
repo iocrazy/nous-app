@@ -18,6 +18,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 import { createOutputNode } from './factories';
 import type { OutputNodeData } from './types';
+import { markDroppedKnobs } from './droppedKnobs';
 import { withGenerationRunner } from './generationRunner';
 import { runLoopCascade, type LoopRunSummary } from './loopRunner';
 import { useLoopRunStore } from './loopRunStore';
@@ -51,6 +52,9 @@ function resolveCaller(loopId: string): PromptCaller {
   return withGenerationRunner(base, {
     canvasId,
     shouldStop: () => useLoopRunStore.getState().isStopRequested(loopId),
+    // Each round rewrites the badge on the loop's prompt node: it describes
+    // the run that just finished, which is the one the user is watching.
+    onDropped: markDroppedKnobs,
   });
 }
 

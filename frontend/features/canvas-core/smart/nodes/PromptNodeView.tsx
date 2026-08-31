@@ -1,6 +1,7 @@
 import { mediaSrc } from '../mediaUrl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 
 import { NodeDeleteButton } from './NodeDeleteButton';
 import { ImagePlus, Library, Play, Split, Square, Zap } from 'lucide-react';
@@ -63,8 +64,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     resource_refs = [],   // default [] for nodes persisted before this field
     image_refs = [],      // inline image chips in the body (IC's mention tokens)
     negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
+    last_dropped,         // knobs the backend ignored on the last run (P4)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
+  const { t } = useTranslation();
   const patch = useNodeDataPatch(id);
   // Read-only: every control on this node writes — the body/negative text,
   // the kind/model/agent/ratio/count pickers, the @-ref chips' remove
@@ -472,6 +475,20 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </span>
           )}
           <RunStatusBadge status={run_status} />
+          {/* What the backend could not honour on that run (P4). Beside the
+              run badge because dispatch is where the dropping happened —
+              the pre-run half of the same loop is the footer's stranded
+              ratio mark. Absent/empty says nothing: silence here means the
+              request was honoured, so it may never be a default. */}
+          {Array.isArray(last_dropped) && last_dropped.length > 0 && (
+            <span
+              data-testid="dropped-knobs-badge"
+              title={t('canvas.knobNotSupported')}
+              className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
+            >
+              {t('canvas.ignoredKnobs', { knobs: last_dropped.join(', ') })}
+            </span>
+          )}
         </div>
       </div>
       {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}

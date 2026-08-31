@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { markDroppedKnobs } from './droppedKnobs';
 import { withGenerationRunner } from './generationRunner';
 import { resolveEntityRef } from './entityRef';
 import {
@@ -139,6 +140,9 @@ function resolveCaller(): PromptCaller {
   return withGenerationRunner(base, {
     canvasId,
     shouldStop: () => useChainRunStore.getState().stopRequested,
+    // A prompt run as part of a chain reports its dropped knobs exactly like
+    // one run on its own — the badge belongs to the node, not to the gesture.
+    onDropped: markDroppedKnobs,
   });
 }
 

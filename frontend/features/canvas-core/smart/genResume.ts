@@ -38,6 +38,7 @@ import {
 } from '../services/canvasGenerationService';
 import { ApiError } from '../../../services/apiClient';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { markDroppedKnobs } from './droppedKnobs';
 import {
   appendGenerationResults,
   markGenerationRecover,
@@ -206,6 +207,21 @@ async function resumePromptTasks(
   let landed = 0;
   let recovered = 0;
   let firstError: string | null = null;
+  // Same read, same terminal point, same semantics as the live runner
+  // (generationRunner). A resume is the OTHER way a generation reaches a
+  // terminal phase, and reading `result_url` here while ignoring its
+  // neighbour would put the badge back in the state this whole feature
+  // exists to end: `last_dropped: []` from the dispatch-time clear is
+  // persisted with the node, so silence after a resume would read as "the
+  // request was honoured" for a run that dropped knobs.
+  //
+  // ⚠️ Known partial: only the tasks still PENDING at reload are polled here
+  // (settled ones were pruned from gen_tasks), so a knob dropped by a
+  // sibling that finished before the reload is unrecoverable — its task id
+  // is gone. This under-reports rather than over-reports, and never reports
+  // worse than the nothing it replaced.
+  const droppedUnion: string[] = [];
+  let observedDropped = false;
   await Promise.all(
     tasks.map(async (t) => {
       try {
@@ -215,6 +231,14 @@ async function resumePromptTasks(
           onTick: (live) => emit(live.phase === 'queued' ? 'queued' : 'running'),
         });
         if (!sameCanvas()) return;
+        const knobs = task.metadata?.dropped_knobs;
+        if (Array.isArray(knobs)) {
+          observedDropped = true;
+          for (const knob of knobs) {
+            if (typeof knob === 'string' && !droppedUnion.includes(knob))
+              droppedUnion.push(knob);
+          }
+        }
         const url =
           task.phase === 'completed' ? task.metadata?.result_url ?? null : null;
         if (url) {
@@ -234,6 +258,11 @@ async function resumePromptTasks(
     }),
   );
   if (!sameCanvas()) return;
+  // Only when somebody actually reported the field: a resume batch whose
+  // polls all broke observed nothing, and writing [] would turn that
+  // non-answer into "nothing was dropped" (the catch branch below
+  // deliberately does not set the flag, matching the runner).
+  if (observedDropped) markDroppedKnobs(promptId, droppedUnion);
   if (landed > 0) {
     patch({ run_status: 'succeeded', run_error: firstError });
   } else {

@@ -37,6 +37,7 @@ import {
   prunePendingGenTask,
 } from './genResume';
 import { onGenerationDispatched } from './dispatchEffects';
+import { markDroppedKnobs } from './droppedKnobs';
 import {
   appendGenerationResults,
   markGenerationRecover,
@@ -193,6 +194,9 @@ export function CanvasComposer({
       // node (P1-13) so a reload resumes the batch; a broken poll becomes
       // a recover mark ("task not lost") instead of a silent failure.
       onDispatched: onGenerationDispatched,
+      // What the provider could not honour lands on the node beside the run
+      // badge — the post-run half of the footer's stranded-value mark.
+      onDropped: markDroppedKnobs,
       onItemSettled: (id, item) => {
         if (item.url) appendGenerationResults(id, [item.url], item.kind);
         else if (item.recoverable) markGenerationRecover(id, item.taskId, item.kind);

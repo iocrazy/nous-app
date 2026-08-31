@@ -16,8 +16,10 @@ Timer,
   Monitor,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { PromptGenSettings } from '../types';
+import { useModelCapabilities } from './useModelCapabilities';
 
 export interface FooterModel {
   name: string;
@@ -101,6 +103,7 @@ export function GenFooterControls({
   onChange,
   disabled,
 }: GenFooterControlsProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState<PopKey | null>(null);
   // Was the open popover summoned by a CLICK (pinned) or by hovering?
   //
@@ -156,8 +159,38 @@ export function GenFooterControls({
   };
 
   const isImage = gen.kind === 'image';
+  // What this model can actually honour. `null` = unknown (loading, old
+  // backend, model absent from the map) and MUST render the full set: a
+  // capabilities hiccup may never cost a user a control that works.
+  const caps = useModelCapabilities(gen.model);
+  // Image and video share ONE grid; only the source list differs, so this is
+  // the single filter point for both. `auto` is a frontend concept (follow
+  // the input) that the backend never lists, so it always survives.
+  //
+  // Deliberately an INTERSECTION, walked from the frontend list: a ratio the
+  // backend grows that has no `RATIO_LABELS` entry cannot be drawn here, so
+  // it is not offered. Widening the vocabulary is a change to that constant.
+  const offeredRatios = (
+    isImage
+      ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
+      : VIDEO_RATIOS.map((r) => ({ value: r.value, label: r.label }))
+  ).filter(({ value: r }) => caps === null || r === 'auto' || caps.ratios.includes(r));
   // Unset means "follow the source" — see autoRatio.isAutoRatio.
   const ratioValue = (isImage ? gen.ratio : gen.aspect) ?? 'auto';
+  // One gate for the resolution column AND the pill's summary suffix: a
+  // summary still saying "1K" after we hid the knob is the other half of the
+  // same fake switch (ark picks its own pixel size, so the claim may be false).
+  const showResolution = caps === null || caps.resolution;
+  // A stored ratio this model does not offer. The value STANDS — rewriting it
+  // to 'auto' here would lie in the other direction (dispatch reads gen.ratio,
+  // and 'auto' claims follow-the-input), and resetting it on a model switch
+  // would mutate the user's data as a side effect of display. So mark it: the
+  // user learns the pick will not be honoured BEFORE spending a run on it.
+  // The post-run half of that loop is the dropped-knob badge.
+  const ratioStranded =
+    caps !== null &&
+    ratioValue !== 'auto' &&
+    !offeredRatios.some((o) => o.value === ratioValue);
   const modelLabel =
     models.find((m) => m.name === gen.model)?.display_name ||
     gen.model ||
@@ -194,8 +227,16 @@ export function GenFooterControls({
       >
         <Scan size={11} />
         <span>
-          {ratioValue}
-          {isImage ? ` · ${(gen.resolution ?? '1k').toUpperCase()}` : ''}
+          <span
+            data-testid="pill-ratio"
+            className={ratioStranded ? 'text-warn' : undefined}
+            title={ratioStranded ? t('canvas.knobNotSupported') : undefined}
+          >
+            {ratioValue}
+          </span>
+          {isImage && showResolution
+            ? ` · ${(gen.resolution ?? '1k').toUpperCase()}`
+            : ''}
         </span>
       </Pill>
       {!isImage && (
@@ -247,7 +288,7 @@ export function GenFooterControls({
           </span>
         </Pill>
       )}
-      {isImage && (
+      {isImage && (caps === null || caps.quality) && (
         <Pill
           testid="pill-quality"
           ariaLabel="Quality"
@@ -342,10 +383,7 @@ export function GenFooterControls({
               ladder right; HOVER selects (滑动到即选择), click closes. */}
           <div className="flex w-[380px] gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {(isImage
-                ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
-                : VIDEO_RATIOS.map((r) => ({ value: r.value, label: r.label }))
-              ).map(({ value: r, label: rl }) => (
+              {offeredRatios.map(({ value: r, label: rl }) => (
                 <button
                   key={r}
                   type="button"
@@ -367,7 +405,7 @@ export function GenFooterControls({
                 </button>
               ))}
             </div>
-            {isImage && (
+            {isImage && showResolution && (
               <div className="flex w-36 flex-col gap-1">
                 {RESOLUTIONS.map((res) => (
                   <button

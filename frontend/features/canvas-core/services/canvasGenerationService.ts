@@ -40,6 +40,10 @@ export interface GenerationTask {
     result_url?: string;
     generated_media_id?: number;
     media_kind?: string;
+    /** Knobs the request asked for that this provider cannot honour (P2).
+     *  Always written by the workflow, `[]` meaning "nothing dropped" — an
+     *  ABSENT key means an older task row, not a clean run. */
+    dropped_knobs?: string[];
     [k: string]: unknown;
   };
 }
@@ -54,6 +58,35 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
   const body = (await response.json()) as { success: boolean; data?: GenerationModel[] };
   if (!body.success || !Array.isArray(body.data)) {
     throw new ApiError('generation-models response missing data', 500);
+  }
+  return body.data;
+}
+
+/** What one catalog model can actually honour, as projected by the backend
+ *  (`GET /api/v1/canvases/generation-capabilities`). The UI hides a knob only
+ *  when a model is present here and says no — absence means "unknown", never
+ *  "unsupported". `honours_ratio` is deliberately absent: it names an internal
+ *  strategy, not something the UI can act on. */
+export interface ModelCapabilities {
+  ratios: string[];
+  quality: boolean;
+  resolution: boolean;
+  max_refs: number;
+  negative: boolean;
+  video_modes: string[];
+}
+
+/** Per-model capabilities keyed by catalog model name. Visibility matches
+ *  `listGenerationModels` row for row (both endpoints read one server-side
+ *  predicate), so every model the picker offers has an entry here. */
+export async function listGenerationCapabilities(): Promise<Record<string, ModelCapabilities>> {
+  const response = await apiFetch('/api/v1/canvases/generation-capabilities');
+  const body = (await response.json()) as {
+    success: boolean;
+    data?: Record<string, ModelCapabilities>;
+  };
+  if (!body.success || !body.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
+    throw new ApiError('generation-capabilities response missing data', 500);
   }
   return body.data;
 }
