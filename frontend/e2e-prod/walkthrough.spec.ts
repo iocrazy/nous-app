@@ -25,7 +25,7 @@ import { loadProdCreds, WALKTHROUGH_IDS } from './helpers';
 const { teamId: TEAM_ID, projectId: PROJECT_ID, episodeId: EPISODE_ID, sceneId: SCENE_ID, shotId: SHOT_ID } =
   WALKTHROUGH_IDS;
 
-test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → generated inbox', async ({ page }) => {
+test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → generated inbox → assets codex', async ({ page }) => {
   const creds = loadProdCreds();
 
   // i18n defaults to 'zh' with nothing in localStorage (i18n.ts:8) — pin 'en'
@@ -167,4 +167,22 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   // the inbox has a single row, so a visible tablist separates "mounted and
   // empty" from "mounted and broken".
   await expect(generated.getByRole('tab', { name: /^Unreviewed/ })).toBeVisible();
+
+  // ── 9. Library → Assets codex (P2). Same contract as step 8: NO claim
+  // about contents. This account's codex may legitimately be empty, and
+  // asserting on cards would turn "no assets yet" into a red deploy. What is
+  // smoked is that the rail entry is reachable and the shelf mounts against
+  // the real `/api/v1/assets` — a blank surface is the failure this catches.
+  //
+  // `.first()` is load-bearing: the rail renders TWO buttons named "Assets" —
+  // the navigation entry and, beside it, the expand/collapse chevron whose
+  // aria-label is the same word. The navigation one is first in DOM order.
+  await page.getByRole('button', { name: 'Assets' }).first().click();
+  const codex = page.getByTestId('asset-shelf');
+  await expect(codex).toBeVisible({ timeout: 15_000 });
+  await expect(codex.getByRole('heading', { name: 'Assets' })).toBeVisible();
+  // The type tablist is the shelf's own chrome, not data — it renders whether
+  // or not a single asset exists, so a visible "All" tab separates "mounted
+  // and empty" from "mounted and broken".
+  await expect(codex.locator('[role="tab"][data-tab-type="all"]')).toBeVisible();
 });
