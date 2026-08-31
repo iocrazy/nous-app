@@ -718,6 +718,10 @@ async def test_an_http_stored_value_is_never_handed_to_materialize(
     out = await svc.generate_slot(int(a["id"]), SCOPE, USER, _req())
     assert materialized == []
     assert out["skipped_references"][0]["reason"] == "no_image_file"
+    # The wave's disclosed behaviour change: a run whose ONLY reference was
+    # skipped must not name that resource in the (unauthenticated) cover URL
+    # either — reverting `sent` back to `refs` turns this line red.
+    assert imagegen.calls[0].get("reference_image_url") is None
 
 
 @pytest.mark.asyncio
