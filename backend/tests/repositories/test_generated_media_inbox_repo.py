@@ -32,6 +32,7 @@ def test_default_state_excludes_deleted_only():
             media_kind=None,
             model=None,
             since=None,
+            source_asset_id=None,
         )
     )
     assert "review_state != 'deleted'" in sql and "scope_id = 7" in sql
@@ -47,6 +48,7 @@ def test_state_and_origin_filters():
             media_kind="image",
             model="seedream-4",
             since=None,
+            source_asset_id=None,
         )
     )
     assert "review_state = 'unreviewed'" in sql
@@ -64,6 +66,7 @@ def test_project_filter_goes_through_canvases():
             media_kind=None,
             model=None,
             since=None,
+            source_asset_id=None,
         )
     )
     assert "canvases" in sql and "project_id = 55" in sql
@@ -80,9 +83,71 @@ def test_since_filter():
             media_kind=None,
             model=None,
             since=since,
+            source_asset_id=None,
         )
     )
     assert "created_at >= '2026-08-01" in sql
+
+
+def test_source_asset_filter_is_an_equality_on_the_stamped_column():
+    """The asset a run was launched from.
+
+    Asserted on the compiled SQL: without the predicate the page is the whole
+    scope's inbox rendered under one asset's name, which reads exactly like a
+    correct answer.
+    """
+    sql = _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=727145299382534300,
+        )
+    )
+    assert "source_asset_id = 727145299382534300" in sql
+
+
+def test_no_source_asset_filter_leaves_the_column_alone():
+    """The negative control: absent means unfiltered, not ``IS NULL``.
+
+    An ``IS NULL`` here would make the default inbox show only rows NO asset
+    produced -- hiding every asset-sourced generation from the main view.
+    """
+    sql = _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=None,
+        )
+    )
+    assert "source_asset_id" not in sql
+
+
+def test_inbox_filters_requires_every_filter_explicitly():
+    """No parameter here may acquire a default.
+
+    A defaulted filter is one a new call site can forget, and forgetting this
+    one widens the page from "this asset's history" to the whole scope with
+    no error anywhere.
+    """
+    import inspect
+
+    sig = inspect.signature(_inbox_filters)
+    defaulted = [
+        name
+        for name, p in sig.parameters.items()
+        if p.default is not inspect.Parameter.empty
+    ]
+    assert defaulted == []
 
 
 def test_repo_exposes_new_methods():

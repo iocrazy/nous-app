@@ -219,12 +219,18 @@ def _inbox_filters(
     media_kind: Optional[str],
     model: Optional[str],
     since: Optional[datetime.datetime],
+    source_asset_id: Optional[int],
 ) -> list:
     """Criteria for the Generated inbox list. Pure so tests can compile them.
 
     state=None -> every state except 'deleted'. project_id is resolved through
     canvases.project_id; rows without a canvas_id (chat uploads, agent runs)
     never match a project filter -- the inbox says so in its empty state.
+
+    source_asset_id is the asset a run was launched FROM (stamped by
+    ``generate_slot``). Every parameter here is required with no default on
+    purpose: a filter that can be forgotten silently widens the page to the
+    whole scope, which reads exactly like a correct answer.
     """
     crit = [GeneratedMedia.scope_id == int(scope_id)]
     if state:
@@ -245,6 +251,8 @@ def _inbox_filters(
         crit.append(GeneratedMedia.model == model)
     if since is not None:
         crit.append(GeneratedMedia.created_at >= since)
+    if source_asset_id is not None:
+        crit.append(GeneratedMedia.source_asset_id == int(source_asset_id))
     return crit
 
 
@@ -560,6 +568,7 @@ class GeneratedMediaRepository:
         media_kind: Optional[str] = None,
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
+        source_asset_id: Optional[int] = None,
         cursor: Optional[str] = None,
         limit: int = 60,
     ) -> dict:
@@ -578,6 +587,7 @@ class GeneratedMediaRepository:
                 media_kind=media_kind,
                 model=model,
                 since=since,
+                source_asset_id=source_asset_id,
             )
         )
         decoded = _decode_cursor(cursor)

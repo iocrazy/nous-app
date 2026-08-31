@@ -272,6 +272,7 @@ async def test_list_passes_filters_through_to_the_repository():
         media_kind="image",
         model="doubao-seedream",
         since=since,
+        source_asset_id=727145299382534300,
         cursor="c1",
         limit=7,
     )
@@ -282,6 +283,7 @@ async def test_list_passes_filters_through_to_the_repository():
         "media_kind": "image",
         "model": "doubao-seedream",
         "since": since,
+        "source_asset_id": 727145299382534300,
         "cursor": "c1",
         "limit": 7,
     }
