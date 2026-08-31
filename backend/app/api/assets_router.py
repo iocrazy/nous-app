@@ -434,6 +434,21 @@ async def attach_files(
             # error envelope: a partial write reported as total failure.
             # unit_of_work(): "Repo writes called inside this block share ONE
             # transaction (atomic: any raise rolls back all)."
+            #
+            # BARE, not `maybe_unit_of_work(is_configured())` — the two forms
+            # in P2 are deliberate and this is the rule for picking:
+            #
+            #   * HTTP request handlers use the BARE form. Every repo method
+            #     this route calls needs the engine anyway, so "no engine" is
+            #     already a broken request; raising is the honest answer and
+            #     leaves the atomicity guarantee UNCONDITIONAL. Downgrading to
+            #     `maybe_` here would make a batch attach silently non-atomic
+            #     in exactly the situation nobody is watching.
+            #   * `maybe_unit_of_work(is_configured())` is for SERVICE-layer
+            #     helpers that also run where no engine exists (the fake-repo
+            #     unit suites) — `assets_service.duplicate` is the P2 example.
+            #     There the gate is what keeps the path byte-for-byte legacy
+            #     rather than raising in a process that never had an engine.
             out: List[Dict[str, Any]] = []
             async with unit_of_work():
                 for item in payload.items:

@@ -294,6 +294,17 @@ class AssetsRepository:
         slot tables are pinned against (test_slots.py) — so a seventh type
         cannot be added to the backend while this method keeps answering with
         six keys.
+
+        ⚠️ **Where the unknown-type carry STOPS.** The loop below deliberately
+        keeps a row whose ``asset_type`` is outside ``ASSET_TYPES`` rather than
+        dropping it silently — but that extra key travels no further than this
+        return value. ``AssetCountsResponse`` (``schemas/assets.py``) declares
+        six explicit fields, so FastAPI's response validation drops the seventh
+        on the way out and no client ever sees it. The carry is therefore a
+        DEBUGGING affordance for a direct caller of this repository, not a
+        contract with the sidebar: a type that reached the table without
+        reaching ``ASSET_TYPES`` shows up in a log or a REPL here, and nowhere
+        in the UI. Widening the response model is what would change that.
         """
         out: Dict[str, int] = {t: 0 for t in ASSET_TYPES}
         async with read_scope() as session:

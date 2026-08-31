@@ -441,6 +441,12 @@ class AssetsService:
             }
         )
 
+        # `maybe_`, not the bare `unit_of_work()` the attach-batch ROUTE uses.
+        # The rule (written out at `assets_router.py`'s batch block): request
+        # handlers take the bare form because a missing engine already breaks
+        # the request; a service helper like this one also runs under the
+        # fake-repo unit suites, where no engine exists and the bare form would
+        # raise on a path that has nothing to do with transactions.
         async with maybe_unit_of_work(is_configured()):
             clash = await self.assets.find_by_name(
                 int(scope_id), src["asset_type"], name
@@ -949,7 +955,7 @@ class AssetsService:
         return f"{base}/api/v1/resources/{int(resource_id)}/cover"
 
     async def _materialize_references(
-        self, stack: AsyncExitStack, resource_ids: List[str]
+        self, stack: AsyncExitStack, resource_ids: List[str], scope_id: int
     ) -> Tuple[List[str], List[Dict[str, Any]]]:
         """Resolve reference resources to LOCAL files the provider can read.
 
@@ -968,14 +974,43 @@ class AssetsService:
         fewer references than the preview promised, and the caller is told
         which and why. Silently dropping it is the recorded
         "选了也生成了但图里没有" failure.
+
+        **Every id is re-checked against ``scope_id`` first.** ``attach_file``
+        scope-checked it once, at attach time; the row can have left the scope
+        since (``delete_resource_item`` drops the ``resource_items`` row while
+        ``asset_files`` keeps its own, whose FK is on ``resources.id``). This
+        path then hands the file's BYTES to an outside provider, which is
+        exactly the reason ``regenerate_prompt`` re-checks the primary file
+        above — and until this guard existed the two P2 paths answered the
+        same question opposite ways: Regenerate said 404
+        ``resource_not_found`` while Generate missing still sent the bytes.
+
+        The re-check runs OUTSIDE ``resource_media_rows``' SYSTEM wrap, and
+        must: that wrap exists so a cross-user read passes the scope choke
+        point at all, and asking "is this still in the caller's scope" from
+        inside it would be asking the question with the answer already
+        suppressed.
         """
         local_paths: List[str] = []
         skipped: List[Dict[str, Any]] = []
+        in_scope: List[str] = []
+        for resource_id in resource_ids:
+            if not await self.relations.resource_in_scope(
+                int(resource_id), int(scope_id)
+            ):
+                # Same code and reason the missing-row branch below uses: from
+                # the caller's side "gone from this scope" and "not there" are
+                # the same fact, and the run already renders this channel.
+                skipped.append(
+                    {"resource_id": str(resource_id), "reason": "resource_not_found"}
+                )
+                continue
+            in_scope.append(resource_id)
         rows = await self.relations.resource_media_rows(
-            [int(r) for r in resource_ids],
+            [int(r) for r in in_scope],
             system_reason=_REFERENCE_READ_REASON,
         )
-        for resource_id in resource_ids:
+        for resource_id in in_scope:
             row = rows.get(int(resource_id))
             if not row:
                 skipped.append(
@@ -1169,11 +1204,20 @@ class AssetsService:
         # unit would delete the reference before the next call reads it.
         async with AsyncExitStack() as stack:
             reference_paths, skipped_references = await self._materialize_references(
-                stack, refs
+                stack, refs, int(scope_id)
             )
             # The url is the vestigial channel (see ``_reference_url``); the
-            # local paths are the one adapters actually read.
-            reference_image_url = self._reference_url(int(refs[0])) if refs else None
+            # local paths are the one adapters actually read. Still taken from
+            # a reference that SURVIVED the scope re-check: the url it builds
+            # is the unauthenticated ``/cover`` route, so naming a resource
+            # this run just refused to send would hand an outside provider the
+            # one thing the refusal was withholding.
+            sent = [
+                r
+                for r in refs
+                if r not in {s["resource_id"] for s in skipped_references}
+            ]
+            reference_image_url = self._reference_url(int(sent[0])) if sent else None
             for index in range(int(req.count)):
                 try:
                     result = await ImageGenerationService().generate_image(
