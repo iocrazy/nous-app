@@ -241,6 +241,7 @@ describe('fetchGenerated', () => {
     expect(url.searchParams.has('media_kind')).toBe(false);
     expect(url.searchParams.has('model')).toBe(false);
     expect(url.searchParams.has('since')).toBe(false);
+    expect(url.searchParams.has('source_asset_id')).toBe(false);
     expect(url.searchParams.has('cursor')).toBe(false);
     expect(url.searchParams.has('limit')).toBe(false);
   });
@@ -254,6 +255,7 @@ describe('fetchGenerated', () => {
       mediaKind: 'image',
       model: 'gpt-image-2',
       since: '2026-08-01T00:00:00Z',
+      sourceAssetId: '727145299382534300',
       cursor: 'abc123',
       limit: 24,
     });
@@ -264,6 +266,7 @@ describe('fetchGenerated', () => {
     expect(url.searchParams.get('media_kind')).toBe('image');
     expect(url.searchParams.get('model')).toBe('gpt-image-2');
     expect(url.searchParams.get('since')).toBe('2026-08-01T00:00:00Z');
+    expect(url.searchParams.get('source_asset_id')).toBe('727145299382534300');
     expect(url.searchParams.get('cursor')).toBe('abc123');
     expect(url.searchParams.get('limit')).toBe('24');
   });

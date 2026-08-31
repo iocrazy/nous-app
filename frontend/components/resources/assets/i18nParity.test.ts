@@ -238,6 +238,47 @@ describe('Asset library i18n parity', () => {
     'assets.err.file_not_captionable',
     'assets.err.not_applicable',
     'assets.err.project_not_found',
+    // Task 8's two dialogs and the generation-history panel.
+    'assets.equip.title',
+    'assets.equip.target',
+    'assets.equip.targetWithLoadout',
+    'assets.equip.search',
+    'assets.equip.noResults',
+    'assets.equip.searchFailed',
+    'assets.equip.alreadyAttached',
+    'assets.equip.otherWorkspace',
+    'assets.equip.selected',
+    'assets.equip.attach',
+    'assets.equip.attached',
+    'assets.equip.nothingAttached',
+    'assets.gen.title',
+    'assets.gen.positive',
+    'assets.gen.negative',
+    'assets.gen.negativeNote',
+    'assets.gen.aspect',
+    'assets.gen.references',
+    'assets.gen.model',
+    'assets.gen.modelDefault',
+    'assets.gen.count',
+    'assets.gen.run',
+    'assets.gen.done',
+    'assets.gen.produced',
+    'assets.gen.unitFailed',
+    'assets.gen.skippedRef',
+    'assets.gen.openInbox',
+    'assets.gen.attachNow',
+    'assets.gen.attached',
+    'assets.gen.attachFailed',
+    'assets.gen.attachOutcome',
+    'assets.history.title',
+    'assets.history.empty',
+    'assets.history.unavailable',
+    'assets.history.openInbox',
+    // Typed refusals only the slot-generation path can produce.
+    'assets.err.slot_not_generatable',
+    'assets.err.loadout_mismatch',
+    'assets.err.generation_failed',
+    'assets.err.register_failed',
     ...RELATION_SECTION_KEYS.map((k) => `assets.rel.${k}`),
     ...LINK_RELATIONS.map((r) => `assets.rel.add.${r}`),
     ...ASSET_SOURCES.map((s) => `assets.source.${s}`),
@@ -259,6 +300,24 @@ describe('Asset library i18n parity', () => {
       'assets.rel.add.holds': ['type'],
       'assets.rel.add.ambience_of': ['type'],
       'assets.rel.add.voice_of': ['type'],
+      // Task 8. `{{n}}` rather than `{{count}}` throughout: i18next reads a
+      // `count` option as a PLURAL SELECTOR and would look for `_one` /
+      // `_other` variants of these keys, none of which exist — the lookup
+      // would fall through to the raw key with nothing failing anywhere.
+      'assets.equip.title': ['slot'],
+      'assets.equip.target': ['slot'],
+      'assets.equip.targetWithLoadout': ['slot', 'loadout'],
+      'assets.equip.selected': ['n'],
+      'assets.equip.attached': ['n', 'slot'],
+      'assets.gen.title': ['slot'],
+      'assets.gen.references': ['n'],
+      'assets.gen.done': ['n'],
+      'assets.gen.produced': ['n'],
+      'assets.gen.unitFailed': ['n'],
+      'assets.gen.skippedRef': ['id'],
+      'assets.gen.attached': ['n', 'slot'],
+      'assets.gen.attachFailed': ['n'],
+      'assets.gen.attachOutcome': ['ok', 'bad'],
     };
     for (const [key, vars] of Object.entries(placeholders)) {
       for (const tree of [en, zh]) {
@@ -267,6 +326,20 @@ describe('Asset library i18n parity', () => {
         }
       }
     }
+  });
+
+  it('no Task 8 key is a plural family in disguise', () => {
+    // The other half of the `{{count}}` trap: a key whose value interpolates
+    // `{{count}}` needs `_one`/`_other` siblings to resolve, and adding one
+    // later without them re-opens exactly the hole above.
+    const bad: string[] = [];
+    for (const key of SHEET_KEYS) {
+      if (!/^assets\.(equip|gen|history)\./.test(key)) continue;
+      for (const tree of [en, zh]) {
+        if (String(at(tree, key)).includes('{{count}}')) bad.push(key);
+      }
+    }
+    expect(bad).toEqual([]);
   });
 
   it('the sheet copy is actually translated, not copied across', () => {

@@ -8,13 +8,12 @@
 //    that brings them (P4 / P5). A live button that does nothing is the silent
 //    no-op this repo keeps re-learning; a disabled one with a reason is a
 //    promise the user can read.
-//  * GENERATION HISTORY IS NOT RENDERED. It would be "the generations this
-//    asset produced", i.e. `generated_media` filtered by `source_asset_id` -
-//    and `GET /api/v1/generated` has no such filter (its query params are
-//    state / origin_kind / project_id / media_kind / model / since / cursor /
-//    limit). Showing the scope's whole inbox under this asset's name would be
-//    a claim that is not true, so the panel is absent until the backend filter
-//    exists. Adding it is out of this task's scope by the brief.
+//
+// GENERATION HISTORY now sits under Used In. Task 7 left it out because
+// `GET /generated` had no `source_asset_id` filter and the only thing it could
+// have shown was the scope's whole inbox under this asset's name; Task 8 added
+// the filter, so the panel asks a question it can actually answer. See
+// `GenerationHistoryPanel`.
 
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,8 +31,12 @@ import type { Project } from '../../../../types';
 import type { AssetLoadoutRow, AssetRowDetail } from '../../../../services/assetsService';
 import { typeSingularKey } from '../assetTypeMeta';
 import { canvasKindFor } from './assetSheetModel';
+import { GenerationHistoryPanel } from './GenerationHistoryPanel';
 
 export interface SheetSidebarProps {
+  /** Null until the resources context resolves one; the history panel is the
+   *  only thing here that fetches, so it simply waits. */
+  scopeId: string | null;
   detail: AssetRowDetail;
   loadout: AssetLoadoutRow | null;
   readOnly: boolean;
@@ -58,6 +61,8 @@ export interface SheetSidebarProps {
   onDelete: () => void;
   busy: boolean;
   onOpenCanvas: (canvasId: string) => void;
+  /** Navigate to the Generated inbox, filtered to unreviewed. */
+  onOpenInbox: () => void;
   onError: (err: unknown) => void;
 }
 
@@ -67,6 +72,7 @@ const ACTION =
   'disabled:cursor-not-allowed disabled:opacity-50';
 
 export const SheetSidebar: React.FC<SheetSidebarProps> = ({
+  scopeId,
   detail,
   loadout,
   readOnly,
@@ -79,6 +85,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
   onDelete,
   busy,
   onOpenCanvas,
+  onOpenInbox,
   onError,
 }) => {
   const { t } = useTranslation();
@@ -216,6 +223,14 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
           {t('assets.sheet.canvasUsageLater', 'Canvas usage arrives with P4')}
         </p>
       </section>
+
+      {scopeId && (
+        <GenerationHistoryPanel
+          scopeId={scopeId}
+          assetId={detail.id}
+          onOpenInbox={onOpenInbox}
+        />
+      )}
     </aside>
   );
 };

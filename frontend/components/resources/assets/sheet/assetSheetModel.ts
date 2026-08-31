@@ -154,6 +154,24 @@ export function hasLoadouts(assetType: AssetType): boolean {
   return assetType === 'character';
 }
 
+/**
+ * The `loadout_id` a NEW file attached to `slot` should carry.
+ *
+ * `worn` is the one slot whose contents belong to an OUTFIT rather than to the
+ * asset: a still of the character in the night robe is a fact about that
+ * loadout. Every other slot holds imagery of the asset itself, and stamping
+ * the selected loadout onto it would make the file the user just attached
+ * disappear the moment they switched outfits — with nothing on screen saying
+ * where it went.
+ *
+ * The reverse of `filesForSlot`'s reading rule (a null `loadout_id` shows
+ * under every loadout), and it is what both `EquipDialog` and the
+ * attach-from-inbox path in `GenerateMissingDialog` send.
+ */
+export function loadoutForSlot(slot: string, selectedLoadoutId: string | null): string | null {
+  return slot === 'worn' ? selectedLoadoutId : null;
+}
+
 // ─── Relations ──────────────────────────────────────────────────────────────
 
 /**

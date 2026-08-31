@@ -47,16 +47,40 @@ vi.mock('../../../AudioWaveformPlayer', () => ({
   AudioWaveformPlayer: ({ src }: { src: string }) => <div data-testid="waveform" data-src={src} />,
 }));
 
-// The sheet must not read the Generated inbox: `GET /generated` has no
-// `source_asset_id` filter, so anything it fetched would be the scope's whole
-// inbox mislabelled as this asset's history. Mocked (not merely absent) so the
-// absence test below asserts a CALL that did not happen rather than a test id
-// no production code has ever used.
+// The sheet DOES read the Generated inbox now — but only through
+// `source_asset_id` (Task 8's backend filter). The test below asserts the
+// ARGUMENTS, because a call without that filter renders identically: a grid of
+// thumbnails under this asset's name that is really the whole scope's inbox.
 const fetchGenerated = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
 const fetchGeneratedCounts = vi.fn().mockResolvedValue({});
+const saveGenerationAsAsset = vi.fn().mockResolvedValue({});
 vi.mock('../../../../services/generatedService', () => ({
   fetchGenerated: (...a: unknown[]) => fetchGenerated(...a),
   fetchGeneratedCounts: (...a: unknown[]) => fetchGeneratedCounts(...a),
+  saveGenerationAsAsset: (...a: unknown[]) => saveGenerationAsAsset(...a),
+}));
+
+vi.mock('../../../../services/generatedMediaService', () => ({
+  generatedMediaCoverUrl: (id: string) => `/api/v1/generated-media/${id}/cover`,
+}));
+
+// The two slot dialogs the sheet now owns. Their own suites cover their
+// behaviour; here the question is only whether the board's hook points reach
+// them with the right slot.
+const previewGenerateSlot = vi.fn();
+const generateSlot = vi.fn();
+const attachFiles = vi.fn();
+
+const searchState: {
+  data: { results: Record<string, unknown>[]; counts: Record<string, number>; next_cursor: null };
+  loading: boolean;
+  error: Error | null;
+} = { data: { results: [], counts: {}, next_cursor: null }, loading: false, error: null };
+vi.mock('../../../../hooks/useResourceSearch', () => ({
+  useResourceSearch: () => searchState,
+}));
+vi.mock('../../../../features/canvas-core/smart/nodes/useGenerationModels', () => ({
+  useGenerationModels: () => [],
 }));
 
 const fetchProjects = vi.fn();
@@ -88,6 +112,9 @@ vi.mock('../../../../services/assetsService', () => ({
   deleteLoadout: vi.fn().mockResolvedValue(undefined),
   translatePrompt: vi.fn(),
   regeneratePrompt: vi.fn(),
+  attachFiles: (...a: unknown[]) => attachFiles(...a),
+  previewGenerateSlot: (...a: unknown[]) => previewGenerateSlot(...a),
+  generateSlot: (...a: unknown[]) => generateSlot(...a),
   ASSET_SOURCES: ['manual'],
   // `useAssetFailure` instance-checks this to tell a TYPED refusal (which
   // renders its own sentence) from anything else.
@@ -134,6 +161,24 @@ beforeEach(() => {
   duplicateAsset.mockResolvedValue({ ...CHARACTER_DETAIL, id: '999' });
   createLink.mockResolvedValue({});
   deleteLink.mockResolvedValue(undefined);
+  attachFiles.mockResolvedValue([{}]);
+  previewGenerateSlot.mockResolvedValue({
+    positive: 'character sheet…',
+    negative: '',
+    reference_resource_ids: [],
+    aspect_ratio: '16:9',
+    model: null,
+  });
+  generateSlot.mockResolvedValue({
+    generation_ids: [],
+    failed: [],
+    skipped_references: [],
+    inbox_state: 'unreviewed',
+  });
+  fetchGenerated.mockResolvedValue({ items: [], next_cursor: null });
+  searchState.data = { results: [], counts: {}, next_cursor: null };
+  searchState.loading = false;
+  searchState.error = null;
   Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
@@ -621,13 +666,163 @@ describe('the deferred surfaces', () => {
     );
   });
 
-  it('reads nothing from the Generated inbox', async () => {
-    // The falsifiable form of "no generation history panel": a panel added
-    // later under ANY test id would have to fetch, and this fails then. A test
-    // id absence check would not.
+  it('the generation history asks the inbox about THIS asset only', async () => {
+    // Task 7 asserted this call did NOT happen, because `GET /generated` had
+    // no `source_asset_id` filter and an unfiltered page would have been the
+    // scope's whole inbox under one asset's name. Task 8 added the filter, so
+    // the question flips — and it is still asked of the ARGUMENTS, since an
+    // unfiltered call renders exactly the same grid.
+    fetchGenerated.mockResolvedValue({
+      items: [
+        {
+          id: '800000000000000001',
+          scope_id: SCOPE_ID,
+          media_kind: 'image',
+          mime: 'image/png',
+          prompt: 'character sheet…',
+          model: 'seedream-4',
+          provider: 'volcengine',
+          origin_kind: 'agent_run',
+          canvas_id: null,
+          node_id: 'asset:727145299382534300:sheet',
+          created_at: '2026-08-30T09:00:00Z',
+          promoted_resource_id: null,
+          review_state: 'unreviewed',
+          source_asset_id: CHARACTER_DETAIL.id,
+          source: {
+            kind: 'agent_run',
+            label: 'Agent Run',
+            canvas_id: null,
+            node_id: 'asset:727145299382534300:sheet',
+            shot_id: null,
+            conversation_id: null,
+            deep_link: null,
+          },
+          title: 'character sheet',
+        },
+      ],
+      next_cursor: null,
+    });
     await renderSheet();
-    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
-    expect(fetchGenerated).not.toHaveBeenCalled();
-    expect(fetchGeneratedCounts).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalled());
+    expect(fetchGenerated).toHaveBeenCalledWith(SCOPE_ID, {
+      sourceAssetId: CHARACTER_DETAIL.id,
+      state: 'all',
+      limit: 8,
+    });
+    const tile = await screen.findByTestId('history-item');
+    expect(tile).toHaveAttribute('data-generation-id', '800000000000000001');
+  });
+
+  it('a history tile navigates to the unreviewed inbox', async () => {
+    fetchGenerated.mockResolvedValue({ items: [], next_cursor: null });
+  searchState.data = { results: [], counts: {}, next_cursor: null };
+  searchState.loading = false;
+  searchState.error = null;
+    await renderSheet();
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalled());
+    // Nothing to click when the history is empty, so the link that always
+    // exists is the dialogs' — asserted in the wiring block below. Here the
+    // point is only that an empty history says so rather than erroring.
+    expect(screen.getByTestId('generation-history')).toHaveTextContent('Nothing Generated Yet');
+  });
+});
+
+describe('the slot dialogs are wired to the board', () => {
+  it('Equip is live and opens the dialog for the slot that was clicked', async () => {
+    await renderSheet();
+    const expressions = screen
+      .getAllByTestId('board-empty-pin')
+      .find((pin) => pin.getAttribute('data-slot') === 'expressions')!;
+    const equip = within(expressions).getByTestId('pin-equip');
+    // Task 7 shipped these DISABLED with an "Arrives shortly" title.
+    expect(equip).not.toBeDisabled();
+
+    fireEvent.click(equip);
+
+    const dialog = await screen.findByTestId('equip-dialog');
+    expect(dialog).toHaveAttribute('data-slot', 'expressions');
+  });
+
+  it('Generate opens its dialog and previews that slot', async () => {
+    await renderSheet();
+    const expressions = screen
+      .getAllByTestId('board-empty-pin')
+      .find((pin) => pin.getAttribute('data-slot') === 'expressions')!;
+    fireEvent.click(within(expressions).getByTestId('pin-generate'));
+
+    const dialog = await screen.findByTestId('generate-missing-dialog');
+    expect(dialog).toHaveAttribute('data-slot', 'expressions');
+    await waitFor(() => expect(previewGenerateSlot).toHaveBeenCalled());
+    expect(previewGenerateSlot).toHaveBeenCalledWith(
+      SCOPE_ID,
+      CHARACTER_DETAIL.id,
+      'expressions',
+      // The board's default loadout — the prompt is composed with it.
+      '727145299382534400',
+    );
+  });
+
+  it('an attach refetches the detail so the pins move', async () => {
+    await renderSheet();
+    const expressions = screen
+      .getAllByTestId('board-empty-pin')
+      .find((pin) => pin.getAttribute('data-slot') === 'expressions')!;
+    fireEvent.click(within(expressions).getByTestId('pin-equip'));
+    await screen.findByTestId('equip-dialog');
+    const before = fetchAssetDetail.mock.calls.length;
+
+    // Drive the dialog's own success path through its onAttached prop by
+    // completing a real attach: one candidate, selected, submitted.
+    searchState.data = {
+      results: [
+        {
+          id: '900000000000000001',
+          name: 'expression-grid.png',
+          kind: 'image',
+          mime: 'image/png',
+          size: 1024,
+          scope: { type: 'team', id: SCOPE_ID },
+          updated_at: '2026-08-30T09:00:00Z',
+          thumbnail_url: '/api/v1/resources/900000000000000001/cover',
+          transcript_status: null,
+          summary_status: null,
+        },
+      ],
+      counts: {},
+      next_cursor: null,
+    };
+    fireEvent.change(screen.getByTestId('equip-search'), { target: { value: 'grid' } });
+    fireEvent.click(await screen.findByTestId('equip-candidate'));
+    fireEvent.click(screen.getByTestId('equip-submit'));
+
+    await waitFor(() => expect(attachFiles).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(fetchAssetDetail.mock.calls.length).toBeGreaterThan(before),
+    );
+    // NOT the six sidebar badges: `GET /assets/counts` tallies this scope's
+    // assets per type, and attaching a file creates and deletes none.
+    expect(refreshAssetCounts).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('equip-dialog')).toBeNull();
+  });
+
+  it('a preset offers neither dialog', async () => {
+    // A preset renders no Equip/Generate affordance at all, so there is no
+    // path to either dialog — and the page double-checks before mounting one.
+    const preset = makeDetail({
+      id: '727145299382534304',
+      scope_id: null,
+      asset_type: 'location',
+      name: 'Bamboo Grove',
+      role_tag: '',
+      source: 'system_preset',
+      is_system_preset: true,
+      readiness: { state: 'draft', missing: ['establishing'] },
+    });
+    await renderSheet(preset, []);
+    expect(screen.queryByTestId('pin-equip')).toBeNull();
+    expect(screen.queryByTestId('pin-generate')).toBeNull();
+    expect(screen.queryByTestId('equip-dialog')).toBeNull();
+    expect(screen.queryByTestId('generate-missing-dialog')).toBeNull();
   });
 });

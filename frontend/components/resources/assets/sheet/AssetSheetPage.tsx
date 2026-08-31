@@ -59,6 +59,8 @@ import {
   relationSectionsFor,
 } from './assetSheetModel';
 import { AssetBoard } from './AssetBoard';
+import { EquipDialog } from './EquipDialog';
+import { GenerateMissingDialog } from './GenerateMissingDialog';
 import { AssetSheetHeader } from './AssetSheetHeader';
 import { AudioSheetBody } from './AudioSheetBody';
 import { LoadoutChips } from './LoadoutChips';
@@ -97,6 +99,17 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   const [projectsFailed, setProjectsFailed] = useState(false);
   /** Bumped to re-run the detail fetch after a write. */
   const [reloadTick, setReloadTick] = useState(0);
+  /**
+   * The slot each dialog is open FOR, or null. Two separate pieces of state
+   * rather than one `{kind, slot}`: they are never open together, and the slot
+   * is what each one is about.
+   *
+   * They are only ever set from the Board's / AudioSheetBody's own handlers,
+   * which a preset does not render at all - so a read-only asset cannot reach
+   * either dialog. The page double-checks anyway below.
+   */
+  const [equipSlot, setEquipSlot] = useState<string | null>(null);
+  const [generateSlotName, setGenerateSlotName] = useState<string | null>(null);
 
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
@@ -319,6 +332,29 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     }
   }, [detail, activeLoadout, related, addToast, t]);
 
+  // --- Slot dialogs ---------------------------------------------------------
+
+  const openInbox = useCallback(
+    // `state=unreviewed` is the inbox's own default, sent explicitly so the
+    // link keeps meaning "the ones nobody has looked at" if that default moves.
+    () => navigate(resPath('/resources/generated?state=unreviewed')),
+    [navigate, resPath],
+  );
+
+  /**
+   * Something landed on a slot. The detail refetch is what moves the pins.
+   *
+   * `refreshAssetCounts()` is deliberately NOT called: the six sidebar badges
+   * are per-type tallies of the scope's assets (`GET /assets/counts` -
+   * "Counts this scope's non-deleted assets only"), and attaching a file
+   * neither creates nor deletes one. Readiness is derived per asset and is not
+   * in those numbers, so a refresh here would be a request that cannot change
+   * anything on screen.
+   */
+  const onSlotFilled = useCallback(() => {
+    reload();
+  }, [reload]);
+
   // --- Render ---------------------------------------------------------------
 
   if (loading) {
@@ -350,6 +386,8 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   }
 
   const readOnly = detail.is_system_preset;
+  /** A preset is read-only all the way down, and both dialogs write. */
+  const canFillSlots = !readOnly && scopeId !== null && scopeId !== '';
   const sections = relationSectionsFor(detail.asset_type, detail.subtype);
 
   return (
@@ -400,12 +438,18 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
           </AssetSheetHeader>
 
           {/* The body, and the only place the six types diverge.
-              TASK 8 PLUGS IN HERE: `AssetBoard` and `AudioSheetBody` both take
-              optional `onEquip(slot)` / `onGenerate(slot)`. Until they are
-              passed, both buttons render DISABLED with an "arrives shortly"
-              title - visible, inert and honest, rather than live and silent. */}
+              `onEquip` / `onGenerate` are passed only when the asset is
+              writable and a scope is known: without a handler the two buttons
+              render DISABLED rather than live-and-silent, which is the state a
+              preset (no affordance at all) and a still-resolving scope should
+              be in. */}
           {detail.asset_type === 'audio' ? (
-            <AudioSheetBody detail={detail} readOnly={readOnly} />
+            <AudioSheetBody
+              detail={detail}
+              readOnly={readOnly}
+              onEquip={canFillSlots ? setEquipSlot : undefined}
+              onGenerate={canFillSlots ? setGenerateSlotName : undefined}
+            />
           ) : detail.asset_type === 'prompt' ? null : (
             scopeId && (
               <AssetBoard
@@ -413,6 +457,8 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
                 detail={detail}
                 loadoutId={selectedLoadoutId}
                 readOnly={readOnly}
+                onEquip={canFillSlots ? setEquipSlot : undefined}
+                onGenerate={canFillSlots ? setGenerateSlotName : undefined}
                 onAssetUpdated={reload}
                 onError={report}
               />
@@ -448,6 +494,7 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
         </div>
 
         <SheetSidebar
+          scopeId={scopeId ?? null}
           detail={detail}
           loadout={activeLoadout}
           readOnly={readOnly}
@@ -460,9 +507,39 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
           onDuplicate={() => void onDuplicate()}
           onDelete={() => void onDelete()}
           onOpenCanvas={(canvasId) => navigate(resPath(`/canvas/${canvasId}`))}
+          onOpenInbox={openInbox}
           onError={report}
         />
       </div>
+
+      {canFillSlots && scopeId && equipSlot !== null && (
+        <EquipDialog
+          open
+          scopeId={scopeId}
+          teamId={teamId}
+          detail={detail}
+          slot={equipSlot}
+          loadoutId={selectedLoadoutId}
+          loadoutName={activeLoadout?.name ?? null}
+          onClose={() => setEquipSlot(null)}
+          onAttached={onSlotFilled}
+          onError={report}
+        />
+      )}
+
+      {canFillSlots && scopeId && generateSlotName !== null && (
+        <GenerateMissingDialog
+          open
+          scopeId={scopeId}
+          detail={detail}
+          slot={generateSlotName}
+          loadoutId={selectedLoadoutId}
+          onClose={() => setGenerateSlotName(null)}
+          onAttached={onSlotFilled}
+          onOpenInbox={openInbox}
+          onError={report}
+        />
+      )}
     </div>
   );
 };

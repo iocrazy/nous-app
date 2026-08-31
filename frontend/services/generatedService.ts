@@ -144,6 +144,12 @@ export interface GeneratedListOptions {
   model?: string;
   /** ISO 8601 instant; the router parses it as a datetime. */
   since?: string;
+  /**
+   * The asset a run was launched FROM (`generate_slot` stamps it). This is
+   * what makes "this asset's generation history" a real question rather than
+   * the scope's whole inbox rendered under one asset's name.
+   */
+  sourceAssetId?: string;
   cursor?: string;
   limit?: number;
 }
@@ -208,6 +214,7 @@ export async function fetchGenerated(
     media_kind: opts.mediaKind,
     model: opts.model,
     since: opts.since,
+    source_asset_id: opts.sourceAssetId,
     cursor: opts.cursor,
     limit: opts.limit === undefined ? undefined : String(opts.limit),
   });
