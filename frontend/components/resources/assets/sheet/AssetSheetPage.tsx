@@ -398,7 +398,7 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
       data-asset-type={detail.asset_type}
       data-read-only={readOnly}
     >
-      <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-1 text-[11px] text-content-4">
+      <nav aria-label={t('assets.sheet.breadcrumb', 'Breadcrumb')} className="mb-4 flex items-center gap-1 text-[11px] text-content-4">
         <button
           type="button"
           data-testid="crumb-assets"

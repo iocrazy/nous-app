@@ -1780,7 +1780,10 @@
       "slot_not_generatable": "This slot has no generation template — fill it by attaching a file.",
       "loadout_mismatch": "That loadout belongs to another asset.",
       "generation_failed": "The image provider could not produce this image.",
-      "register_failed": "The image was generated but could not be stored."
+      "register_failed": "The image was generated but could not be stored.",
+      "not_authorised": "That generation belongs to another workspace.",
+      "generation_not_found": "That generation is no longer in the inbox.",
+      "file_missing": "That generation has no stored file to attach."
     },
     "loadFailed": "Could Not Load Assets — Check Your Connection And Try Again",
     "equip": {
@@ -1896,6 +1899,7 @@
       "addDescription": "Add A Description",
       "editField": "Edit {{field}}",
       "backToAssets": "Back To Assets",
+      "breadcrumb": "Breadcrumb",
       "setting": "Setting",
       "addSetting": "Add A Setting"
     },

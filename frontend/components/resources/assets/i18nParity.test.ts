@@ -287,6 +287,25 @@ describe('Asset library i18n parity', () => {
     'assets.err.loadout_mismatch',
     'assets.err.generation_failed',
     'assets.err.register_failed',
+    // `Attach Now` calls `save-as-asset`, so the codes GeneratedInboxService
+    // raises reach the sheet's `t('assets.err.' + code)` too. They were
+    // missing until Task 9 and rendered the generic line — a typed refusal
+    // read as "something went wrong", which is exactly the failure mode
+    // `useAssetFailure` exists to prevent.
+    //
+    // The other four codes the assets backend can raise —
+    // `file_not_attached` (detachFile), `project_scope_mismatch` /
+    // `project_ref_not_found` (link/unlinkProject) and `personal_team_missing`
+    // (listProjectAssets) — are deliberately NOT listed: those four service
+    // functions have zero component call sites in P2 (verified by grep), so a
+    // string for them would be copy no shipped path can render. They belong
+    // with the UI that first calls them.
+    'assets.err.not_authorised',
+    'assets.err.generation_not_found',
+    'assets.err.file_missing',
+    // The breadcrumb landmark's accessible name: icon-and-link only, so this
+    // string is the entire name a screen reader announces for that nav.
+    'assets.sheet.breadcrumb',
     ...RELATION_SECTION_KEYS.map((k) => `assets.rel.${k}`),
     ...LINK_RELATIONS.map((r) => `assets.rel.add.${r}`),
     ...ASSET_SOURCES.map((s) => `assets.source.${s}`),

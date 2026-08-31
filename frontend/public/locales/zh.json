@@ -1780,7 +1780,10 @@
       "slot_not_generatable": "该槽位没有生成模板 —— 请直接关联文件填充。",
       "loadout_mismatch": "该造型属于另一个资产。",
       "generation_failed": "图像服务未能生成这张图。",
-      "register_failed": "图已生成，但没能存进收件箱。"
+      "register_failed": "图已生成，但没能存进收件箱。",
+      "not_authorised": "该生成结果属于其他工作区。",
+      "generation_not_found": "该生成结果已不在收件箱里。",
+      "file_missing": "该生成结果没有可关联的文件。"
     },
     "loadFailed": "资产列表加载失败 —— 请检查网络后重试",
     "equip": {
@@ -1896,6 +1899,7 @@
       "addDescription": "添加描述",
       "editField": "编辑{{field}}",
       "backToAssets": "返回资产库",
+      "breadcrumb": "面包屑导航",
       "setting": "场景类型",
       "addSetting": "添加场景类型"
     },

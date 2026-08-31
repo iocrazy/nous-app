@@ -218,7 +218,18 @@ interface NameFieldProps {
   onCancel: () => void;
 }
 
-const NameField: React.FC<NameFieldProps> = ({ value, label, onChange, onSubmit, onCancel }) => (
+const NameField: React.FC<NameFieldProps> = ({
+  value,
+  label,
+  onChange,
+  onSubmit,
+  onCancel,
+}) => {
+  // `label` already arrives translated (the caller holds the loadout name);
+  // the cancel affordance is icon-only, so its accessible name is the ONLY
+  // text a screen reader gets for it and has to come from the locale too.
+  const { t } = useTranslation();
+  return (
   <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-card px-2 py-0.5">
     <input
       autoFocus
@@ -245,10 +256,11 @@ const NameField: React.FC<NameFieldProps> = ({ value, label, onChange, onSubmit,
     <button
       type="button"
       onClick={onCancel}
-      aria-label="Cancel"
+      aria-label={t('common.cancel', 'Cancel')}
       className="text-content-4 hover:text-content-2"
     >
       <X size={11} aria-hidden="true" />
     </button>
   </span>
-);
+  );
+};
