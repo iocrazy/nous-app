@@ -140,10 +140,11 @@ Every canvas assertion here checks `.react-flow__node:visible`.
 9. **Assets codex (P2)** — the Library rail's `Assets` entry is clickable and
    the shelf mounts against the real `/api/v1/assets`, with its heading and
    the `All` type tab visible. Same "no claim about contents" rule as step 8.
-   ⚠️ The rail renders TWO buttons named `Assets` — the navigation entry and
-   the expand/collapse chevron beside it, whose `aria-label` is the same word.
-   The spec takes `.first()`; if that ever starts clicking the chevron, the
-   fix is a `data-testid` on the rail entry, not a looser name match.
+   The rail entry is addressed by its exact accessible name. The chevron
+   beside it is named `Expand Assets` (`resources.assetsExpand`), so the two
+   controls are distinguishable by name alone — no `.first()`. If a future
+   change reintroduces two buttons with the same name here, the fix is to
+   rename one of them, not to reach for a positional locator.
 
 ## Troubleshooting: "waiting for element to be visible, enabled and stable"
 

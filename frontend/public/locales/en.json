@@ -1673,6 +1673,7 @@
     "trashFolderConfirm": "This folder contains {{contents}}. All contents will be moved to the recycle bin. Continue?",
     "generated": "Generated",
     "assets": "Assets",
+    "assetsExpand": "Expand Assets",
     "appearsInCanvases_one": "Appears in {{count}} canvas",
     "appearsInCanvases_other": "Appears in {{count}} canvases",
     "canvasRefRole": {
@@ -1703,6 +1704,7 @@
     "new": "New",
     "newOfType": "New {{type}}",
     "loadMore": "Load More",
+    "readinessSortPaged": "Readiness Sorting Only Orders One Page — Switch Sort To Load More",
     "projectsUnavailable": "Projects unavailable",
     "importFromScript": "Import From Script",
     "importFromScriptHint": "Pick a project first — a script imports into one project",
@@ -1942,6 +1944,7 @@
     "title": "Generated",
     "unreviewedChip": "{{n}} unreviewed",
     "loadMore": "Load More",
+    "loadFailed": "Could Not Load Generations — Check Your Connection And Try Again",
     "projectsUnavailable": "Projects unavailable",
     "tab": {
       "unreviewed": "Unreviewed",

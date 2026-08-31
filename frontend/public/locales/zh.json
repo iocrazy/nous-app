@@ -1673,6 +1673,7 @@
     "trashFolderConfirm": "此文件夹包含 {{contents}}，所有内容将移至回收站。是否继续？",
     "generated": "生成内容",
     "assets": "资产库",
+    "assetsExpand": "展开资产库",
     "appearsInCanvases_one": "出现在 {{count}} 个画布",
     "appearsInCanvases_other": "出现在 {{count}} 个画布",
     "canvasRefRole": {
@@ -1703,6 +1704,7 @@
     "new": "新建",
     "newOfType": "新建{{type}}",
     "loadMore": "加载更多",
+    "readinessSortPaged": "就绪度排序只对当前这一页生效 —— 换个排序才能继续加载",
     "projectsUnavailable": "项目列表不可用",
     "importFromScript": "从剧本导入",
     "importFromScriptHint": "请先选择一个项目 —— 剧本只能导入到某一个项目",
@@ -1942,6 +1944,7 @@
     "title": "生成内容",
     "unreviewedChip": "{{n}} 项待处理",
     "loadMore": "加载更多",
+    "loadFailed": "生成内容加载失败 —— 请检查网络后重试",
     "projectsUnavailable": "项目列表加载失败",
     "tab": {
       "unreviewed": "待处理",

@@ -229,8 +229,28 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
     };
   }, [teamId]);
 
+  /**
+   * `sort=readiness` orders drafts-first IN PYTHON, over the page that came
+   * back (`assets_service.py`), so appending a second page produces
+   * `drafts, ready, drafts, ready` — the ordering stops holding exactly where
+   * the user stops looking, and nothing on screen says so.
+   *
+   * Refusing the second page is the honest answer for P2: the user sees one
+   * correctly-ordered page and is told why there is no more of it. Ordering
+   * across the whole result set needs the primary-slot count in the SQL, which
+   * is P3 (recorded in the PR's 已知).
+   *
+   * Deliberately NOT hiding the sort chip once `hasMore` is true: a control
+   * that disappears when the library grows past 60 rows is a worse surprise
+   * than a button that says why it is off.
+   */
+  const readinessSortIsPaged = filters.sort === 'readiness' && hasMore;
+
   const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore || !scopeId) return;
+    // `readinessSortIsPaged` here as well as on the button: a disabled control
+    // is a UI affordance, not a guarantee, and appending a second page under
+    // this sort is the mis-ordering the flag exists to prevent.
+    if (!hasMore || loadingMore || !scopeId || readinessSortIsPaged) return;
     const token = requestRef.current;
     setLoadingMore(true);
     try {
@@ -248,7 +268,16 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
     } finally {
       setLoadingMore(false);
     }
-  }, [hasMore, loadingMore, scopeId, filters, assetType, rows.length, reportFailure]);
+  }, [
+    hasMore,
+    loadingMore,
+    scopeId,
+    filters,
+    assetType,
+    rows.length,
+    reportFailure,
+    readinessSortIsPaged,
+  ]);
 
   // ─── Navigation ──────────────────────────────────────────────────────────
 
@@ -683,17 +712,29 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
             )}
 
             {hasMore && (
-              <div className="flex justify-center py-5">
+              <div className="flex flex-col items-center gap-1.5 py-5">
                 <button
                   type="button"
-                  disabled={loadingMore}
+                  data-testid="asset-load-more"
+                  disabled={loadingMore || readinessSortIsPaged}
                   onClick={() => void loadMore()}
-                  className="rounded-lg border border-line-strong bg-card px-3 py-1.5 text-xs font-medium text-content-2 hover:bg-island-2 disabled:opacity-50"
+                  className="rounded-lg border border-line-strong bg-card px-3 py-1.5 text-xs font-medium text-content-2 hover:bg-island-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loadingMore
                     ? t('common.loading', 'Loading…')
                     : t('assets.loadMore', 'Load More')}
                 </button>
+                {readinessSortIsPaged && (
+                  <p
+                    data-testid="readiness-sort-paged"
+                    className="max-w-sm text-center text-[11px] text-content-3"
+                  >
+                    {t(
+                      'assets.readinessSortPaged',
+                      'Readiness Sorting Only Orders One Page — Switch Sort To Load More',
+                    )}
+                  </p>
+                )}
               </div>
             )}
           </>

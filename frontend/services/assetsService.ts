@@ -445,7 +445,15 @@ export async function listAssets(
   return Array.isArray(data) ? (data as AssetRow[]) : [];
 }
 
-/** Every asset linked to one project, across the project's own asset scope. */
+/**
+ * Every asset linked to one project, across the project's own asset scope.
+ *
+ * NO PRODUCTION CALLER YET — P3's foothold (项目分级视图, spec §9): the
+ * project-scoped shelf is what consumes this. Written and typed now so that
+ * task inherits the "no scope_id, the route derives it" rule rather than
+ * re-deriving it. Distinct from `detachFile` below, which is a MISSING
+ * feature, not a waiting one.
+ */
 export async function listProjectAssets(
   projectId: string,
   type?: AssetType,
@@ -555,7 +563,17 @@ export async function attachFiles(
   return Array.isArray(data) ? (data as AssetFileRow[]) : [];
 }
 
-/** Detach one file from one slot. The resource itself is untouched. */
+/**
+ * Detach one file from one slot. The resource itself is untouched.
+ *
+ * ⚠️ NO PRODUCTION CALLER, and unlike the P3 footholds in this file that is a
+ * GAP, not a plan: `Equip` is the Board's headline action and P2 shipped no
+ * inverse for it, so a file equipped onto the wrong slot can only be undone by
+ * deleting the underlying resource or the whole asset. The endpoint, its scope
+ * gate and its tests all exist — what is missing is the affordance (where the
+ * control lives, its confirm, its refetch contract), which is a design call
+ * and therefore P3. Recorded in the PR's 已知 so a user does not discover it.
+ */
 export async function detachFile(
   scopeId: string,
   assetId: string,
@@ -725,7 +743,13 @@ export async function generateSlot(
 
 // ─── Project refs ───────────────────────────────────────────────────────────
 
-/** Show this asset on a project's shelf. Needs WRITE access to the project. */
+/**
+ * Show this asset on a project's shelf. Needs WRITE access to the project.
+ *
+ * NO PRODUCTION CALLER YET — P3's foothold, the write half of
+ * `listProjectAssets` above. The sheet's `Used In` section reads project
+ * membership; editing it is the P3 surface.
+ */
 export async function linkProject(
   scopeId: string,
   assetId: string,
@@ -738,6 +762,8 @@ export async function linkProject(
   );
 }
 
+/** The inverse of {@link linkProject}, and P3's foothold for the same reason.
+ *  NO PRODUCTION CALLER YET. */
 export async function unlinkProject(
   scopeId: string,
   assetId: string,

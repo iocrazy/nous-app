@@ -174,10 +174,12 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   // smoked is that the rail entry is reachable and the shelf mounts against
   // the real `/api/v1/assets` — a blank surface is the failure this catches.
   //
-  // `.first()` is load-bearing: the rail renders TWO buttons named "Assets" —
-  // the navigation entry and, beside it, the expand/collapse chevron whose
-  // aria-label is the same word. The navigation one is first in DOM order.
-  await page.getByRole('button', { name: 'Assets' }).first().click();
+  // Exact name, no `.first()`: the chevron beside this entry is named
+  // "Expand Assets", so "Assets" addresses exactly one button. A positional
+  // workaround here would start clicking the chevron — collapsing the group
+  // instead of navigating — the first time DOM order changed, and the failure
+  // would look like "the shelf did not mount".
+  await page.getByRole('button', { name: 'Assets', exact: true }).click();
   const codex = page.getByTestId('asset-shelf');
   await expect(codex).toBeVisible({ timeout: 15_000 });
   await expect(codex.getByRole('heading', { name: 'Assets' })).toBeVisible();

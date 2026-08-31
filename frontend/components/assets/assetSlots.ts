@@ -58,11 +58,12 @@ export function slotsFor(type: AssetType): string[] {
 // MIRROR of `slots.py`'s `LINK_RULES` / `_AUDIO_SUBTYPE_FOR_RELATION` /
 // `link_allowed`, added for the entity sheet's relation sections (P2 Task 7).
 //
-// ⚠️ Unlike the slot tables above, this half is NOT pinned by
-// `backend/tests/services/assets/test_slots_frontend_mirror.py` — that test
-// parses PRIMARY_SLOT / SLOTS / UNSORTED / ASSET_TYPES and nothing else. The
-// frontend-side pin is `assetSlots.test.ts`, which hardcodes the same pairs;
-// a Python-side edit still has to be copied here by hand.
+// This half IS pinned, same as the slot tables above:
+// `backend/tests/services/assets/test_slots_frontend_mirror.py` parses
+// LINK_RULES / AUDIO_SUBTYPE_FOR_RELATION / LINK_RELATIONS out of this file and
+// compares them against `slots.py`. A one-sided edit fails the backend suite.
+// (`assetSlots.test.ts` hardcodes the same pairs a third time and therefore
+// stays green on drift — it is not the pin.)
 //
 // What it buys: the "Add" dialog searches only the type the relation can
 // accept, so an impossible pair is unreachable in the UI rather than a 422

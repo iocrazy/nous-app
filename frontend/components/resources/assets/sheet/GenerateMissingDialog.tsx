@@ -40,8 +40,10 @@ import { useToast } from '../../../Toast';
 import { generateSlot, previewGenerateSlot } from '../../../../services/assetsService';
 import type {
   AssetRowDetail,
+  GenerateSlotFailure,
   GenerateSlotPreview,
   GenerateSlotResult,
+  SkippedReference,
 } from '../../../../services/assetsService';
 import { saveGenerationAsAsset } from '../../../../services/generatedService';
 import { useGenerationModels } from '../../../../features/canvas-core/smart/nodes/useGenerationModels';
@@ -57,6 +59,100 @@ export const MAX_COUNT = 4;
 interface AttachOutcome {
   ok: number;
   failed: { id: string; message: string }[];
+}
+
+// ─── The per-unit ledger, rendered by BOTH outcomes ─────────────────────────
+//
+// The 202 (some units landed) and the 503 (none did) carry the SAME two lists:
+// the 202 puts them in the body, the 503 puts them in `error.extra`. Rendering
+// them through one pair of components is what stops the worse outcome from
+// reporting less than the better one - the shape recorded as
+// `reference-backend-returns-frontend-never-reads`, here on a path that costs
+// money.
+
+const FailedUnits: React.FC<{ units: GenerateSlotFailure[]; testId: string }> = ({
+  units,
+  testId,
+}) => {
+  const { t } = useTranslation();
+  if (units.length === 0) return null;
+  return (
+    <ul data-testid={testId} className="flex flex-col gap-0.5">
+      {units.map((unit) => (
+        <li
+          key={unit.index}
+          className="flex items-start gap-1 text-[11px] text-danger"
+          data-unit-index={unit.index}
+        >
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            {t('assets.gen.unitFailed', {
+              n: unit.index + 1,
+              defaultValue: 'Image {{n}} failed',
+            })}
+            {' — '}
+            {t(`assets.err.${unit.code}`, unit.detail)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+const SkippedRefs: React.FC<{ refs: SkippedReference[]; testId: string }> = ({
+  refs,
+  testId,
+}) => {
+  const { t } = useTranslation();
+  if (refs.length === 0) return null;
+  return (
+    <ul data-testid={testId} className="flex flex-col gap-0.5">
+      {refs.map((ref) => (
+        <li
+          key={ref.resource_id}
+          data-resource-id={ref.resource_id}
+          className="flex items-start gap-1 text-[11px] text-warn"
+        >
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            {t('assets.gen.skippedRef', {
+              id: ref.resource_id,
+              defaultValue: 'Reference {{id}} was not sent',
+            })}
+            {' — '}
+            {/* `reason` is DELIBERATELY un-localized machine text
+                (`materialize_failed: [Errno 2] …`, `resource_not_found`). It
+                is the diagnosable half of this line and there is no honest
+                translation of an errno; the sentence around it is translated.
+                Do not wrap it in `t()` - that would render the raw key. */}
+            {ref.reason}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+/** Narrow one of the 503's `extra` lists without trusting its shape. */
+function failuresFrom(value: unknown): GenerateSlotFailure[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (unit): unit is GenerateSlotFailure =>
+      typeof unit === 'object' &&
+      unit !== null &&
+      typeof (unit as GenerateSlotFailure).index === 'number' &&
+      typeof (unit as GenerateSlotFailure).code === 'string',
+  );
+}
+
+function skippedFrom(value: unknown): SkippedReference[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (ref): ref is SkippedReference =>
+      typeof ref === 'object' &&
+      ref !== null &&
+      typeof (ref as SkippedReference).resource_id === 'string',
+  );
 }
 
 export interface GenerateMissingDialogProps {
@@ -113,6 +209,17 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
     phase: 'preview' | 'run';
     /** Null when the failure carried no typed code at all. */
     code: string | null;
+    /**
+     * The provider's OWN sentence (`error.detail`). The backend deliberately
+     * sets the 503's detail to `failed[0]["detail"]` - "insufficient balance",
+     * a content-policy refusal - and the canned `assets.err.generation_failed`
+     * says none of it. Kept as text, not a code: it is not ours to translate.
+     */
+    detail: string | null;
+    /** The 503's `error.extra` ledger. Empty for a failure that carried none
+     *  (a network error, a non-envelope body). */
+    failed: GenerateSlotFailure[];
+    skipped: SkippedReference[];
   } | null>(null);
   const [model, setModel] = useState('');
   const [count, setCount] = useState(1);
@@ -150,7 +257,15 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
       .catch((err: unknown) => {
         if (!alive) return;
         console.error('[GenerateMissingDialog] preview failed:', err);
-        setRefusal({ phase: 'preview', code: (err as { code?: string } | null)?.code ?? null });
+        setRefusal({
+          phase: 'preview',
+          code: (err as { code?: string } | null)?.code ?? null,
+          // A refused PREVIEW replaces the whole panel with its typed sentence
+          // and spends nothing; there is no per-unit ledger to show.
+          detail: null,
+          failed: [],
+          skipped: [],
+        });
       })
       .finally(() => {
         if (alive) setPreviewLoading(false);
@@ -194,7 +309,21 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
       // toast that has already faded leaves them with no reason to change any
       // of them. Same standard `EquipDialog` holds itself to.
       onError(err);
-      setRefusal({ phase: 'run', code: (err as { code?: string } | null)?.code ?? null });
+      // Everything the 503 carried, not just its code. `count=1` makes EVERY
+      // total failure a 503, so storing only the code told the user LESS about
+      // the worst outcome than the 202 tells them about a partial one - and
+      // the provider's reason ("insufficient balance", a policy refusal) lived
+      // only in the console.
+      const typed = err as
+        | { code?: string; detail?: string; extra?: Record<string, unknown> }
+        | null;
+      setRefusal({
+        phase: 'run',
+        code: typed?.code ?? null,
+        detail: typeof typed?.detail === 'string' && typed.detail ? typed.detail : null,
+        failed: failuresFrom(typed?.extra?.failed),
+        skipped: skippedFrom(typed?.extra?.skipped_references),
+      });
     } finally {
       setRunning(false);
     }
@@ -407,49 +536,9 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
               })}
             </p>
 
-            {result.failed.length > 0 && (
-              <ul data-testid="result-failed" className="flex flex-col gap-0.5">
-                {result.failed.map((unit) => (
-                  <li
-                    key={unit.index}
-                    className="flex items-start gap-1 text-[11px] text-danger"
-                    data-unit-index={unit.index}
-                  >
-                    <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    <span>
-                      {t('assets.gen.unitFailed', {
-                        n: unit.index + 1,
-                        defaultValue: 'Image {{n}} failed',
-                      })}
-                      {' — '}
-                      {t(`assets.err.${unit.code}`, unit.detail)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <FailedUnits units={result.failed} testId="result-failed" />
 
-            {result.skipped_references.length > 0 && (
-              <ul data-testid="result-skipped" className="flex flex-col gap-0.5">
-                {result.skipped_references.map((ref) => (
-                  <li
-                    key={ref.resource_id}
-                    data-resource-id={ref.resource_id}
-                    className="flex items-start gap-1 text-[11px] text-warn"
-                  >
-                    <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    <span>
-                      {t('assets.gen.skippedRef', {
-                        id: ref.resource_id,
-                        defaultValue: 'Reference {{id}} was not sent',
-                      })}
-                      {' — '}
-                      {ref.reason}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <SkippedRefs refs={result.skipped_references} testId="result-skipped" />
 
             {attached && (
               <p data-testid="result-attached" className="text-[11px] text-content-3">
@@ -485,17 +574,34 @@ export const GenerateMissingDialog: React.FC<GenerateMissingDialogProps> = ({
         )}
 
         {refusal?.phase === 'run' && (
-          <p
+          <section
             role="alert"
             data-testid="generate-refused"
             data-code={refusal.code ?? ''}
-            className="rounded-lg border border-danger-line bg-danger-soft px-2.5 py-1.5 text-[11px] text-danger"
+            className="flex flex-col gap-1 rounded-lg border border-danger-line bg-danger-soft px-2.5 py-1.5 text-[11px] text-danger"
           >
-            {t('assets.gen.nothingGenerated', 'Nothing Was Generated')}{' '}
-            {refusal.code
-              ? t(`assets.err.${refusal.code}`, t('assets.err.generic'))
-              : t('assets.err.generic')}
-          </p>
+            <p>
+              {t('assets.gen.nothingGenerated', 'Nothing Was Generated')}{' '}
+              {refusal.code
+                ? t(`assets.err.${refusal.code}`, t('assets.err.generic'))
+                : t('assets.err.generic')}
+            </p>
+
+            {/* The provider's own sentence, ALONGSIDE the mapped one rather
+                than as its fallback: `generation_failed` IS mapped, so a
+                fallback would never render and "insufficient balance" would
+                stay in the console - which is exactly how this shipped. */}
+            {refusal.detail && (
+              <p data-testid="refused-detail" className="text-content-2">
+                {refusal.detail}
+              </p>
+            )}
+
+            {/* Same two renderers the 202 uses. The outcome that spent the
+                most must not explain the least. */}
+            <FailedUnits units={refusal.failed} testId="refused-failed" />
+            <SkippedRefs refs={refusal.skipped} testId="refused-skipped" />
+          </section>
         )}
 
         <div className="flex items-center justify-end gap-2">

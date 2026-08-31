@@ -704,6 +704,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }, [scopeId]);
 
   useEffect(() => {
+    // No scope yet (first paint, before the workspace resolves) is not a
+    // scope of zero: `?scope_id=` reaches the backend as a 422 and the only
+    // trace is a console.error on every cold load. The reset effect above
+    // already left the pill at `null`, which is the honest state.
+    if (!scopeId) return;
     let cancelled = false;
     fetchGeneratedCounts(scopeId)
       .then((counts) => {
@@ -727,6 +732,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }, [scopeId]);
 
   useEffect(() => {
+    // Same guard, same reason as the Generated pill above.
+    if (!scopeId) return;
     let cancelled = false;
     fetchAssetCounts(scopeId)
       .then((counts) => {

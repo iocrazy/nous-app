@@ -371,7 +371,13 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
               setAssetsExpanded((v) => !v);
             }}
             className={`p-1 ${cText600} ${cHover300} ${cHoverSurface800} rounded-md transition-colors shrink-0`}
-            aria-label={t('resources.assets', 'Assets')}
+            // NOT `resources.assets`: the navigation row beside it already
+            // carries that name, and two buttons with the same accessible name
+            // in one group is ambiguous to a screen reader AND to any
+            // name-based locator. `e2e-prod/walkthrough.spec.ts` had to take
+            // `.first()` to disambiguate — a positional workaround for what is
+            // really a naming defect.
+            aria-label={t('resources.assetsExpand', 'Expand Assets')}
             aria-expanded={assetsExpanded}
           >
             <ChevronDown
