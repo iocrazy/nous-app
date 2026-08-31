@@ -17,7 +17,9 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { ASSET_TYPES } from '../../assets/assetSlots';
+import { ASSET_TYPES, LINK_RELATIONS } from '../../assets/assetSlots';
+import { ASSET_SOURCES } from '../../../services/assetsService';
+import { RELATION_SECTION_KEYS } from './sheet/assetSheetModel';
 import { READINESS_VALUES, SORT_VALUES } from './assetFilters';
 
 const LOCALES = path.resolve(__dirname, '../../../public/locales');
@@ -133,6 +135,145 @@ describe('Asset library i18n parity', () => {
     ...READINESS_VALUES.map((v) => `assets.readiness.${v}`),
     ...SORT_VALUES.map((v) => `assets.sort.${v}`),
   ];
+
+  // ── The entity sheet's copy (Task 7) ──
+  //
+  // Same reasoning as the shelf block, with three more runtime-built families:
+  //   `assets.rel.${spec.key}`         (section headings)
+  //   `assets.rel.add.${relation}`     (link dialog titles)
+  //   `assets.source.${row.source}`    (Details panel)
+  //   `assets.sheet.lang.${lang}`      (EN/ZH toggle)
+  // Each is enumerated from the vocabulary the code iterates, so adding a
+  // relation or an asset source fails here until both locales carry its label.
+  const SHEET_KEYS = [
+    'assets.sheet.board',
+    'assets.sheet.arrange',
+    'assets.sheet.arrangeHint',
+    'assets.sheet.reorder',
+    'assets.sheet.equip',
+    'assets.sheet.generate',
+    'assets.sheet.comingSoon',
+    'assets.sheet.loadouts',
+    'assets.sheet.loadoutName',
+    'assets.sheet.newLoadout',
+    'assets.sheet.renameLoadout',
+    'assets.sheet.deleteLoadout',
+    'assets.sheet.setDefaultLoadout',
+    'assets.sheet.defaultLoadout',
+    'assets.sheet.activeLoadout',
+    'assets.sheet.prompt',
+    'assets.sheet.positive',
+    'assets.sheet.negative',
+    'assets.sheet.translate',
+    'assets.sheet.regenerate',
+    'assets.sheet.placeholders',
+    'assets.sheet.platformParams',
+    'assets.sheet.paramName',
+    'assets.sheet.paramValue',
+    'assets.sheet.addParam',
+    'assets.sheet.removeParam',
+    'assets.sheet.noParams',
+    'assets.sheet.noExamples',
+    'assets.sheet.noAudio',
+    'assets.sheet.noVariants',
+    'assets.sheet.loopable',
+    'assets.sheet.notLoopable',
+    'assets.sheet.sendToCanvas',
+    'assets.sheet.sendToAgent',
+    'assets.sheet.arrivesWithP4',
+    'assets.sheet.arrivesWithP5',
+    'assets.sheet.copyLoadoutPrompt',
+    'assets.sheet.promptCopied',
+    'assets.sheet.copyFailed',
+    'assets.sheet.nothingToCopy',
+    'assets.sheet.duplicate',
+    'assets.sheet.delete',
+    'assets.sheet.confirmDelete',
+    'assets.sheet.openInCanvas',
+    'assets.sheet.pickProject',
+    'assets.sheet.noProjectsToPick',
+    'assets.sheet.details',
+    'assets.sheet.type',
+    'assets.sheet.subtype',
+    'assets.sheet.source',
+    'assets.sheet.updated',
+    'assets.sheet.assetId',
+    'assets.sheet.usedIn',
+    'assets.sheet.noProjects',
+    'assets.sheet.canvasUsageLater',
+    'assets.sheet.addRole',
+    'assets.sheet.addDescription',
+    'assets.sheet.editField',
+    'assets.sheet.backToAssets',
+    'assets.rel.addAction',
+    'assets.rel.empty',
+    'assets.rel.remove',
+    'assets.rel.search',
+    'assets.rel.noCandidates',
+    'assets.rel.alreadyLinked',
+    'assets.rel.blocked.audioSubtype',
+    'assets.setting.exterior',
+    'assets.setting.interior',
+    // Typed refusals the sheet's own actions can produce, straight from
+    // `assets_service.py`. A code with no string renders the generic line and
+    // the user never learns which rule they hit.
+    'assets.err.asset_not_found',
+    'assets.err.invalid_slot',
+    'assets.err.link_not_allowed',
+    'assets.err.link_not_found',
+    'assets.err.resource_not_found',
+    'assets.err.cannot_delete_default',
+    'assets.err.loadout_not_found',
+    'assets.err.loadouts_character_only',
+    'assets.err.loadout_not_subset',
+    'assets.err.field_not_nullable',
+    'assets.err.nothing_to_translate',
+    'assets.err.translate_unavailable',
+    'assets.err.caption_unavailable',
+    'assets.err.caption_paused',
+    'assets.err.no_primary_file',
+    'assets.err.no_image_file',
+    'assets.err.file_not_captionable',
+    'assets.err.not_applicable',
+    'assets.err.project_not_found',
+    ...RELATION_SECTION_KEYS.map((k) => `assets.rel.${k}`),
+    ...LINK_RELATIONS.map((r) => `assets.rel.add.${r}`),
+    ...ASSET_SOURCES.map((s) => `assets.source.${s}`),
+    ...(['en', 'zh'] as const).map((l) => `assets.sheet.lang.${l}`),
+  ];
+
+  it.each(SHEET_KEYS)('%s resolves in both locales', (key) => {
+    expect(typeof at(en, key), `en ${key}`).toBe('string');
+    expect(typeof at(zh, key), `zh ${key}`).toBe('string');
+  });
+
+  it('the sheet interpolation placeholders survive translation', () => {
+    const placeholders: Record<string, string[]> = {
+      'assets.sheet.reorder': ['slot'],
+      'assets.sheet.confirmDelete': ['name'],
+      'assets.sheet.editField': ['field'],
+      'assets.rel.remove': ['name'],
+      'assets.rel.add.wears': ['type'],
+      'assets.rel.add.holds': ['type'],
+      'assets.rel.add.ambience_of': ['type'],
+      'assets.rel.add.voice_of': ['type'],
+    };
+    for (const [key, vars] of Object.entries(placeholders)) {
+      for (const tree of [en, zh]) {
+        for (const name of vars) {
+          expect(String(at(tree, key)), `${key} / ${name}`).toContain(`{{${name}}}`);
+        }
+      }
+    }
+  });
+
+  it('the sheet copy is actually translated, not copied across', () => {
+    // The four link-dialog titles are the same English sentence by design
+    // (they differ only by the interpolated type), so a zh/en comparison of
+    // one covers all four; they are not exempt.
+    const copied = SHEET_KEYS.filter((key) => at(zh, key) === at(en, key));
+    expect(copied).toEqual([]);
+  });
 
   it.each(SHELF_KEYS)('%s resolves in both locales', (key) => {
     expect(typeof at(en, key), `en ${key}`).toBe('string');

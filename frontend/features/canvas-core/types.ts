@@ -99,6 +99,14 @@ export interface CanvasCreatePayload {
   name?: string;
   kind?: CreatableCanvasKind;
   viewport_json?: CanvasViewport;
+  /**
+   * The asset this canvas belongs to (`canvases.asset_id`, mig 446). The
+   * backend's `CanvasCreate` has accepted it since asset-library P2 Task 1 and
+   * validates that the asset is readable from the project's asset scope
+   * (404 otherwise); it was missing here, so the one caller that sends it -
+   * the entity sheet's "Open in canvas" - had no way to type the field.
+   */
+  asset_id?: string;
 }
 
 export interface CanvasUpdatePayload {

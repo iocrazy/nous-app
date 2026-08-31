@@ -80,13 +80,16 @@ export interface AssetSearchOptions {
  * creation and never corrected afterwards, so a caller that omits it does not
  * get "unknown" — it gets the server default `manual`, which is a claim.
  */
-export type AssetSource =
-  | 'manual'
-  | 'script_import'
-  | 'generated'
-  | 'migrated'
-  | 'duplicated'
-  | 'system_preset';
+export const ASSET_SOURCES = [
+  'manual',
+  'script_import',
+  'generated',
+  'migrated',
+  'duplicated',
+  'system_preset',
+] as const;
+
+export type AssetSource = (typeof ASSET_SOURCES)[number];
 
 export interface AssetCreateBody {
   asset_type: AssetType;

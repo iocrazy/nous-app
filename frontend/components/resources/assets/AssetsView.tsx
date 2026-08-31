@@ -4,8 +4,9 @@
 //
 // Scope of THIS file: it owns the routing contract — which of the three asset
 // URLs is open, and what happens when one of them names a type that does not
-// exist. The shelf itself is `AssetShelf` and the detail page is Task 7;
-// neither re-derives the route, they are handed what the route resolved to.
+// exist. The shelf itself is `AssetShelf` and the detail page is
+// `AssetSheetPage`; neither re-derives the route, they are handed what the
+// route resolved to.
 //
 // The unknown-type redirect is here rather than in the router because React
 // Router cannot express "one of these six literals" in a path param without
@@ -14,13 +15,12 @@
 
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { AssetShelf } from './AssetShelf';
+import { AssetSheetPage } from './sheet/AssetSheetPage';
 
 export const AssetsView: React.FC = () => {
-  const { t } = useTranslation();
   const { selectedAssetType, assetTypeParam, selectedAssetId, resPath } =
     useResourcesContext();
 
@@ -35,18 +35,13 @@ export const AssetsView: React.FC = () => {
     return <Navigate to={resPath('/resources/assets')} replace />;
   }
 
-  // The item route (`resources/assets/item/:assetId`) is still a placeholder —
-  // Task 7 owns `AssetSheetPage`. It renders the id rather than nothing so the
-  // route is observably wired rather than a blank screen.
+  // The item route (`resources/assets/item/:assetId`). The sheet is keyed on
+  // the id so switching between two assets remounts it: its per-asset state
+  // (selected loadout, board draft order, inline edits in progress) belongs to
+  // ONE asset, and carrying it across would filter a character's board by
+  // another character's outfit.
   if (selectedAssetId) {
-    return (
-      <div className="flex-1 min-h-0 overflow-auto p-6">
-        <h1 className="text-[15px] font-medium text-content-1">
-          {t('resources.assets', 'Assets')}
-        </h1>
-        <p className="mt-2 text-[13px] text-content-3 tabular-nums">{selectedAssetId}</p>
-      </div>
-    );
+    return <AssetSheetPage key={selectedAssetId} assetId={selectedAssetId} />;
   }
 
   return <AssetShelf assetType={selectedAssetType} />;

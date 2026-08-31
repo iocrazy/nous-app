@@ -25,13 +25,13 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown, Loader2, Plus } from 'lucide-react';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
-import { useToast } from '../../Toast';
 import { fetchProjects } from '../../../services/projectsService';
 import type { Project } from '../../../types';
 import { ASSET_TYPES, type AssetType } from '../../assets/assetSlots';
-import { listAssets, GeneratedApiError } from '../../../services/assetsService';
+import { listAssets } from '../../../services/assetsService';
 import type { AssetRow, AssetSummary } from '../../../services/assetsService';
 import { AssetCard } from './AssetCard';
+import { useAssetFailureReporter } from './useAssetFailure';
 import { NewAssetDialog } from './NewAssetDialog';
 import { ASSET_TYPE_ICON, typeLabelKey, typeSingularKey } from './assetTypeMeta';
 import {
@@ -136,7 +136,6 @@ export interface AssetShelfProps {
 
 export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
   const { t } = useTranslation();
-  const { addToast } = useToast();
   const { scopeId, teamId, resPath, assetCounts, refreshAssetCounts } = useResourcesContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -169,23 +168,10 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
    *  rather than painted over the newer one. */
   const requestRef = useRef(0);
 
-  const reportFailure = useCallback(
-    (err: unknown) => {
-      if (err instanceof GeneratedApiError) {
-        addToast(t(`assets.err.${err.code}`, t('assets.err.generic')), 'error');
-        return;
-      }
-      console.error('[AssetShelf] request failed:', err);
-      addToast(t('assets.err.generic'), 'error');
-    },
-    [addToast, t],
-  );
-
-  /** `reportFailure` closes over `t`, whose identity react-i18next does not
-   *  promise to keep stable. Depending on it inside a fetching effect would
-   *  make that effect a refetch loop; effects read the latest reporter here. */
-  const reportFailureRef = useRef(reportFailure);
-  reportFailureRef.current = reportFailure;
+  // Shared with the entity sheet — see `useAssetFailure.ts` for why the ref
+  // exists (a fetching effect must not depend on `t`'s identity).
+  const { report: reportFailure, reportRef: reportFailureRef } =
+    useAssetFailureReporter('AssetShelf');
 
   // ─── Data ────────────────────────────────────────────────────────────────
 
@@ -214,7 +200,9 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
       .finally(() => {
         if (requestRef.current === token) setLoading(false);
       });
-  }, [scopeId, assetType, filterKey]);
+    // `reportFailureRef` is a ref (stable identity); listed only to satisfy
+    // the exhaustive-deps rule, which cannot see that through a custom hook.
+  }, [scopeId, assetType, filterKey, reportFailureRef]);
 
   useEffect(() => {
     let alive = true;

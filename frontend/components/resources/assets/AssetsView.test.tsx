@@ -56,6 +56,18 @@ vi.mock('../../../contexts/ResourcesContext', async () => {
 // resolved to and whether a shelf was rendered at all. The stub renders the
 // same label the real tab bar would, so the assertions below still read as
 // "the Locations shelf is on screen" rather than as an internal detail.
+// The sheet is stubbed for the same reason the shelf is: this file owns the
+// hand-off, not the detail page. Mounting the real `AssetSheetPage` here would
+// pull in the Toast provider, ResourcesContext's real shape, and a detail
+// fetch — none of which is what "did the item route resolve an id" asks.
+vi.mock('./sheet/AssetSheetPage', () => ({
+  AssetSheetPage: ({ assetId }: { assetId: string }) => (
+    <div data-testid="asset-sheet" data-asset-id={assetId}>
+      {assetId}
+    </div>
+  ),
+}));
+
 vi.mock('./AssetShelf', () => ({
   AssetShelf: ({ assetType }: { assetType: string | null }) => (
     <div data-testid="asset-shelf" data-asset-type={assetType ?? ''}>
@@ -143,9 +155,14 @@ describe('AssetsView — route shell', () => {
     expect(screen.getByText('Assets')).toBeTruthy();
   });
 
-  it('shows the asset id on the item route, and does not read it as a type', () => {
+  it('hands the asset id to the sheet, and does not read `item` as a type', () => {
+    // The id reaching the sheet is the assertion: rendering the sheet over a
+    // page that resolved the WRONG id would look identical on screen.
     renderAt('/team/42/resources/assets/item/727145299382534300');
-    expect(screen.getByText('727145299382534300')).toBeTruthy();
+    expect(screen.getByTestId('asset-sheet')).toHaveAttribute(
+      'data-asset-id',
+      '727145299382534300',
+    );
     expect(here()).toBe('/team/42/resources/assets/item/727145299382534300');
   });
 });
