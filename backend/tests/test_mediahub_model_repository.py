@@ -137,6 +137,44 @@ async def test_list_enabled_hides_secret_columns(
 
 
 @pytest.mark.asyncio
+async def test_list_enabled_default_still_strips_actual_provider(
+    repo: MediahubModelRepository, fake_session: _FakeSession
+) -> None:
+    """The 2026-08-14 leak tripwire: upstream identity collapses to one bit.
+
+    Every user-facing caller relies on this default. ``include_actual_provider``
+    added an opt-in for server-side consumers; this pins that the opt-out side
+    did not quietly widen.
+    """
+    fake_session.mapping_rows = [
+        {"id": 1, "name": "codex-local-image", "actual_provider": "codex-local"}
+    ]
+
+    rows = await repo.list_enabled()
+
+    assert rows == [{"id": 1, "name": "codex-local-image", "is_local": True}]
+    assert "actual_provider" not in rows[0]
+
+
+@pytest.mark.asyncio
+async def test_list_enabled_can_include_actual_provider_for_server_callers(
+    repo: MediahubModelRepository, fake_session: _FakeSession
+) -> None:
+    """Opt-in for server-side derivation (generation-capabilities looks up the
+    protocol's capabilities and emits only the capability values). ``is_local``
+    stays alongside — the flag adds a field, it does not swap one out."""
+    fake_session.mapping_rows = [
+        {"id": 1, "name": "codex-local-image", "actual_provider": "codex-local"},
+        {"id": 2, "name": "seedream", "actual_provider": "doubao"},
+    ]
+
+    rows = await repo.list_enabled(include_actual_provider=True)
+
+    assert [r["actual_provider"] for r in rows] == ["codex-local", "doubao"]
+    assert [r["is_local"] for r in rows] == [True, False]
+
+
+@pytest.mark.asyncio
 async def test_list_enabled_returns_empty_on_error(
     repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:

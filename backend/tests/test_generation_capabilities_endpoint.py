@@ -57,10 +57,32 @@ async def client() -> AsyncClient:
 
 
 def _catalog(monkeypatch, rows: list[dict]) -> None:
-    """Stub the catalog repository the endpoint reads."""
+    """Stub the catalog repository, honouring its REAL projection.
+
+    ``list_enabled`` pops ``actual_provider`` and leaves only the derived
+    ``is_local`` bit (the 2026-08-14 leak tripwire) unless the caller opts in
+    with ``include_actual_provider=True``. The first version of this stub just
+    handed back whatever rows the test wrote — so every test carried a field
+    production never returns, and the endpoint shipped reading a key that was
+    always ``None``. A boundary stub that does not model the boundary is not
+    a test; this one reproduces both settings of the flag.
+    """
     from app.repositories import mediahub_model_repository as repo_mod
 
-    repo = SimpleNamespace(list_enabled=AsyncMock(return_value=rows))
+    async def _list_enabled(
+        type_filter=None, viewer_user_id=None, include_actual_provider=False
+    ):
+        out = []
+        for r in rows:
+            row = dict(r)
+            provider = row.pop("actual_provider", None)
+            row["is_local"] = provider in ("codex-local", "jimeng-local")
+            if include_actual_provider:
+                row["actual_provider"] = provider
+            out.append(row)
+        return out
+
+    repo = SimpleNamespace(list_enabled=_list_enabled)
     monkeypatch.setattr(repo_mod, "get_mediahub_model_repository", lambda: repo)
 
 
@@ -206,3 +228,49 @@ async def test_capability_keys_match_the_picker_row_for_row(client, monkeypatch)
     picker = {row["name"] for row in models.json()["data"]}
     assert picker == {"codex-local-image"}  # the fixture really did filter
     assert set(caps.json()["data"]) == picker
+
+
+@pytest.mark.asyncio
+async def test_caps_survive_the_repository_leak_tripwire(client, monkeypatch):
+    """Prod incident 2026-08-30: every model came back as none().
+
+    ``list_enabled`` strips ``actual_provider`` by default, so the endpoint's
+    ``r.get("actual_provider")`` was always None, every row resolved to no
+    protocol, and the UI hid the ratio grid down to Auto for every model. The
+    original tests missed it because their stub returned rows carrying a field
+    the real repository never returns. This test is that missing one: it fails
+    unless the endpoint actually asks for the provider.
+    """
+    _catalog(monkeypatch, _ROWS)
+    _gate(monkeypatch)
+
+    resp = await client.get("/api/v1/canvases/generation-capabilities")
+
+    data = resp.json()["data"]
+    assert data["codex-local-image"]["max_refs"] == 9, "degraded to none()"
+    assert len(data["codex-local-image"]["ratios"]) == 8
+    assert len(data["mediahub-doubao-seedream-t2i"]["ratios"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_provider_string_never_reaches_the_response(client, monkeypatch):
+    """The endpoint asks the repository for ``actual_provider`` — so pin that
+    it consumes it and never emits it. Upstream identity stays private (the
+    2026-08-14 leak tripwire); the UI gets capability values only."""
+    _catalog(monkeypatch, _ROWS)
+    _gate(monkeypatch)
+
+    resp = await client.get("/api/v1/canvases/generation-capabilities")
+
+    # NB: a raw substring check would false-positive — the catalog NAME
+    # "codex-local-image" is itself public and legitimately in the body. The
+    # real assertion is the exact key set of each entry.
+    for entry in resp.json()["data"].values():
+        assert set(entry) == {
+            "ratios",
+            "quality",
+            "resolution",
+            "max_refs",
+            "negative",
+            "video_modes",
+        }

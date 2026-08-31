@@ -161,6 +161,7 @@ class MediahubModelRepository:
         self,
         type_filter: Optional[str] = None,
         viewer_user_id: Optional[str] = None,
+        include_actual_provider: bool = False,
     ) -> List[Dict[str, Any]]:
         """List enabled Nous models, optionally filtered by model type.
 
@@ -169,6 +170,16 @@ class MediahubModelRepository:
         Owner scoping (migration 431): rows with a non-NULL ``owner_user_id``
         belong to one user's personal credential; they are listed only for that
         viewer. No viewer → fail-closed (platform rows only).
+
+        :param include_actual_provider: SERVER-SIDE CONSUMERS ONLY. Keeps the
+            raw ``actual_provider`` string in each row instead of collapsing it
+            to the derived ``is_local`` bit. Upstream identity is private (the
+            2026-08-14 leak tripwire, see the comment at the pop below), so a
+            caller that passes True **must never serialize the field into a
+            response** — it is for deriving something on the server, the way
+            ``generation-capabilities`` looks up a protocol's capabilities and
+            emits only the capability values. Defaults to False so every
+            existing caller keeps the byte-identical projection it has today.
         """
         try:
             stmt = (
@@ -198,6 +209,8 @@ class MediahubModelRepository:
                     row = dict(m)
                     provider = row.pop("actual_provider", None)
                     row["is_local"] = provider in ("codex-local", "jimeng-local")
+                    if include_actual_provider:
+                        row["actual_provider"] = provider
                     out.append(_parity(row))
                 return out
         except Exception as e:
