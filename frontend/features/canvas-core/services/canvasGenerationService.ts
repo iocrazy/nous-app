@@ -81,7 +81,7 @@ export async function listGenerationCapabilities(): Promise<Record<string, Model
     success: boolean;
     data?: Record<string, ModelCapabilities>;
   };
-  if (!body.success || !body.data || typeof body.data !== 'object') {
+  if (!body.success || !body.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
     throw new ApiError('generation-capabilities response missing data', 500);
   }
   return body.data;

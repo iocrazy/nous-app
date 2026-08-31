@@ -48,7 +48,7 @@ describe('useModelCapabilities', () => {
     expect(other.result.current).toBeNull();
   });
 
-  it('returns null while loading, on fetch failure, and for an unknown model', async () => {
+  it('returns null while loading and on fetch failure', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     listGenerationCapabilities.mockRejectedValue(new Error('offline'));
     const { result } = renderHook(() => useModelCapabilities('codex-local-image'));
@@ -64,6 +64,43 @@ describe('useModelCapabilities', () => {
     await waitFor(() => expect(a.result.current).not.toBeNull());
     renderHook(() => useModelCapabilities('codex-local-image'));
     expect(listGenerationCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry after a failure — one attempt per session', async () => {
+    // The only structural difference from useGenerationModels is the `settled`
+    // gate. Without an assertion here, swapping it back for a `cache` check
+    // would turn nothing red.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    listGenerationCapabilities.mockRejectedValue(new Error('offline'));
+    const a = renderHook(() => useModelCapabilities('codex-local-image'));
+    await waitFor(() => expect(spy).toHaveBeenCalled()); // the catch ran: settled
+    a.unmount();
+
+    const b = renderHook(() => useModelCapabilities('codex-local-image'));
+    await new Promise((r) => setTimeout(r, 0)); // let any second attempt settle
+    expect(b.result.current).toBeNull();
+    expect(listGenerationCapabilities).toHaveBeenCalledTimes(1);
+    expect(spy, 'a settled failure is neither re-attempted nor re-logged').toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it('picks up a cache that settled elsewhere when its model name arrives late', async () => {
+    // The node that mounts before the catalog loads: no model name yet, so it
+    // never subscribes to the fetch. Another node settles the module cache. If
+    // this one does not re-sync when its name arrives, capability-hiding is a
+    // silent no-op for it forever (null renders as full support).
+    listGenerationCapabilities.mockResolvedValue(CAPS);
+    const late = renderHook(({ m }: { m: string }) => useModelCapabilities(m), {
+      initialProps: { m: '' },
+    });
+    expect(late.result.current).toBeNull();
+
+    const seed = renderHook(() => useModelCapabilities('codex-local-image'));
+    await waitFor(() => expect(seed.result.current).not.toBeNull());
+
+    late.rerender({ m: 'codex-local-image' });
+    await waitFor(() => expect(late.result.current).not.toBeNull());
+    expect(late.result.current!.max_refs).toBe(9);
   });
 
   it('returns null for an empty/absent model name', () => {

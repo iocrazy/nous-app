@@ -39,7 +39,15 @@ export function useModelCapabilities(model: string | null | undefined): ModelCap
   const [caps, setCaps] = useState<Record<string, ModelCapabilities> | null>(cache);
 
   useEffect(() => {
-    if (!model || settled) return undefined;
+    // Re-sync from the module cache first: an instance that mounted with no
+    // model name never subscribed to the fetch, so when its name arrives the
+    // cache may already have settled elsewhere. Passing the same reference
+    // lets React bail out, so this cannot loop.
+    if (settled) {
+      setCaps(cache);
+      return undefined;
+    }
+    if (!model) return undefined;
     let live = true;
     inflight = inflight ?? listGenerationCapabilities();
     inflight
