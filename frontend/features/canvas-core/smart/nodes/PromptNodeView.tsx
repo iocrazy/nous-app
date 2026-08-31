@@ -483,7 +483,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           {Array.isArray(last_dropped) && last_dropped.length > 0 && (
             <span
               data-testid="dropped-knobs-badge"
-              title="Not supported by this model"
+              title={t('canvas.knobNotSupported')}
               className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
             >
               {t('canvas.ignoredKnobs', { knobs: last_dropped.join(', ') })}

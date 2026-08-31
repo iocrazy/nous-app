@@ -14,6 +14,21 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelCapabilities } from '../../services/canvasGenerationService';
+import en from '../../../../public/locales/en.json';
+
+// Resolve `t` against the REAL shipped English copy rather than a hand-written
+// table, so the title assertion below still fails if the key is renamed or
+// dropped from en.json instead of silently passing on a bare key.
+vi.mock('react-i18next', () => {
+  const t = (key: string, vars?: Record<string, unknown>): string => {
+    const template = key
+      .split('.')
+      .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], en);
+    if (typeof template !== 'string') return key;
+    return template.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars?.[name] ?? ''));
+  };
+  return { useTranslation: () => ({ t }) };
+});
 
 /** What `useModelCapabilities` hands the footer for THIS case. */
 let caps: ModelCapabilities | null = null;

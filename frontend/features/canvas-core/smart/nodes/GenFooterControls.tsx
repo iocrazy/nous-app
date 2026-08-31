@@ -16,6 +16,7 @@ Timer,
   Monitor,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { PromptGenSettings } from '../types';
 import { useModelCapabilities } from './useModelCapabilities';
@@ -102,6 +103,7 @@ export function GenFooterControls({
   onChange,
   disabled,
 }: GenFooterControlsProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState<PopKey | null>(null);
   // Was the open popover summoned by a CLICK (pinned) or by hovering?
   //
@@ -228,7 +230,7 @@ export function GenFooterControls({
           <span
             data-testid="pill-ratio"
             className={ratioStranded ? 'text-warn' : undefined}
-            title={ratioStranded ? 'Not supported by this model' : undefined}
+            title={ratioStranded ? t('canvas.knobNotSupported') : undefined}
           >
             {ratioValue}
           </span>

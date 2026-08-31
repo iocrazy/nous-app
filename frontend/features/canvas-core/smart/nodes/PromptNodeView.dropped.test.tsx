@@ -83,6 +83,7 @@ vi.mock('./useModelCapabilities', () => ({
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { markDroppedKnobs } from '../droppedKnobs';
 import { withGenerationRunner } from '../generationRunner';
+import { resumePendingGenerations } from '../genResume';
 import { PromptNodeView } from './PromptNodeView';
 
 const baseProps = {
@@ -135,6 +136,9 @@ describe('PromptNodeView dropped-knob badge', () => {
 
     const badge = getByTestId('dropped-knobs-badge');
     expect(badge.textContent).toBe('Ignored: quality');
+    // Tooltip goes through i18n too — a zh user must not get an English
+    // sentence hanging off a translated badge.
+    expect(badge.getAttribute('title')).toBe('Not supported by this model');
     // Beside the run badge, not somewhere else on the card: the run is what
     // the answer is about.
     expect(
@@ -251,5 +255,76 @@ describe('a real run puts its dropped knobs on the node (seam)', () => {
       </ReactFlowProvider>,
     );
     expect(getByTestId('dropped-knobs-badge').textContent).toBe('Ignored: quality');
+  });
+});
+
+describe('a resumed run puts its dropped knobs on the node (seam)', () => {
+  // A reload is the OTHER way a generation reaches a terminal phase, and it
+  // does not go through the runner at all — genResume re-attaches polling to
+  // the persisted task ids. `last_dropped: []` (written by the dispatch-time
+  // clear) is persisted with the node, so a resume that ignored
+  // `dropped_knobs` would bring the page back showing a CLEAN badge for a run
+  // that dropped knobs: a wrong answer, not a missing one.
+  const seedResumable = (data: Record<string, unknown>) => {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      canvasId: '9',
+      loadStatus: 'ready',
+      nodes: [
+        {
+          id: 'p1',
+          type: 'prompt',
+          position: { x: 0, y: 0 },
+          data: {
+            ...BASE_DATA,
+            run_status: 'running',
+            gen_tasks: [{ task_id: 't1', kind: 'image' }],
+            ...data,
+          },
+        },
+      ],
+      connections: [],
+      selection: [],
+    });
+  };
+  const renderFromStore = () => {
+    const node = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as unknown as { id: string }).id === 'p1');
+    const data = (node as unknown as { data: Record<string, unknown> }).data;
+    return render(
+      <ReactFlowProvider>
+        <PromptNodeView {...baseProps} id="p1" type="prompt" data={data} />
+      </ReactFlowProvider>,
+    );
+  };
+
+  it('shows what the backend ignored for a run that finished after a reload', async () => {
+    seedResumable({ last_dropped: [] });
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_knobs: ['quality'] },
+    });
+
+    await resumePendingGenerations();
+
+    expect(renderFromStore().getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: quality',
+    );
+  });
+
+  it('leaves the badge alone when every resumed poll broke', async () => {
+    // Seeded non-empty so "untouched" is observable at all; the realistic
+    // post-reload value is []. Either way the rule is the same as the
+    // runner's: nobody reported, so nothing gets written down.
+    seedResumable({ last_dropped: ['quality'] });
+    pollGeneration.mockRejectedValue(new Error('poll broke'));
+
+    await resumePendingGenerations();
+
+    expect(renderFromStore().getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: quality',
+    );
   });
 });

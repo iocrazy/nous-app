@@ -2901,6 +2901,7 @@
     },
     "readOnly": "只读",
     "ignoredKnobs": "已忽略：{{knobs}}",
+    "knobNotSupported": "该模型不支持此项",
     "saveBadge": {
       "saving": "保存中…",
       "failed": "保存失败",

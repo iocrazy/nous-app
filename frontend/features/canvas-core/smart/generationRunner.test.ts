@@ -599,4 +599,51 @@ describe('every generation run site shows the dropped knobs', () => {
       ).toMatch(/\bonDropped\s*:/);
     }
   });
+
+  // ── Terminal-poll sites ───────────────────────────────────────────────────
+  // The scan above keys on runner CONSTRUCTION, and that is not where the
+  // hole was: `genResume` polls tasks to a terminal phase without building a
+  // runner at all, so it read `result_url`, ignored `dropped_knobs`, and the
+  // guard reported clean over it for a whole review round.
+  //
+  // The property that actually matters is "polls a generation task to a
+  // terminal phase", so that is what this keys on. Every such file must be
+  // classified — reports the field, or is listed with the reason it has
+  // nowhere to report it. There is deliberately no third, unclassified
+  // state (the tool-descriptor-allowlist idiom): a new terminal-poll site
+  // fails this test until someone decides which it is.
+  const REPORTS_DROPPED_KNOBS = ['smart/generationRunner.ts', 'smart/genResume.ts'];
+  const NO_PROMPT_NODE_TO_REPORT_ON: Record<string, string> = {
+    // `last_dropped` lives on PromptNodeData and the badge is rendered by
+    // PromptNodeView. These three drive shot / timeline / clip nodes, which
+    // have no such field and no badge — reporting there would need a UI that
+    // does not exist, not a one-line read.
+    'smart/nodes/ShotNodeView.tsx': 'shot node: no prompt-node badge exists',
+    'smart/clipRun.ts': 'timeline segment: no prompt-node badge exists',
+    'smart/timelineRun.ts': 'timeline node: no prompt-node badge exists',
+  };
+
+  it('every terminal-poll site is classified: it reports dropped knobs, or says why it cannot', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = join(__dirname, '..');
+    const pollers = sourceFiles(root, readdirSync).filter(
+      (rel) =>
+        // The service module DEFINES pollGeneration.
+        rel !== 'services/canvasGenerationService.ts' &&
+        stripComments(readFileSync(join(root, rel), 'utf8')).includes('pollGeneration('),
+    );
+    expect(
+      pollers.sort(),
+      'a file polls a generation task to a terminal phase but is classified neither way — decide whether it can show dropped knobs',
+    ).toEqual(
+      [...REPORTS_DROPPED_KNOBS, ...Object.keys(NO_PROMPT_NODE_TO_REPORT_ON)].sort(),
+    );
+    for (const rel of REPORTS_DROPPED_KNOBS) {
+      expect(
+        stripComments(readFileSync(join(root, rel), 'utf8')),
+        `${rel} polls to terminal and reads result_url but never dropped_knobs — the badge would show a clean run for one that dropped knobs`,
+      ).toMatch(/\bdropped_knobs\b/);
+    }
+  });
 });
