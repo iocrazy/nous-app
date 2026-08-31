@@ -58,6 +58,35 @@ export async function listGenerationModels(): Promise<GenerationModel[]> {
   return body.data;
 }
 
+/** What one catalog model can actually honour, as projected by the backend
+ *  (`GET /api/v1/canvases/generation-capabilities`). The UI hides a knob only
+ *  when a model is present here and says no — absence means "unknown", never
+ *  "unsupported". `honours_ratio` is deliberately absent: it names an internal
+ *  strategy, not something the UI can act on. */
+export interface ModelCapabilities {
+  ratios: string[];
+  quality: boolean;
+  resolution: boolean;
+  max_refs: number;
+  negative: boolean;
+  video_modes: string[];
+}
+
+/** Per-model capabilities keyed by catalog model name. Visibility matches
+ *  `listGenerationModels` row for row (both endpoints read one server-side
+ *  predicate), so every model the picker offers has an entry here. */
+export async function listGenerationCapabilities(): Promise<Record<string, ModelCapabilities>> {
+  const response = await apiFetch('/api/v1/canvases/generation-capabilities');
+  const body = (await response.json()) as {
+    success: boolean;
+    data?: Record<string, ModelCapabilities>;
+  };
+  if (!body.success || !body.data || typeof body.data !== 'object') {
+    throw new ApiError('generation-capabilities response missing data', 500);
+  }
+  return body.data;
+}
+
 /** An enabled `llm` catalog row for the text prompt's model picker. Same
  *  public-field contract as GenerationModel — the two come from the same
  *  `mediahub_models` table, differing only in `type`. */
