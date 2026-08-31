@@ -18,6 +18,7 @@ Timer,
 import { useEffect, useRef, useState } from 'react';
 
 import type { PromptGenSettings } from '../types';
+import { useModelCapabilities } from './useModelCapabilities';
 
 export interface FooterModel {
   name: string;
@@ -156,6 +157,18 @@ export function GenFooterControls({
   };
 
   const isImage = gen.kind === 'image';
+  // What this model can actually honour. `null` = unknown (loading, old
+  // backend, model absent from the map) and MUST render the full set: a
+  // capabilities hiccup may never cost a user a control that works.
+  const caps = useModelCapabilities(gen.model);
+  // Image and video share ONE grid; only the source list differs, so this is
+  // the single filter point for both. `auto` is a frontend concept (follow
+  // the input) that the backend never lists, so it always survives.
+  const offeredRatios = (
+    isImage
+      ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
+      : VIDEO_RATIOS.map((r) => ({ value: r.value, label: r.label }))
+  ).filter(({ value: r }) => caps === null || r === 'auto' || caps.ratios.includes(r));
   // Unset means "follow the source" — see autoRatio.isAutoRatio.
   const ratioValue = (isImage ? gen.ratio : gen.aspect) ?? 'auto';
   const modelLabel =
@@ -247,7 +260,7 @@ export function GenFooterControls({
           </span>
         </Pill>
       )}
-      {isImage && (
+      {isImage && (caps === null || caps.quality) && (
         <Pill
           testid="pill-quality"
           ariaLabel="Quality"
@@ -342,10 +355,7 @@ export function GenFooterControls({
               ladder right; HOVER selects (滑动到即选择), click closes. */}
           <div className="flex w-[380px] gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {(isImage
-                ? FOOTER_RATIOS.map((r) => ({ value: r, label: RATIO_LABELS[r] ?? '' }))
-                : VIDEO_RATIOS.map((r) => ({ value: r.value, label: r.label }))
-              ).map(({ value: r, label: rl }) => (
+              {offeredRatios.map(({ value: r, label: rl }) => (
                 <button
                   key={r}
                   type="button"
@@ -367,7 +377,7 @@ export function GenFooterControls({
                 </button>
               ))}
             </div>
-            {isImage && (
+            {isImage && (caps === null || caps.resolution) && (
               <div className="flex w-36 flex-col gap-1">
                 {RESOLUTIONS.map((res) => (
                   <button
