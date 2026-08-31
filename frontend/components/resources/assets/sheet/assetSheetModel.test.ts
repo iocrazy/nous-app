@@ -30,7 +30,9 @@ import {
   hasLoadouts,
   linkRowsFor,
   moveSlot,
+  deepEqual,
   platformParamRows,
+  platformParamsFromRows,
   primaryFile,
   promptPlaceholders,
   relatedAssetIds,
@@ -378,12 +380,87 @@ describe('header extras', () => {
     expect(promptPlaceholders({ placeholders: 42 })).toEqual([]);
   });
 
-  it('renders platform params, nested values included', () => {
+  it('renders platform params, nested values included, keeping the stored value', () => {
     expect(platformParamRows({ aspect_ratio: '1:1', size: { w: 2 } })).toEqual([
-      { key: 'aspect_ratio', value: '1:1' },
-      { key: 'size', value: '{"w":2}' },
+      {
+        key: 'aspect_ratio',
+        value: '1:1',
+        original: { key: 'aspect_ratio', value: '1:1' },
+      },
+      { key: 'size', value: '{"w":2}', original: { key: 'size', value: { w: 2 } } },
     ]);
     expect(platformParamRows(null)).toEqual([]);
+  });
+});
+
+describe('platformParamsFromRows', () => {
+  it('writes an untouched row back with its stored TYPE', () => {
+    // The load-bearing case. A stored string "4" renders as the text `4`;
+    // re-reading it would make it the NUMBER 4 - retyping a value nobody
+    // touched, which is exactly what the panel exists not to do.
+    const rows = platformParamRows({ model: '4', flag: 'null', shape: '{"a":1}' });
+    expect(platformParamsFromRows(rows)).toEqual({
+      model: '4',
+      flag: 'null',
+      shape: '{"a":1}',
+    });
+  });
+
+  it('round-trips non-string stored values unchanged', () => {
+    const rows = platformParamRows({ steps: 30, size: { w: 2 }, on: true, off: null });
+    expect(platformParamsFromRows(rows)).toEqual({
+      steps: 30,
+      size: { w: 2 },
+      on: true,
+      off: null,
+    });
+  });
+
+  it('re-reads a row the user actually edited', () => {
+    const [row] = platformParamRows({ steps: 30 });
+    expect(platformParamsFromRows([{ ...row, value: '40' }])).toEqual({ steps: 40 });
+    // Text that is not JSON stays text.
+    expect(platformParamsFromRows([{ ...row, value: '16:9' }])).toEqual({ steps: '16:9' });
+  });
+
+  it('a renamed key counts as an edit', () => {
+    const [row] = platformParamRows({ model: '4' });
+    expect(platformParamsFromRows([{ ...row, key: 'engine' }])).toEqual({ engine: 4 });
+  });
+
+  it('drops a half-typed new row', () => {
+    expect(
+      platformParamsFromRows([
+        { key: '', value: 'orphan', original: null },
+        { key: '  ', value: 'x', original: null },
+      ]),
+    ).toEqual({});
+  });
+
+  it('a brand new row is read from its text', () => {
+    expect(platformParamsFromRows([{ key: 'steps', value: '30', original: null }])).toEqual({
+      steps: 30,
+    });
+  });
+});
+
+describe('deepEqual', () => {
+  it('ignores key order but not values', () => {
+    expect(deepEqual({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    expect(deepEqual({ a: 1 }, { a: '1' })).toBe(false);
+    expect(deepEqual({ a: { b: [1, 2] } }, { a: { b: [1, 2] } })).toBe(true);
+    expect(deepEqual({ a: { b: [1, 2] } }, { a: { b: [2, 1] } })).toBe(false);
+  });
+
+  it('distinguishes missing keys from undefined ones', () => {
+    expect(deepEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+    expect(deepEqual({}, {})).toBe(true);
+  });
+
+  it('handles null and primitives without throwing', () => {
+    expect(deepEqual(null, null)).toBe(true);
+    expect(deepEqual(null, {})).toBe(false);
+    expect(deepEqual([1], { 0: 1 })).toBe(false);
   });
 });
 

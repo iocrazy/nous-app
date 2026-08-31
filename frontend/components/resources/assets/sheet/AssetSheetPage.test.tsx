@@ -47,6 +47,18 @@ vi.mock('../../../AudioWaveformPlayer', () => ({
   AudioWaveformPlayer: ({ src }: { src: string }) => <div data-testid="waveform" data-src={src} />,
 }));
 
+// The sheet must not read the Generated inbox: `GET /generated` has no
+// `source_asset_id` filter, so anything it fetched would be the scope's whole
+// inbox mislabelled as this asset's history. Mocked (not merely absent) so the
+// absence test below asserts a CALL that did not happen rather than a test id
+// no production code has ever used.
+const fetchGenerated = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
+const fetchGeneratedCounts = vi.fn().mockResolvedValue({});
+vi.mock('../../../../services/generatedService', () => ({
+  fetchGenerated: (...a: unknown[]) => fetchGenerated(...a),
+  fetchGeneratedCounts: (...a: unknown[]) => fetchGeneratedCounts(...a),
+}));
+
 const fetchProjects = vi.fn();
 vi.mock('../../../../services/projectsService', () => ({
   fetchProjects: (...a: unknown[]) => fetchProjects(...a),
@@ -71,9 +83,9 @@ vi.mock('../../../../services/assetsService', () => ({
   createLink: (...a: unknown[]) => createLink(...a),
   deleteLink: (...a: unknown[]) => deleteLink(...a),
   listAssets: vi.fn().mockResolvedValue([]),
-  createLoadout: vi.fn(),
-  updateLoadout: vi.fn(),
-  deleteLoadout: vi.fn(),
+  createLoadout: vi.fn().mockResolvedValue({}),
+  updateLoadout: vi.fn().mockResolvedValue({}),
+  deleteLoadout: vi.fn().mockResolvedValue(undefined),
   translatePrompt: vi.fn(),
   regeneratePrompt: vi.fn(),
   ASSET_SOURCES: ['manual'],
@@ -210,6 +222,137 @@ describe('per-type bodies', () => {
     const section = screen.getByTestId('relation-section');
     expect(section).toHaveAttribute('data-relation-key', 'wornBy');
     expect(within(section).queryByTestId('relation-remove')).toBeNull();
+  });
+});
+
+describe('a location sheet keeps its setting editable', () => {
+  const location = makeDetail({
+    id: '727145299382534302',
+    asset_type: 'location',
+    name: 'Bamboo Grove',
+    role_tag: 'exterior',
+    file_counts_by_slot: { establishing: 1 },
+    project_ids: [],
+  });
+
+  it('renders role_tag as the setting chip AND offers the inline edit', async () => {
+    // `role_tag` is writable only here and in the New dialog. Showing a static
+    // chip instead of the field (as an earlier version did) left a location
+    // created with the wrong setting uncorrectable from its own sheet.
+    await renderSheet(location, []);
+    expect(screen.getByTestId('location-setting')).toHaveTextContent('exterior');
+    expect(screen.getByTestId('sheet-role-edit')).toBeTruthy();
+  });
+
+  it('edits it, PATCHing only role_tag', async () => {
+    await renderSheet(location, []);
+    fireEvent.click(screen.getByTestId('sheet-role-edit'));
+    fireEvent.change(screen.getByTestId('sheet-role-input'), { target: { value: 'interior' } });
+    fireEvent.click(screen.getByTestId('sheet-role-save'));
+    await waitFor(() => expect(updateAsset).toHaveBeenCalledTimes(1));
+    expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, location.id, { role_tag: 'interior' });
+  });
+
+  it('a location with no setting still renders something editable', async () => {
+    // The empty case used to render nothing at all: no chip, no field.
+    const blank = makeDetail({ ...location, id: location.id, role_tag: '' });
+    await renderSheet(blank, []);
+    expect(screen.getByTestId('sheet-role')).toHaveTextContent('Add A Setting');
+    expect(screen.getByTestId('sheet-role-edit')).toBeTruthy();
+  });
+
+  it('a preset location shows the chip and no pencil', async () => {
+    const preset = makeDetail({
+      ...location,
+      id: location.id,
+      scope_id: null,
+      is_system_preset: true,
+    });
+    await renderSheet(preset, []);
+    expect(screen.getByTestId('location-setting')).toBeTruthy();
+    expect(screen.queryByTestId('sheet-role-edit')).toBeNull();
+  });
+});
+
+describe('loadout selection', () => {
+  it('survives an unrelated loadout being added', async () => {
+    // Keyed on the loadout COUNT (as an earlier version was), creating or
+    // deleting any loadout snapped the board back to the default outfit.
+    const withThird = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      loadouts: [
+        ...CHARACTER_DETAIL.loadouts,
+        {
+          ...CHARACTER_DETAIL.loadouts[1],
+          id: '727145299382534402',
+          name: 'Rain gear',
+          is_default: false,
+          sort_order: 2,
+        },
+      ],
+    });
+    let served = CHARACTER_DETAIL;
+    fetchAssetDetail.mockImplementation(async (_scope: string, id: string) => {
+      if (id === CHARACTER_DETAIL.id) return served;
+      if (id === COSTUME_DETAIL.id) return COSTUME_DETAIL;
+      throw new Error(`no fixture for ${id}`);
+    });
+    render(<AssetSheetPage assetId={CHARACTER_DETAIL.id} />);
+    await waitFor(() => expect(screen.getByTestId('asset-sheet')).toBeTruthy());
+
+    const chip = (id: string) =>
+      screen
+        .getAllByTestId('loadout-chip')
+        .find((el) => el.dataset.loadoutId === id) as HTMLElement;
+
+    fireEvent.click(within(chip('727145299382534401')).getByText('Night raid'));
+    expect(chip('727145299382534401')).toHaveAttribute('data-active', 'true');
+
+    // Create a third loadout — the sheet refetches and now sees three.
+    served = withThird;
+    fireEvent.click(screen.getByTestId('loadout-new'));
+    fireEvent.change(screen.getByTestId('loadout-name-input'), {
+      target: { value: 'Rain gear' },
+    });
+    fireEvent.click(screen.getByTestId('loadout-name-save'));
+
+    await waitFor(() => expect(screen.getAllByTestId('loadout-chip')).toHaveLength(3));
+    expect(chip('727145299382534401')).toHaveAttribute('data-active', 'true');
+    expect(chip('727145299382534400')).toHaveAttribute('data-active', 'false');
+  });
+
+  it('falls back to the default when the selected loadout is deleted', async () => {
+    const withoutNight = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      loadouts: [CHARACTER_DETAIL.loadouts[0]],
+    });
+    let served = CHARACTER_DETAIL;
+    fetchAssetDetail.mockImplementation(async (_scope: string, id: string) => {
+      if (id === CHARACTER_DETAIL.id) return served;
+      if (id === COSTUME_DETAIL.id) return COSTUME_DETAIL;
+      throw new Error(`no fixture for ${id}`);
+    });
+    render(<AssetSheetPage assetId={CHARACTER_DETAIL.id} />);
+    await waitFor(() => expect(screen.getByTestId('asset-sheet')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Night raid'));
+    served = withoutNight;
+    fireEvent.click(
+      within(
+        screen
+          .getAllByTestId('loadout-chip')
+          .find((el) => el.dataset.loadoutId === '727145299382534401') as HTMLElement,
+      ).getByTestId('loadout-delete'),
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('loadout-chip')).toHaveLength(1));
+    expect(
+      screen
+        .getAllByTestId('loadout-chip')
+        .find((el) => el.dataset.loadoutId === '727145299382534400'),
+    ).toHaveAttribute('data-active', 'true');
   });
 });
 
@@ -375,6 +518,34 @@ describe('Open in canvas', () => {
     expect(navigate).toHaveBeenCalledWith('/team/42/canvas/c1');
   });
 
+  it('offers only the scope team projects, and fetches that list once', async () => {
+    // An unscoped `GET /projects` returns every project the user can see, and
+    // `_require_asset_in_project_scope` 404s the moment the chosen project's
+    // team does not hold the asset - so an unscoped picker offers choices that
+    // dead-end on an error toast.
+    createCanvas.mockResolvedValue({ id: 'c9' });
+    const orphan = makeDetail({ ...CHARACTER_DETAIL, id: CHARACTER_DETAIL.id, project_ids: [] });
+    await renderSheet(orphan, [COSTUME_DETAIL]);
+    fireEvent.click(screen.getByTestId('open-in-canvas'));
+    await waitFor(() => expect(screen.getByTestId('canvas-project-picker')).toBeTruthy());
+
+    expect(fetchProjects).toHaveBeenCalledTimes(1);
+    expect(fetchProjects).toHaveBeenCalledWith({ teamId: TEAM_ID });
+    expect(
+      screen.getAllByTestId('canvas-project-option').map((el) => el.dataset.projectId),
+    ).toEqual(['55']);
+  });
+
+  it('says the projects are unavailable rather than showing an empty workspace', async () => {
+    fetchProjects.mockRejectedValueOnce(new Error('offline'));
+    const orphan = makeDetail({ ...CHARACTER_DETAIL, id: CHARACTER_DETAIL.id, project_ids: [] });
+    await renderSheet(orphan, [COSTUME_DETAIL]);
+    fireEvent.click(screen.getByTestId('open-in-canvas'));
+    const picker = await screen.findByTestId('canvas-project-picker');
+    await waitFor(() => expect(within(picker).getByRole('alert')).toBeTruthy());
+    expect(screen.queryByTestId('canvas-project-option')).toBeNull();
+  });
+
   it('asks which project when the asset is linked to none', async () => {
     createCanvas.mockResolvedValue({ id: 'c2' });
     const orphan = makeDetail({ ...CHARACTER_DETAIL, id: CHARACTER_DETAIL.id, project_ids: [] });
@@ -419,10 +590,13 @@ describe('the deferred surfaces', () => {
     );
   });
 
-  it('renders no generation history panel', async () => {
-    // `GET /generated` has no `source_asset_id` filter, so the only honest
-    // options were "nothing" or "the whole inbox under this asset's name".
+  it('reads nothing from the Generated inbox', async () => {
+    // The falsifiable form of "no generation history panel": a panel added
+    // later under ANY test id would have to fetch, and this fails then. A test
+    // id absence check would not.
     await renderSheet();
-    expect(screen.queryByTestId('generation-history')).toBeNull();
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(fetchGenerated).not.toHaveBeenCalled();
+    expect(fetchGeneratedCounts).not.toHaveBeenCalled();
   });
 });

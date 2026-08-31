@@ -19,7 +19,10 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
-import { getResourceCoverUrl } from '../../../../services/resourceService';
+// The FULL file, not `/cover` - that route serves
+// `thumbnail_path > cover_image_path > original`, and a viewer opened to
+// inspect a pin at full screen would be showing a thumbnail.
+import { getResourceFileUrl } from '../../../../services/resourceService';
 
 export interface PinLightboxProps {
   /** Resource ids, in the order the board shows them. */
@@ -108,7 +111,7 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
           </button>
         )}
         <img
-          src={getResourceCoverUrl(current)}
+          src={getResourceFileUrl(current)}
           alt={slotLabel}
           data-testid="pin-lightbox-image"
           data-resource-id={current}

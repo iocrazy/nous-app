@@ -86,6 +86,9 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   const [selectedLoadoutId, setSelectedLoadoutId] = useState<string | null>(null);
   const [related, setRelated] = useState<Record<string, AssetRow | undefined>>({});
   const [projects, setProjects] = useState<Project[]>([]);
+  /** Distinct from `projects.length === 0`: the canvas picker must not present
+   *  a failed fetch as "this workspace has no projects". */
+  const [projectsFailed, setProjectsFailed] = useState(false);
   /** Bumped to re-run the detail fetch after a write. */
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -117,12 +120,19 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     };
   }, [scopeId, assetId, reloadTick, reportRef]);
 
-  // The selected loadout follows the asset. Keeping a selection across assets
-  // would filter one character's board by another's outfit id and silently
-  // show an empty `worn` pin.
+  // The selection survives as long as it still EXISTS. Keying this on the
+  // loadout count instead (an earlier version did) snapped the board back to
+  // the default outfit whenever any unrelated loadout was created or deleted;
+  // keying it on the asset alone would carry one character's outfit id onto
+  // another's board and silently empty the `worn` pin. Selecting the default
+  // is the answer only when the current selection is gone.
   useEffect(() => {
-    setSelectedLoadoutId(detail ? defaultLoadoutId(detail.loadouts) : null);
-  }, [detail?.id, detail?.loadouts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    setSelectedLoadoutId((current) => {
+      if (!detail) return null;
+      if (current && detail.loadouts.some((l) => l.id === current)) return current;
+      return defaultLoadoutId(detail.loadouts);
+    });
+  }, [detail]);
 
   // --- Related assets -------------------------------------------------------
   //
@@ -163,15 +173,23 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     };
   }, [scopeId, relatedKey]);
 
+  // ONE team-scoped project fetch, used by both the Used In chips and the
+  // canvas picker. Scoped on purpose: an unscoped `GET /projects` returns every
+  // project the user can see, and `_require_asset_in_project_scope` 404s the
+  // moment the chosen project's team does not hold the asset.
   useEffect(() => {
     let alive = true;
     fetchProjects(teamId ? { teamId } : undefined)
       .then((list) => {
-        if (alive) setProjects(list);
+        if (!alive) return;
+        setProjects(list);
+        setProjectsFailed(false);
       })
       .catch((err) => {
-        // Only the Used In chips depend on this; they fall back to raw ids.
         console.error('[AssetSheetPage] project list unavailable:', err);
+        if (!alive) return;
+        setProjects([]);
+        setProjectsFailed(true);
       });
     return () => {
       alive = false;
@@ -423,6 +441,8 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
           detail={detail}
           loadout={activeLoadout}
           readOnly={readOnly}
+          projects={projects}
+          projectsFailed={projectsFailed}
           projectNames={projectNames}
           busy={busy}
           onCopyLoadoutPrompt={() => void onCopyLoadoutPrompt()}

@@ -101,9 +101,18 @@ export const AUDIO_SUBTYPE_FOR_RELATION: Partial<
   voice_of: ['voice'],
 };
 
-/** Mirror of `link_allowed`. `fromSubtype` null is read as `""` — same as
- *  Python's `(from_subtype or "")` — so an audio asset with no subtype set
- *  fails the check rather than passing it by accident. */
+/**
+ * Mirror of `link_allowed`. `fromSubtype` null is read as `""` — same as
+ * Python's `(from_subtype or "")` — so an audio asset with no subtype set
+ * fails the check rather than passing it by accident.
+ *
+ * NO PRODUCTION CALLER YET — the sheet's link picker narrows by
+ * `LINK_RULES[relation][1]`, which is the same rule read from the front. This
+ * function is the MIRROR'S foothold: it is the piece that has to match
+ * `link_allowed` gate for gate, and `assetSlots.test.ts` is the only thing
+ * standing between a Python-side edit and a 422 the UI cannot see coming
+ * (the backend pin parses the slot tables only).
+ */
 export function linkAllowed(
   relation: AssetLinkRelation,
   fromType: AssetType,

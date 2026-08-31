@@ -17,6 +17,7 @@ import { i18nMock, SCOPE_ID } from './sheetTestUtils';
 vi.mock('react-i18next', () => i18nMock);
 vi.mock('../../../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `/api/v1/resources/${id}/cover`,
+  getResourceFileUrl: (id: string) => `/api/v1/resources/${id}/file`,
 }));
 
 const updateAsset = vi.fn();
@@ -162,10 +163,58 @@ describe('prompt-type extras', () => {
     fireEvent.change(value, { target: { value: '16:9' } });
     fireEvent.blur(value);
     await waitFor(() => expect(updateAsset).toHaveBeenCalled());
-    // "16:9" is not JSON, so it stays text. Guessing types would turn a model
-    // named "4" into the number 4.
+    // "16:9" is not JSON, so it stays text.
     expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, promptDetail.id, {
       platform_params: { aspect_ratio: '16:9' },
+    });
+  });
+
+  it('a blur that changed nothing is not a request', async () => {
+    // Tabbing through the panel must not PATCH the column or bump
+    // `updated_at` - the same rule the inline text fields follow.
+    renderEditor({ detail: promptDetail, showPromptExtras: true });
+    fireEvent.blur(screen.getByTestId('param-key'));
+    fireEvent.blur(screen.getByTestId('param-value'));
+    await Promise.resolve();
+    expect(updateAsset).not.toHaveBeenCalled();
+  });
+
+  it('does not retype a stored string on the way back out', async () => {
+    // `{"model": "4"}` renders as the text `4`. Re-reading every row from its
+    // text would rewrite the column to `{"model": 4}` - a silent retype of a
+    // value the user never touched. Note "16:9" cannot catch this: it throws
+    // in JSON.parse and so survives the buggy path too.
+    const withNumericString = makeDetail({
+      ...promptDetail,
+      id: promptDetail.id,
+      platform_params: { model: '4', steps: 30 },
+    });
+    renderEditor({ detail: withNumericString, showPromptExtras: true });
+
+    // Edit the OTHER row, so a save happens and carries the untouched one.
+    const values = screen.getAllByTestId('param-value');
+    fireEvent.change(values[1], { target: { value: '40' } });
+    fireEvent.blur(values[1]);
+
+    await waitFor(() => expect(updateAsset).toHaveBeenCalled());
+    expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, promptDetail.id, {
+      platform_params: { model: '4', steps: 40 },
+    });
+  });
+
+  it('an edited row IS re-read, so a typed number becomes one', async () => {
+    const withNumericString = makeDetail({
+      ...promptDetail,
+      id: promptDetail.id,
+      platform_params: { model: '4' },
+    });
+    renderEditor({ detail: withNumericString, showPromptExtras: true });
+    const value = screen.getByTestId('param-value');
+    fireEvent.change(value, { target: { value: '5' } });
+    fireEvent.blur(value);
+    await waitFor(() => expect(updateAsset).toHaveBeenCalled());
+    expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, promptDetail.id, {
+      platform_params: { model: 5 },
     });
   });
 

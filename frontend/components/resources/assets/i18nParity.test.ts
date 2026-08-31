@@ -202,6 +202,8 @@ describe('Asset library i18n parity', () => {
     'assets.sheet.noProjects',
     'assets.sheet.canvasUsageLater',
     'assets.sheet.addRole',
+    'assets.sheet.setting',
+    'assets.sheet.addSetting',
     'assets.sheet.addDescription',
     'assets.sheet.editField',
     'assets.sheet.backToAssets',

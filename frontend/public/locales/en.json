@@ -1842,7 +1842,9 @@
       "addRole": "Add A Role",
       "addDescription": "Add A Description",
       "editField": "Edit {{field}}",
-      "backToAssets": "Back To Assets"
+      "backToAssets": "Back To Assets",
+      "setting": "Setting",
+      "addSetting": "Add A Setting"
     },
     "rel": {
       "wears": "Wears",

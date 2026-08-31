@@ -1842,7 +1842,9 @@
       "addRole": "添加定位",
       "addDescription": "添加描述",
       "editField": "编辑{{field}}",
-      "backToAssets": "返回资产库"
+      "backToAssets": "返回资产库",
+      "setting": "场景类型",
+      "addSetting": "添加场景类型"
     },
     "rel": {
       "wears": "穿着",

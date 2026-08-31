@@ -17,6 +17,7 @@ vi.mock('react-i18next', () => i18nMock);
 vi.mock('../../../ui/primitives', () => ({ UiModal: UiModalStub }));
 vi.mock('../../../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `/api/v1/resources/${id}/cover`,
+  getResourceFileUrl: (id: string) => `/api/v1/resources/${id}/file`,
 }));
 
 const listAssets = vi.fn();

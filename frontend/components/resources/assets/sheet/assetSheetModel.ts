@@ -346,8 +346,14 @@ export function composeLoadoutPrompt(
   return parts.join(', ');
 }
 
-/** The negatives the same set contributes, de-duplicated, in first-seen order
- *  (spec §6.3: "negative 取并集去重"). */
+/**
+ * The negatives the same set contributes, de-duplicated, in first-seen order
+ * (spec 6.3: "negative 取并集去重").
+ *
+ * NO PRODUCTION CALLER YET - it is P4's foothold: the canvas delivery protocol
+ * composes the positive and the negative together, and this half is written and
+ * pinned now so that task inherits the rule rather than re-deriving it.
+ */
 export function composeLoadoutNegative(
   asset: AssetRow,
   loadout: AssetLoadoutRow | null,
@@ -426,15 +432,97 @@ export function promptPlaceholders(
   return [];
 }
 
-/** `platform_params` flattened to rows for the editor. Values are shown as
- *  JSON so a nested object is visible rather than silently stringified. */
+/**
+ * One row of the `platform_params` editor.
+ *
+ * `original` is what the column actually holds, kept alongside the editable
+ * text so an untouched row can be written back with its TYPE intact. Without
+ * it, rendering `{"model": "4"}` as the text `4` and parsing it back on the way
+ * out rewrites the column to `{"model": 4}` - a silent retype of a value the
+ * user never touched. `null` marks a row the user added, which has no stored
+ * value to preserve.
+ */
+export interface PlatformParamRow {
+  key: string;
+  /** What the input shows. */
+  value: string;
+  original: { key: string; value: unknown } | null;
+}
+
+/** How a stored value is rendered into its input. Strings appear as themselves
+ *  (quoting them would make every model name look like JSON); everything else
+ *  as JSON, so a nested object is visible rather than `[object Object]`. */
+export function platformParamText(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** `platform_params` flattened to editor rows, each carrying its stored value. */
 export function platformParamRows(
   params: Record<string, unknown> | null | undefined,
-): { key: string; value: string }[] {
+): PlatformParamRow[] {
   return Object.entries(params ?? {}).map(([key, value]) => ({
     key,
-    value: typeof value === 'string' ? value : JSON.stringify(value),
+    value: platformParamText(value),
+    original: { key, value },
   }));
+}
+
+/**
+ * Editor rows back into the column.
+ *
+ * A row whose key and text still match what was stored is written back AS
+ * STORED - the string `"4"` stays the string `"4"`. Only a row the user
+ * actually changed is re-read from its text, and then only JSON that parses
+ * becomes a non-string: `1:1` stays text, `{"steps": 30}` becomes an object.
+ * Blank keys are dropped (a half-typed new row is not a parameter yet).
+ */
+export function platformParamsFromRows(rows: readonly PlatformParamRow[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const row of rows) {
+    const name = row.key.trim();
+    if (name === '') continue;
+    const untouched =
+      row.original !== null &&
+      name === row.original.key &&
+      row.value === platformParamText(row.original.value);
+    if (untouched) {
+      out[name] = row.original.value;
+      continue;
+    }
+    try {
+      out[name] = JSON.parse(row.value);
+    } catch {
+      // Not JSON - keep the literal text. This is the common case (`1:1`, a
+      // model slug) and is not an error worth reporting.
+      out[name] = row.value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Structural equality, used to decide whether a param edit is a REQUEST.
+ *
+ * Blurring through a field the user only looked at must not PATCH the column
+ * and must not bump `updated_at` - the same rule the inline text fields follow.
+ * Written out rather than done with `JSON.stringify` because that compares key
+ * ORDER too, and would report a reordered-but-identical object as a change.
+ */
+export function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => deepEqual(item, b[index]));
+  }
+  if (typeof a !== 'object') return false;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every(
+    (key) => Object.prototype.hasOwnProperty.call(right, key) && deepEqual(left[key], right[key]),
+  );
 }
 
 // ─── Canvas ─────────────────────────────────────────────────────────────────

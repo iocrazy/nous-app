@@ -114,18 +114,6 @@ export const AssetSheetHeader: React.FC<AssetSheetHeaderProps> = ({
             </span>
           )}
 
-          {/* Per-type extras. A location's interior/exterior lives in
-              `role_tag` (spec 6.2), which is also the generic role line - so
-              it is shown ONCE, here, rather than twice. */}
-          {detail.asset_type === 'location' && detail.role_tag !== '' && (
-            <span
-              data-testid="location-setting"
-              className="rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3"
-            >
-              {t(`assets.setting.${detail.role_tag}`, detail.role_tag)}
-            </span>
-          )}
-
           {detail.asset_type === 'audio' && (
             <>
               <span
@@ -149,21 +137,43 @@ export const AssetSheetHeader: React.FC<AssetSheetHeaderProps> = ({
           )}
         </div>
 
-        {/* The role line. Locations already show `role_tag` as their setting
-            chip above, so it is not repeated. */}
-        {detail.asset_type !== 'location' && (
-          <InlineText
-            testId="sheet-role"
-            value={detail.role_tag}
-            label={t('assets.dialog.role', 'Role')}
-            readOnly={readOnly}
-            maxLength={40}
-            className="text-[12px] text-content-3"
-            placeholder={t('assets.sheet.addRole', 'Add A Role')}
-            onSave={(next) => onPatch({ role_tag: next })}
-            allowEmpty
-          />
-        )}
+        {/* The role line. ONE field for all six types - `role_tag` is writable
+            only here and in the New dialog, so skipping it for locations (as an
+            earlier version did, showing a static chip instead) left a location
+            created with the wrong setting, or none, uncorrectable from its own
+            sheet. A location renders the SAME field as its interior/exterior
+            chip; only the display form differs. */}
+        <InlineText
+          testId="sheet-role"
+          value={detail.role_tag}
+          label={
+            detail.asset_type === 'location'
+              ? t('assets.sheet.setting', 'Setting')
+              : t('assets.dialog.role', 'Role')
+          }
+          readOnly={readOnly}
+          maxLength={40}
+          className="text-[12px] text-content-3"
+          placeholder={
+            detail.asset_type === 'location'
+              ? t('assets.sheet.addSetting', 'Add A Setting')
+              : t('assets.sheet.addRole', 'Add A Role')
+          }
+          display={
+            detail.asset_type === 'location'
+              ? (value) => (
+                  <span
+                    data-testid="location-setting"
+                    className="rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3"
+                  >
+                    {t(`assets.setting.${value}`, value)}
+                  </span>
+                )
+              : undefined
+          }
+          onSave={(next) => onPatch({ role_tag: next })}
+          allowEmpty
+        />
 
         <InlineText
           testId="sheet-description"
@@ -203,6 +213,11 @@ interface InlineTextProps {
   multiline?: boolean;
   /** Whether clearing the field is a legal edit. A name is not. */
   allowEmpty: boolean;
+  /** Optional read-mode presentation (a location's setting chip). The EDIT
+   *  mode is unchanged: a display form is a skin, never a reason to drop the
+   *  field. An empty value always falls back to the placeholder, so the
+   *  affordance is on screen even when there is nothing to show. */
+  display?: (value: string) => React.ReactNode;
   onSave: (next: string) => void;
 }
 
@@ -216,6 +231,7 @@ const InlineText: React.FC<InlineTextProps> = ({
   placeholder,
   multiline = false,
   allowEmpty,
+  display,
   onSave,
 }) => {
   const { t } = useTranslation();
@@ -234,6 +250,8 @@ const InlineText: React.FC<InlineTextProps> = ({
         <span data-testid={testId} className={`min-w-0 ${className} whitespace-pre-wrap`}>
           {value === '' ? (
             <span className="text-content-4">{placeholder ?? ''}</span>
+          ) : display ? (
+            display(value)
           ) : (
             value
           )}

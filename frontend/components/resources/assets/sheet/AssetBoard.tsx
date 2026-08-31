@@ -55,6 +55,11 @@ export interface AssetBoardProps {
   onError: (err: unknown) => void;
 }
 
+/** How long the keyboard path waits for the next arrow key before saving.
+ *  Long enough to absorb key repeat, short enough that a deliberate single
+ *  move feels saved. */
+const REORDER_SETTLE_MS = 400;
+
 const PIN_FRAME =
   'relative w-full overflow-hidden rounded-lg border bg-island-2 text-left transition-colors';
 
@@ -99,6 +104,16 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
   const primarySlot = PRIMARY_SLOT[detail.asset_type];
   const main = primaryFile(detail, loadoutId);
 
+  // Once the server's own order matches the draft, the draft has nothing left
+  // to say. Clearing it only on a MATCH (rather than on save) avoids the flash
+  // back to the old arrangement between the PATCH resolving and the refetched
+  // detail arriving.
+  useEffect(() => {
+    setDraftOrder((current) =>
+      current && current.join(' ') === savedOrder.join(' ') ? null : current,
+    );
+  }, [savedOrder]);
+
   const commitOrder = useCallback(
     async (next: string[]) => {
       setDraftOrder(next);
@@ -110,7 +125,6 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
           attrs: { ...(detail.attrs ?? {}), board_layout: { slot_order: next } },
         });
         onAssetUpdated(row);
-        setDraftOrder(null);
       } catch (err) {
         // The board snaps back to the saved order: leaving the moved pin where
         // the user dropped it would show an arrangement the server does not
@@ -124,15 +138,52 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
     [readOnly, scopeId, detail.id, detail.attrs, onAssetUpdated, onError],
   );
 
+  // --- Coalesced persistence ------------------------------------------------
+  //
+  // Both inputs move the pin immediately and save on SETTLE. The pointer path
+  // settles on release; the keyboard path has no release, so it settles after a
+  // pause. Without this, a held-down arrow key fires one whole-order PATCH per
+  // repeat, all of them concurrent and none of them ordered - the last write to
+  // land wins, which is not necessarily the last one the user made.
+
+  const pendingRef = useRef<string[] | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPending = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const next = pendingRef.current;
+    pendingRef.current = null;
+    if (next) void commitOrder(next);
+  }, [commitOrder]);
+
+  const schedulePersist = useCallback(
+    (next: string[]) => {
+      pendingRef.current = next;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(flushPending, REORDER_SETTLE_MS);
+    },
+    [flushPending],
+  );
+
+  // An unmount mid-pause must not drop the move: the pin is already where the
+  // user put it on screen, and losing it silently is the worse outcome.
+  const flushRef = useRef(flushPending);
+  flushRef.current = flushPending;
+  useEffect(() => () => flushRef.current(), []);
+
   const moveBy = useCallback(
     (slot: string, delta: number) => {
       const from = order.indexOf(slot);
       if (from < 0) return;
       const next = moveSlot(order, from, from + delta);
       if (next.join(' ') === order.join(' ')) return;
-      void commitOrder(next);
+      setDraftOrder(next);
+      schedulePersist(next);
     },
-    [order, commitOrder],
+    [order, schedulePersist],
   );
 
   // --- Pointer drag ---------------------------------------------------------
@@ -180,6 +231,13 @@ export const AssetBoard: React.FC<AssetBoardProps> = ({
       dragState.current = null;
       event.currentTarget.releasePointerCapture?.(event.pointerId);
       const next = draftOrder;
+      // A release IS the settle: cancel whatever the keyboard path had queued
+      // and write once, now.
+      pendingRef.current = null;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
       if (next && next.join(' ') !== savedOrder.join(' ')) void commitOrder(next);
       else setDraftOrder(null);
     },

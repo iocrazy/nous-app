@@ -16,7 +16,7 @@
 //    a claim that is not true, so the panel is absent until the backend filter
 //    exists. Adding it is out of this task's scope by the brief.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Bot,
@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 
 import { createCanvas } from '../../../../features/canvas-core/services/canvasService';
-import { fetchProjects } from '../../../../services/projectsService';
 import type { Project } from '../../../../types';
 import type { AssetLoadoutRow, AssetRowDetail } from '../../../../services/assetsService';
 import { typeSingularKey } from '../assetTypeMeta';
@@ -38,6 +37,18 @@ export interface SheetSidebarProps {
   detail: AssetRowDetail;
   loadout: AssetLoadoutRow | null;
   readOnly: boolean;
+  /**
+   * The projects of THIS asset's scope, already fetched by the page (team-scoped
+   * via `fetchProjects({teamId})`). Passed down rather than re-fetched: an
+   * unscoped `GET /projects` returns every project the user can see, and
+   * `_require_asset_in_project_scope` 404s the moment the chosen project's team
+   * does not hold the asset - so an unscoped picker offers choices that
+   * dead-end on an error toast.
+   */
+  projects: Project[];
+  /** Distinct from `projects.length === 0`: an empty workspace says "make a
+   *  project", a failed fetch says "try again". */
+  projectsFailed: boolean;
   /** Project id -> name for the Used In chips. */
   projectNames: Record<string, string>;
   onCopyLoadoutPrompt: () => void;
@@ -57,6 +68,8 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
   detail,
   loadout,
   readOnly,
+  projects,
+  projectsFailed,
   projectNames,
   onCopyLoadoutPrompt,
   onDuplicate,
@@ -131,6 +144,8 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
 
         <OpenInCanvasLink
           detail={detail}
+          projects={projects}
+          projectsFailed={projectsFailed}
           onOpenCanvas={onOpenCanvas}
           onError={onError}
         />
@@ -215,6 +230,9 @@ const DetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({
 
 interface OpenInCanvasLinkProps {
   detail: AssetRowDetail;
+  /** The scope's projects, from the page. */
+  projects: Project[];
+  projectsFailed: boolean;
   onOpenCanvas: (canvasId: string) => void;
   onError: (err: unknown) => void;
 }
@@ -227,41 +245,20 @@ interface OpenInCanvasLinkProps {
  * answer; when it is linked to several, or none, the user picks - silently
  * choosing the first would put the canvas somewhere they did not ask for, and
  * refusing outright would strand every asset that is not yet on a project.
+ *
+ * The list is the page's team-scoped one. See `projects` on the props above for
+ * why it is not fetched here.
  */
 const OpenInCanvasLink: React.FC<OpenInCanvasLinkProps> = ({
   detail,
+  projects,
+  projectsFailed,
   onOpenCanvas,
   onError,
 }) => {
   const { t } = useTranslation();
   const [picking, setPicking] = useState(false);
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [projectsFailed, setProjectsFailed] = useState(false);
   const [creating, setCreating] = useState(false);
-
-  useEffect(() => {
-    if (!picking || projects !== null) return;
-    let alive = true;
-    fetchProjects()
-      .then((list) => {
-        if (alive) {
-          setProjects(list);
-          setProjectsFailed(false);
-        }
-      })
-      .catch((err) => {
-        console.error('[AssetSheet] project list unavailable:', err);
-        if (alive) {
-          // An empty list and a failed fetch must not look the same: the
-          // first says "make a project", the second says "try again".
-          setProjects([]);
-          setProjectsFailed(true);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, [picking, projects]);
 
   const open = useCallback(
     async (projectId: string) => {
@@ -308,9 +305,7 @@ const OpenInCanvasLink: React.FC<OpenInCanvasLinkProps> = ({
           <p className="mb-1 text-[11px] text-content-3">
             {t('assets.sheet.pickProject', 'Pick A Project For The Canvas')}
           </p>
-          {projects === null ? (
-            <p className="text-[11px] text-content-4">{t('common.loading', 'Loading...')}</p>
-          ) : projectsFailed ? (
+          {projectsFailed ? (
             <p role="alert" className="text-[11px] text-danger">
               {t('assets.projectsUnavailable', 'Projects unavailable')}
             </p>

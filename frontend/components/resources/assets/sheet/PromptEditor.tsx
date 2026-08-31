@@ -35,7 +35,14 @@ import {
 import type { AssetRowDetail, AssetUpdateBody } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
 import { slotLabelKey } from '../assetTypeMeta';
-import { filesForSlot, platformParamRows, promptPlaceholders } from './assetSheetModel';
+import {
+  deepEqual,
+  filesForSlot,
+  platformParamRows,
+  platformParamsFromRows,
+  promptPlaceholders,
+  type PlatformParamRow,
+} from './assetSheetModel';
 import { PinLightbox } from './PinLightbox';
 
 type PromptLang = 'en' | 'zh';
@@ -321,31 +328,34 @@ interface PlatformParamsProps {
 /**
  * A flat key/value editor over `platform_params`.
  *
- * Values are stored as STRINGS unless they parse as JSON. Guessing types would
- * silently turn a model name like `4` into a number; parsing only what is
- * unambiguously JSON keeps `"1:1"` a string and `{"steps": 30}` an object.
+ * Two rules, both of which this panel got wrong once:
+ *
+ *  * A ROW THE USER DID NOT EDIT IS WRITTEN BACK AS STORED. The inputs are
+ *    text, so a stored string `"4"` renders as `4` - and re-reading every row
+ *    from its text on the way out would rewrite it to the NUMBER 4, retyping a
+ *    value nobody touched. `platformParamsFromRows` keeps each row's stored
+ *    value and only re-reads the ones whose key or text actually moved.
+ *  * A BLUR THAT CHANGED NOTHING IS NOT A REQUEST. Tabbing through the panel
+ *    must not PATCH the column or bump `updated_at`, the same rule the inline
+ *    text fields follow.
+ *
+ * Only an edited row is re-read, and then only unambiguous JSON becomes a
+ * non-string: `1:1` stays text, `{"steps": 30}` becomes an object. Typing a
+ * bare `4` into a row therefore does make it a number - that is a value the
+ * user just wrote, and the input carries no other type information.
  */
 const PlatformParams: React.FC<PlatformParamsProps> = ({ params, readOnly, onSave }) => {
   const { t } = useTranslation();
-  const [rows, setRows] = useState(() => platformParamRows(params));
+  const [rows, setRows] = useState<PlatformParamRow[]>(() => platformParamRows(params));
 
   useEffect(() => {
     setRows(platformParamRows(params));
   }, [params]);
 
-  const commit = (next: { key: string; value: string }[]) => {
-    const out: Record<string, unknown> = {};
-    for (const { key, value } of next) {
-      const name = key.trim();
-      if (name === '') continue;
-      try {
-        out[name] = JSON.parse(value);
-      } catch {
-        // Not JSON - keep the literal text. This is the common case
-        // (`"1:1"`, a model slug) and is not an error worth reporting.
-        out[name] = value;
-      }
-    }
+  const commit = (next: readonly PlatformParamRow[]) => {
+    const out = platformParamsFromRows(next);
+    // Nothing moved - no PATCH, no refetch, no `updated_at` bump.
+    if (deepEqual(out, params ?? {})) return;
     onSave(out);
   };
 
@@ -406,7 +416,10 @@ const PlatformParams: React.FC<PlatformParamsProps> = ({ params, readOnly, onSav
         <button
           type="button"
           data-testid="param-add"
-          onClick={() => setRows((prev) => [...prev, { key: '', value: '' }])}
+          onClick={() =>
+            // `original: null` marks a row with nothing stored to preserve.
+            setRows((prev) => [...prev, { key: '', value: '', original: null }])
+          }
           className="self-start rounded border border-dashed border-line-strong px-2 py-0.5 text-[11px] text-content-3 hover:text-content"
         >
           {t('assets.sheet.addParam', 'Add Parameter')}

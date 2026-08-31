@@ -27,6 +27,7 @@ vi.mock('../../../../services/assetsService', () => ({
 
 vi.mock('../../../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `/api/v1/resources/${id}/cover`,
+  getResourceFileUrl: (id: string) => `/api/v1/resources/${id}/file`,
 }));
 
 import { AssetBoard } from './AssetBoard';
@@ -189,6 +190,47 @@ describe('Arrange', () => {
 
     await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
     expect(slotOrder()[0]).toBe('stills');
+  });
+
+  it('coalesces a burst of arrow keys into ONE write of the final order', async () => {
+    // Held-down arrows would otherwise fire one whole-order PATCH per repeat,
+    // all concurrent and unordered - the last to LAND wins, which is not
+    // necessarily the last one the user made. The pointer path settles on
+    // release; the keyboard path settles after a pause.
+    renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    const handle = () =>
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement;
+
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+    fireEvent.keyDown(handle(), { key: 'ArrowRight' });
+
+    await waitFor(() => expect(updateAsset).toHaveBeenCalled());
+    expect(updateAsset).toHaveBeenCalledTimes(1);
+    expect(updateAsset).toHaveBeenCalledWith(SCOPE_ID, CHARACTER_DETAIL.id, {
+      attrs: {
+        board_layout: {
+          slot_order: ['expressions', 'extras', 'worn', 'stills', 'unsorted'],
+        },
+      },
+    });
+  });
+
+  it('shows the moved pin immediately, before the write settles', () => {
+    renderBoard();
+    fireEvent.click(screen.getByTestId('board-arrange'));
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('pin-drag-handle')
+        .find((el) => el.getAttribute('data-slot') === 'stills') as HTMLElement,
+      { key: 'ArrowRight' },
+    );
+    // The pin moves on the keypress; only the PATCH waits.
+    expect(slotOrder()[0]).toBe('expressions');
+    expect(updateAsset).not.toHaveBeenCalled();
   });
 
   it('a move that would leave the grid is not a request', () => {
