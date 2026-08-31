@@ -173,6 +173,11 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
   // look identical in the popover otherwise, and the user is left reading
   // "this workspace has no projects" off a network error.
   const [projectsError, setProjectsError] = useState(false);
+  /** A failed list is NOT an empty inbox. Without this flag both render as
+   *  "Nothing To Review", which tells the user their generations are gone
+   *  when in fact the request never landed. The toast is transient; this line
+   *  is not. Mirrors `AssetShelf`'s `loadError` — same contract, same reason. */
+  const [loadError, setLoadError] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [saveAsAssetItems, setSaveAsAssetItems] = useState<GeneratedItem[] | null>(null);
@@ -225,13 +230,15 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
         if (requestRef.current !== token) return;
         setItems(page.items);
         setCursor(page.next_cursor);
+        setLoadError(false);
       })
       .catch((err) => {
         if (requestRef.current !== token) return;
         // An error page is not an empty page: leave nothing on screen that
-        // could read as "there is nothing here".
+        // could read as "there is nothing here" — see `loadError` above.
         setItems([]);
         setCursor(null);
+        setLoadError(true);
         reportFailureRef.current(err);
       })
       .finally(() => {
@@ -780,6 +787,14 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             <Loader2 size={14} className="animate-spin" aria-hidden="true" />
             {t('common.loading', 'Loading…')}
           </div>
+        ) : loadError ? (
+          <p
+            role="alert"
+            data-testid="generated-load-error"
+            className="py-10 text-sm text-danger"
+          >
+            {t('generated.loadFailed', 'Could Not Load Generations')}
+          </p>
         ) : items.length === 0 ? (
           <p className="py-10 text-sm text-content-3">{emptyMessage()}</p>
         ) : (

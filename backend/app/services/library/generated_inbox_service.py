@@ -167,6 +167,7 @@ class GeneratedInboxService:
         media_kind: Optional[str] = None,
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
+        source_asset_id: Optional[int] = None,
         cursor: Optional[str] = None,
         limit: int = 60,
     ) -> dict[str, Any]:
@@ -178,6 +179,7 @@ class GeneratedInboxService:
             media_kind=media_kind,
             model=model,
             since=since,
+            source_asset_id=source_asset_id,
             cursor=cursor,
             limit=limit,
         )

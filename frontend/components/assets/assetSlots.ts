@@ -52,3 +52,77 @@ export const UNSORTED = 'unsorted';
 export function slotsFor(type: AssetType): string[] {
   return [...SLOTS[type], UNSORTED];
 }
+
+// ─── Link rules ─────────────────────────────────────────────────────────────
+//
+// MIRROR of `slots.py`'s `LINK_RULES` / `_AUDIO_SUBTYPE_FOR_RELATION` /
+// `link_allowed`, added for the entity sheet's relation sections (P2 Task 7).
+//
+// This half IS pinned, same as the slot tables above:
+// `backend/tests/services/assets/test_slots_frontend_mirror.py` parses
+// LINK_RULES / AUDIO_SUBTYPE_FOR_RELATION / LINK_RELATIONS out of this file and
+// compares them against `slots.py`. A one-sided edit fails the backend suite.
+// (`assetSlots.test.ts` hardcodes the same pairs a third time and therefore
+// stays green on drift — it is not the pin.)
+//
+// What it buys: the "Add" dialog searches only the type the relation can
+// accept, so an impossible pair is unreachable in the UI rather than a 422
+// `link_not_allowed` after the user picked something.
+
+/** How one asset relates to another. Same union as `assetsService`'s
+ *  `AssetLinkRelation`; declared here because this is the table's home and
+ *  importing the service from a constants module would invert the dependency. */
+export type AssetLinkRelation = 'wears' | 'holds' | 'ambience_of' | 'voice_of';
+
+export const LINK_RELATIONS = [
+  'wears',
+  'holds',
+  'ambience_of',
+  'voice_of',
+] as const satisfies readonly AssetLinkRelation[];
+
+/** relation → [from type, to type]. */
+export const LINK_RULES: Record<AssetLinkRelation, readonly [AssetType, AssetType]> = {
+  wears: ['character', 'costume'],
+  holds: ['character', 'prop'],
+  ambience_of: ['audio', 'location'],
+  voice_of: ['audio', 'character'],
+};
+
+/**
+ * The audio subtypes each audio relation accepts. A relation absent from this
+ * table has no subtype condition — the backend applies the check only to the
+ * two audio relations, and mirroring "no entry means no constraint" keeps the
+ * two sides answering the same question.
+ */
+export const AUDIO_SUBTYPE_FOR_RELATION: Partial<
+  Record<AssetLinkRelation, readonly string[]>
+> = {
+  ambience_of: ['sfx', 'music'],
+  voice_of: ['voice'],
+};
+
+/**
+ * Mirror of `link_allowed`. `fromSubtype` null is read as `""` — same as
+ * Python's `(from_subtype or "")` — so an audio asset with no subtype set
+ * fails the check rather than passing it by accident.
+ *
+ * NO PRODUCTION CALLER YET — the sheet's link picker narrows by
+ * `LINK_RULES[relation][1]`, which is the same rule read from the front. This
+ * function is the MIRROR'S foothold: it is the piece that has to match
+ * `link_allowed` gate for gate, and `assetSlots.test.ts` is the only thing
+ * standing between a Python-side edit and a 422 the UI cannot see coming
+ * (the backend pin parses the slot tables only).
+ */
+export function linkAllowed(
+  relation: AssetLinkRelation,
+  fromType: AssetType,
+  fromSubtype: string | null,
+  toType: AssetType,
+): boolean {
+  const rule = LINK_RULES[relation];
+  if (!rule || rule[0] !== fromType || rule[1] !== toType) return false;
+  const allowedSub = AUDIO_SUBTYPE_FOR_RELATION[relation];
+  if (allowedSub && !allowedSub.includes(fromSubtype ?? '')) return false;
+  return true;
+}

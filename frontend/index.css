@@ -266,6 +266,14 @@
   --color-agent: var(--agent);
   --color-agent-soft: var(--agent-soft);
   --color-agent-line: var(--agent-line);
+  /* `--color-accent` is a literal in `:root` (K1), but `--accent-soft` is
+     re-declared per theme AND per module, so its Tailwind alias has to be an
+     inline reference — that is what makes `bg-accent-soft` follow the module
+     the way `bg-[var(--accent-soft)]` already does. Without this line the
+     utility does not exist at all and Tailwind emits nothing for it: the
+     class is silently dropped, which is how six P2 call sites shipped with a
+     transparent chip background nobody saw fail. */
+  --color-accent-soft: var(--accent-soft);
   --color-ink-50: var(--ink-50);
   --color-ink-100: var(--ink-100);
   --color-ink-200: var(--ink-200);

@@ -1,0 +1,268 @@
+{
+ "GET /assets": {
+  "success": true,
+  "data": [
+   {
+    "id": "727145299382534300",
+    "scope_id": "727145299382534200",
+    "asset_type": "character",
+    "subtype": null,
+    "name": "Sang Yao",
+    "role_tag": "lead",
+    "description": "Late twenties, wind-burnt.",
+    "attrs": {},
+    "prompt_positive": "same woman as reference\u2026",
+    "prompt_negative": null,
+    "prompt_positive_zh": null,
+    "prompt_negative_zh": null,
+    "platform_params": {},
+    "cover_file_id": "727145299382534146",
+    "source": "manual",
+    "duplicated_from": null,
+    "is_system_preset": false,
+    "tags": {
+     "role": [
+      "lead"
+     ]
+    },
+    "sort_order": 0,
+    "created_by": "11111111-1111-1111-1111-111111111111",
+    "created_at": "2026-08-29T10:00:00Z",
+    "updated_at": "2026-08-29T10:00:00Z",
+    "readiness": {
+     "state": "ready",
+     "missing": []
+    },
+    "file_counts_by_slot": {
+     "sheet": 1,
+     "stills": 5
+    },
+    "project_ids": [
+     "55"
+    ],
+    "loadout_count": 2
+   },
+   {
+    "id": "727145299382534301",
+    "scope_id": "727145299382534200",
+    "asset_type": "character",
+    "subtype": null,
+    "name": "Fan Qi",
+    "role_tag": "lead",
+    "description": "Late twenties, wind-burnt.",
+    "attrs": {},
+    "prompt_positive": null,
+    "prompt_negative": null,
+    "prompt_positive_zh": null,
+    "prompt_negative_zh": null,
+    "platform_params": {},
+    "cover_file_id": null,
+    "source": "manual",
+    "duplicated_from": null,
+    "is_system_preset": false,
+    "tags": {
+     "role": [
+      "lead"
+     ]
+    },
+    "sort_order": 0,
+    "created_by": "11111111-1111-1111-1111-111111111111",
+    "created_at": "2026-08-29T10:00:00Z",
+    "updated_at": "2026-08-29T10:00:00Z",
+    "readiness": {
+     "state": "draft",
+     "missing": [
+      "sheet"
+     ]
+    },
+    "file_counts_by_slot": {
+     "stills": 1
+    },
+    "project_ids": [
+     "55"
+    ],
+    "loadout_count": 1
+   },
+   {
+    "id": "727145299382534302",
+    "scope_id": "727145299382534200",
+    "asset_type": "location",
+    "subtype": null,
+    "name": "Bamboo Grove",
+    "role_tag": "",
+    "description": "Late twenties, wind-burnt.",
+    "attrs": {},
+    "prompt_positive": "same woman as reference\u2026",
+    "prompt_negative": null,
+    "prompt_positive_zh": null,
+    "prompt_negative_zh": null,
+    "platform_params": {},
+    "cover_file_id": "727145299382534146",
+    "source": "manual",
+    "duplicated_from": null,
+    "is_system_preset": false,
+    "tags": {
+     "role": [
+      "lead"
+     ]
+    },
+    "sort_order": 0,
+    "created_by": "11111111-1111-1111-1111-111111111111",
+    "created_at": "2026-08-29T10:00:00Z",
+    "updated_at": "2026-08-29T10:00:00Z",
+    "readiness": {
+     "state": "ready",
+     "missing": []
+    },
+    "file_counts_by_slot": {
+     "establishing": 1,
+     "keyframes": 3
+    },
+    "project_ids": [
+     "55"
+    ],
+    "loadout_count": 0
+   },
+   {
+    "id": "727145299382534303",
+    "scope_id": null,
+    "asset_type": "prompt",
+    "subtype": null,
+    "name": "Multi-angle 3x3 sheet",
+    "role_tag": "",
+    "description": "Late twenties, wind-burnt.",
+    "attrs": {},
+    "prompt_positive": "same woman as reference\u2026",
+    "prompt_negative": null,
+    "prompt_positive_zh": null,
+    "prompt_negative_zh": null,
+    "platform_params": {},
+    "cover_file_id": "727145299382534146",
+    "source": "system_preset",
+    "duplicated_from": null,
+    "is_system_preset": true,
+    "tags": {
+     "role": [
+      "lead"
+     ]
+    },
+    "sort_order": 0,
+    "created_by": "11111111-1111-1111-1111-111111111111",
+    "created_at": "2026-08-29T10:00:00Z",
+    "updated_at": "2026-08-29T10:00:00Z",
+    "readiness": {
+     "state": "ready",
+     "missing": []
+    },
+    "file_counts_by_slot": {},
+    "project_ids": [],
+    "loadout_count": 0
+   }
+  ]
+ },
+ "GET /assets/{id}": {
+  "success": true,
+  "data": {
+   "id": "727145299382534300",
+   "scope_id": "727145299382534200",
+   "asset_type": "character",
+   "subtype": null,
+   "name": "Sang Yao",
+   "role_tag": "lead",
+   "description": "Late twenties, wind-burnt.",
+   "attrs": {},
+   "prompt_positive": "same woman as reference\u2026",
+   "prompt_negative": null,
+   "prompt_positive_zh": null,
+   "prompt_negative_zh": null,
+   "platform_params": {},
+   "cover_file_id": "727145299382534146",
+   "source": "manual",
+   "duplicated_from": null,
+   "is_system_preset": false,
+   "tags": {
+    "role": [
+     "lead"
+    ]
+   },
+   "sort_order": 0,
+   "created_by": "11111111-1111-1111-1111-111111111111",
+   "created_at": "2026-08-29T10:00:00Z",
+   "updated_at": "2026-08-29T10:00:00Z",
+   "readiness": {
+    "state": "ready",
+    "missing": []
+   },
+   "file_counts_by_slot": {
+    "sheet": 1,
+    "stills": 5
+   },
+   "project_ids": [
+    "55"
+   ],
+   "loadout_count": 2,
+   "files": [
+    {
+     "asset_id": "727145299382534300",
+     "resource_id": "727145299382534146",
+     "slot": "sheet",
+     "loadout_id": null,
+     "sort_order": 0,
+     "note": null,
+     "attached_by": null,
+     "attached_at": "2026-08-29T10:00:00Z"
+    }
+   ],
+   "links": [
+    {
+     "from_asset_id": "727145299382534300",
+     "to_asset_id": "727145299382534310",
+     "relation": "wears",
+     "created_at": null
+    }
+   ],
+   "linked_by": [],
+   "loadouts": [
+    {
+     "id": "727145299382534400",
+     "asset_id": "727145299382534300",
+     "name": "Default",
+     "is_default": true,
+     "costume_ids": [],
+     "prop_ids": [],
+     "prompt_extra": null,
+     "sort_order": 0,
+     "created_at": "2026-08-29T10:00:00Z"
+    },
+    {
+     "id": "727145299382534401",
+     "asset_id": "727145299382534300",
+     "name": "Night raid",
+     "is_default": false,
+     "costume_ids": [
+      "727145299382534310"
+     ],
+     "prop_ids": [],
+     "prompt_extra": "black hooded night robe",
+     "sort_order": 1,
+     "created_at": "2026-08-29T10:00:00Z"
+    }
+   ]
+  }
+ },
+ "error 409": {
+  "success": false,
+  "error": {
+   "code": "asset_exists",
+   "detail": "\u2026",
+   "existing_asset_id": "727145299382534300"
+  }
+ },
+ "error 403 preset": {
+  "success": false,
+  "error": {
+   "code": "system_preset_readonly",
+   "detail": "System presets are read-only; duplicate to edit"
+  }
+ }
+}

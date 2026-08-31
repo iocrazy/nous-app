@@ -72,6 +72,10 @@ class CanvasService:
             kind=data.kind,
             created_by=created_by,
             viewport_json=data.viewport_json,
+            # Whether the asset may be referenced from this project is decided at
+            # the route layer, with the project guards — same split as
+            # project-membership gating (see the module docstring).
+            asset_id=int(data.asset_id) if data.asset_id else None,
         )
 
     async def peek_storyboard(

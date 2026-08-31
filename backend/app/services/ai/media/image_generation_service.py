@@ -55,6 +55,7 @@ class ImageGenerationService:
         reference_image_url: Optional[str] = None,
         aspect_ratio: str = "16:9",
         user_id: Optional[str] = None,
+        reference_image_paths: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         """Generate a single image via the named provider.
 
@@ -70,7 +71,19 @@ class ImageGenerationService:
             provider_name: Registered image provider name, or None to resolve
                 from the DB catalog.
             reference_image_url: Optional URL of a reference image passed to the
-                provider.
+                provider. ⚠️ Of the three image adapters wired today only
+                ``codex`` reads it, and only when it happens to name a LOCAL
+                file; ark ignores it outright (its /images/generations
+                endpoint is text-to-image) and jimeng never reads it. A caller
+                that needs the reference to actually land must pass
+                ``reference_image_paths``.
+            reference_image_paths: Optional LOCAL file paths of reference
+                images (multi-reference, the channel ``codex`` prefers). The
+                caller materializes them — an object-store row has no local
+                path until ``media_storage.materialize()`` has produced one,
+                and the temp file must outlive this call. ark/jimeng still
+                ignore references entirely; that residue is real and the
+                caller has to be honest about it.
             aspect_ratio: Output aspect ratio string (e.g. "16:9", "1:1").
             user_id: Requesting user, threaded to the catalog resolver so
                 owner-scoped rows (migration 431) resolve only for their owner.
@@ -117,6 +130,9 @@ class ImageGenerationService:
                 gen_model,
                 aspect_ratio=aspect_ratio,
                 reference_image_url=reference_image_url,
+                # Every adapter takes **kwargs, so passing this unconditionally
+                # (None included) cannot break a provider that ignores it.
+                reference_image_paths=reference_image_paths or None,
             )
 
             logger.info(

@@ -81,11 +81,26 @@ vi.mock('../services/resourceService', () => ({
 vi.mock('../services/generatedService', () => ({
   fetchGeneratedCounts: vi.fn(),
 }));
+vi.mock('../services/assetsService', () => ({
+  fetchAssetCounts: vi.fn(),
+}));
 
 import { ResourcesProvider, useResourcesContext } from './ResourcesContext';
 import { fetchGeneratedCounts } from '../services/generatedService';
+import { fetchAssetCounts } from '../services/assetsService';
 
 const counts = vi.mocked(fetchGeneratedCounts);
+const assetCounts = vi.mocked(fetchAssetCounts);
+
+/** The server zero-fills, so every type is always present on the wire. */
+const ZERO_COUNTS = {
+  character: 0,
+  location: 0,
+  prop: 0,
+  costume: 0,
+  prompt: 0,
+  audio: 0,
+};
 
 /** Resolve-on-demand promise so a refetch can be held in flight. */
 function deferred<T>() {
@@ -102,9 +117,12 @@ let refresh: () => void = () => {};
 let select: (ids: string[]) => void = () => {};
 let go: (to: string) => void = () => {};
 
+let refreshAssets: () => void = () => {};
+
 function Harness() {
   const ctx = useResourcesContext();
   refresh = ctx.refreshGeneratedCounts;
+  refreshAssets = ctx.refreshAssetCounts;
   select = (ids) => ctx.setSelectedIds(new Set(ids));
   go = (to) => ctx.navigate(to);
   return (
@@ -112,6 +130,11 @@ function Harness() {
       <span data-testid="count">{String(ctx.generatedUnreviewedCount)}</span>
       <span data-testid="selected">{[...ctx.selectedIds].join(',')}</span>
       <span data-testid="view">{ctx.sidebarView}</span>
+      <span data-testid="assetCounts">{JSON.stringify(ctx.assetCounts)}</span>
+      <span data-testid="assetType">{String(ctx.selectedAssetType)}</span>
+      <span data-testid="assetTypeParam">{String(ctx.assetTypeParam)}</span>
+      <span data-testid="assetId">{String(ctx.selectedAssetId)}</span>
+      <span data-testid="isAssets">{String(ctx.isAssetsView)}</span>
     </div>
   );
 }
@@ -136,9 +159,38 @@ function renderAt(entry: string, scopeId = 'team-1') {
   );
 }
 
+/** The three asset URL shapes each need their own route pattern — that is the
+ *  whole point of the routing work under test, so the harness must mirror it
+ *  rather than funnel everything through `:section`. */
+function renderAssetsAt(entry: string, scopeId = 'team-1') {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <Routes>
+        {[
+          '/team/:teamId/resources/:section',
+          '/team/:teamId/resources/assets/:assetType',
+          '/team/:teamId/resources/assets/item/:assetId',
+        ].map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <ResourcesProvider isPersonal={false} scopeId={scopeId}>
+                <Harness />
+              </ResourcesProvider>
+            }
+          />
+        ))}
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   counts.mockReset();
   counts.mockResolvedValue({ unreviewed: 12, saved: 3, in_assets: 1 });
+  assetCounts.mockReset();
+  assetCounts.mockResolvedValue({ ...ZERO_COUNTS, character: 4, location: 2 });
 });
 
 describe('ResourcesContext — generated count', () => {
@@ -180,6 +232,19 @@ describe('ResourcesContext — generated count', () => {
     expect(spy.mock.calls[0][0]).toBe('[ResourcesContext] generated counts failed:');
     spy.mockRestore();
   });
+
+  it('asks for nothing while the scope is still unresolved', async () => {
+    // An empty `scopeId` is "we do not know yet", not "scope zero". Sending it
+    // makes `?scope_id=` a 422 on every cold load, and the only trace is a
+    // console.error the user never sees — a request that can only fail.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderAt('/team/42/resources/generated', '');
+
+    await waitFor(() => expect(screen.getByTestId('count').textContent).toBe('null'));
+    expect(counts).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe('ResourcesContext — selection on entering Generated', () => {
@@ -214,5 +279,106 @@ describe('ResourcesContext — selection on entering Generated', () => {
     });
 
     expect(screen.getByTestId('selected').textContent).toBe('gen:1,gen:2');
+  });
+});
+
+describe('ResourcesContext — assets route derivation', () => {
+  it('reads the Assets landing page off `:section`', async () => {
+    renderAssetsAt('/team/42/resources/assets');
+    await waitFor(() => expect(screen.getByTestId('view').textContent).toBe('assets'));
+    expect(screen.getByTestId('isAssets').textContent).toBe('true');
+    // No type on the landing page — and that must NOT read as an unknown one,
+    // or the view would redirect the landing page to itself forever.
+    expect(screen.getByTestId('assetType').textContent).toBe('null');
+    expect(screen.getByTestId('assetTypeParam').textContent).toBe('undefined');
+  });
+
+  it('derives the type from `assets/:assetType`, where `section` is undefined', async () => {
+    renderAssetsAt('/team/42/resources/assets/location');
+    await waitFor(() => expect(screen.getByTestId('view').textContent).toBe('assets'));
+    expect(screen.getByTestId('assetType').textContent).toBe('location');
+    expect(screen.getByTestId('assetId').textContent).toBe('null');
+  });
+
+  it('keeps an unknown type out of `selectedAssetType` but visible as the raw param', async () => {
+    // The two fields differ ONLY here, and the difference is what lets the
+    // view tell "no type asked for" from "a type that does not exist".
+    renderAssetsAt('/team/42/resources/assets/nonsense');
+    await waitFor(() => expect(screen.getByTestId('view').textContent).toBe('assets'));
+    expect(screen.getByTestId('assetType').textContent).toBe('null');
+    expect(screen.getByTestId('assetTypeParam').textContent).toBe('nonsense');
+  });
+
+  it('derives the asset id from `assets/item/:assetId` without reading it as a type', async () => {
+    renderAssetsAt('/team/42/resources/assets/item/727145299382534201');
+    await waitFor(() => expect(screen.getByTestId('view').textContent).toBe('assets'));
+    expect(screen.getByTestId('assetId').textContent).toBe('727145299382534201');
+    expect(screen.getByTestId('assetTypeParam').textContent).toBe('undefined');
+  });
+
+  it('leaves an unrelated section alone', async () => {
+    // The negative control: `sidebarView === 'assets'` must come from the URL,
+    // not from the new arm firing on every route.
+    renderAssetsAt('/team/42/resources/downloads');
+    await waitFor(() => expect(screen.getByTestId('view').textContent).toBe('downloads'));
+    expect(screen.getByTestId('isAssets').textContent).toBe('false');
+  });
+});
+
+describe('ResourcesContext — asset counts', () => {
+  it('loads the per-type counts for the current scope', async () => {
+    renderAssetsAt('/team/42/resources/assets');
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4'),
+    );
+    expect(assetCounts).toHaveBeenCalledWith('team-1');
+  });
+
+  it('keeps the previous counts visible while a refresh is in flight', async () => {
+    renderAssetsAt('/team/42/resources/assets');
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4'),
+    );
+
+    const pending = deferred<typeof ZERO_COUNTS>();
+    assetCounts.mockReturnValueOnce(pending.promise);
+
+    await act(async () => {
+      refreshAssets();
+    });
+    // Six badges must not blink out and back on every refresh.
+    expect(screen.getByTestId('assetCounts').textContent).toContain('"character":4');
+
+    await act(async () => {
+      pending.resolve({ ...ZERO_COUNTS, character: 9 });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('assetCounts').textContent).toContain('"character":9'),
+    );
+  });
+
+  it('leaves the counts unknown (null) when the fetch fails', async () => {
+    assetCounts.mockRejectedValueOnce(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderAssetsAt('/team/42/resources/assets');
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    // null, not six zeros — zeros would claim an empty library on a fetch we
+    // never got an answer to.
+    expect(screen.getByTestId('assetCounts').textContent).toBe('null');
+    expect(spy.mock.calls[0][0]).toBe('[ResourcesContext] asset counts failed:');
+    spy.mockRestore();
+  });
+
+  it('asks for nothing while the scope is still unresolved', async () => {
+    // Same contract as the Generated pill: no scope yet is not scope zero.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderAssetsAt('/team/42/resources/assets', '');
+
+    await waitFor(() => expect(screen.getByTestId('assetCounts').textContent).toBe('null'));
+    expect(assetCounts).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

@@ -9,6 +9,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
 import { GeneratedView } from './resources/generated/GeneratedView';
+import { AssetsView } from './resources/assets/AssetsView';
 import { ModuleDisabledPage } from './ModuleDisabledPage';
 import { useModuleStatus } from '../hooks/useModuleStatus';
 import { semanticSearch, hybridSearch } from '../services/searchService';
@@ -49,7 +50,7 @@ export const ResourcesViewInner: React.FC = () => {
   const {
     isPersonal, scopeId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId,
     resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, canUpload,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, isAssetsView, canUpload,
     resources, setResources, folders, childFolders, folderPreviews,
     trashedResources, trashedFolders, downloadedResources,
     libraries, setLibraries, smartFolders, setSmartFolders,
@@ -521,6 +522,8 @@ export const ResourcesViewInner: React.FC = () => {
           mediaParserVisible ? <DownloadsView /> : <ModuleDisabledPage />
         ) : isGeneratedView ? (
           <GeneratedView />
+        ) : isAssetsView ? (
+          <AssetsView />
         ) : (
           <>
             {canUpload && (

@@ -21,7 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from app.services.assets.slots import PRIMARY_SLOT, SLOTS, UNSORTED
+from app.services.assets.slots import (
+    _AUDIO_SUBTYPE_FOR_RELATION,
+    LINK_RULES,
+    PRIMARY_SLOT,
+    SLOTS,
+    UNSORTED,
+)
 
 # tests/services/assets/<this file> → tests → backend → repo root
 MIRROR = (
@@ -105,6 +111,67 @@ def test_asset_types_list_matches_the_table_keys(mirror_source):
     assert m, "ASSET_TYPES not found in the mirror"
     types = [x.strip().strip("'\",") for x in m.group(1).split("\n") if x.strip()]
     assert set(types) == set(PRIMARY_SLOT) == set(SLOTS)
+
+
+# ── the link half (P2 Task 7) ──────────────────────────────────────────────
+#
+# `assetSlots.ts` grew a second mirror for the entity sheet's relation
+# sections, and its own header said it was NOT pinned here. That is the same
+# state the slot tables were in before this file existed: the TS-side test
+# (`assetSlots.test.ts`) hardcodes the same pairs a third time, so a
+# Python-side edit leaves it green while the two sides disagree — and the
+# symptom is a picker that offers a relation the backend answers 422
+# `link_not_allowed` to, after the user has already chosen something.
+
+
+def test_link_rules_match(mirror_source):
+    """relation → (from type, to type), on both sides.
+
+    This table decides which assets the "Add" dialog even SEARCHES, so a
+    drifted entry does not fail loudly: it quietly offers the wrong type.
+    """
+    ts = _parse_ts_object(_object_literal(mirror_source, "LINK_RULES"))
+    assert {k: tuple(v) for k, v in ts.items()} == LINK_RULES
+
+
+def test_audio_subtype_conditions_match(mirror_source):
+    """The audio-subtype condition `link_allowed` applies on top of the pair.
+
+    Compared as SETS: Python holds frozensets and the mirror holds arrays, so
+    order is not part of this contract (unlike SLOTS, where it is). A relation
+    ABSENT from either table means "no subtype condition" — so a one-sided
+    deletion is drift too, and the key sets are compared, not just the values.
+    """
+    ts = _parse_ts_object(_object_literal(mirror_source, "AUDIO_SUBTYPE_FOR_RELATION"))
+    assert {k: set(v) for k, v in ts.items()} == {
+        k: set(v) for k, v in _AUDIO_SUBTYPE_FOR_RELATION.items()
+    }
+
+
+def test_link_relations_list_matches_the_rule_keys(mirror_source):
+    """`LINK_RELATIONS` is what the sheet iterates to build its sections. A
+    relation there but not in `LINK_RULES` renders a section whose Add button
+    can never find a legal target."""
+    m = re.search(
+        r"export const LINK_RELATIONS = \[(.*?)\] as const", mirror_source, re.S
+    )
+    assert m, "LINK_RELATIONS not found in the mirror"
+    relations = [x.strip().strip("'\",") for x in m.group(1).split("\n") if x.strip()]
+    assert set(relations) == set(LINK_RULES)
+
+
+def test_the_parser_would_notice_a_changed_link_rule():
+    """Guard on the guard, for the link half specifically: the LINK_RULES
+    literal carries a generic type annotation containing `[` and `]`, which a
+    less careful extractor would trip over."""
+    mutated = (
+        "export const LINK_RULES: Record<AssetLinkRelation, "
+        "readonly [AssetType, AssetType]> = {\n"
+        "  wears: ['character', 'WRONG'],\n};"
+    )
+    parsed = _parse_ts_object(_object_literal(mutated, "LINK_RULES"))
+    assert parsed == {"wears": ["character", "WRONG"]}
+    assert {k: tuple(v) for k, v in parsed.items()} != LINK_RULES
 
 
 def test_the_parser_would_notice_a_changed_value():

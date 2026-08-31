@@ -32,10 +32,10 @@ CI run only proves the stubbed contract held, not that the real thing works.
   against it.
 - **Not a substitute for the regular e2e suite's coverage.** It exercises
   exactly one path end to end (login → project overview → storyboard →
-  canvas → shot list → script editor → Generated inbox). It's a smoke test, not a
-  regression suite — its whole job is to fail loudly when the deployed
-  frontend and deployed backend don't actually agree on anything, which the
-  stubbed suite structurally cannot detect.
+  canvas → shot list → script editor → Generated inbox → Assets codex).
+  It's a smoke test, not a regression suite — its whole job is to fail loudly
+  when the deployed frontend and deployed backend don't actually agree on
+  anything, which the stubbed suite structurally cannot detect.
 
 ## Credentials — never in the repo
 
@@ -137,6 +137,14 @@ Every canvas assertion here checks `.react-flow__node:visible`.
    its heading and tablist visible. Deliberately asserts NOTHING about the
    contents: this account's inbox may legitimately be empty, and a card
    assertion would turn "nothing generated lately" into a red deploy.
+9. **Assets codex (P2)** — the Library rail's `Assets` entry is clickable and
+   the shelf mounts against the real `/api/v1/assets`, with its heading and
+   the `All` type tab visible. Same "no claim about contents" rule as step 8.
+   The rail entry is addressed by its exact accessible name. The chevron
+   beside it is named `Expand Assets` (`resources.assetsExpand`), so the two
+   controls are distinguishable by name alone — no `.first()`. If a future
+   change reintroduces two buttons with the same name here, the fix is to
+   rename one of them, not to reach for a positional locator.
 
 ## Troubleshooting: "waiting for element to be visible, enabled and stable"
 

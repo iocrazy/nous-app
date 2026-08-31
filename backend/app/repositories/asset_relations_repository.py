@@ -12,21 +12,25 @@ so ``_serialize_loadout`` stringifies element-wise, not just the row's own ids.
 from __future__ import annotations
 
 import datetime
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     AssetFiles,
     AssetLinks,
     AssetLoadouts,
     AssetProjectRefs,
+    Assets,
     Projects,
     ResourceItems,
+    Resources,
 )
 
 
@@ -77,6 +81,32 @@ def _row(obj) -> Dict[str, Any]:
 
 
 class AssetRelationsRepository:
+    # ── the parent row's clock ─────────────────────────────────────────────
+
+    async def touch_asset(self, asset_id: int) -> bool:
+        """Bump ``assets.updated_at`` — every relation write owes this.
+
+        ``assets`` deliberately ships NO touch trigger (mig 445), and the
+        relation tables are separate rows, so attaching a file / linking a
+        costume / adding a loadout left the asset's own ``updated_at`` at
+        whatever the last header edit set. The visible cost was the shelf:
+        ``sort=recent`` orders by that column, so an asset the user had just
+        finished filling in did not move.
+
+        No scope predicate on purpose — like the batch derived lookups in
+        ``assets_repository``, this keys on an asset_id the caller has ALREADY
+        resolved through ``_require_writable``. Never call it with an id
+        straight off the wire.
+        """
+        async with write_scope() as session:
+            res = await session.execute(
+                sa_update(Assets)
+                .where(Assets.id == int(asset_id))
+                .where(Assets.deleted_at.is_(None))
+                .values(updated_at=func.now())
+            )
+            return (res.rowcount or 0) > 0
+
     # ── files ──────────────────────────────────────────────────────────────
 
     async def resource_in_scope(self, resource_id: int, scope_id: int) -> bool:
@@ -89,6 +119,71 @@ class AssetRelationsRepository:
         async with read_scope() as session:
             return (await session.execute(stmt)).first() is not None
 
+    async def resource_media_rows(
+        self, resource_ids: List[int], *, system_reason: str
+    ) -> Dict[int, Dict[str, Any]]:
+        """The stored media columns of the given resources, keyed by id.
+
+        Only what the reference-materialization step needs (``file_path`` /
+        ``mime_type`` / the two derived-image columns). Batched: one statement
+        for the whole reference list rather than one per file. A row that does
+        not exist is simply ABSENT from the result — that is how the caller
+        learns ``resource_not_found`` instead of getting a row of Nones.
+
+        **The SYSTEM wrap is LOAD-BEARING in production, not decorative.**
+        ``Resources`` carries ``UserScoped(creator_id)`` and this is the only
+        ``Resources`` read on the assets router, which binds no tenant scope
+        (no ``ScopedRequestDep``). ``SCOPE_ENFORCE_RESOURCES`` defaults to
+        false in code but production sets it true via ``secrets/backend.env``
+        (CLAUDE.md 部署陷阱: env overrides config.yml), so without this the
+        ``do_orm_execute`` choke point sees a scoped table touched with no
+        ambient scope and fail-closed raises ``UnscopedQueryError`` — an
+        unhandled 500 on every generate-slot run whose asset has a file
+        attached, i.e. every run the feature exists for. Same shape and same
+        reason as ``app/main.py``'s media-serve lookup.
+
+        SYSTEM rather than a per-user scope is the deliberate, auditable
+        cross-user read: the caller has already passed ``_require_writable``
+        on the asset, and the ids come from ``asset_files`` rather than from a
+        request body. Injecting ``creator_id == caller`` instead would make a
+        file attached from a TEAMMATE's resource vanish inside a team scope
+        and be reported as ``resource_not_found`` — a wrong reason about a
+        reference that exists.
+
+        ``system_reason`` is REQUIRED and keyword-only: it is the audit line
+        every ``system_request_scope`` entry logs, and a hardcoded one here
+        would make a second caller's deliberate cross-user read show up in the
+        log as this one. The reason belongs to whoever decided the read was
+        legitimate, so it travels from the call site.
+
+        Gated on ``is_enforced`` (not unconditional) purely to stay
+        byte-for-byte legacy where the flag really is off, e.g. this repo's
+        own local/test default.
+
+        Trashed resources are deliberately NOT filtered out: ``is_trashed`` is
+        a shelf state, while the bytes and the ``asset_files`` attachment both
+        still exist. Hiding them here would silently drop a reference the
+        asset page still shows as attached.
+        """
+        if not resource_ids:
+            return {}
+        stmt = select(
+            Resources.id,
+            Resources.file_path,
+            Resources.mime_type,
+            Resources.thumbnail_path,
+            Resources.cover_image_path,
+        ).where(Resources.id.in_([int(r) for r in resource_ids]))
+        scope_cm = (
+            system_request_scope(reason=system_reason)
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
+        return {int(r["id"]): dict(r) for r in rows}
+
     async def attach(
         self,
         asset_id: int,
@@ -98,7 +193,16 @@ class AssetRelationsRepository:
         loadout_id: Optional[int] = None,
         note: Optional[str] = None,
         attached_by: Optional[str] = None,
+        sort_order: int = 0,
     ) -> Dict[str, Any]:
+        """Attach a resource to a slot (idempotent on the PK).
+
+        ``sort_order`` is a parameter only because ``duplicate`` has to
+        reproduce the source's manual ordering; the interactive attach path
+        leaves it at the column default. It is deliberately NOT in the
+        ON CONFLICT ``set_``: re-attaching an already-attached file must not
+        silently reshuffle the slot the user arranged by hand.
+        """
         stmt = pg_insert(AssetFiles).values(
             asset_id=int(asset_id),
             resource_id=int(resource_id),
@@ -106,6 +210,7 @@ class AssetRelationsRepository:
             loadout_id=int(loadout_id) if loadout_id is not None else None,
             note=note,
             attached_by=attached_by,
+            sort_order=int(sort_order),
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[

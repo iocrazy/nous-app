@@ -219,12 +219,18 @@ def _inbox_filters(
     media_kind: Optional[str],
     model: Optional[str],
     since: Optional[datetime.datetime],
+    source_asset_id: Optional[int],
 ) -> list:
     """Criteria for the Generated inbox list. Pure so tests can compile them.
 
     state=None -> every state except 'deleted'. project_id is resolved through
     canvases.project_id; rows without a canvas_id (chat uploads, agent runs)
     never match a project filter -- the inbox says so in its empty state.
+
+    source_asset_id is the asset a run was launched FROM (stamped by
+    ``generate_slot``). Every parameter here is required with no default on
+    purpose: a filter that can be forgotten silently widens the page to the
+    whole scope, which reads exactly like a correct answer.
     """
     crit = [GeneratedMedia.scope_id == int(scope_id)]
     if state:
@@ -245,6 +251,8 @@ def _inbox_filters(
         crit.append(GeneratedMedia.model == model)
     if since is not None:
         crit.append(GeneratedMedia.created_at >= since)
+    if source_asset_id is not None:
+        crit.append(GeneratedMedia.source_asset_id == int(source_asset_id))
     return crit
 
 
@@ -560,6 +568,7 @@ class GeneratedMediaRepository:
         media_kind: Optional[str] = None,
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
+        source_asset_id: Optional[int] = None,
         cursor: Optional[str] = None,
         limit: int = 60,
     ) -> dict:
@@ -578,6 +587,7 @@ class GeneratedMediaRepository:
                 media_kind=media_kind,
                 model=model,
                 since=since,
+                source_asset_id=source_asset_id,
             )
         )
         decoded = _decode_cursor(cursor)
@@ -617,6 +627,27 @@ class GeneratedMediaRepository:
                 .mappings()
                 .first()
             )
+        return _normalize(dict(row)) if row else None
+
+    async def set_source_asset(
+        self, gen_id: int, asset_id: int, *, scope_id: Optional[int] = None
+    ) -> Optional[dict]:
+        """Stamp which asset a generation was made FOR. None when nothing matched.
+
+        ``scope_id`` is optional but every caller should pass it: without a
+        scope predicate this is an UPDATE by primary key, and a future caller
+        handed a user-supplied ``gen_id`` could stamp a row in someone else's
+        scope. The default stays unscoped so the method's behaviour is decided
+        at the call site rather than by whether the argument was remembered —
+        and ``None`` (nothing matched) is returned in either case, so a caller
+        that passes the wrong scope gets a typed failure rather than silence.
+        """
+        stmt = sa_update(GeneratedMedia).where(GeneratedMedia.id == int(gen_id))
+        if scope_id is not None:
+            stmt = stmt.where(GeneratedMedia.scope_id == int(scope_id))
+        stmt = stmt.values(source_asset_id=int(asset_id)).returning(*_GM_COLS)
+        async with write_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
         return _normalize(dict(row)) if row else None
 
     async def count_by_state(self, scope_id: int) -> dict[str, int]:

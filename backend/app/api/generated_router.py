@@ -85,6 +85,7 @@ async def list_generated(
     media_kind: Optional[str] = Query(None, max_length=40),
     model: Optional[str] = Query(None, max_length=200),
     since: Optional[datetime.datetime] = Query(None),
+    source_asset_id: OptSnowflakeQuery = None,
     cursor: Optional[str] = Query(None, max_length=500),
     limit: int = Query(60, ge=1, le=200),
 ):
@@ -105,6 +106,11 @@ async def list_generated(
             media_kind=media_kind,
             model=model,
             since=since,
+            # The asset a run was launched FROM. Validated as a snowflake like
+            # every other id query param: a bare str would reach ``int()`` and
+            # surface as a 500, and an unvalidated one that silently dropped
+            # would answer with the scope's WHOLE inbox under one asset's name.
+            source_asset_id=int(source_asset_id) if source_asset_id else None,
             cursor=cursor,
             limit=limit,
         )
@@ -173,8 +179,7 @@ async def save_as_asset(
             ),
             "asset_id": out["asset_id"],
             "resource_id": out["resource_id"],
-        },
-        201,
+        }
     )
 
 

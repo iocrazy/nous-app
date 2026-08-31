@@ -9,7 +9,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ASSET_TYPES, PRIMARY_SLOT, SLOTS, UNSORTED, slotsFor } from './assetSlots';
+import {
+  ASSET_TYPES,
+  AUDIO_SUBTYPE_FOR_RELATION,
+  LINK_RELATIONS,
+  LINK_RULES,
+  PRIMARY_SLOT,
+  SLOTS,
+  UNSORTED,
+  linkAllowed,
+  slotsFor,
+} from './assetSlots';
 
 // Verbatim from slots.py (PRIMARY_SLOT). `prompt` has no file slot: its body
 // is the primary, so readiness there keys on prompt_positive, not a slot.
@@ -84,5 +94,75 @@ describe('slotsFor', () => {
     const first = slotsFor('prop');
     first.push('bogus');
     expect(slotsFor('prop')).toEqual(['turnaround', 'in_scene', 'details', 'unsorted']);
+  });
+});
+
+// ─── Link rules ─────────────────────────────────────────────────────────────
+//
+// The same hardcoded-second-copy trick as above, for `LINK_RULES` /
+// `link_allowed`. This half of the mirror is NOT covered by the backend's
+// `test_slots_frontend_mirror.py` (it parses only the slot tables), so this
+// file is the ONLY thing standing between a Python-side edit and a relation
+// picker offering a pair the server refuses with 422 `link_not_allowed`.
+
+// Verbatim from slots.py (LINK_RULES).
+const EXPECTED_LINK_RULES: Record<string, [string, string]> = {
+  wears: ['character', 'costume'],
+  holds: ['character', 'prop'],
+  ambience_of: ['audio', 'location'],
+  voice_of: ['audio', 'character'],
+};
+
+// Verbatim from slots.py (_AUDIO_SUBTYPE_FOR_RELATION).
+const EXPECTED_AUDIO_SUBTYPES: Record<string, string[]> = {
+  ambience_of: ['sfx', 'music'],
+  voice_of: ['voice'],
+};
+
+describe('LINK_RULES mirrors slots.py', () => {
+  it('carries exactly the four relations, with the same endpoints', () => {
+    expect(Object.fromEntries(Object.entries(LINK_RULES).map(([k, v]) => [k, [...v]]))).toEqual(
+      EXPECTED_LINK_RULES,
+    );
+  });
+
+  it('LINK_RELATIONS enumerates the table keys', () => {
+    expect([...LINK_RELATIONS].sort()).toEqual(Object.keys(EXPECTED_LINK_RULES).sort());
+  });
+
+  it('only the two audio relations carry a subtype condition', () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(AUDIO_SUBTYPE_FOR_RELATION).map(([k, v]) => [k, [...(v ?? [])]]),
+      ),
+    ).toEqual(EXPECTED_AUDIO_SUBTYPES);
+  });
+});
+
+describe('linkAllowed mirrors link_allowed', () => {
+  it('accepts each rule\'s own pair', () => {
+    expect(linkAllowed('wears', 'character', null, 'costume')).toBe(true);
+    expect(linkAllowed('holds', 'character', null, 'prop')).toBe(true);
+    expect(linkAllowed('ambience_of', 'audio', 'sfx', 'location')).toBe(true);
+    expect(linkAllowed('ambience_of', 'audio', 'music', 'location')).toBe(true);
+    expect(linkAllowed('voice_of', 'audio', 'voice', 'character')).toBe(true);
+  });
+
+  it('rejects a swapped direction', () => {
+    // costume → character is not "wears" backwards; it is nothing.
+    expect(linkAllowed('wears', 'costume', null, 'character')).toBe(false);
+  });
+
+  it('rejects the wrong target type', () => {
+    expect(linkAllowed('wears', 'character', null, 'prop')).toBe(false);
+    expect(linkAllowed('ambience_of', 'audio', 'sfx', 'character')).toBe(false);
+  });
+
+  it('an audio asset with no subtype is refused, not waved through', () => {
+    // Python reads `(from_subtype or "")`, so null is a value that fails the
+    // membership test rather than a missing condition that skips it.
+    expect(linkAllowed('voice_of', 'audio', null, 'character')).toBe(false);
+    expect(linkAllowed('ambience_of', 'audio', '', 'location')).toBe(false);
+    expect(linkAllowed('voice_of', 'audio', 'sfx', 'character')).toBe(false);
   });
 });

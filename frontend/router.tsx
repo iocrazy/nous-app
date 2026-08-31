@@ -164,6 +164,14 @@ export const router = createBrowserRouter([
       { path: 'resources', element: <RedirectToTeam view="resources" /> },
       { path: 'resources/file/:resourceId', element: <RedirectToTeam view="resources" /> },
       { path: 'resources/:section', element: <RedirectToTeam view="resources" /> },
+      // The deep asset-library shapes need their own flat entries: `:section`
+      // matches ONE segment, so without these a bookmarked
+      // /resources/assets/character would fall through to the catch-all and
+      // land on the team root instead of the shelf it names. RedirectToTeam
+      // rebuilds the sub-path from location.pathname, so the type / id
+      // survives the hop.
+      { path: 'resources/assets/:assetType', element: <RedirectToTeam view="resources" /> },
+      { path: 'resources/assets/item/:assetId', element: <RedirectToTeam view="resources" /> },
       { path: 'projects', element: <RedirectToTeam view="projects" /> },
       { path: 'projects/:projectId', element: <RedirectToTeam view="projects" /> },
       { path: 'projects/:projectId/review/:fileId', element: <RedirectToTeam view="projects" /> },
@@ -216,6 +224,17 @@ export const router = createBrowserRouter([
           { path: 'resources/temp', element: <Navigate to="../generated" relative="path" replace /> },
           { path: 'resources/project-assets', element: <Navigate to="../generated" relative="path" replace /> },
           { path: 'resources/:section', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          // Asset library (P2). `resources/assets` itself needs no entry —
+          // the dynamic `:section` above already serves it, exactly as it
+          // serves `generated`; adding a STATIC one would outrank it and leave
+          // `section` undefined, which is how ResourcesContext decides the
+          // sidebar view. The two deeper shapes do need their own routes:
+          //   assets/:assetType   — one type's shelf (character | location | …)
+          //   assets/item/:assetId — one asset's detail page
+          // No ranking conflict between them: the second is four segments to
+          // the first's three, so `assets/item/…` can never be read as a type.
+          { path: 'resources/assets/:assetType', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'resources/assets/item/:assetId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/smart/:smartFolderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/library/:libraryId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },

@@ -24,6 +24,10 @@ worse, silently do the wrong thing) on the server:
   * the three derived-count GROUP BYs every list page runs (``slot_counts`` /
     ``project_ids`` / ``loadout_counts``) really produce the folded wire row,
     and ``readiness`` is derived from the first of them (case 11).
+  * ``duplicate`` writes four tables in one transaction: its loadout copies must
+    not trip ``uq_loadout_default``, its file rows must land on the COPY's
+    loadouts, and its 409 must stay typed instead of becoming a
+    PendingRollbackError on the aborted transaction (cases 14, 15).
 
 Transport: asyncpg on ``INTEGRATION_DATABASE_URL`` for fixture setup and for the
 assertions; the repos themselves go through ``app.db.session`` (SQLAlchemy async
@@ -662,3 +666,334 @@ async def test_list_assets_derives_slot_project_and_loadout_counts(orm_dsn, pg, 
         )
         == 2
     )
+
+
+# ── 12. the tag filter's jsonpath is accepted (and matches) by PostgreSQL ───
+
+
+@_skip
+async def test_tag_filter_matches_any_group_and_rejects_a_miss(orm_dsn, pg, fx):
+    """``jsonb_path_exists(tags, '$.*[*] ? (@ == $v)', jsonb_build_object('v', …))``
+    is the one P2 predicate SQLAlchemy cannot vouch for: the jsonpath is a
+    server-parsed literal, so a typo compiles fine here and only fails (or
+    silently matches nothing) on the server.
+
+    Also pins the lax-mode claim in ``_tag_match``'s comment — ``[*]`` applied
+    to a group whose value is a bare scalar still matches, so a tag written
+    ``{"mood": "warm"}`` is findable exactly like ``{"role": ["hero"]}``.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    tagged = await _make_asset(
+        repo,
+        fx,
+        "character",
+        _uniq("Tagged"),
+        tags={"role": ["hero", "lead"], "era": ["ming"]},
+    )
+    scalar = await _make_asset(
+        repo, fx, "location", _uniq("Scalar Tag"), tags={"mood": "warm"}
+    )
+    await _make_asset(repo, fx, "prop", _uniq("Untagged"))
+
+    async def ids(tag):
+        return {
+            int(r["id"]) for r in await repo.list(fx["team_id"], tag=tag, limit=200)
+        }
+
+    assert int(tagged["id"]) in await ids("hero")  # first member of a group
+    assert int(tagged["id"]) in await ids("ming")  # a different group entirely
+    assert int(scalar["id"]) in await ids("warm")  # scalar group value
+    assert await ids("villain") == set()  # a value nobody carries
+    # The group NAME is not a value — matching it would make the filter answer
+    # a question nobody asked.
+    assert int(tagged["id"]) not in await ids("role")
+
+
+# ── 13. touch_asset really moves the parent row's clock ────────────────────
+
+
+@_skip
+async def test_relation_write_bumps_the_assets_updated_at(orm_dsn, pg, fx):
+    """``assets`` ships no touch trigger (mig 445), so ``updated_at`` moves only
+    because ``touch_asset`` issues its own UPDATE — which nothing but a real
+    server can confirm (``func.now()`` is resolved by PostgreSQL).
+    """
+    from app.schemas.assets import AttachFileRequest
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    created = await service.assets.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Touched")},
+        fx["user_id"],
+    )
+    aid = int(created["id"])
+    before = await pg.fetchval("SELECT updated_at FROM assets WHERE id = $1", aid)
+
+    await service.attach_file(
+        aid,
+        fx["team_id"],
+        AttachFileRequest(resource_id=str(fx["resource_ids"][0]), slot="sheet"),
+        fx["user_id"],
+    )
+
+    after = await pg.fetchval("SELECT updated_at FROM assets WHERE id = $1", aid)
+    assert after > before, "attaching a file left the asset's clock stale"
+
+
+# ── 14. duplicate: the whole copy, with the loadout ids remapped ───────────
+
+
+@_skip
+async def test_duplicate_copies_files_links_and_loadouts_with_ids_remapped(
+    orm_dsn, pg, fx
+):
+    """``duplicate`` writes into four tables in one transaction, and two of its
+    rules are PostgreSQL facts the stubbed unit suite cannot check:
+
+      * the copied loadouts must not violate ``uq_loadout_default`` — a partial
+        unique index the server checks row by row and cannot defer, which is why
+        the default is created FIRST;
+      * ``asset_files.loadout_id`` must land on the COPY's loadout row. A
+        verbatim copy would still satisfy the FK (the source's loadout exists),
+        so nothing but reading the row back proves the remap happened.
+    """
+    from app.schemas.assets import (
+        AssetCreate,
+        AttachFileRequest,
+        DuplicateRequest,
+        LinkRequest,
+        LoadoutCreate,
+        LoadoutUpdate,
+    )
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    r_sheet, r_worn, _unused = fx["resource_ids"]
+
+    src = await service.create_asset(
+        team,
+        AssetCreate(
+            asset_type="character",
+            name=_uniq("Duplicable"),
+            attrs={"height": "tall"},
+            tags={"role": ["hero"]},
+        ),
+        uid,
+    )
+    costume = await service.create_asset(
+        team, AssetCreate(asset_type="costume", name=_uniq("Night Cloak")), uid
+    )
+    aid = int(src["id"])
+    await service.add_link(
+        aid, team, LinkRequest(to_asset_id=costume["id"], relation="wears")
+    )
+    night = await service.create_loadout(
+        aid, team, LoadoutCreate(name="Night raid", costume_ids=[costume["id"]])
+    )
+    # The default is now the SECOND loadout created — so a copy made in source
+    # order would insert a non-default first and the default second.
+    await service.update_loadout(
+        aid, team, int(night["id"]), LoadoutUpdate(is_default=True)
+    )
+    await service.attach_file(
+        aid, team, AttachFileRequest(resource_id=str(r_sheet), slot="sheet"), uid
+    )
+    await service.attach_file(
+        aid,
+        team,
+        AttachFileRequest(resource_id=str(r_worn), slot="worn", loadout_id=night["id"]),
+        uid,
+    )
+    await service.link_project(aid, team, fx["project_id"], uid)
+
+    copied = await service.duplicate(aid, team, uid, DuplicateRequest())
+    new_id = int(copied["id"])
+
+    assert copied["source"] == "duplicated"
+    assert copied["duplicated_from"] == src["id"]
+    assert copied["is_system_preset"] is False
+    assert copied["attrs"] == {"height": "tall"}
+    assert copied["tags"] == {"role": ["hero"]}
+
+    rows = await pg.fetch(
+        "SELECT name, is_default FROM asset_loadouts WHERE asset_id = $1 "
+        "ORDER BY name",
+        new_id,
+    )
+    assert [(r["name"], r["is_default"]) for r in rows] == [
+        ("Default", False),
+        ("Night raid", True),
+    ], "the copy must carry both loadouts and exactly one default"
+
+    new_night = await pg.fetchval(
+        "SELECT id FROM asset_loadouts WHERE asset_id = $1 AND name = 'Night raid'",
+        new_id,
+    )
+    worn = await pg.fetchval(
+        "SELECT loadout_id FROM asset_files WHERE asset_id = $1 AND slot = 'worn'",
+        new_id,
+    )
+    assert int(worn) == int(new_night)
+    assert int(worn) != int(night["id"]), "the file still points at the SOURCE"
+    sheet = await pg.fetchrow(
+        "SELECT loadout_id, resource_id FROM asset_files "
+        "WHERE asset_id = $1 AND slot = 'sheet'",
+        new_id,
+    )
+    assert sheet["loadout_id"] is None and int(sheet["resource_id"]) == r_sheet
+
+    links = await pg.fetch(
+        "SELECT to_asset_id, relation FROM asset_links WHERE from_asset_id = $1",
+        new_id,
+    )
+    assert [(str(r["to_asset_id"]), r["relation"]) for r in links] == [
+        (costume["id"], "wears")
+    ]
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_project_refs WHERE asset_id = $1", new_id
+        )
+        == 0
+    ), "project refs are the source's usage, not the copy's"
+
+
+# ── 15. duplicate: a name collision is a typed 409, not an aborted tx ───────
+
+
+@_skip
+async def test_duplicate_name_collision_is_a_typed_409_and_writes_nothing(
+    orm_dsn, pg, fx
+):
+    """``create``'s 409 path resolves the existing id by SELECTing AFTER the
+    IntegrityError — which inside ``duplicate``'s transaction would be a
+    PendingRollbackError (an untyped 500), because the failed INSERT already
+    aborted it. So ``duplicate`` asks ``find_by_name`` BEFORE inserting and
+    ``create_raw`` never asks after. Only a real server can tell the two apart:
+    against a stub, both answer 409.
+    """
+    from app.schemas.assets import AssetCreate, DuplicateRequest
+    from app.services.assets.assets_service import AssetError, AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    base = _uniq("Bamboo Grove")
+
+    src = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=base), uid
+    )
+    clash = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=f"{base} (copy)"), uid
+    )
+
+    with pytest.raises(AssetError) as excinfo:
+        await service.duplicate(int(src["id"]), team, uid, DuplicateRequest())
+
+    assert excinfo.value.status == 409 and excinfo.value.code == "asset_exists"
+    assert excinfo.value.extra["existing_asset_id"] == clash["id"]
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND asset_type = "
+            "'location' AND deleted_at IS NULL",
+            team,
+        )
+        == 2
+    ), "the refused duplicate must not have left a row behind"
+
+
+# ── 16. count_by_type: scope-only, preset-free, soft-delete-aware ──────────
+
+
+@_skip
+async def test_count_by_type_ignores_presets_other_scopes_and_trashed_rows(
+    orm_dsn, pg, fx
+):
+    """The three exclusions the sidebar badges rest on, against a real server.
+
+    Each one is a way the badge could over-count while every unit test stayed
+    green, because a stubbed session replays whatever rows the test author
+    thought the query would return:
+
+    * a **system preset** is global — ``list()`` unions it into every scope, so
+      counting it would give every team the same non-zero floor no action of
+      theirs can move. The preset here carries a ``scope_id`` (the
+      ``assets_scope_or_preset`` CHECK is an OR, so that is legal), which is
+      precisely the row a scope-only predicate would wrongly count;
+    * a **soft-deleted** asset must stop counting the moment it is trashed —
+      the badge is how the user sees the delete took effect;
+    * another scope's assets must not leak in at all.
+
+    Zero-fill is asserted too: ``audio`` has no rows here and must read 0, not
+    be missing.
+    """
+    from app.db.session import write_scope
+    from app.models import Assets
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team = fx["team_id"]
+
+    a = await _make_asset(repo, fx, "character", _uniq("Counted Lead"))
+    await _make_asset(repo, fx, "character", _uniq("Counted Second"))
+    await _make_asset(repo, fx, "location", _uniq("Counted Grove"))
+    trashed = await _make_asset(repo, fx, "prop", _uniq("Counted Blade"))
+
+    # A preset that DOES carry this scope's id — the row a predicate that only
+    # filtered on scope_id would happily count.
+    async with write_scope() as session:
+        session.add(
+            Assets(
+                scope_id=team,
+                asset_type="prompt",
+                name=_uniq("Preset In Scope"),
+                is_system_preset=True,
+                source="system_preset",
+                prompt_positive="cinematic lighting",
+                created_by=fx["user_id"],
+            )
+        )
+        await session.flush()
+
+    # A second team's asset, to prove the scope predicate is doing work.
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Asset Counts Other Team",
+        fx["user_id"],
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        await repo.create(
+            int(other_team),
+            {"asset_type": "character", "name": _uniq("Not Ours")},
+            fx["user_id"],
+        )
+
+        before = await repo.count_by_type(team)
+        assert before["character"] == 2, before
+        assert before["location"] == 1 and before["prop"] == 1
+        # The in-scope preset is NOT counted, even though it is in this scope.
+        assert before["prompt"] == 0, before
+        # A type with no rows reads 0 rather than being absent.
+        assert before["audio"] == 0 and "audio" in before
+
+        await repo.soft_delete(int(trashed["id"]), team)
+        after = await repo.count_by_type(team)
+        assert after["prop"] == 0, "a trashed asset kept counting"
+        assert after["character"] == 2, "soft delete moved an unrelated tally"
+
+        # Negative control: the row really is still on disk, so the drop above
+        # is the predicate working, not the fixture having vanished.
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM assets WHERE id = $1", int(trashed["id"])
+            )
+            == 1
+        )
+        assert int(a["id"]) > 0
+    finally:
+        await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))

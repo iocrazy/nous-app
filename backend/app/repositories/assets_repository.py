@@ -14,12 +14,13 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import read_scope, write_scope
 from app.models import AssetFiles, AssetLoadouts, AssetProjectRefs, Assets
+from app.models.assets import ASSET_TYPES
 from app.services.assets.slots import readiness
 
 _BIGINT_COLS = ("id", "scope_id", "cover_file_id", "duplicated_from")
@@ -69,6 +70,40 @@ def with_derived(
     return out
 
 
+# ``tags`` is a jsonb OBJECT of groups → arrays ({"role": ["hero"], "era": [...]}),
+# so ``@>`` cannot answer "does any group contain this value" without knowing the
+# group name. jsonpath can: ``$.*`` walks the group values and ``[*]`` their
+# members (lax mode, the default, also matches a group whose value is a bare
+# scalar). The path is OUR constant — a literal_column, never caller text — while
+# the value rides in as a bound parameter via jsonb_build_object.
+_TAG_JSONPATH = literal_column("'$.*[*] ? (@ == $v)'::jsonpath")
+
+
+def _tag_match(tag: str):
+    return func.jsonb_path_exists(
+        Assets.tags, _TAG_JSONPATH, func.jsonb_build_object("v", tag)
+    )
+
+
+def _order_by(sort: str):
+    """ORDER BY for the two orderings SQL can answer.
+
+    ``readiness`` is DERIVED per row (``with_derived``), so it is not here: the
+    service asks for ``recent`` and re-sorts after deriving. An unknown value
+    raises rather than falling back — a sort that silently answers a different
+    question looks exactly like one that worked.
+
+    Note ``sort_order`` is deliberately NOT a leading key any more (it was, when
+    there was a single implicit ordering): a manual-order column ahead of the
+    requested sort would make "by name" mean "by name inside manual buckets".
+    """
+    if sort == "recent":
+        return (Assets.updated_at.desc(), Assets.id.desc())
+    if sort == "name":
+        return (func.lower(Assets.name).asc(), Assets.id.asc())
+    raise ValueError(f"unsupported sort: {sort!r}")
+
+
 class AssetsRepository:
     TABLE = "assets"
 
@@ -89,6 +124,37 @@ class AssetsRepository:
                 scope_id, fields["asset_type"], fields["name"]
             )
             raise DuplicateAssetName(existing_id=int(existing["id"]) if existing else 0)
+
+    async def create_raw(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """INSERT from an explicit FULL column dict (``scope_id`` /
+        ``source`` / ``duplicated_from`` / ``is_system_preset`` included).
+
+        ``create`` exists for the schema-shaped path, where the caller only
+        supplies ``AssetCreate`` fields and the row's provenance is implied.
+        ``duplicate`` owns all of it, so it hands over the whole dict.
+
+        The other difference is load-bearing: a ``uq_assets_scope_type_name``
+        hit raises ``DuplicateAssetName`` with ``existing_id=0`` — **no
+        follow-up SELECT for the real id**. This runs inside the caller's
+        ``unit_of_work()``, where the IntegrityError has ALREADY aborted the
+        transaction: any further statement on that session is a
+        PendingRollbackError (an untyped 500) instead of the typed 409 the
+        caller earned. The caller resolves the existing id with
+        ``find_by_name`` BEFORE inserting; reaching this raise means a
+        concurrent insert won the race between that check and this one, and the
+        409 goes out without the id rather than not at all.
+        """
+        try:
+            async with write_scope() as session:
+                obj = Assets(**fields)
+                session.add(obj)
+                await session.flush()
+                await session.refresh(obj)
+                return _row_dict(obj)
+        except IntegrityError as e:
+            if "uq_assets_scope_type_name" not in str(e.orig):
+                raise
+            raise DuplicateAssetName(existing_id=0)
 
     async def find_by_name(
         self, scope_id: int, asset_type: str, name: str
@@ -119,16 +185,21 @@ class AssetsRepository:
             obj = (await session.execute(stmt)).scalar_one_or_none()
         return _row_dict(obj) if obj else None
 
-    async def list(
+    def _list_stmt(
         self,
         scope_id: int,
         *,
         asset_type: Optional[str] = None,
         project_id: Optional[int] = None,
         q: Optional[str] = None,
+        tag: Optional[str] = None,
+        sort: str = "recent",
         limit: int = 60,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ):
+        """The SELECT behind :meth:`list`, split out so it can be compiled and
+        asserted without a database (tests/services/assets/test_assets_repository_sql.py).
+        """
         limit = max(1, min(int(limit), 200))
         stmt = (
             select(Assets)
@@ -152,13 +223,13 @@ class AssetsRepository:
             stmt = stmt.where(
                 or_(Assets.name.ilike(like), Assets.description.ilike(like))
             )
-        stmt = (
-            stmt.order_by(
-                Assets.sort_order.asc(), Assets.updated_at.desc(), Assets.id.desc()
-            )
-            .limit(limit)
-            .offset(max(0, int(offset)))
-        )
+        if tag:
+            stmt = stmt.where(_tag_match(tag))
+        stmt = stmt.order_by(*_order_by(sort)).limit(limit).offset(max(0, int(offset)))
+        return stmt
+
+    async def list(self, scope_id: int, **filters: Any) -> List[Dict[str, Any]]:
+        stmt = self._list_stmt(int(scope_id), **filters)
         async with read_scope() as session:
             objs = (await session.execute(stmt)).scalars().all()
         return [_row_dict(o) for o in objs]
@@ -195,6 +266,55 @@ class AssetsRepository:
                 else None
             )
             raise DuplicateAssetName(existing_id=int(existing["id"]) if existing else 0)
+
+    def _count_by_type_stmt(self, scope_id: int):
+        """The SELECT behind :meth:`count_by_type`, split out so it can be
+        compiled and asserted without a database (mirrors ``_list_stmt``)."""
+        return (
+            select(Assets.asset_type, func.count())
+            .where(Assets.scope_id == int(scope_id))
+            # System presets are GLOBAL — ``list`` unions them into every
+            # scope, but they are nobody's own assets, so a per-scope tally
+            # must not claim them. ``assets_scope_or_preset`` is an OR, so a
+            # preset MAY carry a scope_id; the scope predicate alone would
+            # therefore not be enough and this is not belt-and-braces.
+            .where(Assets.is_system_preset.is_(False))
+            .where(Assets.deleted_at.is_(None))
+            .group_by(Assets.asset_type)
+        )
+
+    async def count_by_type(self, scope_id: int) -> Dict[str, int]:
+        """``{asset_type: n}`` for one scope, zero-filled over every type.
+
+        Zero-filled on purpose: a GROUP BY answers only for types that have at
+        least one row, and handing the caller a dict missing ``costume``
+        instead of ``costume: 0`` makes "none yet" indistinguishable from "this
+        type does not exist" at every call site. The fill list comes from
+        ``models.assets.ASSET_TYPES`` — the same tuple the DB CHECK and the
+        slot tables are pinned against (test_slots.py) — so a seventh type
+        cannot be added to the backend while this method keeps answering with
+        six keys.
+
+        ⚠️ **Where the unknown-type carry STOPS.** The loop below deliberately
+        keeps a row whose ``asset_type`` is outside ``ASSET_TYPES`` rather than
+        dropping it silently — but that extra key travels no further than this
+        return value. ``AssetCountsResponse`` (``schemas/assets.py``) declares
+        six explicit fields, so FastAPI's response validation drops the seventh
+        on the way out and no client ever sees it. The carry is therefore a
+        DEBUGGING affordance for a direct caller of this repository, not a
+        contract with the sidebar: a type that reached the table without
+        reaching ``ASSET_TYPES`` shows up in a log or a REPL here, and nowhere
+        in the UI. Widening the response model is what would change that.
+        """
+        out: Dict[str, int] = {t: 0 for t in ASSET_TYPES}
+        async with read_scope() as session:
+            for asset_type, n in (
+                await session.execute(self._count_by_type_stmt(int(scope_id)))
+            ).all():
+                # An asset_type outside the table would be a row the slot code
+                # cannot describe; count it rather than dropping it silently.
+                out[str(asset_type)] = int(n)
+        return out
 
     async def soft_delete(self, asset_id: int, scope_id: int) -> bool:
         async with write_scope() as session:

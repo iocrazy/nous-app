@@ -97,3 +97,27 @@ def test_training_set_export_guards_every_resource() -> None:
     assert "_image_gate_reason" in source
     # LoRA convention: caption .txt shares the image's arcname stem.
     assert ".txt" in source and "arcname" in source
+
+
+def test_translate_endpoint_delegates_to_the_shared_ops_module() -> None:
+    """P2-3 moved ``build_translate_plan`` / the TranslateService loop into
+    ``app/services/library/resource_ai_ops.py`` so the asset library can drive
+    the SAME translation agent without importing this router. The move is only
+    worth anything while this endpoint keeps calling the shared copy — a
+    re-inlined loop here would resolve providers its own way and drift.
+    """
+    import app.services.library.resource_ai_ops as ops
+    from app.api import resources_ai_router as mod
+
+    assert mod.build_translate_plan is ops.build_translate_plan
+    assert mod.translate_fields is ops.translate_fields
+
+    source = _source("translate_gen_prompt")
+    assert "translate_fields(" in source
+    assert (
+        "TranslateService(" not in source
+    ), "the provider wiring belongs to resource_ai_ops now, not to this router"
+    assert "AllModelsFailed" in source and "LLMCallError" in source, (
+        "the ops layer propagates provider failures RAW; this endpoint still "
+        "has to let them past its catch-all to the typed provider surface."
+    )

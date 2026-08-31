@@ -613,6 +613,23 @@ describe('GeneratedView — failures and empty states', () => {
     );
   });
 
+  it('a failed list says the fetch failed, NOT that the inbox is empty', async () => {
+    // Back-ported from `AssetShelf`'s `loadError`. The toast fades; the view
+    // does not. Rendering the empty state here tells the user their
+    // generations are gone when the request simply never landed.
+    fetchGenerated.mockRejectedValueOnce(new GeneratedApiError(500, 'http_500', 'boom'));
+    renderView();
+
+    const alert = await screen.findByTestId('generated-load-error');
+    expect(alert.getAttribute('role')).toBe('alert');
+    // The falsifiable half: with the flag missing, THIS is what renders.
+    expect(screen.queryByText('Nothing To Review')).toBeNull();
+    // The toast is still raised — the line and the toast are both owed.
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('Something went wrong', 'error'),
+    );
+  });
+
   it('says there is nothing to review on an empty unreviewed tab', async () => {
     fetchGenerated.mockResolvedValue({ items: [], next_cursor: null });
     renderView();

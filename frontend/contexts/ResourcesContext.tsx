@@ -29,6 +29,8 @@ import {
 } from '../services/resourceService';
 import { fetchLibraries } from '../services/libraryService';
 import { fetchGeneratedCounts } from '../services/generatedService';
+import { fetchAssetCounts, type AssetCounts } from '../services/assetsService';
+import { ASSET_TYPES, type AssetType } from '../components/assets/assetSlots';
 import { useKeysetPagination } from '../hooks/useKeysetPagination';
 import type { KeysetCursor } from '../services/pagination';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
@@ -43,7 +45,7 @@ import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
 
-export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'generated';
+export type SidebarView = 'resources' | 'shared' | 'recycle' | 'downloads' | 'generated' | 'assets';
 export type SortBy = 'newest' | 'oldest' | 'name-az' | 'name-za' | 'largest' | 'smallest';
 
 /** Subset of fetchResources params that the filter bar contributes.
@@ -65,6 +67,16 @@ export interface ResourcesContextType {
   selectedFolderId: string | null;
   selectedSmartFolderId: string | null;
   selectedLibraryId: string | null;
+  /** The asset type whose shelf is open (`resources/assets/:assetType`), or
+   *  null on the Assets landing page. An UNKNOWN slug is null too — see
+   *  `assetTypeParam` below, which is what the redirect branch reads. */
+  selectedAssetType: AssetType | null;
+  /** The raw `:assetType` URL segment, valid or not. The two differ only when
+   *  the URL names a type that does not exist; a page that redirected on
+   *  `selectedAssetType === null` alone would also bounce the landing page. */
+  assetTypeParam: string | undefined;
+  /** The asset whose detail page is open (`resources/assets/item/:assetId`). */
+  selectedAssetId: string | null;
   resPath: (path: string) => string;
   navigate: NavigateFunction;
 
@@ -74,6 +86,7 @@ export interface ResourcesContextType {
   isSharedView: boolean;
   isDownloadsView: boolean;
   isGeneratedView: boolean;
+  isAssetsView: boolean;
   canUpload: boolean;
 
   // ── Data state ──
@@ -117,6 +130,14 @@ export interface ResourcesContextType {
   generatedUnreviewedCount: number | null;
   /** Re-fetch `generatedUnreviewedCount` (e.g. after saving/discarding). */
   refreshGeneratedCounts: () => void;
+  /** Per-type asset tallies for the six Assets sub-items. `null` means "not
+   *  known" (still loading, or the fetch failed): the badges are then not
+   *  rendered at all, so a failed fetch never shows six fake zeros. A type
+   *  that really has none comes back as 0 from the server, which IS rendered
+   *  as nothing — the distinction the null preserves is "we could not ask". */
+  assetCounts: AssetCounts | null;
+  /** Re-fetch `assetCounts` (e.g. after creating or deleting an asset). */
+  refreshAssetCounts: () => void;
   resourceTagNamesMap: Record<string, string>;
   /**
    * Per-resource set of tag ids. Populated alongside resourceTagNamesMap
@@ -226,18 +247,42 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const { t } = useTranslation();
   const { tasks: allUnifiedTasks } = useTaskManager();
   const { currentUserId } = useAuth();
-  const { teamId, section, folderId: urlFolderId, smartFolderId: urlSmartFolderId, libraryId: urlLibraryId } = useParams();
+  const {
+    teamId,
+    section,
+    folderId: urlFolderId,
+    smartFolderId: urlSmartFolderId,
+    libraryId: urlLibraryId,
+    assetType: urlAssetType,
+    assetId: urlAssetId,
+  } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const resPath = useCallback((path: string) => teamId ? `/team/${teamId}${path}` : path, [teamId]);
 
   // ── URL-driven state ──
-  const sidebarView: SidebarView = urlFolderId || urlSmartFolderId || urlLibraryId
+  // `resources/assets/:assetType` and `resources/assets/item/:assetId` are
+  // their own routes, so `section` is UNDEFINED on both — they are recognised
+  // by their own params instead. Without this arm the two deep asset URLs
+  // would render the file browser with the Assets rail entry inactive.
+  const sidebarView: SidebarView = urlAssetType || urlAssetId
+    ? 'assets'
+    : urlFolderId || urlSmartFolderId || urlLibraryId
     ? 'resources'
-    : (['shared', 'recycle', 'downloads', 'generated'].includes(section || '') ? section as SidebarView : 'resources');
+    : (['shared', 'recycle', 'downloads', 'generated', 'assets'].includes(section || '') ? section as SidebarView : 'resources');
   const selectedFolderId = urlFolderId ?? null;
   const selectedSmartFolderId = urlSmartFolderId ?? null;
   const selectedLibraryId = urlLibraryId ?? null;
+  const assetTypeParam = urlAssetType;
+  // Validated against the slot table, not merely passed through: an unknown
+  // slug would otherwise be sent to the backend as `?type=nonsense` and come
+  // back 422, or worse be rendered as an empty shelf that looks like a real
+  // (empty) one. The page redirects on `assetTypeParam && !selectedAssetType`.
+  const selectedAssetType: AssetType | null =
+    urlAssetType && (ASSET_TYPES as readonly string[]).includes(urlAssetType)
+      ? (urlAssetType as AssetType)
+      : null;
+  const selectedAssetId = urlAssetId ?? null;
 
 
   // ── Data state ──
@@ -270,6 +315,13 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [countsRefreshTick, setCountsRefreshTick] = useState(0);
   const refreshSidebarCounts = useCallback(() => {
     setCountsRefreshTick((v) => v + 1);
+  }, []);
+
+  // ── Asset library counts (the six Assets sub-item badges) ──
+  const [assetCounts, setAssetCounts] = useState<AssetCounts | null>(null);
+  const [assetCountsTick, setAssetCountsTick] = useState(0);
+  const refreshAssetCounts = useCallback(() => {
+    setAssetCountsTick((v) => v + 1);
   }, []);
 
   // ── Generated inbox count (the "Generated" rail pill) ──
@@ -456,6 +508,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const isSharedView = sidebarView === 'shared';
   const isDownloadsView = sidebarView === 'downloads';
   const isGeneratedView = sidebarView === 'generated';
+  const isAssetsView = sidebarView === 'assets';
 
   // ── Permission check ──
   const permObjectType = selectedLibraryId ? 'library' : selectedFolderId ? 'folder' : null;
@@ -651,6 +704,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   }, [scopeId]);
 
   useEffect(() => {
+    // No scope yet (first paint, before the workspace resolves) is not a
+    // scope of zero: `?scope_id=` reaches the backend as a 422 and the only
+    // trace is a console.error on every cold load. The reset effect above
+    // already left the pill at `null`, which is the honest state.
+    if (!scopeId) return;
     let cancelled = false;
     fetchGeneratedCounts(scopeId)
       .then((counts) => {
@@ -663,6 +721,31 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
       cancelled = true;
     };
   }, [scopeId, generatedRefreshTick]);
+
+  // Asset counts — same shape of contract as the Generated pill above, for the
+  // same reasons. Reset is its own effect keyed on `scopeId` ALONE so a
+  // `refreshAssetCounts()` tick does not blank all six badges and pop them
+  // back; on a failed REFRESH the last known numbers stay on screen (possibly
+  // stale — the console.error is the signal) rather than the badges vanishing.
+  useEffect(() => {
+    setAssetCounts(null);
+  }, [scopeId]);
+
+  useEffect(() => {
+    // Same guard, same reason as the Generated pill above.
+    if (!scopeId) return;
+    let cancelled = false;
+    fetchAssetCounts(scopeId)
+      .then((counts) => {
+        if (!cancelled) setAssetCounts(counts);
+      })
+      .catch((err) => {
+        console.error('[ResourcesContext] asset counts failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeId, assetCountsTick]);
 
   // Load folder previews when child folders change
   useEffect(() => {
@@ -1101,6 +1184,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     selectedFolderId,
     selectedSmartFolderId,
     selectedLibraryId,
+    selectedAssetType,
+    assetTypeParam,
+    selectedAssetId,
     resPath,
     navigate,
 
@@ -1109,6 +1195,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     isSharedView,
     isDownloadsView,
     isGeneratedView,
+    isAssetsView,
     canUpload,
 
     resources,
@@ -1137,6 +1224,8 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     refreshSidebarCounts,
     generatedUnreviewedCount,
     refreshGeneratedCounts,
+    assetCounts,
+    refreshAssetCounts,
     resourceTagNamesMap,
     resourceTagIdsMap,
     loading,
@@ -1206,10 +1295,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     transcodingResourceIds,
   }), [
     isPersonal, scopeId, teamId, sidebarView, selectedFolderId, selectedSmartFolderId, selectedLibraryId, resPath, navigate,
-    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, canUpload,
+    selectedAssetType, assetTypeParam, selectedAssetId,
+    isResourcesView, isRecycleView, isSharedView, isDownloadsView, isGeneratedView, isAssetsView, canUpload,
     resources, folders, childFolders, folderPreviews, trashedResources, trashedFolders, downloadedResources,
     libraries, smartFolders, allTags, refreshTags, myResourcesCount, downloadsCount, refreshSidebarCounts,
-    generatedUnreviewedCount, refreshGeneratedCounts,
+    generatedUnreviewedCount, refreshGeneratedCounts, assetCounts, refreshAssetCounts,
     resourceTagNamesMap, resourceTagIdsMap, loading, folderChain,
     recycleFolderId, recycleFolderItems, pendingPermanentDelete, pendingBatchPermanentDelete, pendingBatchPermanentDeleteFolders,
     selectedResource, selectedFolder, selectedResourceTags, selectedIds, lastClickedId, multiSelectMode,

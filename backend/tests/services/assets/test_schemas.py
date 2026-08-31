@@ -4,18 +4,31 @@ from typing import get_args
 import pytest
 from pydantic import ValidationError
 
-from app.models.assets import ASSET_SOURCES, ASSET_TYPES, LINK_RELATIONS
+from app.models.assets import (
+    ASSET_SOURCES,
+    ASSET_TYPES,
+    LINK_RELATIONS,
+    AssetLoadouts,
+    Assets,
+)
 from app.schemas.assets import (
+    AssetCountsResponse,
     AssetCreate,
     AssetDetailResponse,
+    AssetFileResponse,
+    AssetLinkResponse,
     AssetResponse,
     AssetSource,
     AssetType,
     AssetUpdate,
     AttachFileRequest,
+    DuplicateRequest,
+    Envelope,
+    ErrorEnvelope,
     LinkRelation,
     LinkRequest,
     LoadoutCreate,
+    LoadoutResponse,
     LoadoutUpdate,
     ProjectRefRequest,
 )
@@ -128,6 +141,7 @@ def test_literals_match_model_constants():
         (AssetUpdate, {"prompt_postive": "typo"}),
         (LoadoutUpdate, {"costumeids": ["1"]}),
         (LoadoutUpdate, {"isdefault": True}),
+        (DuplicateRequest, {"nmae": "Sang Yao copy"}),
     ],
 )
 def test_patch_models_forbid_unknown_fields(model, payload):
@@ -136,6 +150,21 @@ def test_patch_models_forbid_unknown_fields(model, payload):
     with pytest.raises(ValidationError) as ei:
         model(**payload)
     assert "extra" in str(ei.value).lower()
+
+
+# ── duplicate: the only knob is the new name ───────────────────────────────
+
+
+def test_duplicate_request_name_is_optional_and_bounded():
+    """Omitted name = "{source} (copy)", decided by the service. An empty
+    string is NOT that default — it would be a nameless asset — so it is a 422
+    like every other blank name on this surface."""
+    assert DuplicateRequest().name is None
+    assert DuplicateRequest(name="Sang Yao (v2)").name == "Sang Yao (v2)"
+    with pytest.raises(ValidationError):
+        DuplicateRequest(name="")
+    with pytest.raises(ValidationError):
+        DuplicateRequest(name="x" * 201)
 
 
 # ── M1: ids must fit BIGINT, not just "20 digits" ──────────────────────────
@@ -169,3 +198,143 @@ def test_loadout_id_lists_are_bounded_too():
     with pytest.raises(ValidationError):
         LoadoutCreate(name="Night", costume_ids=["99999999999999999999"])
     assert LoadoutCreate(name="Night", costume_ids=[_MAX_OK])
+
+
+# ── P2: the response envelope is a model, not a hand-rolled dict ───────────
+
+
+def test_envelope_defaults_to_success_and_carries_typed_data():
+    env = Envelope[AssetFileResponse](
+        data={
+            "asset_id": "1",
+            "resource_id": "2",
+            "slot": "sheet",
+            "attached_at": datetime(2026, 8, 29, 12, 0, 0),
+        }
+    )
+    assert env.success is True
+    assert env.data.slot == "sheet"
+
+
+def test_error_envelope_defaults_to_failure():
+    err = ErrorEnvelope(error={"code": "not_a_member", "detail": "nope"})
+    assert err.success is False
+    assert err.error["code"] == "not_a_member"
+
+
+def test_file_and_link_models_carry_every_field_the_serializers_emit():
+    """``response_model`` DROPS undeclared keys silently. ``_serialize_file``
+    emits ``attached_by`` and ``_serialize_link`` emits ``created_at``; if the
+    models omitted them the fields would vanish from the wire the day the
+    envelope landed — a removal nothing would report."""
+    from app.repositories.asset_relations_repository import (
+        _serialize_file,
+        _serialize_link,
+    )
+
+    now = datetime(2026, 8, 29, 12, 0, 0)
+    file_keys = set(
+        _serialize_file(
+            {
+                "asset_id": 1,
+                "resource_id": 2,
+                "slot": "sheet",
+                "loadout_id": None,
+                "sort_order": 0,
+                "note": None,
+                "attached_by": None,
+                "attached_at": now,
+            }
+        )
+    )
+    link_keys = set(
+        _serialize_link(
+            {
+                "from_asset_id": 1,
+                "to_asset_id": 2,
+                "relation": "wears",
+                "created_at": now,
+            }
+        )
+    )
+    assert file_keys <= set(AssetFileResponse.model_fields)
+    assert link_keys <= set(AssetLinkResponse.model_fields)
+
+
+def test_asset_response_declares_every_asset_column_and_derived_key():
+    """The same silent-drop guard, for the asset row itself.
+
+    ``_serialize`` emits EVERY ``assets`` column, and ``with_derived`` adds four
+    keys on top — but ``Envelope[AssetResponse]`` only forwards what the model
+    declares. Without this test, the next migration that adds a column to
+    ``assets`` would have the repo emit it, the response model drop it, the
+    frontend never see it, and nothing anywhere fail.
+
+    ``deleted_at`` is the single deliberate exclusion: rows reaching a response
+    are the live ones (every read filters ``deleted_at IS NULL``), so the field
+    is always null and carries no information.
+    """
+    emitted = ({c.name for c in Assets.__table__.columns} - {"deleted_at"}) | {
+        "readiness",
+        "file_counts_by_slot",
+        "project_ids",
+        "loadout_count",
+    }
+    assert emitted <= set(AssetResponse.model_fields)
+
+
+def test_loadout_response_declares_every_loadout_column():
+    """Same guard for ``asset_loadouts`` — ``_serialize_loadout`` emits the whole
+    row, and the create/update/detail routes answer with this model."""
+    emitted = {c.name for c in AssetLoadouts.__table__.columns}
+    assert emitted <= set(LoadoutResponse.model_fields)
+
+
+# ── P2: omit = unchanged, explicit null = clear ────────────────────────────
+
+
+def test_asset_update_distinguishes_omitted_from_explicit_null():
+    """``exclude_none`` cannot tell the two apart — which is why clearing a
+    field was unreachable through PATCH before P2."""
+    omitted = AssetUpdate(name="Sang Yao")
+    cleared = AssetUpdate(name="Sang Yao", subtype=None)
+    assert "subtype" not in omitted.model_fields_set
+    assert "subtype" in cleared.model_fields_set
+    assert cleared.model_dump(exclude_unset=True) == {
+        "name": "Sang Yao",
+        "subtype": None,
+    }
+
+
+def test_asset_update_docstring_states_the_null_semantics():
+    """The semantics live where the payload is declared, not in one call site."""
+    doc = (AssetUpdate.__doc__ or "").lower()
+    assert "omit" in doc and "null" in doc and "clear" in doc
+
+
+# ── P2: the counts payload carries one field per asset type ────────────────
+
+
+def test_asset_counts_response_covers_exactly_the_asset_types():
+    """The sidebar renders one badge per key of this model.
+
+    A type added to ``ASSET_TYPES`` but not here would be counted by the
+    repository and then DROPPED by the response model on the way out — the
+    library would gain a type the sidebar cannot show, with nothing failing.
+    """
+    assert set(AssetCountsResponse.model_fields) == set(ASSET_TYPES)
+
+
+def test_asset_counts_response_defaults_every_type_to_zero():
+    """A type the repository omitted must read as 0, not as a missing key: the
+    client branches on `count > 0` to decide whether to draw a badge, and
+    `undefined > 0` is a silently different answer from `0 > 0`."""
+    out = AssetCountsResponse().model_dump()
+    assert out == {t: 0 for t in ASSET_TYPES}
+
+
+def test_asset_counts_response_rejects_a_non_integer_tally():
+    """Response-model validation is the point of declaring it — a service that
+    answered with a string must fail loudly, not ship a NaN badge."""
+    with pytest.raises(ValidationError):
+        AssetCountsResponse(character="many")

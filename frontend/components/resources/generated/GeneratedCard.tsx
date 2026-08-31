@@ -102,10 +102,21 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     ? t('generated.card.openCanvasNodeHint', 'Opens the canvas at this node')
     : t('generated.card.openSourceHint', 'Opens where this was generated');
 
-  // The P2 asset route. `source_asset_id` can be null on a row promoted
-  // before the asset link existed; the route then lands on the asset index
-  // rather than a 404 on the string "null".
-  const assetPath = `${teamId ? `/team/${teamId}` : ''}/resources/assets/${item.source_asset_id ?? ''}`;
+  // The P2 asset route. It is `resources/assets/item/:assetId`, NOT
+  // `resources/assets/:assetId` — P2 gave the item page its own `item/`
+  // segment precisely so a snowflake can never be read as a type slug. This
+  // line was written before P2 shipped and pointed at the type route, where
+  // an id is not one of the six slugs, so `AssetsView` bounced it to the
+  // shelf: "Open asset" opened the whole library with nothing saying it had
+  // failed to find the asset.
+  //
+  // `source_asset_id` can still be null on a row promoted before the asset
+  // link existed; that lands on the index deliberately, which is why the
+  // `item/` segment is part of the id branch and not of the prefix.
+  const assetBase = `${teamId ? `/team/${teamId}` : ''}/resources/assets`;
+  const assetPath = item.source_asset_id
+    ? `${assetBase}/item/${item.source_asset_id}`
+    : assetBase;
 
   return (
     <div

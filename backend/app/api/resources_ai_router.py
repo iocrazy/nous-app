@@ -41,32 +41,11 @@ from app.schemas.resources import (
     TrainingSetExportRequest,
 )
 
-_PROMPT_FIELD_PAIRS = [
-    # (en_field, zh_field)
-    ("gen_prompt", "gen_prompt_zh"),
-    ("gen_prompt_negative", "gen_prompt_negative_zh"),
-]
-
-
-def build_translate_plan(
-    resource: dict, target_lang: str
-) -> list[tuple[str, str, str]]:
-    """(source_field, target_field, source_text) per non-empty source side.
-
-    target_lang='zh' reads the EN columns; 'en' reads the ZH columns.
-    Empty/whitespace sources are skipped so a positive-only asset still
-    translates cleanly.
-    """
-    plan: list[tuple[str, str, str]] = []
-    for en_field, zh_field in _PROMPT_FIELD_PAIRS:
-        source_field, target_field = (
-            (en_field, zh_field) if target_lang == "zh" else (zh_field, en_field)
-        )
-        text = (resource.get(source_field) or "").strip()
-        if text:
-            plan.append((source_field, target_field, text))
-    return plan
-
+# Both moved to app/services/library/resource_ai_ops.py so the asset library's
+# prompt translate endpoint can drive the SAME translation agent without
+# importing this router (see that module's docstring). Imported under their
+# original names — this module is still where the resources surface reads them.
+from app.services.library.resource_ai_ops import build_translate_plan, translate_fields
 
 router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
@@ -86,11 +65,6 @@ async def translate_gen_prompt(
     from app.api.media_permissions import check_media_access
     from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
     from app.services.ai.llm.llm_retry_middleware import LLMCallError
-    from app.services.ai.providers.ai_provider_helpers import (
-        DEFAULT_TRANSLATE_AGENT_SLUG,
-        resolve_task_ai_config,
-    )
-    from app.services.ai.translate import TranslateService
 
     repo = ResourcesRepository()
     resource = await repo.get_resource_by_id(resource_id)
@@ -104,30 +78,12 @@ async def translate_gen_prompt(
         raise HTTPException(status_code=400, detail="No prompt text to translate from")
 
     try:
-        # resolve_task_ai_config directly, NOT the resolve_translate_provider_config
-        # tuple shim — the shim narrows to 4 positional fields and drops
-        # ``fallback_models``, which is exactly what the chain needs
-        # (spec 2026-08-12-batch-fallback-rollout §1-F3, mirrors
-        # caption_asset/classify_asset's resolve steps).
-        cfg = await resolve_task_ai_config(
-            auth.user_id, "translation", DEFAULT_TRANSLATE_AGENT_SLUG
+        patch = await translate_fields(
+            plan,
+            target_lang=data.target_lang,
+            user_id=auth.user_id,
+            resource_id=str(resource_id),
         )
-        svc = TranslateService(
-            provider_key=cfg.provider_key,
-            provider_config=cfg.provider_config or {},
-            agent_slug=cfg.agent_slug,
-        )
-        patch: dict = {}
-        for _source_field, target_field, source_text in plan:
-            translated = await svc.translate(
-                text=source_text,
-                target_lang=data.target_lang,
-                user_id=auth.user_id,
-                resource_id=str(resource_id),
-                fallback_models=list(cfg.fallback_models),
-            )
-            if translated:
-                patch[target_field] = translated
     except HTTPException:
         raise
     except (AllModelsFailed, LLMCallError):

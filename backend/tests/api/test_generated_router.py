@@ -289,6 +289,38 @@ async def test_remaining_filters_are_typed(app):
 
 
 @pytest.mark.asyncio
+async def test_source_asset_id_is_typed_and_passed_through(app):
+    """The asset-history filter reaches the service as an int, not a string."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(
+            f"/api/v1/generated?scope_id={SCOPE}&state=all&source_asset_id={ASSET}"
+        )
+    assert r.status_code == 200, r.text
+    f = _filters(app)
+    assert f["source_asset_id"] == int(ASSET) and isinstance(f["source_asset_id"], int)
+
+
+@pytest.mark.asyncio
+async def test_absent_source_asset_id_is_none_not_zero(app):
+    """The negative control. ``0`` would filter on an asset id nothing has,
+    turning the default inbox into an empty page."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}")
+    assert r.status_code == 200, r.text
+    assert _filters(app)["source_asset_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["abc", "99999999999999999999", "-1"])
+async def test_bad_source_asset_id_is_422_not_500(app, bad):
+    """Same validator as every other id query param: a bare ``str`` would
+    reach ``int()`` (or the driver) and surface as a 500."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&source_asset_id={bad}")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("limit", ["0", "201"])
 async def test_limit_is_bounded(app, limit):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
