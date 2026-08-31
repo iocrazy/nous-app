@@ -18,6 +18,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ASSET_TYPES } from '../../assets/assetSlots';
+import { READINESS_VALUES, SORT_VALUES } from './assetFilters';
 
 const LOCALES = path.resolve(__dirname, '../../../public/locales');
 
@@ -73,6 +74,101 @@ describe('Asset library i18n parity', () => {
       expect(at(en, `assets.types.${type}`), type).toBe(singular[type]);
     }
     expect(at(en, 'resources.assets')).toBe('Assets');
+  });
+
+  // ── The shelf's own copy (Task 6) ──
+  //
+  // Everything `AssetShelf` / `AssetCard` / `NewAssetDialog` addresses under
+  // `assets.*`. Several of these keys are built at runtime and therefore have
+  // no literal in the source for a grep to find:
+  //   `assets.types.${type}`      (tab bar + rail)
+  //   `assets.readiness.${state}` (filter chip + card chip)
+  //   `assets.sort.${value}`      (sort chip)
+  //   `assets.err.${code}`        (whatever the backend refuses with)
+  // The runtime-built ones are enumerated from the same vocabularies the code
+  // iterates, so adding a sort order or a readiness value fails here until
+  // both locales carry its label.
+  const SHELF_KEYS = [
+    'assets.tab.all',
+    'assets.new',
+    'assets.newOfType',
+    'assets.loadMore',
+    'assets.loadFailed',
+    'assets.projectsUnavailable',
+    'assets.importFromScript',
+    'assets.importFromScriptHint',
+    'assets.importFromScriptGo',
+    'assets.filter.project',
+    'assets.filter.anyProject',
+    'assets.filter.readiness',
+    'assets.filter.anyReadiness',
+    'assets.filter.tag',
+    'assets.filter.anyTag',
+    'assets.filter.noTags',
+    'assets.filter.sort',
+    'assets.card.open',
+    'assets.card.missing',
+    'assets.card.coverage',
+    'assets.card.moreProjects',
+    'assets.presets.title',
+    'assets.presets.hint',
+    'assets.empty.none',
+    'assets.empty.ofType',
+    'assets.empty.filtered',
+    'assets.dialog.title',
+    'assets.dialog.name',
+    'assets.dialog.role',
+    'assets.dialog.description',
+    'assets.dialog.create',
+    'assets.dialog.nameRequired',
+    'assets.dialog.openExisting',
+    // Backend codes the two shelves can actually surface.
+    'assets.err.generic',
+    'assets.err.network',
+    'assets.err.not_a_member',
+    'assets.err.not_found',
+    'assets.err.asset_exists',
+    'assets.err.system_preset_readonly',
+    'assets.err.unreadable_body',
+    ...READINESS_VALUES.map((v) => `assets.readiness.${v}`),
+    ...SORT_VALUES.map((v) => `assets.sort.${v}`),
+  ];
+
+  it.each(SHELF_KEYS)('%s resolves in both locales', (key) => {
+    expect(typeof at(en, key), `en ${key}`).toBe('string');
+    expect(typeof at(zh, key), `zh ${key}`).toBe('string');
+  });
+
+  it('interpolation placeholders survive translation', () => {
+    // A zh string that dropped `{{name}}` renders "Open " with nothing after
+    // it — a bug no key-existence check can see.
+    const placeholders: Record<string, string[]> = {
+      'assets.newOfType': ['type'],
+      'assets.card.open': ['name'],
+      'assets.card.missing': ['slots'],
+      'assets.card.coverage': ['filled', 'total'],
+      'assets.card.moreProjects': ['n'],
+      'assets.empty.ofType': ['type'],
+      'assets.dialog.title': ['type'],
+    };
+    for (const [key, vars] of Object.entries(placeholders)) {
+      for (const tree of [en, zh]) {
+        for (const name of vars) {
+          expect(String(at(tree, key)), `${key} / ${name}`).toContain(`{{${name}}}`);
+        }
+      }
+    }
+  });
+
+  it('the shelf copy is actually translated, not copied across', () => {
+    // Same rule as the type labels below. Exemptions are strings that are
+    // legitimately identical in both: bare placeholders and Latin words we do
+    // not localize.
+    const exempt = new Set(['assets.card.moreProjects']);
+    const copied = SHELF_KEYS.filter(
+      (key) => !exempt.has(key) && at(zh, key) === at(en, key),
+    );
+    expect(copied).toEqual([]);
   });
 
   it('no zh label was left as its English source', () => {

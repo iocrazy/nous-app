@@ -51,6 +51,23 @@ vi.mock('../../../contexts/ResourcesContext', async () => {
   };
 });
 
+// The shelf is stubbed for the same reason `GeneratedView.test.tsx` stubs
+// `CleanupDialog`: what THIS file owns is the hand-off — which type the route
+// resolved to and whether a shelf was rendered at all. The stub renders the
+// same label the real tab bar would, so the assertions below still read as
+// "the Locations shelf is on screen" rather than as an internal detail.
+vi.mock('./AssetShelf', () => ({
+  AssetShelf: ({ assetType }: { assetType: string | null }) => (
+    <div data-testid="asset-shelf" data-asset-type={assetType ?? ''}>
+      {assetType
+        ? ((
+            { character: 'Characters', location: 'Locations' } as Record<string, string>
+          )[assetType] ?? assetType)
+        : 'Assets'}
+    </div>
+  ),
+}));
+
 import { AssetsView } from './AssetsView';
 
 /** Where the router ended up — the redirect's observable effect. */
@@ -90,6 +107,23 @@ describe('AssetsView — route shell', () => {
     expect(screen.getByText('Locations')).toBeTruthy();
     // Still on the type URL — a known type must NOT be redirected.
     expect(here()).toBe('/team/42/resources/assets/location');
+    // …and the type reached the shelf. Rendering the right heading over a
+    // shelf that was handed `null` would look identical on screen.
+    expect(screen.getByTestId('asset-shelf').getAttribute('data-asset-type')).toBe('location');
+  });
+
+  it('hands the landing page a null type rather than not mounting the shelf', () => {
+    // "All" is a real view, not the absence of one: the landing page must
+    // still mount the shelf so the tab bar and the grid are there.
+    renderAt('/team/42/resources/assets');
+    expect(screen.getByTestId('asset-shelf').getAttribute('data-asset-type')).toBe('');
+  });
+
+  it('does not mount the shelf on the item route', () => {
+    // The sheet page (Task 7) is a different screen. Mounting the shelf here
+    // too would fire the shelf's list request behind the detail view.
+    renderAt('/team/42/resources/assets/item/727145299382534300');
+    expect(screen.queryByTestId('asset-shelf')).toBeNull();
   });
 
   it('redirects an unknown type back to the landing page', () => {

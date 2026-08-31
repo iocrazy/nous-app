@@ -1696,7 +1696,70 @@
       "costume": "Costumes",
       "prompt": "Prompts",
       "audio": "Audio"
-    }
+    },
+    "tab": {
+      "all": "All"
+    },
+    "new": "New",
+    "newOfType": "New {{type}}",
+    "loadMore": "Load More",
+    "projectsUnavailable": "Projects unavailable",
+    "importFromScript": "Import From Script",
+    "importFromScriptHint": "Pick a project first — a script imports into one project",
+    "importFromScriptGo": "Opens the project workspace",
+    "readiness": {
+      "ready": "Ready",
+      "draft": "Draft"
+    },
+    "filter": {
+      "project": "Project",
+      "anyProject": "Any Project",
+      "readiness": "Readiness",
+      "anyReadiness": "Any Readiness",
+      "tag": "Tag",
+      "anyTag": "Any Tag",
+      "noTags": "No Tags On This Page",
+      "sort": "Sort"
+    },
+    "sort": {
+      "recent": "Recently Updated",
+      "name": "Name",
+      "readiness": "Readiness"
+    },
+    "card": {
+      "open": "Open {{name}}",
+      "missing": "Missing: {{slots}}",
+      "coverage": "{{filled}} of {{total}} slots filled",
+      "moreProjects": "+{{n}}"
+    },
+    "presets": {
+      "title": "System Presets",
+      "hint": "Read-only — duplicate one to edit it"
+    },
+    "empty": {
+      "none": "No Assets Yet",
+      "ofType": "No {{type}} Yet",
+      "filtered": "No Assets Match These Filters"
+    },
+    "dialog": {
+      "title": "New {{type}}",
+      "name": "Name",
+      "role": "Role",
+      "description": "Description",
+      "create": "Create",
+      "nameRequired": "A Name Is Required",
+      "openExisting": "Open Existing"
+    },
+    "err": {
+      "generic": "Something went wrong. Please try again.",
+      "network": "The request never reached the server. Check your connection.",
+      "not_a_member": "You are not a member of this workspace.",
+      "not_found": "That asset no longer exists.",
+      "asset_exists": "An asset with this name and type already exists here.",
+      "system_preset_readonly": "System presets are read-only — duplicate one to edit it.",
+      "unreadable_body": "The server sent a response we could not read."
+    },
+    "loadFailed": "Could Not Load Assets — Check Your Connection And Try Again"
   },
   "generated": {
     "title": "Generated",

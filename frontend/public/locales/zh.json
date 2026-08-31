@@ -1696,7 +1696,70 @@
       "costume": "服装",
       "prompt": "提示词",
       "audio": "音频"
-    }
+    },
+    "tab": {
+      "all": "全部"
+    },
+    "new": "新建",
+    "newOfType": "新建{{type}}",
+    "loadMore": "加载更多",
+    "projectsUnavailable": "项目列表不可用",
+    "importFromScript": "从剧本导入",
+    "importFromScriptHint": "请先选择一个项目 —— 剧本只能导入到某一个项目",
+    "importFromScriptGo": "打开项目工作区",
+    "readiness": {
+      "ready": "就绪",
+      "draft": "草稿"
+    },
+    "filter": {
+      "project": "项目",
+      "anyProject": "全部项目",
+      "readiness": "完成度",
+      "anyReadiness": "全部状态",
+      "tag": "标签",
+      "anyTag": "全部标签",
+      "noTags": "本页没有标签",
+      "sort": "排序"
+    },
+    "sort": {
+      "recent": "最近更新",
+      "name": "名称",
+      "readiness": "完成度"
+    },
+    "card": {
+      "open": "打开 {{name}}",
+      "missing": "缺少：{{slots}}",
+      "coverage": "已填 {{filled}} / {{total}} 个槽位",
+      "moreProjects": "+{{n}}"
+    },
+    "presets": {
+      "title": "系统预设",
+      "hint": "只读 —— 复制一份后再编辑"
+    },
+    "empty": {
+      "none": "还没有任何资产",
+      "ofType": "还没有{{type}}",
+      "filtered": "没有符合当前筛选条件的资产"
+    },
+    "dialog": {
+      "title": "新建{{type}}",
+      "name": "名称",
+      "role": "角色定位",
+      "description": "描述",
+      "create": "创建",
+      "nameRequired": "名称不能为空",
+      "openExisting": "打开已有的"
+    },
+    "err": {
+      "generic": "出错了，请重试。",
+      "network": "请求没有到达服务器，请检查网络连接。",
+      "not_a_member": "你不是该工作区的成员。",
+      "not_found": "该资产已不存在。",
+      "asset_exists": "该作用域下已存在同名同类型的资产。",
+      "system_preset_readonly": "系统预设只读 —— 复制一份后再编辑。",
+      "unreadable_body": "服务器返回了无法解析的响应。"
+    },
+    "loadFailed": "资产列表加载失败 —— 请检查网络后重试"
   },
   "generated": {
     "title": "生成内容",

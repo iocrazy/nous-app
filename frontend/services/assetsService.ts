@@ -92,6 +92,18 @@ export interface AssetCreateBody {
   asset_type: AssetType;
   name: string;
   /**
+   * The two descriptive fields `AssetCreate` accepts alongside the name
+   * (`role_tag` max 40, `description` max 20000, both defaulting to `""`
+   * server-side).
+   *
+   * They are here rather than left to a follow-up PATCH so the shelf's "New
+   * asset" form is ONE request: a create that succeeded followed by a PATCH
+   * that failed would leave a half-filled asset behind with nothing to
+   * distinguish it from one the user meant to leave blank.
+   */
+  role_tag?: string;
+  description?: string;
+  /**
    * Defaults to `manual` SERVER-side. Any caller creating an asset on behalf
    * of a generation must pass `generated` explicitly: the backend's own
    * create-and-attach path (`generated_inbox_service.save_as_asset`) does, and
