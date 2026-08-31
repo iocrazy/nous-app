@@ -218,7 +218,9 @@ _GENERATION_MODEL_PUBLIC_FIELDS = (
 )
 
 
-async def _visible_generation_rows(user_id: str) -> list[dict]:
+async def _visible_generation_rows(
+    user_id: str, *, include_actual_provider: bool = False
+) -> list[dict]:
     """The image/video catalog rows this user may see, in one place.
 
     ``generation-models`` and ``generation-capabilities`` MUST agree row for
@@ -233,7 +235,7 @@ async def _visible_generation_rows(user_id: str) -> list[dict]:
     )
 
     rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
-        viewer_user_id=user_id
+        viewer_user_id=user_id, include_actual_provider=include_actual_provider
     )
     # The user's Settings → platform-model card (master switch + per-model
     # blacklist) applies here too; the picker must show what Settings shows.
@@ -272,7 +274,10 @@ async def list_generation_capabilities(auth: AuthDep) -> dict:
 
     order = list(ASPECT_RATIOS)  # stable declaration order for the UI grid
     data: dict[str, dict] = {}
-    for r in await _visible_generation_rows(auth.user_id):
+    # The provider string is asked for explicitly and consumed HERE: only the
+    # derived capability values reach the response, never the provider itself.
+    rows = await _visible_generation_rows(auth.user_id, include_actual_provider=True)
+    for r in rows:
         proto = resolve_generation_protocol((r.get("actual_provider") or "").lower())
         caps = proto.capabilities if proto else ProviderCapabilities.none()
         data[str(r.get("name"))] = {
