@@ -137,11 +137,31 @@ describe('GeneratedCard — per-state affordances', () => {
     expect(screen.queryByRole('button', { name: 'As Asset…' })).toBeNull();
   });
 
-  it('navigates to the asset route (P2) with the source asset id', () => {
+  it('navigates to the asset ITEM route (P2) with the source asset id', () => {
+    // The `item/` segment is load-bearing. Until P2 shipped, this pointed at
+    // `/resources/assets/{id}`, which matches the TYPE route
+    // (`resources/assets/:assetType`) — a snowflake is not one of the six
+    // slugs, so `AssetsView` redirected to the shelf and "Open asset" quietly
+    // opened the whole library instead of the asset. This assertion was
+    // written against that URL and therefore pinned the bug rather than the
+    // behaviour its own name describes.
     render(<GeneratedCard item={IN_ASSETS} selected={false} teamId="t1" {...handlers()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open asset' }));
-    expect(navigate).toHaveBeenCalledWith('/team/t1/resources/assets/727145299382534201');
+    expect(navigate).toHaveBeenCalledWith(
+      '/team/t1/resources/assets/item/727145299382534201',
+    );
+  });
+
+  it('falls back to the asset index when the row has no source asset id', () => {
+    // A row promoted before the asset link existed. Landing on the index is
+    // the deliberate answer; what must NOT happen is a URL ending in a bare
+    // `item/` or the string "null".
+    const orphan = { ...IN_ASSETS, source_asset_id: null };
+    render(<GeneratedCard item={orphan} selected={false} teamId="t1" {...handlers()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open asset' }));
+    expect(navigate).toHaveBeenCalledWith('/team/t1/resources/assets');
   });
 
   it('calls onSave / onSaveAsAsset with the item', () => {
