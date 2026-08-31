@@ -15,6 +15,7 @@ import {
   prunePendingGenTask,
 } from './genResume';
 import { onGenerationDispatched } from './dispatchEffects';
+import { markDroppedKnobs } from './droppedKnobs';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveEntityRef } from './entityRef';
 import { DEFAULT_SPLIT_SEPARATOR, splitPromptItems } from './promptSplit';
@@ -58,6 +59,9 @@ function resolveCaller(canvasId: string | null): PromptCaller {
       // Results still land via the end-of-run upsert below, which finds this
       // slot and fills it — resume only takes over after a refresh.
       onDispatched: onGenerationDispatched,
+      // Same shared effect as the composer: a retry that silently drops a
+      // knob would otherwise look identical to one that honoured everything.
+      onDropped: markDroppedKnobs,
       onItemSettled: (id, item) => {
         if (!item.url && item.recoverable) {
           markGenerationRecover(id, item.taskId, item.kind);

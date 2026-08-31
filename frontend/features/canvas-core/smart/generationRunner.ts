@@ -50,6 +50,13 @@ export interface GenerationRunnerDeps {
       recoverable?: boolean;
     },
   ) => void;
+  /** What the backend could not honour (P4): the union of every task's
+   *  `metadata.dropped_knobs`, fired ONCE after the batch reaches a terminal
+   *  state. Fired even when the union is empty and even when every item
+   *  failed — "nothing was dropped" is an answer the caller needs (it clears
+   *  a previous run's badge), and whether an image came out is a separate
+   *  question from whether the request was honoured. */
+  onDropped?: (promptId: string, knobs: string[]) => void;
 }
 
 /** Sentinel phase for tasks whose poll broke (network/timeout) — the task
@@ -185,6 +192,23 @@ export function withGenerationRunner(
           ),
         ),
       );
+
+      // What the request asked for that the provider could not do (P4).
+      // Read at the SAME terminal point as result_url, from the same
+      // metadata: reading one and not the other is exactly how this repo
+      // has three times shipped a backend field no frontend ever consumed.
+      // Union rather than last-writer-wins — a fan-out is one user action,
+      // and a knob dropped by any of its items was dropped for the run.
+      const droppedUnion: string[] = [];
+      for (const task of tasks) {
+        const knobs = 'metadata' in task ? task.metadata?.dropped_knobs : undefined;
+        if (!Array.isArray(knobs)) continue;
+        for (const knob of knobs) {
+          if (typeof knob === 'string' && !droppedUnion.includes(knob))
+            droppedUnion.push(knob);
+        }
+      }
+      deps.onDropped?.(ctx.promptId, droppedUnion);
 
       // Per-item independence (Infinite semantics, P0-2): completed items
       // always land; failed siblings are reported alongside, never allowed

@@ -2900,6 +2900,7 @@
       "hint": "It doesn't have any content yet."
     },
     "readOnly": "Read-only",
+    "ignoredKnobs": "Ignored: {{knobs}}",
     "saveBadge": {
       "saving": "Saving…",
       "failed": "Save failed",

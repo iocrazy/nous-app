@@ -2900,6 +2900,7 @@
       "hint": "这里还没有任何内容。"
     },
     "readOnly": "只读",
+    "ignoredKnobs": "已忽略：{{knobs}}",
     "saveBadge": {
       "saving": "保存中…",
       "failed": "保存失败",

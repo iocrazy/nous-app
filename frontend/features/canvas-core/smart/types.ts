@@ -155,6 +155,15 @@ export interface PromptNodeData {
   /** In-flight generation batch (P1-13) — task ids persisted at dispatch
    *  so a reload can resume polling (genResume). [] once the run settles. */
   gen_tasks?: Array<{ task_id: string; kind: 'image' | 'video' }>;
+  /**
+   * Knobs the backend could not honour on the LAST run (P4). Written by the
+   * generation runner from `metadata.dropped_knobs` at the poll-terminal
+   * point (via markDroppedKnobs), read by PromptNodeView's "Ignored: …"
+   * badge beside the run status. Rewritten by every run — including a run
+   * that dropped nothing, which clears it — so it always describes the run
+   * the badge sits next to, never an older one.
+   */
+  last_dropped?: string[];
   /** @-selected input image url (IC parity ⑤ — the mention picker's
    *  「输入图」tab): overrides which wired input feeds i2i. Stale refs
    *  fall back to the first input (resolveEffectiveSourceUrl). */

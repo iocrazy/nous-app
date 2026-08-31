@@ -367,3 +367,124 @@ describe('withGenerationRunner — placeholder lifecycle (P0-3)', () => {
     expect(result.ok).toBe(true); // P0-2: the good item still lands
   });
 });
+
+describe('withGenerationRunner — dropped knobs (P4)', () => {
+  // P2 puts `dropped_knobs` in the task metadata, right beside `result_url`.
+  // Reading one and not the other is how "the backend returns it, the frontend
+  // never reads it" happens; the runner reads both at the same terminal point
+  // and hands the union to the caller, which puts it on the node.
+  it('reports the knobs the backend ignored', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_knobs: ['quality'] },
+    });
+
+    const dropped: Array<[string, string[]]> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (id, knobs) => dropped.push([id, knobs]),
+    });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: 'ark', count: 1 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dropped).toEqual([['p1', ['quality']]]);
+  });
+
+  it('unions the knobs across a fan-out instead of reporting only the last task', async () => {
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/1/cover', dropped_knobs: ['ratio', 'quality'] },
+      })
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover', dropped_knobs: ['quality', 'refs'] },
+      });
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 2 } });
+
+    expect(dropped).toEqual([['ratio', 'quality', 'refs']]);
+  });
+
+  it('reports an empty list when nothing was dropped, so a stale badge cannot survive a clean run', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_knobs: [] },
+    });
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'jimeng-4', count: 1 } });
+
+    expect(dropped).toEqual([[]]);
+  });
+
+  it('still reports drops for a run whose items all failed', async () => {
+    // The knobs were dropped at DISPATCH — whether the provider then produced
+    // an image is a separate question, and one answer must not hide the other.
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'failed',
+      error_msg: 'boom',
+      metadata: { dropped_knobs: ['ratio'] },
+    });
+
+    const dropped: string[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs) => dropped.push(knobs),
+    });
+    const result = await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: 'ark', count: 1 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(dropped).toEqual([['ratio']]);
+  });
+});
+
+describe('every generation run site shows the dropped knobs', () => {
+  // A source scan, in the dispatchEffects idiom: the failure this guards is a
+  // NEW entry point that constructs the generation runner and quietly omits
+  // the badge, which no behavioural test on the existing sites can catch.
+  const SITES = ['CanvasComposer.tsx', 'chainRun.ts', 'loopRun.ts', 'regenerate.ts'];
+
+  it('every withGenerationRunner call site wires onDropped', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const here = join(__dirname);
+    const constructors = readdirSync(here).filter(
+      (f) =>
+        !f.includes('.test.') &&
+        // The module that DEFINES the wrapper obviously names it.
+        f !== 'generationRunner.ts' &&
+        /\.tsx?$/.test(f) &&
+        readFileSync(join(here, f), 'utf8').includes('withGenerationRunner('),
+    );
+    expect(
+      constructors.sort(),
+      'a file constructs the generation runner but is not in the checked set',
+    ).toEqual([...SITES].sort());
+    for (const rel of SITES) {
+      expect(
+        readFileSync(join(here, rel), 'utf8'),
+        `${rel} constructs the generation runner without onDropped — its runs would drop knobs silently`,
+      ).toMatch(/onDropped/);
+    }
+  });
+});

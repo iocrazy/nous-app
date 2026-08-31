@@ -40,6 +40,10 @@ export interface GenerationTask {
     result_url?: string;
     generated_media_id?: number;
     media_kind?: string;
+    /** Knobs the request asked for that this provider cannot honour (P2).
+     *  Always written by the workflow, `[]` meaning "nothing dropped" — an
+     *  ABSENT key means an older task row, not a clean run. */
+    dropped_knobs?: string[];
     [k: string]: unknown;
   };
 }
