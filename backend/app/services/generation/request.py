@@ -140,6 +140,17 @@ class GenerationRequest:
             dropped.append("video_mode")
         return eff, dropped
 
+    def knobs_dict(self) -> dict[str, Any]:
+        """The knobs, in the shape the outcome record stores them.
+
+        Here because the workflow needs them as JSON-safe primitives to carry
+        across a DBOS step boundary. Imported inside the method: ``outcome``
+        already imports this module, and the record's shape belongs to it.
+        """
+        from app.services.generation.outcome import knobs_of
+
+        return knobs_of(self)
+
     def to_codex_daemon_payload(
         self, *, engine_model: str, ref_urls: list[str]
     ) -> dict[str, Any]:

@@ -121,12 +121,19 @@ async def generate_canvas_media_step(
     params: Dict[str, Any],
     source_url: Optional[str],
     user_id: Optional[str] = None,
+    canvas_id: Optional[int] = None,
+    node_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the DB-catalog provider; returns the raw product location.
 
     ``remote_url`` (Ark) and ``local_path`` (jimeng-cli) are mutually
     exclusive; exactly one is set on success. An explicit caller ``model``
     wins over the catalog row's ``actual_model``.
+
+    ``canvas_id``/``node_id`` are needed by the DAEMON branch alone: that
+    product is registered by the upload endpoint rather than by
+    ``persist_canvas_generation_step``, so the attribution the persist step
+    would have written has to travel out with the job instead.
     """
     from app.services.media.parsers.video_providers import db_registry
 
@@ -239,11 +246,32 @@ async def generate_canvas_media_step(
                 engine_model=engine_model, ref_urls=ref_urls
             )
 
+        # The same five identity fields ``persist_canvas_generation_step``
+        # stamps on a server-side product, plus the three-part contract. It
+        # rides the ticket because the daemon's upload — not this workflow —
+        # is what creates the row. Deliberately NOT the payload: that carries
+        # ref urls and the augmented prompt, and this sits in Redis.
         result = await dispatch_to_daemon(
             user_id=str(user_id),
             scope_id=int(await _resolve_personal_team_id(str(user_id))),
             kind=kind if kind in ("image", "video") else "image",
             payload=payload,
+            attribution={
+                "canvas_id": canvas_id,
+                "node_id": node_id,
+                "prompt": prompt,
+                # The RESOLVED model, exactly as the server branches record
+                # ``gen_model = actual_model or model``. Writing the catalog
+                # ROW NAME here (what this used to do) made
+                # ``generated_media.model`` mean two different things
+                # depending on which branch wrote the row — unqueryable, and
+                # querying these records is the whole point.
+                "model": engine_model or model or "",
+                "provider": f"{engine}-local",
+                "requested": req.knobs_dict(),
+                "effective": eff.knobs_dict(),
+                "dropped": dropped,
+            },
         )
         return {
             "media_kind": kind if kind in ("image", "video") else "image",
@@ -251,8 +279,13 @@ async def generate_canvas_media_step(
             "remote_url": None,
             "existing_gen_id": result.get("gen_id"),
             "provider": f"{engine}-local",
-            "model": model or "",
+            "model": engine_model or model or "",
             "dropped_knobs": dropped,
+            # Both halves ride along as JSON-safe primitives: DBOS persists a
+            # step's return value, and the record downstream is only worth
+            # keeping if it can tell "we never sent it" from "they ignored it".
+            "requested_params": req.knobs_dict(),
+            "effective_params": eff.knobs_dict(),
         }
 
     if kind == "video":
@@ -315,6 +348,8 @@ async def generate_canvas_media_step(
             "provider": "jimeng-cli",
             "model": gen_model or "",
             "dropped_knobs": dropped,
+            "requested_params": req.knobs_dict(),
+            "effective_params": eff.knobs_dict(),
         }
 
     provider, actual_model = await db_registry.resolve_image_provider(
@@ -369,7 +404,50 @@ async def generate_canvas_media_step(
         "provider": getattr(result, "provider", "") or "",
         "model": gen_model or "",
         "dropped_knobs": dropped,
+        "requested_params": req.knobs_dict(),
+        "effective_params": eff.knobs_dict(),
     }
+
+
+async def _outcome_of(media: Dict[str, Any], media_kind: str) -> Dict[str, Any]:
+    """The four-key outcome block for a product that has just been made.
+
+    Measurement is best-effort by construction: the asset already exists and
+    has already been paid for, so a probe that cannot read it records
+    ``measured: null`` (and therefore no verdict) rather than failing a run
+    that succeeded. Remote-url products (ark) are not on disk at this point,
+    so they take that same honest ``null`` — P2 measures what it can reach.
+
+    That null is STRUCTURAL for remote-url providers, not a probe that
+    happened to fail: we do not hold the bytes here at all. Measuring after
+    ingest is a real follow-up — ``register_generated_media`` does fetch them
+    — but it is a shared choke point every generation goes through, and the
+    one provider it would serve has had no production traffic in 90 days, so
+    it is deliberately out of this branch's scope. Any query over these
+    records must therefore treat ``honored: null`` as "no verdict", never as
+    a failure (see the plan's Task 5 Step 2, and its divergence from spec
+    §6.2's "其余三条必须相符").
+    """
+    from app.services.generation.measure import measure_image, measure_video
+    from app.services.generation.outcome import build_outcome_params_from_dicts
+
+    measured = None
+    local_path = media.get("local_path")
+    if local_path:
+        try:
+            measured = (
+                measure_image(str(local_path))
+                if media_kind == "image"
+                else await measure_video(str(local_path))
+            )
+        except Exception as exc:  # a broken probe must not break a good run
+            logger.warning("[canvas_generation][persist] measure failed: {}", exc)
+    return build_outcome_params_from_dicts(
+        requested=media.get("requested_params") or {},
+        effective=media.get("effective_params") or {},
+        dropped=list(media.get("dropped_knobs") or []),
+        measured=measured,
+    )
 
 
 @DBOS.step()
@@ -386,6 +464,10 @@ async def persist_canvas_generation_step(
     Registration is REQUIRED (it is the only way to mint a servable URL for
     local files, and it makes remote products durable too) — any failure
     raises (route C). The jimeng scratch dir is reaped after ingest.
+
+    The product is measured here, on the way in, and the outcome block is
+    merged into the params the row keeps: this is the last point where the
+    file is still on disk (``finally`` reaps the scratch dir below).
     """
     # C 方案: a daemon-produced file was already registered by the upload
     # endpoint (it holds the bytes, we never did) — skip re-registration and
@@ -409,6 +491,7 @@ async def persist_canvas_generation_step(
             raise ValueError("canvas generation persist has no user_id")
         media_kind = str(media.get("media_kind") or "image")
         scope_id = int(await _resolve_personal_team_id(str(user_id)))
+        params = {**(params or {}), **await _outcome_of(media, media_kind)}
         row = await register_generated_media(
             user_id=str(user_id),
             scope_id=scope_id,
@@ -580,7 +663,7 @@ async def canvas_generation_workflow(
     source_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     media = await generate_canvas_media_step(
-        kind, prompt, model, params, source_url, user_id
+        kind, prompt, model, params, source_url, user_id, canvas_id, node_id
     )
     result = await persist_canvas_generation_step(
         media=media,
