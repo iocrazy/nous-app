@@ -441,6 +441,14 @@ export function CanvasView({
   // by nodeCount===0 AND a per-canvas ref (StrictMode double-run), persisted
   // through the normal debounced save. ?name=&description=&characterId= from
   // the library's "Open in Canvas" pre-fill the card.
+  //
+  // ⚠️ NOTHING IN THE APP PRODUCES THOSE PARAMS ANY MORE (P3 Task 6): the only
+  // "Open in Canvas" buttons lived on the retired `CharacterLibrary` /
+  // `EntityLibrary` bible cards. The seeding below still works for a
+  // hand-written URL, and the un-parameterised path (an empty entity canvas
+  // seeding an UNBOUND card) is unaffected — so this is left intact rather
+  // than trimmed. Re-establishing an entry point from the asset library is P4
+  // canvas work, together with `smart/entityRef.ts`.
   const [searchParams] = useSearchParams();
   const seededRef = useRef<string | null>(null);
   useEffect(() => {

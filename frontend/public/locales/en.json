@@ -5082,59 +5082,6 @@
     "unpinScenes": "Unpin scene list",
     "railNav": "Editor navigation"
   },
-  "characters": {
-    "extractFailed": "Failed to extract characters",
-    "createFailed": "Failed to create character",
-    "updateFailed": "Failed to save character",
-    "openCanvasFailed": "Failed to open character canvas",
-    "untitled": "New Character",
-    "emptyTitle": "No characters yet",
-    "emptyHint": "Extract the cast from your scripts, or add one by hand.",
-    "extract": "Extract from script",
-    "missingFromLibrary_one": "{{count}} character in your scripts is not in this library yet",
-    "missingFromLibrary_other": "{{count}} characters in your scripts are not in this library yet",
-    "importMissing": "Import them",
-    "importedCount_one": "Imported {{count}} character from your scripts",
-    "importedCount_other": "Imported {{count}} characters from your scripts",
-    "importedNone": "Every script character is already in the library",
-    "add": "Add Character",
-    "nameLabel": "Character name",
-    "bioLabel": "Character bio",
-    "bioPlaceholder": "Backstory, look, temperament…",
-    "assetsHint": "Generated assets appear here",
-    "openCanvas": "Open in Canvas",
-    "role": {
-      "lead": "Lead",
-      "support": "Support",
-      "antagonist": "Antagonist"
-    }
-  },
-  "libEntities": {
-    "extract": "Extract from script",
-    "extractFailed": "Failed to extract from script",
-    "createFailed": "Failed to create",
-    "updateFailed": "Failed to save",
-    "openCanvasFailed": "Failed to open canvas",
-    "nameLabel": "Name",
-    "bioLabel": "Description",
-    "bioPlaceholder": "Look, mood, period, materials…",
-    "assetsHint": "Generated assets appear here",
-    "videoAsset": "Video asset",
-    "generatedAsset": "Generated asset",
-    "openCanvas": "Open in Canvas",
-    "location": {
-      "label": "location",
-      "untitled": "New Location",
-      "emptyTitle": "No locations yet",
-      "add": "Add Location"
-    },
-    "prop": {
-      "label": "prop",
-      "untitled": "New Prop",
-      "emptyTitle": "No props yet",
-      "add": "Add Prop"
-    }
-  },
   "errors": {
     "PROVIDER_AUTH": {
       "title": "The AI provider rejected the credentials",

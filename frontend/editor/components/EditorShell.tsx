@@ -41,7 +41,6 @@ import { fetchScriptProject } from '../../services/scriptService';
 import { onSceneContentRefresh } from '../../components/agentActivity/shotFocusBus';
 import { planInsertScene } from '../insertScenePlan';
 import { fetchProjectEntities } from '../../services/projectsService';
-import { extractLibEntitiesFromScript } from '../../services/libEntitiesService';
 import { useToast } from '../../components/Toast';
 import { mergeProjectMentionCandidates } from '../mentionCandidates';
 import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
@@ -892,28 +891,17 @@ export function EditorShell({
     return map;
   }, [railCharacters]);
 
-  // Auto-sync locations to the project Scene Library (场景库): whenever the set
-  // of distinct location names changes, re-run the idempotent extract so a
-  // location created in a scene heading shows up in the library WITHOUT the
-  // manual "Extract from script" step (user request). Debounced so it fires
-  // once the meta write (updateSceneMeta, 600ms) has persisted the header the
-  // extract reads server-side; best-effort (a background sync, no toast).
-  const locationSyncKey = useMemo(
-    () => [...locationCandidates].map((n) => n.toUpperCase()).sort().join('|'),
-    [locationCandidates],
-  );
-  const lastLocationSyncRef = useRef<string>('');
-  useEffect(() => {
-    if (!workspaceProjectId) return;
-    if (locationSyncKey === lastLocationSyncRef.current) return;
-    const id = setTimeout(() => {
-      lastLocationSyncRef.current = locationSyncKey;
-      extractLibEntitiesFromScript(workspaceProjectId, 'location').catch((err) =>
-        console.error('[EditorShell] auto-sync locations to Scene Library failed', err),
-      );
-    }, 1500);
-    return () => clearTimeout(id);
-  }, [locationSyncKey, workspaceProjectId]);
+  // RETIRED (P3 Task 6): locations typed into a scene heading used to be
+  // auto-extracted into `project_lib_entities` here (debounced POST to
+  // /lib/location/extract), so the workspace's Locations wall filled itself
+  // without the manual "Extract from script" step. That wall — `EntityLibrary`
+  // — is gone: the workspace's Locations page now reads the ASSET LIBRARY, and
+  // `import_from_script` derives its names from the script server-side rather
+  // than from `project_lib_entities`. The sync therefore had no reader left;
+  // keeping it would have meant a POST per heading edit into a table no screen
+  // shows. The successor is `Import From Script` on the assets panel, which is
+  // deliberately a user action (see `ProjectAssetsPanel`). The legacy extract
+  // ENDPOINT is untouched — the rename PR owns it.
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {

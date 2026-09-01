@@ -7,9 +7,11 @@
  * type's label, which nothing downstream would notice — the panel would ask
  * for a valid type and get a valid answer.
  *
- * (This file previously pinned the delegation to `CharacterLibrary` /
- * `EntityLibrary` over `project_characters` / `project_lib_entities`. Those
- * components still exist; nothing in the workspace routes to them any more.)
+ * It also pins WHICH component every module renders. `ProjectAssetsPanel` is
+ * mocked, so a module routed anywhere else renders no `panel` testid and the
+ * case below fails — that is the guard against a revert of P3 Task 5's swap
+ * back to the (now deleted) `CharacterLibrary` / `EntityLibrary` walls over
+ * `project_characters` / `project_lib_entities`.
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -48,6 +50,23 @@ describe('WorkspaceEntities', () => {
   ] as const)('maps the %s module to the %s asset type', (kind, type) => {
     render(<WorkspaceEntities kind={kind} projectId="p1" projectTeamId="42" teamId="42" />);
     expect(screen.getByTestId('panel').getAttribute('data-asset-type')).toBe(type);
+  });
+
+  it('renders the assets panel for every module — no legacy library wall', () => {
+    // Positive AND negative: the panel must be the ONLY thing each module
+    // mounts. A revert that re-introduced a bible-card wall would either drop
+    // the `panel` testid (routed elsewhere) or add one of the retired testids
+    // alongside it (rendered as well) — this fails on both.
+    for (const kind of ['characters', 'locations', 'props', 'costumes'] as const) {
+      const { container, unmount } = render(
+        <WorkspaceEntities kind={kind} projectId="p1" projectTeamId="42" teamId="42" />,
+      );
+      expect(container.querySelectorAll('[data-testid="panel"]')).toHaveLength(1);
+      for (const retired of ['character-library', 'entity-library', 'character-card', 'entity-card']) {
+        expect(container.querySelector(`[data-testid="${retired}"]`)).toBeNull();
+      }
+      unmount();
+    }
   });
 
   it('uses the project’s own team as the asset scope', () => {

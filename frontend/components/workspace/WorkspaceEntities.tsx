@@ -10,9 +10,11 @@
  * label.
  *
  * What it no longer does: delegate to `CharacterLibrary` / `EntityLibrary`
- * over `project_characters` / `project_lib_entities`. Those components and
- * their service are still in the tree — retiring them is Task 6's call, not
- * this file's — but nothing in the workspace routes to them any more.
+ * over `project_characters` / `project_lib_entities`. Those components, their
+ * services (`charactersService` / `libEntitiesService`) and the bible cards'
+ * `EntityAssetStrip` were deleted in P3 Task 6 — this file has no legacy
+ * branch left to fall back to. The backend's old extract endpoints still
+ * exist; the rename PR owns them.
  */
 
 import { useTeamContext } from '../../contexts/TeamContext';
