@@ -55,6 +55,8 @@ on:
       - 'supabase/ci_bootstrap.sql'
       - 'backend/tests/db/test_schema_drift.py'
       - 'backend/tests/db/test_assets_repository_integration.py'
+      - 'backend/tests/db/test_assets_migration_integration.py'
+      - 'backend/app/workflows/backfill_assets_from_project_entities.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/services/assets/**'
@@ -271,3 +273,18 @@ jobs:
           # indexes free/hold names, that ON CONFLICT finds the real index, or
           # that a raise inside unit_of_work() rolls the whole batch back.
           uv run pytest tests/db/test_assets_repository_integration.py -v
+
+      - name: Exercise the project-library → assets migration (mig 445/446)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # P3 deleted the guard that blocked `dry_run=False`; THIS is what
+          # replaced it. `_apply` and `_reconcile` are ORM statements whose unit
+          # tests stub the session, so nothing else proves that the row-wise
+          # `(asset_type, lower(name)) IN ((...))` lookup runs, that re-applying
+          # takes the `existing` branch on every row (a property of the partial
+          # unique index, not of our Python), or that reconciliation agrees with
+          # apply about adopting a same-name asset of ANY source.
+          uv run pytest tests/db/test_assets_migration_integration.py -v

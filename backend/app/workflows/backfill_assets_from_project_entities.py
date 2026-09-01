@@ -2,13 +2,26 @@
 → team-scoped assets (spec §4). THE BACKFILL PARADIGM (backfill_issue_scope.py):
 DBOS workflow, ``dry_run=True`` by default, idempotent, failures raise.
 
-P0 ships the PLANNER and the dry-run path. Execution (dry_run=False) is wired
-here — but ``_reject_execution_until_p3()`` blocks it: this code has never run
-against a database, and the registry entry makes one admin POST enough to reach
-it. P3 removes that guard after the merge list has been reviewed by a human and
-an integration test exists — same-name-same-type rows inside one team MERGE into
-one asset (the first cross-project reuse win, and the one place a wrong merge
-would hurt).
+P0 shipped the PLANNER and the dry-run path only; execution was blocked by a
+``_reject_execution_until_p3()`` guard because ``_apply`` / ``_reconcile`` had
+never run against a database. P3 removes that guard: both paths are now
+exercised against a real PostgreSQL by
+``tests/db/test_assets_migration_integration.py``. ``dry_run=True`` is still the
+default and still the way to review the merge list first — same-name-same-type
+rows inside one team MERGE into one asset (the first cross-project reuse win,
+and the one place a wrong merge would hurt).
+
+ADOPTION, and why reconciliation must share its definition of "done":
+``_apply`` claims an existing same-name asset **whatever its source** — a
+migrated row on a re-run, but also one a user created by hand. That merge is the
+point (the legacy row and the hand-made asset are the same character). It also
+means "how many assets did this produce" cannot be answered by counting
+``source='migrated'``: a run that adopted N user-created assets would under-report
+by exactly N and read as a failure. ``_reconcile`` therefore asks the same
+question ``_apply`` asks — does a live asset exist at ``(scope_id, asset_type,
+lower(name))`` — for every planned key, and counts only the project refs the plan
+actually asked for (an adopted asset may carry older refs to projects outside
+this plan; those are not this run's business).
 
 Task Center: pass the dispatching admin's ``run_user_id`` (a real auth.users
 row) so the run shows up; the all-zero system id never creates a row.
@@ -22,11 +35,21 @@ in the admin router therefore only passes ``limit`` to workflows that take one.
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import AbstractSet, Any, Dict, List, Optional, Set, Tuple, TypedDict
+from typing import (
+    AbstractSet,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypedDict,
+)
 
 from dbos import DBOS
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -44,6 +67,17 @@ SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
 # always exact — compare ``counts["merges"]`` against the list length to see
 # whether the review list was truncated.
 _MERGES_CAP = 200
+
+# Cap the missing-key lists the reconciliation report carries. Exact counts sit
+# beside them (``*_missing_count`` + ``*_missing_truncated``), so a truncated
+# list is never mistaken for the whole story.
+_MISSING_CAP = 20
+
+# Batch sizes for the reconciliation lookups. The plan is global (no ``limit``),
+# so a large workspace can hold thousands of keys — one IN list per scope would
+# be a single enormous statement.
+_KEY_CHUNK = 500
+_ID_CHUNK = 1000
 
 LegacyRef = Tuple[str, int]
 
@@ -213,6 +247,8 @@ def reconcile_counts(
     actual_assets: int,
     expected_refs: int,
     actual_refs: int,
+    missing_assets: Sequence[Dict[str, Any]] = (),
+    missing_refs: Sequence[Dict[str, Any]] = (),
 ) -> None:
     """Pure: raise unless the database agrees with the plan (spec §4).
 
@@ -221,18 +257,48 @@ def reconcile_counts(
     compared ``created + existing`` against ``len(plan["assets"])``, which the
     apply loop makes true by construction — a check that cannot fail is not a
     check.
+
+    ``missing_assets`` / ``missing_refs`` are for the message only. A bare
+    "expected=41 actual=40" cannot tell an operator WHICH key failed, and the
+    keys are what they need to go look at; they are already capped by
+    :func:`_reconcile` before they get here.
     """
     if expected_assets == actual_assets and expected_refs == actual_refs:
         return
+    detail = ""
+    if missing_assets:
+        detail += f"; missing assets (up to {_MISSING_CAP}): {list(missing_assets)}"
+    if missing_refs:
+        detail += f"; missing project refs (up to {_MISSING_CAP}): {list(missing_refs)}"
     raise RuntimeError(
         "[backfill-assets] reconciliation failed: "
         f"assets expected={expected_assets} actual={actual_assets}; "
-        f"project_refs expected={expected_refs} actual={actual_refs}"
+        f"project_refs expected={expected_refs} actual={actual_refs}" + detail
     )
 
 
-async def _reconcile(plan: MigrationPlan) -> Dict[str, int]:
-    """Count what is actually in the DB for the planned scopes and compare.
+def _chunks(items: List[Any], size: int) -> List[List[Any]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+async def _reconcile(plan: MigrationPlan) -> Dict[str, Any]:
+    """Query-only: report what the DB actually holds for THIS plan's keys.
+
+    Deliberately does not raise. The workflow stores this report in the run's
+    metadata *before* calling :func:`reconcile_counts`, so a failed
+    reconciliation leaves behind the keys that are missing rather than only a
+    count that disagrees.
+
+    Existence is asked exactly the way ``_apply`` asks it — a live asset at
+    ``(scope_id, asset_type, lower(name))``, **no source filter**. Filtering on
+    ``source='migrated'`` (the pre-P3 form) contradicted ``_apply``'s deliberate
+    adoption of same-name user-created assets: every adopted asset would be
+    counted as absent, so a correct run reported failure.
+
+    Project refs are counted per planned ``(asset_id, project_id)`` pair, not as
+    "all refs of these assets": an adopted asset can already carry refs to
+    projects this plan never mentions, and those must not inflate the actual
+    count past the expected one.
 
     Re-running the same plan keeps this true: every planned asset exists exactly
     once (the idempotency lookup finds it) and every planned project ref exists
@@ -240,49 +306,94 @@ async def _reconcile(plan: MigrationPlan) -> Dict[str, int]:
     """
     expected_assets = plan["counts"]["assets"]
     expected_refs = sum(len(a["project_ids"]) for a in plan["assets"])
-    scope_ids = sorted({a["scope_id"] for a in plan["assets"]})
-    actual_assets = 0
-    actual_refs = 0
-    if scope_ids:
+
+    by_scope: "OrderedDict[int, List[PlannedAsset]]" = OrderedDict()
+    for a in plan["assets"]:
+        by_scope.setdefault(a["scope_id"], []).append(a)
+
+    found: Dict[Tuple[int, str, str], int] = {}
+    ref_pairs: Set[Tuple[int, int]] = set()
+    if by_scope:
         async with read_scope() as session:
-            asset_ids = [
-                int(x)
-                for x in (
-                    await session.execute(
-                        select(Assets.id)
-                        .where(Assets.source == "migrated")
-                        .where(Assets.deleted_at.is_(None))
-                        .where(Assets.scope_id.in_(scope_ids))
-                    )
+            for scope_id, group in by_scope.items():
+                keys = sorted(
+                    {(a["asset_type"], a["name"].strip().lower()) for a in group}
                 )
-                .scalars()
-                .all()
-            ]
-            actual_assets = len(asset_ids)
-            if asset_ids:
-                actual_refs = (
+                for chunk in _chunks(keys, _KEY_CHUNK):
+                    rows = (
+                        await session.execute(
+                            select(
+                                Assets.id, Assets.asset_type, func.lower(Assets.name)
+                            )
+                            .where(Assets.scope_id == scope_id)
+                            .where(Assets.deleted_at.is_(None))
+                            .where(
+                                tuple_(Assets.asset_type, func.lower(Assets.name)).in_(
+                                    chunk
+                                )
+                            )
+                        )
+                    ).all()
+                    for asset_id, asset_type, lowered in rows:
+                        found[(scope_id, asset_type, lowered)] = int(asset_id)
+            asset_ids = sorted(set(found.values()))
+            for chunk in _chunks(asset_ids, _ID_CHUNK):
+                rows = (
                     await session.execute(
-                        select(func.count())
-                        .select_from(AssetProjectRefs)
-                        .where(AssetProjectRefs.asset_id.in_(asset_ids))
+                        select(
+                            AssetProjectRefs.asset_id, AssetProjectRefs.project_id
+                        ).where(AssetProjectRefs.asset_id.in_(chunk))
                     )
-                ).scalar_one()
-    reconcile_counts(expected_assets, actual_assets, expected_refs, actual_refs)
-    return {"assets": actual_assets, "project_refs": actual_refs}
+                ).all()
+                ref_pairs.update((int(x), int(y)) for x, y in rows)
 
+    present_assets = present_refs = 0
+    missing_assets: List[Dict[str, Any]] = []
+    missing_refs: List[Dict[str, Any]] = []
+    for a in plan["assets"]:
+        asset_id = found.get(_key(a["scope_id"], a["asset_type"], a["name"]))
+        if asset_id is None:
+            # Its refs cannot exist either — report them so the two numbers in
+            # the failure message stay consistent with each other.
+            missing_assets.append(
+                {
+                    "scope_id": str(a["scope_id"]),
+                    "asset_type": a["asset_type"],
+                    "name": a["name"],
+                }
+            )
+            missing_refs.extend(
+                {"name": a["name"], "project_id": str(pid), "asset_id": None}
+                for pid in a["project_ids"]
+            )
+            continue
+        present_assets += 1
+        for pid in a["project_ids"]:
+            if (asset_id, int(pid)) in ref_pairs:
+                present_refs += 1
+            else:
+                missing_refs.append(
+                    {
+                        "name": a["name"],
+                        "project_id": str(pid),
+                        "asset_id": str(asset_id),
+                    }
+                )
 
-def _reject_execution_until_p3() -> None:
-    """P3 deletes this guard (and its call) once the integration test lands.
-
-    ``_apply`` / ``_reconcile`` are compile-verified only — they have never run
-    against a database, and their first run would be a production write reached
-    by one admin POST with ``dry_run: false``. The registry entry exists so the
-    *plan* can be reviewed; executing it is not P0's to ship.
-    """
-    raise NotImplementedError(
-        "assets_from_project_entities execution is P3 — dry_run=False is "
-        "blocked until the integration test lands"
-    )
+    # BIGINT ids are stringified above: this dict lands in task_tracking.metadata
+    # (jsonb) and is read by JS, where a Snowflake id over 2^53 loses precision.
+    return {
+        "assets_expected": expected_assets,
+        "assets_present": present_assets,
+        "assets_missing": missing_assets[:_MISSING_CAP],
+        "assets_missing_count": len(missing_assets),
+        "assets_missing_truncated": len(missing_assets) > _MISSING_CAP,
+        "project_refs_expected": expected_refs,
+        "project_refs_present": present_refs,
+        "project_refs_missing": missing_refs[:_MISSING_CAP],
+        "project_refs_missing_count": len(missing_refs),
+        "project_refs_missing_truncated": len(missing_refs) > _MISSING_CAP,
+    }
 
 
 async def _apply(plan: MigrationPlan, run_user_id: str) -> Dict[str, int]:
@@ -399,10 +510,20 @@ async def backfill_assets_from_project_entities(
         out["counts"] = plan["counts"]
         out["merges"] = plan["merges"][:_MERGES_CAP]
         if not dry_run:
-            _reject_execution_until_p3()
             out["applied"] = await _apply(plan, owner)
             # Reconciliation (spec §4) — against DB counts, not our own tally.
-            out["reconciled"] = await _reconcile(plan)
+            # The report is stored BEFORE the check raises, so a failed run's
+            # metadata names the keys that are missing.
+            report = await _reconcile(plan)
+            out["reconciled"] = report
+            reconcile_counts(
+                report["assets_expected"],
+                report["assets_present"],
+                report["project_refs_expected"],
+                report["project_refs_present"],
+                missing_assets=report["assets_missing"],
+                missing_refs=report["project_refs_missing"],
+            )
     except Exception:
         # Persist whatever was computed before the crash, then raise —
         # 路线 C rule 4: the trigger writes phase=failed, we never do.

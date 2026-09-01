@@ -5,6 +5,7 @@ one place a wrong decision would silently fuse two different people's
 characters into one team asset, so every branch of it is pinned here.
 """
 
+import contextlib
 import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -206,33 +207,249 @@ class TestReconcileCounts:
             reconcile_counts(3, 3, 7, 5)
         assert "project_refs expected=7 actual=5" in str(e.value)
 
+    def test_the_message_names_the_missing_keys_when_it_has_them(self):
+        """The counts say something is wrong; the keys say what to go look at."""
+        with pytest.raises(RuntimeError) as e:
+            reconcile_counts(
+                2,
+                1,
+                2,
+                1,
+                missing_assets=[
+                    {"scope_id": "100", "asset_type": "character", "name": "Lin Mu"}
+                ],
+                missing_refs=[{"name": "Lin Mu", "project_id": "11", "asset_id": None}],
+            )
+        msg = str(e.value)
+        assert "Lin Mu" in msg
+        assert "missing assets" in msg and "missing project refs" in msg
 
-class TestExecutionBlockedInP0:
-    async def test_dry_run_false_raises_before_touching_the_database(self):
-        """One admin POST with ``dry_run: false`` must not reach ``_apply``,
-        which has never run against a database."""
+    def test_missing_keys_are_never_reported_on_a_passing_check(self):
+        """Defensive: a caller that passes stale lists must not turn a clean
+        reconciliation into a failure — the counts alone decide."""
+        assert (
+            reconcile_counts(
+                3, 3, 7, 7, missing_assets=[{"name": "x"}], missing_refs=[{"name": "x"}]
+            )
+            is None
+        )
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+
+class _FakeSession:
+    """Answers the two reconciliation queries from canned rows.
+
+    Not a substitute for the real thing — the statements themselves (including
+    the row-wise ``(asset_type, lower(name)) IN ((...),(...))``) only ever run
+    on Postgres in ``tests/db/test_assets_migration_integration.py``. What this
+    fake pins is the FOLD: which planned keys are called present, which are
+    named as missing, and that refs outside the plan are ignored.
+    """
+
+    def __init__(self, assets_by_scope, ref_pairs=()):
+        self.assets_by_scope = assets_by_scope
+        self.ref_pairs = list(ref_pairs)
+        self.statements = []
+
+    async def execute(self, stmt):
+        sql = str(stmt)
+        self.statements.append(sql)
+        params = stmt.compile().params
+        if "asset_project_refs" in sql:
+            wanted = None
+            for k, v in params.items():
+                if k.startswith("asset_id") and isinstance(v, (list, tuple)):
+                    wanted = {int(x) for x in v}
+            rows = [r for r in self.ref_pairs if wanted is None or int(r[0]) in wanted]
+            return _FakeResult(rows)
+        scope = next(v for k, v in params.items() if k.startswith("scope_id"))
+        return _FakeResult(self.assets_by_scope.get(int(scope), []))
+
+
+@contextlib.asynccontextmanager
+async def _fake_scope(session):
+    yield session
+
+
+async def _reconcile_with(plan, session):
+    import app.workflows.backfill_assets_from_project_entities as m
+
+    with patch.object(m, "read_scope", lambda: _fake_scope(session)):
+        return await m._reconcile(plan)
+
+
+class TestReconcileSemantics:
+    """``_apply`` adopts a same-name asset WHATEVER its source (that merge is
+    the point). Reconciliation has to ask the same question — the pre-P3 form
+    counted only ``source='migrated'``, so a run that adopted N user-created
+    assets under-reported by exactly N and read as a failure."""
+
+    async def test_the_existence_query_does_not_filter_on_source(self):
+        """The regression this task exists to kill, asserted on the statement
+        itself: a ``source`` predicate here is what made adoption unreportable.
+        Pinning the SQL (not just the count) keeps a future edit from quietly
+        re-adding the filter and passing because the fixture happens to be
+        migrated-only."""
+        plan = plan_migration([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM)
+        session = _FakeSession({TEAM_A: [(900, "character", "sang yao")]})
+        await _reconcile_with(plan, session)
+        asset_sql = [s for s in session.statements if "asset_project_refs" not in s]
+        assert asset_sql, "no asset existence query was issued"
+        for sql in asset_sql:
+            assert "assets.source" not in sql
+
+    async def test_an_adopted_user_created_asset_counts_as_present(self):
+        plan = plan_migration([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM)
+        # Row 900 was created by hand (source='manual'); _apply adopted it.
+        session = _FakeSession(
+            {TEAM_A: [(900, "character", "sang yao")]}, ref_pairs=[(900, P1)]
+        )
+        report = await _reconcile_with(plan, session)
+        assert report["assets_expected"] == 1
+        assert report["assets_present"] == 1
+        assert report["assets_missing"] == []
+        assert report["project_refs_expected"] == 1
+        assert report["project_refs_present"] == 1
+        assert report["project_refs_missing"] == []
+
+    async def test_a_missing_asset_is_named_not_merely_counted(self):
+        """A bare "expected=2 actual=1" cannot tell an operator which key
+        failed — and the key is the only thing they can go look at."""
+        plan = plan_migration(
+            [_char(1, P1, "Sang Yao"), _char(2, P1, "Lin Mu")], [], PROJECT_TEAM
+        )
+        session = _FakeSession(
+            {TEAM_A: [(900, "character", "sang yao")]}, ref_pairs=[(900, P1)]
+        )
+        report = await _reconcile_with(plan, session)
+        assert report["assets_present"] == 1
+        assert report["assets_missing"] == [
+            {"scope_id": str(TEAM_A), "asset_type": "character", "name": "Lin Mu"}
+        ]
+        assert report["assets_missing_count"] == 1
+        assert report["assets_missing_truncated"] is False
+        # The absent asset's refs are absent too — reported, with no asset id
+        # to give, so the two numbers stay consistent with each other.
+        assert report["project_refs_present"] == 1
+        assert report["project_refs_missing"] == [
+            {"name": "Lin Mu", "project_id": str(P1), "asset_id": None}
+        ]
+
+    async def test_refs_outside_the_plan_do_not_inflate_the_count(self):
+        """An adopted asset can already be linked to projects this plan never
+        mentions. Counting "all refs of these assets" would push actual past
+        expected and fail a correct run — so only planned pairs are counted."""
+        plan = plan_migration([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM)
+        session = _FakeSession(
+            {TEAM_A: [(900, "character", "sang yao")]},
+            ref_pairs=[(900, P1), (900, P2), (900, P3)],
+        )
+        report = await _reconcile_with(plan, session)
+        assert report["project_refs_expected"] == 1
+        assert report["project_refs_present"] == 1
+        assert report["project_refs_missing"] == []
+
+    async def test_a_present_asset_missing_one_ref_reports_that_pair(self):
+        plan = plan_migration(
+            [_char(1, P1, "Sang Yao"), _char(2, P2, "Sang Yao")], [], PROJECT_TEAM
+        )
+        assert plan["counts"]["merges"] == 1  # one asset, two project refs
+        session = _FakeSession(
+            {TEAM_A: [(900, "character", "sang yao")]}, ref_pairs=[(900, P1)]
+        )
+        report = await _reconcile_with(plan, session)
+        assert report["assets_present"] == 1
+        assert report["project_refs_expected"] == 2
+        assert report["project_refs_present"] == 1
+        assert report["project_refs_missing"] == [
+            {"name": "Sang Yao", "project_id": str(P2), "asset_id": "900"}
+        ]
+
+    async def test_case_and_whitespace_are_normalised_like_apply(self):
+        plan = plan_migration([_char(1, P1, "  Sang Yao  ")], [], PROJECT_TEAM)
+        session = _FakeSession(
+            {TEAM_A: [(900, "character", "sang yao")]}, ref_pairs=[(900, P1)]
+        )
+        report = await _reconcile_with(plan, session)
+        assert report["assets_present"] == 1
+
+    async def test_each_scope_is_asked_separately(self):
+        """Team B's asset must not satisfy Team A's key. One query per scope,
+        each pinned to that scope's id."""
+        plan = plan_migration(
+            [_char(1, P1, "Sang Yao"), _char(2, P3, "Sang Yao")], [], PROJECT_TEAM
+        )
+        assert plan["counts"]["assets"] == 2  # same name, different teams
+        session = _FakeSession({TEAM_B: [(901, "character", "sang yao")]})
+        report = await _reconcile_with(plan, session)
+        assert report["assets_present"] == 1
+        assert report["assets_missing"] == [
+            {"scope_id": str(TEAM_A), "asset_type": "character", "name": "Sang Yao"}
+        ]
+
+    async def test_missing_lists_are_capped_but_the_counts_stay_exact(self):
+        chars = [_char(i, P1, f"Ghost {i:03d}") for i in range(50)]
+        plan = plan_migration(chars, [], PROJECT_TEAM)
+        session = _FakeSession({TEAM_A: []})
+        report = await _reconcile_with(plan, session)
+        assert report["assets_present"] == 0
+        assert len(report["assets_missing"]) == 20
+        assert report["assets_missing_count"] == 50
+        assert report["assets_missing_truncated"] is True
+        assert len(report["project_refs_missing"]) == 20
+        assert report["project_refs_missing_count"] == 50
+        assert report["project_refs_missing_truncated"] is True
+
+    async def test_an_empty_plan_never_opens_a_session(self):
+        """ "Nothing to reconcile" must not become "a query returned nothing"."""
         import app.workflows.backfill_assets_from_project_entities as m
 
-        applied = AsyncMock()
-        with (
-            patch.object(
-                m, "_load_inputs", AsyncMock(return_value=([], [], {}, set()))
-            ),
-            patch.object(m, "_apply", applied),
-            patch(
-                "app.services.infra.unified_task_manager.get_task_manager",
-                return_value=AsyncMock(),
-            ),
-        ):
-            with pytest.raises(NotImplementedError, match="P3"):
-                await inspect.unwrap(m.backfill_assets_from_project_entities)(
-                    dry_run=False, run_user_id="admin-uuid"
-                )
-        applied.assert_not_awaited()
+        plan = plan_migration([], [], PROJECT_TEAM)
+        opened = False
 
-    async def test_dry_run_true_still_returns_the_plan(self):
+        def _boom():
+            nonlocal opened
+            opened = True
+            raise AssertionError("read_scope opened for an empty plan")
+
+        with patch.object(m, "read_scope", _boom):
+            report = await m._reconcile(plan)
+        assert opened is False
+        assert report["assets_expected"] == 0
+        assert report["assets_present"] == 0
+        assert report["project_refs_missing"] == []
+
+
+class TestExecutionUnsealed:
+    """P3 removed ``_reject_execution_until_p3``. These pin what replaced it:
+    ``dry_run=False`` really runs apply → reconcile → the arithmetic check, and
+    ``dry_run=True`` still runs neither."""
+
+    async def test_dry_run_false_applies_reconciles_and_checks(self):
         import app.workflows.backfill_assets_from_project_entities as m
 
+        applied = AsyncMock(
+            return_value={"created": 1, "existing": 0, "project_refs_added": 1}
+        )
+        report = {
+            "assets_expected": 1,
+            "assets_present": 1,
+            "assets_missing": [],
+            "assets_missing_count": 0,
+            "assets_missing_truncated": False,
+            "project_refs_expected": 1,
+            "project_refs_present": 1,
+            "project_refs_missing": [],
+            "project_refs_missing_count": 0,
+            "project_refs_missing_truncated": False,
+        }
         with (
             patch.object(
                 m,
@@ -241,6 +458,83 @@ class TestExecutionBlockedInP0:
                     return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
                 ),
             ),
+            patch.object(m, "_apply", applied),
+            patch.object(m, "_reconcile", AsyncMock(return_value=report)),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=AsyncMock(),
+            ),
+        ):
+            out = await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                dry_run=False, run_user_id="admin-uuid"
+            )
+        applied.assert_awaited_once()
+        assert out["applied"]["created"] == 1
+        assert out["reconciled"] == report
+
+    async def test_a_failing_reconciliation_raises_and_keeps_the_report(self):
+        """路线 C rule 4: the failure path raises (never returns a failed dict),
+        and the metadata patched on the way out carries the reconciliation
+        report — so the run record names WHICH key is missing, not just that a
+        count disagreed."""
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        report = {
+            "assets_expected": 1,
+            "assets_present": 0,
+            "assets_missing": [
+                {"scope_id": str(TEAM_A), "asset_type": "character", "name": "Sang Yao"}
+            ],
+            "assets_missing_count": 1,
+            "assets_missing_truncated": False,
+            "project_refs_expected": 1,
+            "project_refs_present": 0,
+            "project_refs_missing": [
+                {"name": "Sang Yao", "project_id": str(P1), "asset_id": None}
+            ],
+            "project_refs_missing_count": 1,
+            "project_refs_missing_truncated": False,
+        }
+        manager = AsyncMock()
+        with (
+            patch.object(
+                m,
+                "_load_inputs",
+                AsyncMock(
+                    return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
+                ),
+            ),
+            patch.object(m, "_apply", AsyncMock(return_value={})),
+            patch.object(m, "_reconcile", AsyncMock(return_value=report)),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+        ):
+            with pytest.raises(RuntimeError) as e:
+                await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                    dry_run=False, run_user_id="admin-uuid"
+                )
+        assert "Sang Yao" in str(e.value)
+        manager.complete.assert_not_awaited()
+        patched = manager.patch_metadata.await_args.args[1]
+        assert patched["reconciled"] == report
+
+    async def test_dry_run_true_still_returns_the_plan_without_applying(self):
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        applied = AsyncMock()
+        reconciled = AsyncMock()
+        with (
+            patch.object(
+                m,
+                "_load_inputs",
+                AsyncMock(
+                    return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
+                ),
+            ),
+            patch.object(m, "_apply", applied),
+            patch.object(m, "_reconcile", reconciled),
             patch(
                 "app.services.infra.unified_task_manager.get_task_manager",
                 return_value=AsyncMock(),
@@ -253,6 +547,8 @@ class TestExecutionBlockedInP0:
         assert out["counts"]["assets"] == 1
         assert out["merges"] == []
         assert "applied" not in out
+        applied.assert_not_awaited()
+        reconciled.assert_not_awaited()
 
 
 class TestSubtitle:
