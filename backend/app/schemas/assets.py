@@ -37,6 +37,26 @@ AssetType = Literal["character", "location", "prop", "costume", "prompt", "audio
 AssetSource = Literal[
     "manual", "script_import", "generated", "migrated", "duplicated", "system_preset"
 ]
+"""Every provenance the ``assets_source_check`` constraint allows. This is the
+RESPONSE vocabulary — a row legitimately comes back as ``duplicated`` /
+``migrated`` / ``system_preset`` / ``script_import``."""
+
+AssetCreateSource = Literal["manual", "generated"]
+"""The subset a CLIENT may claim on POST /assets.
+
+The other four are assertions only the server can honestly make: ``duplicated``
+is set by ``AssetsService.duplicate``, ``migrated`` by the migration workflow,
+``system_preset`` by the seeder, ``script_import`` by the script importer —
+each alongside the row (``duplicated_from``, the preset flag) that makes the
+claim true. Accepting them from the request body let any client forge
+provenance on a hand-made asset, and provenance is written once at creation
+and never corrected afterwards, so nothing downstream could tell.
+
+Those server-side paths do NOT go through ``AssetCreate``: ``duplicate`` hands
+``create_raw`` a full column dict, and the seeder writes rows directly. So the
+narrowing costs them nothing — verified by grep, ``AssetCreate(...)`` has
+exactly one non-test construction site (``generated_inbox_service``, which
+passes ``generated``)."""
 LinkRelation = Literal["wears", "holds", "ambience_of", "voice_of"]
 ReadinessState = Literal["ready", "draft"]
 
@@ -54,7 +74,8 @@ class AssetCreate(BaseModel):
     prompt_negative_zh: Optional[str] = Field(default=None, max_length=20000)
     platform_params: Dict[str, Any] = Field(default_factory=dict)
     tags: Dict[str, Any] = Field(default_factory=dict)
-    source: AssetSource = "manual"
+    # Narrower than the AssetSource the response carries — see AssetCreateSource.
+    source: AssetCreateSource = "manual"
 
 
 class AssetUpdate(BaseModel):

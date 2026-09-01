@@ -133,10 +133,20 @@ class FakeAssetsRepo:
 
     def make_preset(self, asset_id):
         """A system preset carries is_system_preset AND scope_id NULL — the
-        assets_scope_or_preset CHECK forbids any other combination."""
+        assets_scope_or_preset CHECK forbids any other combination — and
+        ``source="system_preset"``.
+
+        The source is stamped HERE rather than passed through ``AssetCreate``:
+        the seeder writes the preset row directly, and ``AssetCreate.source``
+        is now the client-facing allowlist (``manual`` / ``generated``), which
+        deliberately cannot express this one. Setting all three together is
+        also the only combination the real row ever has, so a fixture cannot
+        drift into a half-preset the CHECK would have rejected.
+        """
         row = self.rows[int(asset_id)]
         row["is_system_preset"] = True
         row["scope_id"] = None
+        row["source"] = "system_preset"
         return row
 
     async def slot_counts(self, ids):
@@ -602,7 +612,7 @@ async def test_link_project_rejects_other_team_and_unknown(svc):
 async def test_system_preset_is_readonly(svc):
     p = await svc.create_asset(
         SCOPE,
-        AssetCreate(asset_type="prompt", name="Grid", source="system_preset"),
+        AssetCreate(asset_type="prompt", name="Grid"),
         USER,
     )
     svc.assets.make_preset(p["id"])
@@ -619,7 +629,7 @@ async def test_delete_asset_refuses_system_preset(svc):
     matches — it would return False silently, so refuse before writing."""
     p = await svc.create_asset(
         SCOPE,
-        AssetCreate(asset_type="prompt", name="Grid", source="system_preset"),
+        AssetCreate(asset_type="prompt", name="Grid"),
         USER,
     )
     svc.assets.make_preset(p["id"])
@@ -799,7 +809,7 @@ async def _preset(svc, asset_type="prompt", name="Grid"):
     """A row reachable from SCOPE only because ``get()`` unions presets in."""
     p = await svc.create_asset(
         SCOPE,
-        AssetCreate(asset_type=asset_type, name=name, source="system_preset"),
+        AssetCreate(asset_type=asset_type, name=name),
         USER,
     )
     svc.assets.make_preset(p["id"])
@@ -962,3 +972,146 @@ async def test_link_personal_project_without_owner_is_typed_not_500(svc, monkeyp
     with pytest.raises(AssetError) as ei:  # owner_id NULL
         await svc.link_project(int(c["id"]), SCOPE, 59, USER)
     assert ei.value.status == 422 and ei.value.code == "project_scope_mismatch"
+
+
+# ── M3: the asset and its Default loadout are ONE transaction ──────────────
+
+
+@pytest.fixture
+def uow_spy(monkeypatch):
+    """Record every entry/exit of the service's unit-of-work.
+
+    The fakes hold rows in a dict, so nothing here can roll anything back —
+    that is an engine property, pinned against a real server in
+    ``tests/db/test_assets_repository_integration.py``. What IS checkable
+    without a DB is the part the engine cannot fix for us: that both writes are
+    issued INSIDE one open block. A create moved back out of it would still
+    pass every other test in this file.
+    """
+    import contextlib
+
+    import app.services.assets.assets_service as m
+
+    log: list[str] = []
+
+    @contextlib.asynccontextmanager
+    async def _spy(enabled):
+        log.append(f"uow_enter(enabled={enabled})")
+        try:
+            yield None
+        finally:
+            log.append("uow_exit")
+
+    monkeypatch.setattr(m, "maybe_unit_of_work", _spy)
+    monkeypatch.setattr(m, "is_configured", lambda: True)
+    return log
+
+
+def _traced(svc, log):
+    """Append repo calls to the same log the uow spy writes to."""
+    real_create = svc.assets.create
+    real_loadout = svc.relations.create_loadout
+
+    async def create(scope_id, fields, created_by):
+        log.append("assets.create")
+        return await real_create(scope_id, fields, created_by)
+
+    async def create_loadout(asset_id, fields):
+        log.append("relations.create_loadout")
+        return await real_loadout(asset_id, fields)
+
+    svc.assets.create = create
+    svc.relations.create_loadout = create_loadout
+
+
+@pytest.mark.asyncio
+async def test_character_create_and_default_loadout_share_one_uow(svc, uow_spy):
+    _traced(svc, uow_spy)
+    await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
+    )
+    assert uow_spy == [
+        "uow_enter(enabled=True)",
+        "assets.create",
+        "relations.create_loadout",
+        "uow_exit",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_default_loadout_takes_the_asset_down_with_it(svc, uow_spy):
+    """The bug: two transactions meant a committed character with no loadout —
+    the one state ``create_loadout`` exists to make impossible — while the user
+    saw only an error. The error must still reach the caller (no silent
+    no-op), and the write must still be inside the open block when it does.
+    """
+
+    async def _boom(asset_id, fields):
+        uow_spy.append("relations.create_loadout")
+        raise RuntimeError("loadout insert failed")
+
+    _traced(svc, uow_spy)
+    svc.relations.create_loadout = _boom
+
+    with pytest.raises(RuntimeError):
+        await svc.create_asset(
+            SCOPE, AssetCreate(asset_type="character", name="Doomed"), USER
+        )
+    # The raise happened while the transaction was still open — that, not the
+    # fake's dict, is what a real engine turns into a rollback.
+    assert uow_spy.index("relations.create_loadout") < uow_spy.index("uow_exit")
+    assert uow_spy[-1] == "uow_exit"
+
+
+@pytest.mark.asyncio
+async def test_non_character_create_still_opens_the_uow(svc, uow_spy):
+    """A prop writes one row, so atomicity is trivially satisfied — but the
+    block must not be conditional on the asset type: a later second write added
+    to this path would then be atomic for characters only."""
+    _traced(svc, uow_spy)
+    await svc.create_asset(SCOPE, AssetCreate(asset_type="prop", name="Blade"), USER)
+    assert uow_spy == ["uow_enter(enabled=True)", "assets.create", "uow_exit"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_is_answered_before_the_insert(svc, uow_spy):
+    """Inside a transaction the 409 must be decided by a SELECT that runs
+    BEFORE the failing INSERT: afterwards the transaction is aborted and the
+    lookup ``AssetsRepository.create`` used to do raises PendingRollbackError —
+    an untyped 500 in place of the 409 (integration case 15's finding, now
+    reachable from this path too because it opens a UoW).
+    """
+    a = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="location", name="Bamboo Grove"), USER
+    )
+    _traced(svc, uow_spy)
+    with pytest.raises(AssetError) as ei:
+        await svc.create_asset(
+            SCOPE, AssetCreate(asset_type="location", name="bamboo grove"), USER
+        )
+    assert ei.value.status == 409 and ei.value.code == "asset_exists"
+    assert ei.value.extra["existing_asset_id"] == a["id"]
+    # Decided without ever reaching the INSERT.
+    assert "assets.create" not in uow_spy
+
+
+@pytest.mark.asyncio
+async def test_uow_is_skipped_when_no_engine_exists(svc, monkeypatch):
+    """``maybe_``, not the bare form: this service also runs in processes that
+    never had an engine (this very suite). ``enabled=False`` must reach
+    ``maybe_unit_of_work`` so it stays a no-op instead of raising."""
+    import contextlib
+
+    import app.services.assets.assets_service as m
+
+    seen: list[bool] = []
+
+    @contextlib.asynccontextmanager
+    async def _spy(enabled):
+        seen.append(enabled)
+        yield None
+
+    monkeypatch.setattr(m, "maybe_unit_of_work", _spy)
+    monkeypatch.setattr(m, "is_configured", lambda: False)
+    await svc.create_asset(SCOPE, AssetCreate(asset_type="prop", name="Blade"), USER)
+    assert seen == [False]

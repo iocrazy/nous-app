@@ -91,6 +91,20 @@ export const ASSET_SOURCES = [
 
 export type AssetSource = (typeof ASSET_SOURCES)[number];
 
+/**
+ * The subset a client may CLAIM on create (`app/schemas/assets.py::
+ * AssetCreateSource`). The API rejects the other four with a 422 — they are
+ * assertions only the server can honestly make, each written alongside the row
+ * that makes it true (`duplicated_from` for `duplicated`, the preset flag for
+ * `system_preset`). Provenance is written once and never corrected, so a
+ * forged one is permanent.
+ *
+ * Deliberately NOT `AssetSource`: a create body typed as the response
+ * vocabulary compiles for values the server refuses, turning a type error at
+ * the call site into a 422 at runtime.
+ */
+export type AssetCreateSource = Extract<AssetSource, 'manual' | 'generated'>;
+
 export interface AssetCreateBody {
   asset_type: AssetType;
   name: string;
@@ -113,7 +127,7 @@ export interface AssetCreateBody {
    * a two-step client that skips it writes a permanently wrong provenance
    * that nothing downstream can distinguish from a hand-made asset.
    */
-  source?: AssetSource;
+  source?: AssetCreateSource;
 }
 
 const BASE = () => `${getApiUrl()}/api/v1/assets`;

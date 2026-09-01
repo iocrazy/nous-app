@@ -368,6 +368,49 @@ class AssetRelationsRepository:
         async with read_scope() as session:
             return [_row(o) for o in (await session.execute(stmt)).scalars().all()]
 
+    # ── FOR UPDATE lock ordering ───────────────────────────────────────────
+    #
+    # Both locking SELECTs below are split out so they can be compiled and
+    # asserted without a database (tests/services/assets/
+    # test_asset_relations_repository_sql.py), the same reason
+    # ``AssetsRepository._list_stmt`` is.
+    #
+    # Each carries ``.order_by(AssetLoadouts.id)`` for DEADLOCK PREVENTION, not
+    # for presentation: ``FOR UPDATE`` takes the row locks in the order the scan
+    # returns rows, and an unordered scan is free to return them in ANY order
+    # (seq scan vs index scan, heap layout after an UPDATE rewrites a row).
+    # Two concurrent transactions touching the same asset's loadouts can then
+    # grab the same two rows in opposite orders and deadlock — PostgreSQL
+    # resolves that by killing one with 40P01, surfacing as a random 500 that
+    # only reproduces under concurrency. A total order on ``id``, applied by
+    # every locker, makes that cycle unconstructible.
+    #
+    # ⚠️ Any NEW ``with_for_update()`` in this file must order by
+    # ``AssetLoadouts.id`` too — the guarantee is a property of the whole set of
+    # lockers, so one unordered straggler restores the deadlock for everybody.
+
+    @staticmethod
+    def _owned_probe_stmt(loadout_id: int, asset_id: int):
+        """``set_default``'s ownership probe (single row, but the ordering keeps
+        it in the same lock order as the multi-row scan below)."""
+        return (
+            select(AssetLoadouts.id)
+            .where(AssetLoadouts.id == int(loadout_id))
+            .where(AssetLoadouts.asset_id == int(asset_id))
+            .order_by(AssetLoadouts.id)
+            .with_for_update()
+        )
+
+    @staticmethod
+    def _siblings_for_update_stmt(asset_id: int):
+        """``strip_from_loadouts``' scan of every loadout of one asset."""
+        return (
+            select(AssetLoadouts)
+            .where(AssetLoadouts.asset_id == int(asset_id))
+            .order_by(AssetLoadouts.id)
+            .with_for_update()
+        )
+
     async def set_default(self, loadout_id: int, asset_id: int) -> bool:
         """Make ``loadout_id`` the asset's default, in one transaction.
 
@@ -384,12 +427,7 @@ class AssetRelationsRepository:
         """
         async with write_scope() as session:
             owned = (
-                await session.execute(
-                    select(AssetLoadouts.id)
-                    .where(AssetLoadouts.id == int(loadout_id))
-                    .where(AssetLoadouts.asset_id == int(asset_id))
-                    .with_for_update()
-                )
+                await session.execute(self._owned_probe_stmt(loadout_id, asset_id))
             ).first()
             if owned is None:
                 return False
@@ -425,13 +463,7 @@ class AssetRelationsRepository:
         touched = 0
         async with write_scope() as session:
             objs = (
-                (
-                    await session.execute(
-                        select(AssetLoadouts)
-                        .where(AssetLoadouts.asset_id == int(asset_id))
-                        .with_for_update()
-                    )
-                )
+                (await session.execute(self._siblings_for_update_stmt(asset_id)))
                 .scalars()
                 .all()
             )

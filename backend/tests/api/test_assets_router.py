@@ -104,6 +104,7 @@ class _FakeService:
     def __init__(self):
         self.calls = []
         self.attach_attempts = []
+        self.created_sources = []
 
     async def list_assets(self, scope_id, **f):
         self.calls.append(("list", scope_id, f))
@@ -126,7 +127,12 @@ class _FakeService:
             "audio": 0,
         }
 
+    # Provenance the router actually handed down, so the "defaults to manual"
+    # pin reads the value rather than the absence of a rejection.
+    created_sources: list = []
+
     async def create_asset(self, scope_id, payload, user_id):
+        self.created_sources.append(payload.source)
         if payload.name == "dup":
             raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
         return asset_row(id="2", name=payload.name, asset_type=payload.asset_type)
@@ -559,3 +565,64 @@ async def test_ids_past_int64_are_422_not_500(app, url):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get(url)
     assert r.status_code == 422, r.text
+
+
+# ── M4: only the server may claim the non-manual provenances ───────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source", ["migrated", "duplicated", "system_preset", "script_import"]
+)
+async def test_create_refuses_a_client_claimed_server_source(app, source):
+    """These four are assertions only the server can honestly make, each
+    written alongside the row that makes it true (``duplicated_from`` for
+    ``duplicated``, the preset flag + NULL scope for ``system_preset``). A
+    client that could set them would write a permanently wrong provenance —
+    it is stamped once at creation and never corrected — that nothing
+    downstream could tell from the real thing.
+
+    The refusal must be a 422 at the schema boundary, not a service check: a
+    value that reaches the service has already been model_dump()-ed into the
+    INSERT's field dict.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets?scope_id=9000",
+            json={"asset_type": "character", "name": "Forged", "source": source},
+        )
+    assert r.status_code == 422, r.text
+    assert any(
+        "source" in map(str, err.get("loc", [])) for err in r.json()["detail"]
+    ), r.text
+    # And it never reached the service — a 422 raised after the create would
+    # leave the row behind.
+    assert not any(c[0] == "create" for c in app.state.fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["manual", "generated"])
+async def test_create_still_accepts_the_two_client_sources(app, source):
+    """The other half of the pin. ``generated`` is what ``SaveAsAssetDialog``
+    sends for every asset born out of the Generated inbox; narrowing the
+    allowlist onto it would break that flow silently (the dialog reports the
+    error, the asset just never exists)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets?scope_id=9000",
+            json={"asset_type": "character", "name": "Sang Yao", "source": source},
+        )
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_create_defaults_to_manual_when_source_is_omitted(app):
+    """Omission is not "unknown" — the server default is a claim, and it has to
+    stay the honest one."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.post(
+            "/api/v1/assets?scope_id=9000",
+            json={"asset_type": "character", "name": "Sang Yao"},
+        )
+    assert r.status_code == 201, r.text
+    assert app.state.fake.created_sources == ["manual"]

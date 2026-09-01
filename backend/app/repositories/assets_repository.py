@@ -18,7 +18,7 @@ from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
-from app.db.session import read_scope, write_scope
+from app.db.session import in_unit_of_work, read_scope, write_scope
 from app.models import AssetFiles, AssetLoadouts, AssetProjectRefs, Assets
 from app.models.assets import ASSET_TYPES
 from app.services.assets.slots import readiness
@@ -32,6 +32,23 @@ class DuplicateAssetName(Exception):
     def __init__(self, existing_id: int):
         self.existing_id = existing_id
         super().__init__(f"asset with same name/type exists: {existing_id}")
+
+
+def _like_escape(text: str) -> str:
+    """Escape the ILIKE metacharacters in USER text so it matches literally.
+
+    Only the caller's substring goes through here — the surrounding ``%``
+    wildcards are ours and must stay live. Without it a search for ``a_b``
+    also matches ``axb`` and a search for ``%`` matches every row: the filter
+    silently WIDENS, which reads as "search is broken" rather than as an
+    error. ``\\`` is escaped FIRST; doing it after ``%``/``_`` would
+    re-escape the backslashes this function had just added.
+
+    The result is only correct when passed with ``escape="\\"`` — otherwise
+    PostgreSQL has no escape character and the backslashes are literal
+    pattern characters.
+    """
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _row_dict(obj: Assets) -> Dict[str, Any]:
@@ -110,6 +127,25 @@ class AssetsRepository:
     async def create(
         self, scope_id: int, fields: Dict[str, Any], created_by: Optional[str]
     ) -> Dict[str, Any]:
+        """INSERT from the ``AssetCreate``-shaped field dict.
+
+        The 409 path resolves the clashing row's id by SELECTing AFTER the
+        IntegrityError, which is only safe when this method owns its
+        transaction: the failed INSERT aborts whatever transaction it ran in,
+        and a ``write_scope()`` of our own is thrown away (the follow-up
+        ``find_by_name`` then opens a clean session). Inside an ambient
+        ``unit_of_work()`` that same SELECT lands on the caller's now-aborted
+        transaction and raises ``PendingRollbackError`` — an untyped 500 in
+        place of the 409. ``create_raw`` never looks up for exactly this
+        reason (integration case 15 pins the difference; a stubbed session
+        cannot tell the two apart).
+
+        So under a UoW we raise with ``existing_id=0`` instead. That is not a
+        loss of information in practice: a caller opening a UoW around this
+        (``AssetsService.create_asset``) pre-checks with ``find_by_name`` and
+        answers the 409 from there, and only loses the id on the genuine
+        concurrent-insert race — where 409-without-the-id still beats a 500.
+        """
         try:
             async with write_scope() as session:
                 obj = Assets(**fields, scope_id=int(scope_id), created_by=created_by)
@@ -120,6 +156,8 @@ class AssetsRepository:
         except IntegrityError as e:
             if "uq_assets_scope_type_name" not in str(e.orig):
                 raise
+            if in_unit_of_work():
+                raise DuplicateAssetName(existing_id=0)
             existing = await self.find_by_name(
                 scope_id, fields["asset_type"], fields["name"]
             )
@@ -219,9 +257,15 @@ class AssetsRepository:
                 )
             )
         if q:
-            like = f"%{q.strip()}%"
+            # ``escape`` on BOTH sides of the or_: passing it to only one leaves
+            # that column matching the escape backslashes literally, so the same
+            # query would answer differently depending on which column hit.
+            like = f"%{_like_escape(q.strip())}%"
             stmt = stmt.where(
-                or_(Assets.name.ilike(like), Assets.description.ilike(like))
+                or_(
+                    Assets.name.ilike(like, escape="\\"),
+                    Assets.description.ilike(like, escape="\\"),
+                )
             )
         if tag:
             stmt = stmt.where(_tag_match(tag))

@@ -49,6 +49,24 @@ _request_session: ContextVar[AsyncSession | None] = ContextVar(
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def in_unit_of_work() -> bool:
+    """True when an ambient ``unit_of_work()`` / ``caller_scope()`` session is
+    active — i.e. the next ``write_scope()`` will JOIN a transaction it does
+    not own rather than open its own.
+
+    For repo error handlers that need to know whether a failed statement just
+    poisoned somebody else's transaction. A ``write_scope()`` of its own is
+    discarded on failure and the next query gets a clean session; the ambient
+    one is aborted in place, so any follow-up SELECT on it raises
+    ``PendingRollbackError`` (an untyped 500) instead of answering. See
+    ``AssetsRepository.create``, the one caller today.
+
+    Not a substitute for ``is_configured()``: this asks "am I inside someone's
+    transaction", not "does an engine exist".
+    """
+    return _request_session.get() is not None
+
+
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """Lazily build the async session factory bound to the existing engine.
 

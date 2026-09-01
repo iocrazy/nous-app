@@ -253,20 +253,55 @@ class AssetsService:
     async def create_asset(
         self, scope_id: int, payload: AssetCreate, user_id: Optional[str]
     ) -> Dict[str, Any]:
+        """Create one asset — and, for a character, its Default loadout — in ONE
+        transaction.
+
+        The two writes used to be two transactions, so a Default loadout that
+        failed to insert left a committed character behind with no loadout at
+        all: the one shape ``create_loadout`` is here to make impossible, and
+        the user saw only the error. Every other invariant in this service is
+        enforced against a database that is assumed consistent, and this was
+        the path that could break that assumption.
+
+        `maybe_`, not the bare ``unit_of_work()`` the attach-batch ROUTE uses —
+        the rule is written out at ``assets_router.py``'s batch block: request
+        handlers take the bare form, a SERVICE helper like this one also runs
+        under the fake-repo unit suites where no engine exists and the bare
+        form would raise. Same call as ``duplicate`` below.
+
+        The duplicate check moved BEFORE the INSERT for the same reason
+        ``duplicate`` asks first: inside this transaction, a unique-violation
+        aborts it, and the id lookup ``AssetsRepository.create`` would
+        otherwise run afterwards would raise ``PendingRollbackError`` instead
+        of yielding the 409. The ``except`` below is now only the concurrent
+        race (someone committed the same name between our SELECT and our
+        INSERT), where the repo hands back ``existing_id=0``.
+        """
         fields = payload.model_dump()
-        try:
-            row = await self.assets.create(int(scope_id), fields, user_id)
-        except DuplicateAssetName as e:
-            raise AssetError(
-                409,
-                "asset_exists",
-                "An asset with this name and type already exists in this scope",
-                {"existing_asset_id": str(e.existing_id)},
+        async with maybe_unit_of_work(is_configured()):
+            clash = await self.assets.find_by_name(
+                int(scope_id), fields["asset_type"], fields["name"]
             )
-        if row["asset_type"] == "character":
-            await self.relations.create_loadout(
-                int(row["id"]), {"name": "Default", "is_default": True}
-            )
+            if clash:
+                raise AssetError(
+                    409,
+                    "asset_exists",
+                    "An asset with this name and type already exists in this scope",
+                    {"existing_asset_id": str(clash["id"])},
+                )
+            try:
+                row = await self.assets.create(int(scope_id), fields, user_id)
+            except DuplicateAssetName as e:
+                raise AssetError(
+                    409,
+                    "asset_exists",
+                    "An asset with this name and type already exists in this scope",
+                    {"existing_asset_id": str(e.existing_id)},
+                )
+            if row["asset_type"] == "character":
+                await self.relations.create_loadout(
+                    int(row["id"]), {"name": "Default", "is_default": True}
+                )
         return (await self._derived([row]))[0]
 
     async def list_assets(

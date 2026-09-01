@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.repositories.assets_repository import AssetsRepository
+from app.repositories.assets_repository import AssetsRepository, _like_escape
 
 SCOPE = 727145299382534200
 
@@ -70,6 +70,77 @@ def test_unknown_sort_raises_instead_of_falling_back():
     for — and look exactly like a working one."""
     with pytest.raises(ValueError):
         _sql(sort="readiness")
+
+
+# ── M2: the q filter matches the user's text LITERALLY ─────────────────────
+
+
+def _compiled(**kw):
+    stmt = AssetsRepository()._list_stmt(SCOPE, **kw)
+    return stmt.compile(dialect=postgresql.dialect())
+
+
+def test_no_q_emits_no_ilike():
+    """Negative control — otherwise "ILIKE is present" could just be it always
+    being there."""
+    assert "ILIKE" not in _sql()
+
+
+def test_q_emits_escape_on_both_columns():
+    """``escape=`` on only one side of the ``or_`` would make the SAME query
+    behave differently depending on which column matched: the name compared
+    literally, the description still reading ``_`` as a wildcard."""
+    sql = _sql(q="a_b")
+    assert sql.count("ILIKE") == 2
+    assert sql.count("ESCAPE '\\\\'") == 2
+
+
+@pytest.mark.parametrize(
+    "raw,pattern",
+    [
+        # `_` matches any single char in LIKE — unescaped, "a_b" also finds "axb".
+        ("a_b", "%a\\_b%"),
+        # `%` matches everything — unescaped, this q is not a filter at all.
+        ("100%", "%100\\%%"),
+        # The escape char itself, escaped FIRST so it does not double-escape the
+        # backslashes the other two rules add.
+        ("back\\slash", "%back\\\\slash%"),
+        # Nothing to escape: the plain path must stay byte-for-byte unchanged.
+        ("plain", "%plain%"),
+        # Surrounding whitespace is still stripped before the wildcards go on.
+        ("  spaced  ", "%spaced%"),
+    ],
+)
+def test_the_bound_pattern_escapes_only_the_users_text(raw, pattern):
+    """The ``%`` wildcards are OURS and must stay live; everything between them
+    is the user's and must be inert."""
+    params = _compiled(q=raw).params
+    assert params["name_1"] == pattern
+    assert params["description_1"] == pattern
+
+
+def test_the_users_text_never_reaches_the_sql_string():
+    """Escaping is about matching semantics, not injection — the value has
+    always been bound. Pinned so a future "just interpolate it" cannot land
+    quietly alongside the escaping."""
+    assert "DROP TABLE" not in _sql(q="x'; DROP TABLE assets; --")
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("a_b", "a\\_b"),
+        ("100%", "100\\%"),
+        ("a\\b", "a\\\\b"),
+        ("_%\\", "\\_\\%\\\\"),
+        ("", ""),
+    ],
+)
+def test_like_escape_unit(raw, expected):
+    """Ordering matters: escaping ``\\`` after ``%``/``_`` would re-escape the
+    backslashes just added, turning ``a_b`` into ``a\\\\_b`` — which matches a
+    LITERAL backslash followed by anything, i.e. nothing the user typed."""
+    assert _like_escape(raw) == expected
 
 
 # ── count_by_type (the sidebar badges) ─────────────────────────────────────
