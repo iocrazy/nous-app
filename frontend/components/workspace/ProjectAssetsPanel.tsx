@@ -30,10 +30,21 @@
 // The blast radius is NOT uniform across the three write paths, and the
 // difference is what a future fixer needs:
 //
-//  * Unlink and Link From Library's `linkProject` are refused CLEAN. The
-//    backend compares the resolved project scope against the `scope_id` it
-//    was handed and answers a typed `project_scope_mismatch` (422) before
-//    writing anything; the panel renders that sentence.
+//  * Unlink and Link From Library's `linkProject` are both refused CLEAN —
+//    but by DIFFERENT gates, and naming the wrong one sends the next fixer to
+//    the wrong file:
+//      · `linkProject` sends the panel's GUESSED scope, which the collaborator
+//        really is a member of, so `_gate` admits it and the service's own
+//        comparison against the project's resolved scope answers a typed
+//        `project_scope_mismatch` (422). The panel renders that sentence.
+//      · Unlink sends `asset.scope_id` — the OWNER's scope, straight from the
+//        row the server just returned — so it never reaches a scope
+//        comparison at all: `_gate` answers `not_a_member` (403) first, and
+//        `unlink_project` has no `project_scope_mismatch` path to reach.
+//    The row-scope request shape is still the more correct of the two: it is
+//    what lets Unlink work on a personal project whose viewer has no resolved
+//    personal team, where the guess is NULL and the other two writes disable
+//    themselves (pinned by the Unlink case in `e2e/project-assets.spec.ts`).
 //  * `+ New` LEAVES A STRAY. `NewAssetDialog` calls `POST /assets` with the
 //    guessed scope FIRST, and that endpoint gates only on membership of the
 //    scope it was given — which the collaborator legitimately has, for their
@@ -302,15 +313,25 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
   );
 
   /**
-   * How many of each type this run put ON THE PROJECT, in `ASSET_TYPES` order.
+   * How many of each type THIS SCRIPT'S NAMES now sit on the project as, in
+   * `ASSET_TYPES` order. Read it as "what the names this run looked at map
+   * to", NOT as "what this run wrote".
    *
-   * Keyed on `linked`, not on `action`: the endpoint lands Characters AND
-   * Locations in one call, so a Characters panel that gains three cards after
-   * a "5 Created" summary reads as an import that under-delivered. `linked`
-   * is the field that decides whether a card appears — an item can be
-   * `action: 'created'` with `linked: false` (the asset landed, the ref did
-   * not), and counting that one here would promise a card that is not coming.
-   * It already has its own failure line.
+   * That distinction is load-bearing on a RE-RUN: a name that was already an
+   * asset and already referenced comes back `action: 'skipped'` with
+   * `code: 'already_linked'` and `linked: true`, so it keeps counting here
+   * while the summary above says "0 Created, 0 Linked, N Skipped". Both are
+   * true and they are answering different questions — the summary reports the
+   * writes, the chips report where the reader will find the cards. Pinned by
+   * `renders the same chips on an idempotent re-run` in the test file.
+   *
+   * Keyed on `linked`, not on `action`, for the same reason: the endpoint
+   * lands Characters AND Locations in one call, so a Characters panel that
+   * gains three cards after a "5 Created" summary reads as an import that
+   * under-delivered. `linked` is the field that decides whether a card
+   * appears — an item can be `action: 'created'` with `linked: false` (the
+   * asset landed, the ref did not), and counting that one here would promise
+   * a card that is not coming. It already has its own failure line.
    */
   const importedByType = ASSET_TYPES.map((type) => ({
     type,

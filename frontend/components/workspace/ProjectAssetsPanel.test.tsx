@@ -452,6 +452,53 @@ describe('ProjectAssetsPanel — import from script', () => {
     expect(screen.getAllByTestId('import-failure')).toHaveLength(1);
   });
 
+  it('renders the same chips on an idempotent re-run, beside a zero-write summary', async () => {
+    // The re-run shape, pinned because the two lines say different things and
+    // both are true. `already_linked` comes back `action: 'skipped'` with
+    // `linked: true` — the name IS on the project, this run just did not put
+    // it there. So the summary reports 0 written and the chips still report
+    // where the reader will find the cards.
+    //
+    // It is also the shape that decides what the chips MEAN: excluding
+    // `already_linked` would make a second import of an unchanged script show
+    // no chips at all, which reads as "these names are not here" — the exact
+    // opposite of the truth.
+    importFromScript.mockResolvedValue(
+      report({
+        skipped: 2,
+        items: [
+          {
+            name: 'Sang Yao',
+            asset_type: 'character',
+            action: 'skipped',
+            asset_id: '1',
+            linked: true,
+            code: 'already_linked',
+            detail: 'Already referenced by this project',
+          },
+          {
+            name: 'Rooftop',
+            asset_type: 'location',
+            action: 'skipped',
+            asset_id: '3',
+            linked: true,
+            code: 'already_linked',
+            detail: 'Already referenced by this project',
+          },
+        ],
+      }),
+    );
+    mount();
+
+    fireEvent.click(screen.getByTestId('import-from-script'));
+    const box = await screen.findByTestId('import-report');
+    expect(box.textContent).toContain('Imported — 0 Created, 0 Linked, 2 Skipped');
+    expect(screen.getByTestId('import-by-type').textContent).toBe('Characters 1Locations 1');
+    // `already_linked` is benign: it is the idempotent answer, not a refusal,
+    // so it must not produce a failure line beside the chips.
+    expect(screen.queryAllByTestId('import-failure')).toHaveLength(0);
+  });
+
   it('shows no breakdown when nothing landed on the project', async () => {
     importFromScript.mockResolvedValue(
       report({

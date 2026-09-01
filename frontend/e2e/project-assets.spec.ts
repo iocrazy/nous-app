@@ -365,8 +365,16 @@ test.describe('Project assets panel — the write paths (P3)', () => {
     await expect(report).toContainText('Imported — 3 Created, 0 Linked, 1 Skipped');
 
     // Per-type chips, from the `linked` flag rather than `action`: two
-    // Characters (CLIENT re-link + DEV) and one Location. The fourth row —
-    // created but unreferenced — is excluded, because no card is coming for it.
+    // Characters (CLIENT + DEV) and one Location. The fourth row — created but
+    // unreferenced — is excluded, because no card is coming for it.
+    //
+    // CLIENT is the case worth naming: it came back `action: 'skipped'` with
+    // `code: 'already_linked'` and `linked: true`, and it STILL counts. The
+    // chips answer "what do this script's names map to on the project", not
+    // "what did this run write" — the summary line above answers the second.
+    // Excluding it would make a re-run of an unchanged script show no chips at
+    // all, which reads as "these names are not here". Same rule, same words,
+    // in `ProjectAssetsPanel`'s `importedByType` docblock.
     const chips = page.getByTestId('import-by-type').locator('span[data-asset-type]');
     await expect(chips).toHaveCount(2);
     await expect(chips.filter({ hasText: 'Characters' })).toHaveText('Characters 2');
@@ -486,9 +494,17 @@ test.describe('Project assets panel — the write paths (P3)', () => {
     await expect(page.getByTestId('project-assets-count')).toHaveText('2 Linked');
 
     // The two scope-dependent actions are off and say why, rather than failing
-    // on click. This also proves the guess really is absent — without it the
-    // test would pass on a build that resolved a scope after all, and the
-    // assertion below would be back to comparing two equal values.
+    // on click.
+    //
+    // These three are LOAD-BEARING, and what they pin is SCENARIO FIDELITY:
+    // they are the only evidence that the guess is really absent. Without
+    // them the test would still pass on a build that resolved a personal team
+    // after all — and then the DELETE below would carry the row's scope
+    // because the two happen to agree, not because Unlink prefers the row's.
+    // The test would be asserting the right value for the wrong reason, and
+    // would go on passing after a "simplify" collapsed Unlink to the guess.
+    // (They are not an inequality check: with the guess null there is no
+    // second value to be unequal to — that is the point.)
     await expect(page.getByTestId('link-from-library')).toBeDisabled();
     await expect(page.getByTestId('new-asset')).toBeDisabled();
     await expect(page.getByTestId('link-from-library')).toHaveAttribute(
