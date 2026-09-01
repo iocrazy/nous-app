@@ -14,8 +14,11 @@ import pytest
 
 from app.api.admin.backfill_router import _BACKFILLS, workflow_kwargs
 from app.workflows.backfill_assets_from_project_entities import (
+    legacy_ref_for_entity,
+    parse_entity_canvas_name,
     plan_migration,
     reconcile_counts,
+    resource_id_from_media_url,
 )
 
 TEAM_A, TEAM_B = 100, 200
@@ -35,6 +38,42 @@ def _char(id, project_id, name, **kw):
         "portrait_url": kw.get("portrait_url"),
         "source": kw.get("source", "manual"),
     }
+
+
+# What ``_run_extra_steps`` returns — every key the workflow reads, defaulting
+# to zero. Written out in full (rather than built with .get on read) so a step
+# that stops reporting a bucket breaks a test instead of silently vanishing
+# from the Task Center line.
+def _extras(covers=None, canvases=None, generated_media=None):
+    out = {
+        "covers": {
+            "covers_with_url": 0,
+            "covers_resolved": 0,
+            "covers_unresolved": 0,
+            "covers_attached": 0,
+        },
+        "canvases": {
+            "canvases_scanned": 0,
+            "canvases_linked": 0,
+            "skipped_unparsed_canvas": 0,
+            "canvases_no_asset": 0,
+            "canvases_no_scope": 0,
+        },
+        "generated_media": {
+            "genmedia_mapped": 0,
+            "genmedia_unmatched": 0,
+            "genmedia_scope_mismatch": 0,
+            "genmedia_saved": 0,
+            "genmedia_in_assets": 0,
+        },
+    }
+    for key, override in (
+        ("covers", covers),
+        ("canvases", canvases),
+        ("generated_media", generated_media),
+    ):
+        out[key].update(override or {})
+    return out
 
 
 def _ent(id, project_id, entity_type, name, **kw):
@@ -223,6 +262,17 @@ class TestReconcileCounts:
         msg = str(e.value)
         assert "Lin Mu" in msg
         assert "missing assets" in msg and "missing project refs" in msg
+
+    def test_the_failure_message_says_the_run_is_partially_applied(self):
+        """Writes commit per row, so a red run has already changed the
+        database. An admin reading only "reconciliation failed" would
+        reasonably assume nothing happened and go looking for a rollback that
+        does not exist; the message has to say re-running is the recovery."""
+        with pytest.raises(RuntimeError) as e:
+            reconcile_counts(3, 2, 7, 7)
+        msg = str(e.value)
+        assert "PARTIALLY applied" in msg
+        assert "re-running" in msg.lower()
 
     def test_missing_keys_are_never_reported_on_a_passing_check(self):
         """Defensive: a caller that passes stale lists must not turn a clean
@@ -436,8 +486,13 @@ class TestExecutionUnsealed:
         import app.workflows.backfill_assets_from_project_entities as m
 
         applied = AsyncMock(
-            return_value={"created": 1, "existing": 0, "project_refs_added": 1}
+            return_value={
+                "counts": {"created": 1, "existing": 0, "project_refs_added": 1},
+                "asset_id_by_key": {(TEAM_A, "character", "sang yao"): 5001},
+                "asset_id_by_ref": {("project_characters", 1): 5001},
+            }
         )
+        extra = AsyncMock(return_value=_extras())
         report = {
             "assets_expected": 1,
             "assets_present": 1,
@@ -459,6 +514,7 @@ class TestExecutionUnsealed:
                 ),
             ),
             patch.object(m, "_apply", applied),
+            patch.object(m, "_run_extra_steps", extra),
             patch.object(m, "_reconcile", AsyncMock(return_value=report)),
             patch(
                 "app.services.infra.unified_task_manager.get_task_manager",
@@ -471,6 +527,15 @@ class TestExecutionUnsealed:
         applied.assert_awaited_once()
         assert out["applied"]["created"] == 1
         assert out["reconciled"] == report
+        # Steps 1/2-tail, 4 and 5 run for real, and the two indexes ``_apply``
+        # built are what they run on — passing an empty map would make every
+        # generated_media row look unmatched on a live run.
+        extra.assert_awaited_once()
+        kwargs = extra.await_args.kwargs
+        assert kwargs["dry_run"] is False
+        assert kwargs["asset_id_by_ref"] == {("project_characters", 1): 5001}
+        assert kwargs["asset_id_by_key"] == {(TEAM_A, "character", "sang yao"): 5001}
+        assert out["covers"] == _extras()["covers"]
 
     async def test_a_failing_reconciliation_raises_and_keeps_the_report(self):
         """路线 C rule 4: the failure path raises (never returns a failed dict),
@@ -504,7 +569,18 @@ class TestExecutionUnsealed:
                     return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
                 ),
             ),
-            patch.object(m, "_apply", AsyncMock(return_value={})),
+            patch.object(
+                m,
+                "_apply",
+                AsyncMock(
+                    return_value={
+                        "counts": {},
+                        "asset_id_by_key": {},
+                        "asset_id_by_ref": {},
+                    }
+                ),
+            ),
+            patch.object(m, "_run_extra_steps", AsyncMock(return_value=_extras())),
             patch.object(m, "_reconcile", AsyncMock(return_value=report)),
             patch(
                 "app.services.infra.unified_task_manager.get_task_manager",
@@ -525,6 +601,7 @@ class TestExecutionUnsealed:
 
         applied = AsyncMock()
         reconciled = AsyncMock()
+        extra = AsyncMock(return_value=_extras())
         with (
             patch.object(
                 m,
@@ -534,6 +611,7 @@ class TestExecutionUnsealed:
                 ),
             ),
             patch.object(m, "_apply", applied),
+            patch.object(m, "_run_extra_steps", extra),
             patch.object(m, "_reconcile", reconciled),
             patch(
                 "app.services.infra.unified_task_manager.get_task_manager",
@@ -550,6 +628,48 @@ class TestExecutionUnsealed:
         applied.assert_not_awaited()
         reconciled.assert_not_awaited()
 
+    async def test_dry_run_still_previews_the_three_extra_steps(self):
+        """A dry-run that reported only the asset plan would say nothing about
+        covers, canvases or generations — the operator would be approving three
+        steps sight unseen. They run, in preview mode, and their counts land in
+        the run's metadata."""
+        import app.workflows.backfill_assets_from_project_entities as m
+
+        applied = AsyncMock()
+        extra = AsyncMock(
+            return_value=_extras(
+                covers={"covers_with_url": 4, "covers_resolved": 2},
+                canvases={"canvases_scanned": 3, "canvases_linked": 1},
+                generated_media={"genmedia_mapped": 6},
+            )
+        )
+        with (
+            patch.object(
+                m,
+                "_load_inputs",
+                AsyncMock(
+                    return_value=([_char(1, P1, "Sang Yao")], [], PROJECT_TEAM, set())
+                ),
+            ),
+            patch.object(m, "_apply", applied),
+            patch.object(m, "_run_extra_steps", extra),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=AsyncMock(),
+            ),
+        ):
+            out = await inspect.unwrap(m.backfill_assets_from_project_entities)(
+                dry_run=True, run_user_id="admin-uuid"
+            )
+        applied.assert_not_awaited()
+        assert extra.await_args.kwargs["dry_run"] is True
+        # No asset ids exist yet, so the steps must fall back to the plan.
+        assert extra.await_args.kwargs.get("asset_id_by_key") is None
+        assert extra.await_args.kwargs.get("asset_id_by_ref") is None
+        assert out["covers"]["covers_resolved"] == 2
+        assert out["canvases"]["canvases_linked"] == 1
+        assert out["generated_media"]["genmedia_mapped"] == 6
+
 
 class TestSubtitle:
     """I5: the skip buckets must be in the line a human reads, not only in
@@ -557,7 +677,9 @@ class TestSubtitle:
     "0 assets from 42 rows, 0 merges" — which reads as "nothing to migrate"
     when the truth is "42 rows are waiting on a P3 decision"."""
 
-    async def _run_and_capture_subtitle(self, chars, project_team, personal):
+    async def _run_and_capture_subtitle(
+        self, chars, project_team, personal, extras=None
+    ):
         import app.workflows.backfill_assets_from_project_entities as m
 
         manager = AsyncMock()
@@ -566,6 +688,11 @@ class TestSubtitle:
                 m,
                 "_load_inputs",
                 AsyncMock(return_value=(chars, [], project_team, personal)),
+            ),
+            patch.object(
+                m,
+                "_run_extra_steps",
+                AsyncMock(return_value=extras or _extras()),
             ),
             patch(
                 "app.services.infra.unified_task_manager.get_task_manager",
@@ -591,6 +718,8 @@ class TestSubtitle:
         assert subtitle == (
             "dry-run: 1 assets from 4+0 rows, 0 merges, "
             "skipped 2 personal / 1 unknown"
+            ", covers 0/0, canvases 0/0"
+            ", genmedia 0 mapped / 0 saved / 0 in_assets"
         )
 
     async def test_zero_skips_still_say_so(self):
@@ -602,4 +731,179 @@ class TestSubtitle:
         assert subtitle == (
             "dry-run: 1 assets from 1+0 rows, 0 merges, "
             "skipped 0 personal / 0 unknown"
+            ", covers 0/0, canvases 0/0"
+            ", genmedia 0 mapped / 0 saved / 0 in_assets"
         )
+
+    async def test_subtitle_carries_every_new_step_count(self):
+        """Steps 1/2-tail, 4 and 5 have to reach the line a human reads for the
+        same reason the skip buckets do. Distinct numbers everywhere so a
+        transposed pair cannot pass."""
+        subtitle = await self._run_and_capture_subtitle(
+            [_char(1, P1, "Sang Yao")],
+            PROJECT_TEAM,
+            set(),
+            extras=_extras(
+                covers={"covers_with_url": 7, "covers_resolved": 3},
+                canvases={"canvases_scanned": 9, "canvases_linked": 5},
+                generated_media={
+                    "genmedia_mapped": 11,
+                    "genmedia_saved": 13,
+                    "genmedia_in_assets": 2,
+                },
+            ),
+        )
+        assert subtitle.endswith(
+            ", covers 3/7, canvases 5/9" ", genmedia 11 mapped / 13 saved / 2 in_assets"
+        )
+
+
+class TestCoverUrlResolution:
+    """``resource_id_from_media_url`` decides whether a legacy cover URL is
+    allowed to become an ``asset_files`` attachment. A false positive puts the
+    WRONG image on a character sheet, so everything it does not recognise with
+    certainty must come back None."""
+
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("https://api.nous.ink/api/v1/resources/123/cover", 123),
+            ("https://api.nous.ink/api/v1/resources/123/cover?token=abc&v=9", 123),
+            ("/api/v1/resources/456/file", 456),
+            ("/api/v1/resources/456", 456),
+            ("https://api.nous.ink/media/789", 789),
+            ("https://api.nous.ink/media/789/cover?token=abc", 789),
+            ("/media/9007199254740991", 9007199254740991),
+        ],
+        ids=[
+            "resources-cover",
+            "resources-cover-query",
+            "resources-file",
+            "resources-bare",
+            "media-id",
+            "media-id-cover",
+            "snowflake-at-js-max",
+        ],
+    )
+    def test_id_bearing_shapes_resolve(self, url, expected):
+        assert resource_id_from_media_url(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/media/2024/03/portrait.jpg",  # legacy by-path fallback route
+            "/media/12345.jpg",  # a filename that starts with digits
+            "sb://media/abc/portrait.jpg",  # object-store path
+            "https://cdn.example.com/portrait.jpg",  # someone else's CDN
+            "portrait.jpg",
+            "",
+            None,
+        ],
+        ids=[
+            "by-path-route",
+            "digit-filename",
+            "object-store",
+            "foreign-cdn",
+            "bare-filename",
+            "empty",
+            "none",
+        ],
+    )
+    def test_everything_else_declines_to_guess(self, url):
+        assert resource_id_from_media_url(url) is None
+
+
+class TestEntityCanvasNameRule:
+    """Spec §4 step 4's name rule, VERIFIED against the code that created the
+    canvases rather than against the spec prose:
+
+        CharacterLibrary.tsx:55  `${name} · Character`
+        EntityLibrary.tsx:120    `${row.name} · ${meta.canvasSuffix}`  (Location|Prop)
+
+    The separator is U+00B7 MIDDLE DOT with a space either side.
+    """
+
+    @pytest.mark.parametrize(
+        "name,kind,expected",
+        [
+            ("Sang Yao · Character", "character", "Sang Yao"),
+            ("Rain Alley · Location", "location", "Rain Alley"),
+            ("Revolver · Prop", "prop", "Revolver"),
+            # An entity whose own name contains the separator: the suffix is
+            # the LAST field, so the rest of the name survives intact.
+            ("Act I · Rain Alley · Location", "location", "Act I · Rain Alley"),
+            ("  Padded  · Prop", "prop", "Padded"),
+        ],
+        ids=["character", "location", "prop", "name-contains-separator", "padding"],
+    )
+    def test_parses_the_titles_the_app_creates(self, name, kind, expected):
+        assert parse_entity_canvas_name(name, kind) == expected
+
+    @pytest.mark.parametrize(
+        "name,kind",
+        [
+            ("Sang Yao", "character"),  # renamed, suffix dropped
+            ("Sang Yao - Character", "character"),  # ASCII hyphen, not U+00B7
+            ("Sang Yao·Character", "character"),  # no surrounding spaces
+            ("Sang Yao ‧ Character", "character"),  # U+2027, a look-alike
+            ("Sang Yao · Characters", "character"),  # not the suffix word
+            ("· Character", "character"),  # empty entity name
+            ("", "character"),
+            (None, "character"),
+        ],
+        ids=[
+            "no-suffix",
+            "ascii-hyphen",
+            "no-spaces",
+            "lookalike-separator",
+            "wrong-suffix-word",
+            "empty-name",
+            "empty-string",
+            "none",
+        ],
+    )
+    def test_anything_else_is_left_alone(self, name, kind):
+        assert parse_entity_canvas_name(name, kind) is None
+
+    def test_the_suffix_must_agree_with_the_canvas_kind(self):
+        """``kind`` and the title are written together at creation, so a
+        disagreement means a human renamed it — the one case where guessing is
+        certainly wrong. Both directions, so this cannot pass by always
+        returning None (the row above proves the same title parses under the
+        right kind)."""
+        assert parse_entity_canvas_name("Revolver · Prop", "prop") == "Revolver"
+        assert parse_entity_canvas_name("Revolver · Prop", "character") is None
+        assert parse_entity_canvas_name("Revolver · Prop", "location") is None
+
+
+class TestLegacyRefForEntity:
+    """``params.entity_kind``/``entity_id`` name a row in ONE of two legacy
+    tables (entityRef.ts: a character card binds ``project_characters``,
+    location/prop cards bind ``project_lib_entities``). Getting the table wrong
+    would map a generation to whichever unrelated row shares that id."""
+
+    def test_character_points_at_project_characters(self):
+        assert legacy_ref_for_entity("character", "42") == ("project_characters", 42)
+
+    @pytest.mark.parametrize("kind", ["location", "prop"])
+    def test_location_and_prop_point_at_project_lib_entities(self, kind):
+        assert legacy_ref_for_entity(kind, "42") == ("project_lib_entities", 42)
+
+    def test_the_id_arrives_as_a_string_and_is_parsed(self):
+        """entityRef.ts stamps ``String(raw)``, so the JSONB value is text —
+        comparing it as text against a BIGINT legacy id would never match."""
+        assert legacy_ref_for_entity("prop", " 42 ") == ("project_lib_entities", 42)
+
+    @pytest.mark.parametrize(
+        "kind,entity_id",
+        [
+            ("costume", "42"),  # a real asset type, but never a legacy card
+            ("", "42"),
+            (None, "42"),
+            ("prop", "not-a-number"),
+            ("prop", None),
+        ],
+        ids=["unknown-kind", "empty-kind", "none-kind", "non-numeric-id", "none-id"],
+    )
+    def test_unknown_kind_or_unparseable_id_is_not_a_guess(self, kind, entity_id):
+        assert legacy_ref_for_entity(kind, entity_id) is None
