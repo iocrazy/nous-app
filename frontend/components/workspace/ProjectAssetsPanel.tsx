@@ -23,12 +23,34 @@
 // explicit `scope_id` instead, so this component has to resolve the same
 // answer client-side: the project's `team_id`, or — for a personal project —
 // the viewer's personal team. Those agree for every project a viewer owns and
-// for every team project; they disagree for a collaborator on someone ELSE's
-// personal project, where the writes would be aimed at the wrong scope. The
-// backend refuses exactly that case with a typed `project_scope_mismatch`
-// rather than writing into the wrong library, and this panel renders that
-// refusal — the reads keep working throughout. Recorded rather than papered
-// over: the honest fix is a scope on the project payload, not a guess here.
+// for every team project; they disagree for exactly one case, a collaborator
+// on someone ELSE'S PERSONAL PROJECT, where every write here is aimed at the
+// collaborator's own personal team instead of the owner's.
+//
+// The blast radius is NOT uniform across the three write paths, and the
+// difference is what a future fixer needs:
+//
+//  * Unlink and Link From Library's `linkProject` are refused CLEAN. The
+//    backend compares the resolved project scope against the `scope_id` it
+//    was handed and answers a typed `project_scope_mismatch` (422) before
+//    writing anything; the panel renders that sentence.
+//  * `+ New` LEAVES A STRAY. `NewAssetDialog` calls `POST /assets` with the
+//    guessed scope FIRST, and that endpoint gates only on membership of the
+//    scope it was given — which the collaborator legitimately has, for their
+//    own personal team. So the asset is created in the wrong library and only
+//    the follow-up `linkProject` is refused. The user is told the ref failed,
+//    but an orphan row is left behind in a library they were not aiming at.
+//  * `Link From Library` also SEARCHES the wrong scope, so the rows it offers
+//    are the collaborator's own assets — every pick is then a guaranteed 422.
+//    That is the same "offering a click that cannot succeed" this dialog
+//    avoids for system presets, reached by a different route.
+//
+// `Import From Script` is unaffected: that endpoint resolves its own scope.
+//
+// Recorded rather than papered over: the honest fix is the project payload
+// carrying its asset scope, not a better guess here. Until then the reads are
+// always right and no write silently succeeds against the wrong library — but
+// `+ New` can silently CREATE in one.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -39,6 +61,7 @@ import { useToast } from '../Toast';
 import { AssetCard } from '../resources/assets/AssetCard';
 import { NewAssetDialog } from '../resources/assets/NewAssetDialog';
 import { typeLabelKey, typeSingularKey } from '../resources/assets/assetTypeMeta';
+import { ASSET_TYPES } from '../assets/assetSlots';
 import { useAssetFailureReporter } from '../resources/assets/useAssetFailure';
 import {
   importFromScript,
@@ -94,11 +117,19 @@ const ImportLine: React.FC<{ item: ImportedAssetItem }> = ({ item }) => {
     ? t(`assets.err.${item.code}`, item.detail ?? t('assets.err.generic'))
     : (item.detail ?? t('assets.err.generic'));
   return (
-    <li data-testid="import-failure" data-name={item.name} className="text-[11px] text-warn">
+    <li
+      data-testid="import-failure"
+      data-name={item.name}
+      data-asset-type={item.asset_type}
+      className="text-[11px] text-warn"
+    >
       {t('assets.project.importSkipped', {
         name: item.name,
+        // The run spans two types; a bare name leaves the reader guessing
+        // which panel a refused row belonged to.
+        type: t(typeSingularKey(item.asset_type), item.asset_type),
         reason,
-        defaultValue: '{{name}} — {{reason}}',
+        defaultValue: '{{name}} ({{type}}) — {{reason}}',
       })}
     </li>
   );
@@ -265,9 +296,26 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
     ? t('assets.project.scopeUnknown', 'Workspace Not Resolved Yet')
     : undefined;
 
-  const importFailures = (importResult?.items ?? []).filter(
+  const importItems = importResult?.items ?? [];
+  const importFailures = importItems.filter(
     (item) => item.code != null && item.code !== BENIGN_IMPORT_CODE,
   );
+
+  /**
+   * How many of each type this run put ON THE PROJECT, in `ASSET_TYPES` order.
+   *
+   * Keyed on `linked`, not on `action`: the endpoint lands Characters AND
+   * Locations in one call, so a Characters panel that gains three cards after
+   * a "5 Created" summary reads as an import that under-delivered. `linked`
+   * is the field that decides whether a card appears — an item can be
+   * `action: 'created'` with `linked: false` (the asset landed, the ref did
+   * not), and counting that one here would promise a card that is not coming.
+   * It already has its own failure line.
+   */
+  const importedByType = ASSET_TYPES.map((type) => ({
+    type,
+    n: importItems.filter((item) => item.linked === true && item.asset_type === type).length,
+  })).filter((entry) => entry.n > 0);
 
   return (
     <div className="flex h-full flex-col" data-testid="project-assets-panel" data-asset-type={assetType}>
@@ -350,6 +398,26 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
               <X size={13} aria-hidden="true" />
             </button>
           </div>
+          {importedByType.length > 0 && (
+            <p data-testid="import-by-type" className="flex flex-wrap gap-1.5 pt-1">
+              {importedByType.map(({ type, n }) => (
+                <span
+                  key={type}
+                  data-asset-type={type}
+                  className="rounded-full border border-line-strong px-1.5 text-[10px] text-content-3"
+                >
+                  {t('assets.project.importTypeCount', {
+                    type: t(typeLabelKey(type), type),
+                    n,
+                    // `{{type}} {{n}}` rather than "{{n}} {{type}}": the type
+                    // labels are plurals, so a leading count would read "1
+                    // Characters" whenever a run lands exactly one.
+                    defaultValue: '{{type}} {{n}}',
+                  })}
+                </span>
+              ))}
+            </p>
+          )}
           {importResult.items.length === 0 && (
             <p data-testid="import-nothing" className="pt-1 text-[11px] text-content-3">
               {t(

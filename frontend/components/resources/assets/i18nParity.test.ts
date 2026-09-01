@@ -311,10 +311,15 @@ describe('Asset library i18n parity', () => {
     // The other four codes the assets backend can raise —
     // `file_not_attached` (detachFile), `project_scope_mismatch` /
     // `project_ref_not_found` (link/unlinkProject) and `personal_team_missing`
-    // (listProjectAssets) — are deliberately NOT listed: those four service
-    // functions have zero component call sites in P2 (verified by grep), so a
-    // string for them would be copy no shipped path can render. They belong
-    // with the UI that first calls them.
+    // (listProjectAssets) — were deliberately NOT listed in P2: those four
+    // service functions had zero component call sites then, so a string for
+    // them would have been copy no shipped path could render. They belong with
+    // the UI that first calls them — and THREE OF THE FOUR now have one. The
+    // project workspace panels (P3 Task 5) call link/unlink and the
+    // project-scoped read, so `project_scope_mismatch`,
+    // `project_ref_not_found` and `personal_team_missing` have moved into
+    // `PROJECT_KEYS` below. Only `file_not_attached` is still waiting:
+    // `detachFile` remains uncalled.
     'assets.err.not_authorised',
     'assets.err.generation_not_found',
     'assets.err.file_missing',
@@ -350,6 +355,7 @@ describe('Asset library i18n parity', () => {
     'assets.project.unlinked',
     'assets.project.importDone',
     'assets.project.importSkipped',
+    'assets.project.importTypeCount',
     'assets.project.importNothing',
     'assets.project.scopeUnknown',
     // The write half of the project refs, now that a component calls it.
@@ -378,7 +384,12 @@ describe('Asset library i18n parity', () => {
       'assets.project.empty': ['type'],
       'assets.project.unlink': ['name'],
       'assets.project.importDone': ['created', 'linked', 'skipped'],
-      'assets.project.importSkipped': ['name', 'reason'],
+      // The import run spans two asset types in one call, so both the summary
+      // breakdown and every failure line name the type — a bare count made a
+      // Characters panel that gained 3 cards after "5 Created" read as an
+      // import that under-delivered.
+      'assets.project.importSkipped': ['name', 'type', 'reason'],
+      'assets.project.importTypeCount': ['type', 'n'],
     };
     for (const [key, vars] of Object.entries(placeholders)) {
       for (const tree of [en, zh]) {

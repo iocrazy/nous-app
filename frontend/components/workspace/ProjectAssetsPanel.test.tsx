@@ -33,6 +33,7 @@ const translate = (key: string, opts?: string | Record<string, unknown>): string
     'assets.types.prop': 'Props',
     'assets.types.costume': 'Costumes',
     'saveAsAsset.type.character': 'Character',
+    'saveAsAsset.type.location': 'Location',
     'saveAsAsset.type.costume': 'Costume',
     'assets.newOfType': 'New {{type}}',
     'assets.importFromScript': 'Import From Script',
@@ -45,7 +46,8 @@ const translate = (key: string, opts?: string | Record<string, unknown>): string
     'assets.project.unlinked': 'Removed From This Project — Still In Your Library',
     'assets.project.importDone':
       'Imported — {{created}} Created, {{linked}} Linked, {{skipped}} Skipped',
-    'assets.project.importSkipped': '{{name}} — {{reason}}',
+    'assets.project.importSkipped': '{{name}} ({{type}}) — {{reason}}',
+    'assets.project.importTypeCount': '{{type}} {{n}}',
     'assets.project.importNothing': 'Your Scripts Name No Characters Or Locations Yet',
     'assets.project.scopeUnknown': 'Workspace Not Resolved Yet',
     'assets.err.empty_name': 'The Script Left This Name Blank',
@@ -415,6 +417,63 @@ describe('ProjectAssetsPanel — import from script', () => {
     expect(importFromScript).toHaveBeenCalledWith(PROJECT);
     await waitFor(() => expect(listProjectAssets).toHaveBeenCalledTimes(2));
     expect(screen.queryAllByTestId('import-failure')).toHaveLength(0);
+
+    // The run lands BOTH types in one call, so the tally alone would let a
+    // Characters panel that gained 2 cards look like it lost one of the 3.
+    expect(screen.getByTestId('import-by-type').textContent).toBe('Characters 2Locations 1');
+  });
+
+  it('counts the breakdown by `linked`, not by `action`', async () => {
+    importFromScript.mockResolvedValue(
+      report({
+        created: 2,
+        items: [
+          { name: 'Sang Yao', asset_type: 'character', action: 'created', asset_id: '1', linked: true },
+          // Created, but the REF failed — no card will appear for it. Counting
+          // it in the breakdown would promise one that never arrives; it gets
+          // a failure line instead.
+          {
+            name: 'Lin Mo',
+            asset_type: 'character',
+            action: 'created',
+            asset_id: '2',
+            linked: false,
+            code: 'project_scope_mismatch',
+            detail: 'Different team',
+          },
+        ],
+      }),
+    );
+    mount();
+
+    fireEvent.click(screen.getByTestId('import-from-script'));
+    await screen.findByTestId('import-report');
+    expect(screen.getByTestId('import-by-type').textContent).toBe('Characters 1');
+    expect(screen.getAllByTestId('import-failure')).toHaveLength(1);
+  });
+
+  it('shows no breakdown when nothing landed on the project', async () => {
+    importFromScript.mockResolvedValue(
+      report({
+        skipped: 1,
+        items: [
+          {
+            name: '(blank)',
+            asset_type: 'character',
+            action: 'skipped',
+            code: 'empty_name',
+            detail: 'Blank name in script',
+          },
+        ],
+      }),
+    );
+    mount();
+
+    fireEvent.click(screen.getByTestId('import-from-script'));
+    await screen.findByTestId('import-report');
+    // An empty chip row would read as "0 of everything", which is a different
+    // claim from "this run put nothing here".
+    expect(screen.queryByTestId('import-by-type')).toBeNull();
   });
 
   it('names every refused item, including one that was created but not linked', async () => {
@@ -461,8 +520,8 @@ describe('ProjectAssetsPanel — import from script', () => {
 
     const lines = screen.getAllByTestId('import-failure').map((el) => el.textContent);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe('Sang Yao — That Project Belongs To A Different Workspace');
-    expect(lines[1]).toBe('(blank) — The Script Left This Name Blank');
+    expect(lines[0]).toBe('Sang Yao (Character) — That Project Belongs To A Different Workspace');
+    expect(lines[1]).toBe('(blank) (Character) — The Script Left This Name Blank');
   });
 
   it('falls back to the server’s own detail for a code with no string', async () => {
@@ -484,7 +543,7 @@ describe('ProjectAssetsPanel — import from script', () => {
 
     fireEvent.click(screen.getByTestId('import-from-script'));
     const line = await screen.findByTestId('import-failure');
-    expect(line.textContent).toBe('Ghost — A reason only the server knows');
+    expect(line.textContent).toBe('Ghost (Character) — A reason only the server knows');
   });
 
   it('says so when the script named nothing at all', async () => {
