@@ -202,11 +202,18 @@ def resource_id_from_media_url(url: Optional[str]) -> Optional[int]:
 
 # ── spec §4 step 4: entity canvas name → the asset it belongs to ───────────
 #
-# VERIFIED against the code that CREATED these canvases, not against the spec:
-#   frontend/components/workspace/CharacterLibrary.tsx:55
+# VERIFIED against the code that CREATED these canvases, not against the spec.
+# ⚠️ That code no longer exists in the tree — P3 Task 6 deleted both readers
+# once these pages moved onto `assets` (commit ce5e24df). The anchors are
+# therefore GIT-HISTORY anchors, and they must stay that way: the canvases
+# already in the database were named by that code, so the rule this parser
+# implements is a fact about history, not about any current file.
+#
+#   git show ce5e24df^:frontend/components/workspace/CharacterLibrary.tsx | sed -n 55p
 #       const canvasNameFor = (name: string) => `${name} · Character`;
-#   frontend/components/workspace/EntityLibrary.tsx:120
+#   git show ce5e24df^:frontend/components/workspace/EntityLibrary.tsx | sed -n 120p
 #       const wanted = `${row.name} · ${meta.canvasSuffix}`;   // Location | Prop
+#
 # The separator is U+00B7 MIDDLE DOT with a space on each side (hexdumped, not
 # eyeballed — U+00B7 and U+2027/U+30FB look alike in a diff).
 _CANVAS_NAME_SEP = " · "
@@ -929,6 +936,16 @@ async def _resolve_covers(
     ]
     resolved_ids = {rid for (_k, rid) in resolved}
 
+    # Both write counts are ROWCOUNTS, not loop iterations. The two statements
+    # are independently non-clobbering (``cover_file_id`` only while NULL; the
+    # attach is ON CONFLICT DO NOTHING), so an iteration can land one, both, or
+    # neither — and a re-run lands neither. Counting iterations reported the
+    # same number on every run, which is the one thing these buckets exist to
+    # tell apart: "this run attached N covers" vs "there was nothing left to
+    # do". They are reported separately for the same reason: a row whose cover
+    # a user has since picked still gets its file attached, and folding that
+    # into one number hides which half happened.
+    cover_set = 0
     attached = 0
     if not dry_run:
         for key, rid in resolved:
@@ -940,9 +957,12 @@ async def _resolve_covers(
                 # is what makes the surprise visible.
                 continue
             async with write_scope() as session:
-                await session.execute(cover_set_stmt(asset_id, rid))
-                await session.execute(cover_attach_stmt(asset_id, rid, run_user_id))
-            attached += 1
+                set_res = await session.execute(cover_set_stmt(asset_id, rid))
+                att_res = await session.execute(
+                    cover_attach_stmt(asset_id, rid, run_user_id)
+                )
+            cover_set += set_res.rowcount or 0
+            attached += att_res.rowcount or 0
 
     return (
         {
@@ -953,6 +973,7 @@ async def _resolve_covers(
             # attrs.legacy_cover_url".
             "covers_unresolved": with_url - len(resolved),
             "covers_attached": attached,
+            "covers_cover_set": cover_set,
         },
         resolved_ids,
     )
@@ -1327,12 +1348,22 @@ async def backfill_assets_from_project_entities(
     # Steps 1/2-tail, 4 and 5 get their own clause for the same reason the skip
     # buckets do: a run that mapped nothing and a run with nothing to map are
     # different facts, and only the line a human reads can tell them apart.
+    #
+    # ABBREVIATED on purpose. ``complete()`` truncates at 200 characters and it
+    # truncates the TAIL, so the spelled-out form ("covers 3/7, canvases 5/9,
+    # genmedia 11 mapped / 13 saved / 2 in_assets") put the newest counters
+    # exactly where they get cut — on a workspace with six-figure counts the
+    # line would have ended mid-word and the three steps this clause exists to
+    # report would have been the ones to vanish. Legend, since the line has no
+    # room for one: cov resolved/with_url, cnv linked/scanned,
+    # gen mapped/saved/in_assets. ``test_subtitle_fits_even_at_absurd_counts``
+    # pins that the whole line still fits with every count at six digits.
     cov, cnv, gen = out["covers"], out["canvases"], out["generated_media"]
     extras = (
-        f", covers {cov['covers_resolved']}/{cov['covers_with_url']}"
-        f", canvases {cnv['canvases_linked']}/{cnv['canvases_scanned']}"
-        f", genmedia {gen['genmedia_mapped']} mapped"
-        f" / {gen['genmedia_saved']} saved / {gen['genmedia_in_assets']} in_assets"
+        f", cov {cov['covers_resolved']}/{cov['covers_with_url']}"
+        f" cnv {cnv['canvases_linked']}/{cnv['canvases_scanned']}"
+        f" gen {gen['genmedia_mapped']}/{gen['genmedia_saved']}"
+        f"/{gen['genmedia_in_assets']}"
     )
     subtitle = (
         f"dry-run: {counts['assets']} assets from "

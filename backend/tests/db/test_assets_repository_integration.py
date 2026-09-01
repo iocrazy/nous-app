@@ -1186,13 +1186,19 @@ async def test_create_asset_inside_a_callers_uow_rolls_back_with_it(orm_dsn, pg,
     team, uid = fx["team_id"], fx["user_id"]
     name = _uniq("Orphan Candidate")
 
+    # The id is captured INSIDE the transaction, before the raise, because it
+    # is the only way to ask the loadout question directly afterwards.
+    doomed: Dict[str, int] = {}
     with pytest.raises(RuntimeError):
         async with unit_of_work():
-            await service.create_asset(
+            row = await service.create_asset(
                 team, AssetCreate(asset_type="character", name=name), uid
             )
+            doomed["id"] = int(row["id"])
             # Stands in for attach_file / set_review_state failing.
             raise RuntimeError("the rest of the caller's work failed")
+
+    assert "id" in doomed, "create_asset returned no row before the raise"
 
     assert (
         await pg.fetchval(
@@ -1204,12 +1210,14 @@ async def test_create_asset_inside_a_callers_uow_rolls_back_with_it(orm_dsn, pg,
     ), "the asset outlived its caller's transaction — nested UoW, orphan row"
 
     # The Default loadout must not survive either (it would be an orphan of an
-    # orphan, invisible to every asset query).
+    # orphan, invisible to every asset query). Asked by the ROW's id, not by
+    # joining back to ``assets``: that join is entailed by the FK once the
+    # assert above holds, so it could not have failed and was proving nothing.
+    # By id it is a real observation — a loadout that outlived its asset would
+    # be a dangling row, and this is what would see it.
     assert (
         await pg.fetchval(
-            "SELECT count(*) FROM asset_loadouts lo JOIN assets a ON a.id = "
-            "lo.asset_id WHERE a.name = $1",
-            name,
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1", doomed["id"]
         )
         == 0
     )

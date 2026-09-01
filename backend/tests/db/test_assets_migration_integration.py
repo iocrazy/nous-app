@@ -781,6 +781,7 @@ async def test_cover_urls_resolve_in_scope_and_attach_to_the_unsorted_slot(
         "covers_resolved": 2,
         "covers_unresolved": 2,
         "covers_attached": 2,
+        "covers_cover_set": 2,
     }
 
     async def _cover_of(name):
@@ -812,6 +813,27 @@ async def test_cover_urls_resolve_in_scope_and_attach_to_the_unsorted_slot(
     assert sorted((int(r["resource_id"]), r["slot"]) for r in slots) == sorted(
         [(own_a, "unsorted"), (own_b, "unsorted")]
     )
+
+    # Both write counts are ROWCOUNTS, so a re-run reports ZERO — the same way
+    # the canvas and genmedia buckets already do. Counting loop iterations (the
+    # pre-fix-wave form) reported 2 forever, which reads as "this run attached
+    # two covers" on a run that wrote nothing at all. The read-side buckets are
+    # unchanged, because what the plan resolves has not changed.
+    again = await _run_extra_steps(
+        plan,
+        {pid: fx["team_id"] for pid in fx["project_ids"]},
+        dry_run=False,
+        run_user_id=fx["user_id"],
+        asset_id_by_key=applied["asset_id_by_key"],
+        asset_id_by_ref=applied["asset_id_by_ref"],
+    )
+    assert again["covers"] == {
+        "covers_with_url": 4,
+        "covers_resolved": 2,
+        "covers_unresolved": 2,
+        "covers_attached": 0,
+        "covers_cover_set": 0,
+    }
     # The foreign file was never attached to anything of ours — the assertion
     # that makes "dropped" mean dropped rather than "counted but attached".
     assert (
@@ -821,16 +843,8 @@ async def test_cover_urls_resolve_in_scope_and_attach_to_the_unsorted_slot(
         == 0
     )
 
-    # Re-run: same numbers, no second attachment row.
-    again = await _run_extra_steps(
-        plan,
-        {pid: fx["team_id"] for pid in fx["project_ids"]},
-        dry_run=False,
-        run_user_id=fx["user_id"],
-        asset_id_by_key=applied["asset_id_by_key"],
-        asset_id_by_ref=applied["asset_id_by_ref"],
-    )
-    assert again["covers"] == out["covers"]
+    # No second attachment row either — the zero above is the write really not
+    # happening, not the counter having stopped counting.
     assert (
         await pg.fetchval(
             "SELECT count(*) FROM asset_files af JOIN assets a ON a.id = af.asset_id "
@@ -1244,7 +1258,7 @@ async def test_dry_run_previews_the_same_numbers_the_live_run_produces(orm_dsn, 
     )
     for step in ("covers", "canvases", "generated_media"):
         for bucket, previewed in preview[step].items():
-            if bucket == "covers_attached":
+            if bucket in ("covers_attached", "covers_cover_set"):
                 continue  # a write count; the preview writes nothing by design
             assert live[step][bucket] == previewed, (
                 f"{step}.{bucket}: preview said {previewed}, "

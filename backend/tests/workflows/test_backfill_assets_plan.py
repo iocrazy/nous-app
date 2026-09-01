@@ -65,6 +65,7 @@ def _extras(covers=None, canvases=None, generated_media=None):
             "covers_resolved": 0,
             "covers_unresolved": 0,
             "covers_attached": 0,
+            "covers_cover_set": 0,
         },
         "canvases": {
             "canvases_scanned": 0,
@@ -786,8 +787,7 @@ class TestSubtitle:
         assert subtitle == (
             "dry-run: 1 assets from 4+0 rows, 0 merges, "
             "skipped 2 unmappable / 1 unknown"
-            ", covers 0/0, canvases 0/0"
-            ", genmedia 0 mapped / 0 saved / 0 in_assets"
+            ", cov 0/0 cnv 0/0 gen 0/0/0"
         )
 
     async def test_zero_skips_still_say_so(self):
@@ -799,8 +799,7 @@ class TestSubtitle:
         assert subtitle == (
             "dry-run: 1 assets from 1+0 rows, 0 merges, "
             "skipped 0 unmappable / 0 unknown"
-            ", covers 0/0, canvases 0/0"
-            ", genmedia 0 mapped / 0 saved / 0 in_assets"
+            ", cov 0/0 cnv 0/0 gen 0/0/0"
         )
 
     async def test_subtitle_carries_every_new_step_count(self):
@@ -821,8 +820,39 @@ class TestSubtitle:
                 },
             ),
         )
+        assert subtitle.endswith(", cov 3/7 cnv 5/9 gen 11/13/2")
+
+    async def test_subtitle_fits_even_at_absurd_counts(self):
+        """``complete()`` truncates the TAIL at 200 characters, and the three
+        newest counters sit at the tail — so the abbreviation is not cosmetic,
+        it is what keeps them from being the part that gets cut.
+
+        Six digits everywhere is past anything real (the legacy corpus is two
+        tables of hand-made rows) and that is the point: the guard has to hold
+        with headroom, not exactly. Spelling the clause back out
+        ("covers 3/7, canvases 5/9, genmedia 11 mapped / ...") pushes this
+        past 200 and turns the test red.
+        """
+        big = 999999
+        subtitle = await self._run_and_capture_subtitle(
+            [_char(1, P1, "Sang Yao"), _char(2, P_ORPHAN, "Nowhere")],
+            PROJECT_TEAM,
+            {P_ORPHAN},
+            extras=_extras(
+                covers={"covers_with_url": big, "covers_resolved": big},
+                canvases={"canvases_scanned": big, "canvases_linked": big},
+                generated_media={
+                    "genmedia_mapped": big,
+                    "genmedia_saved": big,
+                    "genmedia_in_assets": big,
+                },
+            ),
+        )
+        assert len(subtitle) <= 200, f"{len(subtitle)} chars: {subtitle}"
+        # And the tail really is the new clause, in full — a length check alone
+        # would pass on a line that had been cut just before it.
         assert subtitle.endswith(
-            ", covers 3/7, canvases 5/9" ", genmedia 11 mapped / 13 saved / 2 in_assets"
+            f", cov {big}/{big} cnv {big}/{big} gen {big}/{big}/{big}"
         )
 
 
@@ -883,10 +913,17 @@ class TestCoverUrlResolution:
 
 class TestEntityCanvasNameRule:
     """Spec §4 step 4's name rule, VERIFIED against the code that created the
-    canvases rather than against the spec prose:
+    canvases rather than against the spec prose.
 
-        CharacterLibrary.tsx:55  `${name} · Character`
-        EntityLibrary.tsx:120    `${row.name} · ${meta.canvasSuffix}`  (Location|Prop)
+    ⚠️ Both files were deleted in P3 Task 6 (commit ce5e24df) when these pages
+    moved onto ``assets``, so these are GIT-HISTORY anchors — which is the
+    right kind: the canvases sitting in the database were named by that code,
+    and no current file governs their shape.
+
+        git show ce5e24df^:frontend/components/workspace/CharacterLibrary.tsx | sed -n 55p
+            `${name} · Character`
+        git show ce5e24df^:frontend/components/workspace/EntityLibrary.tsx | sed -n 120p
+            `${row.name} · ${meta.canvasSuffix}`   (Location | Prop)
 
     The separator is U+00B7 MIDDLE DOT with a space either side.
     """

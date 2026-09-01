@@ -61,6 +61,30 @@ class TestCoverGuards:
         # write path that forgets it leaves the row looking untouched.
         assert "updated_at" in sql
 
+    def test_the_cover_guard_is_not_an_artefact_of_this_rows_ids(self):
+        """The NEGATIVE control this file's header promises every assertion,
+        and which ``test_cover_is_set_only_while_it_is_null`` was missing.
+
+        Two halves, because the first alone is weak: the same builder compiled
+        for a DIFFERENT pair of ids still carries ``cover_file_id IS NULL``
+        (so the guard comes from the predicate, not from 22 having looked
+        null-ish), and the statement must NOT carry the unconditional shape —
+        an UPDATE whose only WHERE clause is the id. That second half is the
+        one that fails if someone "simplifies" the builder: dropping the guard
+        changes nothing any data-driven test can see (measured — see header),
+        but it makes a re-run overwrite a cover the user has since chosen.
+        """
+        other = _sql(cover_set_stmt(99, 98))
+        assert "cover_file_id IS NULL" in other
+        assert "assets.id = 99" in other
+        assert (
+            "cover_file_id IS NULL"
+            not in _sql(cover_set_stmt(11, 22)).split("WHERE")[0]
+        ), "the guard must be in the WHERE clause, not the SET"
+        # No id from the other compilation leaked in, so the two really are
+        # independent renderings rather than one cached string.
+        assert "98" not in _sql(cover_set_stmt(11, 22))
+
     def test_the_attach_does_nothing_on_conflict(self):
         sql = _sql(cover_attach_stmt(11, 22, "00000000-0000-0000-0000-000000000000"))
         assert "ON CONFLICT" in sql and "DO NOTHING" in sql
