@@ -18,10 +18,11 @@ them, and collapsing the counts would hide that):
    attached to an asset (``asset_files``) is, by definition, in the asset
    library; its inbox state should say so.
 
-``dry_run=False`` is allowed here (unlike ``backfill_assets_from_project_entities``,
-whose live path is blocked until P3): both halves are narrow and reversible in
-kind — one inserts rows that point at files that already exist, the other
-flips a display state for rows whose attachment is a fact in another table.
+``dry_run=False`` is cheap to reach for here because both halves are narrow and
+reversible in kind: one inserts rows that point at files that already exist
+(no blob is written, nothing is moved), the other flips a display state for
+rows whose attachment is a fact recorded in another table. Neither half can
+lose data that the run did not itself create.
 
 Task Center: the all-zero ``SYSTEM_RUN_USER_ID`` violates
 ``task_tracking.user_id → auth.users`` and the row is silently never created

@@ -997,3 +997,243 @@ async def test_count_by_type_ignores_presets_other_scopes_and_trashed_rows(
     finally:
         await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
         await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))
+
+
+# ── 17. create_asset: the asset and its Default loadout commit together ─────
+
+
+@_skip
+async def test_create_asset_rolls_the_character_back_when_its_loadout_fails(
+    orm_dsn, pg, fx
+):
+    """The P3/M3 fix. Before it, ``create_asset`` ran two transactions: a
+    Default loadout that failed to insert left a COMMITTED character with no
+    loadout — the one state ``create_loadout`` exists to make impossible —
+    while the caller saw only an error.
+
+    Only a real server can tell the fix from a no-op: with a fake repo the
+    write "not happening" is the fake declining to append to a dict, which
+    proves nothing about a transaction. Here the assertion is a SELECT on
+    another connection AFTER the raise.
+    """
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    name = _uniq("Doomed Hero")
+
+    async def _boom(asset_id, fields):
+        raise RuntimeError("loadout insert failed")
+
+    service.relations.create_loadout = _boom
+
+    with pytest.raises(RuntimeError):
+        await service.create_asset(
+            team, AssetCreate(asset_type="character", name=name), uid
+        )
+
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND name = $2",
+            team,
+            name,
+        )
+        == 0
+    ), "the character survived a failed Default loadout — two transactions again"
+
+    # Negative control: the same call WITHOUT the injected failure does commit,
+    # so the zero above is the rollback and not a fixture that never inserts.
+    ok_name = _uniq("Live Hero")
+    service_ok = AssetsService()
+    created = await service_ok.create_asset(
+        team, AssetCreate(asset_type="character", name=ok_name), uid
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1 AND is_default",
+            int(created["id"]),
+        )
+        == 1
+    )
+
+
+@_skip
+async def test_create_asset_duplicate_stays_a_typed_409_inside_its_new_uow(
+    orm_dsn, pg, fx
+):
+    """Case 15's finding now applies to ``create_asset`` too, because it opens a
+    transaction: a unique violation aborts it, so the id lookup
+    ``AssetsRepository.create`` used to run afterwards would raise
+    PendingRollbackError — an untyped 500 where the API contract says 409 with
+    the clashing id. The pre-check is what keeps it typed, and only a real
+    server distinguishes the two.
+    """
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetError, AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    name = _uniq("Bamboo Grove")
+
+    first = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=name), uid
+    )
+    with pytest.raises(AssetError) as excinfo:
+        # Case-insensitive: uq_assets_scope_type_name keys on lower(name).
+        await service.create_asset(
+            team, AssetCreate(asset_type="location", name=name.upper()), uid
+        )
+
+    assert excinfo.value.status == 409 and excinfo.value.code == "asset_exists"
+    assert excinfo.value.extra["existing_asset_id"] == first["id"]
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND asset_type = "
+            "'location' AND deleted_at IS NULL",
+            team,
+        )
+        == 1
+    ), "the refused create left a row behind"
+
+    # The session is still usable afterwards — a PendingRollbackError would
+    # have poisoned it, and this call is what would surface that.
+    again = await service.create_asset(
+        team, AssetCreate(asset_type="location", name=_uniq("Reed Marsh")), uid
+    )
+    assert again["id"] != first["id"]
+
+
+# ── 18. the q filter matches the user's text literally (LIKE escaping) ──────
+
+
+@_skip
+async def test_q_filter_treats_like_metacharacters_as_literal_text(orm_dsn, pg, fx):
+    """M2. ``_like_escape`` + ``escape="\\\\"`` is a claim about how PostgreSQL
+    reads the pattern, and the compiled-SQL pin can only show the ESCAPE clause
+    is emitted — whether the server then matches ``a_b`` against ``axb`` is the
+    server's answer, not SQLAlchemy's.
+
+    The failure this prevents is a filter that silently WIDENS: a search for
+    ``100%`` returning the whole shelf reads as "search is broken", never as an
+    error.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team, uid = fx["team_id"], fx["user_id"]
+    tag = uuid.uuid4().hex[:12]
+
+    literal = await repo.create(team, {"asset_type": "prop", "name": f"a_b {tag}"}, uid)
+    decoy = await repo.create(team, {"asset_type": "prop", "name": f"axb {tag}"}, uid)
+    percent = await repo.create(
+        team, {"asset_type": "prop", "name": f"100% {tag}"}, uid
+    )
+
+    async def _names(q):
+        return {r["name"] for r in await repo.list(team, q=q, limit=200)}
+
+    # `_` is a single-char wildcard unescaped: without the fix `axb` matches.
+    hit = await _names(f"a_b {tag}")
+    assert literal["name"] in hit
+    assert decoy["name"] not in hit, "'_' still matched any character"
+
+    # `%` matches everything unescaped, so this q would return all three.
+    pct = await _names("100%")
+    assert percent["name"] in pct
+    assert literal["name"] not in pct and decoy["name"] not in pct
+
+    # A lone `%` used to be a filter that filters nothing — the widest failure
+    # shape. Escaped, it is a search for rows whose name CONTAINS a percent
+    # sign, so exactly the one row qualifies (the fixture's other assets are
+    # this case's three; the tag keeps every other run's rows out).
+    lone = await _names("%")
+    assert percent["name"] in lone
+    assert (
+        literal["name"] not in lone and decoy["name"] not in lone
+    ), "'%' was still a match-everything wildcard"
+
+    # Negative control: ordinary text still matches, so the escaping did not
+    # simply break search (a pattern of literal backslashes matches nothing).
+    assert (await _names(f"axb {tag}")) == {decoy["name"]}
+    # And the ILIKE is still case-insensitive.
+    assert (await _names(f"AXB {tag}")) == {decoy["name"]}
+
+
+# ── 19. create_asset joins a caller's transaction instead of nesting ────────
+
+
+@_skip
+async def test_create_asset_inside_a_callers_uow_rolls_back_with_it(orm_dsn, pg, fx):
+    """The C-1 regression, reproduced end to end.
+
+    ``_save_as_asset_core`` (generated_inbox_service) calls ``create_asset``
+    INSIDE its own ``unit_of_work()``, then attaches the file and flips the
+    review state. A nested ``unit_of_work()`` is REQUIRES_NEW — the inner block
+    commits independently and the outer rollback does not undo it — so an
+    asset created that way would SURVIVE a later failure in the same logical
+    operation, as an orphan with no attachment. The user's retry then hits it
+    as a 409 asset_exists, with no way forward.
+
+    Only a real server shows this: with a stubbed session, "nested" and
+    "joined" both look like the writes happening.
+    """
+    from app.db.session import unit_of_work
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    name = _uniq("Orphan Candidate")
+
+    # The id is captured INSIDE the transaction, before the raise, because it
+    # is the only way to ask the loadout question directly afterwards.
+    doomed: Dict[str, int] = {}
+    with pytest.raises(RuntimeError):
+        async with unit_of_work():
+            row = await service.create_asset(
+                team, AssetCreate(asset_type="character", name=name), uid
+            )
+            doomed["id"] = int(row["id"])
+            # Stands in for attach_file / set_review_state failing.
+            raise RuntimeError("the rest of the caller's work failed")
+
+    assert "id" in doomed, "create_asset returned no row before the raise"
+
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND name = $2",
+            team,
+            name,
+        )
+        == 0
+    ), "the asset outlived its caller's transaction — nested UoW, orphan row"
+
+    # The Default loadout must not survive either (it would be an orphan of an
+    # orphan, invisible to every asset query). Asked by the ROW's id, not by
+    # joining back to ``assets``: that join is entailed by the FK once the
+    # assert above holds, so it could not have failed and was proving nothing.
+    # By id it is a real observation — a loadout that outlived its asset would
+    # be a dangling row, and this is what would see it.
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1", doomed["id"]
+        )
+        == 0
+    )
+
+    # Negative control: the same call inside a COMMITTING outer transaction
+    # does persist, so the zero above is the rollback reaching it — not
+    # create_asset having quietly stopped writing when a caller wraps it.
+    kept = _uniq("Kept Hero")
+    async with unit_of_work():
+        created = await service.create_asset(
+            team, AssetCreate(asset_type="character", name=kept), uid
+        )
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1 AND is_default",
+            int(created["id"]),
+        )
+        == 1
+    ), "joining the outer transaction lost the Default loadout"

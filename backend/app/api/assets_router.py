@@ -51,6 +51,7 @@ from app.schemas.assets import (
     GenerateSlotPreview,
     GenerateSlotRequest,
     GenerateSlotResponse,
+    ImportFromScriptResponse,
     LinkedResponse,
     LinkRequest,
     LoadoutCreate,
@@ -161,6 +162,45 @@ async def _project_gate(project_id: Any, auth, *, write: bool) -> None:
         )
 
 
+async def _project_scope_id(project_id: Any) -> int:
+    """The asset scope a project's assets live in — its team, or the OWNER's
+    personal team when ``projects.team_id`` is NULL.
+
+    The owner's, not the caller's: the project guard admits collaborators via
+    ``project_members``, and resolving the caller's own team for them would
+    aim every asset read/write at the wrong scope — a read would answer
+    ``{success:true, data:[]}``, which reads exactly like an empty library.
+
+    Shared by the two ``/projects/{id}/assets*`` routes so they cannot drift
+    into resolving the same project to different scopes.
+    """
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Projects.owner_id, Projects.team_id).where(
+                    Projects.id == int(project_id)
+                )
+            )
+        ).first()
+    if row is None:  # pragma: no cover - the project guard already 404s
+        raise AssetError(404, "project_not_found", "Project not found")
+    owner_id, team_id = row
+    if team_id is None:
+        try:
+            team_id = int(await _resolve_personal_team_id(str(owner_id)))
+        except ValueError:
+            # Legacy owner with no personal team row. Letting the ValueError
+            # out was an untyped 500 on a path whose honest answer is "this
+            # project's asset scope cannot be resolved" — the write half
+            # (link_project) has answered that way since P0.
+            raise AssetError(
+                422,
+                "personal_team_missing",
+                "Project owner has no personal team; cannot resolve its asset scope",
+            )
+    return int(team_id)
+
+
 def _ok(data: Any) -> Dict[str, Any]:
     """Success body. A plain dict on purpose — a ``JSONResponse`` would skip the
     route's ``response_model``, which is where the payload gets validated. The
@@ -254,36 +294,7 @@ async def list_project_assets(
     try:
         # Guard raises 404/403; _project_gate restates it in this router's shape.
         await _project_gate(project_id, auth, write=False)
-        async with read_scope() as session:
-            row = (
-                await session.execute(
-                    select(Projects.owner_id, Projects.team_id).where(
-                        Projects.id == int(project_id)
-                    )
-                )
-            ).first()
-        if row is None:  # pragma: no cover - the guard above already 404s
-            raise AssetError(404, "project_not_found", "Project not found")
-        owner_id, team_id = row
-        if team_id is None:
-            # Personal project (projects.team_id NULL) → the OWNER's personal
-            # team, not the caller's. The guard admits collaborators via
-            # project_members, and resolving the caller's own team for them
-            # would look up assets in the wrong scope and answer
-            # {success:true, data:[]} — a wrong answer that reads exactly like
-            # an empty library.
-            try:
-                team_id = int(await _resolve_personal_team_id(str(owner_id)))
-            except ValueError:
-                # Legacy owner with no personal team row. Letting the ValueError
-                # out was an untyped 500 on a read whose honest answer is "this
-                # project's asset scope cannot be resolved" — the write half
-                # (link_project) has answered that way since P0.
-                raise AssetError(
-                    422,
-                    "personal_team_missing",
-                    "Project owner has no personal team; cannot resolve its asset scope",
-                )
+        team_id = await _project_scope_id(project_id)
         rows = await _service().list_assets(
             int(team_id),
             asset_type=type,
@@ -295,6 +306,60 @@ async def list_project_assets(
     except AssetError as e:
         return _err(e)
     return _ok(rows)
+
+
+@router.post(
+    "/projects/{project_id}/assets/import-from-script",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Envelope[ImportFromScriptResponse],
+    responses=_ERRORS,
+)
+async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep):
+    """一键导入 — land the project's script-derived Characters/Locations as
+    assets in the project's scope and reference each from the project.
+
+    Lives on THIS router, not ``projects_router``, although the plan named the
+    latter: the ``/projects/{id}/assets`` prefix is already owned here (the GET
+    beside it), and so are the gate helpers, the ``Envelope``/``_ok``/``_err``
+    conventions and the single error contract. Splitting one prefix across two
+    routers is how two shapes of refusal end up on sibling URLs. There is no
+    shadowing risk from ``projects_router`` being registered FIRST — it has no
+    ``/{project_id}/assets`` route at all, pinned by
+    ``test_projects_assets_import.py::test_import_route_is_not_shadowed``.
+
+    Two gates, both required and neither redundant: the project guard
+    (``write=True`` — this writes ``asset_project_refs``, and ``can_read`` is
+    granted to any project VIEWER) and scope membership on the RESOLVED scope
+    (this also creates ``assets`` rows there, and a collaborator on someone
+    else's personal project is not a member of that person's personal team).
+
+    201 with a per-name report, never a bare count: each name comes back with
+    what happened to it, so "imported 7" cannot hide 3 that were refused.
+    Re-running is safe and creates nothing — see
+    ``AssetsService.import_from_script``.
+
+    ⚠️ The status is 201 even when NOTHING was created — an idempotent re-run
+    answers 201 with every item ``skipped``. The per-item report is the
+    contract, not the status line: a client branching on the status alone
+    learns only that the request was accepted. Read ``created`` / ``linked`` /
+    ``skipped`` (or the items) to tell the user what happened. Answering 200 on
+    an empty batch was considered and rejected — it would make the status
+    depend on data the caller cannot predict, and the two codes would still
+    need the same body to be read.
+
+    The old ``/{project_id}/characters/extract`` and
+    ``/{project_id}/lib/{type}/extract`` endpoints are deliberately untouched:
+    they still own ``project_characters`` / ``project_lib_entities``, and this
+    endpoint writes neither.
+    """
+    try:
+        await _project_gate(project_id, auth, write=True)
+        scope_id = await _project_scope_id(project_id)
+        sid = await _gate(str(scope_id), auth)
+        out = await _service().import_from_script(sid, int(project_id), auth.user_id)
+    except AssetError as e:
+        return _err(e)
+    return _ok(out)
 
 
 # ── counts ──────────────────────────────────────────────────────────────────

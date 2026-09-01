@@ -1,32 +1,64 @@
 /**
- * WorkspaceEntities — the Characters/Locations ASSETS "main library" module
- * (spec frame: "Characters / Locations 主库(ASSETS)", decision G13). One
- * component serves both `characters` and `locations` (prop-driven) since
- * they share the same main-library + episode-badge layout, just a
- * different count label and data source field.
+ * WorkspaceEntities — the project workspace's ASSETS group (Characters /
+ * Locations / Props / Costumes), on the asset library (P3 Task 5).
  *
- * Entities are derived server-side from script cues/scene headers — this
- * view is read-only (no create/edit; the note line makes that explicit).
+ * All this file does now is translate the SIDEBAR MODULE key (plural, the
+ * workspace's vocabulary) into an ASSET TYPE (singular, the library's) and
+ * hand the panel the project's asset scope. The mapping is explicit rather
+ * than a de-pluralizing regex: the two vocabularies are allowed to diverge,
+ * and a silent mismatch here would render one type's page under another's
+ * label.
+ *
+ * What it no longer does: delegate to `CharacterLibrary` / `EntityLibrary`
+ * over `project_characters` / `project_lib_entities`. Those components, their
+ * services (`charactersService` / `libEntitiesService`) and the bible cards'
+ * `EntityAssetStrip` were deleted in P3 Task 6 — this file has no legacy
+ * branch left to fall back to. The backend's old extract endpoints still
+ * exist; the rename PR owns them.
  */
 
-import { CharacterLibrary } from './CharacterLibrary';
-import { EntityLibrary } from './EntityLibrary';
+import { useTeamContext } from '../../contexts/TeamContext';
+import type { AssetType } from '../../services/assetsService';
+import { ProjectAssetsPanel } from './ProjectAssetsPanel';
+
+/** Sidebar module key → asset type. */
+const TYPE_FOR_MODULE = {
+  characters: 'character',
+  locations: 'location',
+  props: 'prop',
+  costumes: 'costume',
+} as const satisfies Record<string, AssetType>;
+
+export type WorkspaceEntityKind = keyof typeof TYPE_FOR_MODULE;
 
 interface WorkspaceEntitiesProps {
-  kind: 'characters' | 'locations' | 'props';
+  kind: WorkspaceEntityKind;
   projectId: string;
+  /** `projects.team_id` — null for a personal project, whose asset scope is
+   *  its owner's personal team. */
+  projectTeamId: string | null;
+  /** The URL's team segment, for the cross-module link into the resources
+   *  module's asset sheet. */
+  teamId?: string;
 }
 
-export function WorkspaceEntities({ kind, projectId }: WorkspaceEntitiesProps) {
-  // All three ASSETS libraries are authored bible-card walls now (CC4 + SP3):
-  // characters keep their dedicated component; locations/props share the
-  // generalized EntityLibrary. The old derived read-only list is retired —
-  // Extract materializes the derivation into rows instead.
-  if (kind === 'characters') return <CharacterLibrary projectId={projectId} />;
+export function WorkspaceEntities({
+  kind,
+  projectId,
+  projectTeamId,
+  teamId,
+}: WorkspaceEntitiesProps) {
+  const { personalTeamId } = useTeamContext();
+  // See `ProjectAssetsPanel`'s scope note for why this resolution exists and
+  // where it is knowingly approximate.
+  const scopeId = projectTeamId ?? personalTeamId;
+
   return (
-    <EntityLibrary
-      entityType={kind === 'locations' ? 'location' : 'prop'}
+    <ProjectAssetsPanel
+      assetType={TYPE_FOR_MODULE[kind]}
       projectId={projectId}
+      scopeId={scopeId}
+      teamId={teamId}
     />
   );
 }

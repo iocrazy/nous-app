@@ -147,6 +147,7 @@
     "unlimited": "无限制"
   },
   "common": {
+    "error": "出错了",
     "details": "详情",
     "dismiss": "关闭",
     "confirm": "确认",
@@ -1778,6 +1779,8 @@
       "no_image_file": "该槽位里没有可读的图片。",
       "file_not_captionable": "该文件无法作为图片读取。",
       "not_applicable": "这个操作不适用于该资产类型。",
+      "project_forbidden": "你没有修改该项目的权限",
+      "project_access_denied": "无法访问该项目",
       "project_not_found": "当前工作区看不到该项目。",
       "slot_not_generatable": "该槽位没有生成模板 —— 请直接关联文件填充。",
       "loadout_mismatch": "该造型属于另一个资产。",
@@ -1785,7 +1788,14 @@
       "register_failed": "图已生成，但没能存进收件箱。",
       "not_authorised": "该生成结果属于其他工作区。",
       "generation_not_found": "该生成结果已不在收件箱里。",
-      "file_missing": "该生成结果没有可关联的文件。"
+      "file_missing": "该生成结果没有可关联的文件。",
+      "project_scope_mismatch": "该项目属于另一个工作区",
+      "project_ref_not_found": "该资产未关联到本项目",
+      "personal_team_missing": "该项目的所有者没有个人工作区",
+      "empty_name": "剧本里这个名字是空的",
+      "name_too_long": "名称过长，无法保存",
+      "already_linked": "已在本项目中",
+      "internal_error": "服务器出错了"
     },
     "loadFailed": "资产列表加载失败 —— 请检查网络后重试",
     "equip": {
@@ -1938,6 +1948,26 @@
     "setting": {
       "exterior": "外景",
       "interior": "内景"
+    },
+    "project": {
+      "allLinked": "搜到的都已在本项目中",
+      "count": "已关联 {{n}} 个",
+      "empty": "本项目还没有{{type}}——关联一个或新建一个",
+      "importDone": "导入完成——新建 {{created}} 个，关联 {{linked}} 个，跳过 {{skipped}} 个",
+      "importNothing": "剧本中还没有出现人物或场景",
+      "importSkipped": "{{name}}（{{type}}）——{{reason}}",
+      "importTypeCount": "{{type}} {{n}} 个",
+      "linkFromLibrary": "从资产库关联",
+      "linkTitle": "从资产库关联{{type}}",
+      "linked": "已加入本项目",
+      "loadFailed": "无法加载本项目的资产",
+      "noCandidates": "资产库中没有匹配项",
+      "scopeUnknown": "工作区尚未就绪",
+      "search": "搜索资产库",
+      "searchFailed": "搜索资产库失败",
+      "unlink": "把 {{name}} 移出本项目",
+      "unlinkHint": "仅从本项目移除——资产仍保留在资产库中",
+      "unlinked": "已移出本项目——资产仍在资产库中"
     }
   },
   "generated": {
@@ -2769,7 +2799,8 @@
         "files": "文件",
         "trash": "回收站",
         "settings": "设置",
-        "props": "道具"
+        "props": "道具",
+        "costumes": "服装"
       },
       "publish": {
         "comingSoon": "发布功能将随 Distribution D2 上线"
@@ -5053,59 +5084,6 @@
     "pinScenes": "固定场景列表",
     "unpinScenes": "取消固定场景列表",
     "railNav": "编辑器导航"
-  },
-  "characters": {
-    "extractFailed": "提取角色失败",
-    "createFailed": "创建角色失败",
-    "updateFailed": "保存角色失败",
-    "openCanvasFailed": "打开人物画布失败",
-    "untitled": "New Character",
-    "emptyTitle": "还没有角色",
-    "emptyHint": "从剧本提取角色，或手动添加。",
-    "extract": "从剧本提取",
-    "missingFromLibrary_one": "剧本里有 {{count}} 个角色还不在人物库中",
-    "missingFromLibrary_other": "剧本里有 {{count}} 个角色还不在人物库中",
-    "importMissing": "一键导入",
-    "importedCount_one": "已从剧本导入 {{count}} 个角色",
-    "importedCount_other": "已从剧本导入 {{count}} 个角色",
-    "importedNone": "剧本中的角色都已在人物库中",
-    "add": "添加角色",
-    "nameLabel": "角色名",
-    "bioLabel": "角色小传",
-    "bioPlaceholder": "背景、外形、性情……",
-    "assetsHint": "生成的资产会出现在这里",
-    "openCanvas": "在画布中打开",
-    "role": {
-      "lead": "主角",
-      "support": "配角",
-      "antagonist": "反派"
-    }
-  },
-  "libEntities": {
-    "extract": "从剧本提取",
-    "extractFailed": "从剧本提取失败",
-    "createFailed": "创建失败",
-    "updateFailed": "保存失败",
-    "openCanvasFailed": "打开画布失败",
-    "nameLabel": "名称",
-    "bioLabel": "描述",
-    "bioPlaceholder": "外观、氛围、年代、材质……",
-    "assetsHint": "生成的资产会出现在这里",
-    "videoAsset": "视频资产",
-    "generatedAsset": "生成的资产",
-    "openCanvas": "在画布中打开",
-    "location": {
-      "label": "场景",
-      "untitled": "New Location",
-      "emptyTitle": "还没有场景",
-      "add": "添加场景"
-    },
-    "prop": {
-      "label": "道具",
-      "untitled": "New Prop",
-      "emptyTitle": "还没有道具",
-      "add": "添加道具"
-    }
   },
   "errors": {
     "PROVIDER_AUTH": {

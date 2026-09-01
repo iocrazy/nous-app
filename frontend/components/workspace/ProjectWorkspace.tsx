@@ -136,7 +136,8 @@ export function ProjectWorkspace({
     const q = searchParams.get('module');
     const valid: WorkspaceModule[] = [
       'overview', 'canvas', 'episodes', 'tasks', 'script', 'characters',
-      'locations', 'props', 'files', 'trash', 'settings', 'stage', 'storyboard',
+      'locations', 'props', 'costumes', 'files', 'trash', 'settings', 'stage',
+      'storyboard',
     ];
     return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
   })();
@@ -1176,8 +1177,19 @@ export function ProjectWorkspace({
                 canArrange={isProjectOwner}
               />
             )}
-            {(activeModule === 'characters' || activeModule === 'locations' || activeModule === 'props') && (
-              <WorkspaceEntities kind={activeModule} projectId={project.id} />
+            {(activeModule === 'characters' ||
+              activeModule === 'locations' ||
+              activeModule === 'props' ||
+              activeModule === 'costumes') && (
+              <WorkspaceEntities
+                kind={activeModule}
+                projectId={project.id}
+                // The project's own team, which is the asset scope its library
+                // lives in (null on a personal project — the panel resolves
+                // that to the personal team).
+                projectTeamId={project.team_id}
+                teamId={teamId}
+              />
             )}
             {activeModule === 'files' && (
               <WorkspaceFiles

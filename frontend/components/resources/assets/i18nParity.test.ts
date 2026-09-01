@@ -308,13 +308,29 @@ describe('Asset library i18n parity', () => {
     // read as "something went wrong", which is exactly the failure mode
     // `useAssetFailure` exists to prevent.
     //
-    // The other four codes the assets backend can raise —
+    // The other four codes the ASSETS SERVICE can raise —
     // `file_not_attached` (detachFile), `project_scope_mismatch` /
     // `project_ref_not_found` (link/unlinkProject) and `personal_team_missing`
-    // (listProjectAssets) — are deliberately NOT listed: those four service
-    // functions have zero component call sites in P2 (verified by grep), so a
-    // string for them would be copy no shipped path can render. They belong
-    // with the UI that first calls them.
+    // (listProjectAssets) — were deliberately NOT listed in P2: those four
+    // service functions had zero component call sites then, so a string for
+    // them would have been copy no shipped path could render. They belong with
+    // the UI that first calls them — and THREE OF THE FOUR now have one. The
+    // project workspace panels (P3 Task 5) call link/unlink and the
+    // project-scoped read, so `project_scope_mismatch`,
+    // `project_ref_not_found` and `personal_team_missing` have moved into
+    // `PROJECT_KEYS` below. Of the service's four, only `file_not_attached` is
+    // still waiting: `detachFile` remains uncalled.
+    //
+    // ⚠️ CORRECTED (final review I-1). The sentence above used to end "Only
+    // `file_not_attached` is still waiting" full stop, which read as an
+    // inventory of every code the ASSETS BACKEND can produce — and it is not.
+    // It counts only what `AssetsService` raises. The ROUTER contributes two
+    // more of its own: `_project_gate` translates the shared project guard's
+    // HTTPException into `project_forbidden` (403) / `project_not_found` (404)
+    // with `project_access_denied` as its default, and those never appear in
+    // any service. They are in `PROJECT_KEYS` below now. A note that says
+    // "coverage is complete" is exactly what stops the next person looking,
+    // so the scope of the count is now stated instead of implied.
     'assets.err.not_authorised',
     'assets.err.generation_not_found',
     'assets.err.file_missing',
@@ -326,6 +342,122 @@ describe('Asset library i18n parity', () => {
     ...ASSET_SOURCES.map((s) => `assets.source.${s}`),
     ...(['en', 'zh'] as const).map((l) => `assets.sheet.lang.${l}`),
   ];
+
+  // ── The project workspace's panels (P3 Task 5) ──
+  //
+  // `ProjectAssetsPanel` / `LinkFromLibraryDialog` render the project's view
+  // over the library. Three of the `assets.err.*` codes below are the ones the
+  // Task-7 block above deliberately left out ("they belong with the UI that
+  // first calls them") — link/unlink and the project-scoped read are that UI,
+  // so they move here rather than staying unlisted.
+  const PROJECT_KEYS = [
+    'assets.project.linkFromLibrary',
+    'assets.project.linkTitle',
+    'assets.project.search',
+    'assets.project.noCandidates',
+    'assets.project.allLinked',
+    'assets.project.searchFailed',
+    'assets.project.count',
+    'assets.project.empty',
+    'assets.project.loadFailed',
+    'assets.project.linked',
+    'assets.project.unlink',
+    'assets.project.unlinkHint',
+    'assets.project.unlinked',
+    'assets.project.importDone',
+    'assets.project.importSkipped',
+    'assets.project.importTypeCount',
+    'assets.project.importNothing',
+    'assets.project.scopeUnknown',
+    // The write half of the project refs, now that a component calls it.
+    'assets.err.project_scope_mismatch',
+    'assets.err.project_ref_not_found',
+    'assets.err.personal_team_missing',
+    // ROUTER-level, not service-level: `_project_gate` (assets_router) turns
+    // the shared project guard's HTTPException into these. P3 is the first
+    // release where they are reachable — all four `/projects/{id}/assets*`
+    // routes carry that gate and none of them had a caller before this UI.
+    //
+    // `project_forbidden` is the reachable one, and its scenario is ordinary:
+    // a read-only collaborator opens the workspace Characters page (the read
+    // passes — `can_read` is granted to any project viewer) and clicks Import
+    // From Script, which is deliberately NOT gated on `writesDisabled`
+    // because the endpoint resolves its own scope. `verify_project_write_access`
+    // answers 403. Without this string the toast was the generic "Something
+    // went wrong. Please try again." — a typed refusal rendered as noise,
+    // which is the whole failure mode `useAssetFailure` exists to prevent.
+    //
+    // `project_access_denied` is `_PROJECT_GUARD_CODES`'s DEFAULT arm: it
+    // fires only if the guard ever raises a status other than 403/404. No
+    // path produces it today. It is listed anyway because the cost of a
+    // string is nothing and the cost of the fallback is a user reading
+    // "Something went wrong" about a permission decision.
+    'assets.err.project_forbidden',
+    'assets.err.project_access_denied',
+    // Per-item codes only `import-from-script` produces. These reach the user
+    // through `t('assets.err.' + item.code)` on the import report's failure
+    // lines — a code with no string falls back to the server's English
+    // `detail`, which is honest but untranslated.
+    'assets.err.empty_name',
+    'assets.err.name_too_long',
+    'assets.err.already_linked',
+    'assets.err.internal_error',
+  ];
+
+  it.each(PROJECT_KEYS)('%s resolves in both locales', (key) => {
+    expect(typeof at(en, key), `en ${key}`).toBe('string');
+    expect(typeof at(zh, key), `zh ${key}`).toBe('string');
+  });
+
+  it('the project panel interpolation placeholders survive translation', () => {
+    const placeholders: Record<string, string[]> = {
+      'assets.project.linkTitle': ['type'],
+      'assets.project.count': ['n'],
+      'assets.project.empty': ['type'],
+      'assets.project.unlink': ['name'],
+      'assets.project.importDone': ['created', 'linked', 'skipped'],
+      // The import run spans two asset types in one call, so both the summary
+      // breakdown and every failure line name the type — a bare count made a
+      // Characters panel that gained 3 cards after "5 Created" read as an
+      // import that under-delivered.
+      'assets.project.importSkipped': ['name', 'type', 'reason'],
+      'assets.project.importTypeCount': ['type', 'n'],
+    };
+    for (const [key, vars] of Object.entries(placeholders)) {
+      for (const tree of [en, zh]) {
+        for (const name of vars) {
+          expect(String(at(tree, key)), `${key} / ${name}`).toContain(`{{${name}}}`);
+        }
+      }
+    }
+  });
+
+  it('no project panel key is a plural family in disguise', () => {
+    // Same `{{count}}` trap as Task 8's block: `assets.project.count` uses
+    // `{{n}}` precisely so i18next does not read it as a plural selector and
+    // go looking for `_one` / `_other` siblings that do not exist.
+    const bad = PROJECT_KEYS.filter((key) =>
+      [en, zh].some((tree) => String(at(tree, key)).includes('{{count}}')),
+    );
+    expect(bad).toEqual([]);
+  });
+
+  it('the project panel copy is actually translated, not copied across', () => {
+    const copied = PROJECT_KEYS.filter((key) => at(zh, key) === at(en, key));
+    expect(copied).toEqual([]);
+  });
+
+  it('the workspace sidebar has a Costumes label in both locales', () => {
+    // The four ASSETS modules are one panel over `assets` filtered by type;
+    // Costumes is the type that never had a project-local table and so never
+    // had a rail entry until P3.
+    for (const key of ['characters', 'locations', 'props', 'costumes']) {
+      expect(typeof at(en, `projects.workspace.modules.${key}`), key).toBe('string');
+      expect(typeof at(zh, `projects.workspace.modules.${key}`), key).toBe('string');
+    }
+    expect(at(en, 'projects.workspace.modules.costumes')).toBe('Costumes');
+    expect(at(zh, 'projects.workspace.modules.costumes')).not.toBe('Costumes');
+  });
 
   it.each(SHEET_KEYS)('%s resolves in both locales', (key) => {
     expect(typeof at(en, key), `en ${key}`).toBe('string');

@@ -74,34 +74,80 @@ const ENTITIES = {
   locations: [{ name: 'Radio Booth', scene_count: 3, episode_ids: ['1'] }],
 };
 
-// The Characters module renders the CharacterLibrary bible-card wall (CC4) off
-// GET /projects/{id}/characters — the old derived `/entities` list was retired.
-const CHARACTERS = [
+// The Characters module is now the project's view over the ASSET LIBRARY
+// (P3 Task 5): `ProjectAssetsPanel` renders `AssetCard`s off
+// GET /projects/{id}/assets, filtered by `?type=`. It replaced the
+// `CharacterLibrary` bible-card wall over `project_characters`, which in turn
+// had replaced the derived `/entities` list — the wall's `character-library` /
+// `character-card` testids no longer exist anywhere in the tree.
+//
+// Real wire shape, not a tidied one (CLAUDE.md 边界 mock): every id is a
+// STRING (the repository stringifies BIGINT so a Snowflake never lands in a JS
+// number), `scope_id` is non-null because only global presets carry null,
+// `tags` is an OBJECT of group → values rather than a flat array,
+// `file_counts_by_slot` is sparse, and `readiness` / `project_ids` are
+// server-derived rather than columns. `cover_file_id` is null on purpose so
+// the cards draw their type glyph instead of fetching a portrait.
+const PROJECT_ASSETS = [
   {
-    id: 'c1',
-    project_id: '1',
+    id: '727145299382534300',
+    scope_id: '727145299382534200',
+    asset_type: 'character',
+    subtype: null,
     name: 'CLIENT',
     role_tag: 'lead',
     description: 'The buyer, always on the phone.',
-    tags: {},
-    portrait_url: null,
-    source: 'script',
+    attrs: {},
+    prompt_positive: null,
+    prompt_negative: null,
+    prompt_positive_zh: null,
+    prompt_negative_zh: null,
+    platform_params: {},
+    cover_file_id: null,
+    source: 'script_import',
+    duplicated_from: null,
+    is_system_preset: false,
+    tags: { role: ['lead'] },
     sort_order: 10,
+    created_by: '11111111-1111-1111-1111-111111111111',
     created_at: '2026-07-01T00:00:00Z',
     updated_at: '2026-07-01T00:00:00Z',
+    readiness: { state: 'ready', missing: [] },
+    file_counts_by_slot: { sheet: 1 },
+    project_ids: ['1'],
+    loadout_count: 0,
   },
   {
-    id: 'c2',
-    project_id: '1',
+    id: '727145299382534301',
+    scope_id: '727145299382534200',
+    asset_type: 'character',
+    subtype: null,
     name: 'DEV',
     role_tag: 'support',
     description: 'The engineer who ships.',
+    attrs: {},
+    prompt_positive: null,
+    prompt_negative: null,
+    prompt_positive_zh: null,
+    prompt_negative_zh: null,
+    platform_params: {},
+    cover_file_id: null,
+    source: 'script_import',
+    duplicated_from: null,
+    is_system_preset: false,
     tags: {},
-    portrait_url: null,
-    source: 'script',
     sort_order: 20,
+    created_by: '11111111-1111-1111-1111-111111111111',
     created_at: '2026-07-01T00:00:00Z',
     updated_at: '2026-07-01T00:00:00Z',
+    // Draft rather than ready on the second card: the readiness chip and the
+    // coverage ring are the two things `AssetCard` derives, and a fixture
+    // where every row is identical could not tell a broken derivation from a
+    // working one.
+    readiness: { state: 'draft', missing: ['sheet'] },
+    file_counts_by_slot: {},
+    project_ids: ['1'],
+    loadout_count: 0,
   },
 ];
 
@@ -205,18 +251,10 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
     if (pathname === '/api/v1/projects/stages/catalog') return route.fulfill({ json: { data: CATALOG } });
     if (pathname.endsWith('/episodes/progress')) return route.fulfill({ json: { success: true, data: EPISODES } });
     if (pathname.endsWith('/entities')) return route.fulfill({ json: { success: true, data: ENTITIES } });
-    if (pathname.endsWith('/characters')) return route.fulfill({ json: { success: true, data: CHARACTERS } });
+    if (pathname.endsWith('/assets')) return route.fulfill({ json: { success: true, data: PROJECT_ASSETS } });
     if (pathname.endsWith('/renders')) return route.fulfill({ json: { success: true, data: RENDERS } });
     return route.fallback();
   });
-
-  // The CharacterLibrary bible cards each mount an EntityAssetStrip that lists
-  // generations for the entity (GET /generated-media?entity_kind=…). It reads
-  // `.data.items`, so the empty catch-all's `{data:[]}` would make `.items`
-  // undefined and crash the card — return the paged shape instead.
-  await page.route(/\/api\/v1\/generated-media(\?|$)/, (route) =>
-    route.fulfill({ json: { success: true, data: { items: [], next_cursor: null } } }),
-  );
 
   // Renders grid thumbnails — real bytes so the screenshot doesn't show a
   // broken-image icon for the image-kind render.
@@ -342,11 +380,38 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.getByTestId('ws-ep-option-2').click();
     await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 2 — Cutdown/);
 
-    // Characters main-library module — the CharacterLibrary bible-card wall.
+    // Characters module — the project's view over the asset library (P3).
+    // Asserted on VISIBILITY, not `toHaveCount` alone: the storyboard-canvas
+    // incident shipped duplicate nodes that existed in the DOM but were
+    // permanently `visibility:hidden`, and a bare count passed on the broken
+    // build (CLAUDE.md 前端上线验收).
     await page.getByTestId('ws-module-characters').click();
-    await expect(page.getByTestId('character-library')).toBeVisible();
-    await expect(page.getByTestId('character-card')).toHaveCount(2);
-    await expect(page.getByTestId('character-card').first().locator('input')).toHaveValue('CLIENT');
+    await expect(page.getByTestId('project-assets-panel')).toBeVisible();
+    await expect(page.getByTestId('asset-card').first()).toBeVisible();
+    await expect(page.getByTestId('asset-card')).toHaveCount(2);
+    await expect(page.getByTestId('asset-card').first()).toContainText('CLIENT');
+    // The empty state and the load-error line are the two things this panel
+    // must NOT be showing when it has rows — they are distinct elements, and
+    // either one appearing here would mean the grid above came from somewhere
+    // other than the stubbed response.
+    await expect(page.getByTestId('project-assets-empty')).toHaveCount(0);
+    await expect(page.getByTestId('project-assets-error')).toHaveCount(0);
+    // Readiness is DERIVED per row (`ready` iff the primary slot holds a
+    // file), so the two fixture rows must disagree — one chip of each.
+    await expect(page.getByTestId('asset-card').first()).toHaveAttribute(
+      'data-readiness',
+      'ready',
+    );
+    await expect(page.getByTestId('asset-card').nth(1)).toHaveAttribute(
+      'data-readiness',
+      'draft',
+    );
+
+    // Costumes — the fourth ASSETS module, which had no page before P3. The
+    // stub answers the same rows for every `?type=`, so this asserts the
+    // module is REACHABLE and renders the same panel, not that it filters.
+    await page.getByTestId('ws-module-costumes').click();
+    await expect(page.getByTestId('project-assets-panel')).toBeVisible();
 
     // Files module — Renders chip consumes the /renders endpoint.
     await page.getByTestId('ws-module-files').click();
@@ -377,8 +442,9 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('ws-episode-row-1')).toContainText('Ep 1 — Pilot');
 
     await page.getByTestId('ws-module-characters').click();
-    await expect(page.getByTestId('character-library')).toBeVisible();
-    await expect(page.getByTestId('character-card').first().locator('input')).toHaveValue('CLIENT');
+    await expect(page.getByTestId('project-assets-panel')).toBeVisible();
+    await expect(page.getByTestId('asset-card').first()).toBeVisible();
+    await expect(page.getByTestId('asset-card').first()).toContainText('CLIENT');
 
     await page.getByTestId('ws-module-files').click();
     await page.getByTestId('ws-files-chip-renders').click();

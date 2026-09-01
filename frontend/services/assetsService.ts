@@ -91,6 +91,20 @@ export const ASSET_SOURCES = [
 
 export type AssetSource = (typeof ASSET_SOURCES)[number];
 
+/**
+ * The subset a client may CLAIM on create (`app/schemas/assets.py::
+ * AssetCreateSource`). The API rejects the other four with a 422 — they are
+ * assertions only the server can honestly make, each written alongside the row
+ * that makes it true (`duplicated_from` for `duplicated`, the preset flag for
+ * `system_preset`). Provenance is written once and never corrected, so a
+ * forged one is permanent.
+ *
+ * Deliberately NOT `AssetSource`: a create body typed as the response
+ * vocabulary compiles for values the server refuses, turning a type error at
+ * the call site into a 422 at runtime.
+ */
+export type AssetCreateSource = Extract<AssetSource, 'manual' | 'generated'>;
+
 export interface AssetCreateBody {
   asset_type: AssetType;
   name: string;
@@ -113,7 +127,7 @@ export interface AssetCreateBody {
    * a two-step client that skips it writes a permanently wrong provenance
    * that nothing downstream can distinguish from a hand-made asset.
    */
-  source?: AssetSource;
+  source?: AssetCreateSource;
 }
 
 const BASE = () => `${getApiUrl()}/api/v1/assets`;
@@ -448,11 +462,11 @@ export async function listAssets(
 /**
  * Every asset linked to one project, across the project's own asset scope.
  *
- * NO PRODUCTION CALLER YET — P3's foothold (项目分级视图, spec §9): the
- * project-scoped shelf is what consumes this. Written and typed now so that
- * task inherits the "no scope_id, the route derives it" rule rather than
- * re-deriving it. Distinct from `detachFile` below, which is a MISSING
- * feature, not a waiting one.
+ * The project workspace's asset panels (P3) are the caller. Note what this
+ * route does NOT take: a `scope_id`. The scope is derived from the project —
+ * and from its OWNER, not the caller — so a collaborator on someone else's
+ * personal project reads the same shelf the owner does instead of an empty
+ * one aimed at their own personal team.
  */
 export async function listProjectAssets(
   projectId: string,
@@ -746,9 +760,10 @@ export async function generateSlot(
 /**
  * Show this asset on a project's shelf. Needs WRITE access to the project.
  *
- * NO PRODUCTION CALLER YET — P3's foothold, the write half of
- * `listProjectAssets` above. The sheet's `Used In` section reads project
- * membership; editing it is the P3 surface.
+ * The write half of `listProjectAssets`, and unlike it this one DOES take a
+ * `scope_id` — the ASSET's scope, which the router gates membership on. Pass
+ * the row's own `scope_id` where you have a row; a scope guessed from the
+ * caller's own team is how a link lands on the wrong library.
  */
 export async function linkProject(
   scopeId: string,
@@ -762,8 +777,63 @@ export async function linkProject(
   );
 }
 
-/** The inverse of {@link linkProject}, and P3's foothold for the same reason.
- *  NO PRODUCTION CALLER YET. */
+/**
+ * One name's outcome in an {@link importFromScript} run.
+ *
+ * `action` is the whole answer and the three values are NOT interchangeable:
+ * `created` minted a new asset, `linked` found one already in the scope and
+ * pointed the project at it, and `skipped` did NEITHER — `code`/`detail` say
+ * why. Rendering only the tallies would let a refused name read as an import.
+ */
+export interface ImportedAssetItem {
+  name: string;
+  asset_type: AssetType;
+  action: 'created' | 'linked' | 'skipped';
+  asset_id?: string | null;
+  linked?: boolean;
+  code?: string | null;
+  detail?: string | null;
+}
+
+/** `created + linked + skipped === items.length` always holds server-side, so
+ *  the summary line needs no client-side walk of `items`. */
+export interface ImportFromScriptResponse {
+  items: ImportedAssetItem[];
+  created: number;
+  linked: number;
+  skipped: number;
+}
+
+/**
+ * 一键导入 — land the project's script-derived Characters and Locations as
+ * assets in the project's scope and reference each from the project.
+ *
+ * Both types in ONE request (the endpoint reads the whole script), so a panel
+ * showing only Characters still imports Locations; the per-item report is what
+ * lets the caller say so rather than under-reporting its own effect.
+ *
+ * Like {@link listProjectAssets} and for the same reason, no `scope_id`: the
+ * route derives it from the project. Re-running creates nothing.
+ */
+export async function importFromScript(
+  projectId: string,
+): Promise<ImportFromScriptResponse> {
+  const raw = await sendJson<Partial<ImportFromScriptResponse>>(
+    `${getApiUrl()}/api/v1/projects/${projectId}/assets/import-from-script`,
+    'POST',
+  );
+  // `items` normalized for the same reason `normalizeDetail` normalizes its
+  // arrays: a caller mapping over it must not crash on a partial payload.
+  return {
+    items: Array.isArray(raw?.items) ? raw.items : [],
+    created: raw?.created ?? 0,
+    linked: raw?.linked ?? 0,
+    skipped: raw?.skipped ?? 0,
+  };
+}
+
+/** The inverse of {@link linkProject}. Removes the REFERENCE only — the asset
+ *  itself stays in its library, which is what the panel's copy promises. */
 export async function unlinkProject(
   scopeId: string,
   assetId: string,

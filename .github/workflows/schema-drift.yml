@@ -55,6 +55,15 @@ on:
       - 'supabase/ci_bootstrap.sql'
       - 'backend/tests/db/test_schema_drift.py'
       - 'backend/tests/db/test_assets_repository_integration.py'
+      - 'backend/tests/db/test_assets_migration_integration.py'
+      - 'backend/app/workflows/backfill_assets_from_project_entities.py'
+      # The migration workflow IMPORTS `_NOT_MARKABLE` and
+      # `_resources_with_asset_files_stmt` from this module on purpose (two
+      # copies would let the two backfills disagree about the same row), so a
+      # PR that only touches the shared definitions has to reach this E2 chain
+      # too — otherwise the one guard that runs them against a real Postgres
+      # never fires for the change that moved them.
+      - 'backend/app/workflows/backfill_generated_inbox.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/services/assets/**'
@@ -271,3 +280,18 @@ jobs:
           # indexes free/hold names, that ON CONFLICT finds the real index, or
           # that a raise inside unit_of_work() rolls the whole batch back.
           uv run pytest tests/db/test_assets_repository_integration.py -v
+
+      - name: Exercise the project-library → assets migration (mig 445/446)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # P3 deleted the guard that blocked `dry_run=False`; THIS is what
+          # replaced it. `_apply` and `_reconcile` are ORM statements whose unit
+          # tests stub the session, so nothing else proves that the row-wise
+          # `(asset_type, lower(name)) IN ((...))` lookup runs, that re-applying
+          # takes the `existing` branch on every row (a property of the partial
+          # unique index, not of our Python), or that reconciliation agrees with
+          # apply about adopting a same-name asset of ANY source.
+          uv run pytest tests/db/test_assets_migration_integration.py -v

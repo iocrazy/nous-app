@@ -37,6 +37,33 @@ AssetType = Literal["character", "location", "prop", "costume", "prompt", "audio
 AssetSource = Literal[
     "manual", "script_import", "generated", "migrated", "duplicated", "system_preset"
 ]
+"""Every provenance the ``assets_source_check`` constraint allows. This is the
+RESPONSE vocabulary — a row legitimately comes back as ``duplicated`` /
+``migrated`` / ``system_preset`` / ``script_import``."""
+
+AssetCreateSource = Literal["manual", "generated"]
+"""The subset a CLIENT may claim on POST /assets.
+
+The other four are assertions only the server can honestly make: ``duplicated``
+is set by ``AssetsService.duplicate``, ``migrated`` by the migration workflow,
+``system_preset`` by the seeder, ``script_import`` by the script importer —
+each alongside the row (``duplicated_from``, the preset flag) that makes the
+claim true. Accepting them from the request body let any client forge
+provenance on a hand-made asset, and provenance is written once at creation
+and never corrected afterwards, so nothing downstream could tell.
+
+Those server-side paths do NOT go through ``AssetCreate``: ``duplicate`` hands
+``create_raw`` a full column dict, and the seeder writes rows directly. So the
+narrowing costs them nothing — verified by grep, ``AssetCreate(...)`` has TWO
+non-test construction sites, and neither lets a client near this field:
+``generated_inbox_service`` (server-built, passes ``generated``) and
+``AssetsService._import_one`` (leaves the default and asserts ``script_import``
+through ``create_asset``'s keyword-only ``source=`` instead — a parameter no
+route passes, so the request body cannot reach it).
+
+⚠️ That count is the check this note makes falsifiable, so re-run the grep when
+you add a caller rather than trusting the number:
+``grep -rn "AssetCreate(" app/``."""
 LinkRelation = Literal["wears", "holds", "ambience_of", "voice_of"]
 ReadinessState = Literal["ready", "draft"]
 
@@ -54,7 +81,8 @@ class AssetCreate(BaseModel):
     prompt_negative_zh: Optional[str] = Field(default=None, max_length=20000)
     platform_params: Dict[str, Any] = Field(default_factory=dict)
     tags: Dict[str, Any] = Field(default_factory=dict)
-    source: AssetSource = "manual"
+    # Narrower than the AssetSource the response carries — see AssetCreateSource.
+    source: AssetCreateSource = "manual"
 
 
 class AssetUpdate(BaseModel):
@@ -439,3 +467,50 @@ class LinkedResponse(BaseModel):
 
 class UnlinkedResponse(BaseModel):
     unlinked: bool = True
+
+
+# ── POST /projects/{id}/assets/import-from-script ───────────────────────────
+
+
+class ImportedAssetItem(BaseModel):
+    """One name's outcome. Every name the script yielded gets a row here —
+    including the ones nothing happened to (CLAUDE.md 触发路径必须类型化失败回显:
+    a batch that silently drops what it could not do reports success for work
+    it did not perform).
+
+    ``action`` and ``linked`` are reported INDEPENDENTLY on purpose. They answer
+    different questions — "did this call create the asset row" vs "does a
+    project ref for it exist now" — and folding the second into the first is
+    exactly the "正交的结果各自独立上报" failure: an asset that was created but
+    whose ref write then failed would read as a clean ``created`` to a caller
+    branching on ``action`` alone.
+
+    - ``created`` — this call inserted the asset. ``linked`` says whether its
+      project ref landed too; if it did not, ``code``/``detail`` say why.
+    - ``linked`` (action) — the asset already existed under this name+type in
+      this scope and this call added the missing project ref.
+    - ``skipped`` — nothing was written. ``code`` says which: ``already_linked``
+      (asset and ref both already there — the idempotent re-run), ``empty_name``
+      / ``name_too_long`` (unusable name), or the ``AssetError`` code that
+      refused it.
+    """
+
+    name: str
+    asset_type: AssetType
+    action: Literal["created", "linked", "skipped"]
+    asset_id: Optional[str] = None
+    linked: bool = False
+    code: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class ImportFromScriptResponse(BaseModel):
+    """The batch outcome. The three tallies count ``items`` by ``action``, so
+    ``created + linked + skipped == len(items)`` always holds — a caller can
+    render the summary line without walking the list, and a mismatch is a bug
+    in this endpoint rather than an ambiguity the client has to resolve."""
+
+    items: List[ImportedAssetItem]
+    created: int
+    linked: int
+    skipped: int

@@ -6,6 +6,14 @@
 // and lands verbatim in generated_media.params, which is what the library
 // asset strips query. BFS from the prompt so the NEAREST bound card wins
 // when branches merge.
+//
+// P4 OWNS THIS FILE'S MIGRATION. The ids it resolves are `project_characters`
+// / `project_lib_entities` rows bound to canvas entity cards — the same legacy
+// tables the workspace's Characters / Locations / Props / Costumes pages left
+// behind in P3 (they read `assets` now). The card-side reader is already gone
+// (P3 Task 6 retired `EntityAssetStrip`), so this stamp currently has no
+// in-app consumer; re-pointing entity cards at `assets` / `canvas_asset_refs`
+// is P4 canvas work, deliberately not done here.
 
 import type { CanvasConnection, CanvasNode } from '../types';
 
