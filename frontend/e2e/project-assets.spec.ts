@@ -430,51 +430,89 @@ test.describe('Project assets panel — the write paths (P3)', () => {
     expect(state.writes[1].body).toEqual({ project_id: PROJECT_ID });
   });
 
-  test('Unlink: drops the reference only, at the ROW’s scope rather than the panel’s guess', async ({
+  test('Unlink: works even when the panel has no write scope, because it uses the row’s', async ({
     page,
   }) => {
-    // Shaped as the one case where the two scopes DISAGREE — otherwise this
-    // assertion is a tautology. `ProjectAssetsPanel`'s docblock records the
-    // gap: reads are always right (the route derives the scope from the
-    // project's OWNER), but the panel has to guess the write scope as
-    // `project.team_id ?? personalTeamId`. On someone else's PERSONAL project
-    // (`team_id: null`) that guess lands on the VIEWER's own team.
+    // This is the one place `asset.scope_id ?? scopeId` earns its keep, and it
+    // is reachable rather than hypothetical.
     //
-    // Unlink is the write path that survives it, and this is why: it sends
-    // `asset.scope_id ?? scopeId` — the scope the SERVER just said the row
-    // lives in — so it stays correct while the panel's guess is wrong. Pinning
-    // that here is what stops a future "simplify" from collapsing it to the
-    // guess, which would turn every collaborator's unlink into a 422.
+    // The panel guesses its write scope as `project.team_id ?? personalTeamId`.
+    // On a PERSONAL project (`team_id: null`) whose viewer has no resolved
+    // personal team yet, that guess is NULL — so `Link From Library` and
+    // `+ New` are disabled and say why. The READ still works: that route takes
+    // no `scope_id` at all, deriving it server-side from the project's owner.
+    //
+    // Unlink is deliberately NOT gated on the guess (its button is disabled
+    // only while another unlink is in flight) and goes through anyway, because
+    // it sends the scope the SERVER just said the row lives in. Collapsing it
+    // to the guess would leave the user looking at rows they cannot remove.
+    //
+    // What this deliberately does NOT claim: that a row's scope and a
+    // PRESENT guess ever disagree. `link_project` refuses any asset whose
+    // scope differs from the project's resolved scope (422
+    // `project_scope_mismatch`), so on a consistent database the two agree
+    // wherever a write can succeed at all — and where they would differ (a
+    // collaborator on someone else's personal project) the scope gate answers
+    // 403 `not_a_member` before any of this is reached. The reachable gap is
+    // the guess being ABSENT, not being different.
     const OWNER_SCOPE_ID = '727145299382534900';
-    const ownedByOther = (over: Record<string, unknown>) =>
+    const owned = (over: Record<string, unknown>) =>
       assetRow({ ...over, scope_id: OWNER_SCOPE_ID });
     const state: AssetsState = {
-      linked: [ownedByOther({ id: CLIENT_ID, name: 'CLIENT' }), ownedByOther({ id: DEV_ID, name: 'DEV' })],
+      linked: [owned({ id: CLIENT_ID, name: 'CLIENT' }), owned({ id: DEV_ID, name: 'DEV' })],
       writes: [],
     };
+
+    // Leave the personal team unresolved. Two halves, because either one alone
+    // gets overwritten: drop the key `setupStubbedSession` seeded (this init
+    // script runs after its), and answer `team_members` with nothing — which
+    // is `fetchPersonalTeam`'s own early-return-null branch, so it never sets
+    // the state or writes the key back.
+    await page.addInitScript(() => {
+      try {
+        localStorage.removeItem('mediahub_personal_team');
+      } catch {
+        /* localStorage unavailable — nothing we can do */
+      }
+    });
+    await page.route('**/rest/v1/team_members*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+    );
+
     await routeWorkspaceApi(page, state, { project: { team_id: null } });
     await openCharactersPanel(page);
 
+    // The read landed even though there is no scope to write with.
     await expect(page.getByTestId('project-assets-count')).toHaveText('2 Linked');
 
-    // Addressed by the row it belongs to, not by position: the panel renders
-    // one of these per card and `.first()` would silently follow a re-order.
-    await page.locator(`[data-testid="unlink-asset"][data-asset-id="${CLIENT_ID}"]`).click();
+    // The two scope-dependent actions are off and say why, rather than failing
+    // on click. This also proves the guess really is absent — without it the
+    // test would pass on a build that resolved a scope after all, and the
+    // assertion below would be back to comparing two equal values.
+    await expect(page.getByTestId('link-from-library')).toBeDisabled();
+    await expect(page.getByTestId('new-asset')).toBeDisabled();
+    await expect(page.getByTestId('link-from-library')).toHaveAttribute(
+      'title',
+      'Workspace Not Resolved Yet',
+    );
+
+    // Unlink is not gated on it, and goes through.
+    const unlink = page.locator(`[data-testid="unlink-asset"][data-asset-id="${CLIENT_ID}"]`);
+    await expect(unlink).toBeEnabled();
+    await unlink.click();
 
     await expect(page.getByTestId('project-assets-count')).toHaveText('1 Linked');
     await expect(page.getByTestId('asset-card')).toHaveCount(1);
     await expect(page.getByTestId('asset-card')).toBeVisible();
     await expect(page.getByTestId('asset-card')).toContainText('DEV');
 
-    // One DELETE, carrying both ids in the path — and `scope_id` is the ROW's
-    // owner scope, NOT `SCOPE_ID` (which is what the panel guessed and what
-    // the session's personal team is).
+    // One DELETE, both ids in the path, and `scope_id` is the ROW's — the only
+    // value available here, since the panel's own is null.
     expect(state.writes).toHaveLength(1);
     expect(state.writes[0].method).toBe('DELETE');
     expect(state.writes[0].pathname).toBe(
       `/api/v1/assets/${CLIENT_ID}/project-refs/${PROJECT_ID}`,
     );
     expect(state.writes[0].scopeId).toBe(OWNER_SCOPE_ID);
-    expect(state.writes[0].scopeId).not.toBe(SCOPE_ID);
   });
 });

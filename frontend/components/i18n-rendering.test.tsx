@@ -135,6 +135,14 @@ describe('locale structural guards', () => {
     // deliberate, working pattern all over this codebase (a key that resolves
     // wins; the default is the floor), and sweeping it up here would demand
     // every ad-hoc default be pre-registered in both locale files.
+    //
+    // ⚠️ BLIND SPOT, stated so nobody assumes wider cover than there is: the
+    // dot group below is REQUIRED, so a flat key — `t('submit')` — is
+    // invisible to this scan. There are none in the tree today (every key in
+    // use is namespaced), which is why the pattern can demand a dot at all: a
+    // dotless match would sweep in `t(x)`-shaped calls on non-i18n `t`
+    // bindings. If flat keys ever appear, relaxing this needs that
+    // disambiguation solved first, not just the `+` loosened.
     const NO_FALLBACK = /\bt\(\s*(['"])([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+)\1\s*\)/g;
     const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', 'e2e-artifacts', '.git']);
     const root = resolve(__dirname, '..');
