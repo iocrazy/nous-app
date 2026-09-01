@@ -159,6 +159,15 @@ _IMPORT_SOURCE = "script_import"
 # down with it.
 _MAX_ASSET_NAME = 200
 
+# What the import's two defensive handlers put on the wire instead of
+# ``str(e)``. ``ImportedAssetItem.detail`` is rendered verbatim by
+# ``ProjectAssetsPanel``'s ``ImportLine`` whenever the code has no translation,
+# so a raw SQLAlchemy exception string — which carries the statement and its
+# bound parameters — would land in a user's browser. The exception is already
+# ``logger.error``'d at both sites with the name that produced it, so nothing
+# diagnostic is lost by not shipping it.
+_INTERNAL_DETAIL = "An unexpected error occurred while importing this name"
+
 # The audit line the cross-user reference read is logged under. Owned by this
 # call site, not by the repo: it names WHY this particular read is a legitimate
 # system read (the asset passed _require_writable, the ids came from
@@ -1617,14 +1626,30 @@ class AssetsService:
                 # ``create_asset`` omits the key when it lost a concurrent race
                 # (the aborted INSERT could not look the winner up). Recover it
                 # rather than reporting a skip for an asset that exists.
-                found = await self.assets.find_by_name(int(scope_id), asset_type, name)
+                #
+                # Its own try, and this is the whole point: an exception raised
+                # INSIDE an ``except`` block is not caught by that try's sibling
+                # handlers, so without this the lookup failing would escape
+                # ``_import_one`` entirely and take the WHOLE batch down —
+                # exactly what the "Never raises" contract above promises it
+                # cannot, and what per-name isolation exists for.
+                try:
+                    found = await self.assets.find_by_name(
+                        int(scope_id), asset_type, name
+                    )
+                except Exception as lookup_err:  # pragma: no cover - defensive
+                    logger.error(
+                        "import-from-script: race recovery lookup failed for "
+                        f"{name!r}: {lookup_err}"
+                    )
+                    found = None
                 existing_id = str(found["id"]) if found else None
             if not existing_id:
                 return _row("skipped", code=e.code, detail=e.detail)
             asset_id = int(existing_id)
         except Exception as e:  # pragma: no cover - defensive, per-name only
             logger.error(f"import-from-script: create failed for {name!r}: {e}")
-            return _row("skipped", code="internal_error", detail=str(e))
+            return _row("skipped", code="internal_error", detail=_INTERNAL_DETAIL)
 
         try:
             linked = await self.link_project(
@@ -1646,7 +1671,7 @@ class AssetsService:
                 "created" if created else "skipped",
                 asset_id=str(asset_id),
                 code="internal_error",
-                detail=str(e),
+                detail=_INTERNAL_DETAIL,
             )
         if created:
             return _row("created", asset_id=str(asset_id), linked=True)

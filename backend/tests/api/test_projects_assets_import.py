@@ -610,3 +610,81 @@ async def test_service_output_satisfies_the_response_model(svc, monkeypatch):
     assert len(parsed.items) == 3
     assert parsed.created == 2 and parsed.skipped == 1
     assert parsed.created + parsed.linked + parsed.skipped == len(parsed.items)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_race_recovery_lookup_skips_one_name_not_the_batch(
+    svc, monkeypatch
+):
+    """m-1: the one escape hatch in ``_import_one``'s "Never raises" contract.
+
+    The recovery ``find_by_name`` runs INSIDE an ``except`` block, and Python
+    does not offer a sibling handler of the same ``try`` to an exception raised
+    there — so before the fix, a connection blip on that lookup escaped
+    ``_import_one`` and took the entire batch down. Two names, the failing one
+    first: the second must still land.
+    """
+    _stub_entities(monkeypatch, characters=["Raced", "Fine"])
+
+    async def _raced(scope_id, payload, user_id, **kw):
+        if payload.name == "Raced":
+            raise AssetError(409, "asset_exists", "exists")  # no extra key
+        return await AssetsService.create_asset(svc, scope_id, payload, user_id, **kw)
+
+    real_find = svc.assets.find_by_name
+
+    async def _boom(scope_id, asset_type, name):
+        # Only the raced name: ``create_asset`` itself consults this repo
+        # method, so a blanket failure would break the second name's CREATE
+        # and the test would pass for the wrong reason.
+        if name == "Raced":
+            raise RuntimeError("connection reset mid-recovery")
+        return await real_find(scope_id, asset_type, name)
+
+    monkeypatch.setattr(svc, "create_asset", _raced)
+    monkeypatch.setattr(svc.assets, "find_by_name", _boom)
+
+    out = await svc.import_from_script(SCOPE, 55, USER)
+    assert [i["name"] for i in out["items"]] == ["Raced", "Fine"]
+    # The raced name is reported as its OWN skip, carrying the original 409's
+    # code — not swallowed, and not promoted to something that looks like it
+    # worked.
+    assert out["items"][0]["action"] == "skipped"
+    assert out["items"][0]["code"] == "asset_exists"
+    assert out["items"][1]["action"] == "created", "the batch survived"
+    assert out["created"] == 1 and out["skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_defensive_detail_is_fixed_copy_not_the_exception_string(
+    svc, monkeypatch
+):
+    """m-2: ``ImportedAssetItem.detail`` is rendered verbatim by the panel's
+    ``ImportLine`` whenever the code has no translation. A SQLAlchemy exception
+    string carries the statement and its bound parameters, so it must never be
+    what goes on the wire. The logger already has the original."""
+    from app.services.assets.assets_service import _INTERNAL_DETAIL
+
+    secret = "SELECT * FROM assets WHERE token='sk-live-DO-NOT-SHIP'"
+    _stub_entities(monkeypatch, characters=["Sang Yao"])
+
+    async def _boom(scope_id, payload, user_id, **kw):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(svc, "create_asset", _boom)
+    row = (await svc.import_from_script(SCOPE, 55, USER))["items"][0]
+    assert row["code"] == "internal_error"
+    assert row["detail"] == _INTERNAL_DETAIL
+    assert secret not in str(row)
+
+    # The link half, which is a separate handler and would have been missed by
+    # fixing only the one the reviewer quoted.
+    async def _link_boom(asset_id, scope_id, project_id, user_id):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(svc, "create_asset", AssetsService.create_asset.__get__(svc))
+    monkeypatch.setattr(svc, "link_project", _link_boom)
+    row2 = (await svc.import_from_script(SCOPE, 55, USER))["items"][0]
+    assert row2["code"] == "internal_error"
+    assert row2["detail"] == _INTERNAL_DETAIL
+    assert secret not in str(row2)

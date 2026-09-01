@@ -57,6 +57,13 @@ on:
       - 'backend/tests/db/test_assets_repository_integration.py'
       - 'backend/tests/db/test_assets_migration_integration.py'
       - 'backend/app/workflows/backfill_assets_from_project_entities.py'
+      # The migration workflow IMPORTS `_NOT_MARKABLE` and
+      # `_resources_with_asset_files_stmt` from this module on purpose (two
+      # copies would let the two backfills disagree about the same row), so a
+      # PR that only touches the shared definitions has to reach this E2 chain
+      # too — otherwise the one guard that runs them against a real Postgres
+      # never fires for the change that moved them.
+      - 'backend/app/workflows/backfill_generated_inbox.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/services/assets/**'
