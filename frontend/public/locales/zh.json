@@ -1785,7 +1785,14 @@
       "register_failed": "图已生成，但没能存进收件箱。",
       "not_authorised": "该生成结果属于其他工作区。",
       "generation_not_found": "该生成结果已不在收件箱里。",
-      "file_missing": "该生成结果没有可关联的文件。"
+      "file_missing": "该生成结果没有可关联的文件。",
+      "project_scope_mismatch": "该项目属于另一个工作区",
+      "project_ref_not_found": "该资产未关联到本项目",
+      "personal_team_missing": "该项目的所有者没有个人工作区",
+      "empty_name": "剧本里这个名字是空的",
+      "name_too_long": "名称过长，无法保存",
+      "already_linked": "已在本项目中",
+      "internal_error": "服务器出错了"
     },
     "loadFailed": "资产列表加载失败 —— 请检查网络后重试",
     "equip": {
@@ -1938,6 +1945,25 @@
     "setting": {
       "exterior": "外景",
       "interior": "内景"
+    },
+    "project": {
+      "allLinked": "搜到的都已在本项目中",
+      "count": "已关联 {{n}} 个",
+      "empty": "本项目还没有{{type}}——关联一个或新建一个",
+      "importDone": "导入完成——新建 {{created}} 个，关联 {{linked}} 个，跳过 {{skipped}} 个",
+      "importNothing": "剧本中还没有出现人物或场景",
+      "importSkipped": "{{name}}——{{reason}}",
+      "linkFromLibrary": "从资产库关联",
+      "linkTitle": "从资产库关联{{type}}",
+      "linked": "已加入本项目",
+      "loadFailed": "无法加载本项目的资产",
+      "noCandidates": "资产库中没有匹配项",
+      "scopeUnknown": "工作区尚未就绪",
+      "search": "搜索资产库",
+      "searchFailed": "搜索资产库失败",
+      "unlink": "把 {{name}} 移出本项目",
+      "unlinkHint": "仅从本项目移除——资产仍保留在资产库中",
+      "unlinked": "已移出本项目——资产仍在资产库中"
     }
   },
   "generated": {
@@ -2769,7 +2795,8 @@
         "files": "文件",
         "trash": "回收站",
         "settings": "设置",
-        "props": "道具"
+        "props": "道具",
+        "costumes": "服装"
       },
       "publish": {
         "comingSoon": "发布功能将随 Distribution D2 上线"

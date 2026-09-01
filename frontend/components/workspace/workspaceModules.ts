@@ -7,7 +7,7 @@
 
 import type { ComponentType } from 'react';
 import { LayoutDashboard, Frame, ListVideo, ListTodo, Users, MapPin,
-  Package, FolderOpen, Trash2, Settings } from 'lucide-react';
+  Package, Shirt, FolderOpen, Trash2, Settings } from 'lucide-react';
 
 export type WorkspaceModule =
   | 'overview'
@@ -18,6 +18,10 @@ export type WorkspaceModule =
   | 'characters'
   | 'locations'
   | 'props'
+  // Costumes has no `project_*` table behind it and never had a page here —
+  // it arrives with the asset library (P3), which made all four of these one
+  // view over `assets` filtered by type.
+  | 'costumes'
   | 'files'
   | 'trash'
   | 'settings'
@@ -45,11 +49,13 @@ export const TOP_MODULES: WorkspaceModuleDef[] = [
   { key: 'tasks', labelKey: 'projects.workspace.modules.tasks', icon: ListTodo },
 ];
 
-/** ASSETS group — project-level entities (spec G13: main-library + appearances). */
+/** ASSETS group — the project's view over the asset library (P3), one entry
+ *  per asset type that a project references, plus Files. */
 export const ASSET_MODULES: WorkspaceModuleDef[] = [
   { key: 'characters', labelKey: 'projects.workspace.modules.characters', icon: Users },
   { key: 'locations', labelKey: 'projects.workspace.modules.locations', icon: MapPin },
   { key: 'props', labelKey: 'projects.workspace.modules.props', icon: Package },
+  { key: 'costumes', labelKey: 'projects.workspace.modules.costumes', icon: Shirt },
   { key: 'files', labelKey: 'projects.workspace.modules.files', icon: FolderOpen },
 ];
 

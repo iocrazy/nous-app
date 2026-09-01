@@ -151,6 +151,19 @@ const mockProjectsService = vi.hoisted(() => ({
   // tests below, just needs to exist so the import resolves.
   updateEpisode: vi.fn(),
 }));
+// Lazily imported by ProjectWorkspace; stubbed so `?module=<asset module>`
+// can be pinned without pulling TeamContext and the assets client in here.
+vi.mock('./WorkspaceEntities', () => ({
+  WorkspaceEntities: (props: { kind: string; projectId: string; projectTeamId: string | null }) => (
+    <div
+      data-testid="ws-entities"
+      data-kind={props.kind}
+      data-project-id={props.projectId}
+      data-project-team-id={props.projectTeamId ?? ''}
+    />
+  ),
+}));
+
 vi.mock('../../services/projectsService', () => mockProjectsService);
 
 const mockScriptService = vi.hoisted(() => ({
@@ -352,6 +365,11 @@ describe('ProjectWorkspace', () => {
 
     expect(screen.getByTestId('ws-module-characters')).toBeTruthy();
     expect(screen.getByTestId('ws-module-locations')).toBeTruthy();
+    expect(screen.getByTestId('ws-module-props')).toBeTruthy();
+    // Costumes arrived with the asset library (P3): the four ASSETS entries
+    // are one panel over `assets` filtered by type, and costume is the type
+    // that never had a `project_*` table to give it a rail entry before.
+    expect(screen.getByTestId('ws-module-costumes')).toBeTruthy();
     expect(screen.getByTestId('ws-module-files')).toBeTruthy();
     expect(screen.getByTestId('ws-module-trash')).toBeTruthy();
     expect(screen.getByTestId('ws-module-settings')).toBeTruthy();
@@ -1164,6 +1182,44 @@ describe('ProjectWorkspace', () => {
     await expandEpisodesTree();
     const publishBtn = await screen.findByTestId('ws-ep-publish');
     expect(publishBtn).toBeDisabled();
+  });
+
+  it.each(['characters', 'locations', 'props', 'costumes'])(
+    'routes ?module=%s to the project assets panel',
+    async (module) => {
+      // Two things at once, and both are silent when wrong: the module must be
+      // in the `valid` list (an unknown value falls back to Overview with
+      // nothing said) and the content switch must match it (a module in the
+      // rail whose branch is missing renders a blank pane). `costumes` is the
+      // new one; the other three are the regression guard for the switch that
+      // used to enumerate exactly three.
+      mockSearchParams.current = new URLSearchParams(`module=${module}`);
+      render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+      const panel = await screen.findByTestId('ws-entities');
+      expect(panel.getAttribute('data-kind')).toBe(module);
+      expect(panel.getAttribute('data-project-id')).toBe(PROJECT.id);
+      expect(screen.queryByTestId('ws-overview')).toBeNull();
+    },
+  );
+
+  it('hands the panel the PROJECT’s team, not the URL’s', async () => {
+    // The two are the same for every project reached through its own team's
+    // URL, so this fixture makes them differ on purpose: the asset scope is a
+    // property of the project, while the team SEGMENT is only where the
+    // cross-module links point. Reading the URL for the scope would aim every
+    // write at whichever workspace the user happened to navigate from.
+    mockSearchParams.current = new URLSearchParams('module=characters');
+    render(
+      <ProjectWorkspace
+        project={{ ...PROJECT, team_id: 't-owner' }}
+        teamId="t1"
+        onBack={noop}
+      />,
+    );
+
+    const panel = await screen.findByTestId('ws-entities');
+    expect(panel.getAttribute('data-project-team-id')).toBe('t-owner');
   });
 
   it('falls back to Overview when ?module=stage is loaded without a node id (#final-review)', async () => {

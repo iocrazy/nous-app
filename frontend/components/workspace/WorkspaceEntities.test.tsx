@@ -1,40 +1,66 @@
 /**
- * WorkspaceEntities — thin router over the three ASSETS libraries (CC4+SP3):
- * characters → CharacterLibrary, locations/props → EntityLibrary. Library
- * behavior is covered in their own suites.
+ * WorkspaceEntities — the module-key → asset-type mapping, and nothing else.
+ *
+ * It matters because the two vocabularies are different by design: the
+ * sidebar's keys are plural workspace modules, the library's are singular
+ * asset types. A wrong entry here renders one type's assets under another
+ * type's label, which nothing downstream would notice — the panel would ask
+ * for a valid type and get a valid answer.
+ *
+ * (This file previously pinned the delegation to `CharacterLibrary` /
+ * `EntityLibrary` over `project_characters` / `project_lib_entities`. Those
+ * components still exist; nothing in the workspace routes to them any more.)
  */
+import React from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 
-import { render, screen, cleanup } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-vi.mock('./CharacterLibrary', () => ({
-  CharacterLibrary: ({ projectId }: { projectId: string }) => (
-    <div data-testid="character-library-mock" data-project={projectId} />
-  ),
+const personalTeamId = '727145299382534777';
+vi.mock('../../contexts/TeamContext', () => ({
+  useTeamContext: () => ({ personalTeamId }),
 }));
-vi.mock('./EntityLibrary', () => ({
-  EntityLibrary: ({ entityType, projectId }: { entityType: string; projectId: string }) => (
-    <div data-testid="entity-library-mock" data-type={entityType} data-project={projectId} />
+
+vi.mock('./ProjectAssetsPanel', () => ({
+  ProjectAssetsPanel: (props: {
+    assetType: string;
+    projectId: string;
+    scopeId: string | null;
+    teamId?: string;
+  }) => (
+    <div
+      data-testid="panel"
+      data-asset-type={props.assetType}
+      data-project-id={props.projectId}
+      data-scope-id={props.scopeId ?? ''}
+      data-team-id={props.teamId ?? ''}
+    />
   ),
 }));
 
 import { WorkspaceEntities } from './WorkspaceEntities';
 
-afterEach(() => cleanup());
-
 describe('WorkspaceEntities', () => {
-  it('characters → CharacterLibrary', () => {
-    render(<WorkspaceEntities kind="characters" projectId="p1" />);
-    expect(screen.getByTestId('character-library-mock').getAttribute('data-project')).toBe('p1');
+  it.each([
+    ['characters', 'character'],
+    ['locations', 'location'],
+    ['props', 'prop'],
+    ['costumes', 'costume'],
+  ] as const)('maps the %s module to the %s asset type', (kind, type) => {
+    render(<WorkspaceEntities kind={kind} projectId="p1" projectTeamId="42" teamId="42" />);
+    expect(screen.getByTestId('panel').getAttribute('data-asset-type')).toBe(type);
   });
 
-  it('locations → EntityLibrary(location)', () => {
-    render(<WorkspaceEntities kind="locations" projectId="p1" />);
-    expect(screen.getByTestId('entity-library-mock').getAttribute('data-type')).toBe('location');
+  it('uses the project’s own team as the asset scope', () => {
+    render(<WorkspaceEntities kind="characters" projectId="p1" projectTeamId="42" teamId="42" />);
+    expect(screen.getByTestId('panel').getAttribute('data-scope-id')).toBe('42');
   });
 
-  it('props → EntityLibrary(prop)', () => {
-    render(<WorkspaceEntities kind="props" projectId="p1" />);
-    expect(screen.getByTestId('entity-library-mock').getAttribute('data-type')).toBe('prop');
+  it('falls back to the personal team for a team-less project', () => {
+    // `projects.team_id` is NULL on a personal project; its assets live in the
+    // owner's personal team.
+    render(<WorkspaceEntities kind="props" projectId="p1" projectTeamId={null} />);
+    const panel = screen.getByTestId('panel');
+    expect(panel.getAttribute('data-scope-id')).toBe(personalTeamId);
+    expect(panel.getAttribute('data-team-id')).toBe('');
   });
 });

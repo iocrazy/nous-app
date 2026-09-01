@@ -1785,7 +1785,14 @@
       "register_failed": "The image was generated but could not be stored.",
       "not_authorised": "That generation belongs to another workspace.",
       "generation_not_found": "That generation is no longer in the inbox.",
-      "file_missing": "That generation has no stored file to attach."
+      "file_missing": "That generation has no stored file to attach.",
+      "project_scope_mismatch": "That Project Belongs To A Different Workspace",
+      "project_ref_not_found": "This Asset Is Not Linked To This Project",
+      "personal_team_missing": "No Personal Workspace For This Project's Owner",
+      "empty_name": "The Script Left This Name Blank",
+      "name_too_long": "That Name Is Too Long To Store",
+      "already_linked": "Already In This Project",
+      "internal_error": "Something Went Wrong On The Server"
     },
     "loadFailed": "Could Not Load Assets — Check Your Connection And Try Again",
     "equip": {
@@ -1938,6 +1945,25 @@
     "setting": {
       "exterior": "Exterior",
       "interior": "Interior"
+    },
+    "project": {
+      "allLinked": "Everything Found Is Already In This Project",
+      "count": "{{n}} Linked",
+      "empty": "No {{type}} In This Project Yet — Link One Or Create One",
+      "importDone": "Imported — {{created}} Created, {{linked}} Linked, {{skipped}} Skipped",
+      "importNothing": "Your Scripts Name No Characters Or Locations Yet",
+      "importSkipped": "{{name}} — {{reason}}",
+      "linkFromLibrary": "Link From Library",
+      "linkTitle": "Link {{type}} From Library",
+      "linked": "Added To This Project",
+      "loadFailed": "Could Not Load This Project’s Assets",
+      "noCandidates": "Nothing In The Library Matches",
+      "scopeUnknown": "Workspace Not Resolved Yet",
+      "search": "Search The Library",
+      "searchFailed": "Could Not Search The Library",
+      "unlink": "Remove {{name}} From This Project",
+      "unlinkHint": "Removes it from this project only — the asset stays in your library",
+      "unlinked": "Removed From This Project — Still In Your Library"
     }
   },
   "generated": {
@@ -2769,7 +2795,8 @@
         "files": "Files",
         "trash": "Trash",
         "settings": "Settings",
-        "props": "Props"
+        "props": "Props",
+        "costumes": "Costumes"
       },
       "publish": {
         "comingSoon": "Publishing arrives with Distribution D2"
