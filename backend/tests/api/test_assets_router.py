@@ -128,9 +128,9 @@ class _FakeService:
         }
 
     # Provenance the router actually handed down, so the "defaults to manual"
-    # pin reads the value rather than the absence of a rejection.
-    created_sources: list = []
-
+    # pin reads the value rather than the absence of a rejection. Instance
+    # attribute only (see __init__) — a class-level list would be shared by
+    # every test in the file.
     async def create_asset(self, scope_id, payload, user_id):
         self.created_sources.append(payload.source)
         if payload.name == "dup":
@@ -595,9 +595,12 @@ async def test_create_refuses_a_client_claimed_server_source(app, source):
     assert any(
         "source" in map(str, err.get("loc", [])) for err in r.json()["detail"]
     ), r.text
-    # And it never reached the service — a 422 raised after the create would
-    # leave the row behind.
-    assert not any(c[0] == "create" for c in app.state.fake.calls)
+    # And it never reached the service — a 422 raised AFTER the create would
+    # leave the row behind. Read from ``created_sources``, which
+    # ``_FakeService.create_asset`` actually appends to: ``calls`` is only
+    # written by list/count/attach, so asserting on it here would be true even
+    # when the router did call through.
+    assert app.state.fake.created_sources == []
 
 
 @pytest.mark.asyncio

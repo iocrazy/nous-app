@@ -1115,3 +1115,141 @@ async def test_uow_is_skipped_when_no_engine_exists(svc, monkeypatch):
     monkeypatch.setattr(m, "is_configured", lambda: False)
     await svc.create_asset(SCOPE, AssetCreate(asset_type="prop", name="Blade"), USER)
     assert seen == [False]
+
+
+# ── C-1: an ambient transaction is JOINED, never nested inside ─────────────
+
+
+@pytest.fixture
+def forbid_new_transaction(monkeypatch):
+    """Make opening a NEW session loud instead of silent.
+
+    ``unit_of_work()`` reaches for ``get_sessionmaker()`` as its first act, so
+    a sessionmaker that raises turns "a second transaction was opened" into a
+    failure with a name on it. Returns a flag list the negative control reads,
+    proving the probe can actually fire.
+    """
+    import app.db.session as sess
+
+    tripped: list[str] = []
+
+    def _boom():
+        tripped.append("opened")
+        raise AssertionError("opened a second transaction inside an ambient one")
+
+    monkeypatch.setattr(sess, "get_sessionmaker", _boom)
+    return tripped
+
+
+@pytest.fixture
+def ambient_uow(monkeypatch):
+    """Pretend a caller already has a transaction open (what
+    ``generated_inbox_service._save_as_asset_core`` really does around
+    ``create_asset``) without needing an engine to open a real one."""
+    import app.db.session as sess
+
+    token = sess._request_session.set(object())  # type: ignore[arg-type]
+    yield
+    sess._request_session.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_create_asset_joins_an_outer_uow_instead_of_nesting(
+    svc, monkeypatch, ambient_uow, forbid_new_transaction
+):
+    """The regression this pins is invisible to every other test.
+
+    ``unit_of_work()`` nested in an active one is REQUIRES_NEW: the inner block
+    COMMITS INDEPENDENTLY and an outer rollback does not undo it. With
+    ``create_asset`` opening its own, a ``_save_as_asset_core`` whose
+    ``attach_file`` or ``set_review_state`` then failed would roll back around
+    an already-committed asset — an orphan with no attachment, which the user's
+    retry meets as a 409 asset_exists. That path's own suite replaces
+    ``AssetsService`` with a fake, so nothing there executes this method.
+    """
+    import app.services.assets.assets_service as m
+
+    monkeypatch.setattr(m, "is_configured", lambda: True)
+    a = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
+    )
+    # The writes still happened — joining is not skipping.
+    assert a["id"].isdigit()
+    los = await svc.relations.list_loadouts(int(a["id"]))
+    assert len(los) == 1 and los[0]["is_default"]
+    assert forbid_new_transaction == []
+
+
+@pytest.mark.asyncio
+async def test_the_probe_fires_when_a_transaction_really_is_opened(
+    svc, monkeypatch, forbid_new_transaction
+):
+    """Negative control for the test above: WITHOUT an ambient transaction the
+    same call does open one, so the empty list up there is the guard working
+    and not a probe that never fires."""
+    import app.services.assets.assets_service as m
+
+    monkeypatch.setattr(m, "is_configured", lambda: True)
+    with pytest.raises(AssertionError, match="second transaction"):
+        await svc.create_asset(
+            SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
+        )
+    assert forbid_new_transaction == ["opened"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_joins_an_outer_uow_instead_of_nesting(
+    svc, monkeypatch, ambient_uow, forbid_new_transaction
+):
+    """Same shape as ``create_asset``. Only the router calls ``duplicate``
+    today, so this is the potential case rather than the in-flight one — but
+    the failure it prevents (a copy that survives its caller's rollback) is
+    silent, so the guard is pinned rather than left to a future reader."""
+    import app.services.assets.assets_service as m
+    from app.schemas.assets import DuplicateRequest
+
+    monkeypatch.setattr(m, "is_configured", lambda: True)
+    src = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Original"), USER
+    )
+    copy = await svc.duplicate(int(src["id"]), SCOPE, USER, DuplicateRequest())
+    assert copy["name"] == "Original (copy)"
+    assert forbid_new_transaction == []
+
+
+@pytest.mark.asyncio
+async def test_race_409_omits_the_id_it_could_not_learn(svc, uow_spy):
+    """I-2. Inside a transaction the repo cannot resolve the winner's id (the
+    failed INSERT aborted it) and reports 0. Forwarding that would give both
+    dialogs — SaveAsAssetDialog's setExistingConflictId, NewAssetDialog's
+    setExistingId — a recovery link pointing at asset 0. The key must be
+    ABSENT, which is what ``duplicate`` already does for the same case."""
+    from app.repositories.assets_repository import DuplicateAssetName
+
+    async def _lost_race(scope_id, fields, created_by):
+        raise DuplicateAssetName(existing_id=0)
+
+    svc.assets.create = _lost_race
+    with pytest.raises(AssetError) as ei:
+        await svc.create_asset(
+            SCOPE, AssetCreate(asset_type="location", name="Bamboo Grove"), USER
+        )
+    assert ei.value.status == 409 and ei.value.code == "asset_exists"
+    assert "existing_asset_id" not in ei.value.extra, ei.value.extra
+
+
+@pytest.mark.asyncio
+async def test_race_409_still_carries_a_real_id_when_it_has_one(svc, uow_spy):
+    """The other half: omitting the key is for the UNKNOWN case only. A repo
+    that did resolve the winner must still hand the dialog its jump target."""
+    from app.repositories.assets_repository import DuplicateAssetName
+
+    async def _lost_race(scope_id, fields, created_by):
+        raise DuplicateAssetName(existing_id=4242)
+
+    svc.assets.create = _lost_race
+    with pytest.raises(AssetError) as ei:
+        await svc.create_asset(
+            SCOPE, AssetCreate(asset_type="location", name="Bamboo Grove"), USER
+        )
+    assert ei.value.extra["existing_asset_id"] == "4242"

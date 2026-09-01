@@ -1158,3 +1158,74 @@ async def test_q_filter_treats_like_metacharacters_as_literal_text(orm_dsn, pg, 
     assert (await _names(f"axb {tag}")) == {decoy["name"]}
     # And the ILIKE is still case-insensitive.
     assert (await _names(f"AXB {tag}")) == {decoy["name"]}
+
+
+# ── 19. create_asset joins a caller's transaction instead of nesting ────────
+
+
+@_skip
+async def test_create_asset_inside_a_callers_uow_rolls_back_with_it(orm_dsn, pg, fx):
+    """The C-1 regression, reproduced end to end.
+
+    ``_save_as_asset_core`` (generated_inbox_service) calls ``create_asset``
+    INSIDE its own ``unit_of_work()``, then attaches the file and flips the
+    review state. A nested ``unit_of_work()`` is REQUIRES_NEW — the inner block
+    commits independently and the outer rollback does not undo it — so an
+    asset created that way would SURVIVE a later failure in the same logical
+    operation, as an orphan with no attachment. The user's retry then hits it
+    as a 409 asset_exists, with no way forward.
+
+    Only a real server shows this: with a stubbed session, "nested" and
+    "joined" both look like the writes happening.
+    """
+    from app.db.session import unit_of_work
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetsService
+
+    service = AssetsService()
+    team, uid = fx["team_id"], fx["user_id"]
+    name = _uniq("Orphan Candidate")
+
+    with pytest.raises(RuntimeError):
+        async with unit_of_work():
+            await service.create_asset(
+                team, AssetCreate(asset_type="character", name=name), uid
+            )
+            # Stands in for attach_file / set_review_state failing.
+            raise RuntimeError("the rest of the caller's work failed")
+
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE scope_id = $1 AND name = $2",
+            team,
+            name,
+        )
+        == 0
+    ), "the asset outlived its caller's transaction — nested UoW, orphan row"
+
+    # The Default loadout must not survive either (it would be an orphan of an
+    # orphan, invisible to every asset query).
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts lo JOIN assets a ON a.id = "
+            "lo.asset_id WHERE a.name = $1",
+            name,
+        )
+        == 0
+    )
+
+    # Negative control: the same call inside a COMMITTING outer transaction
+    # does persist, so the zero above is the rollback reaching it — not
+    # create_asset having quietly stopped writing when a caller wraps it.
+    kept = _uniq("Kept Hero")
+    async with unit_of_work():
+        created = await service.create_asset(
+            team, AssetCreate(asset_type="character", name=kept), uid
+        )
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1 AND is_default",
+            int(created["id"]),
+        )
+        == 1
+    ), "joining the outer transaction lost the Default loadout"

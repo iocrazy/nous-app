@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.db.engine import is_configured
-from app.db.session import maybe_unit_of_work
+from app.db.session import in_unit_of_work, maybe_unit_of_work
 from app.repositories.asset_relations_repository import (
     AssetRelationsRepository,
     _serialize_file,
@@ -269,6 +269,19 @@ class AssetsService:
         under the fake-repo unit suites where no engine exists and the bare
         form would raise. Same call as ``duplicate`` below.
 
+        ``and not in_unit_of_work()`` is the other half, and it is NOT belt and
+        braces: ``unit_of_work()`` nested inside an active one is REQUIRES_NEW —
+        the inner block commits INDEPENDENTLY and an outer rollback does not
+        undo it (its own docstring says so). ``_save_as_asset_core``
+        (generated_inbox_service) calls this method inside its UoW, so opening
+        our own would commit the asset + Default loadout, and a later
+        ``attach_file`` / ``set_review_state`` failure would roll back around
+        them — leaving an ORPHAN asset with no attachment, which the user's
+        retry then hits as a 409. Skipping the block when a transaction is
+        already open makes the repo writes join THAT one via ``write_scope()``:
+        the atomicity gets wider, never narrower, and the standalone
+        ``POST /assets`` path is unaffected.
+
         The duplicate check moved BEFORE the INSERT for the same reason
         ``duplicate`` asks first: inside this transaction, a unique-violation
         aborts it, and the id lookup ``AssetsRepository.create`` would
@@ -278,7 +291,7 @@ class AssetsService:
         INSERT), where the repo hands back ``existing_id=0``.
         """
         fields = payload.model_dump()
-        async with maybe_unit_of_work(is_configured()):
+        async with maybe_unit_of_work(is_configured() and not in_unit_of_work()):
             clash = await self.assets.find_by_name(
                 int(scope_id), fields["asset_type"], fields["name"]
             )
@@ -292,11 +305,24 @@ class AssetsService:
             try:
                 row = await self.assets.create(int(scope_id), fields, user_id)
             except DuplicateAssetName as e:
+                # Lost the race with a concurrent insert between the check above
+                # and this one. Inside a transaction ``create`` cannot look the
+                # winner's id up (the failed INSERT aborted it), so it reports
+                # 0 — and 0 must NOT be forwarded: both consumers treat this
+                # key as a jump target for the existing asset
+                # (SaveAsAssetDialog's setExistingConflictId /
+                # NewAssetDialog's setExistingId), so a "0" renders a recovery
+                # link to an asset that does not exist. Omit the key instead —
+                # same call ``duplicate`` makes for the same reason.
                 raise AssetError(
                     409,
                     "asset_exists",
                     "An asset with this name and type already exists in this scope",
-                    {"existing_asset_id": str(e.existing_id)},
+                    (
+                        {"existing_asset_id": str(e.existing_id)}
+                        if e.existing_id
+                        else {}
+                    ),
                 )
             if row["asset_type"] == "character":
                 await self.relations.create_loadout(
@@ -482,7 +508,14 @@ class AssetsService:
         # the request; a service helper like this one also runs under the
         # fake-repo unit suites, where no engine exists and the bare form would
         # raise on a path that has nothing to do with transactions.
-        async with maybe_unit_of_work(is_configured()):
+        #
+        # `not in_unit_of_work()` for the reason spelled out at `create_asset`:
+        # a nested unit_of_work() is REQUIRES_NEW, so it would commit this copy
+        # independently of a caller's transaction and survive that caller's
+        # rollback. Only the router calls `duplicate` today, so this is the
+        # potential case rather than the in-flight one — but the failure it
+        # prevents is silent, and the guard costs a conjunct.
+        async with maybe_unit_of_work(is_configured() and not in_unit_of_work()):
             clash = await self.assets.find_by_name(
                 int(scope_id), src["asset_type"], name
             )
