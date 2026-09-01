@@ -54,9 +54,16 @@ and never corrected afterwards, so nothing downstream could tell.
 
 Those server-side paths do NOT go through ``AssetCreate``: ``duplicate`` hands
 ``create_raw`` a full column dict, and the seeder writes rows directly. So the
-narrowing costs them nothing — verified by grep, ``AssetCreate(...)`` has
-exactly one non-test construction site (``generated_inbox_service``, which
-passes ``generated``)."""
+narrowing costs them nothing — verified by grep, ``AssetCreate(...)`` has TWO
+non-test construction sites, and neither lets a client near this field:
+``generated_inbox_service`` (server-built, passes ``generated``) and
+``AssetsService._import_one`` (leaves the default and asserts ``script_import``
+through ``create_asset``'s keyword-only ``source=`` instead — a parameter no
+route passes, so the request body cannot reach it).
+
+⚠️ That count is the check this note makes falsifiable, so re-run the grep when
+you add a caller rather than trusting the number:
+``grep -rn "AssetCreate(" app/``."""
 LinkRelation = Literal["wears", "holds", "ambience_of", "voice_of"]
 ReadinessState = Literal["ready", "draft"]
 

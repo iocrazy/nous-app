@@ -1540,6 +1540,15 @@ class AssetsService:
         Deliberately does NOT touch ``project_characters`` /
         ``project_lib_entities``: the old extract endpoints still own those
         tables and stay untouched (their retirement belongs to the rename PR).
+
+        **No cap on the name count, accepted deliberately.** The batch costs two
+        round-trips per name (create + link), so a 300-name script is ~600
+        statements in one request. A ``MAX_IMPORT_NAMES`` refusal was considered
+        and rejected: the list is not user-supplied, it is derived from script
+        content the project already holds, so a cap would refuse an import the
+        user legitimately asked for and leave no way to finish it. Revisit if a
+        real project ever makes this slow — the fix then is batching the writes,
+        not refusing the request.
         """
         by_type = await _script_entity_names(int(project_id))
         items: List[Dict[str, Any]] = []

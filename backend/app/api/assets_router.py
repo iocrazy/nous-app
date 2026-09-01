@@ -338,6 +338,15 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
     Re-running is safe and creates nothing — see
     ``AssetsService.import_from_script``.
 
+    ⚠️ The status is 201 even when NOTHING was created — an idempotent re-run
+    answers 201 with every item ``skipped``. The per-item report is the
+    contract, not the status line: a client branching on the status alone
+    learns only that the request was accepted. Read ``created`` / ``linked`` /
+    ``skipped`` (or the items) to tell the user what happened. Answering 200 on
+    an empty batch was considered and rejected — it would make the status
+    depend on data the caller cannot predict, and the two codes would still
+    need the same body to be read.
+
     The old ``/{project_id}/characters/extract`` and
     ``/{project_id}/lib/{type}/extract`` endpoints are deliberately untouched:
     they still own ``project_characters`` / ``project_lib_entities``, and this

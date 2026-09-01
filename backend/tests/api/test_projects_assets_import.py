@@ -325,19 +325,101 @@ def svc():
     )
 
 
-def _entities(characters=(), locations=()):
-    async def _fake(project_id):
-        return {"character": list(characters), "location": list(locations)}
+def _scene_rows(characters=(), locations=()):
+    """Scene rows in the shape ``ScriptSceneRepository.list_scene_rows_for_project``
+    returns — ``{episode_id, location_text, content_json}``, one per scene."""
+    rows = [
+        {
+            "episode_id": 7,
+            "location_text": loc,
+            "content_json": [],
+        }
+        for loc in locations
+    ]
+    rows.append(
+        {
+            "episode_id": 7,
+            "location_text": None,
+            "content_json": [{"type": "character", "text": c} for c in characters],
+        }
+    )
+    return rows
 
-    return _fake
+
+def _stub_entities(monkeypatch, characters=(), locations=()):
+    """Stub the boundary BELOW the code under test.
+
+    The first version of these tests monkeypatched ``_script_entity_names``
+    itself — the one seam between this endpoint and the rest of the system —
+    so the adapter never executed. Corrupting both its dict keys and its field
+    key left all 928 tests green, while production would have answered
+    ``201 {"items": [], "created": 0, ...}``: a success for zero work on a
+    user-triggered path.
+
+    So: patch ``ProjectsService.get_project_entities`` instead, and build its
+    return value by running the REAL ``derive_project_entities`` over real
+    scene rows. The fixture cannot drift from the deriver, because the deriver
+    produces it.
+    """
+    from app.services.library.project_entities import derive_project_entities
+    from app.services.library.projects_service import ProjectsService
+
+    payload = derive_project_entities(_scene_rows(characters, locations))
+
+    async def _fake(self, project_id):
+        return payload
+
+    monkeypatch.setattr(ProjectsService, "get_project_entities", _fake)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_script_entity_names_maps_the_real_wire_shape(monkeypatch):
+    """The adapter, executed. ``get_project_entities`` answers
+    ``{"characters": [{"name", "cue_count", "episode_ids"}], "locations":
+    [{"name", "scene_count", "episode_ids"}]}`` — a literal here rather than a
+    derived one, so this test also pins the shape the deriver is expected to
+    emit. ``_script_entity_names`` must key off ``characters``/``locations``
+    and off ``name``; any other spelling yields empty lists, which the endpoint
+    would report as a cheerful 201 that imported nothing."""
+    from app.services.library.projects_service import ProjectsService
+
+    async def _fake(self, project_id):
+        assert project_id == 55
+        return {
+            "characters": [
+                {"name": "Sang Yao", "cue_count": 3, "episode_ids": ["7"]},
+                {"name": "Lin Xi", "cue_count": 1, "episode_ids": []},
+            ],
+            "locations": [
+                {"name": "Rooftop", "scene_count": 2, "episode_ids": ["7"]},
+            ],
+        }
+
+    monkeypatch.setattr(ProjectsService, "get_project_entities", _fake)
+    assert await assets_service._script_entity_names(55) == {
+        "character": ["Sang Yao", "Lin Xi"],
+        "location": ["Rooftop"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_script_entity_names_agrees_with_the_real_deriver(monkeypatch):
+    """Positive control for the literal above: the same assertion, but with the
+    payload produced by the production ``derive_project_entities`` rather than
+    hand-written. If the deriver renames a key, the literal test alone would
+    keep passing while production went empty."""
+    _stub_entities(monkeypatch, characters=["Sang Yao"], locations=["Rooftop"])
+    assert await assets_service._script_entity_names(55) == {
+        "character": ["Sang Yao"],
+        "location": ["Rooftop"],
+    }
 
 
 @pytest.mark.asyncio
 async def test_creates_links_and_reports_each_name(svc, monkeypatch):
-    monkeypatch.setattr(
-        assets_service,
-        "_script_entity_names",
-        _entities(characters=["Sang Yao", "Lin Xi"], locations=["Rooftop"]),
+    _stub_entities(
+        monkeypatch, characters=["Sang Yao", "Lin Xi"], locations=["Rooftop"]
     )
     out = await svc.import_from_script(SCOPE, 55, USER)
     assert out["created"] == 3 and out["linked"] == 0 and out["skipped"] == 0
@@ -359,11 +441,7 @@ async def test_creates_links_and_reports_each_name(svc, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_second_run_creates_nothing(svc, monkeypatch):
-    monkeypatch.setattr(
-        assets_service,
-        "_script_entity_names",
-        _entities(characters=["Sang Yao"], locations=["Rooftop"]),
-    )
+    _stub_entities(monkeypatch, characters=["Sang Yao"], locations=["Rooftop"])
     first = await svc.import_from_script(SCOPE, 55, USER)
     assert first["created"] == 2
     second = await svc.import_from_script(SCOPE, 55, USER)
@@ -382,9 +460,7 @@ async def test_same_name_existing_asset_gets_the_ref_not_a_409(svc, monkeypatch)
     existing = await svc.create_asset(
         SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
     )
-    monkeypatch.setattr(
-        assets_service, "_script_entity_names", _entities(characters=["Sang Yao"])
-    )
+    _stub_entities(monkeypatch, characters=["Sang Yao"])
     out = await svc.import_from_script(SCOPE, 55, USER)
     assert out == {
         "items": [
@@ -408,26 +484,61 @@ async def test_same_name_existing_asset_gets_the_ref_not_a_409(svc, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_blank_and_overlong_names_are_reported_not_dropped(svc, monkeypatch):
-    monkeypatch.setattr(
-        assets_service,
-        "_script_entity_names",
-        _entities(characters=["", "   ", "X" * 201, "Good"]),
+async def test_a_case_differing_name_links_the_existing_asset(svc, monkeypatch):
+    """``uq_assets_scope_type_name`` is on ``lower(name)`` (mig 445), so
+    "Sang yao" and "Sang Yao" are the SAME asset. The import must add the ref
+    to the existing row — not crash on the unique violation, and not create a
+    second asset the index would reject anyway."""
+    from app.schemas.assets import AssetCreate
+
+    existing = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Sang yao"), USER
     )
+    _stub_entities(monkeypatch, characters=["Sang Yao"])
     out = await svc.import_from_script(SCOPE, 55, USER)
-    assert out["created"] == 1 and out["skipped"] == 3
-    codes = [i["code"] for i in out["items"]]
-    assert codes == ["empty_name", "empty_name", "name_too_long", None]
-    assert len(out["items"]) == 4, "a dropped name is a silent no-op"
+    assert out["created"] == 0 and out["linked"] == 1
+    row = out["items"][0]
+    assert row["action"] == "linked" and row["asset_id"] == str(existing["id"])
+    # The script's casing does NOT rewrite the authored row's name.
+    assert len(svc.assets.rows) == 1
+    assert svc.assets.rows[int(existing["id"])]["name"] == "Sang yao"
+
+
+@pytest.mark.asyncio
+async def test_overlong_name_is_reported_not_dropped(svc, monkeypatch):
+    """Through the real seam: ``derive_project_entities`` applies no length
+    rule, so a 201-character cue genuinely reaches ``_import_one`` and must
+    come back as a REPORTED skip — not a ValidationError that would take the
+    rest of the batch with it, and not a silent drop."""
+    _stub_entities(monkeypatch, characters=["X" * 201, "Good"])
+    out = await svc.import_from_script(SCOPE, 55, USER)
+    assert out["created"] == 1 and out["skipped"] == 1
+    assert [i["code"] for i in out["items"]] == ["name_too_long", None]
+    assert len(out["items"]) == 2, "a dropped name is a silent no-op"
+
+
+@pytest.mark.asyncio
+async def test_blank_names_are_reported_not_dropped(svc):
+    """Second line of defense, tested at ``_import_one`` directly.
+
+    A blank name cannot arrive through the seam today —
+    ``derive_project_entities`` skips empty text on both branches, which the
+    stub above faithfully reproduces, so feeding one through
+    ``import_from_script`` would test the DERIVER's filter and call it this
+    guard's. The guard still has to exist: it is what holds if the name source
+    ever changes (a different deriver, an explicit name list), and its failure
+    mode without it is an unhandled ValidationError mid-batch.
+    """
+    for raw in ("", "   "):
+        row = await svc._import_one(SCOPE, 55, "character", raw, USER)
+        assert row["action"] == "skipped" and row["code"] == "empty_name"
+        assert row["asset_id"] is None and row["linked"] is False
+    assert svc.assets.rows == {}, "a blank name must not create anything"
 
 
 @pytest.mark.asyncio
 async def test_one_failing_name_does_not_sink_the_batch(svc, monkeypatch):
-    monkeypatch.setattr(
-        assets_service,
-        "_script_entity_names",
-        _entities(characters=["Boom", "Fine"]),
-    )
+    _stub_entities(monkeypatch, characters=["Boom", "Fine"])
     real_create = svc.create_asset
 
     async def _create(scope_id, payload, user_id, **kw):
@@ -447,9 +558,7 @@ async def test_one_failing_name_does_not_sink_the_batch(svc, monkeypatch):
 async def test_an_asset_that_lands_but_cannot_be_linked_says_so(svc, monkeypatch):
     """The two results are orthogonal: reporting only ``created`` would tell the
     caller the import succeeded for a name whose project ref never landed."""
-    monkeypatch.setattr(
-        assets_service, "_script_entity_names", _entities(characters=["Sang Yao"])
-    )
+    _stub_entities(monkeypatch, characters=["Sang Yao"])
 
     async def _no_link(asset_id, scope_id, project_id, user_id):
         raise AssetError(422, "project_scope_mismatch", "other team")
@@ -473,9 +582,7 @@ async def test_concurrent_race_without_an_existing_id_still_recovers(svc, monkey
     existing = await svc.create_asset(
         SCOPE, AssetCreate(asset_type="character", name="Sang Yao"), USER
     )
-    monkeypatch.setattr(
-        assets_service, "_script_entity_names", _entities(characters=["Sang Yao"])
-    )
+    _stub_entities(monkeypatch, characters=["Sang Yao"])
 
     async def _raced(scope_id, payload, user_id, **kw):
         raise AssetError(409, "asset_exists", "exists")  # no extra key
@@ -493,12 +600,13 @@ async def test_service_output_satisfies_the_response_model(svc, monkeypatch):
     against that model."""
     from app.schemas.assets import ImportFromScriptResponse
 
-    monkeypatch.setattr(
-        assets_service,
-        "_script_entity_names",
-        _entities(characters=["Sang Yao", ""], locations=["Rooftop"]),
+    # A mix, so the model meets a skipped row (its optional keys populated)
+    # and a created one in the same payload.
+    _stub_entities(
+        monkeypatch, characters=["Sang Yao", "X" * 201], locations=["Rooftop"]
     )
     out = await svc.import_from_script(SCOPE, 55, USER)
     parsed = ImportFromScriptResponse.model_validate(out)
     assert len(parsed.items) == 3
+    assert parsed.created == 2 and parsed.skipped == 1
     assert parsed.created + parsed.linked + parsed.skipped == len(parsed.items)
