@@ -355,6 +355,12 @@ class FakeRelationsRepo:
         return True, team_id, owner_id
 
     async def link_project(self, a, p, u):
+        """Mirrors the real INSERT ... ON CONFLICT DO NOTHING: True only when a
+        NEW row landed. A fake that always answered True would let
+        ``import_from_script``'s ``linked`` vs ``already_linked`` distinction
+        pass whether or not the service reads the repo's answer."""
+        if (a, p) in self.refs:
+            return False
         self.refs.append((a, p))
         return True
 

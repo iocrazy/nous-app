@@ -460,3 +460,50 @@ class LinkedResponse(BaseModel):
 
 class UnlinkedResponse(BaseModel):
     unlinked: bool = True
+
+
+# ── POST /projects/{id}/assets/import-from-script ───────────────────────────
+
+
+class ImportedAssetItem(BaseModel):
+    """One name's outcome. Every name the script yielded gets a row here —
+    including the ones nothing happened to (CLAUDE.md 触发路径必须类型化失败回显:
+    a batch that silently drops what it could not do reports success for work
+    it did not perform).
+
+    ``action`` and ``linked`` are reported INDEPENDENTLY on purpose. They answer
+    different questions — "did this call create the asset row" vs "does a
+    project ref for it exist now" — and folding the second into the first is
+    exactly the "正交的结果各自独立上报" failure: an asset that was created but
+    whose ref write then failed would read as a clean ``created`` to a caller
+    branching on ``action`` alone.
+
+    - ``created`` — this call inserted the asset. ``linked`` says whether its
+      project ref landed too; if it did not, ``code``/``detail`` say why.
+    - ``linked`` (action) — the asset already existed under this name+type in
+      this scope and this call added the missing project ref.
+    - ``skipped`` — nothing was written. ``code`` says which: ``already_linked``
+      (asset and ref both already there — the idempotent re-run), ``empty_name``
+      / ``name_too_long`` (unusable name), or the ``AssetError`` code that
+      refused it.
+    """
+
+    name: str
+    asset_type: AssetType
+    action: Literal["created", "linked", "skipped"]
+    asset_id: Optional[str] = None
+    linked: bool = False
+    code: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class ImportFromScriptResponse(BaseModel):
+    """The batch outcome. The three tallies count ``items`` by ``action``, so
+    ``created + linked + skipped == len(items)`` always holds — a caller can
+    render the summary line without walking the list, and a mismatch is a bug
+    in this endpoint rather than an ambiguity the client has to resolve."""
+
+    items: List[ImportedAssetItem]
+    created: int
+    linked: int
+    skipped: int

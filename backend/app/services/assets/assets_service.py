@@ -13,6 +13,8 @@ import os
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional, Tuple
 
+from loguru import logger
+
 from app.core.config import settings
 from app.db.engine import is_configured
 from app.db.session import in_unit_of_work, maybe_unit_of_work
@@ -31,6 +33,7 @@ from app.repositories.assets_repository import (
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.assets import (
     AssetCreate,
+    AssetSource,
     AssetUpdate,
     AttachFileRequest,
     DuplicateRequest,
@@ -143,6 +146,19 @@ _TRANSLATE_EMPTY = (
 # of the priority so the primary image is never the one left behind.
 MAX_SLOT_REFERENCES = 3
 
+# The provenance ``import_from_script`` stamps. Asserted by the SERVER (see
+# ``create_asset``'s ``source=``), never claimed by a request body: these rows
+# are named after script content the project already contains, and recording
+# them as ``manual`` would make the library unable to answer "which of these
+# did a human author" — the one question ``assets.source`` exists to answer.
+# ``AssetSource``'s docstring reserves this value for exactly this caller.
+_IMPORT_SOURCE = "script_import"
+
+# ``AssetCreate.name`` is capped at 200. A cue longer than that is a REPORTED
+# skip rather than a ValidationError that would take the rest of the batch
+# down with it.
+_MAX_ASSET_NAME = 200
+
 # The audit line the cross-user reference read is logged under. Owned by this
 # call site, not by the repo: it names WHY this particular read is a legitimate
 # system read (the asset passed _require_writable, the ids came from
@@ -153,6 +169,29 @@ _REFERENCE_READ_REASON = "assets-generate-slot: resolve reference media paths"
 # canvas and shot-generate paths use (``_KIND_MIME``/``mime="image/png"``), so
 # all three land the same way in Tier-1.
 _GENERATED_IMAGE_MIME = "image/png"
+
+
+async def _script_entity_names(project_id: int) -> Dict[str, List[str]]:
+    """The script-derived names ``import_from_script`` lands, by asset type.
+
+    Same source as the two endpoints that predate it —
+    ``projects_router.extract_project_characters`` and ``extract_lib_entities``
+    both read ``ProjectsService().get_project_entities`` — so the import cannot
+    disagree with what the project's own Characters/Locations views show.
+    Locations are the only other derived kind: props/costumes have no
+    derivation source (scene headers give locations, character cues give
+    characters), which is why they are absent here rather than empty.
+
+    Imported lazily: ``projects_service`` reaches back into library services,
+    and a module-level import here would close an import cycle.
+    """
+    from app.services.library.projects_service import ProjectsService
+
+    entities = await ProjectsService().get_project_entities(project_id)
+    return {
+        "character": [str(e.get("name", "")) for e in entities.get("characters", [])],
+        "location": [str(e.get("name", "")) for e in entities.get("locations", [])],
+    }
 
 
 def _is_stored_path(value: Any) -> bool:
@@ -251,10 +290,24 @@ class AssetsService:
     # ── assets ─────────────────────────────────────────────────────────────
 
     async def create_asset(
-        self, scope_id: int, payload: AssetCreate, user_id: Optional[str]
+        self,
+        scope_id: int,
+        payload: AssetCreate,
+        user_id: Optional[str],
+        *,
+        source: Optional[AssetSource] = None,
     ) -> Dict[str, Any]:
         """Create one asset — and, for a character, its Default loadout — in ONE
         transaction.
+
+        ``source`` overrides the payload's provenance and is keyword-only and
+        SERVER-SIDE: ``AssetCreate.source`` is narrowed to ``manual|generated``
+        precisely so a client cannot claim a provenance only the server can
+        honestly assert, and this parameter is how the server asserts one. The
+        request body cannot reach it — every route hands ``payload`` straight
+        through without it. Used by :meth:`import_from_script` to stamp
+        ``script_import``, the value ``AssetSource``'s own docstring reserves
+        for "the script importer".
 
         The two writes used to be two transactions, so a Default loadout that
         failed to insert left a committed character behind with no loadout at
@@ -291,6 +344,8 @@ class AssetsService:
         INSERT), where the repo hands back ``existing_id=0``.
         """
         fields = payload.model_dump()
+        if source is not None:
+            fields["source"] = source
         async with maybe_unit_of_work(is_configured() and not in_unit_of_work()):
             clash = await self.assets.find_by_name(
                 int(scope_id), fields["asset_type"], fields["name"]
@@ -1394,7 +1449,17 @@ class AssetsService:
 
     async def link_project(
         self, asset_id: int, scope_id: int, project_id: int, user_id: Optional[str]
-    ) -> None:
+    ) -> bool:
+        """Reference ``asset_id`` from ``project_id``.
+
+        Returns whether a NEW ref row landed: the repo insert is
+        ``on_conflict_do_nothing``, so False means "already referenced", not
+        "failed" — every real failure is a raised :class:`AssetError`.
+        ``import_from_script`` needs that distinction to tell ``linked`` from
+        ``already_linked``; ``POST /assets/{id}/project-refs`` ignores it and
+        keeps answering ``{linked: true}`` for both, which is the truth it
+        promised its callers (the ref exists).
+        """
         await self._require_writable(asset_id, scope_id)
         exists, team_id, owner_id = await self.relations.project_team_id(
             int(project_id)
@@ -1414,8 +1479,11 @@ class AssetsService:
                 "project_scope_mismatch",
                 "Project belongs to a different team than this asset",
             )
-        await self.relations.link_project(int(asset_id), int(project_id), user_id)
+        inserted = await self.relations.link_project(
+            int(asset_id), int(project_id), user_id
+        )
         await self.relations.touch_asset(int(asset_id))
+        return bool(inserted)
 
     @staticmethod
     async def _owner_personal_team(owner_id: Optional[str]) -> int:
@@ -1449,3 +1517,136 @@ class AssetsService:
                 404, "project_ref_not_found", "Asset is not linked to this project"
             )
         await self.relations.touch_asset(int(asset_id))
+
+    # ── import from script ─────────────────────────────────────────────────
+
+    async def import_from_script(
+        self, scope_id: int, project_id: int, user_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """一键导入 — land the project's script-derived names as assets in
+        ``scope_id`` and reference each from the project.
+
+        Per-name isolation is the point: every name runs in its own
+        try/except and its own transaction, so one unusable cue (blank, over
+        length, a scope refusal) cannot sink the names after it. That is also
+        why there is no outer ``unit_of_work`` — an all-or-nothing batch would
+        make a single bad name discard every asset the user asked for.
+
+        Idempotent by construction: a re-run finds every asset already there
+        (409 ``asset_exists``) and every ref already written
+        (``link_project`` -> False), so it reports all ``skipped``/
+        ``already_linked`` and creates nothing. Pinned by the router tests.
+
+        Deliberately does NOT touch ``project_characters`` /
+        ``project_lib_entities``: the old extract endpoints still own those
+        tables and stay untouched (their retirement belongs to the rename PR).
+        """
+        by_type = await _script_entity_names(int(project_id))
+        items: List[Dict[str, Any]] = []
+        for asset_type in ("character", "location"):
+            for raw_name in by_type.get(asset_type, []):
+                items.append(
+                    await self._import_one(
+                        int(scope_id), int(project_id), asset_type, raw_name, user_id
+                    )
+                )
+        tally = {"created": 0, "linked": 0, "skipped": 0}
+        for item in items:
+            tally[item["action"]] += 1
+        return {"items": items, **tally}
+
+    async def _import_one(
+        self,
+        scope_id: int,
+        project_id: int,
+        asset_type: str,
+        raw_name: str,
+        user_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """One name -> one typed outcome row. Never raises: a failure here is
+        this name's result, not the batch's."""
+
+        def _row(action: str, **over: Any) -> Dict[str, Any]:
+            return {
+                "name": name,
+                "asset_type": asset_type,
+                "action": action,
+                "asset_id": None,
+                "linked": False,
+                "code": None,
+                "detail": None,
+                **over,
+            }
+
+        name = str(raw_name or "").strip()
+        if not name:
+            return _row("skipped", code="empty_name", detail="Blank name in script")
+        if len(name) > _MAX_ASSET_NAME:
+            return _row(
+                "skipped",
+                code="name_too_long",
+                detail=f"Name exceeds {_MAX_ASSET_NAME} characters",
+            )
+
+        created = False
+        try:
+            row = await self.create_asset(
+                int(scope_id),
+                AssetCreate(asset_type=asset_type, name=name),
+                user_id,
+                source=_IMPORT_SOURCE,
+            )
+            asset_id, created = int(row["id"]), True
+        except AssetError as e:
+            if e.code != "asset_exists":
+                return _row("skipped", code=e.code, detail=e.detail)
+            # Same name+type already in this scope: the import's job is then
+            # only the missing project ref. NOT a 409 — the user asked for the
+            # project to reference these names, and it now does.
+            existing_id = e.extra.get("existing_asset_id")
+            if not existing_id:
+                # ``create_asset`` omits the key when it lost a concurrent race
+                # (the aborted INSERT could not look the winner up). Recover it
+                # rather than reporting a skip for an asset that exists.
+                found = await self.assets.find_by_name(int(scope_id), asset_type, name)
+                existing_id = str(found["id"]) if found else None
+            if not existing_id:
+                return _row("skipped", code=e.code, detail=e.detail)
+            asset_id = int(existing_id)
+        except Exception as e:  # pragma: no cover - defensive, per-name only
+            logger.error(f"import-from-script: create failed for {name!r}: {e}")
+            return _row("skipped", code="internal_error", detail=str(e))
+
+        try:
+            linked = await self.link_project(
+                asset_id, int(scope_id), int(project_id), user_id
+            )
+        except AssetError as e:
+            # The asset landed; the ref did not. Reported on its own axis
+            # rather than downgraded to "skipped" (which would hide a row the
+            # user now owns) or reported as a clean "created".
+            return _row(
+                "created" if created else "skipped",
+                asset_id=str(asset_id),
+                code=e.code,
+                detail=e.detail,
+            )
+        except Exception as e:  # pragma: no cover - defensive, per-name only
+            logger.error(f"import-from-script: link failed for {name!r}: {e}")
+            return _row(
+                "created" if created else "skipped",
+                asset_id=str(asset_id),
+                code="internal_error",
+                detail=str(e),
+            )
+        if created:
+            return _row("created", asset_id=str(asset_id), linked=True)
+        if linked:
+            return _row("linked", asset_id=str(asset_id), linked=True)
+        return _row(
+            "skipped",
+            asset_id=str(asset_id),
+            linked=True,
+            code="already_linked",
+            detail="Asset already exists and is already referenced by this project",
+        )
