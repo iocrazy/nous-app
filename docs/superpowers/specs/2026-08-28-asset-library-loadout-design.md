@@ -226,7 +226,14 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 
 剩下的残差只有一个桶：`skipped_unmappable_personal` —— 项目无 team **且** owner 连 `kind='personal'` 的 `teams` 行都没有。`assets.scope_id` 是 `teams` 外键，没有可写的 scope，所以只计数、不猜。它与 `skipped_unknown_project`（项目 id 根本解析不到）分开计数，两者都写进 Task Center subtitle —— 否则一个全是跳过行的工作区会显示成「0 assets from 42 rows」，读起来就是「没东西可迁」。⚠️ 这个桶在 P3 之前叫 `skipped_personal_project` 且含义是**所有**个人项目；改名而非复用，是为了让 P3 之前跑过的 dry-run 元数据不会被当成同一个意思读。
 
-每步可重跑；跑完对账：`count(assets where source='migrated') = count(project_characters) + count(project_lib_entities) − 合并数`。
+每步可重跑。**对账口径见下 —— ⚠️ 不要用 `count(assets where source='migrated')` 那条老公式对账**（P3 已作废）：`_apply` **刻意认领任意来源的同名资产**，包括用户手建的 `source='manual'` 行（那正是合并语义想要的：legacy 行和手建资产是同一个角色）。所以一次**正确**的运行里，`source='migrated'` 的行数会**少于**计划的资产数，少的恰好是被认领的那些 —— 照老公式算会算出缺口，把一次干净的迁移读成失败。P3 的 E2 用例正好构造了这个场景（一个大小写不同的手建 asset 被认领）。
+
+真正的对账由 live 那次运行**自动收尾**（`_reconcile` → `reconcile_counts`），口径是两条，**都不看 `source`**：
+
+1. 计划里的每一个 key `(scope_id, asset_type, lower(name))` 在库里都有一个存活资产 —— 问法与 `_apply` 认领时问的**完全同一句**；
+2. 计划**要求**的每一对 `(asset_id, project_id)` 都有 `asset_project_refs` 行 —— 只数计划要的那些，因为被认领的资产可能早就带着本次计划没提到的项目 ref。
+
+口径不符 → 运行直接变红（phase=failed），报告在抛出**之前**已写进 `task_tracking.metadata.reconciled`，所以失败的运行里点名了缺哪些 key。操作员的动作是**读那次运行的 `metadata.reconciled`**，不是自己跑 SQL 数行 —— 完整流程见 PR body 的「部署后必做」。
 
 ## 5. API（`/api/v1`）
 

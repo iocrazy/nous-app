@@ -1445,11 +1445,28 @@ async def test_a_personal_projects_entity_canvas_links_after_the_mapping(
     name = _uniq("Lantern Court")
     await _seed_entity(pg, personal_a, "location", name)
     canvas_id = await _seed_canvas(pg, personal_a, "location", f"{name} · Location")
-    # The ownerless project's canvas is the control: same shape, no scope, so
-    # it must fall into the residue bucket rather than link to anything.
-    orphan_name = _uniq("Nowhere Court")
-    await _seed_canvas(
-        pg, fx["orphan_project_id"], "location", f"{orphan_name} · Location"
+    # The ownerless project's canvas is the control, and it carries the SAME
+    # entity name on purpose. A different name would make it unlinkable for
+    # two reasons at once (no scope, and no asset by that name), so the test
+    # could not tell them apart: a bug that resolved this project to some
+    # arbitrary scope would still leave it unlinked, and the control would
+    # report success. Sharing the name means the ONLY thing keeping it
+    # unlinked is having no scope — which is exactly the property under test.
+    orphan_canvas_id = await _seed_canvas(
+        pg, fx["orphan_project_id"], "location", f"{name} · Location"
+    )
+    # …and a same-name asset in the OTHER scope this fixture owns, so that
+    # every scope a borrowing bug could reach has something for that canvas to
+    # link to. Without this, "still unlinked" could just mean the arbitrary
+    # scope it grabbed happened to be empty, and the control would pass on a
+    # build that had stopped skipping. Seeded directly (no legacy row), so the
+    # plan is unchanged.
+    await pg.fetchval(
+        "INSERT INTO assets (scope_id, asset_type, name, created_by, source) "
+        "VALUES ($1, 'location', $2, $3, 'manual') RETURNING id",
+        fx["team_id"],
+        name,
+        uuid.UUID(fx["user_id"]),
     )
 
     chars, ents = await _rows_for(pg, fx["all_project_ids"])
@@ -1467,6 +1484,25 @@ async def test_a_personal_projects_entity_canvas_links_after_the_mapping(
         await pg.fetchval("SELECT scope_id FROM assets WHERE id = $1", int(linked_to))
         == fx["personal_team_id"]
     )
+
+    # The control, EXECUTED. Both halves, because either alone is weak: the
+    # bucket must have counted it (otherwise it was silently dropped somewhere
+    # else, or parsed into `skipped_unparsed_canvas` — the name IS parseable,
+    # so a scope-less canvas landing there would mean the two reasons had been
+    # folded together), and the row must still be unlinked (a count is a claim
+    # about a decision; this is the decision's effect).
+    assert counts["canvases_no_scope"] >= 1
+    assert (
+        await pg.fetchval(
+            "SELECT asset_id FROM canvases WHERE id = $1", orphan_canvas_id
+        )
+        is None
+    ), "the ownerless project's canvas was linked despite having no scope"
+
     # Re-running links nothing further (the scan itself filters asset_id IS NULL).
     again = await _link_entity_canvases(plan, project_team, dry_run=False)
     assert again["canvases_linked"] == 0
+    # …and the control is still a control on the re-run: it is unlinked, so the
+    # scan still sees it, so it must still be counted rather than quietly
+    # disappearing from the report.
+    assert again["canvases_no_scope"] >= 1
