@@ -1779,6 +1779,8 @@
       "no_image_file": "该槽位里没有可读的图片。",
       "file_not_captionable": "该文件无法作为图片读取。",
       "not_applicable": "这个操作不适用于该资产类型。",
+      "project_forbidden": "你没有修改该项目的权限",
+      "project_access_denied": "无法访问该项目",
       "project_not_found": "当前工作区看不到该项目。",
       "slot_not_generatable": "该槽位没有生成模板 —— 请直接关联文件填充。",
       "loadout_mismatch": "该造型属于另一个资产。",

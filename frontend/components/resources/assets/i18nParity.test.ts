@@ -308,7 +308,7 @@ describe('Asset library i18n parity', () => {
     // read as "something went wrong", which is exactly the failure mode
     // `useAssetFailure` exists to prevent.
     //
-    // The other four codes the assets backend can raise —
+    // The other four codes the ASSETS SERVICE can raise —
     // `file_not_attached` (detachFile), `project_scope_mismatch` /
     // `project_ref_not_found` (link/unlinkProject) and `personal_team_missing`
     // (listProjectAssets) — were deliberately NOT listed in P2: those four
@@ -318,8 +318,19 @@ describe('Asset library i18n parity', () => {
     // project workspace panels (P3 Task 5) call link/unlink and the
     // project-scoped read, so `project_scope_mismatch`,
     // `project_ref_not_found` and `personal_team_missing` have moved into
-    // `PROJECT_KEYS` below. Only `file_not_attached` is still waiting:
-    // `detachFile` remains uncalled.
+    // `PROJECT_KEYS` below. Of the service's four, only `file_not_attached` is
+    // still waiting: `detachFile` remains uncalled.
+    //
+    // ⚠️ CORRECTED (final review I-1). The sentence above used to end "Only
+    // `file_not_attached` is still waiting" full stop, which read as an
+    // inventory of every code the ASSETS BACKEND can produce — and it is not.
+    // It counts only what `AssetsService` raises. The ROUTER contributes two
+    // more of its own: `_project_gate` translates the shared project guard's
+    // HTTPException into `project_forbidden` (403) / `project_not_found` (404)
+    // with `project_access_denied` as its default, and those never appear in
+    // any service. They are in `PROJECT_KEYS` below now. A note that says
+    // "coverage is complete" is exactly what stops the next person looking,
+    // so the scope of the count is now stated instead of implied.
     'assets.err.not_authorised',
     'assets.err.generation_not_found',
     'assets.err.file_missing',
@@ -362,6 +373,27 @@ describe('Asset library i18n parity', () => {
     'assets.err.project_scope_mismatch',
     'assets.err.project_ref_not_found',
     'assets.err.personal_team_missing',
+    // ROUTER-level, not service-level: `_project_gate` (assets_router) turns
+    // the shared project guard's HTTPException into these. P3 is the first
+    // release where they are reachable — all four `/projects/{id}/assets*`
+    // routes carry that gate and none of them had a caller before this UI.
+    //
+    // `project_forbidden` is the reachable one, and its scenario is ordinary:
+    // a read-only collaborator opens the workspace Characters page (the read
+    // passes — `can_read` is granted to any project viewer) and clicks Import
+    // From Script, which is deliberately NOT gated on `writesDisabled`
+    // because the endpoint resolves its own scope. `verify_project_write_access`
+    // answers 403. Without this string the toast was the generic "Something
+    // went wrong. Please try again." — a typed refusal rendered as noise,
+    // which is the whole failure mode `useAssetFailure` exists to prevent.
+    //
+    // `project_access_denied` is `_PROJECT_GUARD_CODES`'s DEFAULT arm: it
+    // fires only if the guard ever raises a status other than 403/404. No
+    // path produces it today. It is listed anyway because the cost of a
+    // string is nothing and the cost of the fallback is a user reading
+    // "Something went wrong" about a permission decision.
+    'assets.err.project_forbidden',
+    'assets.err.project_access_denied',
     // Per-item codes only `import-from-script` produces. These reach the user
     // through `t('assets.err.' + item.code)` on the import report's failure
     // lines — a code with no string falls back to the server's English

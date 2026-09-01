@@ -1779,6 +1779,8 @@
       "no_image_file": "That slot holds no image to read.",
       "file_not_captionable": "That file cannot be read as an image.",
       "not_applicable": "This action does not apply to this asset type.",
+      "project_forbidden": "You Do Not Have Permission To Change This Project",
+      "project_access_denied": "That Project Could Not Be Accessed",
       "project_not_found": "That project is not visible in this workspace.",
       "slot_not_generatable": "This slot has no generation template — fill it by attaching a file.",
       "loadout_mismatch": "That loadout belongs to another asset.",
