@@ -147,6 +147,7 @@
     "unlimited": "Unlimited"
   },
   "common": {
+    "error": "Something Went Wrong",
     "details": "Details",
     "dismiss": "Dismiss",
     "confirm": "Confirm",

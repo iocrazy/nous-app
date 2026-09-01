@@ -25,7 +25,7 @@ import { loadProdCreds, WALKTHROUGH_IDS } from './helpers';
 const { teamId: TEAM_ID, projectId: PROJECT_ID, episodeId: EPISODE_ID, sceneId: SCENE_ID, shotId: SHOT_ID } =
   WALKTHROUGH_IDS;
 
-test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → generated inbox → assets codex', async ({ page }) => {
+test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → project materials → generated inbox → assets codex', async ({ page }) => {
   const creds = loadProdCreds();
 
   // i18n defaults to 'zh' with nothing in localStorage (i18n.ts:8) — pin 'en'
@@ -152,7 +152,25 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   await page.getByTestId('ws-ep-script').click();
   await expect(page.locator('[data-editor-shell]')).toBeVisible({ timeout: 15_000 });
 
-  // ── 8. Library → Generated inbox (P1). Deliberately makes NO claim about
+  // ── 8. Sidebar → the project's Characters materials page (P3). These four
+  // modules (Characters / Locations / Props / Costumes) moved off the
+  // project-local `project_characters` / `project_lib_entities` tables onto
+  // the asset library: the page is now a VIEW over `asset_project_refs`,
+  // served by `GET /api/v1/projects/{id}/assets`.
+  //
+  // Same contract as steps 9 and 10 below: NO claim about contents. A project
+  // with nothing linked yet is a legitimate state, and asserting on cards
+  // would turn "no cast imported yet" into a red deploy. The falsifiable
+  // signal is the LINKED COUNT — `project-assets-count` renders only on the
+  // loaded branch (the panel's error branch swaps it for `project-assets-
+  // error` instead), so a visible count separates "mounted and empty" from
+  // "the project-scoped read failed". That distinction is the whole reason
+  // the panel keeps `loadError` separate from an empty list.
+  await page.getByTestId('ws-module-characters').click();
+  await expect(page.getByTestId('project-assets-panel')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('project-assets-count')).toBeVisible();
+
+  // ── 9. Library → Generated inbox (P1). Deliberately makes NO claim about
   // what is in it: this account's inbox may legitimately be empty, and an
   // assertion on cards would turn "nothing generated lately" into a red
   // deploy. What is being smoked is that the rail entry is reachable and the
@@ -168,7 +186,7 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   // empty" from "mounted and broken".
   await expect(generated.getByRole('tab', { name: /^Unreviewed/ })).toBeVisible();
 
-  // ── 9. Library → Assets codex (P2). Same contract as step 8: NO claim
+  // ── 10. Library → Assets codex (P2). Same contract as step 9: NO claim
   // about contents. This account's codex may legitimately be empty, and
   // asserting on cards would turn "no assets yet" into a red deploy. What is
   // smoked is that the rail entry is reachable and the shelf mounts against

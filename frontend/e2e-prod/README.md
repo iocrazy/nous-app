@@ -32,7 +32,8 @@ CI run only proves the stubbed contract held, not that the real thing works.
   against it.
 - **Not a substitute for the regular e2e suite's coverage.** It exercises
   exactly one path end to end (login → project overview → storyboard →
-  canvas → shot list → script editor → Generated inbox → Assets codex).
+  canvas → shot list → script editor → project materials → Generated inbox
+  → Assets codex).
   It's a smoke test, not a regression suite — its whole job is to fail loudly
   when the deployed frontend and deployed backend don't actually agree on
   anything, which the stubbed suite structurally cannot detect.
@@ -132,14 +133,23 @@ Every canvas assertion here checks `.react-flow__node:visible`.
 6. **Shot List tab, view three** — the flat per-shot table, seeded shot row
    visible.
 7. **Script module** — the inline-mounted editor shell loads.
-8. **Generated inbox (P1)** — the Library rail's `Generated` entry is
+8. **Project materials (P3)** — the sidebar's `Characters` module opens the
+   project's view over the ASSET LIBRARY (`GET /api/v1/projects/{id}/assets`),
+   which replaced the project-local `project_characters` /
+   `project_lib_entities` tables. Asserts the panel is visible and its linked
+   COUNT rendered — nothing about the contents: a project with nothing linked
+   is a legitimate state. The count is the falsifiable half, because the
+   panel's failed-load branch renders `project-assets-error` INSTEAD of it;
+   a visible count therefore separates "mounted and empty" from "the
+   project-scoped read failed".
+9. **Generated inbox (P1)** — the Library rail's `Generated` entry is
    clickable and the view mounts against the real `/api/v1/generated`, with
    its heading and tablist visible. Deliberately asserts NOTHING about the
    contents: this account's inbox may legitimately be empty, and a card
    assertion would turn "nothing generated lately" into a red deploy.
-9. **Assets codex (P2)** — the Library rail's `Assets` entry is clickable and
+10. **Assets codex (P2)** — the Library rail's `Assets` entry is clickable and
    the shelf mounts against the real `/api/v1/assets`, with its heading and
-   the `All` type tab visible. Same "no claim about contents" rule as step 8.
+   the `All` type tab visible. Same "no claim about contents" rule as step 9.
    The rail entry is addressed by its exact accessible name. The chevron
    beside it is named `Expand Assets` (`resources.assetsExpand`), so the two
    controls are distinguishable by name alone — no `.first()`. If a future

@@ -15,8 +15,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join, relative, resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -117,6 +117,67 @@ describe('locale structural guards', () => {
       const dups = top.filter((k, i) => top.indexOf(k) !== i);
       expect(dups, `${fn}.json duplicate top-level namespaces`).toEqual([]);
     }
+  });
+
+  it('every t() call with NO fallback addresses a key both locales carry', () => {
+    // The other half of this file's opening bug class. `t('x', 'Fallback')`
+    // masks a missing key by rendering the English default — bad, but legible.
+    // `t('x')` with no default renders the RAW KEY: a user sees the literal
+    // string "common.error" in a toast, and nothing anywhere reports it.
+    //
+    // Found live by the P3 i18n sweep: `common.error` had no entry in either
+    // locale while 19 call sites across 8 files rendered it into toasts. It
+    // had been that way since the key's first use, because the only checks
+    // that existed asked whether a key's VALUE was translated — never whether
+    // a key the code addresses exists at all.
+    //
+    // Scoped to the no-fallback form on purpose: the with-fallback form is a
+    // deliberate, working pattern all over this codebase (a key that resolves
+    // wins; the default is the floor), and sweeping it up here would demand
+    // every ad-hoc default be pre-registered in both locale files.
+    const NO_FALLBACK = /\bt\(\s*(['"])([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+)\1\s*\)/g;
+    const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', 'e2e-artifacts', '.git']);
+    const root = resolve(__dirname, '..');
+
+    function sources(dir: string): string[] {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name)) out.push(...sources(full));
+        } else if (['.ts', '.tsx'].includes(extname(entry.name)) && !/\.test\.tsx?$/.test(entry.name)) {
+          out.push(full);
+        }
+      }
+      return out;
+    }
+
+    const at = (tree: Record<string, unknown>, key: string): unknown =>
+      key.split('.').reduce<unknown>(
+        (node, part) =>
+          node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined,
+        tree,
+      );
+
+    const files = sources(root);
+    // A tree walk that found nothing would report "no missing keys" while
+    // checking nothing at all — the guard has to prove it ran (CLAUDE.md
+    // 探针必须可证伪 / 空输出不等于否定结论).
+    expect(files.length).toBeGreaterThan(200);
+
+    const missing: string[] = [];
+    let callSites = 0;
+    for (const file of files) {
+      const src = readFileSync(file, 'utf8');
+      for (const [, , key] of src.matchAll(NO_FALLBACK)) {
+        callSites += 1;
+        const enHit = typeof at(enJson as Record<string, unknown>, key) === 'string';
+        const zhHit = typeof at(zhJson as Record<string, unknown>, key) === 'string';
+        if (!enHit || !zhHit) missing.push(`${key} (${relative(root, file)})`);
+      }
+    }
+    expect(callSites).toBeGreaterThan(500);
+    expect([...new Set(missing)].sort()).toEqual([]);
   });
 
   it('en and zh have identical key sets', () => {

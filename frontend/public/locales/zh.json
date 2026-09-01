@@ -147,6 +147,7 @@
     "unlimited": "无限制"
   },
   "common": {
+    "error": "出错了",
     "details": "详情",
     "dismiss": "关闭",
     "confirm": "确认",
