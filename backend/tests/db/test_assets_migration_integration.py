@@ -94,18 +94,35 @@ async def pg():
 
 @pytest.fixture
 async def fx(pg) -> Dict[str, Any]:
-    """One team, one owner, three projects in it, plus one personal project
-    (``team_id IS NULL``) so the skip bucket has something real to skip, plus a
-    SECOND team that owns nothing — it exists so cross-scope cases have a real
-    other tenant to be dropped in favour of, rather than a made-up id that any
-    lookup would miss for the wrong reason.
+    """One team, one owner, three projects in it, plus a SECOND team that owns
+    nothing — it exists so cross-scope cases have a real other tenant to be
+    dropped in favour of, rather than a made-up id that any lookup would miss
+    for the wrong reason.
+
+    Plus the two shapes of team-less project P3 has to tell apart:
+
+      * ``personal_project_id`` / ``personal_project_id_2`` — owned by a user
+        who HAS a personal team (``personal_team_id``, ``kind='personal'``).
+        These MAP: their rows migrate into that team, and two of them exist so
+        the cross-project merge can be shown to work the same way it does for
+        two projects inside one collaborative team.
+      * ``orphan_project_id`` — owned by a DIFFERENT user with no personal team
+        row at all. Nothing to map it to, so it is the one that still skips.
+
+    The owner is deliberately given a real `kind='personal'` team here rather
+    than letting the mapping fall through: ``uq_teams_owner_personal`` makes
+    that at most one row, which is what lets ``_load_inputs`` batch the lookup
+    instead of calling the one-user-per-query helper.
 
     Legacy rows are NOT seeded here — each case seeds the ones it needs, because
     what is in ``project_characters`` / ``project_lib_entities`` is the input
     under test.
     """
     user_id = uuid.uuid4()
-    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", user_id)
+    orphan_user_id = uuid.uuid4()
+    await pg.execute(
+        "INSERT INTO auth.users (id) VALUES ($1), ($2)", user_id, orphan_user_id
+    )
     team_id = await pg.fetchval(
         "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
         "RETURNING id",
@@ -122,6 +139,15 @@ async def fx(pg) -> Dict[str, Any]:
             uuid.uuid4().hex[:16],
         )
     )
+    personal_team_id = int(
+        await pg.fetchval(
+            "INSERT INTO teams (name, owner_id, invite_code, kind) "
+            "VALUES ($1, $2, $3, 'personal') RETURNING id",
+            "Asset Migration Personal Team",
+            user_id,
+            uuid.uuid4().hex[:16],
+        )
+    )
     project_ids: List[int] = []
     for n in range(3):
         pid = await pg.fetchval(
@@ -132,24 +158,42 @@ async def fx(pg) -> Dict[str, Any]:
             team_id,
         )
         project_ids.append(int(pid))
-    personal_project_id = int(
+    personal_project_ids: List[int] = []
+    for n in range(2):
+        personal_project_ids.append(
+            int(
+                await pg.fetchval(
+                    "INSERT INTO projects (name, owner_id, team_id) "
+                    "VALUES ($1, $2, NULL) RETURNING id",
+                    f"Migration Test Personal Project {n}",
+                    user_id,
+                )
+            )
+        )
+    orphan_project_id = int(
         await pg.fetchval(
             "INSERT INTO projects (name, owner_id, team_id) VALUES ($1, $2, NULL) "
             "RETURNING id",
-            "Migration Test Personal Project",
-            user_id,
+            "Migration Test Ownerless Project",
+            orphan_user_id,
         )
     )
-    all_projects = project_ids + [personal_project_id]
+    all_projects = project_ids + personal_project_ids + [orphan_project_id]
+    all_teams = [int(team_id), other_team_id, personal_team_id]
 
     try:
         yield {
             "user_id": str(user_id),
+            "orphan_user_id": str(orphan_user_id),
             "team_id": int(team_id),
             "other_team_id": other_team_id,
+            "personal_team_id": personal_team_id,
             "project_ids": project_ids,
-            "personal_project_id": personal_project_id,
+            "personal_project_id": personal_project_ids[0],
+            "personal_project_id_2": personal_project_ids[1],
+            "orphan_project_id": orphan_project_id,
             "all_project_ids": all_projects,
+            "all_team_ids": all_teams,
         }
     finally:
         await pg.execute(
@@ -166,12 +210,12 @@ async def fx(pg) -> Dict[str, Any]:
         # counts leak into the next).
         await pg.execute(
             "DELETE FROM generated_media WHERE scope_id = ANY($1::bigint[])",
-            [int(team_id), other_team_id],
+            all_teams,
         )
         # assets cascades to asset_loadouts / asset_project_refs / asset_files.
         await pg.execute(
             "DELETE FROM assets WHERE scope_id = ANY($1::bigint[]) OR created_by = $2",
-            [int(team_id), other_team_id],
+            all_teams,
             user_id,
         )
         # canvases cascade with their project; projects/resource_items cascade
@@ -179,17 +223,17 @@ async def fx(pg) -> Dict[str, Any]:
         # user, not the scope), so drop the items first and then the rows.
         await pg.execute(
             "DELETE FROM resource_items WHERE scope_id = ANY($1::bigint[])",
-            [int(team_id), other_team_id],
+            all_teams,
         )
         await pg.execute("DELETE FROM resources WHERE creator_id = $1", user_id)
         await pg.execute(
             "DELETE FROM projects WHERE id = ANY($1::bigint[])", all_projects
         )
+        await pg.execute("DELETE FROM teams WHERE id = ANY($1::bigint[])", all_teams)
         await pg.execute(
-            "DELETE FROM teams WHERE id = ANY($1::bigint[])",
-            [int(team_id), other_team_id],
+            "DELETE FROM auth.users WHERE id = ANY($1::uuid[])",
+            [user_id, orphan_user_id],
         )
-        await pg.execute("DELETE FROM auth.users WHERE id = $1", user_id)
 
 
 async def _seed_character(pg, project_id: int, name: str, **kw) -> int:
@@ -254,11 +298,21 @@ async def _rows_for(pg, project_ids: List[int]):
     return chars, ents
 
 
+def _project_team(fx):
+    """The project → SCOPE map ``_load_inputs`` would build for this fixture:
+    team projects to their team, personal projects to their OWNER's personal
+    team (the P3 mapping), and the ownerless one absent — it has no scope."""
+    return {
+        **{pid: fx["team_id"] for pid in fx["project_ids"]},
+        fx["personal_project_id"]: fx["personal_team_id"],
+        fx["personal_project_id_2"]: fx["personal_team_id"],
+    }
+
+
 def _plan_for(fx, chars, ents):
     from app.workflows.backfill_assets_from_project_entities import plan_migration
 
-    project_team = {pid: fx["team_id"] for pid in fx["project_ids"]}
-    return plan_migration(chars, ents, project_team, {fx["personal_project_id"]})
+    return plan_migration(chars, ents, _project_team(fx), {fx["orphan_project_id"]})
 
 
 async def _live_assets(pg, team_id: int):
@@ -538,11 +592,23 @@ async def test_refs_outside_the_plan_do_not_fail_reconciliation(orm_dsn, pg, fx)
 
 
 @_skip
-async def test_load_inputs_reads_the_legacy_tables_and_splits_projects(orm_dsn, pg, fx):
-    """``_load_inputs`` projects every column of two legacy tables and splits
-    projects into team-owned vs personal (``team_id IS NULL``). Its assertions
-    are scoped to the fixture's own rows so other rows in a shared drift DB
-    cannot make it pass or fail."""
+async def test_load_inputs_reads_the_legacy_tables_and_resolves_every_scope(
+    orm_dsn, pg, fx
+):
+    """``_load_inputs`` projects every column of two legacy tables and resolves
+    each project to its ASSET SCOPE: a team project to its team, a personal
+    project to its OWNER's personal team (the P3 mapping, running here against
+    the real ``uq_teams_owner_personal`` index rather than a stub), and an
+    ownerless one to nothing at all.
+
+    The batched ``teams`` lookup is the mirror of
+    ``resources_service._resolve_personal_team_id``; this is the only place it
+    executes against Postgres, so a UUID-vs-text comparison that SQLAlchemy
+    compiles but PG rejects would surface here and nowhere else.
+
+    Assertions are scoped to the fixture's own rows so other rows in a shared
+    drift DB cannot make it pass or fail.
+    """
     from app.workflows.backfill_assets_from_project_entities import _load_inputs
 
     p0 = fx["project_ids"][0]
@@ -551,7 +617,7 @@ async def test_load_inputs_reads_the_legacy_tables_and_splits_projects(orm_dsn, 
     cid = await _seed_character(pg, p0, cname, role_tag="lead", tags='{"k": "v"}')
     eid = await _seed_entity(pg, fx["personal_project_id"], "prop", ename)
 
-    chars, ents, project_team, personal = await _load_inputs()
+    chars, ents, project_team, unmappable = await _load_inputs()
 
     mine = next(c for c in chars if int(c["id"]) == cid)
     assert mine["name"] == cname
@@ -560,8 +626,36 @@ async def test_load_inputs_reads_the_legacy_tables_and_splits_projects(orm_dsn, 
     assert next(e for e in ents if int(e["id"]) == eid)["entity_type"] == "prop"
 
     assert project_team[p0] == fx["team_id"]
-    assert fx["personal_project_id"] in personal
-    assert fx["personal_project_id"] not in project_team
+    # Both personal projects of the same owner resolve to the SAME scope —
+    # which is what makes the cross-project merge below possible at all.
+    assert project_team[fx["personal_project_id"]] == fx["personal_team_id"]
+    assert project_team[fx["personal_project_id_2"]] == fx["personal_team_id"]
+    assert fx["personal_project_id"] not in unmappable
+
+    # The residue: no personal team for that owner, so no scope, so no guess.
+    assert fx["orphan_project_id"] in unmappable
+    assert fx["orphan_project_id"] not in project_team
+
+
+@_skip
+async def test_the_scope_load_inputs_picks_is_the_one_the_read_route_resolves(
+    orm_dsn, pg, fx
+):
+    """The mapping is only correct if it agrees with the route the workspace
+    pages actually call. ``assets_router._project_scope_id`` is that route's
+    resolver; this asserts the two answers are the same row, so a future edit
+    to either one cannot drift the migration away from the UI's read.
+    """
+    from app.api.assets_router import _project_scope_id
+    from app.workflows.backfill_assets_from_project_entities import _load_inputs
+
+    _chars, _ents, project_team, _unmappable = await _load_inputs()
+    for key in ("personal_project_id", "personal_project_id_2"):
+        assert project_team[fx[key]] == int(await _project_scope_id(fx[key])), key
+    # And for a team project, where the two agree trivially — stated so the
+    # assertion above is not the only thing keeping them aligned.
+    p0 = fx["project_ids"][0]
+    assert project_team[p0] == int(await _project_scope_id(p0))
 
 
 # ── seeds for steps 1/2-tail, 4 and 5 ───────────────────────────────────────
@@ -1211,3 +1305,154 @@ async def test_the_cover_step_survives_production_scope_enforcement(orm_dsn, pg,
         )
         == rid
     )
+
+
+# ── 11. the P3 ruling: personal projects migrate to the owner's personal team ─
+
+
+@_skip
+async def test_a_personal_projects_rows_land_in_the_owners_personal_team(
+    orm_dsn, pg, fx
+):
+    """C-1, end to end.
+
+    Before P3 these rows were counted into a skip bucket and left in
+    ``project_characters`` / ``project_lib_entities`` — while the workspace
+    pages had already been switched to read ``assets`` and the old readers
+    deleted, which made them unreachable. This is the test that says they move.
+
+    Four properties in one run, because they are only true together:
+      * the rows land in the OWNER's personal team, not anywhere else;
+      * a same-name asset already in that team is ADOPTED, not duplicated —
+        the merge is symmetric with what a collaborative team gets;
+      * two personal projects of one owner share one asset and each keep their
+        own ``asset_project_refs`` row;
+      * the ownerless project's rows still skip, with no asset created for them.
+    """
+    from app.workflows.backfill_assets_from_project_entities import (
+        _apply,
+        _load_inputs,
+        _reconcile,
+        plan_migration,
+    )
+
+    personal_a = fx["personal_project_id"]
+    personal_b = fx["personal_project_id_2"]
+    scope = fx["personal_team_id"]
+
+    shared = _uniq("Solo Lead")
+    prop = _uniq("Jade Seal")
+    ownerless = _uniq("Nowhere Man")
+
+    # A hand-made asset already in the personal team, differing in case so the
+    # adoption is proven to match on lower(name) like the unique index does.
+    adopted_id = int(
+        await pg.fetchval(
+            "INSERT INTO assets (scope_id, asset_type, name, created_by, source) "
+            "VALUES ($1, 'character', $2, $3, 'manual') RETURNING id",
+            scope,
+            shared.upper(),
+            uuid.UUID(fx["user_id"]),
+        )
+    )
+
+    await _seed_character(pg, personal_a, shared, role_tag="lead")
+    await _seed_character(pg, personal_b, shared, description="from the second")
+    await _seed_entity(pg, personal_a, "prop", prop)
+    # The residue, seeded so "nothing was created for it" is an observation
+    # rather than the absence of an input.
+    await _seed_character(pg, fx["orphan_project_id"], ownerless)
+
+    # The map comes from the REAL resolver, not a hand-built one — that is the
+    # half under test. The ROWS are still the fixture's own, so a shared drift
+    # database cannot change this plan's merge groups.
+    chars, ents = await _rows_for(pg, fx["all_project_ids"])
+    _c, _e, project_team, unmappable = await _load_inputs()
+    plan = plan_migration(chars, ents, project_team, unmappable)
+    assert plan["counts"]["assets"] == 2  # the merged character + the prop
+    assert plan["counts"]["merges"] == 1
+    assert plan["counts"]["skipped_unmappable_personal"] == 1
+    assert {a["scope_id"] for a in plan["assets"]} == {scope}
+
+    first = await _apply(plan, fx["user_id"])
+    # One created (the prop), one adopted (the hand-made character), three refs
+    # — two for the merged character, one for the prop.
+    assert first["counts"] == {"created": 1, "existing": 1, "project_refs_added": 3}
+    report = await _reconcile(plan)
+    assert report["assets_present"] == report["assets_expected"] == 2
+    assert report["project_refs_present"] == report["project_refs_expected"] == 3
+
+    live = await _live_assets(pg, scope)
+    assert len(live) == 2
+    merged = next(r for r in live if r["name"].lower() == shared.lower())
+    assert int(merged["id"]) == adopted_id, "the existing asset was duplicated"
+    refs = sorted(
+        int(r["project_id"])
+        for r in await pg.fetch(
+            "SELECT project_id FROM asset_project_refs WHERE asset_id = $1",
+            adopted_id,
+        )
+    )
+    assert refs == sorted([personal_a, personal_b])
+
+    # Nothing was created for the ownerless project, in ANY scope.
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM assets WHERE name = $1 AND deleted_at IS NULL",
+            ownerless,
+        )
+        == 0
+    )
+
+    # Idempotent: a second run adopts everything and adds no ref.
+    second = await _apply(plan, fx["user_id"])
+    assert second["counts"] == {"created": 0, "existing": 2, "project_refs_added": 0}
+    assert second["asset_id_by_key"] == first["asset_id_by_key"]
+    assert [int(r["id"]) for r in await _live_assets(pg, scope)] == [
+        int(r["id"]) for r in live
+    ]
+
+
+@_skip
+async def test_a_personal_projects_entity_canvas_links_after_the_mapping(
+    orm_dsn, pg, fx
+):
+    """Step 4 inherits the mapping instead of re-deriving it. Before P3 a
+    personal project's canvases all landed in ``canvases_no_scope`` — the
+    canvas and its asset existed and stayed unconnected."""
+    from app.workflows.backfill_assets_from_project_entities import (
+        _apply,
+        _link_entity_canvases,
+        _load_inputs,
+        plan_migration,
+    )
+
+    personal_a = fx["personal_project_id"]
+    name = _uniq("Lantern Court")
+    await _seed_entity(pg, personal_a, "location", name)
+    canvas_id = await _seed_canvas(pg, personal_a, "location", f"{name} · Location")
+    # The ownerless project's canvas is the control: same shape, no scope, so
+    # it must fall into the residue bucket rather than link to anything.
+    orphan_name = _uniq("Nowhere Court")
+    await _seed_canvas(
+        pg, fx["orphan_project_id"], "location", f"{orphan_name} · Location"
+    )
+
+    chars, ents = await _rows_for(pg, fx["all_project_ids"])
+    _c, _e, project_team, unmappable = await _load_inputs()
+    plan = plan_migration(chars, ents, project_team, unmappable)
+    await _apply(plan, fx["user_id"])
+
+    counts = await _link_entity_canvases(plan, project_team, dry_run=False)
+    assert counts["canvases_linked"] >= 1
+    linked_to = await pg.fetchval(
+        "SELECT asset_id FROM canvases WHERE id = $1", canvas_id
+    )
+    assert linked_to is not None
+    assert (
+        await pg.fetchval("SELECT scope_id FROM assets WHERE id = $1", int(linked_to))
+        == fx["personal_team_id"]
+    )
+    # Re-running links nothing further (the scan itself filters asset_id IS NULL).
+    again = await _link_entity_canvases(plan, project_team, dry_run=False)
+    assert again["canvases_linked"] == 0

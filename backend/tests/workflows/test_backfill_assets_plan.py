@@ -22,9 +22,23 @@ from app.workflows.backfill_assets_from_project_entities import (
 )
 
 TEAM_A, TEAM_B = 100, 200
+PERSONAL_TEAM = 300  # the owner's personal team, kind='personal'
 P1, P2, P3 = 11, 12, 13  # P1,P2 in team A; P3 in team B
-P_PERSONAL = 14  # personal project — projects.team_id IS NULL
-PROJECT_TEAM = {P1: TEAM_A, P2: TEAM_A, P3: TEAM_B}
+# Two personal projects (``projects.team_id IS NULL``) owned by the SAME user.
+# P3 maps both onto that owner's personal team, so ``project_team`` carries
+# them exactly like a team project — the mapping happens in ``_load_inputs``,
+# not in the planner.
+P_PERSONAL, P_PERSONAL_2 = 14, 15
+# A personal project whose owner has NO personal team row: nothing to map it
+# to, so it stays out of the map and goes in the unmappable set instead.
+P_ORPHAN = 16
+PROJECT_TEAM = {
+    P1: TEAM_A,
+    P2: TEAM_A,
+    P3: TEAM_B,
+    P_PERSONAL: PERSONAL_TEAM,
+    P_PERSONAL_2: PERSONAL_TEAM,
+}
 
 
 def _char(id, project_id, name, **kw):
@@ -98,7 +112,7 @@ def test_one_character_becomes_one_asset_with_project_ref():
         "assets": 1,
         "merges": 0,
         "skipped_unknown_project": 0,
-        "skipped_personal_project": 0,
+        "skipped_unmappable_personal": 0,
     }
     a = plan["assets"][0]
     assert a["scope_id"] == TEAM_A and a["asset_type"] == "character"
@@ -176,21 +190,75 @@ def test_unknown_project_is_skipped_and_counted():
     plan = plan_migration([_char(1, 999, "Ghost")], [], PROJECT_TEAM)
     assert plan["counts"]["assets"] == 0
     assert plan["counts"]["skipped_unknown_project"] == 1
-    assert plan["counts"]["skipped_personal_project"] == 0
+    assert plan["counts"]["skipped_unmappable_personal"] == 0
 
 
-def test_personal_project_is_counted_apart_from_unknown():
-    """A personal project (projects.team_id IS NULL) is not a data hole — P3
-    decides how it maps to a personal team, so it must not hide inside the
-    "unknown project" bucket that means "this row's project is gone"."""
+def test_a_personal_projects_rows_migrate_to_the_owners_personal_team():
+    """The P3 ruling, at the planner's level: a personal project resolves to a
+    scope like any other, so its rows are PLANNED — not counted into a skip
+    bucket. Reverting to the old skip behaviour makes this the first failure.
+    """
     plan = plan_migration(
-        [_char(1, P_PERSONAL, "Solo"), _char(2, 999, "Ghost")],
+        [_char(1, P_PERSONAL, "Solo")],
         [_ent(9, P_PERSONAL, "prop", "Sword")],
         PROJECT_TEAM,
-        personal_project_ids={P_PERSONAL},
+    )
+    assert plan["counts"]["assets"] == 2
+    assert plan["counts"]["skipped_unmappable_personal"] == 0
+    assert {a["scope_id"] for a in plan["assets"]} == {PERSONAL_TEAM}
+    assert {a["asset_type"] for a in plan["assets"]} == {"character", "prop"}
+    assert all(a["project_ids"] == [P_PERSONAL] for a in plan["assets"])
+
+
+def test_the_merge_is_symmetric_across_one_owners_personal_projects():
+    """Same name, same type, two personal projects of the SAME owner → ONE
+    asset referenced by both — identical to what two projects inside one team
+    produce. This is the merge semantics the spec asked P3 to settle, and the
+    planner gets it by having no personal branch at all.
+    """
+    plan = plan_migration(
+        [
+            _char(1, P_PERSONAL, "Old Zhang"),
+            _char(2, P_PERSONAL_2, "old zhang", description="v2"),
+        ],
+        [],
+        PROJECT_TEAM,
+    )
+    assert plan["counts"]["assets"] == 1 and plan["counts"]["merges"] == 1
+    a = plan["assets"][0]
+    assert a["scope_id"] == PERSONAL_TEAM
+    assert sorted(a["project_ids"]) == [P_PERSONAL, P_PERSONAL_2]
+    assert a["legacy"] == [("project_characters", 1), ("project_characters", 2)]
+
+
+def test_two_owners_same_name_stay_apart():
+    """The other half of the merge ruling: personal scopes are per-owner, so
+    two different people's "Old Zhang" must NOT fuse. Pinned because the
+    planner cannot see owners — it trusts ``project_team`` to be per-owner,
+    and this is what says so out loud."""
+    other_owner_team = 301
+    plan = plan_migration(
+        [_char(1, P_PERSONAL, "Old Zhang"), _char(2, 17, "Old Zhang")],
+        [],
+        {**PROJECT_TEAM, 17: other_owner_team},
+    )
+    assert plan["counts"]["assets"] == 2 and plan["counts"]["merges"] == 0
+    assert {a["scope_id"] for a in plan["assets"]} == {PERSONAL_TEAM, other_owner_team}
+
+
+def test_an_owner_with_no_personal_team_is_counted_apart_from_unknown():
+    """The residue after the mapping: a personal project whose owner has no
+    ``teams`` row with ``kind='personal'``. There is no scope to write to
+    (``assets.scope_id`` is a FK), so it is counted — and NOT inside the
+    "unknown project" bucket, which means "this row's project is gone"."""
+    plan = plan_migration(
+        [_char(1, P_ORPHAN, "Solo"), _char(2, 999, "Ghost")],
+        [_ent(9, P_ORPHAN, "prop", "Sword")],
+        PROJECT_TEAM,
+        unmappable_personal_project_ids={P_ORPHAN},
     )
     assert plan["counts"]["assets"] == 0 and plan["assets"] == []
-    assert plan["counts"]["skipped_personal_project"] == 2
+    assert plan["counts"]["skipped_unmappable_personal"] == 2
     assert plan["counts"]["skipped_unknown_project"] == 1
 
 
@@ -673,12 +741,12 @@ class TestExecutionUnsealed:
 
 class TestSubtitle:
     """I5: the skip buckets must be in the line a human reads, not only in
-    ``counts`` metadata. Without them a mostly-personal workspace reports
-    "0 assets from 42 rows, 0 merges" — which reads as "nothing to migrate"
-    when the truth is "42 rows are waiting on a P3 decision"."""
+    ``counts`` metadata. Without them a workspace whose rows all landed in a
+    skip bucket reports "0 assets from 42 rows, 0 merges" — which reads as
+    "nothing to migrate" when the truth is "42 rows had nowhere to go"."""
 
     async def _run_and_capture_subtitle(
-        self, chars, project_team, personal, extras=None
+        self, chars, project_team, unmappable, extras=None
     ):
         import app.workflows.backfill_assets_from_project_entities as m
 
@@ -687,7 +755,7 @@ class TestSubtitle:
             patch.object(
                 m,
                 "_load_inputs",
-                AsyncMock(return_value=(chars, [], project_team, personal)),
+                AsyncMock(return_value=(chars, [], project_team, unmappable)),
             ),
             patch.object(
                 m,
@@ -708,16 +776,16 @@ class TestSubtitle:
         subtitle = await self._run_and_capture_subtitle(
             [
                 _char(1, P1, "Sang Yao"),
-                _char(2, P_PERSONAL, "Personal One"),
-                _char(3, P_PERSONAL, "Personal Two"),
+                _char(2, P_ORPHAN, "Ownerless One"),
+                _char(3, P_ORPHAN, "Ownerless Two"),
                 _char(4, 999, "Orphan"),
             ],
             PROJECT_TEAM,
-            {P_PERSONAL},
+            {P_ORPHAN},
         )
         assert subtitle == (
             "dry-run: 1 assets from 4+0 rows, 0 merges, "
-            "skipped 2 personal / 1 unknown"
+            "skipped 2 unmappable / 1 unknown"
             ", covers 0/0, canvases 0/0"
             ", genmedia 0 mapped / 0 saved / 0 in_assets"
         )
@@ -730,7 +798,7 @@ class TestSubtitle:
         )
         assert subtitle == (
             "dry-run: 1 assets from 1+0 rows, 0 merges, "
-            "skipped 0 personal / 0 unknown"
+            "skipped 0 unmappable / 0 unknown"
             ", covers 0/0, canvases 0/0"
             ", genmedia 0 mapped / 0 saved / 0 in_assets"
         )

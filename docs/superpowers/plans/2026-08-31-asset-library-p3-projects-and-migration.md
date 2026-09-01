@@ -50,7 +50,7 @@
 - 封面（spec §4 步 1/2 尾注）：`portrait_url`/`cover_url` 试反解为 `resources` 行（按 URL 中的 resource id 或 file_path 匹配；只认本 scope）→ 命中则写 `cover_file_id` 并 attach `unsorted` 槽；不命中留 `attrs.legacy_cover_url`（现状已留）。触及 `Resources` 读 → `system_request_scope(reason=...)`。
 - 步 4：`canvases WHERE kind IN ('character','location','prop')` 按 `"{name} · {Kind}"` 反解到本 scope 同名 asset，命中写 `canvases.asset_id`；不命中跳过并计数（`skipped_unparsed_canvas`）。
 - 步 5：`generated_media.params->>'entity_kind'/'entity_id'` 按步 1/2 的 legacy→asset id 映射表写 `source_asset_id`；`promoted_resource_id IS NOT NULL` 置 `review_state='saved'`；被 `asset_files` 引用的置 `in_assets`（复用 P1 回填的判定 SQL 形状）。
-- dry-run 输出把新增各步的计数并入 Task Center subtitle（沿用 skipped_personal_project 桶的呈现）。
+- dry-run 输出把新增各步的计数并入 Task Center subtitle（沿用跳过桶的呈现；终审修复波把该桶从 `skipped_personal_project` 改名为 `skipped_unmappable_personal` —— 个人项目现在映射到 owner 的个人 team，只有"owner 连个人 team 都没有"才进桶，见 spec §4）。
 - [ ] 提交 `feat(assets): migration steps — canvas reverse-parse, genmedia mapping, cover resolution`
 
 ### Task 4: 后端 — `POST /projects/{pid}/assets/import-from-script`

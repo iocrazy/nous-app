@@ -53,6 +53,28 @@ guards), so a second run finishes the work and adds nothing twice.
 ``reconcile_counts``'s failure message repeats this, because that message is
 what an admin actually reads when a run goes red.
 
+PERSONAL PROJECTS (``projects.team_id IS NULL``), the mapping P3 ruled:
+their rows migrate to the **OWNER's personal team** — the same scope
+``assets_router._project_scope_id`` resolves for ``GET /projects/{id}/assets``,
+which is the read the workspace pages now perform. Anything else and the
+migration would write where the UI does not look.
+
+Merge semantics are SYMMETRIC with team projects: the mapped scope goes into
+the same ``(scope_id, asset_type, lower(name))`` grouping as every other row,
+so one person's same-name character across two of their personal projects
+becomes ONE asset referenced by both — exactly what happens to two team
+projects in one team. Nothing downstream special-cases it; step 4's canvas
+reverse-parse gets the mapping for free because it reads the same
+``project_team`` map.
+
+The residue is one bucket: ``skipped_unmappable_personal`` counts rows whose
+project has no team AND whose owner has no ``teams`` row with
+``kind='personal'``. There is no scope to write them to (``assets.scope_id``
+is a ``teams`` FK), so they are counted, never guessed at. The bucket was
+called ``skipped_personal_project`` before P3 and meant *every* personal
+project; it is renamed rather than reused so a pre-P3 run's stored metadata
+cannot be read as if it meant the same thing.
+
 Task Center: pass the dispatching admin's ``run_user_id`` (a real auth.users
 row) so the run shows up; the all-zero system id never creates a row.
 
@@ -81,7 +103,7 @@ from typing import (
 
 from dbos import DBOS
 from loguru import logger
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import String, cast, func, select, tuple_
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -99,6 +121,7 @@ from app.models import (
     Projects,
     ResourceItems,
     Resources,
+    Teams,
 )
 from app.services.assets.slots import UNSORTED
 
@@ -281,22 +304,31 @@ def plan_migration(
     characters: List[Dict[str, Any]],
     entities: List[Dict[str, Any]],
     project_team: Dict[int, int],
-    personal_project_ids: AbstractSet[int] = frozenset(),
+    unmappable_personal_project_ids: AbstractSet[int] = frozenset(),
 ) -> MigrationPlan:
-    """Pure: group legacy rows by (team, type, lower(name)); merge duplicates.
+    """Pure: group legacy rows by (scope, type, lower(name)); merge duplicates.
 
     Merge policy: first row's display name, longest description, union of tags
     (first-wins per key), first non-empty role_tag, first non-null cover, all
     project ids, all legacy ids.
 
-    Two skip buckets, deliberately distinct: ``skipped_personal_project`` are
-    rows whose project has ``team_id IS NULL`` (a real project with no team —
-    P3 decides how those map to a personal team), ``skipped_unknown_project``
-    are rows whose project id resolves to nothing at all.
+    ``project_team`` is a project → SCOPE map, not a project → ``team_id``
+    column read: ``_load_inputs`` has already resolved a personal project
+    (``team_id IS NULL``) to its OWNER's personal team, so a personal project's
+    rows fold through this function exactly like a team project's — same
+    grouping key, same merge, no branch. That symmetry is the P3 ruling, and
+    keeping it out of this function is what makes it true rather than
+    approximately true.
+
+    Two skip buckets, deliberately distinct:
+      * ``skipped_unmappable_personal`` — the project has no team AND its owner
+        has no personal team, so there is no ``teams`` row to scope the asset
+        to. Counted, never guessed at.
+      * ``skipped_unknown_project`` — the project id resolves to nothing at all.
     """
     groups: "OrderedDict[Tuple[int, str, str], PlannedAsset]" = OrderedDict()
     skipped_unknown = 0
-    skipped_personal = 0
+    skipped_unmappable = 0
 
     def _fold(
         row: Dict[str, Any],
@@ -305,10 +337,10 @@ def plan_migration(
         cover: Optional[str],
         table: str,
     ) -> None:
-        nonlocal skipped_unknown, skipped_personal
+        nonlocal skipped_unknown, skipped_unmappable
         pid = int(row["project_id"])
-        if pid in personal_project_ids:
-            skipped_personal += 1
+        if pid in unmappable_personal_project_ids:
+            skipped_unmappable += 1
             return
         team = project_team.get(pid)
         if team is None:
@@ -380,12 +412,35 @@ def plan_migration(
             "assets": len(assets),
             "merges": len(merges),
             "skipped_unknown_project": skipped_unknown,
-            "skipped_personal_project": skipped_personal,
+            "skipped_unmappable_personal": skipped_unmappable,
         },
     }
 
 
 async def _load_inputs() -> Tuple[List[dict], List[dict], Dict[int, int], Set[int]]:
+    """The legacy rows + a project → ASSET SCOPE map + the unmappable residue.
+
+    A team project's scope is its ``team_id``. A personal project's
+    (``team_id IS NULL``) is its OWNER's personal team — the same answer
+    ``assets_router._project_scope_id`` gives ``GET /projects/{id}/assets``,
+    which is the read the workspace pages perform, so the migration writes
+    where the UI looks.
+
+    That resolution is MIRRORED from ``resources_service._resolve_personal_team_id``
+    rather than called: the helper answers one user per round-trip and this is
+    a global scan, so a workspace with N personal-project owners would cost N
+    sequential queries inside a read that is otherwise two statements. The
+    mirror is safe to keep in step because the answer is pinned by a UNIQUE
+    index — ``uq_teams_owner_personal`` (``owner_id`` WHERE
+    ``kind = 'personal'``) — so "the owner's personal team" is one row, not a
+    ``LIMIT 1`` over an ordered set that the two call sites could order
+    differently.
+
+    Owners with no personal team row land in the returned set: there is no
+    ``teams`` id to scope their assets to (``assets.scope_id`` is a FK), and
+    inventing one would put a user's characters in a library nothing reads.
+    """
+
     def _rows(objs) -> List[dict]:
         return [{c.name: getattr(o, c.name) for c in o.__table__.columns} for o in objs]
 
@@ -396,15 +451,38 @@ async def _load_inputs() -> Tuple[List[dict], List[dict], Dict[int, int], Set[in
         ents = _rows(
             (await session.execute(select(ProjectLibEntities))).scalars().all()
         )
-        projs = (await session.execute(select(Projects.id, Projects.team_id))).all()
+        projs = (
+            await session.execute(
+                select(Projects.id, Projects.team_id, Projects.owner_id)
+            )
+        ).all()
+        owner_ids = sorted(
+            {str(owner) for (_p, team, owner) in projs if team is None and owner}
+        )
+        personal_team_by_owner: Dict[str, int] = {}
+        for chunk in _chunks(owner_ids, _ID_CHUNK):
+            rows = (
+                await session.execute(
+                    select(cast(Teams.owner_id, String), Teams.id)
+                    .where(Teams.kind == "personal")
+                    .where(cast(Teams.owner_id, String).in_(chunk))
+                )
+            ).all()
+            for owner, team_id in rows:
+                personal_team_by_owner[str(owner)] = int(team_id)
+
     project_team: Dict[int, int] = {}
-    personal_project_ids: Set[int] = set()
-    for pid, team_id in projs:
-        if team_id is None:
-            personal_project_ids.add(int(pid))
-        else:
+    unmappable_personal_project_ids: Set[int] = set()
+    for pid, team_id, owner_id in projs:
+        if team_id is not None:
             project_team[int(pid)] = int(team_id)
-    return chars, ents, project_team, personal_project_ids
+            continue
+        mapped = personal_team_by_owner.get(str(owner_id)) if owner_id else None
+        if mapped is None:
+            unmappable_personal_project_ids.add(int(pid))
+        else:
+            project_team[int(pid)] = int(mapped)
+    return chars, ents, project_team, unmappable_personal_project_ids
 
 
 def reconcile_counts(
@@ -893,10 +971,17 @@ async def _link_entity_canvases(
     to the same-scope same-type asset matched on ``lower(name)`` — the same
     match ``_apply`` and the unique index use.
 
-    A canvas's scope comes from its project's team (``project_id`` is NOT
-    NULL), exactly as ``_load_inputs`` derives it. A personal project has no
-    team, so its canvases cannot name a team-scoped asset; they get their own
-    bucket rather than being reported as unparseable names.
+    A canvas's scope comes from ``project_team`` (``project_id`` is NOT NULL),
+    which is the SAME map ``plan_migration`` folds on — so a personal project's
+    entity canvases link to the assets this run just created in its owner's
+    personal team, with no branch here. Getting the P3 personal mapping for
+    free is the reason this step takes the map rather than re-reading
+    ``projects.team_id``: two derivations of "which scope is this project's"
+    is how a canvas ends up pointing at nothing.
+
+    ``canvases_no_scope`` is therefore now the residue only — a canvas whose
+    project is unknown, or is a personal project whose owner has no personal
+    team (the same rows ``skipped_unmappable_personal`` counts).
 
     In dry-run the planned assets do not exist yet, so a key that the plan is
     about to create counts as resolvable. In a live run the same lookup finds
@@ -1176,8 +1261,8 @@ async def backfill_assets_from_project_entities(
 
     out: Dict[str, Any] = {"dry_run": dry_run}
     try:
-        chars, ents, project_team, personal_project_ids = await _load_inputs()
-        plan = plan_migration(chars, ents, project_team, personal_project_ids)
+        chars, ents, project_team, unmappable = await _load_inputs()
+        plan = plan_migration(chars, ents, project_team, unmappable)
         logger.info(
             "[backfill-assets] plan counts={} dry_run={}", plan["counts"], dry_run
         )
@@ -1229,12 +1314,14 @@ async def backfill_assets_from_project_entities(
         raise
 
     counts = out["counts"]
-    # I5: the skip buckets belong in the line a human reads. On a workspace of
-    # mostly personal projects the headline alone said "0 assets from 42 rows,
-    # 0 merges" — indistinguishable from "nothing to migrate" when the truth is
-    # "42 rows are waiting on a P3 decision".
+    # I5: the skip buckets belong in the line a human reads. A headline of
+    # "0 assets from 42 rows, 0 merges" is indistinguishable from "nothing to
+    # migrate" when the truth is "42 rows had nowhere to go". Since P3 maps
+    # personal projects onto their owner's personal team, a non-zero
+    # `unmappable` here is the narrow residue — projects whose owner has no
+    # personal team row at all — and it is the number an operator must chase.
     skipped = (
-        f", skipped {counts['skipped_personal_project']} personal"
+        f", skipped {counts['skipped_unmappable_personal']} unmappable"
         f" / {counts['skipped_unknown_project']} unknown"
     )
     # Steps 1/2-tail, 4 and 5 get their own clause for the same reason the skip

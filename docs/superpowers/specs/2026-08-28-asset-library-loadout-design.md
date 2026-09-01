@@ -218,7 +218,13 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 6. Chat Uploads 登记（§3.7）。
 7. `canvas_asset_refs` 从 `nodes_json` 重建（此时应为空，占位）。
 
-⚠️ **P0 的 planner 不处理个人项目**（`projects.team_id IS NULL`）：它们进一个**独立**的 `skipped_personal_project` 桶（与 `skipped_unknown_project` 分开计数，两者都写进 dry-run 的 Task Center subtitle，否则一个以个人项目为主的工作区会显示成「0 assets from 42 rows」，读起来就是「没东西可迁」）。上面第 1/2 步写的「项目所属 team **或个人 team**」是 **P3 才决定**的映射 —— 把个人项目映射到 owner 的个人 team 需要先确定合并语义（同一个人在多个个人项目里的同名角色算不算一个），这个决定不在 P0 的范围里。
+✅ **个人项目的映射已由 P3 拍板（`projects.team_id IS NULL`）**：迁到 **owner 的个人 team** —— 也就是 `assets_router._project_scope_id` 为 `GET /projects/{id}/assets` 解析出的同一个 scope。选它的理由不是"最自然"，而是**工作区那四个页面就是这么读的**：写到别处等于迁完了 UI 还是空的。
+
+合并语义与 team 项目**完全对称**（这正是 P0 说要先定的那一条）：映射后的 scope 直接进同一个 `(scope_id, asset_type, lower(name))` 分组，所以同一个人在自己两个个人项目里的同名角色**合并成一个 asset、被两个项目各自 ref**，跟同一个 team 里两个项目的行为一字不差。planner 里没有任何个人项目分支（分支只在 `_load_inputs` 的 scope 解析里），第 4 步画布反解因此自动继承这个映射。不同 owner 的同名角色不会合并 —— 个人 team 天然按人分开。
+
+生产地面真值（拍板依据，2026-09-01 实测）：个人侧 **1 个 character + 7 个 lib entity，全在一个个人项目里**；team 侧 **0 行**。也就是说这条映射不是理论补全，它是**目前唯一有数据要迁的那一侧**；不做就等于这批行在 P3 之后既迁不走、前端又已经切到 `assets` 读不到它们（T6 已删掉旧读者），而 P6 会 DROP 那两张表。
+
+剩下的残差只有一个桶：`skipped_unmappable_personal` —— 项目无 team **且** owner 连 `kind='personal'` 的 `teams` 行都没有。`assets.scope_id` 是 `teams` 外键，没有可写的 scope，所以只计数、不猜。它与 `skipped_unknown_project`（项目 id 根本解析不到）分开计数，两者都写进 Task Center subtitle —— 否则一个全是跳过行的工作区会显示成「0 assets from 42 rows」，读起来就是「没东西可迁」。⚠️ 这个桶在 P3 之前叫 `skipped_personal_project` 且含义是**所有**个人项目；改名而非复用，是为了让 P3 之前跑过的 dry-run 元数据不会被当成同一个意思读。
 
 每步可重跑；跑完对账：`count(assets where source='migrated') = count(project_characters) + count(project_lib_entities) − 合并数`。
 
