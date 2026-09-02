@@ -66,7 +66,7 @@ const noteBody = (text: string) => (_content: string, el: Element | null) =>
 
 const NOTE = {
   id: '1', content_md: 'first idea #hooks', tags: ['hooks'], ref_hotspot: null,
-  pinned: false, note_date: '2026-07-07',
+  pinned: false, rating: 0, note_date: '2026-07-07',
   created_at: '2026-07-07T09:42:00+00:00', updated_at: '2026-07-07T09:42:00+00:00',
   attachments: [],
 };

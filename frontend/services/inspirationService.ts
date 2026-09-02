@@ -25,6 +25,10 @@ export interface InspirationNote {
   tags: string[];
   ref_hotspot: RefHotspot | null;
   pinned: boolean;
+  /** 0-5 stars (mig 448). Backend defaults it to 0, so this is a number, not
+   *  optional — but read it as `rating ?? 0` when the source is a hand-written
+   *  fixture that predates the column. */
+  rating: number;
   note_date: string;
   created_at: string;
   updated_at: string;
@@ -110,9 +114,14 @@ export async function listNotes(
 export async function createNote(
   contentMd: string,
   refHotspot?: RefHotspot,
+  /** 0-5. Sent in this SAME request so an external client (the iOS Shortcut)
+   *  never needs a follow-up PATCH. Omitted when undefined → DB default 0. */
+  rating?: number,
 ): Promise<InspirationNote> {
   const body: Record<string, unknown> = { content_md: contentMd };
   if (refHotspot) body.ref_hotspot = refHotspot;
+  // `!== undefined`, not truthiness: rating 0 is a real value to send.
+  if (rating !== undefined) body.rating = rating;
   const resp = await fetch(`${base()}/notes`, {
     method: 'POST',
     headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
@@ -126,6 +135,7 @@ export async function updateNote(
   patch: {
     content_md?: string;
     pinned?: boolean;
+    rating?: number;
   },
 ): Promise<InspirationNote> {
   const resp = await fetch(`${base()}/notes/${id}`, {

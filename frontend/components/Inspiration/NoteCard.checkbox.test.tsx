@@ -9,7 +9,7 @@ import { NoteCard } from './NoteCard';
 import type { InspirationNote } from '../../services/inspirationService';
 
 const note = (over: Partial<InspirationNote> = {}): InspirationNote => ({
-  id: '1', content_md: '- [ ] a\n- [ ] b', tags: [], ref_hotspot: null, pinned: false,
+  id: '1', content_md: '- [ ] a\n- [ ] b', tags: [], ref_hotspot: null, pinned: false, rating: 0,
   note_date: '2026-07-07', created_at: '2026-07-07T09:42:00+00:00',
   updated_at: '2026-07-07T09:42:00+00:00', attachments: [], ...over,
 });

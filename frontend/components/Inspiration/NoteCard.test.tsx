@@ -37,6 +37,7 @@ const note = (over: Partial<InspirationNote> = {}): InspirationNote => ({
   tags: ['hooks'],
   ref_hotspot: null,
   pinned: false,
+  rating: 0,
   note_date: '2026-07-07',
   created_at: '2026-07-07T09:42:00+00:00',
   updated_at: '2026-07-07T09:42:00+00:00',
