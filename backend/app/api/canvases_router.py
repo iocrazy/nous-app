@@ -234,19 +234,17 @@ async def _visible_generation_rows(
     told to hide. Two hand-rolled copies of "list, filter by Settings, keep
     image/video" is exactly the "two predicates that must agree" shape that
     drifts silently, so both endpoints call this and neither re-derives it.
-    """
-    from app.repositories import mediahub_model_repository as _repo_mod
-    from app.services.ai.platform_model_visibility import (
-        filter_platform_models_for_user,
-    )
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
-        viewer_user_id=user_id, include_actual_provider=include_actual_provider
+    The implementation moved to ``services/generation/model_capabilities.py``
+    when the asset library's bundle endpoint became the third consumer — same
+    rule, one more caller. This thin wrapper stays because both routes below
+    and their tests name it.
+    """
+    from app.services.generation.model_capabilities import visible_generation_rows
+
+    return await visible_generation_rows(
+        user_id, include_actual_provider=include_actual_provider
     )
-    # The user's Settings → platform-model card (master switch + per-model
-    # blacklist) applies here too; the picker must show what Settings shows.
-    rows = await filter_platform_models_for_user(user_id, rows)
-    return [r for r in rows if r.get("type") in ("image", "video")]
 
 
 @router.get("/canvases/generation-models")

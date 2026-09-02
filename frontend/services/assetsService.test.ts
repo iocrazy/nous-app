@@ -25,6 +25,7 @@ import {
   fetchAsset,
   fetchAssetCounts,
   fetchAssetDetail,
+  fetchBundle,
   generateSlot,
   linkProject,
   listAssets,
@@ -840,6 +841,90 @@ describe('project refs', () => {
   });
 });
 
+describe('bundle', () => {
+  // The wire shape as the router really emits it (Envelope[BundleResponse]):
+  // resource ids are JSON STRINGS on `/assets` — the repository stringifies
+  // every BIGINT column — and `dropped` is always present, empty or not.
+  const BUNDLE = {
+    prompt: { positive: 'a swordswoman, a long coat', negative: 'glasses' },
+    reference_resource_ids: ['727145299382534146', '727145299382534147'],
+    dropped: [{ resource_id: '727145299382534148', reason: 'over_limit' }],
+    max_refs: 2,
+  };
+
+  it('GETs the bundle with the model on the query string', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    const [url, init] = callAt(spy);
+    expect(url.pathname).toBe(`/api/v1/assets/${ASSET_ID}/bundle`);
+    expect(url.searchParams.get('model')).toBe('seedream-4');
+    expect(init.method).toBeUndefined(); // a GET, not a POST
+    expect(bundle.reference_resource_ids).toEqual([
+      '727145299382534146',
+      '727145299382534147',
+    ]);
+    expect(bundle.max_refs).toBe(2);
+  });
+
+  it('sends loadout_id when one is picked', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4', loadoutId: '400' });
+
+    expect(callAt(spy)[0].searchParams.get('loadout_id')).toBe('400');
+  });
+
+  it('omits loadout_id when there is none', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(callAt(spy)[0].searchParams.has('loadout_id')).toBe(false);
+  });
+
+  it('keeps `dropped` — the half a caller must render', async () => {
+    stubFetch({ success: true, data: BUNDLE });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(bundle.dropped).toEqual([
+      { resource_id: '727145299382534148', reason: 'over_limit' },
+    ]);
+  });
+
+  it('carries a zero-ref provider through as its own reason', async () => {
+    // ark / jimeng are pure text-to-image: max_refs 0, everything reported.
+    stubFetch({
+      success: true,
+      data: {
+        prompt: { positive: 'a swordswoman', negative: '' },
+        reference_resource_ids: [],
+        dropped: [{ resource_id: '727145299382534146', reason: 'provider_no_refs' }],
+        max_refs: 0,
+      },
+    });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'ark-t2i' });
+
+    expect(bundle.max_refs).toBe(0);
+    expect(bundle.dropped[0].reason).toBe('provider_no_refs');
+  });
+
+  it('surfaces model_unknown as a typed error, not an empty bundle', async () => {
+    stubFetch(
+      { success: false, error: { code: 'model_unknown', detail: 'not available' } },
+      422,
+    );
+
+    const err = await fetchBundle(SCOPE, ASSET_ID, { model: 'ghost' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GeneratedApiError);
+    expect(err.code).toBe('model_unknown');
+  });
+});
+
 describe('scope_id and auth ride on every new call', () => {
   // A call that forgets `?scope_id=` is a 403 `not_a_member` at runtime and a
   // green unit test everywhere else, so the sweep is over ALL of them at once
@@ -862,6 +947,7 @@ describe('scope_id and auth ride on every new call', () => {
     ['translatePrompt', () => translatePrompt(SCOPE, ASSET_ID, 'zh')],
     ['regeneratePrompt', () => regeneratePrompt(SCOPE, ASSET_ID)],
     ['previewGenerateSlot', () => previewGenerateSlot(SCOPE, ASSET_ID, 'sheet')],
+    ['fetchBundle', () => fetchBundle(SCOPE, ASSET_ID, { model: 'm' })],
     ['generateSlot', () => generateSlot(SCOPE, ASSET_ID, { slot: 'sheet' })],
     ['linkProject', () => linkProject(SCOPE, ASSET_ID, '55')],
     ['unlinkProject', () => unlinkProject(SCOPE, ASSET_ID, '55')],

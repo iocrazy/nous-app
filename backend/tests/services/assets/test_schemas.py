@@ -444,6 +444,70 @@ def test_used_in_canvas_ref_keeps_every_field_the_repository_emits():
     assert emitted <= set(UsedInCanvasRef.model_fields)
 
 
+def test_bundle_response_requires_every_half_including_dropped():
+    """Nothing here may be defaulted. ``dropped`` in particular: an optional
+    empty list lets a service that stopped reporting drops answer "nothing was
+    dropped", which is the silent drop the field was added to end."""
+    from app.schemas.assets import BundleResponse
+
+    required = {
+        name for name, f in BundleResponse.model_fields.items() if f.is_required()
+    }
+    assert required == {"prompt", "reference_resource_ids", "dropped", "max_refs"}
+
+
+def test_bundle_reference_ids_are_strings_not_numbers():
+    """BIGINT resource ids. A JSON number past 2**53 loses precision in the
+    browser — the bigIntSafeFetch discipline, at the schema."""
+    from app.schemas.assets import BundleResponse
+
+    model = BundleResponse(
+        prompt={"positive": "p", "negative": ""},
+        reference_resource_ids=["727145299382534146"],
+        dropped=[],
+        max_refs=3,
+    )
+    assert model.reference_resource_ids == ["727145299382534146"]
+    assert all(isinstance(x, str) for x in model.reference_resource_ids)
+
+
+def test_bundle_drop_reasons_are_a_closed_vocabulary():
+    """The three the protocol defines — and nothing else. A reason the UI has
+    no string for renders as a blank row, which is a drop the user cannot
+    see."""
+    import typing
+
+    from app.schemas.assets import DroppedReason
+
+    assert set(typing.get_args(DroppedReason)) == {
+        "no_image_file",
+        "over_limit",
+        "provider_no_refs",
+    }
+
+
+def test_bundle_rejects_an_invented_drop_reason():
+    from pydantic import ValidationError
+
+    from app.schemas.assets import BundleResponse
+
+    with pytest.raises(ValidationError):
+        BundleResponse(
+            prompt={"positive": "", "negative": ""},
+            reference_resource_ids=[],
+            dropped=[{"resource_id": "1", "reason": "because"}],
+            max_refs=3,
+        )
+
+
+def test_bundle_carries_no_multi_subject_field():
+    """Ruling B: the spec's ``multi_subject`` capability has no referent
+    anywhere in this repo, so the wire does not invent one."""
+    from app.schemas.assets import BundleResponse
+
+    assert "multi_subject" not in BundleResponse.model_fields
+
+
 def test_used_in_canvas_ref_node_ids_is_a_list_not_a_count():
     """A count would be enough to render "used in 2 places" and useless for the
     click that jumps to one of them — the list is the feature."""

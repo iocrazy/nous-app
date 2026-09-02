@@ -250,6 +250,7 @@ async def test_non_member_403(app):
         ("get", "/api/v1/assets?scope_id=666"),
         ("get", "/api/v1/assets/counts?scope_id=666"),
         ("get", "/api/v1/assets/5?scope_id=666"),
+        ("get", "/api/v1/assets/5/bundle?scope_id=666&model=m"),
         ("delete", "/api/v1/assets/5?scope_id=666"),
         ("post", "/api/v1/assets/5/duplicate?scope_id=666"),
         ("post", "/api/v1/assets/5/files?scope_id=666"),

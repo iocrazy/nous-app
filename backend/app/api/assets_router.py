@@ -43,6 +43,7 @@ from app.schemas.assets import (
     AssetUpdate,
     AttachFileRequest,
     AttachFilesBatchRequest,
+    BundleResponse,
     DeletedResponse,
     DetachedResponse,
     DuplicateRequest,
@@ -470,6 +471,54 @@ async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
     try:
         sid = await _gate(scope_id, auth)
         return _ok(await _service().list_canvas_refs(asset_id, sid))
+    except AssetError as e:
+        return _err(e)
+
+
+# The catalog row name, not a provider key — same vocabulary the model picker
+# shows (``GET /canvases/generation-models``). Bounded to the column's width so
+# a hostile string is a 422 at the boundary rather than a long round trip that
+# ends in ``model_unknown``.
+ModelQuery = Annotated[str, Query(min_length=1, max_length=100)]
+
+
+@router.get(
+    "/assets/{asset_id}/bundle",
+    response_model=Envelope[BundleResponse],
+    responses=_ERRORS,
+)
+async def asset_bundle(
+    asset_id: IdPath,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    model: ModelQuery,
+    loadout_id: OptSnowflakeQuery = None,
+):
+    """What this asset hands a generator running ``model`` (spec §6.3).
+
+    A READ: it composes and reports, it writes nothing and calls no provider.
+    ``model`` is required because the answer DEPENDS on it — the reference
+    ceiling is the provider's (``ProviderCapabilities.max_refs``), so the same
+    asset bundles differently for codex (9 references) and for ark (none at
+    all). A default model here would quietly answer for a provider the caller
+    is not about to use.
+
+    ``dropped`` is the load-bearing half. Every reference the asset owns that
+    is not in ``reference_resource_ids`` appears there with a reason — a
+    reference chosen, not sent, and not reported is the recorded
+    "选了也生成了但图里没有" failure.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().get_bundle(
+                asset_id,
+                sid,
+                model=model,
+                loadout_id=loadout_id,
+                user_id=auth.user_id,
+            )
+        )
     except AssetError as e:
         return _err(e)
 

@@ -479,6 +479,71 @@ class SkippedReference(BaseModel):
     reason: str
 
 
+class BundlePrompt(BaseModel):
+    """The two prompt halves of a bundle.
+
+    Nested rather than flattened to ``positive``/``negative`` so a caller that
+    forwards "the prompt" forwards BOTH — ``negative`` is provenance the
+    generation records, and a flat shape is how it gets left behind.
+    """
+
+    positive: str
+    negative: str
+
+
+DroppedReason = Literal["no_image_file", "over_limit", "provider_no_refs"]
+"""Why a reference the asset owns is not in the delivered list.
+
+A closed vocabulary, declared here so FastAPI VALIDATES it on the way out: an
+invented reason fails loudly rather than reaching a UI that has no string for
+it and renders nothing — which is the silent drop this whole field exists to
+end.
+
+``provider_no_refs`` is deliberately NOT folded into ``over_limit``: a ceiling
+of zero is not a contest this file lost, and the user's remedy is a different
+model rather than fewer picks."""
+
+
+class DroppedReference(BaseModel):
+    """One reference that will NOT be sent, and why."""
+
+    resource_id: str
+    reason: DroppedReason
+
+
+class BundleResponse(BaseModel):
+    """``GET /assets/{id}/bundle`` — the delivery payload for one model.
+
+    Every field is REQUIRED, ``dropped`` included. A defaulted empty list would
+    let a service that stopped reporting drops answer "nothing was dropped",
+    which is the exact failure the field was added to prevent.
+    """
+
+    prompt: BundlePrompt
+    reference_resource_ids: List[str] = Field(
+        ...,
+        description=(
+            "The asset's files that fit this provider, in priority order "
+            "(primary slot, worn, stills, the rest), trimmed to max_refs."
+        ),
+    )
+    dropped: List[DroppedReference] = Field(
+        ...,
+        description=(
+            "Every reference the asset owns that is NOT in the list above, "
+            "each with its reason. Present and empty when nothing was dropped."
+        ),
+    )
+    max_refs: int = Field(
+        ...,
+        description=(
+            "How many references this provider accepts (0 = none at all). "
+            "Echoed so a caller can say '3 of 5 sent' without inferring the "
+            "ceiling from the two list lengths."
+        ),
+    )
+
+
 class GenerateSlotResponse(BaseModel):
     """202 body. ``failed`` is present even when empty — a caller must not
     have to infer "did any of them fail?" from ``len(generation_ids)``."""

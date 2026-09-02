@@ -443,6 +443,70 @@ export interface GenerateSlotBody {
   count?: number;
 }
 
+// ─── Bundle delivery protocol ───────────────────────────────────────────────
+
+/**
+ * Why a reference the asset owns is not in the delivered list. A CLOSED set,
+ * mirroring `DroppedReason` in `backend/app/schemas/assets.py` — the backend's
+ * response model validates it, so a value outside these three never reaches
+ * the wire.
+ *
+ * `provider_no_refs` is not a flavour of `over_limit`: the provider takes no
+ * references at all, and the remedy is a different model rather than fewer
+ * picks. A UI that collapses the two sends people unpicking references that
+ * were never going to be sent.
+ */
+export type DroppedReason = 'no_image_file' | 'over_limit' | 'provider_no_refs';
+
+export interface DroppedReference {
+  resource_id: string;
+  reason: DroppedReason;
+}
+
+/**
+ * What an asset hands a generator running one specific model (spec §6.3).
+ *
+ * `dropped` is the load-bearing half and must be rendered: every reference the
+ * asset owns that is not in `reference_resource_ids` is in there with a
+ * reason. Reading only the id list reports a trimmed delivery as a complete
+ * one — the recorded "选了也生成了但图里没有" failure.
+ *
+ * `max_refs` is the PROVIDER's ceiling, echoed so a caller can say "2 of 5
+ * sent" without inferring it from the two list lengths (which would read 2 as
+ * the ceiling for an asset that only owns two files).
+ */
+export interface AssetBundle {
+  prompt: { positive: string; negative: string };
+  reference_resource_ids: string[];
+  dropped: DroppedReference[];
+  max_refs: number;
+}
+
+export interface BundleOptions {
+  /** A catalog row NAME, the same vocabulary the model picker shows. */
+  model: string;
+  loadoutId?: string;
+}
+
+/**
+ * Compose this asset's delivery payload for `model`.
+ *
+ * `model` is required because the answer depends on it — the reference ceiling
+ * belongs to the provider, so the same asset bundles differently for codex
+ * (nine references) and for ark (none). A read: no provider call, no writes,
+ * no cost.
+ */
+export async function fetchBundle(
+  scopeId: string,
+  assetId: string,
+  opts: BundleOptions,
+): Promise<AssetBundle> {
+  const qs = query(scopeId, { model: opts.model, loadout_id: opts.loadoutId });
+  return envelopeFetch<AssetBundle>(`${BASE()}/${assetId}/bundle?${qs}`, {
+    headers: await getAuthHeaders(),
+  });
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
