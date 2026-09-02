@@ -104,6 +104,7 @@ export const InspirationPage: React.FC = () => {
   // note.id so unrelated notes never block each other; the latest seq for a
   // given note is the only response allowed to apply/revert its content_md.
   const toggleSeq = useRef<Record<string, number>>({});
+  const ratingSeq = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const id = setTimeout(() => setQ(queryInput.trim()), 300);
@@ -272,6 +273,31 @@ export const InspirationPage: React.FC = () => {
     }
   };
 
+  const onRating = async (note: InspirationNote, value: number) => {
+    // Currently UNREACHABLE: RatingStars maps a click on the already-selected
+    // star to 0, so the value it emits never equals the current one. Kept as a
+    // symmetric no-op guard (onToggleTask has the same early return, and that
+    // one IS reachable) and as cover if that contract ever changes. No test
+    // pins this line — do not read it as covered behaviour.
+    if ((note.rating ?? 0) === value) return;
+    // Same seq-guard as onToggleTask: claim this note's latest write slot
+    // BEFORE the optimistic update, so a response that lands after a newer
+    // click (of the same note) never clobbers state it no longer owns.
+    const seq = (ratingSeq.current[note.id] ?? 0) + 1;
+    ratingSeq.current[note.id] = seq;
+    setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, rating: value } : n)));
+    try {
+      const updated = await updateNote(note.id, { rating: value });
+      if (seq !== ratingSeq.current[note.id]) return; // superseded; discard
+      setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+    } catch (err) {
+      if (seq === ratingSeq.current[note.id]) {
+        setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
+      }
+      addToast((err as Error).message, 'error');
+    }
+  };
+
   const startEdit = (note: InspirationNote) => {
     setEditing(note);
     setEditText(note.content_md);
@@ -383,6 +409,7 @@ export const InspirationPage: React.FC = () => {
                 onDelete={onDelete}
                 onTagClick={(tg) => setTag(tg)}
                 onToggleTask={(note, index) => void onToggleTask(note, index)}
+                onRating={(note, value) => void onRating(note, value)}
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}
