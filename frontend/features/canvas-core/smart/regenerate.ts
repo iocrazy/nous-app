@@ -15,6 +15,7 @@ import {
   prunePendingGenTask,
 } from './genResume';
 import { onGenerationDispatched } from './dispatchEffects';
+import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveAssetRef } from './assetRef';
@@ -61,6 +62,9 @@ function resolveCaller(canvasId: string | null): PromptCaller {
       onDispatched: onGenerationDispatched,
       // Same shared effect as the composer: a retry that silently drops a
       // knob would otherwise look identical to one that honoured everything.
+      // Asset cards wired upstream contribute references, prompt text and a
+      // negative — resolved per run because the answer depends on the model.
+      assetInputs: resolveAssetInputsForRun,
       onDropped: markDroppedKnobs,
       onItemSettled: (id, item) => {
         if (!item.url && item.recoverable) {
@@ -105,6 +109,7 @@ export async function rerunPrompt(
     // its i2i / i2v input.
     source_url: resolveEffectiveSourceUrl(prompt!, nodes, connections),
     source_urls: resolveEffectiveSourceUrls(prompt!, nodes, connections),
+    negative_body: data.negative_body ?? null,
     asset_ref: resolveAssetRef(promptId, nodes, connections),
     split_prompts: data.split_enabled
       ? splitPromptItems(data.body, data.split_separator ?? DEFAULT_SPLIT_SEPARATOR)

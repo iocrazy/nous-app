@@ -12,6 +12,7 @@ import {
   pollGeneration,
   PollStopped,
 } from '../services/canvasGenerationService';
+import type { AssetInputsResolver } from './assetInputs';
 import type { PromptCaller, RunnerResult } from './runner';
 import type { DroppedRef } from './types';
 import { isAutoRatio, measureRatio } from './autoRatio';
@@ -77,7 +78,30 @@ export interface GenerationRunnerDeps {
    *  missing" unanswerable. Both are read at the SAME terminal metadata read,
    *  so neither can quietly acquire a consumer the other lacks. */
   onDropped?: (promptId: string, knobs: string[], refs: DroppedRef[]) => void;
+  /** What the upstream asset cards contribute to this run (asset-library P4).
+   *
+   *  REQUIRED, not optional. Every run path must answer the question, because
+   *  the two answers are indistinguishable on screen: a site that forgot to
+   *  wire it would dispatch a prompt whose asset card contributed nothing and
+   *  look exactly like a card that had nothing to contribute. Production sites
+   *  pass `resolveAssetInputsForRun`; tests that are not about assets pass
+   *  `noAssetInputs`, which says so out loud.
+   *
+   *  Resolved per run, not cached: the bundle depends on the MODEL (nine
+   *  references for codex, none for ark) and the model is a knob the user
+   *  changes between runs. */
+  assetInputs: AssetInputsResolver;
 }
+
+/** An explicit "this run has no asset composition" — for tests and for the
+ *  headless/mock paths, so the absence is a decision in the source rather than
+ *  a missing property. */
+export const noAssetInputs: AssetInputsResolver = async () => ({
+  reference_urls: [],
+  prompt_prefix: '',
+  negative: '',
+  contributions: [],
+});
 
 /** Sentinel phase for tasks whose poll broke (network/timeout) — the task
  *  itself is NOT lost; it keeps running server-side (P1-13). */
@@ -106,6 +130,26 @@ export function withGenerationRunner(
       // of leaving a stale verdict up indefinitely.
       deps.onDropped?.(ctx.promptId, [], []);
 
+      // What the upstream asset cards contribute, for THIS model. Resolved
+      // before anything else is decided, because it changes both the reference
+      // list the ratio is measured against and the prompt text that ships.
+      // Reporting what the bundle would not send happens inside the resolver,
+      // on the cards themselves — same "always write, including the clean
+      // case" rule the prompt-node badge follows.
+      const assets = await deps.assetInputs(ctx.promptId, gen.model ?? '');
+
+      // Asset references LEAD. They are what the picture is OF, and both
+      // ceilings that trim references — the frontend's none, the backend's
+      // `reconcile` at `caps.max_refs` — trim from the tail, so anything put
+      // ahead of them is a reference chosen for the model over a reference
+      // chosen for the subject.
+      const sourceUrls = [
+        ...assets.reference_urls,
+        ...(ctx.source_urls ?? []).filter(
+          (u) => !assets.reference_urls.includes(u),
+        ),
+      ];
+
       const params: Record<string, unknown> = {};
       if (gen.kind === 'image') {
         // `auto` (and an unset value) means "match the image feeding this
@@ -115,6 +159,10 @@ export function withGenerationRunner(
         //
         // An explicit choice is never overridden, and an unmeasurable source
         // sends no ratio at all rather than a guess.
+        // `ctx.source_urls`, NOT the asset-prefixed list: `auto` means "match
+        // the image feeding this prompt", and an asset's reference is a
+        // subject, not a composition. Following it would let wiring a portrait
+        // card silently turn a landscape board portrait.
         if (isAutoRatio(gen.ratio)) {
           const followed = ctx.source_url ?? ctx.source_urls?.[0];
           if (followed) {
@@ -126,8 +174,8 @@ export function withGenerationRunner(
         }
       }
       if (gen.kind === 'image' && gen.quality) params.quality = gen.quality;
-      if (gen.kind === 'image' && ctx.source_urls?.length)
-        params.source_urls = ctx.source_urls;
+      if (gen.kind === 'image' && sourceUrls.length)
+        params.source_urls = sourceUrls;
       if (gen.kind === 'image' && gen.resolution)
         params.resolution = gen.resolution;
       if (gen.kind === 'video' && gen.aspect) params.aspect = gen.aspect;
@@ -137,8 +185,18 @@ export function withGenerationRunner(
         params.resolution = gen.resolution;
       if (gen.kind === 'video' && gen.video_mode)
         params.video_mode = gen.video_mode;
-      if (gen.kind === 'video' && ctx.source_urls?.length)
-        params.source_urls = ctx.source_urls;
+      if (gen.kind === 'video' && sourceUrls.length)
+        params.source_urls = sourceUrls;
+      // One negative for the request: the prompt node's own (loaded from a
+      // prompt asset) plus every upstream card's, deduped. Whether the
+      // provider takes one is NOT decided here — `GenerationRequest.reconcile`
+      // drops it and names `negative` in `dropped_knobs`, which this node
+      // already renders. Deciding it twice is how the two answers drift.
+      const negative = [ctx.negative_body ?? '', assets.negative]
+        .map((n) => n.trim())
+        .filter((n, i, all) => n && all.indexOf(n) === i)
+        .join('\n');
+      if (negative) params.negative = negative;
       if (ctx.asset_ref) {
         // Asset-library provenance (P4, plan ruling H): params land verbatim in
         // generated_media.params, so a run carries the asset it was launched
@@ -156,10 +214,16 @@ export function withGenerationRunner(
       // IC 分隔符拆分: each split item dispatches independently — one
       // prompt node fans out into N generations whose results all land on
       // this node's output slot.
-      const promptItems =
+      const bodies =
         ctx.split_prompts && ctx.split_prompts.length > 1
           ? ctx.split_prompts
           : [ctx.body];
+      // The asset text leads EACH split item, not just the first: a split is N
+      // independent generations of the same subject, so a prefix applied once
+      // would describe only one of them.
+      const promptItems = assets.prompt_prefix
+        ? bodies.map((b) => [assets.prompt_prefix, b.trim()].filter(Boolean).join('\n'))
+        : bodies;
       const perItemCount =
         gen.kind === 'video' ? 1 : Math.max(1, Math.min(gen.count ?? 1, 8));
       const taskIdBatches = await Promise.all(

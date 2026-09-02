@@ -50,9 +50,11 @@ import { getResourceCoverUrl } from '../../../../services/resourceService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { fileVisibleUnderLoadout, orderedReferenceFiles } from '../assetFiles';
 import { useCanvasScope } from '../canvasScope';
+import { downstreamGenModel } from '../promptInputs';
 import type { AssetNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
+import { useModelCapabilities } from './useModelCapabilities';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 /** Detail-fetch outcome. `error` is "could not ask", never "is not there". */
@@ -130,8 +132,56 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
     () => orderedReferenceFiles(detail?.files ?? [], assetType, node.loadout_id),
     [detail, assetType, node.loadout_id],
   );
-  const selected_file_ids = node.selected_file_ids ?? [];
+  const selected_file_ids = useMemo(
+    () => node.selected_file_ids ?? [],
+    [node.selected_file_ids],
+  );
   const primarySlot = PRIMARY_SLOT[assetType] ?? null;
+
+  // ── The provider's reference ceiling (plan ruling E) ───────────────────
+  // The ceiling belongs to the MODEL, and this card has none — the prompt it
+  // feeds does. `downstreamGenModel` answers null when the card feeds two
+  // prompts on different models, and `useModelCapabilities` answers null for
+  // an unknown model, a still-loading fetch or an old backend. Both nulls mean
+  // the same thing here: NO limit, render full support. Guessing a ceiling
+  // would disable a file that would in fact have been sent.
+  const downstreamNodes = useCanvasCoreStore((st) => st.nodes);
+  const downstreamConnections = useCanvasCoreStore((st) => st.connections);
+  const genModel = useMemo(
+    () => downstreamGenModel(id, downstreamNodes as never, downstreamConnections as never),
+    [id, downstreamNodes, downstreamConnections],
+  );
+  const caps = useModelCapabilities(genModel);
+  const maxRefs = caps?.max_refs ?? null;
+  // Rank among the CHECKED rows, in list order — the same order the bundle
+  // trims from the tail of.
+  const selectedRank = useMemo(() => {
+    const rank = new Map<string, number>();
+    let i = 0;
+    for (const f of files) {
+      if (selected_file_ids.includes(f.resource_id)) rank.set(f.resource_id, i++);
+    }
+    return rank;
+  }, [files, selected_file_ids]);
+  const selectedCount = selectedRank.size;
+  const atLimit = maxRefs !== null && selectedCount >= maxRefs;
+
+  // What the last run's bundle would not send, and whether asking failed at
+  // all. Empty is a real answer ("nothing dropped"); a null error is "the ask
+  // worked". Only a non-empty one renders.
+  const bundleDropped = useMemo(
+    () => node.last_bundle_dropped ?? [],
+    [node.last_bundle_dropped],
+  );
+  const bundleError = node.last_bundle_error ?? null;
+  const droppedByReason = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const d of bundleDropped) {
+      const reason = String(d?.reason || 'over_limit');
+      counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    return [...counts.entries()];
+  }, [bundleDropped]);
 
   const onLoadoutChange = useCallback(
     (raw: string) => {
@@ -295,9 +345,54 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
           go downstream, so the empty and the failed cases both say what is
           going on rather than rendering as an empty box. */}
       <div className="border-t border-canvas-line px-3 py-2">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-canvas-muted">
-          {t('canvas.asset.references', 'Reference Files')}
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-canvas-muted">
+            {t('canvas.asset.references', 'Reference Files')}
+          </span>
+          {/* What the LAST run's bundle would not send, grouped by reason. The
+              backend is the authority on this — the greying below is only a
+              hint given ahead of time. Absent/empty renders nothing: silence
+              means everything checked was delivered, so it can never be a
+              default. */}
+          {droppedByReason.length > 0 && (
+            <span
+              data-testid="asset-node-dropped"
+              title={bundleDropped
+                .map((d) => `${d.resource_id} — ${d.reason}`)
+                .join('\n')}
+              className="shrink-0 rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
+            >
+              {t('assets.node.refsDropped', {
+                refs: droppedByReason
+                  .map(([reason, count]) =>
+                    t('assets.node.refsDroppedGroup', {
+                      count,
+                      // An unrecognised code still renders as itself — a badge
+                      // that omits a reference because nobody wrote its label
+                      // is the silent drop all over again.
+                      reason: t(`assets.node.dropReason.${reason}`, reason),
+                      defaultValue: '{{count}} ({{reason}})',
+                    }),
+                  )
+                  .join(', '),
+                defaultValue: 'Not sent: {{refs}}',
+              })}
+            </span>
+          )}
         </div>
+
+        {bundleError && (
+          <div
+            data-testid="asset-node-bundle-error"
+            className="mb-1 text-[11px] text-warn"
+            title={bundleError}
+          >
+            {t(
+              'assets.node.bundleFailed',
+              'The last run could not read this asset. Nothing from it was sent.',
+            )}
+          </div>
+        )}
 
         {loadState === 'error' ? (
           <div data-testid="asset-node-load-error" className="text-[11px] text-warn">
@@ -317,11 +412,32 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
             {files.map((f) => {
               const checked = selected_file_ids.includes(f.resource_id);
               const slotName = t(slotLabelKey(f.slot), f.slot);
+              // Past the ceiling: a CHECKED row beyond it will be trimmed by
+              // the bundle, an UNCHECKED one cannot be added without pushing
+              // something else out.
+              const overLimit =
+                checked && maxRefs !== null && (selectedRank.get(f.resource_id) ?? 0) >= maxRefs;
+              // A checked row is never disabled — the user has to be able to
+              // take it back off. Disabling it would trap the selection at a
+              // ceiling with no way down, and `patchNode` writes no history
+              // entry, so there is no undo either.
+              const blocked = !checked && atLimit;
+              const limitHint = t('assets.node.refsLimit', {
+                count: maxRefs ?? 0,
+                defaultValue:
+                  'This model takes {{count}} reference images. The rest are not sent.',
+              });
               return (
                 <li key={f.resource_id}>
                   <label
-                    className="nodrag flex cursor-pointer items-center gap-1.5"
-                    title={slotName}
+                    data-testid={`asset-node-row-${f.resource_id}`}
+                    data-over-limit={overLimit || blocked ? 'true' : undefined}
+                    className={`nodrag flex items-center gap-1.5 ${
+                      blocked || overLimit
+                        ? 'cursor-not-allowed opacity-50'
+                        : 'cursor-pointer'
+                    }`}
+                    title={blocked || overLimit ? limitHint : slotName}
                   >
                     <input
                       type="checkbox"
@@ -331,7 +447,7 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
                         defaultValue: 'Use {{slot}} reference',
                       })}
                       checked={checked}
-                      disabled={readOnly}
+                      disabled={readOnly || blocked}
                       onChange={() => toggleFile(f.resource_id)}
                       className="h-3 w-3 shrink-0"
                     />
@@ -353,6 +469,21 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
               );
             })}
           </ul>
+        )}
+
+        {/* Said once, under the list, when the ceiling is actually in play.
+            `maxRefs === null` is "unknown", not "zero" — it renders nothing. */}
+        {maxRefs !== null && atLimit && files.length > 0 && (
+          <div
+            data-testid="asset-node-refs-limit"
+            className="mt-1 text-[10px] text-canvas-muted"
+          >
+            {t('assets.node.refsLimit', {
+              count: maxRefs,
+              defaultValue:
+                'This model takes {{count}} reference images. The rest are not sent.',
+            })}
+          </div>
         )}
       </div>
 

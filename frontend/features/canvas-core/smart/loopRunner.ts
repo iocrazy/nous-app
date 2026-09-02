@@ -101,6 +101,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
           provider_slug?: string;
           agent_id?: string | null;
           gen?: RunnerContext['gen'];
+          negative_body?: string | null;
         }
       | undefined;
     if (!d) continue;
@@ -122,6 +123,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
         opts.nodes,
         opts.connections,
       ),
+      negative_body: d.negative_body ?? null,
       asset_ref: resolveAssetRef(id, opts.nodes, opts.connections),
     });
   }

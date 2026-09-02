@@ -1984,6 +1984,19 @@
       "removeHint": "Takes it off your library shelf — it stays in this project",
       "removeNamed": "Remove {{name}} From Your Library",
       "removed": "Removed From Your Library — Still In This Project"
+    },
+    "node": {
+      "refsLimit_one": "This model takes {{count}} reference image. The rest are not sent.",
+      "refsLimit_other": "This model takes {{count}} reference images. The rest are not sent.",
+      "refsDropped": "Not sent: {{refs}}",
+      "refsDroppedGroup_one": "{{count}} ({{reason}})",
+      "refsDroppedGroup_other": "{{count}} ({{reason}})",
+      "bundleFailed": "The last run could not read this asset. Nothing from it was sent.",
+      "dropReason": {
+        "over_limit": "over the model's limit",
+        "no_image_file": "no image file",
+        "provider_no_refs": "model takes no references"
+      }
     }
   },
   "generated": {

@@ -1984,6 +1984,19 @@
       "removeHint": "从资产库货架移走 —— 它仍留在本项目里",
       "removeNamed": "把 {{name}} 移出资产库",
       "removed": "已移出资产库 —— 仍留在本项目"
+    },
+    "node": {
+      "refsLimit_one": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsLimit_other": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsDropped": "未发送：{{refs}}",
+      "refsDroppedGroup_one": "{{count}} 张（{{reason}}）",
+      "refsDroppedGroup_other": "{{count}} 张（{{reason}}）",
+      "bundleFailed": "上次运行无法读取该素材，它的内容一项都没有发送。",
+      "dropReason": {
+        "over_limit": "超过模型上限",
+        "no_image_file": "没有图片文件",
+        "provider_no_refs": "该模型不支持参考图"
+      }
     }
   },
   "generated": {

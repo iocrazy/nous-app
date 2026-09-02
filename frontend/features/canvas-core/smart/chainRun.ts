@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import { withGenerationRunner } from './generationRunner';
 import { resolveAssetRef } from './assetRef';
@@ -142,6 +143,9 @@ function resolveCaller(): PromptCaller {
     shouldStop: () => useChainRunStore.getState().stopRequested,
     // A prompt run as part of a chain reports its dropped knobs exactly like
     // one run on its own — the badge belongs to the node, not to the gesture.
+    // Asset cards wired upstream contribute references, prompt text and a
+    // negative — resolved per run because the answer depends on the model.
+    assetInputs: resolveAssetInputsForRun,
     onDropped: markDroppedKnobs,
   });
 }
@@ -183,6 +187,7 @@ export async function startChainRun(tailId: string): Promise<boolean> {
           gen: data.gen ?? null,
           source_url: resolveEffectiveSourceUrl(prompt, live.nodes, live.connections),
           source_urls: resolveEffectiveSourceUrls(prompt, live.nodes, live.connections),
+          negative_body: data.negative_body ?? null,
           asset_ref: resolveAssetRef(thin.promptId, live.nodes, live.connections),
         };
         return resolveCaller()(ctx);

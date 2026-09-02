@@ -18,6 +18,7 @@ import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasNode } from '../types';
 import { createOutputNode } from './factories';
 import type { OutputNodeData } from './types';
+import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import { withGenerationRunner } from './generationRunner';
 import { runLoopCascade, type LoopRunSummary } from './loopRunner';
@@ -54,6 +55,9 @@ function resolveCaller(loopId: string): PromptCaller {
     shouldStop: () => useLoopRunStore.getState().isStopRequested(loopId),
     // Each round rewrites the badge on the loop's prompt node: it describes
     // the run that just finished, which is the one the user is watching.
+    // Asset cards wired upstream contribute references, prompt text and a
+    // negative — resolved per run because the answer depends on the model.
+    assetInputs: resolveAssetInputsForRun,
     onDropped: markDroppedKnobs,
   });
 }

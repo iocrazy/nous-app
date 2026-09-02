@@ -1,0 +1,328 @@
+// features/canvas-core/smart/nodes/AssetNodeView.limits.test.tsx
+//
+// The provider reference ceiling on the card's checklist (P4 Task 5, plan
+// ruling E), and the report of what the last run's bundle would not send.
+//
+// Two properties do the work here:
+//
+//   * `null` capabilities mean NO limit. The hook documents `null` as
+//     "unknown ⇒ render full support", and it is what a still-loading fetch, a
+//     failed one, an old backend and an unlisted model all produce. Reading it
+//     as zero would grey out every row on the day the endpoint hiccups.
+//   * a CHECKED row is never disabled. Disabling it would trap the selection at
+//     the ceiling with no way down, and `patchNode` writes no history entry, so
+//     there is no undo either.
+
+import { ReactFlowProvider } from '@xyflow/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import type { AssetRowDetail } from '../../../../services/assetsService';
+import { AssetNodeView } from './AssetNodeView';
+import { _resetModelCapabilitiesCache } from './useModelCapabilities';
+
+const fetchAssetDetail = vi.fn();
+const listGenerationCapabilities = vi.fn();
+
+vi.mock('../../../../services/assetsService', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    fetchAssetDetail: (...args: unknown[]) => fetchAssetDetail(...args),
+  };
+});
+
+vi.mock('../../services/canvasGenerationService', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    listGenerationCapabilities: () => listGenerationCapabilities(),
+  };
+});
+
+// The stub INTERPOLATES `{{name}}` placeholders, unlike the plain-defaults one
+// in `AssetNodeView.test.tsx`: the badge's whole job is to say how many
+// references went missing and why, and a stub that renders `{{count}}` would
+// let a badge that never substitutes anything pass.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: unknown) => {
+      const opts = (typeof fallback === 'object' && fallback !== null
+        ? fallback
+        : {}) as Record<string, unknown> & { defaultValue?: string };
+      const template =
+        typeof fallback === 'string' ? fallback : (opts.defaultValue ?? key);
+      return template.replace(/\{\{(\w+)\}\}/g, (m, name) =>
+        name in opts ? String(opts[name]) : m,
+      );
+    },
+  }),
+}));
+
+const SCOPE = '727145299382534100';
+const ASSET_ID = '727145299382534300';
+const F1 = '900000000000000001';
+const F2 = '900000000000000002';
+const F3 = '900000000000000003';
+
+const file = (resource_id: string, slot: string, sort_order: number) => ({
+  asset_id: ASSET_ID,
+  resource_id,
+  slot,
+  loadout_id: null,
+  sort_order,
+  note: null,
+  attached_by: null,
+  attached_at: '2026-09-02T00:00:00+00:00',
+});
+
+const DETAIL = {
+  id: ASSET_ID,
+  scope_id: SCOPE,
+  asset_type: 'character',
+  subtype: null,
+  name: 'Cole Bannon',
+  role_tag: 'lead',
+  description: '',
+  attrs: {},
+  prompt_positive: null,
+  prompt_negative: null,
+  prompt_positive_zh: null,
+  prompt_negative_zh: null,
+  platform_params: {},
+  cover_file_id: F1,
+  source: 'manual',
+  duplicated_from: null,
+  is_system_preset: false,
+  tags: {},
+  sort_order: 0,
+  created_by: null,
+  created_at: '2026-09-01T00:00:00+00:00',
+  updated_at: '2026-09-01T00:00:00+00:00',
+  readiness: { state: 'ready', missing: [] },
+  file_counts_by_slot: { sheet: 1, stills: 2 },
+  project_ids: [],
+  loadout_count: 0,
+  files: [file(F1, 'sheet', 0), file(F2, 'stills', 1), file(F3, 'stills', 2)],
+  links: [],
+  linked_by: [],
+  loadouts: [],
+} as unknown as AssetRowDetail;
+
+const NODE_DATA = {
+  asset_id: ASSET_ID,
+  loadout_id: null as string | null,
+  selected_file_ids: [F1, F2],
+  name: 'Cole Bannon',
+  asset_type: 'character' as const,
+  cover_file_id: F1,
+  readiness_state: 'ready' as const,
+};
+
+const baseProps = {
+  selected: false,
+  dragging: false,
+  zIndex: 0,
+  isConnectable: true,
+  positionAbsoluteX: 0,
+  positionAbsoluteY: 0,
+  deletable: true,
+  draggable: true,
+  selectable: true,
+} as const;
+
+/** Downstream prompt on `model`, wired from the card. */
+const promptNode = (id: string, model: string | undefined) => ({
+  id,
+  type: 'prompt',
+  position: { x: 0, y: 0 },
+  data: { body: '', gen: model ? { kind: 'image', model, count: 1 } : null },
+});
+
+function seedAndRender(
+  data: Record<string, unknown> = NODE_DATA,
+  downstream: Array<{ id: string; model?: string }> = [{ id: 'p1', model: 'codex' }],
+) {
+  useCanvasCoreStore.setState({
+    kind: 'smart',
+    canvasId: '9',
+    loadStatus: 'ready',
+    readOnly: false,
+    nodes: [
+      { id: 'a1', type: 'asset', position: { x: 0, y: 0 }, data },
+      ...downstream.map((d) => promptNode(d.id, d.model)),
+    ],
+    connections: downstream.map((d) => ({ id: `e-${d.id}`, source: 'a1', target: d.id })),
+    selection: [],
+  } as never);
+  return render(
+    <MemoryRouter initialEntries={[`/team/${SCOPE}/canvas/9`]}>
+      <Routes>
+        <Route
+          path="/team/:teamId/canvas/:canvasId"
+          element={
+            <ReactFlowProvider>
+              <AssetNodeView {...baseProps} id="a1" type="asset" data={data} />
+            </ReactFlowProvider>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+const box = (id: string) => screen.getByTestId(`asset-node-file-${id}`) as HTMLInputElement;
+const row = (id: string) => screen.getByTestId(`asset-node-row-${id}`);
+
+beforeEach(() => {
+  useCanvasCoreStore.getState().reset();
+  _resetModelCapabilitiesCache();
+  fetchAssetDetail.mockResolvedValue(DETAIL);
+  listGenerationCapabilities.mockResolvedValue({
+    codex: {
+      ratios: ['1:1'],
+      quality: true,
+      resolution: true,
+      max_refs: 9,
+      negative: true,
+      video_modes: [],
+    },
+    'seedream-4': {
+      ratios: ['1:1'],
+      quality: false,
+      resolution: false,
+      max_refs: 2,
+      negative: false,
+      video_modes: [],
+    },
+    'ark-seedream': {
+      ratios: ['1:1'],
+      quality: false,
+      resolution: false,
+      max_refs: 0,
+      negative: false,
+      video_modes: [],
+    },
+  });
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('over-limit greying', () => {
+  it('greys the unchecked rows once the selection reaches the model ceiling', async () => {
+    // seedream-4 takes 2; the card already has 2 checked.
+    seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
+    await waitFor(() => expect(box(F3)).toBeDisabled());
+    expect(row(F3)).toHaveAttribute('data-over-limit', 'true');
+    expect(screen.getByTestId('asset-node-refs-limit')).toBeInTheDocument();
+  });
+
+  it('never disables a CHECKED row — the user must be able to take it off', async () => {
+    seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
+    await waitFor(() => expect(box(F3)).toBeDisabled());
+    expect(box(F1)).not.toBeDisabled();
+    expect(box(F2)).not.toBeDisabled();
+  });
+
+  it('marks the checked rows PAST the ceiling without disabling them', async () => {
+    // Three checked against a ceiling of two: the third will be trimmed.
+    seedAndRender({ ...NODE_DATA, selected_file_ids: [F1, F2, F3] }, [
+      { id: 'p1', model: 'seedream-4' },
+    ]);
+    await waitFor(() =>
+      expect(row(F3)).toHaveAttribute('data-over-limit', 'true'),
+    );
+    expect(row(F1)).not.toHaveAttribute('data-over-limit');
+    expect(row(F2)).not.toHaveAttribute('data-over-limit');
+    expect(box(F3)).not.toBeDisabled();
+  });
+
+  it('greys every unchecked row for a model that takes NO references', async () => {
+    seedAndRender({ ...NODE_DATA, selected_file_ids: [] }, [
+      { id: 'p1', model: 'ark-seedream' },
+    ]);
+    await waitFor(() => expect(box(F1)).toBeDisabled());
+    expect(box(F2)).toBeDisabled();
+    expect(box(F3)).toBeDisabled();
+  });
+
+  it('imposes no limit when the model is generous', async () => {
+    seedAndRender(NODE_DATA, [{ id: 'p1', model: 'codex' }]);
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(box(F3)).not.toBeDisabled();
+    expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
+  });
+
+  it('imposes no limit when the capabilities fetch FAILS (null = unknown)', async () => {
+    listGenerationCapabilities.mockRejectedValue(new Error('HTTP 500'));
+    seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(box(F3)).not.toBeDisabled();
+    expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
+  });
+
+  it('imposes no limit when the card feeds nothing', async () => {
+    seedAndRender(NODE_DATA, []);
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(box(F3)).not.toBeDisabled();
+  });
+
+  it('imposes no limit when two downstream prompts disagree on the model', async () => {
+    // One ceiling cannot describe two providers, and greying by the smaller one
+    // would disable a file the other would in fact have been sent.
+    seedAndRender(NODE_DATA, [
+      { id: 'p1', model: 'seedream-4' },
+      { id: 'p2', model: 'codex' },
+    ]);
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(box(F3)).not.toBeDisabled();
+    expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
+  });
+});
+
+describe('the last run’s bundle report', () => {
+  it('shows what the bundle would not send, grouped by reason', async () => {
+    seedAndRender({
+      ...NODE_DATA,
+      last_bundle_dropped: [
+        { resource_id: F2, reason: 'over_limit' },
+        { resource_id: F3, reason: 'over_limit' },
+      ],
+    });
+    const badge = await screen.findByTestId('asset-node-dropped');
+    expect(badge).toHaveTextContent('2');
+    expect(badge.getAttribute('title')).toContain(F2);
+  });
+
+  it('renders an unrecognised reason code as itself rather than omitting it', async () => {
+    seedAndRender({
+      ...NODE_DATA,
+      last_bundle_dropped: [{ resource_id: F2, reason: 'brand_new_reason' }],
+    });
+    const badge = await screen.findByTestId('asset-node-dropped');
+    expect(badge).toHaveTextContent('brand_new_reason');
+  });
+
+  it('shows nothing when the last run dropped nothing', async () => {
+    seedAndRender({ ...NODE_DATA, last_bundle_dropped: [] });
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    expect(screen.queryByTestId('asset-node-dropped')).toBeNull();
+    expect(screen.queryByTestId('asset-node-bundle-error')).toBeNull();
+  });
+
+  it('says the run could not read the asset at all, separately from a clean drop list', async () => {
+    seedAndRender({
+      ...NODE_DATA,
+      last_bundle_dropped: [],
+      last_bundle_error: 'HTTP 500',
+    });
+    const err = await screen.findByTestId('asset-node-bundle-error');
+    expect(err.getAttribute('title')).toBe('HTTP 500');
+    expect(screen.queryByTestId('asset-node-dropped')).toBeNull();
+  });
+});

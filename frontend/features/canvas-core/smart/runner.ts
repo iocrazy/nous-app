@@ -33,6 +33,11 @@ export interface RunnerContext {
   source_urls?: string[];
   /** IC 分隔符: pre-split prompt items — each dispatches independently. */
   split_prompts?: string[];
+  /** The prompt node's own negative text (`PromptNodeData.negative_body`,
+   *  loaded from a prompt asset). Ships as `params.negative`, merged with what
+   *  upstream asset cards contribute; the BACKEND decides whether the provider
+   *  takes one, and names `negative` in `dropped_knobs` when it does not. */
+  negative_body?: string | null;
   /** Owning ASSET card (asset-library P4) — the nearest upstream `asset`
    *  node, stamped into generation params as `source_asset_id` / `loadout_id`
    *  so the produced media backlinks to the library entity it came from.

@@ -12,6 +12,7 @@
  */
 
 import type { AssetType } from '../../../components/assets/assetSlots';
+import type { DroppedReference } from '../../../services/assetsService';
 import type { CropRegion } from '../editor/types';
 import type { CanvasNode } from '../types';
 
@@ -449,6 +450,25 @@ export interface AssetNodeData {
   readiness_state: 'ready' | 'draft';
   /** The asset is gone (detail answered 404). Absent = not known to be gone. */
   removed?: boolean;
+  // ── Last run's bundle report (P4 Task 5) ──────────────────────────────
+  /**
+   * References the bundle endpoint would NOT send on the last run this card
+   * fed, each with the backend's reason (`over_limit` / `no_image_file` /
+   * `provider_no_refs`). Rewritten by every run, INCLUDING a clean one — which
+   * clears it — so the badge always describes the run it sits beside.
+   *
+   * This is the asset-side half of the same discipline `last_dropped` serves on
+   * the prompt node: a delivery the provider trimmed must say so somewhere, or
+   * "选了也生成了但图里没有" happens with nothing on screen explaining it.
+   */
+  last_bundle_dropped?: DroppedReference[];
+  /**
+   * The bundle request itself failed, and why. NOT the same as an empty
+   * `last_bundle_dropped`: "we could not ask" and "nothing was dropped" are
+   * different answers, and collapsing them reports a card that contributed
+   * nothing as a card that had nothing to contribute.
+   */
+  last_bundle_error?: string | null;
 }
 
 /**

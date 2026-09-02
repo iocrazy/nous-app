@@ -91,7 +91,7 @@ vi.mock('./useModelCapabilities', () => ({
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { markDroppedKnobs } from '../droppedKnobs';
-import { withGenerationRunner } from '../generationRunner';
+import { noAssetInputs, withGenerationRunner } from '../generationRunner';
 import { resumePendingGenerations } from '../genResume';
 import { PromptNodeView } from './PromptNodeView';
 
@@ -340,7 +340,7 @@ describe('a real run puts its dropped knobs on the node (seam)', () => {
 
     const runner = withGenerationRunner(
       async () => ({ ok: true, text: '', error: null }),
-      { canvasId: '9', onDropped: markDroppedKnobs },
+      { assetInputs: noAssetInputs, canvasId: '9', onDropped: markDroppedKnobs },
     );
     await runner({
       promptId: 'p1',
@@ -389,7 +389,7 @@ describe('a real run puts its dropped knobs on the node (seam)', () => {
 
     const runner = withGenerationRunner(
       async () => ({ ok: true, text: '', error: null }),
-      { canvasId: '9', onDropped: markDroppedKnobs },
+      { assetInputs: noAssetInputs, canvasId: '9', onDropped: markDroppedKnobs },
     );
     await runner({
       promptId: 'p1',

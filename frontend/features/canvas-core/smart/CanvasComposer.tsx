@@ -37,6 +37,7 @@ import {
   prunePendingGenTask,
 } from './genResume';
 import { onGenerationDispatched } from './dispatchEffects';
+import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import {
   appendGenerationResults,
@@ -196,6 +197,9 @@ export function CanvasComposer({
       onDispatched: onGenerationDispatched,
       // What the provider could not honour lands on the node beside the run
       // badge — the post-run half of the footer's stranded-value mark.
+      // Asset cards wired upstream contribute references, prompt text and a
+      // negative — resolved per run because the answer depends on the model.
+      assetInputs: resolveAssetInputsForRun,
       onDropped: markDroppedKnobs,
       onItemSettled: (id, item) => {
         if (item.url) appendGenerationResults(id, [item.url], item.kind);
@@ -367,6 +371,7 @@ export function CanvasComposer({
             gen: data.gen ?? null,
             source_url: resolveEffectiveSourceUrl(n as never, nodes, connections),
             source_urls: resolveEffectiveSourceUrls(n as never, nodes, connections),
+            negative_body: data.negative_body ?? null,
             asset_ref: resolveAssetRef(id, nodes, connections),
           };
         })
