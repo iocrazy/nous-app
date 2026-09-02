@@ -274,6 +274,19 @@ describe('PromptNodeView dropped-reference badge', () => {
     // A code with no label is not a crash, it just leaks an identifier at the
     // user — so the parity check is here, where the list is read.
     const zh = (await import('../../../../public/locales/zh.json')).default;
+    // The imported JSON carries its own literal type, and indexing it by a
+    // runtime string needs a widened view. `Record<string, unknown>` one level
+    // at a time, not a blanket cast: `Record<string, never>` (what this used
+    // to say) claims every value is `never`, which overlaps with nothing and
+    // is a TS2352 — the check still ran, but the file stopped typechecking.
+    const dropReasons = (tree: unknown): Record<string, unknown> => {
+      const canvas = (tree as Record<string, unknown>).canvas as
+        | Record<string, unknown>
+        | undefined;
+      return (canvas?.refDropReason ?? {}) as Record<string, unknown>;
+    };
+    const enReasons = dropReasons(en);
+    const zhReasons = dropReasons(zh);
     for (const reason of [
       'unknown_shape',
       'not_in_scope',
@@ -283,11 +296,11 @@ describe('PromptNodeView dropped-reference badge', () => {
       'unresolved',
     ]) {
       expect(
-        (en as Record<string, never>).canvas['refDropReason'][reason],
+        enReasons[reason],
         `en is missing canvas.refDropReason.${reason}`,
       ).toBeTruthy();
       expect(
-        (zh as Record<string, never>).canvas['refDropReason'][reason],
+        zhReasons[reason],
         `zh is missing canvas.refDropReason.${reason}`,
       ).toBeTruthy();
     }

@@ -761,6 +761,42 @@ describe('the deferred surfaces', () => {
   // (`list_canvases_for_asset`): string ids, one row per canvas with
   // `node_ids` aggregated, `kind` carried but not rendered.
 
+  it('ASKS for used_in — the panel is the only reason the aggregate is paid for', async () => {
+    // `used_in` is OPT-IN on `GET /assets/{id}` (it is a five-table aggregate,
+    // and a canvas board fetches one detail per asset card). This page is the
+    // only caller that turns it on, so nothing else in the suite can notice if
+    // the flag is dropped: the panel would simply go blank, and `used_in`
+    // arriving as `undefined` renders as "no canvases" rather than as an
+    // error. Verified by mutation — removing `{ usedIn: true }` reddens this
+    // and nothing else.
+    await renderSheet();
+
+    const own = fetchAssetDetail.mock.calls.find(
+      (c: unknown[]) => c[1] === CHARACTER_DETAIL.id,
+    );
+    expect(own, 'the sheet never fetched its own detail').toBeTruthy();
+    expect((own as unknown[])[2]).toEqual({ usedIn: true });
+  });
+
+  it('does NOT ask for used_in on the linked assets it renders as chips', async () => {
+    // Their usage is not on this page, and asking would multiply the aggregate
+    // by the number of links — the N+1 the opt-in exists to prevent.
+    await renderSheet();
+
+    await waitFor(() =>
+      expect(
+        fetchAssetDetail.mock.calls.some((c: unknown[]) => c[1] === COSTUME_DETAIL.id),
+      ).toBe(true),
+    );
+    for (const call of fetchAssetDetail.mock.calls) {
+      if (call[1] === CHARACTER_DETAIL.id) continue;
+      expect(
+        (call[2] as { usedIn?: boolean } | undefined)?.usedIn,
+        `related fetch for ${String(call[1])} paid for used_in`,
+      ).toBeFalsy();
+    }
+  });
+
   it('Used In lists the canvases, names their project, and counts the cards', async () => {
     const detail = makeDetail({
       ...CHARACTER_DETAIL,
