@@ -193,6 +193,15 @@ async def _canvas_project_scope_id(canvas_id: int) -> Optional[int]:
     return int(await _resolve_personal_team_id(str(owner_id)))
 
 
+# Why the most recent scope resolution failed, keyed by the pair that asked.
+#
+# Bounded by construction: written only on the exception path, and the entry is
+# consumed (popped) by ``_registration_scope_id``. A reference-path failure that
+# nobody consumes leaves at most one entry per (canvas, user) seen since the
+# process started — an internal diagnostic, never read for control flow.
+_LAST_SCOPE_ERROR: Dict[tuple[Optional[int], Optional[str]], str] = {}
+
+
 async def _generation_scope_id(
     canvas_id: Optional[int], user_id: Optional[str]
 ) -> Optional[int]:
@@ -236,6 +245,14 @@ async def _generation_scope_id(
             user_id,
             exc,
         )
+        # The cause is kept, not just logged. ``_registration_scope_id`` turns a
+        # None into a RuntimeError whose message is all the task row shows, and
+        # "could not resolve a registration scope" is the same sentence for a
+        # missing project row and for a database that is down — two facts with
+        # different responses. Stashed here rather than raised, because the
+        # REFERENCE path deliberately treats None as ``scope_unresolved`` and
+        # carries on.
+        _LAST_SCOPE_ERROR[(canvas_id, user_id)] = repr(exc)
         return None
 
 
@@ -264,9 +281,15 @@ async def _registration_scope_id(
     """
     scope = await _generation_scope_id(canvas_id, user_id)
     if scope is None:
+        cause = _LAST_SCOPE_ERROR.pop((canvas_id, user_id), None)
+        # The underlying exception rides in the message when there was one. A
+        # transient DB blip and a genuinely missing project row both arrive
+        # here as ``None``, and the task row shows only this sentence — so
+        # without the cause, "retry this" and "this data is wrong" look
+        # identical to whoever reads it.
         raise RuntimeError(
             "canvas generation persist could not resolve a registration scope "
-            f"(canvas={canvas_id}, user={user_id})"
+            f"(canvas={canvas_id}, user={user_id})" + (f": {cause}" if cause else "")
         )
     return int(scope)
 

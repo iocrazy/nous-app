@@ -197,7 +197,7 @@ class GeneratedInboxService:
         and the same ``GeneratedItem`` projection — because a by-id read that
         built its own body would be a second wire shape for one row, and the
         client would have to know which endpoint it came from. Pinned by
-        ``tests/services/library/test_generated_inbox_get_item.py``.
+        ``tests/services/library/test_generated_inbox_service.py``.
 
         Refuses with the same 404 the other single-row paths use when the row is
         not in this scope. Note this reads the row through

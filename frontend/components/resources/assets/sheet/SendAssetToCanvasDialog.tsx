@@ -135,45 +135,61 @@ export const SendAssetToCanvasDialog: React.FC<SendAssetToCanvasDialogProps> = (
     [addToast, t],
   );
 
+  // The delivery itself, with NO busy handling — the two entry points below own
+  // the flag. `sendToNew` used to clear it and then call `send`, which sets it
+  // again; correct only because both land in one React batch and `send`'s
+  // captured `busy` was therefore still false. That made the two-step path's
+  // correctness rest on there being no `await` between those two lines, and
+  // nothing said so. Now the flag is taken once and released once per user
+  // action, whichever path it took.
+  const deliver = useCallback(
+    async (canvasId: string) => {
+      const result = await sendAssetToCanvas(canvasId, detail, { loadoutId });
+      // `=== false`, not `!result.ok` — see `sendAssetToCanvas`: without
+      // `strictNullChecks` only an explicit literal comparison narrows a
+      // boolean-discriminated union.
+      if (result.ok === false) {
+        fail(result.reason);
+        return;
+      }
+      onDone(result.canvasId, result.nodeId);
+    },
+    [detail, loadoutId, fail, onDone],
+  );
+
   const send = useCallback(
     async (canvasId: string) => {
       if (busy) return;
       setBusy(true);
       try {
-        const result = await sendAssetToCanvas(canvasId, detail, { loadoutId });
-        // `=== false`, not `!result.ok` — see `sendAssetToCanvas`: without
-        // `strictNullChecks` only an explicit literal comparison narrows a
-        // boolean-discriminated union.
-        if (result.ok === false) {
-          fail(result.reason);
-          return;
-        }
-        onDone(result.canvasId, result.nodeId);
+        await deliver(canvasId);
       } finally {
         setBusy(false);
       }
     },
-    [busy, detail, loadoutId, fail, onDone],
+    [busy, deliver],
   );
 
   const sendToNew = useCallback(async () => {
     if (busy || !project) return;
     setBusy(true);
-    let created: Canvas;
     try {
-      created = await createCanvas(String(project.id), {
-        name: detail.name,
-        kind: 'smart',
-      });
-    } catch (err) {
-      console.error('[SendAssetToCanvasDialog] createCanvas failed:', err);
-      fail('create_failed');
+      let created: Canvas;
+      try {
+        created = await createCanvas(String(project.id), {
+          name: detail.name,
+          kind: 'smart',
+        });
+      } catch (err) {
+        console.error('[SendAssetToCanvasDialog] createCanvas failed:', err);
+        fail('create_failed');
+        return;
+      }
+      await deliver(String(created.id));
+    } finally {
       setBusy(false);
-      return;
     }
-    setBusy(false);
-    await send(String(created.id));
-  }, [busy, project, detail.name, fail, send]);
+  }, [busy, project, detail.name, fail, deliver]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

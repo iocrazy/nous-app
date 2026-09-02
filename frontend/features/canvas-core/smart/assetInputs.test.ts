@@ -199,6 +199,19 @@ describe('resolveAssetInputs', () => {
     expect(out.reference_urls).toEqual([assetReferenceUrl('44')]);
   });
 
+  it('reports a missing MODEL as its own cause, without asking the endpoint', async () => {
+    // M5. `model` is `min_length=1` on the bundle route, so an empty one is a
+    // 422 — and the card would then say "could not read this asset", sending
+    // the user to inspect an asset that is fine when the real answer is "this
+    // prompt has no model selected".
+    fetchBundle.mockResolvedValue(bundle());
+    const nodes = [assetNode('a1'), node('p1', 'prompt')];
+    const out = await run(nodes, [edge('a1', 'p1')], '');
+    expect(fetchBundle).not.toHaveBeenCalled();
+    expect(out.contributions[0].error).toBe('no_model');
+    expect(out.reference_urls).toEqual([]);
+  });
+
   it('reports nothing dropped when everything chosen was sent (I1)', async () => {
     // The badge cried wolf on the happy path before this: the endpoint put
     // every non-top-N file of the ASSET into `dropped`, so a freshly placed

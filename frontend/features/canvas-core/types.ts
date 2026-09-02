@@ -51,12 +51,24 @@ export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
   // every node as React Flow's default — the blank-canvas failure class.
   kind === 'costume';
 
-/** The library-entity canvas kinds — each seeds its own preset workflow. */
-export type EntityCanvasKind = 'character' | 'location' | 'prop';
+/**
+ * The library-entity canvas kinds — the four an asset can open a board for.
+ *
+ * `costume` belongs here (plan ruling G): `canvasKindFor` returns it, so the
+ * pre-P4 three-way split answered `false` for a costume board while every
+ * other part of the codebase treated the four alike. It was latent rather than
+ * broken only because the entity seeding templates that read this were deleted;
+ * `CanvasPage` now uses it to decide who gets a node bar, which makes it
+ * load-bearing again.
+ */
+export type EntityCanvasKind = 'character' | 'location' | 'prop' | 'costume';
 export const isEntityCanvas = (
   kind: CanvasKind | null | undefined,
 ): kind is EntityCanvasKind =>
-  kind === 'character' || kind === 'location' || kind === 'prop';
+  kind === 'character' ||
+  kind === 'location' ||
+  kind === 'prop' ||
+  kind === 'costume';
 
 export interface CanvasViewport {
   x: number;

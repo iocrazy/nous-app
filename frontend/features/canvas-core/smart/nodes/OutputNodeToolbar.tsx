@@ -157,7 +157,19 @@ export function OutputNodeToolbar({
           label={t('canvas.asAsset.action', 'As Asset…')}
           onClick={onAsAsset}
           disabled={readOnly || asAssetDisabled}
-          title={asAssetDisabled ? asAssetDisabledReason : undefined}
+          // Both disabled paths say WHY. `asAssetDisabled` covers "not an
+          // image" and "no workspace in the URL"; read-only is the third, and
+          // leaving it with only the button's own label made a greyed key look
+          // like an omission rather than a permission.
+          title={
+            asAssetDisabled
+              ? asAssetDisabledReason
+              : readOnly
+                // Reuses the canvas's existing read-only label rather than
+                // minting a fourth way to say the same thing.
+                ? t('canvas.readOnly', 'Read-only')
+                : undefined
+          }
         >
           <Boxes size={13} />
         </ToolbarButton>

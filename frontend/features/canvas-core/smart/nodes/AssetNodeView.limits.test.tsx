@@ -391,6 +391,24 @@ describe('the last run’s bundle report', () => {
     expect(screen.queryByTestId('asset-node-bundle-error')).toBeNull();
   });
 
+  it.each([
+    ['no_model', 'Pick a model on the prompt'],
+    ['no_scope', 'Open this canvas from a workspace'],
+  ])('names %s as its own cause, not as an unreadable asset', async (code, text) => {
+    // The generic "could not read this asset" line sends the user to inspect a
+    // card that is fine. These two codes are about the PROMPT and the URL.
+    seedAndRender({ ...NODE_DATA, last_bundle_error: code }, [
+      { id: 'p1', model: 'codex' },
+    ]);
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-node-bundle-error')).toBeInTheDocument(),
+    );
+    const box = screen.getByTestId('asset-node-bundle-error');
+    expect(box.textContent).toContain(text);
+    expect(box.textContent).not.toContain('could not read this asset');
+    expect(box).toHaveAttribute('data-bundle-error', code);
+  });
+
   it('says the run could not read the asset at all, separately from a clean drop list', async () => {
     seedAndRender({
       ...NODE_DATA,

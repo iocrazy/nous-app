@@ -10,7 +10,8 @@
  *
  * Mocks copied from `CanvasPage.nodeParam.test.tsx`, with `useParams` also
  * answering a `teamId` — that URL segment IS the asset scope (`canvasScope.ts`),
- * so without it the hooks below correctly ask nothing at all.
+ * so without it the hooks below correctly ask nothing at all. ⚠️ One of those
+ * copied mocks is not incidental: see the note above `react-i18next`.
  */
 
 import React from 'react';
@@ -27,6 +28,16 @@ vi.mock('react-router-dom', () => ({
   useSearchParams: () => [new URLSearchParams()],
 }));
 
+// ⚠️ LOAD-BEARING INSTABILITY — do not "tidy" this into a hoisted stable `t`.
+//
+// A fresh function on every call means every consumer that lists `t` in a
+// dependency array re-runs on every render. That is what catches the
+// seed-effect defect this file was written for: an effect that seeds node data
+// from a fetched prop re-fires and wipes the user's edits
+// (`reference-useeffect-prop-seed-swallows-edits`), and with a stable `t` the
+// effect settles on the first render and the bug is invisible. Verified: with
+// this mock, restoring the seeding effect turns 3 tests here red; with a
+// hoisted `t`, none of them notice.
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
 }));
@@ -348,6 +359,44 @@ describe('legacy card migration', () => {
     );
     expect((useCanvasCoreStore.getState().nodes[0] as { position: unknown }).position)
       .toEqual({ x: 999, y: 777 });
+  });
+
+  it('retries after a node-count change abandoned the first pass', async () => {
+    // `nodeCount` is a dep, so ADDING a node while the resolves are out
+    // re-runs the effect: the cleanup cancels the in-flight pass and the
+    // re-run used to return early on the latch, discarding the verdicts with
+    // nothing on screen or in the log to say a migration had been abandoned.
+    // Self-healing on the NEXT load, but silent for this one.
+    let release: (id: string) => void = () => {};
+    resolveLegacyAsset.mockImplementation(
+      () => new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+    );
+    seedReady({ nodes: [legacyCharacter()] });
+    renderView();
+    await waitFor(() => expect(resolveLegacyAsset).toHaveBeenCalledTimes(1));
+
+    // The user adds an unrelated node mid-flight.
+    act(() => {
+      useCanvasCoreStore.getState().setNodes([
+        legacyCharacter(),
+        { id: 'n2', type: 'prompt', position: { x: 10, y: 10 }, data: {} },
+      ]);
+    });
+
+    // The re-run must ask again rather than sit on a latch it will never clear.
+    await waitFor(() => expect(resolveLegacyAsset).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      release(ASSET_ID);
+    });
+
+    await waitFor(() =>
+      expect((useCanvasCoreStore.getState().nodes[0] as { type: string }).type).toBe(
+        'asset',
+      ),
+    );
   });
 
   it('asks nothing when there is no legacy card to resolve', async () => {

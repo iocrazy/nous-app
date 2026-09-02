@@ -251,19 +251,33 @@ def test_resolve_legacy_uses_jsonb_containment():
     assert "public.assets.attrs @> " in _legacy_sql()
 
 
+def _containment_param() -> dict:
+    """The ONE bound value that carries the ``attrs @> ...`` payload.
+
+    Selected by SHAPE, not by position. These two tests used to read
+    ``list(params.values())[1]``, which depends on the scope predicate being
+    bound first — so dropping the scope filter turned them red for a reason
+    that has nothing to do with what they claim to test, and they would have
+    misreported which property broke. (The scope predicate has its own test.)
+    """
+    params = _legacy_stmt().compile(dialect=postgresql.dialect()).params
+    matches = [v for v in params.values() if isinstance(v, dict) and "legacy_ids" in v]
+    assert len(matches) == 1, f"expected exactly one containment payload: {params}"
+    return matches[0]
+
+
 def test_the_pair_rides_as_one_bound_jsonb_value():
     """Both halves in ONE parameter — an id compared on its own would let
     ``project_characters`` 7 answer for ``project_lib_entities`` 7, which is a
     different entity in a different table."""
-    params = _legacy_stmt().compile(dialect=postgresql.dialect()).params
-    assert list(params.values())[1] == {"legacy_ids": [["project_characters", 12]]}
+    assert _containment_param() == {"legacy_ids": [["project_characters", 12]]}
 
 
 def test_the_legacy_id_is_a_json_number_not_a_string():
     """The migration wrote ``int(entity_id)``. ``"12"`` and ``12`` are
     different JSONB scalars, so a stringified id matches NOTHING — and an empty
     result here reads exactly like "that entity was never migrated"."""
-    pair = list(_legacy_stmt().compile(dialect=postgresql.dialect()).params.values())[1]
+    pair = _containment_param()
     assert pair["legacy_ids"][0][1] == 12
     assert not isinstance(pair["legacy_ids"][0][1], str)
 

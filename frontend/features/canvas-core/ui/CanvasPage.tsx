@@ -43,7 +43,7 @@ import { onPromoteShot } from '../smart/promoteShotBus';
 import { PromoteShotDialog } from '../smart/PromoteShotDialog';
 import type { ShotNodeData, SmartNode } from '../smart/types';
 import type { CanvasNode } from '../types';
-import { isSmartFamily } from '../types';
+import { isEntityCanvas, isSmartFamily } from '../types';
 import { useOptionalToast } from '../../../components/Toast';
 import { fetchAssetDetail, resolveLegacyAsset } from '../../../services/assetsService';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -536,6 +536,15 @@ export function CanvasView({
     if (legacyCards(snapshot).length === 0) return;
     migratedForRef.current = canvasId;
     let cancelled = false;
+    // Did this pass reach a conclusion? A node added or deleted while the
+    // resolves are out re-runs this effect (`nodeCount` is a dep), the cleanup
+    // sets `cancelled`, and the re-run then returns early on the latch — so
+    // the verdicts were thrown away and NOTHING would ever try again for this
+    // mount. Self-healing across reloads (the design re-resolves on every load
+    // until a save), but silent within one, which is the shape this branch
+    // keeps filing bugs about. Releasing the latch when a pass applied nothing
+    // lets the re-run pick the work back up.
+    let applied = false;
     void resolveLegacyVerdicts(snapshot, {
       resolve: (kind, legacyId) => resolveLegacyAsset(assetScopeId, kind, legacyId),
       fetchDetail: (id) => fetchAssetDetail(assetScopeId, id),
@@ -546,9 +555,17 @@ export function CanvasView({
       const outcome = applyLegacyVerdicts(store.nodes, verdicts);
       if (outcome.unchanged) return;
       store.setNodesTransient(outcome.nodes);
+      applied = true;
     });
     return () => {
       cancelled = true;
+      // Only when nothing landed. Clearing it unconditionally would re-resolve
+      // after every successful migration too, and the rewritten cards no
+      // longer look legacy, so `legacyCards(snapshot).length === 0` would stop
+      // it anyway — but relying on that makes the latch mean two things.
+      if (!applied && migratedForRef.current === canvasId) {
+        migratedForRef.current = null;
+      }
     };
   }, [loadStatus, canvasId, assetScopeId, nodeCount]);
 
@@ -753,7 +770,18 @@ export function CanvasView({
           index of what a canvas can do), these are pure action affordances:
           a disabled-but-present toolbar would just be furniture. The
           "Read-only" badge is what explains their absence. */}
-      {kind === 'smart' && !readOnly && <TopNodeBar surfaceRef={surfaceRef} />}
+      {/* Standard AND the four entity boards. The entity kinds used to be
+          excluded because they seeded a preset workflow and needed no way to
+          add anything; P4 deleted those templates, so a hand-made character /
+          location / prop / costume board opened blank with NO way to add a
+          node except the pane's drag-create menu — which a user has to know is
+          there. `lite` stays out on its own terms: it deliberately offers a
+          four-card menu instead of the full node set (see `DragCreateMenu`),
+          and that is a product decision this change has no business
+          reversing. */}
+      {(kind === 'smart' || isEntityCanvas(kind)) && !readOnly && (
+        <TopNodeBar surfaceRef={surfaceRef} />
+      )}
       {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && !readOnly && (
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />

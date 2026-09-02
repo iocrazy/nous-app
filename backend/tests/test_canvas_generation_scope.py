@@ -295,6 +295,44 @@ async def test_an_unresolvable_scope_raises_rather_than_picking_one(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_a_transient_failure_keeps_its_cause_in_the_message(monkeypatch):
+    """A DB blip and a genuinely missing project row both arrive as ``None``,
+    and the task row shows only this sentence. Without the cause, "retry this"
+    and "this data is wrong" read the same."""
+    wf._LAST_SCOPE_ERROR.clear()
+
+    async def _boom(_canvas_id):
+        raise OSError("connection reset by peer")
+
+    monkeypatch.setattr(wf, "_canvas_project_scope_id", _boom)
+
+    with pytest.raises(RuntimeError) as e:
+        await wf._registration_scope_id(CANVAS_ORPHAN, RUNNER)
+
+    assert "registration scope" in str(e.value)
+    assert "connection reset by peer" in str(e.value)
+    # Consumed, so a later clean failure does not inherit an old cause.
+    assert wf._LAST_SCOPE_ERROR == {}
+
+
+@pytest.mark.asyncio
+async def test_a_clean_unresolvable_scope_invents_no_cause():
+    """Negative control: no canvas AND no user returns ``None`` by the early
+    exit, with no exception anywhere. The message must not suggest one — a
+    fabricated cause is worse than no cause.
+
+    (⚠️ "the runner has no personal team" is NOT this case: that path raises
+    inside ``_resolve_personal_team_id``, so it legitimately carries a cause.
+    The two were conflated when this control was first written.)"""
+    wf._LAST_SCOPE_ERROR.clear()
+
+    with pytest.raises(RuntimeError) as e:
+        await wf._registration_scope_id(None, None)
+
+    assert str(e.value).endswith("(canvas=None, user=None)")
+
+
+@pytest.mark.asyncio
 async def test_persist_files_a_team_canvas_product_in_the_team_scope(monkeypatch):
     """The wiring, not just the helper.
 

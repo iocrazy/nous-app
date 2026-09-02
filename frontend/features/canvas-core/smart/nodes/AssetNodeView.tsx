@@ -399,13 +399,30 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
         {bundleError && (
           <div
             data-testid="asset-node-bundle-error"
+            data-bundle-error={bundleError}
             className="mb-1 text-[11px] text-warn"
             title={bundleError}
           >
-            {t(
-              'canvas.asset.bundleFailed',
-              'The last run could not read this asset. Nothing from it was sent.',
-            )}
+            {/* Two known codes get their own sentence, because they send the
+                user to two different places. `no_model` is not a fault of this
+                asset at all — the prompt downstream has no model selected, and
+                telling someone "could not read this asset" for that has them
+                inspecting a card that is fine. Everything else keeps the
+                generic line with the raw code in the tooltip. */}
+            {bundleError === 'no_model'
+              ? t(
+                  'canvas.asset.noModel',
+                  'Pick a model on the prompt — nothing was sent from this card.',
+                )
+              : bundleError === 'no_scope'
+                ? t(
+                    'canvas.asset.noScope',
+                    'Open this canvas from a workspace — nothing was sent from this card.',
+                  )
+                : t(
+                    'canvas.asset.bundleFailed',
+                    'The last run could not read this asset. Nothing from it was sent.',
+                  )}
           </div>
         )}
 

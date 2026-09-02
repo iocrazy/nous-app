@@ -276,6 +276,13 @@ export function upstreamAssetNodes(
  * a run that silently shipped no references would look identical to one whose
  * asset had none.
  *
+ * `model` is required for the same reason and reported as its own code.
+ * The bundle endpoint declares it `min_length=1`, so an empty one is a 422 —
+ * and the card would then say "could not read this asset", sending the user to
+ * look at the asset when the actual answer is "this prompt has no model
+ * selected". Both preconditions are checked here, before the request, so each
+ * gets an answer that names the thing the user has to fix.
+ *
  * A failed bundle fetch fails only ITS card. One unreachable asset must not
  * throw away the references of the card beside it, and it must not be
  * swallowed either: it lands in that card's `error`.
@@ -303,6 +310,9 @@ export async function resolveAssetInputs(
       };
       if (!opts.scopeId) {
         return { ...base, error: 'no_scope' };
+      }
+      if (!opts.model) {
+        return { ...base, error: 'no_model' };
       }
       let bundle: AssetBundle;
       try {

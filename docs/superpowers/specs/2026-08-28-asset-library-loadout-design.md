@@ -310,6 +310,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 - 复制节点 = 复制引用（同 asset_id）：`asset_id` / `loadout_id` / `selected_file_ids` **不进** `remapSmartTags`，有测试钉住。
 - **旧智能卡迁移**：加载后（不阻塞首屏）对 `character` / `location` / `prop` 节点按 `data.character_id` / `data.entity_id` 调 `GET /assets/resolve-legacy?kind=&legacy_id=`；命中 → **原地**改成 asset 节点（同 node id、同位置，连线不动），未命中（`{"asset_id": null}`，一个真的 200）→ 保留旧卡并打 `Unmigrated` 标记；请求失败 → 什么都不改（「问不到」不是「没有」）。写回走 `setNodesTransient`，不进历史也不强制保存 —— 仅仅打开一块老画布不该产生一次 PUT。
 
+  ⚠️ **代价：`canvas_asset_refs` 要等到下一次真实保存才补上。** 该镜像由 `CanvasService` 在保存路径上从 `nodes_json` 重建，而这里刻意不保存，所以刚迁完卡片的画布**不会**出现在资产页的 Used In 面板里，直到有人编辑并保存那块画布。这是「打开不该是写入」这条取舍的直接后果，不是缺陷；写在这里是因为「卡片明明在画布上，Used In 却说没有」正是 `canvas_asset_refs` 一开始要防的那种读法。要立刻补齐可跑 `backend/scripts/backfill_canvas_asset_refs.py`。
+
 ### 6.4 项目工作区（屏 6 下半）
 
 - 侧栏「素材」组：人物 / 场景库 / 道具 / **服装**（新）；数据源换 `GET /projects/{pid}/assets?type=`。
@@ -376,4 +378,4 @@ P1 与 P2 可并行（不同 worktree）。
 - **投递协议 provider 能力表会过时**：⚠️ **本条已按裁决 A 作废**。能力表**不放 `config.yml`** —— 它已经在代码里（`ProviderCapabilities`），再放一份就是两处真相；「缺省保守 1 张」也不做，未知 model 一律 422 `model_unknown`。过时的缓解是加 provider 时改那一个类，`GET /canvases/generation-capabilities` 与 bundle 同源读它。
 - **权限**：assets 沿用 team membership；system preset prompt 全局只读；跨 team 不可见（RLS + 后端 gate 双层）。
 - **协作者看不到自己在画布上跑出来的图（P4 已知缺口）**：画布生成的产物按**画布所属项目的 scope** 登记，而 Generated 收件箱的门是**团队成员身份**。一个不是团队成员的项目协作者因此跑得动生成、却在收件箱里看不到结果。这与 P3 Task 5 记下的是同一类缺口（项目协作者模型与团队作用域模型不重合），不在 P4 修复范围内。
-- **被「收养」的资产找不回旧卡（P4 已知缺口）**：迁移的 adopt 分支（把老实体并进一个手建资产）**不写 `attrs.legacy_ids`**，所以 `resolve-legacy` 对它们只能回 `null`，画布上的旧卡永远显示 `Unmigrated`。刻意不靠名字猜 —— 那会把卡片接到没人选过的资产上。正解是让 adopt 分支幂等地把 `[table, id]` 追加进 `attrs.legacy_ids`，然后重跑一次迁移把存量补齐（生产当前 adopted 计数为 0）。
+- **被「收养」的资产找不回旧卡** ✅ **P4 收尾波已修**：adopt 分支现在幂等地把 `[table, id]` 追加进 `attrs.legacy_ids`（集合语义，`attrs` 其余键原样保留，不写 `merged_from`），所以被收养的老实体和其它实体一样能被 `resolve-legacy` 找到。**存量需要重跑一次迁移**才补齐——重跑对已打标的行是完全的 no-op（连 `updated_at` 都不动），生产当前 adopted 计数为 0，所以窗口很小。仍然刻意不靠名字猜：那会把卡片接到没人选过的资产上。

@@ -3,9 +3,17 @@
  * 节点条, dual-canvas Phase 2.2): one chip per node type, click drops the
  * node at the viewport centre. Image Gen / Video Gen chips create a
  * Prompt node pre-set to that generation kind (our equivalent of IC's
- * API生成/视频生成 nodes). Standard (kind='smart') canvases only — the
- * lite canvas keeps its four-card create menu, entity canvases keep
- * their preset workflows.
+ * API生成/视频生成 nodes).
+ *
+ * Shown on the Standard canvas AND on the four entity boards (character /
+ * location / prop / costume). The entity kinds were excluded while they seeded
+ * a preset workflow and had nothing to add; P4 deleted those templates, and a
+ * hand-made entity board then opened blank with no visible way to add a node.
+ *
+ * `lite` is still excluded, on its own terms: it deliberately offers a
+ * four-card create menu rather than the full node set (`DragCreateMenu`
+ * filters `SMART_ITEMS` down to upload / group / prompt / loop), and putting
+ * eleven chips above it would hand back exactly what that menu withholds.
  */
 
 import { useCallback, useState } from 'react';
@@ -241,7 +249,7 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
             data-testid={`top-node-chip-${chip.key}`}
             disabled={busy}
             onClick={() => addAtCenter(chip)}
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
             {t(`canvas.nodeBar.${chip.key}`, chip.label)}

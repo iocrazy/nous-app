@@ -1477,3 +1477,125 @@ async def test_resolve_legacy_matches_the_pair_and_only_the_pair(orm_dsn, pg, fx
     finally:
         await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
         await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))
+
+
+# ── the provenance column: WRITE joined to READ (P4 Task 7, final wave) ─────
+
+
+@_skip
+async def test_source_asset_stamp_is_found_by_the_inbox_filter(orm_dsn, pg, fx):
+    """`set_source_asset` (the write) and `list_inbox(source_asset_id=...)`
+    (the read) are pinned in different files against different fixtures. This
+    is the one case that joins them on a real database.
+
+    Two things only Postgres can answer here: whether the BIGINT the write
+    binds is the same value the filter compares (the two sides reach the column
+    through the same ORM attribute, but a Snowflake past 2^53 is exactly where
+    "the same attribute" has stopped being enough in this repo before), and
+    whether the partial index's predicate — `WHERE source_asset_id IS NOT NULL`
+    — leaves unstamped rows reachable by every OTHER filter.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    repo = AssetsRepository()
+    asset = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Stamped Subject")},
+        fx["user_id"],
+    )
+    other = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Unstamped Subject")},
+        fx["user_id"],
+    )
+
+    async def _gen(name: str) -> int:
+        return int(
+            await pg.fetchval(
+                "INSERT INTO generated_media "
+                "(scope_id, creator_id, media_kind, file_path, origin_kind) "
+                "VALUES ($1, $2, 'image', $3, 'canvas_generate') RETURNING id",
+                fx["team_id"],
+                uuid.UUID(fx["user_id"]),
+                f"/tmp/{name}.png",
+            )
+        )
+
+    stamped_id = await _gen("stamped")
+    bare_id = await _gen("bare")
+
+    gm = GeneratedMediaRepository()
+    written = await gm.set_source_asset(
+        stamped_id, int(asset["id"]), scope_id=fx["team_id"]
+    )
+    assert written is not None
+    # The wire shape stringifies ids; the comparison is on the VALUE.
+    assert int(written["source_asset_id"]) == int(asset["id"])
+
+    page = await gm.list_inbox(fx["team_id"], source_asset_id=int(asset["id"]))
+    got = {int(r["id"]) for r in page["items"]}
+    assert got == {stamped_id}, "the write is not reachable by the read it exists for"
+
+    # A different asset does not inherit it, and the unstamped row is still
+    # listable without the filter — the partial index hides nothing.
+    empty = await gm.list_inbox(fx["team_id"], source_asset_id=int(other["id"]))
+    assert empty["items"] == []
+    unfiltered = {int(r["id"]) for r in (await gm.list_inbox(fx["team_id"]))["items"]}
+    assert {stamped_id, bare_id} <= unfiltered
+
+
+@_skip
+async def test_the_stamp_refuses_a_row_in_another_scope(orm_dsn, pg, fx):
+    """`scope_id` is optional on `set_source_asset` and every caller passes it.
+    Without the predicate this is an UPDATE by primary key, and a caller handed
+    a user-supplied `gen_id` could stamp a row in someone else's tenant."""
+    from app.repositories.assets_repository import AssetsRepository
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    repo = AssetsRepository()
+    asset = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Scoped Subject")},
+        fx["user_id"],
+    )
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Other Stamp Team",
+        uuid.UUID(fx["user_id"]),
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        foreign_id = int(
+            await pg.fetchval(
+                "INSERT INTO generated_media "
+                "(scope_id, creator_id, media_kind, file_path, origin_kind) "
+                "VALUES ($1, $2, 'image', '/tmp/foreign.png', 'canvas_generate') "
+                "RETURNING id",
+                int(other_team),
+                uuid.UUID(fx["user_id"]),
+            )
+        )
+
+        gm = GeneratedMediaRepository()
+        refused = await gm.set_source_asset(
+            foreign_id, int(asset["id"]), scope_id=fx["team_id"]
+        )
+
+        # `None` is the typed failure, and the row is genuinely untouched —
+        # a returning-clause miss with a write behind it would be worse than
+        # no check at all.
+        assert refused is None
+        assert (
+            await pg.fetchval(
+                "SELECT source_asset_id FROM generated_media WHERE id = $1",
+                foreign_id,
+            )
+            is None
+        )
+    finally:
+        await pg.execute(
+            "DELETE FROM generated_media WHERE scope_id = $1", int(other_team)
+        )
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))

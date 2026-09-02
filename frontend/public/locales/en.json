@@ -3374,6 +3374,8 @@
       "refsDroppedGroup_one": "{{count}} ({{reason}})",
       "refsDroppedGroup_other": "{{count}} ({{reason}})",
       "bundleFailed": "The last run could not read this asset. Nothing from it was sent.",
+      "noModel": "Pick a model on the prompt — nothing was sent from this card.",
+      "noScope": "Open this canvas from a workspace — nothing was sent from this card.",
       "dropReason": {
         "over_limit": "over the model's limit",
         "no_image_file": "no image file",

@@ -410,13 +410,24 @@ def plan_migration(
         if not g["role_tag"] and role_tag:
             g["role_tag"] = role_tag
 
+    # The table label is READ from ``_ENTITY_KIND_TO_LEGACY_TABLE``, not typed
+    # again here. These call sites are the actual WRITERS of
+    # ``attrs.legacy_ids``; the dict feeds ``legacy_ref_for_entity``, the
+    # reader. While they were two independent literals, the mirror test that
+    # pins them equal could not have turned red if someone re-spelled the
+    # writer alone — the exact half-renamed state the pin exists to prevent.
+    #
+    # ``[...]`` and not ``.get(...)``: an ``entity_type`` outside the mapping
+    # is a row this planner does not know how to attribute, and inventing a
+    # label for it would write provenance nobody can resolve. A KeyError in a
+    # dry-run plan is the loud answer.
     for c in characters:
         _fold(
             c,
             "character",
             c.get("role_tag") or "",
             c.get("portrait_url"),
-            "project_characters",
+            _ENTITY_KIND_TO_LEGACY_TABLE["character"],
         )
     for e in entities:
         _fold(
@@ -424,7 +435,7 @@ def plan_migration(
             e["entity_type"],
             e.get("badge_tag") or "",
             e.get("cover_url"),
-            "project_lib_entities",
+            _ENTITY_KIND_TO_LEGACY_TABLE[e["entity_type"]],
         )
 
     assets = list(groups.values())

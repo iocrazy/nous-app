@@ -3374,6 +3374,8 @@
       "refsDroppedGroup_one": "{{count}} 张（{{reason}}）",
       "refsDroppedGroup_other": "{{count}} 张（{{reason}}）",
       "bundleFailed": "上次运行无法读取该素材，它的内容一项都没有发送。",
+      "noModel": "请先在提示词节点选择模型 — 这张卡片没有发送任何内容。",
+      "noScope": "请从工作区打开此画布 — 这张卡片没有发送任何内容。",
       "dropReason": {
         "over_limit": "超过模型上限",
         "no_image_file": "没有图片文件",

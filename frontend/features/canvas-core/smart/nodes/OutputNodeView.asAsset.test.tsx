@@ -43,6 +43,21 @@ const GENERATED_ITEM = {
   title: 'A dockworker at dawn',
 };
 
+// The toast is MOCKED rather than left absent. Without a provider,
+// `useOptionalToast()` answers null and `toast?.addToast(...)` is a no-op — so
+// the failure case below asserted only that no dialog opened, which is also
+// exactly what a regression that dropped the user-visible report looks like.
+// The `console.error` half was covered; the half the user sees was not.
+const addToast = vi.fn();
+vi.mock('../../../../components/Toast', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useOptionalToast: () => ({ addToast }),
+    useToast: () => ({ addToast }),
+  };
+});
+
 const fetchGeneratedItem = vi.fn();
 vi.mock('../../../../services/generatedService', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -122,6 +137,7 @@ const asAsset = () => screen.getByRole('button', { name: 'As Asset…' });
 
 beforeEach(() => {
   fetchGeneratedItem.mockReset().mockResolvedValue(GENERATED_ITEM);
+  addToast.mockReset();
   dialogProps.mockReset();
   useCanvasCoreStore.getState().reset();
 });
@@ -192,12 +208,26 @@ describe('As Asset…', () => {
     );
   });
 
-  it('opens nothing when the row cannot be read, and does not crash', async () => {
+  it('opens nothing when the row cannot be read, and SAYS so', async () => {
+    // Both halves. "No dialog opened" alone is indistinguishable from a
+    // regression that silently swallowed the failure — the user clicked, and
+    // "nothing happened" is the one outcome that teaches them the button is
+    // broken.
     fetchGeneratedItem.mockRejectedValue(new Error('404'));
     renderOutput(imageOutput());
     fireEvent.click(asAsset());
-    await waitFor(() => expect(fetchGeneratedItem).toHaveBeenCalled());
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
     expect(screen.queryByTestId('save-as-asset-dialog')).toBeNull();
+    expect(addToast.mock.calls[0][1]).toBe('error');
+  });
+
+  it('says nothing on the happy path', async () => {
+    // Negative control: a toast on every click is a toast nobody reads, and it
+    // would make the assertion above pass for the wrong reason.
+    renderOutput(imageOutput());
+    fireEvent.click(asAsset());
+    await waitFor(() => expect(screen.getByTestId('save-as-asset-dialog')).toBeTruthy());
+    expect(addToast).not.toHaveBeenCalled();
   });
 
   it('leaves the node itself untouched — promoting is not a canvas edit', async () => {
