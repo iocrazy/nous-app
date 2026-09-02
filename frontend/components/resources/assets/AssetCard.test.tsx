@@ -76,6 +76,7 @@ const READY_CHARACTER: AssetRow = {
   source: 'manual',
   duplicated_from: null,
   is_system_preset: false,
+  in_library: true,
   tags: { role: ['lead'] },
   sort_order: 0,
   created_by: '11111111-1111-1111-1111-111111111111',
@@ -107,6 +108,7 @@ const PRESET_PROMPT: AssetRow = {
   role_tag: '',
   source: 'system_preset',
   is_system_preset: true,
+  in_library: true,
   readiness: { state: 'ready', missing: [] },
   file_counts_by_slot: {},
   project_ids: [],
@@ -208,14 +210,49 @@ describe('AssetCard — portrait, chips and navigation', () => {
     expect(screen.queryByTestId('asset-card-type-tag')).toBeNull();
   });
 
-  it('names projects when it can and falls back to the raw id when it cannot', () => {
+  it('names projects when it can, and never shows a raw id when it cannot', () => {
     const { unmount } = renderCard({ projectNames: { '55': 'Bamboo Reel' } });
-    expect(screen.getByTestId('asset-card-project').textContent).toBe('Bamboo Reel');
+    const named = screen.getByTestId('asset-card-project');
+    expect(named.textContent).toBe('Bamboo Reel');
+    // The tooltip carries the full NAME here: the chip truncates at 7rem, so
+    // what it hides is the rest of the name, not the id.
+    expect(named.getAttribute('title')).toBe('Bamboo Reel');
     unmount();
+
     // An unnamed project is still a project this asset is used in — dropping
-    // the chip would under-report where the asset appears.
+    // the chip would under-report where the asset appears. But a raw
+    // Snowflake is not a LABEL: it renders abbreviated, with the full id in
+    // the tooltip.
     renderCard();
-    expect(screen.getByTestId('asset-card-project').textContent).toBe('55');
+    const unnamed = screen.getByTestId('asset-card-project');
+    expect(unnamed.textContent).toBe('#55');
+    expect(unnamed.getAttribute('title')).toBe('55');
+  });
+
+  it('abbreviates a real Snowflake id rather than rendering all 18 digits', () => {
+    // The bug this replaces: a project chip on a card fetched without a name
+    // map showed the full BIGINT, wide enough to crowd out the chip beside it
+    // and meaningless to read.
+    const snowflake = '727145299382534055';
+    renderCard({ asset: { ...READY_CHARACTER, project_ids: [snowflake] } });
+    const chip = screen.getByTestId('asset-card-project');
+    expect(chip.textContent).toBe('#…4055');
+    expect(chip.textContent).not.toContain(snowflake);
+    expect(chip.getAttribute('title')).toBe(snowflake);
+  });
+
+  it('marks an asset that is not in the library, and leaves members unmarked', () => {
+    // Only the "out" state gets a badge: on the shelf, membership is the norm
+    // and a badge on every card would be noise. On the project panel — where
+    // both states sit side by side — this is what says which cards the Add To
+    // Library action still applies to.
+    const { unmount } = renderCard({
+      asset: { ...READY_CHARACTER, in_library: false },
+    });
+    expect(screen.getByTestId('not-in-library-badge').textContent).toBe('Not In Library');
+    unmount();
+    renderCard();
+    expect(screen.queryByTestId('not-in-library-badge')).toBeNull();
   });
 
   it('collapses the tail of a long project list into a count', () => {

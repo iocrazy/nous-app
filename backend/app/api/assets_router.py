@@ -236,15 +236,24 @@ async def list_assets(
     q: Optional[str] = Query(None, max_length=200),
     readiness: Optional[str] = Query(None, pattern="^(ready|draft)$"),
     tag: Optional[str] = Query(None, min_length=1, max_length=200),
+    library: str = Query("in", pattern="^(in|out|all)$"),
     sort: str = Query("recent", pattern="^(recent|name|readiness)$"),
     limit: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     """The shelf query.
 
-    ``readiness`` / ``tag`` / ``sort`` are pinned to enumerations rather than
-    accepted loosely: a filter value the server does not understand must be a
-    422, because quietly ignoring it returns the whole shelf looking filtered.
+    ``readiness`` / ``tag`` / ``library`` / ``sort`` are pinned to enumerations
+    rather than accepted loosely: a filter value the server does not understand
+    must be a 422, because quietly ignoring it returns the whole shelf looking
+    filtered.
+
+    ``library`` DEFAULTS TO ``"in"`` (mig 448) — this is the LIBRARY shelf, and
+    membership is explicit, so project-originated rows (``script_import`` /
+    ``migrated``) are absent unless somebody added them. ``out`` shows exactly
+    those, and ``all`` is the pre-448 behaviour. The default is the narrow one
+    on purpose: a shelf that quietly included every name a script mentioned is
+    the state this change exists to end, and a caller that wants both says so.
     """
     try:
         sid = await _gate(scope_id, auth)
@@ -255,6 +264,7 @@ async def list_assets(
             q=q,
             readiness=readiness,
             tag=tag,
+            library=library,
             sort=sort,
             limit=limit,
             offset=offset,
@@ -291,6 +301,18 @@ async def list_project_assets(
         None, pattern="^(character|location|prop|costume|prompt|audio)$"
     ),
 ):
+    """A project's own assets — BOTH membership states (mig 448).
+
+    ``library="all"``, not the shelf's ``"in"``, and this is the whole point of
+    making membership explicit rather than deleting the rows: a project's page
+    is the HOME of the entities that project produced. 一键导入 lands a script's
+    cast list here and it must be visible IMMEDIATELY — filtering this route to
+    library members would make the import look like it did nothing, which is the
+    silent-no-op class this router refuses everywhere else.
+
+    The shelf and this page therefore answer different questions on purpose: the
+    shelf is "my library", this is "what this project uses".
+    """
     try:
         # Guard raises 404/403; _project_gate restates it in this router's shape.
         await _project_gate(project_id, auth, write=False)
@@ -300,6 +322,7 @@ async def list_project_assets(
             asset_type=type,
             project_id=int(project_id),
             q=None,
+            library="all",
             limit=200,
             offset=0,
         )
@@ -378,9 +401,15 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
     responses=_ERRORS,
 )
 async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
-    """Per-type tallies for the scope's own assets — the sidebar's six badges.
+    """Per-type tallies for the scope's own LIBRARY — the sidebar's six badges.
 
-    Counts this scope's non-deleted assets only. Global system presets are
+    Counts this scope's non-deleted, in-library assets only (mig 448): the
+    badges sit above the shelf, and the shelf defaults to ``library='in'``, so
+    counting project-originated rows here would put a number on the sidebar
+    that the grid below it cannot show. Adding one to the library moves its
+    badge; that is the point of the number.
+
+    Global system presets are
     NOT included: they are visible from every scope and belong to none, so
     folding them in would give every team the same non-zero floor that no
     action of theirs can move. The shelf list DOES union them in, so a type's
@@ -471,6 +500,79 @@ async def delete_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     except AssetError as e:
         return _err(e)
     return _ok({"deleted": True})
+
+
+# ── library membership (mig 448) ────────────────────────────────────────────
+#
+# WHY A PAIR OF ROUTES AND NOT JUST PATCH. ``AssetUpdate.in_library`` exists and
+# works — this router keeps that surface because ``AssetUpdate`` mirrors the
+# writable columns and a hole in it is its own kind of surprise. But the CLIENT
+# uses these two, and the difference is not cosmetic:
+#
+#   * The user's act is "add this to my library" / "take it out", not "write
+#     false into a column". A named route is what lets the frontend send an
+#     INTENT, so the button has exactly one call to make and one failure to
+#     report — the typed-echo rule this router is built on.
+#   * A PATCH body is assembled from a form. ``AssetUpdate`` is
+#     ``exclude_unset``, so a client that builds one with ``{...row}`` sends
+#     every key it happens to hold; these routes carry NO body at all and
+#     therefore cannot rewrite a field the user did not touch.
+#
+# Both land on ``AssetsService.set_library_membership`` — one gate, one UPDATE,
+# one shape of refusal. There is no second code path to drift.
+#
+# ORDERING: both sit under ``/assets/{asset_id}/…``, so they cannot capture the
+# literal ``/assets/counts`` above and nothing above can capture them. Pinned by
+# ``tests/api/test_assets_library_membership.py``.
+
+
+@router.post(
+    "/assets/{asset_id}/library",
+    response_model=Envelope[AssetResponse],
+    responses=_ERRORS,
+)
+async def add_to_library(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """Add this asset to the scope's library. Idempotent — adding one that is
+    already in answers the same 200 with the same row, because "it is in your
+    library" is the outcome that was asked for.
+
+    200, not 201: nothing is created. The row already existed and one of its
+    columns moved.
+
+    Answers the ASSET, not ``{"added": true}``: the caller re-renders the card
+    it just acted on, and a bare acknowledgement would make it guess the new
+    state or spend a round trip asking.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().set_library_membership(asset_id, sid, in_library=True)
+        )
+    except AssetError as e:
+        return _err(e)
+
+
+@router.delete(
+    "/assets/{asset_id}/library",
+    response_model=Envelope[AssetResponse],
+    responses=_ERRORS,
+)
+async def remove_from_library(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """Remove this asset from the scope's library. Idempotent, like its twin.
+
+    ⚠️ This is NOT a delete and NOT an unlink. The row keeps its files, links,
+    loadouts and every project reference, and its project pages keep showing it
+    (``GET /projects/{id}/assets`` reads both membership states). Only the shelf
+    and the sidebar badges stop counting it. ``DELETE /assets/{id}`` is the
+    destructive one.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().set_library_membership(asset_id, sid, in_library=False)
+        )
+    except AssetError as e:
+        return _err(e)
 
 
 # ── files ───────────────────────────────────────────────────────────────────

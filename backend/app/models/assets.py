@@ -83,6 +83,13 @@ class Assets(Base):
             "asset_type",
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        # mig 448 — the shelf/counts predicate, membership folded in.
+        Index(
+            "idx_assets_scope_library",
+            "scope_id",
+            "asset_type",
+            postgresql_where=text("in_library AND deleted_at IS NULL"),
+        ),
         Index(
             "uq_assets_scope_type_name",
             text("COALESCE(scope_id, 0)"),
@@ -125,6 +132,15 @@ class Assets(Base):
     duplicated_from: Mapped[int | None] = mapped_column(BigInteger)
     is_system_preset: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # mig 448 — EXPLICIT library membership. True = the user deliberately put
+    # this asset in the scope's library (manual create, duplicate,
+    # save-as-asset); False = it arrived as a side effect of project work
+    # (source ``script_import`` / ``migrated``) and is visible on its project's
+    # page but not on the shelf until someone adds it. Distinct from ``source``
+    # on purpose: provenance is written once, membership is toggled.
+    in_library: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
     )
     tags: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")

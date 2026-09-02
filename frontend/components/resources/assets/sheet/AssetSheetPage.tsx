@@ -41,6 +41,7 @@ import {
   deleteLink,
   duplicateAsset,
   fetchAssetDetail,
+  setAssetLibraryMembership,
   updateAsset,
 } from '../../../../services/assetsService';
 import type {
@@ -240,6 +241,32 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     [scopeId, detail, reload, report],
   );
 
+  /**
+   * Library membership (mig 448). A NAMED action, not a `patch({in_library})`
+   * — see `setAssetLibraryMembership`. The sheet is the second place a user
+   * can adopt a project-originated asset (the first is the project panel), and
+   * it is the only one reachable from the shelf itself.
+   */
+  const toggleLibrary = useCallback(async () => {
+    if (!scopeId || !detail) return;
+    const next = !detail.in_library;
+    try {
+      await setAssetLibraryMembership(scopeId, detail.id, next);
+      addToast(
+        next
+          ? t('assets.library.added', 'Added To Your Library')
+          : t('assets.library.removed', 'Removed From Your Library — Still In This Project'),
+        'success',
+      );
+      // Refetch rather than patching the row locally: `readiness` and the
+      // derived counts come from the server, and a half-updated object is how
+      // the sheet and the shelf start disagreeing.
+      reload();
+    } catch (err) {
+      report(err);
+    }
+  }, [scopeId, detail, addToast, t, reload, report]);
+
   const addLink = useCallback(
     async (toAssetId: string, relation: AssetLinkRelation) => {
       if (!scopeId || !detail) return;
@@ -422,7 +449,12 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
 
       <div className="flex gap-6">
         <div className="flex min-w-0 flex-1 flex-col gap-6">
-          <AssetSheetHeader detail={detail} readOnly={readOnly} onPatch={(b) => void patch(b)}>
+          <AssetSheetHeader
+            detail={detail}
+            readOnly={readOnly}
+            onPatch={(b) => void patch(b)}
+            onToggleLibrary={() => void toggleLibrary()}
+          >
             {hasLoadouts(detail.asset_type) && scopeId && (
               <LoadoutChips
                 scopeId={scopeId}

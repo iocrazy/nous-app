@@ -338,3 +338,36 @@ def test_asset_counts_response_rejects_a_non_integer_tally():
     answered with a string must fail loudly, not ship a NaN badge."""
     with pytest.raises(ValidationError):
         AssetCountsResponse(character="many")
+
+
+# ── mig 448: explicit library membership ───────────────────────────────────
+
+
+def test_in_library_is_on_the_response_and_the_patch_body():
+    """The response carries it because a client must never have to infer
+    membership from ``source``; the PATCH body carries it because
+    ``AssetUpdate`` mirrors the writable columns."""
+    assert "in_library" in AssetResponse.model_fields
+    assert "in_library" in AssetUpdate.model_fields
+
+
+def test_the_response_defaults_to_a_member():
+    """NOT NULL DEFAULT true in the column, so the model's fallback must agree:
+    a row whose key somehow went missing must read as "in", never as "out"."""
+    assert AssetResponse.model_fields["in_library"].default is True
+
+
+def test_a_client_cannot_set_membership_at_creation():
+    """``AssetCreate`` deliberately has no ``in_library``: membership at
+    creation is decided by WHICH SERVER PATH created the row (deliberate act →
+    in, script import / migration → out), and that is a keyword-only argument
+    on ``create_asset`` no request body can reach — the same stance
+    ``AssetCreateSource`` takes for provenance.
+
+    ``extra`` is not forbidden on ``AssetCreate``, so the field would be
+    silently dropped rather than refused; this asserts the model does not
+    declare it at all.
+    """
+    assert "in_library" not in AssetCreate.model_fields
+    made = AssetCreate(asset_type="character", name="Sang Yao", in_library=False)
+    assert not hasattr(made, "in_library")

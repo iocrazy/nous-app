@@ -102,6 +102,32 @@ def _tag_match(tag: str):
     )
 
 
+LIBRARY_FILTERS = ("in", "out", "all")
+
+
+def _library_predicate(library: str):
+    """The ``assets.in_library`` predicate for one ``library=`` value, or None
+    for ``all``.
+
+    Returns None rather than a tautology (``true``) for ``all`` so the caller
+    emits NO predicate at all — a compiled-SQL pin can then tell "unfiltered"
+    from "filtered to everything", which a ``WHERE true`` would hide.
+
+    An unknown value RAISES, for the same reason ``_order_by`` does: silently
+    falling back to ``in`` would answer a different question than the caller
+    asked and look exactly like a working filter. The router pins the
+    vocabulary with a ``pattern=``, so reaching this raise is a programming
+    error, not user input.
+    """
+    if library == "all":
+        return None
+    if library == "in":
+        return Assets.in_library.is_(True)
+    if library == "out":
+        return Assets.in_library.is_(False)
+    raise ValueError(f"unsupported library filter: {library!r}")
+
+
 def _order_by(sort: str):
     """ORDER BY for the two orderings SQL can answer.
 
@@ -231,12 +257,19 @@ class AssetsRepository:
         project_id: Optional[int] = None,
         q: Optional[str] = None,
         tag: Optional[str] = None,
+        library: str = "in",
         sort: str = "recent",
         limit: int = 60,
         offset: int = 0,
     ):
         """The SELECT behind :meth:`list`, split out so it can be compiled and
         asserted without a database (tests/services/assets/test_assets_repository_sql.py).
+
+        ``library`` defaults to ``"in"`` HERE as well as at the router, and that
+        is deliberate duplication: this is the shelf's query, and a repo default
+        of "all" would mean any caller that forgot the argument silently widened
+        the library to include project-originated rows. The one caller that
+        genuinely wants both states (``GET /projects/{id}/assets``) says so.
         """
         limit = max(1, min(int(limit), 200))
         stmt = (
@@ -246,6 +279,9 @@ class AssetsRepository:
             )
             .where(Assets.deleted_at.is_(None))
         )
+        membership = _library_predicate(library)
+        if membership is not None:
+            stmt = stmt.where(membership)
         if asset_type:
             stmt = stmt.where(Assets.asset_type == asset_type)
         if project_id is not None:
@@ -323,6 +359,12 @@ class AssetsRepository:
             # preset MAY carry a scope_id; the scope predicate alone would
             # therefore not be enough and this is not belt-and-braces.
             .where(Assets.is_system_preset.is_(False))
+            # mig 448: the badges count the LIBRARY, and the library is what
+            # somebody deliberately added. Counting project-originated rows here
+            # would put a number on the sidebar that the shelf below it cannot
+            # show — the exact "badge and grid silently disagree" failure the
+            # preset exclusion above already exists to prevent.
+            .where(Assets.in_library.is_(True))
             .where(Assets.deleted_at.is_(None))
             .group_by(Assets.asset_type)
         )

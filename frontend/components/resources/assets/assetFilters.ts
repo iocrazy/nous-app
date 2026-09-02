@@ -22,7 +22,11 @@
 // enumerations, and sharing the vocabulary helpers would invite sharing the
 // vocabularies next.
 
-import type { AssetListOptions, AssetType } from '../../../services/assetsService';
+import type {
+  AssetLibraryFilter,
+  AssetListOptions,
+  AssetType,
+} from '../../../services/assetsService';
 
 // ─── Vocabularies (mirrored from `assets_router.list_assets`) ───────────────
 //
@@ -35,6 +39,15 @@ export type ReadinessFilter = (typeof READINESS_VALUES)[number];
 
 export const SORT_VALUES = ['recent', 'name', 'readiness'] as const;
 export type AssetSort = (typeof SORT_VALUES)[number];
+
+/** Library membership (mig 448). Mirrors `assets_router.list_assets`'s
+ *  `library` param — see `AssetLibraryFilter` for what each value means. */
+export const LIBRARY_VALUES = ['in', 'out', 'all'] as const;
+
+/** The router's own default: the shelf IS the library. Serializing it would
+ *  put a param in the URL that produces the identical request, so like
+ *  `DEFAULT_SORT` it is omitted rather than written. */
+export const DEFAULT_LIBRARY: AssetLibraryFilter = 'in';
 
 /** The router's own default. Serializing it would put a param in the URL that
  *  produces the identical request — so it is omitted, not written. */
@@ -50,6 +63,14 @@ export const ASSET_PAGE_SIZE = 60;
 export interface AssetFilters {
   projectId: string | null;
   readiness: ReadinessFilter | null;
+  /**
+   * Which side of `in_library` the shelf shows. NOT nullable, unlike the other
+   * three: "no library filter" is not a state this shelf has — every request
+   * carries one of the three values, and `in` is simply the default. A null
+   * here would be a fourth value meaning the same as `in`, which is how a
+   * default becomes impossible to change.
+   */
+  library: AssetLibraryFilter;
   /** One tag VALUE (not `group:value`) — the server matches it across every
    *  tag group, which is what `tags` being a jsonb object of group → values
    *  makes possible. */
@@ -58,7 +79,13 @@ export interface AssetFilters {
 }
 
 export function defaultAssetFilters(): AssetFilters {
-  return { projectId: null, readiness: null, tag: null, sort: DEFAULT_SORT };
+  return {
+    projectId: null,
+    readiness: null,
+    library: DEFAULT_LIBRARY,
+    tag: null,
+    sort: DEFAULT_SORT,
+  };
 }
 
 // ─── Parse / serialize ──────────────────────────────────────────────────────
@@ -87,6 +114,7 @@ export function parseAssetFilters(searchParams: URLSearchParams): AssetFilters {
   return {
     projectId: nonEmpty(searchParams.get('project_id')),
     readiness: oneOf(searchParams.get('readiness'), READINESS_VALUES),
+    library: oneOf(searchParams.get('library'), LIBRARY_VALUES) ?? DEFAULT_LIBRARY,
     tag: nonEmpty(searchParams.get('tag')),
     sort: oneOf(searchParams.get('sort'), SORT_VALUES) ?? DEFAULT_SORT,
   };
@@ -97,6 +125,7 @@ export function serializeAssetFilters(filters: AssetFilters): URLSearchParams {
   const sp = new URLSearchParams();
   if (filters.projectId) sp.set('project_id', filters.projectId);
   if (filters.readiness) sp.set('readiness', filters.readiness);
+  if (filters.library !== DEFAULT_LIBRARY) sp.set('library', filters.library);
   if (filters.tag) sp.set('tag', filters.tag);
   if (filters.sort !== DEFAULT_SORT) sp.set('sort', filters.sort);
   return sp;
@@ -110,9 +139,20 @@ export function serializeAssetFilters(filters: AssetFilters): URLSearchParams {
  *
  * `sort` is excluded on purpose: re-ordering a shelf never removes a row from
  * it, so a sorted-but-unfiltered empty shelf is genuinely empty.
+ *
+ * `library` counts only as `out`. `in` is the DEFAULT view — an empty shelf
+ * there is the honest "you have no characters yet", and reporting it as
+ * "nothing matches your filters" would send the user hunting for a filter they
+ * never set. `all` is the WIDEST possible query, so an empty result under it
+ * cannot have been narrowed by anything.
  */
 export function hasActiveAssetFilters(filters: AssetFilters): boolean {
-  return filters.projectId !== null || filters.readiness !== null || filters.tag !== null;
+  return (
+    filters.projectId !== null ||
+    filters.readiness !== null ||
+    filters.library === 'out' ||
+    filters.tag !== null
+  );
 }
 
 /**
@@ -133,6 +173,7 @@ export function assetListOptionsFor(
   if (assetType) opts.type = assetType;
   if (filters.projectId) opts.projectId = filters.projectId;
   if (filters.readiness) opts.readiness = filters.readiness;
+  if (filters.library !== DEFAULT_LIBRARY) opts.library = filters.library;
   if (filters.tag) opts.tag = filters.tag;
   if (filters.sort !== DEFAULT_SORT) opts.sort = filters.sort;
   return opts;

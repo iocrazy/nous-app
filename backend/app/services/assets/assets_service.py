@@ -102,7 +102,7 @@ CLEARABLE_FIELDS = frozenset(
 
 # The header a duplicate carries over verbatim. Everything NOT here is decided
 # by ``duplicate`` (name / source / duplicated_from / is_system_preset /
-# scope_id / cover_file_id) or left to the column default (id, the timestamps,
+# in_library / scope_id / cover_file_id) or left to the column default (id, the timestamps,
 # ``sort_order`` — a manual shelf position belongs to the row that earned it).
 # An explicit tuple rather than "every column except…": a new column added to
 # ``assets`` should have to be classified once, here, instead of joining the
@@ -305,9 +305,19 @@ class AssetsService:
         user_id: Optional[str],
         *,
         source: Optional[AssetSource] = None,
+        in_library: bool = True,
     ) -> Dict[str, Any]:
         """Create one asset — and, for a character, its Default loadout — in ONE
         transaction.
+
+        ``in_library`` (mig 448) defaults to True and is keyword-only and
+        SERVER-SIDE, exactly like ``source``: ``AssetCreate`` does not carry the
+        field, so no request body can reach it. True is the right default
+        because every path that reaches this method through a ROUTE is a
+        deliberate act — a hand-made asset (``POST /assets``), a Save-as-Asset
+        from the Generated inbox. The one caller that passes False is
+        :meth:`_import_one`, where the names come from a script rather than
+        from a user picking them.
 
         ``source`` overrides the payload's provenance and is keyword-only and
         SERVER-SIDE: ``AssetCreate.source`` is narrowed to ``manual|generated``
@@ -355,6 +365,7 @@ class AssetsService:
         fields = payload.model_dump()
         if source is not None:
             fields["source"] = source
+        fields["in_library"] = bool(in_library)
         async with maybe_unit_of_work(is_configured() and not in_unit_of_work()):
             clash = await self.assets.find_by_name(
                 int(scope_id), fields["asset_type"], fields["name"]
@@ -407,8 +418,9 @@ class AssetsService:
         ``readiness`` and ``sort="readiness"`` are handled HERE, not in SQL:
         readiness is derived per row (``with_derived`` folds the batch slot
         counts in), so there is no column to filter or order by. Everything
-        else — ``asset_type`` / ``project_id`` / ``q`` / ``tag`` / the two SQL
-        orderings / limit / offset — is delegated unchanged.
+        else — ``asset_type`` / ``project_id`` / ``q`` / ``tag`` / ``library``
+        (mig 448) / the two SQL orderings / limit / offset — is delegated
+        unchanged.
 
         Known limitation: because the readiness filter runs after the page has
         been fetched, it thins THAT page rather than paging over the filtered
@@ -504,6 +516,41 @@ class AssetsService:
             raise AssetError(404, "asset_not_found", "Asset not found")
         return (await self._derived([updated]))[0]
 
+    async def set_library_membership(
+        self, asset_id: int, scope_id: int, *, in_library: bool
+    ) -> Dict[str, Any]:
+        """Add this asset to / remove it from the scope's library (mig 448).
+
+        The write behind ``POST``/``DELETE /assets/{id}/library``. It is the
+        same UPDATE ``update_asset`` would perform for ``{"in_library": ...}``
+        and goes through the same ``_require_writable`` gate — a system preset
+        is a 403 here too, because a global row's membership is not one team's
+        to change.
+
+        **Idempotent, and it says so by returning the row rather than a
+        boolean.** Adding an asset that is already in reports the same 200 and
+        the same body as the call that moved it; "already there" is the
+        outcome the user asked for, not a refusal. A caller that needs to know
+        whether anything moved compares ``in_library`` against what it held.
+        Answering 409 for a no-op would make the panel's Add To Library button
+        fail on a double click.
+
+        Removing does NOT delete, unlink or hide anything else: the asset keeps
+        its files, links, loadouts and every ``asset_project_refs`` row, and its
+        project pages keep showing it (that route reads ``library='all'``). Only
+        the shelf and the sidebar badges stop counting it.
+        """
+        await self._require_writable(asset_id, scope_id)
+        updated = await self.assets.update(
+            int(asset_id), int(scope_id), {"in_library": bool(in_library)}
+        )
+        if not updated:
+            # Soft-deleted (or left the scope) between the gate and the UPDATE
+            # — the same race ``update_asset`` answers as an honest 404 rather
+            # than feeding None to ``_derived``.
+            raise AssetError(404, "asset_not_found", "Asset not found")
+        return (await self._derived([updated]))[0]
+
     async def duplicate(
         self,
         asset_id: int,
@@ -561,6 +608,12 @@ class AssetsService:
                 "source": "duplicated",
                 "duplicated_from": int(src["id"]),
                 "is_system_preset": False,
+                # mig 448: duplicating is a deliberate act, so the COPY is a
+                # library member whatever the source was. Copying the source's
+                # membership would make "duplicate this script-imported
+                # character so I can edit it" produce a second row the shelf
+                # still refuses to show — a duplicate the user cannot find.
+                "in_library": True,
                 "created_by": user_id,
                 "cover_file_id": await self._cover_for_copy(src, scope_id),
             }
@@ -1613,6 +1666,11 @@ class AssetsService:
                 AssetCreate(asset_type=asset_type, name=name),
                 user_id,
                 source=_IMPORT_SOURCE,
+                # mig 448: a script's cast list is the PROJECT's, not the
+                # library's. These rows show on the project page immediately
+                # (that route reads ``library='all'``) and reach the shelf only
+                # when someone clicks Add To Library.
+                in_library=False,
             )
             asset_id, created = int(row["id"]), True
         except AssetError as e:

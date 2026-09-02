@@ -1722,7 +1722,8 @@
       "tag": "Tag",
       "anyTag": "Any Tag",
       "noTags": "No Tags On This Page",
-      "sort": "Sort"
+      "sort": "Sort",
+      "library": "Library"
     },
     "sort": {
       "recent": "Recently Updated",
@@ -1742,7 +1743,8 @@
     "empty": {
       "none": "No Assets Yet",
       "ofType": "No {{type}} Yet",
-      "filtered": "No Assets Match These Filters"
+      "filtered": "No Assets Match These Filters",
+      "nothingOutOfLibrary": "Every Asset Is Already In Your Library"
     },
     "dialog": {
       "title": "New {{type}}",
@@ -1968,6 +1970,20 @@
       "unlink": "Remove {{name}} From This Project",
       "unlinkHint": "Removes it from this project only — the asset stays in your library",
       "unlinked": "Removed From This Project — Still In Your Library"
+    },
+    "library": {
+      "addHint": "Puts it on your library shelf so other projects can use it",
+      "addNamed": "Add {{name}} To Your Library",
+      "addToLibrary": "Add To Library",
+      "added": "Added To Your Library",
+      "all": "All",
+      "in": "In Library",
+      "notInLibrary": "Not In Library",
+      "notInLibraryHint": "Lives on this project only — add it to reuse it elsewhere",
+      "out": "Not In Library",
+      "removeHint": "Takes it off your library shelf — it stays in this project",
+      "removeNamed": "Remove {{name}} From Your Library",
+      "removed": "Removed From Your Library — Still In This Project"
     }
   },
   "generated": {

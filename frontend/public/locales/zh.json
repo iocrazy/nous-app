@@ -1722,7 +1722,8 @@
       "tag": "标签",
       "anyTag": "全部标签",
       "noTags": "本页没有标签",
-      "sort": "排序"
+      "sort": "排序",
+      "library": "资产库"
     },
     "sort": {
       "recent": "最近更新",
@@ -1742,7 +1743,8 @@
     "empty": {
       "none": "还没有任何资产",
       "ofType": "还没有{{type}}",
-      "filtered": "没有符合当前筛选条件的资产"
+      "filtered": "没有符合当前筛选条件的资产",
+      "nothingOutOfLibrary": "所有资产都已在你的资产库里"
     },
     "dialog": {
       "title": "新建{{type}}",
@@ -1968,6 +1970,20 @@
       "unlink": "把 {{name}} 移出本项目",
       "unlinkHint": "仅从本项目移除——资产仍保留在资产库中",
       "unlinked": "已移出本项目——资产仍在资产库中"
+    },
+    "library": {
+      "addHint": "加到资产库货架上，其他项目就能复用",
+      "addNamed": "把 {{name}} 加入资产库",
+      "addToLibrary": "加入资产库",
+      "added": "已加入资产库",
+      "all": "全部",
+      "in": "已在资产库",
+      "notInLibrary": "不在资产库",
+      "notInLibraryHint": "只属于这个项目 —— 加入资产库后其他项目也能用",
+      "out": "不在资产库",
+      "removeHint": "从资产库货架移走 —— 它仍留在本项目里",
+      "removeNamed": "把 {{name}} 移出资产库",
+      "removed": "已移出资产库 —— 仍留在本项目"
     }
   },
   "generated": {

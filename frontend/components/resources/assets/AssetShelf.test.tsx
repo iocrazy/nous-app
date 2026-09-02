@@ -48,6 +48,12 @@ const translate = (key: string, opts?: string | Record<string, unknown>): string
     'assets.filter.tag': 'Tag',
     'assets.filter.anyTag': 'Any Tag',
     'assets.filter.sort': 'Sort',
+    'assets.filter.library': 'Library',
+    'assets.library.in': 'In Library',
+    'assets.library.out': 'Not In Library',
+    'assets.library.all': 'All',
+    'assets.library.notInLibrary': 'Not In Library',
+    'assets.empty.nothingOutOfLibrary': 'Every Asset Is Already In Your Library',
     'assets.sort.recent': 'Recently Updated',
     'assets.sort.name': 'Name',
     'assets.sort.readiness': 'Readiness',
@@ -148,6 +154,7 @@ const CHARACTER: AssetRow = {
   source: 'manual',
   duplicated_from: null,
   is_system_preset: false,
+  in_library: true,
   tags: { role: ['lead'] },
   sort_order: 0,
   created_by: '11111111-1111-1111-1111-111111111111',
@@ -168,6 +175,7 @@ const PRESET: AssetRow = {
   role_tag: '',
   source: 'system_preset',
   is_system_preset: true,
+  in_library: true,
   file_counts_by_slot: {},
   project_ids: [],
   loadout_count: 0,
@@ -289,6 +297,68 @@ describe('AssetShelf — the request', () => {
     expect(listAssets.mock.calls[1][1]).toMatchObject({ readiness: 'draft' });
     // …and it is in the URL, so the view is a link somebody can paste.
     expect(new URLSearchParams(location.search).get('readiness')).toBe('draft');
+  });
+});
+
+describe('AssetShelf — library membership (mig 448)', () => {
+  it('defaults to the library and sends NO library param', async () => {
+    // The server's own default is `in`. Sending it explicitly would produce
+    // the identical request and put a param in the URL that says nothing —
+    // but the DEFAULT itself is the load-bearing half of this change, so what
+    // this pins is that nothing widens it back.
+    renderAt('/team/42/resources/assets/character');
+    await waitFor(() => expect(listAssets).toHaveBeenCalled());
+    const [, opts] = listAssets.mock.calls[0];
+    expect('library' in opts).toBe(false);
+    expect(new URLSearchParams(location.search).has('library')).toBe(false);
+  });
+
+  it('the chip re-requests with the value and puts it in the URL', async () => {
+    renderAt('/team/42/resources/assets/character');
+    await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(1));
+
+    // Addressed by the chip's own id, not by its label: unlike the other
+    // chips this one ALWAYS renders a summary ("Library · In Library"),
+    // because there is no "unset" state for it to fall back to.
+    const chip = document.querySelector('[data-chip-id="library"] button');
+    expect(chip, 'the library chip is on the filter row').toBeTruthy();
+    fireEvent.click(chip as Element);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Not In Library' }));
+    await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(2));
+    expect(listAssets.mock.calls[1][1]).toMatchObject({ library: 'out' });
+    // In the URL, so the view is a link somebody can paste — there is no
+    // local chip state that could disagree with it.
+    expect(new URLSearchParams(location.search).get('library')).toBe('out');
+  });
+
+  it('an empty out-of-library shelf says why, not "no assets match"', async () => {
+    // A user who just clicked "Not In Library" and read the generic filtered
+    // line would go hunting for a filter they never set. The answer here is
+    // the good news that there is nothing left to adopt.
+    renderAt('/team/42/resources/assets/character?library=out');
+    await waitFor(() => expect(listAssets).toHaveBeenCalled());
+    expect(listAssets.mock.calls[0][1]).toMatchObject({ library: 'out' });
+    expect(screen.getByText('Every Asset Is Already In Your Library')).toBeTruthy();
+    expect(screen.queryByText('No Assets Match These Filters')).toBeNull();
+  });
+
+  it('a library value the server would refuse never reaches the request', async () => {
+    renderAt('/team/42/resources/assets/character?library=maybe');
+    await waitFor(() => expect(listAssets).toHaveBeenCalled());
+    const [, opts] = listAssets.mock.calls[0];
+    expect('library' in opts).toBe(false);
+  });
+
+  it('names the project on a card chip instead of showing the raw id', async () => {
+    // The bug: the chips rendered 15-digit Snowflakes. The shelf already
+    // fetches the project list for its Project filter, so the map is free.
+    fetchProjects.mockResolvedValue([{ id: '55', name: 'Bamboo Reel' }]);
+    listAssets.mockResolvedValue([CHARACTER]);
+    renderAt('/team/42/resources/assets/character');
+    await waitFor(() => expect(screen.getAllByTestId('asset-card')).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-card-project').textContent).toBe('Bamboo Reel'),
+    );
   });
 });
 

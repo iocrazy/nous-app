@@ -28,11 +28,35 @@ import { ASSET_TYPE_ICON, slotLabelKey, typeSingularKey } from './assetTypeMeta'
 /** How many project chips fit before the rest become "+N". */
 const PROJECT_CHIP_LIMIT = 2;
 
+/**
+ * What a project chip shows when no name is known for the id.
+ *
+ * A Snowflake id is 15-19 digits. Rendering it raw was the bug this replaces:
+ * the chip read as a wall of numbers, wide enough to crowd out the chip beside
+ * it and meaningless to anyone. A short `#…1234` is honest about being an id
+ * and about being abbreviated, and the caller pairs it with a `title` carrying
+ * the full value so the information is still reachable.
+ *
+ * Ids short enough to be readable are shown whole — the `#` prefix alone
+ * already says "this is an id, not a name". Exported for its test: the cutoff
+ * is the part worth pinning.
+ */
+export function shortProjectLabel(projectId: string): string {
+  return projectId.length > 6 ? `#…${projectId.slice(-4)}` : `#${projectId}`;
+}
+
 export interface AssetCardProps {
   asset: AssetRow;
-  /** Project id → display name, for the chips. Ids with no entry render as
-   *  the raw id rather than disappearing: a project the caller could not
-   *  name is still a project this asset is used in. */
+  /** Project id → display name, for the chips.
+   *
+   *  An id with no entry still renders — a project the caller could not name
+   *  is still a project this asset is used in, and dropping the chip would
+   *  under-report where the asset is used. It falls back to
+   *  {@link shortProjectLabel} with the full id in a `title`, never to the raw
+   *  15-digit Snowflake as the visible label.
+   *
+   *  A caller that omits the map entirely gets the fallback for EVERY chip, so
+   *  pass it wherever a project list is already on hand. */
   projectNames?: Record<string, string>;
   /** The All tab shows a type tag; a single-type shelf does not need one. */
   showTypeTag?: boolean;
@@ -168,6 +192,24 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           </div>
         )}
 
+        {/* Library membership (mig 448). Rendered ONLY when the asset is out
+            — a badge on every in-library card would be noise on the shelf,
+            where being in the library is the norm. On the project panel, where
+            both states sit side by side, this is what tells the user which
+            cards the Add To Library action still applies to. */}
+        {asset.in_library === false && (
+          <span
+            data-testid="not-in-library-badge"
+            title={t(
+              'assets.library.notInLibraryHint',
+              'Lives on this project only — add it to reuse it elsewhere',
+            )}
+            className="absolute bottom-1.5 left-1.5 rounded-full border border-line-strong bg-card/90 px-1.5 text-[10px] font-medium text-content-3"
+          >
+            {t('assets.library.notInLibrary', 'Not In Library')}
+          </span>
+        )}
+
         {showTypeTag && (
           <span
             data-testid="asset-card-type-tag"
@@ -237,15 +279,24 @@ export const AssetCard: React.FC<AssetCardProps> = ({
                   })}`}
           </span>
 
-          {shownProjects.map((projectId) => (
-            <span
-              key={projectId}
-              data-testid="asset-card-project"
-              className="max-w-[7rem] truncate rounded-full border border-line-strong px-1.5 text-[10px] text-content-3"
-            >
-              {projectNames?.[projectId] ?? projectId}
-            </span>
-          ))}
+          {shownProjects.map((projectId) => {
+            const name = projectNames?.[projectId];
+            return (
+              <span
+                key={projectId}
+                data-testid="asset-card-project"
+                data-project-id={projectId}
+                data-project-named={name !== undefined}
+                // The full id in the tooltip either way: when the name is
+                // known the chip is truncated, and when it is not the label is
+                // abbreviated. Both hide something the user may need.
+                title={name ?? projectId}
+                className="max-w-[7rem] truncate rounded-full border border-line-strong px-1.5 text-[10px] text-content-3"
+              >
+                {name ?? shortProjectLabel(projectId)}
+              </span>
+            );
+          })}
           {overflowProjects > 0 && (
             <span className="text-[10px] tabular-nums text-content-4">
               {t('assets.card.moreProjects', {

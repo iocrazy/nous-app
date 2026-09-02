@@ -48,6 +48,10 @@ def asset_row(**over):
         "source": "manual",
         "duplicated_from": None,
         "is_system_preset": False,
+        # mig 448 — ``_serialize`` emits every ``assets`` column, so the fixture
+        # carries it too. Leaving it out would let the response model's default
+        # stand in for a field the real wire always sends.
+        "in_library": True,
         "tags": {},
         "sort_order": 0,
         "created_by": USER,

@@ -44,6 +44,10 @@ class FakeAssetsRepo:
             "source": "manual",
             "duplicated_from": None,
             "is_system_preset": False,
+            # mig 448 — the real column is NOT NULL DEFAULT true, so a row that
+            # reaches this fake without the key must look like one the database
+            # produced, not like one missing a field.
+            "in_library": True,
             "tags": {},
             "sort_order": 0,
             "created_by": USER,

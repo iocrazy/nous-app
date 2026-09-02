@@ -1513,3 +1513,73 @@ async def test_a_personal_projects_entity_canvas_links_after_the_mapping(
     # scan still sees it, so it must still be counted rather than quietly
     # disappearing from the report.
     assert again["canvases_no_scope"] >= 1
+
+
+# ── 12. mig 448: a migrated row is not a library member ─────────────────────
+
+
+@_skip
+async def test_apply_creates_outside_the_library_and_never_evicts_an_adopted_row(
+    orm_dsn, pg, fx
+):
+    """The migration's half of explicit library membership.
+
+    Two facts, and the second is the one that could silently undo a user's
+    decision:
+
+    * a row ``_apply`` CREATES starts ``in_library = false``. These entities
+      only ever existed inside one project; the project page still shows them
+      (that route reads both states), the library shelf does not until someone
+      adopts them.
+    * a row ``_apply`` ADOPTS keeps whatever membership it already had. The
+      adoption branch matches by ``(scope, type, lower(name))`` and may land on
+      a hand-made asset the user deliberately put in their library — writing
+      ``false`` over it would make a re-run of an admin-only maintenance
+      workflow quietly evict rows from the user's shelf.
+
+    Both are column values on the server, which is where the ORM default and
+    the explicit keyword can disagree without any unit test noticing.
+    """
+    from app.workflows.backfill_assets_from_project_entities import _apply
+
+    p0, p1, _p2 = fx["project_ids"]
+    adopted = _uniq("Adopted Lead")
+    fresh = _uniq("Migrated Extra")
+
+    adopted_id = int(
+        await pg.fetchval(
+            "INSERT INTO assets (scope_id, asset_type, name, source, in_library, "
+            "created_by) VALUES ($1, 'character', $2, 'manual', true, $3) RETURNING id",
+            fx["team_id"],
+            adopted,
+            uuid.UUID(fx["user_id"]),
+        )
+    )
+    await _seed_character(pg, p0, adopted)
+    await _seed_character(pg, p1, fresh)
+
+    chars, ents = await _rows_for(pg, fx["project_ids"])
+    applied = await _apply(_plan_for(fx, chars, ents), fx["user_id"])
+    assert applied["counts"]["created"] == 1 and applied["counts"]["existing"] == 1
+
+    created_id = await pg.fetchval(
+        "SELECT id FROM assets WHERE scope_id = $1 AND name = $2", fx["team_id"], fresh
+    )
+    assert (
+        await pg.fetchval("SELECT in_library FROM assets WHERE id = $1", created_id)
+        is False
+    ), "a migrated row landed in the library"
+    assert (
+        await pg.fetchval("SELECT in_library FROM assets WHERE id = $1", adopted_id)
+        is True
+    ), "adoption evicted an asset the user had already added to their library"
+
+    # It is out of the LIBRARY, not out of the PROJECT: the ref that makes it
+    # visible on its project page still landed. Without this the assertion
+    # above would also pass for a row the migration failed to link at all.
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_project_refs WHERE asset_id = $1", created_id
+        )
+        == 1
+    )

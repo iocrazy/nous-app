@@ -67,6 +67,19 @@ you add a caller rather than trusting the number:
 LinkRelation = Literal["wears", "holds", "ambience_of", "voice_of"]
 ReadinessState = Literal["ready", "draft"]
 
+LibraryFilter = Literal["in", "out", "all"]
+"""``GET /assets?library=`` — which side of ``assets.in_library`` to return.
+
+Three values, not a boolean, because "both" is a real answer this surface
+needs: the shelf asks ``in`` (the library IS the members), the project panel
+asks ``all`` (a project's page is the home of its own entities whether or not
+anyone adopted them), and ``out`` is what makes the shelf's "Not In Library"
+chip able to show the user what is waiting to be adopted.
+
+A boolean with a null default would have collapsed "all" and "unspecified" into
+the same value, which is the ambiguity that makes a default impossible to
+change later."""
+
 
 class AssetCreate(BaseModel):
     asset_type: AssetType
@@ -120,6 +133,17 @@ class AssetUpdate(BaseModel):
     cover_file_id: Optional[SnowflakeId] = None
     tags: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
+    # mig 448. PATCH-able because it is an ordinary writable column and
+    # ``AssetUpdate`` mirrors those — but the UI does NOT drive it from here:
+    # adding to / removing from the library is one named action, and it has its
+    # own pair of routes (``POST``/``DELETE /assets/{id}/library``) so the
+    # client sends an intent rather than a field write. Both land on the same
+    # UPDATE through the same ``_require_writable`` gate.
+    #
+    # NOT nullable: ``in_library`` is NOT NULL, so it is absent from
+    # ``CLEARABLE_FIELDS`` and an explicit ``{"in_library": null}`` is a typed
+    # 422 (``field_not_nullable``), never a dropped key.
+    in_library: Optional[bool] = None
 
 
 class AssetReadiness(BaseModel):
@@ -146,6 +170,9 @@ class AssetResponse(BaseModel):
     source: AssetSource = "manual"
     duplicated_from: Optional[str] = None
     is_system_preset: bool = False
+    # mig 448 — see ``Assets.in_library``. Always present (NOT NULL column), so
+    # a client never has to infer membership from ``source``.
+    in_library: bool = True
     tags: Dict[str, Any] = Field(default_factory=dict)
     sort_order: int = 0
     created_by: Optional[str] = None

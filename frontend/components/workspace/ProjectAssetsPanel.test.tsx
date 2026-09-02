@@ -50,6 +50,11 @@ const translate = (key: string, opts?: string | Record<string, unknown>): string
     'assets.project.importTypeCount': '{{type}} {{n}}',
     'assets.project.importNothing': 'Your Scripts Name No Characters Or Locations Yet',
     'assets.project.scopeUnknown': 'Workspace Not Resolved Yet',
+    'assets.library.notInLibrary': 'Not In Library',
+    'assets.library.added': 'Added To Your Library',
+    'assets.library.removed': 'Removed From Your Library — Still In This Project',
+    'assets.library.addNamed': 'Add {{name}} To Your Library',
+    'assets.library.removeNamed': 'Remove {{name}} From Your Library',
     'assets.err.empty_name': 'The Script Left This Name Blank',
     'assets.err.project_scope_mismatch': 'That Project Belongs To A Different Workspace',
     'assets.err.generic': 'Something went wrong. Please try again.',
@@ -91,10 +96,19 @@ vi.mock('../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `https://api.test/resources/${id}/cover`,
 }));
 
+// The panel fetches the project list so `AssetCard`'s chips can show NAMES —
+// an asset here may be used by other projects too, and those chips rendered
+// raw Snowflake ids before.
+const fetchProjects = vi.fn();
+vi.mock('../../services/projectsService', () => ({
+  fetchProjects: (...a: unknown[]) => fetchProjects(...a),
+}));
+
 const listProjectAssets = vi.fn();
 const linkProject = vi.fn();
 const unlinkProject = vi.fn();
 const importFromScript = vi.fn();
+const setAssetLibraryMembership = vi.fn();
 const searchAssets = vi.fn();
 vi.mock('../../services/assetsService', async () => {
   const { GeneratedApiError } = await import('../../services/apiEnvelope');
@@ -103,6 +117,7 @@ vi.mock('../../services/assetsService', async () => {
     linkProject: (...a: unknown[]) => linkProject(...a),
     unlinkProject: (...a: unknown[]) => unlinkProject(...a),
     importFromScript: (...a: unknown[]) => importFromScript(...a),
+    setAssetLibraryMembership: (...a: unknown[]) => setAssetLibraryMembership(...a),
     searchAssets: (...a: unknown[]) => searchAssets(...a),
     GeneratedApiError,
   };
@@ -158,6 +173,7 @@ function row(over: Partial<AssetRow> = {}): AssetRow {
     source: 'manual',
     duplicated_from: null,
     is_system_preset: false,
+    in_library: true,
     tags: { role: ['lead'] },
     sort_order: 0,
     created_by: '11111111-1111-1111-1111-111111111111',
@@ -190,7 +206,9 @@ beforeEach(() => {
   listProjectAssets.mockResolvedValue([]);
   linkProject.mockResolvedValue(undefined);
   unlinkProject.mockResolvedValue(undefined);
+  setAssetLibraryMembership.mockResolvedValue(row());
   searchAssets.mockResolvedValue([]);
+  fetchProjects.mockResolvedValue([{ id: PROJECT, name: 'Bamboo Reel' }]);
 });
 
 describe('ProjectAssetsPanel — the grid', () => {
@@ -610,5 +628,110 @@ describe('ProjectAssetsPanel — import from script', () => {
     fireEvent.click(screen.getByTestId('import-from-script'));
     await waitFor(() => expect(addToast).toHaveBeenCalled());
     expect(screen.queryByTestId('import-report')).toBeNull();
+  });
+});
+
+describe('ProjectAssetsPanel — library membership (mig 448)', () => {
+  it('adds an out-of-library asset, says what happened, and refetches', async () => {
+    // This panel is where the distinction is visible: 一键导入 lands rows here
+    // outside the library, and this is the one click that promotes one.
+    const outsider = row({ in_library: false, source: 'script_import' });
+    listProjectAssets.mockResolvedValue([outsider]);
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId('toggle-library')).toBeTruthy());
+    const button = screen.getByTestId('toggle-library');
+    expect(button.getAttribute('data-in-library')).toBe('false');
+    // The card says so too, so the button is not the only thing carrying the
+    // state the user is acting on.
+    expect(screen.getByTestId('not-in-library-badge')).toBeTruthy();
+
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      // The asset's OWN scope, not the panel's resolved guess — the same rule
+      // `unlink` follows, and for the same reason.
+      expect(setAssetLibraryMembership).toHaveBeenCalledWith(
+        SCOPE,
+        '727145299382534300',
+        true,
+      ),
+    );
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Added To Your Library', 'success'));
+    // Refetched rather than patched in place: the derived fields come from
+    // the server, and a locally spliced row is how the panel and the shelf
+    // start disagreeing.
+    await waitFor(() => expect(listProjectAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it('removes a member, and the copy promises the project keeps it', async () => {
+    listProjectAssets.mockResolvedValue([row({ in_library: true })]);
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId('toggle-library')).toBeTruthy());
+    expect(screen.getByTestId('toggle-library').getAttribute('data-in-library')).toBe('true');
+    // No badge on a member — that state is the norm and a badge on every card
+    // would be noise.
+    expect(screen.queryByTestId('not-in-library-badge')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('toggle-library'));
+
+    await waitFor(() =>
+      expect(setAssetLibraryMembership).toHaveBeenCalledWith(
+        SCOPE,
+        '727145299382534300',
+        false,
+      ),
+    );
+    // "Remove" on a page full of project entities reads as "delete" unless the
+    // sentence says otherwise.
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        'Removed From Your Library — Still In This Project',
+        'success',
+      ),
+    );
+  });
+
+  it('reports a refusal instead of leaving the badge silently unmoved', async () => {
+    listProjectAssets.mockResolvedValue([row({ in_library: false })]);
+    setAssetLibraryMembership.mockRejectedValue(
+      new GeneratedApiError(403, 'system_preset_readonly', 'read only'),
+    );
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId('toggle-library')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('toggle-library'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    // The failure toast is an error, never the cheerful success one.
+    expect(addToast.mock.calls.every(([, kind]) => kind !== 'success')).toBe(true);
+    // Nothing refetched — the panel did not pretend a write happened.
+    expect(listProjectAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the project on a card chip rather than showing the raw id', async () => {
+    // The panel had no project list at all before, so every chip here was a
+    // 15-digit Snowflake.
+    listProjectAssets.mockResolvedValue([row({ project_ids: [PROJECT] })]);
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId('asset-card')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-card-project').textContent).toBe('Bamboo Reel'),
+    );
+  });
+
+  it('falls back to a short id, never the raw Snowflake, when the list is down', async () => {
+    fetchProjects.mockRejectedValue(new Error('offline'));
+    listProjectAssets.mockResolvedValue([row({ project_ids: [PROJECT] })]);
+    mount();
+
+    await waitFor(() => expect(screen.getByTestId('asset-card')).toBeTruthy());
+    const chip = screen.getByTestId('asset-card-project');
+    await waitFor(() => expect(chip.getAttribute('data-project-named')).toBe('false'));
+    expect(chip.textContent).toBe('#…4055');
+    expect(chip.textContent).not.toContain(PROJECT);
+    expect(chip.getAttribute('title')).toBe(PROJECT);
   });
 });
