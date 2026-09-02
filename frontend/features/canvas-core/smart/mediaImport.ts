@@ -71,10 +71,13 @@ export async function importCanvasMedia(
 /**
  * Library-asset ingest: mint a durable /generated-media/ URL for an
  * already-uploaded resource-library asset via
- * POST /generated-media/import-from-resource. Resource-library file URLs
- * are auth-gated and the i2i bridge (promptInputs.ts's DURABLE_PREFIX)
- * can't fetch them directly, so a Library pick needs this same durable
- * detour importCanvasMedia does for local uploads.
+ * POST /generated-media/import-from-resource.
+ *
+ * The i2i bridge does now resolve `/api/v1/resources/{id}/(cover|file)`
+ * directly (asset-library P4 Task 3), so this detour is no longer what makes
+ * a Library pick usable as a reference. It stays because the media node's
+ * items are `generated_media` ROWS, not just urls: the output/Save-as-Asset
+ * path reads `GeneratedImageRef.id`, and a bare resource url has none.
  */
 export async function importResourceAsCanvasMedia(
   resourceId: string,

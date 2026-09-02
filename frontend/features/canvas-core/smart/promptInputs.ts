@@ -2,10 +2,19 @@
 //
 // Upstream image input resolution (G4-F3 — Infinite's cascade refs): a
 // prompt fed by an output node holding a DURABLE generated image uses it
-// as the generation source (i2i / i2v bridge, G4-B0). Only
-// /api/v1/generated-media/ URLs qualify — the backend bridge can't fetch
-// authenticated resource-file URLs, so external/preview links are skipped
-// (resource_refs 打通 stays parked until a resource_id bridge exists).
+// as the generation source (i2i / i2v bridge, G4-B0).
+//
+// TWO url families qualify, and the backend resolves both (asset-library P4
+// Task 3, `generated_media_service.classify_reference_url`):
+//   /api/v1/generated-media/{id}/(cover|stream|file) — an earlier generation
+//   /api/v1/resources/{id}/(cover|file)              — a library file, e.g.
+//                                                      an asset's reference
+// Everything else (external links, blob/data previews) is skipped here.
+//
+// A url that passes this filter is not promised a picture: the backend still
+// scope-checks a resource and can find no image behind it. Those come back as
+// `dropped_refs` on the run and are shown on the node — the filter is a
+// cheap first pass, never the last word.
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import type {
@@ -15,13 +24,17 @@ import type {
   OutputNodeData,
 } from './types';
 
-const DURABLE_PREFIX = '/api/v1/generated-media/';
+export const DURABLE_PREFIXES = [
+  '/api/v1/generated-media/',
+  '/api/v1/resources/',
+] as const;
 
 const asObj = (n: unknown) => n as Record<string, unknown>;
 
 function durableUrls(candidates: Array<string | null | undefined>): string[] {
   return candidates.filter(
-    (url): url is string => typeof url === 'string' && url.startsWith(DURABLE_PREFIX),
+    (url): url is string =>
+      typeof url === 'string' && DURABLE_PREFIXES.some((p) => url.startsWith(p)),
   );
 }
 

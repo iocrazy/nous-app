@@ -13,6 +13,7 @@ import {
   PollStopped,
 } from '../services/canvasGenerationService';
 import type { PromptCaller, RunnerResult } from './runner';
+import type { DroppedRef } from './types';
 import { isAutoRatio, measureRatio } from './autoRatio';
 
 export interface GenerationRunnerDeps {
@@ -66,8 +67,16 @@ export interface GenerationRunnerDeps {
    *  An empty union from a task that DID report is still fired: that is a
    *  real observation of a clean run. Fired for a failed run too — whether
    *  an image came out is a separate question from whether the request was
-   *  honoured. */
-  onDropped?: (promptId: string, knobs: string[]) => void;
+   *  honoured.
+   *
+   *  `refs` is the second, ORTHOGONAL ledger (asset-library P4): references
+   *  the backend could not resolve — a resource outside the run's scope, one
+   *  with no image bytes, a url shape it does not serve. It travels beside
+   *  `knobs` rather than inside it because a run can lose a knob, lose a
+   *  reference, or both, and folding them together makes "which picture is
+   *  missing" unanswerable. Both are read at the SAME terminal metadata read,
+   *  so neither can quietly acquire a consumer the other lacks. */
+  onDropped?: (promptId: string, knobs: string[], refs: DroppedRef[]) => void;
 }
 
 /** Sentinel phase for tasks whose poll broke (network/timeout) — the task
@@ -95,7 +104,7 @@ export function withGenerationRunner(
       // poll so the badge is never displayed as truth beside a `running`
       // status — and so a dispatch that throws below still clears it instead
       // of leaving a stale verdict up indefinitely.
-      deps.onDropped?.(ctx.promptId, []);
+      deps.onDropped?.(ctx.promptId, [], []);
 
       const params: Record<string, unknown> = {};
       if (gen.kind === 'image') {
@@ -218,14 +227,31 @@ export function withGenerationRunner(
       // Union rather than last-writer-wins — a fan-out is one user action,
       // and a knob dropped by any of its items was dropped for the run.
       const droppedUnion: string[] = [];
+      const refUnion: DroppedRef[] = [];
       let observed = false;
       for (const task of tasks) {
-        const knobs = 'metadata' in task ? task.metadata?.dropped_knobs : undefined;
-        if (!Array.isArray(knobs)) continue;
-        observed = true;
-        for (const knob of knobs) {
-          if (typeof knob === 'string' && !droppedUnion.includes(knob))
-            droppedUnion.push(knob);
+        const meta = 'metadata' in task ? task.metadata : undefined;
+        const knobs = meta?.dropped_knobs;
+        const refs = meta?.dropped_refs;
+        // Either ledger reporting counts as an observation: a backend that
+        // dropped a reference but no knob still answered the question.
+        if (Array.isArray(knobs)) {
+          observed = true;
+          for (const knob of knobs) {
+            if (typeof knob === 'string' && !droppedUnion.includes(knob))
+              droppedUnion.push(knob);
+          }
+        }
+        if (Array.isArray(refs)) {
+          observed = true;
+          for (const ref of refs) {
+            if (!ref || typeof ref !== 'object') continue;
+            const url = String((ref as DroppedRef).url ?? '');
+            const reason = String((ref as DroppedRef).reason ?? '');
+            if (!url) continue;
+            if (refUnion.some((r) => r.url === url && r.reason === reason)) continue;
+            refUnion.push({ url, reason });
+          }
         }
       }
       // Nobody reported: every poll broke (RECOVER_PHASE carries no metadata
@@ -234,7 +260,7 @@ export function withGenerationRunner(
       // result this repo files under empty-output-is-not-a-negative-result.
       // Staying silent leaves the dispatch-time clear standing, which reads
       // as "unknown", which is what it is.
-      if (observed) deps.onDropped?.(ctx.promptId, droppedUnion);
+      if (observed) deps.onDropped?.(ctx.promptId, droppedUnion, refUnion);
 
       // Per-item independence (Infinite semantics, P0-2): completed items
       // always land; failed siblings are reported alongside, never allowed

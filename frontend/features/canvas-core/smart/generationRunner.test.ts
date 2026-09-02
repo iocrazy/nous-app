@@ -647,3 +647,131 @@ describe('every generation run site shows the dropped knobs', () => {
     }
   });
 });
+
+describe('withGenerationRunner — dropped references (asset-library P4)', () => {
+  // `dropped_refs` rides in the SAME task metadata as `dropped_knobs`, and is
+  // read at the same terminal point for the same reason: a field only one of
+  // the two ledgers consumes is how a run that lost a reference reads as a
+  // clean one. They are reported apart because they are orthogonal — a run
+  // can lose a knob, a reference, or both.
+  const REF_A = { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' };
+  const REF_B = { url: '/api/v1/resources/92/cover', reason: 'no_image_file' };
+
+  it('reports the references the backend could not use', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_knobs: [], dropped_refs: [REF_A] },
+    });
+
+    const calls: Array<[string[], unknown[]]> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([
+      [[], []],
+      [[], [REF_A]],
+    ]);
+  });
+
+  it('unions across the fan-out and dedupes by url+reason', async () => {
+    // One user action, several tasks: a reference lost by any of them was
+    // lost for the run. The same reference lost twice is still one reference.
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/1/cover', dropped_refs: [REF_A] },
+      })
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover', dropped_refs: [REF_A, REF_B] },
+      });
+
+    const refs: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, _knobs, r) => refs.push(r),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 2 } });
+
+    expect(refs).toEqual([[], [REF_A, REF_B]]);
+  });
+
+  it('a reference drop is an observation even when no knob was dropped', async () => {
+    // The `observed` flag used to be set only by `dropped_knobs`. A backend
+    // that honoured every knob and lost a reference would then be recorded as
+    // "nobody reported", and the badge would never appear.
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_refs: [REF_A] },
+    });
+
+    const calls: Array<[string[], unknown[]]> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs, r) => calls.push([knobs, r]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls[1]).toEqual([[], [REF_A]]);
+  });
+
+  it('stays silent when NOTHING reported either ledger', async () => {
+    // A row that predates both fields, or a batch whose polls all broke. `[]`
+    // here would turn "we never got an answer" into "nothing was dropped".
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover' },
+    });
+
+    const calls: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([[[], []]]);
+  });
+
+  it('clears the reference verdict at dispatch too', async () => {
+    // Half a cleared badge is worse than none: the knobs would describe this
+    // run and the references an older one, in the same sentence.
+    dispatchGenerations.mockRejectedValue(new Error('network down'));
+
+    const calls: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([[[], []]]);
+  });
+
+  it('ignores malformed entries rather than rendering a blank reference', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: {
+        result_url: '/gm/1/cover',
+        dropped_refs: [null, 'nope', { reason: 'not_in_scope' }, REF_A],
+      },
+    });
+
+    const refs: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      canvasId: '9',
+      onDropped: (_id, _knobs, r) => refs.push(r),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(refs[1]).toEqual([REF_A]);
+  });
+});

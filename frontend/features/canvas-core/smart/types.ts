@@ -101,6 +101,18 @@ export interface ShotNodeData {
   stale?: boolean;
 }
 
+/** One reference a generation run could not use, and why.
+ *
+ * Mirrors the backend's `dropped_refs` entries verbatim (route: workflow
+ * result → task_tracking metadata → generationRunner). `reason` is a code,
+ * not a sentence: the UI owns the wording, and both locales have to be able
+ * to say it. An unrecognised code still renders — falling back to the raw
+ * code beats a badge that silently omits a reference. */
+export interface DroppedRef {
+  url: string;
+  reason: string;
+}
+
 export interface PromptNodeData {
   body: string;
   /** IC promptH: user-dragged textarea height in px (persisted so the
@@ -164,6 +176,20 @@ export interface PromptNodeData {
    * the badge sits next to, never an older one.
    */
   last_dropped?: string[];
+  /**
+   * References the backend could not USE on the LAST run (P4 asset library),
+   * each with a machine-readable reason: `unknown_shape` / `not_in_scope` /
+   * `no_image_file` / `materialize_failed` / `scope_unresolved` /
+   * `unresolved`. Written by the same `markDroppedKnobs` call that writes
+   * `last_dropped`, from `metadata.dropped_refs`, and rendered in the same
+   * "Ignored" badge.
+   *
+   * Separate from `last_dropped` rather than folded into it because the two
+   * are ORTHOGONAL results of one run: a knob can be dropped, a reference
+   * can be dropped, or both. Merging them into one string list would make
+   * "which references were lost" unanswerable from the node's own state.
+   */
+  last_dropped_refs?: DroppedRef[];
   /** @-selected input image url (IC parity ⑤ — the mention picker's
    *  「输入图」tab): overrides which wired input feeds i2i. Stale refs
    *  fall back to the first input (resolveEffectiveSourceUrl). */

@@ -3212,6 +3212,15 @@
     },
     "readOnly": "只读",
     "ignoredKnobs": "已忽略：{{knobs}}",
+    "ignoredRefs": "{{count}} 张参考（{{reason}}）",
+    "refDropReason": {
+      "unknown_shape": "不支持的链接",
+      "not_in_scope": "不在当前空间",
+      "no_image_file": "没有图片文件",
+      "materialize_failed": "读取失败",
+      "scope_unresolved": "空间未知",
+      "unresolved": "无法解析"
+    },
     "knobNotSupported": "该模型不支持此项",
     "saveBadge": {
       "saving": "保存中…",

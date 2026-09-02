@@ -3212,6 +3212,15 @@
     },
     "readOnly": "Read-only",
     "ignoredKnobs": "Ignored: {{knobs}}",
+    "ignoredRefs": "{{count}} reference(s) ({{reason}})",
+    "refDropReason": {
+      "unknown_shape": "unsupported link",
+      "not_in_scope": "out of scope",
+      "no_image_file": "no image file",
+      "materialize_failed": "unreadable",
+      "scope_unresolved": "scope unknown",
+      "unresolved": "unresolved"
+    },
     "knobNotSupported": "Not supported by this model",
     "saveBadge": {
       "saving": "Saving…",
