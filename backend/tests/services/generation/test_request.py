@@ -293,3 +293,23 @@ def test_reconcile_image_refs_still_capped_by_max_refs_even_with_video_modes():
     )
     assert eff.refs == ("/u/1",)
     assert dropped == ["refs"]
+
+
+def test_quality_survives_reconcile_and_reaches_the_codex_daemon_payload():
+    """P1 declared codex-local quality=False (honest then: nothing forwarded it).
+    With the 0.4.0 gate that is no longer true — quality must now pass
+    reconcile untouched and land in the payload."""
+    from app.services.ai.provider_protocols import resolve_generation_protocol
+
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="a cat",
+        model="codex-local-image",
+        params={"ratio": "16:9", "quality": "high"},
+        source_url=None,
+    )
+    caps = resolve_generation_protocol("codex-local").capabilities
+    eff, dropped = req.reconcile(caps)
+    assert dropped == []  # P1 had ["quality"] here
+    payload = eff.to_codex_daemon_payload(engine_model="", ref_urls=[])
+    assert payload["quality"] == "high"

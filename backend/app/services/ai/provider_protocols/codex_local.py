@@ -30,24 +30,23 @@ class CodexLocalProtocol(ProviderProtocol):
     model_types = ("llm", "image")
     is_chat_key = True
     generation_family = "codex-local"
-    # Almost the server-side codex protocol's knobs — it is the same CLI, just
-    # executed on the user's machine (spec §3.2 groups them on one row). The
-    # one real difference is ``quality``, and it is a difference in the
-    # DAEMON, not the CLI: ``runImageJob`` in ``tools/codex-daemon/index.mjs``
-    # builds its argv as ``images generate|edit --prompt --out --size --format
-    # --background [--model] [--ref-image ...]`` and never appends
-    # ``--quality``, so a forwarded quality is discarded one layer down where
-    # nobody can see it. The server path really does forward it
-    # (``codex_cli.py``'s ``--quality``), hence ``CodexProtocol.quality=True``.
+    # The server-side codex protocol's knobs — it is the same CLI, just
+    # executed on the user's machine (spec §3.2 groups them on one row), and
+    # since P3 that includes ``quality``.
     #
-    # Declaring False is the honest reading of today's daemon: the knob shows
-    # up in ``dropped_knobs`` instead of vanishing. Flip it back to True in P3
-    # — in the SAME change that adds ``--quality`` to that argv array — not
-    # before. A capability that is true only in intent is the 假开关 this
-    # contract exists to delete.
+    # ``quality=True`` here is a fact, not a promise. Two things make it one:
+    # ``buildImageArgs`` in ``tools/codex-daemon/index.mjs`` appends
+    # ``--quality`` from 0.4.0 onward, and a daemon older than that never
+    # receives an image/video job at all —
+    # ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION`` refuses it with a typed
+    # ``DaemonUpdateRequiredError`` that tells the user how to update. So no
+    # path remains on which a forwarded quality is discarded one layer down
+    # where nobody can see it, which is exactly what P1's honest ``False``
+    # was reporting. The server path forwards it too (``codex_cli.py``'s
+    # ``--quality``), so the two codex rows agree again.
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
-        quality=False,
+        quality=True,
         resolution=False,  # the model picks the pixel size; --size is ignored
         max_refs=9,
         negative=False,

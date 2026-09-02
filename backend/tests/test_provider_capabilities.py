@@ -45,18 +45,21 @@ def test_codex_family_matrix():
         assert caps.honours_ratio == "prompt_hint"
 
 
-def test_codex_quality_is_declared_per_transport_not_per_cli():
-    """The one knob the two codex rows do NOT share, and it is deliberate.
+def test_codex_quality_is_true_on_both_transports_now_that_the_gate_exists():
+    """Both codex rows honour ``quality``, and for codex-local that is a fact
+    rather than an intention.
 
-    Server ``codex`` appends ``--quality`` (``codex_cli.py``); the paired
-    daemon's ``runImageJob`` (``tools/codex-daemon/index.mjs``) never does, so
-    a quality sent there is discarded where nobody can see it. Declaring False
-    for codex-local puts it in ``dropped_knobs`` instead. P3 flips this back
-    in the same change that adds ``--quality`` to that argv — asserting them
-    equal again is only correct once the daemon really forwards it.
+    Server ``codex`` appends ``--quality`` (``codex_cli.py``). The paired
+    daemon does too from 0.4.0 (``buildImageArgs`` in
+    ``tools/codex-daemon/index.mjs``), and a daemon below that version never
+    receives such a job at all: ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION``
+    refuses it with a typed ``DaemonUpdateRequiredError`` telling the user to
+    update. So there is no path left on which a forwarded quality is silently
+    discarded — which is what made P1's honest ``False`` necessary and what
+    now makes ``True`` the honest value.
     """
     assert _proto("codex").capabilities.quality is True
-    assert _proto("codex-local").capabilities.quality is False
+    assert _proto("codex-local").capabilities.quality is True
 
 
 def test_jimeng_family_matrix():
@@ -113,8 +116,9 @@ def test_capabilities_drive_reconcile_through_the_real_consumer():
     )
     expected = {
         "codex": ["resolution"],
-        # codex-local loses quality too — the daemon never forwards it.
-        "codex-local": ["quality", "resolution"],
+        # codex-local keeps quality since daemon 0.4.0 forwards it (older
+        # daemons are refused outright, never silently degraded).
+        "codex-local": ["resolution"],
         "jimeng-cli": ["quality"],
         "jimeng-local": ["quality"],
         # 21:9 is not one of ark's five ratios, so it goes too.

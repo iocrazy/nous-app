@@ -107,7 +107,9 @@ async def test_returns_caps_keyed_by_catalog_name(client, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()["data"]
     codex = data["codex-local-image"]
-    assert codex["quality"] is False  # P1 flipped this to honest False
+    # P1 said False (nothing forwarded it); P3 flipped it back once daemon
+    # 0.4.0 forwards --quality and older daemons are refused outright.
+    assert codex["quality"] is True
     assert codex["max_refs"] == 9
     assert len(codex["ratios"]) == 8
     assert codex["resolution"] is False
