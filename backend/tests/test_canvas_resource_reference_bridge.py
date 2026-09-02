@@ -86,6 +86,67 @@ def test_our_own_absolute_url_is_still_ours(monkeypatch):
     ) == ("unknown", None)
 
 
+def test_public_api_base_is_not_a_settings_field(monkeypatch):
+    """Ground truth for the two tests below, asserted rather than assumed.
+
+    ``PUBLIC_API_BASE`` appears in two ``getattr(settings, ...)`` calls and in
+    NO field declaration, and ``Settings`` forbids extras — so it cannot be set
+    at all. Its "fallback" is therefore the only path either function takes,
+    which is why the round trip below is pinned on the fallback rather than on
+    a configured host. If someone declares the field, this test turns red and
+    the round trip needs a second arm.
+    """
+    from app.core.config import settings as real_settings
+
+    assert "PUBLIC_API_BASE" not in type(real_settings).model_fields
+    with pytest.raises((AttributeError, ValueError)):
+        real_settings.PUBLIC_API_BASE = "https://api.example.test"
+
+
+def test_what_the_daemon_branch_mints_is_what_this_classifier_accepts(monkeypatch):
+    """The round trip that guards the DAEMON branch.
+
+    ``canvas_generation._absolute_media_url`` absolutises a relative durable
+    URL before handing it to the user's machine to fetch; this classifier
+    decides whether an absolute URL is ours. If they disagree about the host, a
+    reference we minted ourselves is classified ``unknown`` and reported as a
+    dropped ref — for no reason a user could act on.
+
+    This is the DEFAULT deployment (see the test above: ``PUBLIC_API_BASE``
+    cannot be set), and it is the configuration that used to fail — the minter
+    fell back to a literal the classifier had never heard of. The assertion is
+    that the two AGREE, not that either equals a particular host, so moving the
+    default breaks nothing here as long as both sides move together.
+    """
+    from app.workflows import canvas_generation as cg
+
+    monkeypatch.setattr(gm_svc.settings, "MEDIA_PUBLIC_URL", "")
+
+    absolute = cg._absolute_media_url("/api/v1/resources/91/cover")
+
+    assert absolute.startswith("http")
+    assert classify_reference_url(absolute) == ("resource", 91), (
+        f"the daemon branch mints {absolute!r} and the classifier calls it "
+        "foreign — a reference we made ourselves would be dropped"
+    )
+    # Negative control: the check is a host allowlist, not "any absolute URL".
+    assert classify_reference_url(
+        "https://cdn.evil.test/api/v1/resources/91/cover"
+    ) == ("unknown", None)
+
+
+def test_a_generated_media_url_on_our_own_host_round_trips_too(monkeypatch):
+    """The other durable shape, through the same allowlist — so a fix that
+    special-cased only the resources path is visible."""
+    from app.workflows import canvas_generation as cg
+
+    monkeypatch.setattr(gm_svc.settings, "MEDIA_PUBLIC_URL", "")
+
+    absolute = cg._absolute_media_url("/api/v1/generated-media/5/file")
+
+    assert classify_reference_url(absolute) == ("genmedia", 5)
+
+
 # ── the resolver ───────────────────────────────────────────────────────────
 
 

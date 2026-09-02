@@ -230,6 +230,32 @@ describe('PromptNodeView dropped-reference badge', () => {
     );
   });
 
+  it('explains BOTH halves in the tooltip, not whichever came second', () => {
+    // The tooltip used to pick one: the url list whenever any reference was
+    // dropped, the knob sentence otherwise. A run that lost a knob AND a
+    // reference therefore showed only the urls, and "why was quality ignored"
+    // became unreachable on exactly the run that needed both answers.
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped: ['quality'],
+      last_dropped_refs: [
+        { url: '/api/v1/resources/91/cover', reason: 'materialize_failed' },
+      ],
+    });
+
+    const title = getByTestId('dropped-knobs-badge').getAttribute('title') ?? '';
+    expect(title).toContain('Not supported by this model');
+    expect(title).toContain('/api/v1/resources/91/cover — materialize_failed');
+  });
+
+  it('says only the knob half when no reference was dropped', () => {
+    const { getByTestId } = mount({ ...BASE_DATA, last_dropped: ['quality'] });
+
+    expect(getByTestId('dropped-knobs-badge').getAttribute('title')).toBe(
+      'Not supported by this model',
+    );
+  });
+
   it('renders an unlabelled reason as its raw code rather than omitting it', () => {
     // A backend that adds a reason before the locale does must still produce a
     // visible badge. Swallowing the entry would be the silent drop this whole

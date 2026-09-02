@@ -158,16 +158,28 @@ async def test_visibility_is_the_same_row_set_the_picker_reads(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_router_helper_delegates_rather_than_re_deriving(monkeypatch):
     """The whole reason the predicate moved: two hand-rolled copies of
-    "enabled + Settings + image/video" drift silently."""
+    "enabled + Settings + image/video" drift silently.
+
+    The gate is stubbed with a NON-EMPTY blacklist on purpose. With an empty
+    one, both sides answer the full catalog and a router that re-derived the
+    rows while forgetting the Settings filter entirely would still compare
+    equal — the assertion would be true for a reason that has nothing to do
+    with delegation. One disabled model makes the two answers differ unless
+    the router really is calling the shared predicate.
+    """
     # ``from app.api import canvases_router`` hands back the APIRouter OBJECT
     # (``app/api/__init__.py`` re-exports it), not the module — the same trap
     # ``tests/test_canvas_asset_refs_routes.py`` documents.
     canvases_router = importlib.import_module("app.api.canvases_router")
 
     _catalog(monkeypatch)
-    _gate(monkeypatch)
+    _gate(monkeypatch, disabled=frozenset({"ark-t2i"}))
 
     from_router = await canvases_router._visible_generation_rows(USER)
     from_service = await visible_generation_rows(USER)
 
     assert from_router == from_service
+    # The blacklist really bit — otherwise the equality above compares two
+    # unfiltered lists and proves nothing about the Settings half.
+    assert "ark-t2i" not in {r["name"] for r in from_service}
+    assert "codex-local-image" in {r["name"] for r in from_service}

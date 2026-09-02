@@ -607,21 +607,42 @@ class ResourceRefResolution:
     reason: Optional[str] = None
 
 
+# The host ``canvas_generation._absolute_media_url`` falls back to when
+# ``PUBLIC_API_BASE`` is unset — which is the default, since that setting is not
+# declared in ``core/config.py``. Spelled once, here, and read by the minter
+# through this module so the two cannot drift apart.
+_DEFAULT_PUBLIC_API_BASE = "https://api.nous.ink"
+
+
 def _own_hosts() -> frozenset[str]:
     """The hosts whose absolute URLs are OURS to resolve.
 
     A reference URL is only ever a key into our own database, but the DAEMON
     branch of ``canvas_generation`` passes it through to the user's machine to
     FETCH — so an absolute URL pointing somewhere else must never be classified
-    as one of ours. Derived from the same two settings that MINT these URLs
-    (``MEDIA_PUBLIC_URL`` for ``_reference_url``, ``PUBLIC_API_BASE`` for
-    ``_absolute_media_url``); neither configured means only relative paths
-    qualify, which is what every producer in this repo emits.
+    as one of ours. Derived from the same settings that MINT these URLs:
+    ``MEDIA_PUBLIC_URL`` for ``_reference_url``, and for ``_absolute_media_url``
+    both ``PUBLIC_API_BASE`` *and* the literal it falls back to when that
+    setting is absent.
+
+    ⚠️ That fallback is the reason ``_DEFAULT_PUBLIC_API_BASE`` is listed here.
+    ``PUBLIC_API_BASE`` is not declared in ``core/config.py`` at all, so in the
+    default configuration ``_absolute_media_url`` mints URLs on
+    ``https://api.nous.ink`` — and without this entry, a URL we minted
+    ourselves would come back from ``classify_reference_url`` as ``unknown``.
+    Latent rather than live (no producer feeds an absolutised URL back into
+    ``eff.refs``, and the failure would be a reported drop rather than a silent
+    one), but "the minter and the recogniser disagree about our own host" is
+    not a difference to leave standing.
+
+    A host configured nowhere still contributes nothing, so relative paths —
+    what every producer in this repo emits — remain the only shape that
+    qualifies out of the box beyond our own two names.
     """
     hosts: set[str] = set()
     for value in (
         getattr(settings, "MEDIA_PUBLIC_URL", "") or "",
-        getattr(settings, "PUBLIC_API_BASE", "") or "",
+        getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE,
     ):
         netloc = urlsplit(str(value)).netloc.lower()
         if netloc:

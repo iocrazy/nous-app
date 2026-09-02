@@ -70,8 +70,8 @@ from app.services.ai.provider_protocols.base import ProviderCapabilities
 # same rules on both surfaces, and a second copy is how the composed prompt and
 # the previewed prompt quietly stop agreeing.
 from app.services.assets.slot_generation import (
-    _NEGATIVE_SPLIT,
-    _dedupe,
+    NEGATIVE_SPLIT,
+    dedupe_fragments,
     reference_order,
 )
 
@@ -125,7 +125,7 @@ def _linked_negative_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]
         for row in linked_assets or []:
             if str(row.get("asset_type") or "") != kind:
                 continue
-            out.extend(_NEGATIVE_SPLIT.split(row.get("prompt_negative") or ""))
+            out.extend(NEGATIVE_SPLIT.split(row.get("prompt_negative") or ""))
     return out
 
 
@@ -194,6 +194,15 @@ def _all_in_priority_order(
     SAME dedupe the capped call uses, so "which one is over the limit" is
     decided by the ranking that actually ships, not by a second sort written
     here.
+
+    ⚠️ The empty short circuit returns BEFORE ``reference_order`` can reject an
+    unknown ``asset_type``, so a bundle for a type outside ``SLOTS`` with no
+    files composes cleanly instead of raising — the opposite of the posture
+    ``test_an_unknown_asset_type_fails_loudly`` pins for the same type WITH
+    files. Unreachable through the service (the column is CHECK-constrained and
+    every one of the six types is in ``SLOTS``), and left as is deliberately:
+    moving the validation earlier would buy a raise on a path no caller can
+    reach, at the cost of a lookup on the path every caller does.
     """
     total = sum(len(rows or []) for rows in (files_by_slot or {}).values())
     if total <= 0:
@@ -246,7 +255,7 @@ def build_bundle(
     linked_positive = _linked_positive_texts(linked_assets)
 
     positive = ", ".join(
-        _dedupe(
+        dedupe_fragments(
             [
                 asset_row.get("prompt_positive") or "",
                 (loadout_row or {}).get("prompt_extra") or "",
@@ -256,9 +265,9 @@ def build_bundle(
         )
     )
     negative = ", ".join(
-        _dedupe(
+        dedupe_fragments(
             [
-                *_NEGATIVE_SPLIT.split(asset_row.get("prompt_negative") or ""),
+                *NEGATIVE_SPLIT.split(asset_row.get("prompt_negative") or ""),
                 *_linked_negative_texts(linked_assets),
             ]
         )

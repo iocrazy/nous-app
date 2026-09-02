@@ -75,24 +75,42 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // only joined here, at the one place a user reads them. References are
   // grouped by reason rather than listed per-url: the badge is a summary, and
   // the urls are in the tooltip.
-  const droppedRefs: DroppedRef[] = Array.isArray(last_dropped_refs)
-    ? last_dropped_refs
-    : [];
-  const refCounts = droppedRefs.reduce<Map<string, number>>((acc, ref) => {
-    const reason = String(ref?.reason || 'unresolved');
-    return acc.set(reason, (acc.get(reason) ?? 0) + 1);
-  }, new Map());
-  const ignoredParts: string[] = [
-    ...(Array.isArray(last_dropped) ? last_dropped : []),
-    ...[...refCounts.entries()].map(([reason, count]) =>
-      t('canvas.ignoredRefs', {
-        count,
-        // An unrecognised code still renders as itself: a badge that omits a
-        // reference because nobody wrote its label is the silent drop again.
-        reason: t(`canvas.refDropReason.${reason}`, reason),
-      }),
-    ),
-  ];
+  const droppedRefs: DroppedRef[] = useMemo(
+    () => (Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
+    [last_dropped_refs],
+  );
+  const ignoredParts: string[] = useMemo(() => {
+    const refCounts = droppedRefs.reduce<Map<string, number>>((acc, ref) => {
+      const reason = String(ref?.reason || 'unresolved');
+      return acc.set(reason, (acc.get(reason) ?? 0) + 1);
+    }, new Map());
+    return [
+      ...(Array.isArray(last_dropped) ? last_dropped : []),
+      ...[...refCounts.entries()].map(([reason, count]) =>
+        t('canvas.ignoredRefs', {
+          count,
+          // An unrecognised code still renders as itself: a badge that omits a
+          // reference because nobody wrote its label is the silent drop again.
+          reason: t(`canvas.refDropReason.${reason}`, reason),
+        }),
+      ),
+    ];
+  }, [droppedRefs, last_dropped, t]);
+  // BOTH halves of the tooltip, always — not one or the other.
+  //
+  // It used to pick the URL list when any reference was dropped and the knob
+  // sentence otherwise, so a run that lost a knob AND a reference showed only
+  // the URLs and "why was quality ignored" became unreachable. The badge joins
+  // two orthogonal ledgers; its tooltip has to as well, or the badge says
+  // "Ignored: quality, 1 reference" and can only explain one of them.
+  const ignoredTitle = useMemo(() => {
+    const lines: string[] = [];
+    if (Array.isArray(last_dropped) && last_dropped.length > 0) {
+      lines.push(t('canvas.knobNotSupported'));
+    }
+    lines.push(...droppedRefs.map((r) => `${r.url} — ${r.reason}`));
+    return lines.join('\n');
+  }, [droppedRefs, last_dropped, t]);
   const patch = useNodeDataPatch(id);
   // Read-only: every control on this node writes — the body/negative text,
   // the kind/model/agent/ratio/count pickers, the @-ref chips' remove
@@ -508,11 +526,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           {ignoredParts.length > 0 && (
             <span
               data-testid="dropped-knobs-badge"
-              title={
-                droppedRefs.length > 0
-                  ? droppedRefs.map((r) => `${r.url} — ${r.reason}`).join('\n')
-                  : t('canvas.knobNotSupported')
-              }
+              title={ignoredTitle}
               className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
             >
               {t('canvas.ignoredKnobs', { knobs: ignoredParts.join(', ') })}

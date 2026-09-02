@@ -45,9 +45,14 @@ async def main() -> None:
         total_canvases += 1
         total_refs += len(refs)
         total_skipped += skipped
+    # ⚠️ Say what the number COUNTS. This line used to read "refs stored
+    # without a non-owned loadout" — a double negative that states the
+    # opposite of the tally: these are refs stored WITHOUT their loadout,
+    # BECAUSE that loadout belonged to a different asset. An operator reading
+    # the old wording would take a healthy run for a broken one and vice versa.
     logger.info(
         "backfill done: {} canvases, {} refs, {} skipped asset nodes, "
-        "{} refs stored without a non-owned loadout",
+        "{} refs stored without their loadout (it belonged to another asset)",
         total_canvases,
         total_refs,
         total_skipped,

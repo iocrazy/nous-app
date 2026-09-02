@@ -556,9 +556,15 @@ async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
 
 
 # The catalog row name, not a provider key — same vocabulary the model picker
-# shows (``GET /canvases/generation-models``). Bounded to the column's width so
-# a hostile string is a 422 at the boundary rather than a long round trip that
-# ends in ``model_unknown``.
+# shows (``GET /canvases/generation-models``).
+#
+# The 100-character bound is OURS, not the column's: ``mediahub_models.name``
+# is unbounded ``Text``. It keeps a hostile query string from buying a full
+# catalog scan that was always going to end in ``model_unknown``. ⚠️ The cost
+# is that a catalog name longer than 100 characters answers a bare validation
+# 422 instead of the typed ``model_unknown`` — acceptable while no such row
+# exists, and a reason to raise this number rather than to explain it away if
+# one ever does.
 ModelQuery = Annotated[str, Query(min_length=1, max_length=100)]
 
 # The card's checklist, repeatable: ``?selected_file_ids=1&selected_file_ids=2``.

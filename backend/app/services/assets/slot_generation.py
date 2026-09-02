@@ -175,10 +175,10 @@ _TEMPLATES: Dict[tuple[str, str], tuple[str, tuple[str, ...], str]] = {
 
 # Negatives arrive as free text the user typed; split on the two separators a
 # prompt field actually carries.
-_NEGATIVE_SPLIT = re.compile(r"[,\n]+")
+NEGATIVE_SPLIT = re.compile(r"[,\n]+")
 
 
-def _dedupe(fragments: Iterable[str]) -> List[str]:
+def dedupe_fragments(fragments: Iterable[str]) -> List[str]:
     """Strip, drop blanks, drop case-insensitive repeats, keep first spelling."""
     seen: set[str] = set()
     out: List[str] = []
@@ -224,7 +224,7 @@ def slot_prompt(
     body, template_negatives, aspect_ratio = template
 
     positive = ", ".join(
-        _dedupe(
+        dedupe_fragments(
             [
                 asset_row.get("prompt_positive") or "",
                 (loadout_row or {}).get("prompt_extra") or "",
@@ -234,9 +234,9 @@ def slot_prompt(
         )
     )
     negative = ", ".join(
-        _dedupe(
+        dedupe_fragments(
             [
-                *_NEGATIVE_SPLIT.split(asset_row.get("prompt_negative") or ""),
+                *NEGATIVE_SPLIT.split(asset_row.get("prompt_negative") or ""),
                 *template_negatives,
                 *_BASE_NEGATIVE,
             ]
@@ -311,4 +311,16 @@ def reference_order(
     return out
 
 
-__all__ = ["SlotNotGeneratable", "reference_order", "slot_prompt"]
+# ``dedupe_fragments`` / ``NEGATIVE_SPLIT`` are PUBLIC because a second
+# module composes prompts from the same rows: ``assets/bundle.py`` reuses
+# both so the composed prompt and the previewed prompt cannot drift apart
+# on the dedupe rule or on what counts as a negative fragment. They were
+# underscore-private and imported across the boundary anyway, which said
+# the opposite of what the arrangement actually is.
+__all__ = [
+    "NEGATIVE_SPLIT",
+    "SlotNotGeneratable",
+    "dedupe_fragments",
+    "reference_order",
+    "slot_prompt",
+]

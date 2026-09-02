@@ -103,11 +103,23 @@ async def test_refs_failure_does_not_break_save(monkeypatch):
 
 
 class FakeAssetRefsRepo:
-    def __init__(self) -> None:
-        self.calls: List[tuple[str, List[Dict[str, Any]]]] = []
+    """Carries the REAL return contract: ``replace_for_canvas`` answers an
+    ``int`` — how many refs had a loadout dropped as not belonging to their
+    asset.
 
-    async def replace_for_canvas(self, canvas_id: str, refs) -> None:
+    It used to return ``None``. That is falsy, so ``if disowned:`` behaved
+    identically and every wiring test stayed green — which is exactly how the
+    warning branch below went untested: a fake that never produces a non-zero
+    count cannot reach the only line that reports the drop.
+    """
+
+    def __init__(self, disowned: int = 0) -> None:
+        self.calls: List[tuple[str, List[Dict[str, Any]]]] = []
+        self.disowned = disowned
+
+    async def replace_for_canvas(self, canvas_id: str, refs) -> int:
         self.calls.append((canvas_id, refs))
+        return self.disowned
 
 
 _ASSET_A = "727145299382534145"
@@ -251,3 +263,69 @@ async def test_unreadable_asset_node_is_logged_not_silently_dropped():
         "the skipped count must be reported; a dropped ref that nothing logs "
         f"is a silent no-op. lines={seen}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_loadout_is_logged_not_silently_dropped():
+    """A node pairing an asset with ANOTHER asset's loadout keeps the ref and
+    drops the costume half. Only this log line says so.
+
+    The ref is still stored (the asset really is on the canvas), so nothing in
+    the mirror, the response, or the canvas itself records that the loadout was
+    refused — the row simply has ``loadout_id NULL``, which is also what a node
+    that never named a loadout looks like. Deleting the warning changes no
+    assertion anywhere else; that is why it needs one of its own.
+    """
+    from loguru import logger as loguru_logger
+
+    seen: List[str] = []
+    handler_id = loguru_logger.add(lambda m: seen.append(str(m)), level="WARNING")
+    try:
+        asset_refs = FakeAssetRefsRepo(disowned=2)
+        svc = CanvasService(
+            repository=FakeRepo(),
+            refs_repository=FakeRefsRepo(),
+            asset_refs_repository=asset_refs,
+        )
+        await svc.update_with_lock(
+            "5001",
+            CanvasUpdate(
+                base_updated_at=FROZEN,
+                nodes_json=[_asset_node("a", _ASSET_A, _LOADOUT)],
+            ),
+        )
+    finally:
+        loguru_logger.remove(handler_id)
+
+    assert len(asset_refs.calls) == 1
+    assert any("2 asset ref(s) stored without" in line for line in seen), (
+        "the refused-loadout count must be reported; the ref survives with a "
+        f"NULL loadout and nothing else can tell. lines={seen}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_clean_save_does_not_warn_about_loadouts():
+    """Negative control. A warning that fires on every save is a warning
+    nobody reads, and it would make the pin above pass for the wrong reason."""
+    from loguru import logger as loguru_logger
+
+    seen: List[str] = []
+    handler_id = loguru_logger.add(lambda m: seen.append(str(m)), level="WARNING")
+    try:
+        svc = CanvasService(
+            repository=FakeRepo(),
+            refs_repository=FakeRefsRepo(),
+            asset_refs_repository=FakeAssetRefsRepo(disowned=0),
+        )
+        await svc.update_with_lock(
+            "5001",
+            CanvasUpdate(
+                base_updated_at=FROZEN,
+                nodes_json=[_asset_node("a", _ASSET_A, _LOADOUT)],
+            ),
+        )
+    finally:
+        loguru_logger.remove(handler_id)
+
+    assert not any("stored without" in line for line in seen), seen

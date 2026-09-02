@@ -109,7 +109,14 @@ def _absolute_media_url(url: str) -> str:
         return url
     from app.core.config import settings
 
-    base = str(getattr(settings, "PUBLIC_API_BASE", "") or "https://api.nous.ink")
+    # The fallback is imported, not spelled again: ``_own_hosts`` has to
+    # RECOGNISE what this function MINTS, and two copies of the default host is
+    # exactly how a URL we made ourselves ends up classified as foreign.
+    from app.services.library.generated_media_service import (
+        _DEFAULT_PUBLIC_API_BASE,
+    )
+
+    base = str(getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE)
     return f"{base.rstrip('/')}{url}"
 
 

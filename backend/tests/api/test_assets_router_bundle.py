@@ -59,8 +59,17 @@ class _FakeService:
         self.result = dict(_BUNDLE)
         self.error: AssetError | None = None
 
-    async def get_bundle(self, asset_id, scope_id, *, model, loadout_id, user_id):
-        self.calls.append((asset_id, scope_id, model, loadout_id, user_id))
+    async def get_bundle(
+        self, asset_id, scope_id, *, model, loadout_id, selected_file_ids, user_id
+    ):
+        # ``selected_file_ids`` is REQUIRED here, not defaulted: the router
+        # always passes it, and a fake that quietly accepted its absence would
+        # let a route that stopped forwarding the card's checklist pass. It is
+        # also recorded RAW, because the three wire states (absent / given /
+        # given-but-empty) are three different answers.
+        self.calls.append(
+            (asset_id, scope_id, model, loadout_id, selected_file_ids, user_id)
+        )
         if self.error is not None:
             raise self.error
         return self.result
@@ -127,7 +136,7 @@ async def test_model_loadout_and_caller_all_reach_the_service(app, client):
         f"/api/v1/assets/{ASSET_ID}/bundle?scope_id=9000&model={MODEL}&loadout_id=400"
     )
 
-    assert app.state.fake.calls == [(int(ASSET_ID), 9000, MODEL, "400", USER)]
+    assert app.state.fake.calls == [(int(ASSET_ID), 9000, MODEL, "400", None, USER)]
 
 
 @pytest.mark.asyncio
@@ -214,6 +223,61 @@ async def test_dropped_is_required_not_defaulted_to_empty(app, client):
         await client.get(
             f"/api/v1/assets/{ASSET_ID}/bundle?scope_id=9000&model={MODEL}"
         )
+
+
+# ── the card's checklist, on the wire (C1) ─────────────────────────────────
+#
+# THREE states, and a query string can only tell them apart because the empty
+# one is spelled `?selected_file_ids=` rather than by omitting the parameter.
+# These are the pin on that spelling: collapse "absent" and "empty" into each
+# other and unticking every box on a card ships every reference the user just
+# removed — the endpoint reads absent as "no checklist, send them all".
+
+
+async def _selection(app, client, query: str):
+    resp = await client.get(
+        f"/api/v1/assets/{ASSET_ID}/bundle?scope_id=9000&model={MODEL}{query}"
+    )
+    assert resp.status_code == 200, resp.text
+    return app.state.fake.calls[-1][4]
+
+
+@pytest.mark.asyncio
+async def test_an_absent_selection_reaches_the_service_as_none(app, client):
+    """The asset sheet's request, unchanged by this parameter's arrival — and
+    the reason the sheet-side callers needed no edit."""
+    assert await _selection(app, client, "") is None
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_selection_arrives_in_order(app, client):
+    picked = await _selection(
+        app, client, "&selected_file_ids=727145299382534146&selected_file_ids=8"
+    )
+    assert picked == ("727145299382534146", "8")
+
+
+@pytest.mark.asyncio
+async def test_an_empty_selection_is_empty_not_absent(app, client):
+    """`?selected_file_ids=` is "the user unticked everything"."""
+    picked = await _selection(app, client, "&selected_file_ids=")
+    assert picked == ()
+    assert picked is not None
+
+
+@pytest.mark.asyncio
+async def test_a_blank_entry_among_real_ids_is_dropped_not_carried(app, client):
+    picked = await _selection(app, client, "&selected_file_ids=7&selected_file_ids=%20")
+    assert picked == ("7",)
+
+
+@pytest.mark.asyncio
+async def test_an_over_long_selection_entry_is_refused_at_the_boundary(client):
+    resp = await client.get(
+        f"/api/v1/assets/{ASSET_ID}/bundle?scope_id=9000&model={MODEL}"
+        "&selected_file_ids=" + ("9" * 41)
+    )
+    assert resp.status_code == 422
 
 
 # ── route ordering ─────────────────────────────────────────────────────────
