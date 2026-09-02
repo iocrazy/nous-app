@@ -40,8 +40,13 @@ interface ResourceCardProps {
   // Justified view: real aspect ratio (w/h) for the thumbnail (no letterbox bars)
   aspectRatio?: number;
   /** Adaptive view: report the thumbnail's natural ratio once it loads, for
-   *  resources whose dimensions the server did not send (every upload). The
-   *  grid batches these and re-justifies the affected rows once. */
+   *  resources whose dimensions the server did not send (every upload).
+   *
+   *  The grid batches these per animation frame and re-runs the justified
+   *  layout. Because that packing is sequential, a corrected ratio repartitions
+   *  its own row AND every row after it — the caller drops measurements that
+   *  merely confirm the placeholder, and the layout keeps the untouched prefix,
+   *  but items below the change can still shift. See utils/justifiedLayout.ts. */
   onThumbnailAspect?: (aspect: number) => void;
 }
 

@@ -21,6 +21,7 @@
  */
 
 import { clampAspectRatio } from './justifiedLayout'
+import { isAlbumType, isAudioType, isVideoType } from './awemeType'
 
 /** Placeholder for an image whose dimensions are not known yet. */
 export const DEFAULT_IMAGE_ASPECT = 4 / 3
@@ -35,7 +36,14 @@ export { clampAspectRatio } from './justifiedLayout'
 
 export interface AspectSource {
   resolution?: string | null
+  /** `resources` rows carry a MIME type. */
   mime_type?: string | null
+  /**
+   * `parsed_media` rows (My Downloads) carry a media_type instead — 'video' /
+   * 'carousel' / 'image_text' / 'audio', plus legacy numeric spellings. Both
+   * shapes feed the same helpers so the two surfaces cannot drift apart.
+   */
+  media_type?: string | number | null
   thumbnail_path?: string | null
 }
 
@@ -50,12 +58,17 @@ export function parseResolution(res?: string | null): number | null {
   return clampAspectRatio(w / h)
 }
 
-function isImage(mime?: string | null): boolean {
-  return !!mime && mime.startsWith('image/')
+function isImageLike(source?: AspectSource): boolean {
+  if (source?.mime_type?.startsWith('image/')) return true
+  // Albums and image-text posts are still pictures, so they measure like one.
+  return isAlbumType(source?.media_type ?? undefined)
 }
 
-function isVideo(mime?: string | null): boolean {
-  return !!mime && mime.startsWith('video/')
+function isVideoLike(source?: AspectSource): boolean {
+  if (source?.mime_type?.startsWith('video/')) return true
+  const mt = source?.media_type
+  if (mt === undefined || mt === null) return false
+  return isVideoType(mt) && !isAudioType(String(mt))
 }
 
 /**
@@ -66,7 +79,31 @@ function isVideo(mime?: string | null): boolean {
 export function needsAspectMeasurement(resource?: AspectSource): boolean {
   if (!resource) return false
   if (parseResolution(resource.resolution) !== null) return false
-  return isImage(resource.mime_type) || isVideo(resource.mime_type)
+  return isImageLike(resource) || isVideoLike(resource)
+}
+
+/**
+ * Relative tolerance under which a measured ratio is treated as confirming the
+ * placeholder rather than correcting it.
+ *
+ * Reporting a ratio that rounds to what the layout already assumed would
+ * repartition every row after that item (the packing is sequential — see
+ * utils/justifiedLayout.ts) to produce a visually identical result. A 4:3 photo
+ * landing on the 4:3 placeholder is the common case worth skipping.
+ */
+export const ASPECT_MATCH_TOLERANCE = 0.02
+
+/**
+ * True when `measured` is close enough to the ratio the layout is already using
+ * that re-laying out would not visibly change anything.
+ */
+export function matchesCurrentAspect(
+  current: number,
+  measured: number,
+  tolerance: number = ASPECT_MATCH_TOLERANCE,
+): boolean {
+  if (!Number.isFinite(measured) || measured <= 0 || current <= 0) return false
+  return Math.abs(clampAspectRatio(measured) - current) / current <= tolerance
 }
 
 /**
@@ -80,7 +117,7 @@ export function aspectRatioOf(resource?: AspectSource, measured?: number): numbe
     return clampAspectRatio(measured)
   }
 
-  if (isVideo(resource?.mime_type)) return DEFAULT_VIDEO_ASPECT
-  if (isImage(resource?.mime_type)) return DEFAULT_IMAGE_ASPECT
+  if (isVideoLike(resource)) return DEFAULT_VIDEO_ASPECT
+  if (isImageLike(resource)) return DEFAULT_IMAGE_ASPECT
   return NON_VISUAL_ASPECT
 }

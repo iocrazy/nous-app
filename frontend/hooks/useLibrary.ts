@@ -13,6 +13,39 @@ import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
 import { SearchResult } from '../services/searchService';
 
+/** The download library's view modes. `adaptive` is the Eagle-style justified
+ *  layout shared with the resource grid; the other three are pre-existing. */
+export const LIBRARY_VIEW_MODES = ['adaptive', 'grid', 'list', 'feed'] as const;
+export type LibraryViewMode = (typeof LIBRARY_VIEW_MODES)[number];
+
+/** localStorage blob holding the download library's UI preferences. */
+export const LIBRARY_PREFS_KEY = 'mediahub_library_preferences';
+
+/**
+ * The download library's initial view mode: a stored preference if it names a
+ * real mode, else the Eagle-style adaptive layout (matching the resource grid).
+ *
+ * Extracted from the hook so the default, the validation and the
+ * storage-unavailable path are testable without standing up useLibrary's
+ * supabase/service dependencies.
+ */
+export function readStoredLibraryViewMode(): LibraryViewMode {
+  try {
+    const saved = localStorage.getItem(LIBRARY_PREFS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const mode = parsed?.viewMode;
+      if (typeof mode === 'string' && (LIBRARY_VIEW_MODES as readonly string[]).includes(mode)) {
+        return mode as LibraryViewMode;
+      }
+    }
+  } catch (err) {
+    // Privacy mode, disabled storage, or a corrupt blob — never silent.
+    console.error('Failed to read stored library view mode:', err);
+  }
+  return 'adaptive';
+}
+
 interface UseLibraryParams {
   isAuthenticated: boolean;
   selectedTeamId: string | null;
@@ -55,21 +88,11 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const [isSentinelVisible, setIsSentinelVisible] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // View mode
-  const [libraryViewMode, setLibraryViewMode] = useState<'grid' | 'list' | 'feed'>(() => {
-    const saved = localStorage.getItem('mediahub_library_preferences');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.viewMode && ['grid', 'list', 'feed'].includes(parsed.viewMode)) {
-          return parsed.viewMode;
-        }
-      } catch {
-        return 'grid';
-      }
-    }
-    return 'grid';
-  });
+  // View mode. Defaults to the Eagle-style adaptive layout, matching the
+  // resource grid (see contexts/ResourcesContext.tsx): covers keep their own
+  // proportions instead of being cropped onto the fixed 2:3 tile. A stored
+  // preference still wins, so anyone who already chose grid/list/feed keeps it.
+  const [libraryViewMode, setLibraryViewMode] = useState<LibraryViewMode>(readStoredLibraryViewMode);
 
   // Library tab
   const [activeLibraryTab, setActiveLibraryTab] = useState<LibraryTab>(() => {

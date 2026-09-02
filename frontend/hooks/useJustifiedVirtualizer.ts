@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { computeJustifiedRows, type JustifiedRow } from '../utils/justifiedLayout'
+import { useContainerWidth } from './useContainerWidth'
 
 /** Height of a grid card's non-thumbnail chrome (filename bar): px-3/py-2.5
  *  padding + one 13px text line + border. Estimate only — rows re-measure. */
@@ -18,7 +19,7 @@ interface UseJustifiedVirtualizerResult {
   /** Pre-computed row partition; item i of row r renders at ar*row.height. */
   rows: JustifiedRow[]
   rowVirtualizer: ReturnType<typeof useVirtualizer>
-  containerRef: (node: HTMLDivElement | null) => void
+  containerRef: (node: HTMLElement | null) => void
   gap: number
 }
 
@@ -38,29 +39,49 @@ export function useJustifiedVirtualizer({
   targetRowHeight = 170,
   gap = 8,
 }: UseJustifiedVirtualizerOpts): UseJustifiedVirtualizerResult {
-  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
-  const [width, setWidth] = useState(0)
+  const { ref: containerRef, width } = useContainerWidth()
 
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    setContainerEl(node)
-  }, [])
+  // Previous inputs/outputs, so a repeat layout of the same list can keep the
+  // untouched prefix instead of repacking from item 0. See the ripple note at
+  // the top of utils/justifiedLayout.ts for what this does and does NOT fix.
+  const prevRatiosRef = useRef<number[]>([])
+  const prevRowsRef = useRef<JustifiedRow[]>([])
+  const prevShapeRef = useRef('')
 
-  useEffect(() => {
-    if (!containerEl) return
-    const initial = containerEl.getBoundingClientRect().width
-    if (initial > 0) setWidth(initial)
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) setWidth(entry.contentRect.width)
-    })
-    observer.observe(containerEl)
-    return () => observer.disconnect()
-  }, [containerEl])
+  const rows = useMemo(() => {
+    const shape = `${width}|${targetRowHeight}|${gap}|${aspectRatios.length}`
+    const sameShape = shape === prevShapeRef.current
+    const prevRatios = prevRatiosRef.current
+    const prevRows = prevRowsRef.current
 
-  const rows = useMemo(
-    () => computeJustifiedRows(aspectRatios, width, { targetRowHeight, gap }),
-    [aspectRatios, width, targetRowHeight, gap],
-  )
+    let firstChangedIndex = 0
+    if (sameShape && prevRows.length > 0) {
+      firstChangedIndex = aspectRatios.length
+      for (let i = 0; i < aspectRatios.length; i += 1) {
+        if (aspectRatios[i] !== prevRatios[i]) {
+          firstChangedIndex = i
+          break
+        }
+      }
+      // Nothing moved at all — hand back the SAME array so the virtualizer's
+      // measure effect (keyed on `rows` identity) does not fire needlessly.
+      if (firstChangedIndex === aspectRatios.length) return prevRows
+    }
+
+    const next = computeJustifiedRows(
+      aspectRatios,
+      width,
+      { targetRowHeight, gap },
+      sameShape && prevRows.length > 0
+        ? { prevRows, firstChangedIndex }
+        : undefined,
+    )
+
+    prevRatiosRef.current = aspectRatios
+    prevRowsRef.current = next
+    prevShapeRef.current = shape
+    return next
+  }, [aspectRatios, width, targetRowHeight, gap])
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,

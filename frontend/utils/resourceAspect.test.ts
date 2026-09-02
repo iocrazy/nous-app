@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   aspectRatioOf,
+  matchesCurrentAspect,
+  ASPECT_MATCH_TOLERANCE,
   needsAspectMeasurement,
   parseResolution,
   DEFAULT_IMAGE_ASPECT,
@@ -102,5 +104,37 @@ describe('needsAspectMeasurement', () => {
 
   it('is false for a missing resource', () => {
     expect(needsAspectMeasurement(undefined)).toBe(false)
+  })
+})
+
+describe('matchesCurrentAspect — skip layout churn for a confirming measurement', () => {
+  it('is true when the measurement lands on the placeholder', () => {
+    // A genuine 4:3 photo measuring in against the 4:3 placeholder: reporting
+    // it would repartition the tail to produce the same picture.
+    expect(matchesCurrentAspect(DEFAULT_IMAGE_ASPECT, 4 / 3)).toBe(true)
+  })
+
+  it('is true just inside the tolerance and false just outside', () => {
+    const current = DEFAULT_IMAGE_ASPECT
+    const inside = current * (1 + ASPECT_MATCH_TOLERANCE * 0.9)
+    const outside = current * (1 + ASPECT_MATCH_TOLERANCE * 1.1)
+    expect(matchesCurrentAspect(current, inside)).toBe(true)
+    expect(matchesCurrentAspect(current, outside)).toBe(false)
+  })
+
+  it('is false for a real correction, so portrait uploads still re-layout', () => {
+    // The case that matters: a portrait phone photo under a 4:3 placeholder.
+    expect(matchesCurrentAspect(DEFAULT_IMAGE_ASPECT, 0.75)).toBe(false)
+  })
+
+  it('compares against the CLAMPED measurement, matching what the layout uses', () => {
+    // 50 clamps to 3; against a current of 3 that is a confirmation, not a change.
+    expect(matchesCurrentAspect(3, 50)).toBe(true)
+  })
+
+  it('is false for nonsense input rather than silently skipping', () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(matchesCurrentAspect(DEFAULT_IMAGE_ASPECT, bad)).toBe(false)
+    }
   })
 })

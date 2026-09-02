@@ -16,7 +16,16 @@
  * nothing and cost size stability.
  */
 
-/** Cards are never narrower than this when a wider layout is possible. */
+/**
+ * Cards are never narrower than this when a wider layout is possible.
+ *
+ * The hedge is load-bearing: the guarantee holds only at or above **504px** of
+ * container. Below that the max-width cap wins and the widening pass pushes
+ * cards under the minimum (at 250px it returns 2 columns of 119px), because one
+ * 250px card would breach MAX_CARD_WIDTH and there is no third option. 504 is
+ * where the two bounds stop conflicting; no container in the app is near it
+ * (the narrowest real one is a 375px phone, which yields 2 columns of 181px).
+ */
 export const MIN_CARD_WIDTH = 160
 /** Hard cap — beyond this a column is added instead of growing the card.
  *  Mirrors the `.downloads-grid` CSS band `minmax(160px, 220px)`. */

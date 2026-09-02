@@ -28,12 +28,20 @@ describe('columnsForWidth', () => {
     }
   })
 
-  it('keeps cards at or above the min width whenever the container allows it', () => {
-    // Above the point where one min-width card fits, cards stay in band.
-    for (let w = MIN_CARD_WIDTH * 4; w <= 3000; w += 7) {
+  it('keeps cards at or above the min width from the documented floor up', () => {
+    // 504px is where the min-width and max-width bounds stop conflicting; the
+    // doc comment on MIN_CARD_WIDTH explains why they conflict below it.
+    for (let w = 504; w <= 3000; w += 7) {
       const cols = columnsForWidth(w)
-      expect(cardWidthFor(w, cols)).toBeGreaterThanOrEqual(MIN_CARD_WIDTH * 0.9)
+      expect(cardWidthFor(w, cols)).toBeGreaterThanOrEqual(MIN_CARD_WIDTH)
     }
+  })
+
+  it('pins 504 as the exact floor of that guarantee', () => {
+    // Falsifiable both ways, so moving MIN/MAX/GAP without updating the comment
+    // turns this red rather than silently drifting the documented number.
+    expect(cardWidthFor(504, columnsForWidth(504))).toBeGreaterThanOrEqual(MIN_CARD_WIDTH)
+    expect(cardWidthFor(503, columnsForWidth(503))).toBeLessThan(MIN_CARD_WIDTH)
   })
 
   it('adds columns monotonically as the container widens', () => {
@@ -84,5 +92,28 @@ describe('reflow stability — info panel opening must not resize cards', () => 
   it('regression: 780px does NOT produce a 2-column giant-card layout', () => {
     expect(columnsForWidth(780)).toBeGreaterThan(2)
     expect(cardWidthFor(780, columnsForWidth(780))).toBeLessThan(250)
+  })
+})
+
+describe('narrow containers — below the app\'s real range, pinned deliberately', () => {
+  // The old rule had a hard 2-column minimum. The band rule drops that: nothing
+  // in the app reaches these widths (the narrowest real container is a 375px
+  // phone, which still yields 2), but the behaviour should be intentional
+  // rather than incidental, so it is pinned either way.
+  it('gives a single column where a second would breach the min width', () => {
+    expect(columnsForWidth(172)).toBe(1)
+    expect(columnsForWidth(200)).toBe(1)
+    expect(columnsForWidth(220)).toBe(1)
+  })
+
+  it('adds the second column as soon as the cap requires it', () => {
+    // 221 is the boundary: a lone card there would exceed MAX_CARD_WIDTH, so
+    // the widening pass fires and splits it in two.
+    expect(columnsForWidth(221)).toBe(2)
+    expect(cardWidthFor(221, 2)).toBeLessThanOrEqual(MAX_CARD_WIDTH)
+  })
+
+  it('still reports 2 for the unmeasured width, so nothing renders 1-up on a cold load', () => {
+    expect(columnsForWidth(0)).toBe(2)
   })
 })

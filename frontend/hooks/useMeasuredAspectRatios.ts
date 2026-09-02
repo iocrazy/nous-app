@@ -10,9 +10,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * milliseconds — visible as rows twitching while a folder opens. Coalescing
  * per frame means the rows settle in one re-layout.
  *
- * The map only ever grows with cards that have actually been mounted (the grid
- * is virtualized), and holds one number per resource id, so it stays small
- * relative to the item list it describes.
+ * GROWTH — the map is NOT pruned, and nothing bounds it below the size of the
+ * list. It gains one entry per resource id whose thumbnail has been measured,
+ * and those entries live for the lifetime of the provider, so scrolling a large
+ * folder end to end leaves an entry per item seen (plus the same again in the
+ * `knownRef` mirror). Two numbers keyed by id is a few dozen bytes each, so a
+ * 100k-item folder scrolled in full costs single-digit MB — acceptable, but it
+ * is a ceiling worth knowing rather than a claim that it stays small.
+ *
+ * Pruning is deliberately not attempted: entries are only re-derivable by
+ * re-decoding the image, so evicting one trades memory for a re-measure and a
+ * re-layout ripple (see utils/justifiedLayout.ts) the moment the user scrolls
+ * back. Dropping the whole map on a folder change would be the cheap win if
+ * this ever matters.
  */
 export interface MeasuredAspectRatios {
   /** id → measured ratio (w/h). Identity changes only on a real flush. */

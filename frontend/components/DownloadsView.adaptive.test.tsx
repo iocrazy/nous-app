@@ -1,24 +1,19 @@
 /**
- * My Downloads → right-click → Send to Agent: the WIRING.
+ * My Downloads in the adaptive (justified) view.
  *
- * Review finding I1: the two tests around this feature both stopped at the
- * ends of the chain — `DownloadContextMenu.test.tsx` checks the menu calls
- * the prop it was handed, `downloadAgentPayload.test.ts` checks a pure
- * function's return value — and the segment between them, the part living in
- * DownloadsView, was covered by nothing. Two mutations proved it: replacing
- * `onSendToAgent={handleCtxSendToAgent}` with `() => {}` (the feature is dead
- * again, which is the exact bug this branch fixes) and deleting the failure
- * toast (a silent no-op on a user-action -> agent path) both left all 5078
- * tests green.
+ * Review round 1, Important #1: the adaptive default reached the resource grid
+ * but not this surface. The layout maths lives in utils/justifiedLayout.ts and
+ * is tested there; what is asserted HERE is the wiring that nothing else
+ * covers — that this view renders justified ROWS, sizes each card from its own
+ * aspect ratio, and only attaches the measurement callback where the server
+ * gave no dimensions.
  *
- * So this renders the real DownloadsView, with the context menu stubbed to
- * capture the props it is actually handed, and invokes that captured
- * callback. Everything else is mocked at the module boundary: the assertions
- * are only about this one handler, and a heavy real render would fail for a
- * dozen unrelated reasons.
+ * The harness mirrors DownloadsView.sendToAgent.test.tsx: everything outside
+ * the branch under test is mocked at the module boundary, because a heavy real
+ * render would fail for a dozen unrelated reasons.
  */
-import { render, waitFor, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 
 // ── the two collaborators under observation ────────────────────────
 const { sendResourceToAgentMock, addToastMock } = vi.hoisted(() => ({
@@ -77,18 +72,19 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 
-const VIDEO = {
-  id: '900001',
-  platform_id: 'abc123',
-  title: 'Some Clip',
-  music_download_path: null,
-};
+// Real wire shape: parsed_media rows carry `resolution` as "W:H" (ytdlp writes
+// it; see utils/awemeType.formatResolution) and `media_type`, NOT a mime type.
+const VIDEOS = [
+  { id: '900001', platform_id: 'a1', title: 'Landscape', media_type: 'video', resolution: '1920:1080', music_download_path: null },
+  { id: '900002', platform_id: 'a2', title: 'Portrait', media_type: 'video', resolution: '1080:1920', music_download_path: null },
+  { id: '900003', platform_id: 'a3', title: 'Square', media_type: 'video', resolution: '1000:1000', music_download_path: null },
+];
 
 vi.mock('../contexts/LibraryContext', () => ({
   useLibraryContext: () => ({
-    library: [VIDEO], isLoadingLibrary: false, libraryError: null, totalCount: 1,
+    library: VIDEOS, isLoadingLibrary: false, libraryError: null, totalCount: VIDEOS.length,
     hasMoreData: false, isLoadingMore: false, loadMoreRef: { current: null },
-    isSentinelVisible: false, loadMoreLibrary: vi.fn(), libraryViewMode: 'grid',
+    isSentinelVisible: false, loadMoreLibrary: vi.fn(), libraryViewMode: 'adaptive',
     setLibraryViewMode: vi.fn(), sharedVideoIds: [], setLibrary: vi.fn(),
     loadLibraryData: vi.fn(), handleUpdateLibraryItem: vi.fn(),
     setFilterParams: vi.fn(),
@@ -123,7 +119,9 @@ vi.mock('./CompactMediaCard', () => ({
   CompactMediaCard: (props: any) => (
     <button
       data-testid="card"
-      onClick={() => props.onContextMenu({ clientX: 10, clientY: 10 }, props.data)}
+      data-title={props.data.title}
+      data-aspect={String(props.aspectRatio)}
+      data-measurable={String(props.onThumbnailAspect !== undefined)}
     />
   ),
 }));
@@ -175,66 +173,71 @@ vi.mock('../utils/awemeType', async (importOriginal) => ({
   getVideoUrl: () => '',
 }));
 
+// jsdom implements no ResizeObserver, and a real one would report 0 here
+// anyway. Stub the shared width hook with a fixed container width so the row
+// partition below is deterministic arithmetic.
+const CONTAINER_WIDTH = 1000;
+vi.mock('../hooks/useContainerWidth', () => ({
+  useContainerWidth: () => ({ ref: () => {}, width: CONTAINER_WIDTH }),
+}));
+
 import { DownloadsView } from './DownloadsView';
+import { computeJustifiedRows } from '../utils/justifiedLayout';
+import { parseResolution } from '../utils/resourceAspect';
 
-/** Open the context menu on a row the way the view itself does, then hand
- *  back the Send to Agent callback the menu was actually given. */
-async function captureSendToAgent() {
-  const { getAllByTestId } = render(<DownloadsView />);
-  // Right-click a real card so the view sets its own `contextMenu` state —
-  // the handler reads `contextMenu.video`, so a synthesised prop call would
-  // test nothing.
-  fireEvent.click(getAllByTestId('card')[0]);
-  await waitFor(() => expect(menuProps.current?.contextMenu).toBeTruthy());
-  return menuProps.current.onSendToAgent as () => Promise<void>;
-}
+const TARGET_ROW_HEIGHT = 200;
+const GAP = 12;
 
-const LINKED_MAP = {
-  '900001': {
-    id: '339710259795355',
-    filename: 'clip.mp4',
-    mime_type: 'video/mp4',
-    notes: null,
-    rating: 0,
-    transcript_status: 'none',
-    summary_status: 'none',
-  },
-};
+describe('DownloadsView — adaptive view', () => {
+  it('renders one card per item, sized by its own aspect ratio', () => {
+    const { getAllByTestId } = render(<DownloadsView />);
+    const cards = getAllByTestId('card');
+    expect(cards).toHaveLength(3);
 
-beforeEach(() => {
-  resourceDataMap.current = { ...LINKED_MAP };
-  sendResourceToAgentMock.mockReset().mockResolvedValue(undefined);
-  addToastMock.mockReset();
-  menuProps.current = null;
-});
-
-describe('DownloadsView — Send to Agent wiring', () => {
-  it('sends the resource to the agent, keyed by resources.id', async () => {
-    const onSendToAgent = await captureSendToAgent();
-    await act(async () => { await onSendToAgent(); });
-
-    expect(sendResourceToAgentMock).toHaveBeenCalledTimes(1);
-    const [resource, opts] = sendResourceToAgentMock.mock.calls[0];
-    // The row on screen is parsed_media 900001; what an agent can be handed
-    // is resources 339710259795355. Passing the former addresses a different
-    // row entirely at the transcribe endpoint.
-    expect(resource.id).toBe('339710259795355');
-    expect(resource.mime_type).toBe('video/mp4');
-    // Dropping these re-bills a transcription on an already-processed video.
-    expect(resource.transcript_status).toBe('none');
-    expect(opts.scope).toEqual({ type: 'personal', id: '' });
+    // Each card gets the ratio parsed from its own resolution, so a portrait
+    // clip is narrow and a landscape one is wide — the whole point of the view.
+    const byTitle = Object.fromEntries(
+      cards.map((c) => [c.getAttribute('data-title'), Number(c.getAttribute('data-aspect'))]),
+    );
+    expect(byTitle.Landscape).toBeCloseTo(16 / 9, 5);
+    expect(byTitle.Portrait).toBeCloseTo(1080 / 1920, 5);
+    expect(byTitle.Square).toBeCloseTo(1, 5);
   });
 
-  it('tells the user when no library resource is linked', async () => {
-    // The page's media -> resource map has not landed (or this media has no
-    // resource row). There is nothing an agent could be given, and saying
-    // nothing is the silent no-op this codebase keeps paying for.
-    resourceDataMap.current = {};
-    const onSendToAgent = await captureSendToAgent();
-    await act(async () => { await onSendToAgent(); });
+  it('lays the items out in justified rows at the container width', () => {
+    const { container } = render(<DownloadsView />);
+    const rows = container.querySelectorAll('.flex.items-start');
+    expect(rows.length).toBeGreaterThan(0);
 
-    expect(sendResourceToAgentMock).not.toHaveBeenCalled();
-    expect(addToastMock).toHaveBeenCalledTimes(1);
-    expect(addToastMock.mock.calls[0][1]).toBe('error');
+    // The rendered partition must match the shared layout function fed the same
+    // inputs — that is what makes this "the same layout as My Uploads".
+    const aspects = [
+      parseResolution('1920:1080')!,
+      parseResolution('1080:1920')!,
+      parseResolution('1000:1000')!,
+    ];
+    const expected = computeJustifiedRows(aspects, CONTAINER_WIDTH, {
+      targetRowHeight: TARGET_ROW_HEIGHT,
+      gap: GAP,
+    });
+    expect(rows).toHaveLength(expected.length);
+
+    // Card widths are ratio * row height, in order.
+    const widths = Array.from(container.querySelectorAll('[data-testid="card"]'))
+      .map((c) => (c.parentElement as HTMLElement).style.width);
+    expected.forEach((row) => {
+      for (let i = row.start; i < row.end; i += 1) {
+        expect(widths[i]).toBe(`${aspects[i] * row.height}px`);
+      }
+    });
+  });
+
+  it('never attaches the measurement callback when the server sent dimensions', () => {
+    // Downloads almost always carry `resolution`, so measuring would be pure
+    // cost — and every report repartitions the tail.
+    const { getAllByTestId } = render(<DownloadsView />);
+    for (const card of getAllByTestId('card')) {
+      expect(card.getAttribute('data-measurable')).toBe('false');
+    }
   });
 });

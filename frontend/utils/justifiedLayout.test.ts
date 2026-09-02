@@ -111,3 +111,86 @@ describe('computeJustifiedRows', () => {
     expect(elapsed).toBeLessThan(200); // generous CI headroom; ~ms locally
   });
 });
+
+describe('computeJustifiedRows — incremental reuse', () => {
+  /** Deterministic pseudo-random ratios, so a failure is reproducible. */
+  function ratios(n: number, seed: number): number[] {
+    let s = seed;
+    return Array.from({ length: n }, () => {
+      s = (s * 1103515245 + 12345) % 2147483648;
+      return 0.4 + (s / 2147483648) * 2.6;
+    });
+  }
+
+  it('produces EXACTLY the full-recompute result for every change position', () => {
+    // The reuse hint is a cost optimisation, so its only correctness duty is to
+    // be indistinguishable from recomputing from scratch. Sweep the change
+    // position across the whole list rather than spot-checking one index.
+    const base = ratios(120, 7);
+    const prevRows = computeJustifiedRows(base, WIDTH, { targetRowHeight: TARGET, gap: GAP });
+
+    for (let changed = 0; changed < base.length; changed += 1) {
+      const next = [...base];
+      next[changed] = next[changed] > 1.5 ? 0.5 : 2.7;
+
+      const full = computeJustifiedRows(next, WIDTH, { targetRowHeight: TARGET, gap: GAP });
+      const incremental = computeJustifiedRows(
+        next,
+        WIDTH,
+        { targetRowHeight: TARGET, gap: GAP },
+        { prevRows, firstChangedIndex: changed },
+      );
+
+      expect(incremental).toEqual(full);
+    }
+  });
+
+  it('keeps the untouched prefix rows byte-identical (same object identity)', () => {
+    const base = ratios(60, 11);
+    const prevRows = computeJustifiedRows(base, WIDTH, { targetRowHeight: TARGET, gap: GAP });
+
+    // Change an item late in the list so several rows precede it.
+    const changed = prevRows[3].start;
+    const next = [...base];
+    next[changed] = 0.45;
+
+    const rows = computeJustifiedRows(
+      next,
+      WIDTH,
+      { targetRowHeight: TARGET, gap: GAP },
+      { prevRows, firstChangedIndex: changed },
+    );
+
+    // Rows entirely before the changed item are REUSED, not rebuilt.
+    for (let i = 0; i < 3; i += 1) expect(rows[i]).toBe(prevRows[i]);
+    // The row containing the change is not reused.
+    expect(rows[3]).not.toBe(prevRows[3]);
+  });
+
+  it('recomputes everything when the change is at index 0', () => {
+    const base = ratios(40, 3);
+    const prevRows = computeJustifiedRows(base, WIDTH, { targetRowHeight: TARGET, gap: GAP });
+    const next = [...base];
+    next[0] = 2.9;
+
+    const rows = computeJustifiedRows(
+      next,
+      WIDTH,
+      { targetRowHeight: TARGET, gap: GAP },
+      { prevRows, firstChangedIndex: 0 },
+    );
+    expect(rows).toEqual(
+      computeJustifiedRows(next, WIDTH, { targetRowHeight: TARGET, gap: GAP }),
+    );
+  });
+
+  it('ignores an empty prevRows hint', () => {
+    const ars = ratios(25, 5);
+    expect(
+      computeJustifiedRows(ars, WIDTH, { targetRowHeight: TARGET, gap: GAP }, {
+        prevRows: [],
+        firstChangedIndex: 10,
+      }),
+    ).toEqual(computeJustifiedRows(ars, WIDTH, { targetRowHeight: TARGET, gap: GAP }));
+  });
+})
