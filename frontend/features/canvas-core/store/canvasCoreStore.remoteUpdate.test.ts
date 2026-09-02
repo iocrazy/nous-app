@@ -264,3 +264,57 @@ describe('applyRemoteUpdate — a drag in flight is dirty', () => {
     expect(s.conflict).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E. reset() must leave no unclaimed drag tick behind
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('reset — the drag tick is closure state, so reset owns it', () => {
+  // `unclaimedDragTick` lives in the store's closure, NOT in the state
+  // object, so `set({...})` inside `reset()` cannot clear it. Leaving it set
+  // hands the flag to whatever runs next on a store that is no longer
+  // holding a canvas — and `flushSave()` reads it as "there are drag
+  // positions in `nodes` nobody has claimed", which on a reset store is
+  // false by construction.
+  //
+  // The leak is reachable: leaving a canvas mid-drag is exactly the gesture
+  // `unclaimedDragTick` exists for, and leaving is exactly what calls
+  // `reset()`.
+
+  it('a drag tick then reset() leaves the store clean, not dirty', async () => {
+    const { store } = makeStore();
+    await store.getState().loadCanvas('100');
+
+    store.getState().noteDragStart();
+    store.getState().setNodesDragTick([{ id: 'dragged', position: { x: 40, y: 0 } }]);
+    store.getState().reset();
+
+    // `flushSave` is the one path that claims a held drag on unmount. On a
+    // store with no canvas open there is nothing to claim, so it must not
+    // mark dirty: a reset store reporting unsaved work is a lie every
+    // dirty-check downstream would believe.
+    await store.getState().flushSave();
+    expect(store.getState().revision).toBe(0);
+    expect(store.getState().revision).toBe(store.getState().persistedRevision);
+  });
+
+  it('a remote row on the NEXT canvas rebases instead of raising a conflict', async () => {
+    const { store } = makeStore();
+    await store.getState().loadCanvas('100');
+    store.getState().noteDragStart();
+    store.getState().setNodesDragTick([{ id: 'dragged', position: { x: 40, y: 0 } }]);
+    store.getState().reset();
+
+    await store.getState().loadCanvas('100');
+    const remoteRow: Canvas = {
+      ...baseCanvas,
+      base_updated_at: TS2,
+      nodes_json: [{ id: 'remote-wins' }],
+    };
+    store.getState().applyRemoteUpdate(remoteRow);
+
+    const s = store.getState();
+    expect(s.nodes).toEqual([{ id: 'remote-wins' }]);
+    expect(s.conflict).toBeNull();
+  });
+});

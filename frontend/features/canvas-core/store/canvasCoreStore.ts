@@ -740,6 +740,12 @@ export function createCanvasCoreStore(
         if (historyTimer) clearTimeout(historyTimer);
         historyTimer = null;
         pendingHistoryBase = null;
+        // Closure state, so the `set({...})` below cannot reach it. Leaving
+        // it set hands "there are unclaimed drag positions in `nodes`" to a
+        // store that is no longer holding a canvas — and leaving mid-drag is
+        // both the gesture the flag exists for and the thing that calls
+        // `reset()`, so the two meet in practice.
+        unclaimedDragTick = false;
         set({
           canvasId: null,
           kind: null,
