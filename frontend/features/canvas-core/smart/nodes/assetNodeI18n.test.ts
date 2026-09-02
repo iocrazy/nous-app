@@ -11,6 +11,15 @@
 // The key list is read out of the SOURCE, not typed out here: a hand-kept
 // inventory drifts the moment a string is added, and the drift is silent in
 // exactly the direction this test exists to catch.
+//
+// ⚠️ ONE NAMESPACE (P4 Task 8). The run-report strings — the provider's
+// reference ceiling, what the bundle would not send, and why — used to live
+// under `assets.node.*` while everything else on the same card lived under
+// `canvas.asset.*`. Two namespaces for one component meant a translator
+// touching "the asset card" saw half of it, and the split tracked nothing:
+// both halves are rendered by `AssetNodeView`, both are canvas copy. They are
+// now all `canvas.asset.*`, and the "no key nothing asks for" case below is
+// what stops the old family from being resurrected in a locale file alone.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,7 +46,12 @@ function at(tree: Record<string, unknown>, key: string): unknown {
   );
 }
 
-/** Every `canvas.asset.*` key the two components ask for. */
+/**
+ * Every `canvas.asset.*` key the two components ask for by a LITERAL.
+ *
+ * `dropReason.${reason}` is built at runtime from a backend code and so has no
+ * literal to find — it is enumerated from the contract instead, below.
+ */
 const usedKeys = [
   ...new Set(
     SOURCES.flatMap((file) => {
@@ -50,43 +64,6 @@ const usedKeys = [
 const en = load('en');
 const zh = load('zh');
 
-describe('asset node i18n', () => {
-  it('found the keys at all — an empty list would pass every case below', () => {
-    expect(usedKeys.length).toBeGreaterThan(10);
-  });
-
-  it.each(usedKeys)('%s is translated in both locales', (key) => {
-    expect(typeof at(en, key)).toBe('string');
-    expect(typeof at(zh, key)).toBe('string');
-  });
-
-  it('the drag-create entry is named and described in both locales', () => {
-    for (const key of ['canvas.dragCreate.node.asset', 'canvas.dragCreate.desc.asset']) {
-      expect(typeof at(en, key)).toBe('string');
-      expect(typeof at(zh, key)).toBe('string');
-    }
-  });
-
-  it('the zh values are actually translated, not copied English', () => {
-    // A copied English value passes a "the key exists" check while leaving zh
-    // users on English — the failure this file is really about.
-    const copied = usedKeys.filter((k) => at(en, k) === at(zh, k));
-    expect(copied).toEqual([]);
-  });
-
-  it('no locale carries a canvas.asset key nothing asks for', () => {
-    const declared = Object.keys(
-      (at(en, 'canvas.asset') ?? {}) as Record<string, unknown>,
-    ).map((k) => `canvas.asset.${k}`);
-    expect(declared.sort()).toEqual(usedKeys);
-  });
-});
-
-// ── The run-report namespace (`assets.node.*`, P4 Task 5) ──────────────────
-// Separate namespace, separate block: these are the strings the node shows
-// ABOUT A RUN (the provider's reference ceiling, and what the bundle would not
-// send), and the plan names them `assets.node.*`.
-
 /** A key is translated when it is a string, or when BOTH plural forms are. */
 function translated(tree: Record<string, unknown>, key: string): boolean {
   if (typeof at(tree, key) === 'string') return true;
@@ -95,14 +72,6 @@ function translated(tree: Record<string, unknown>, key: string): boolean {
     typeof at(tree, `${key}_other`) === 'string'
   );
 }
-
-const nodeKeys = [
-  ...new Set(
-    [...fs.readFileSync(SOURCES[0], 'utf8').matchAll(/'(assets\.node\.[A-Za-z0-9_.]+)'/g)].map(
-      (m) => m[1],
-    ),
-  ),
-].sort();
 
 /**
  * The drop-reason codes, read out of the BACKEND CONTRACT rather than listed
@@ -120,49 +89,82 @@ const dropReasons = (() => {
   return [...union.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
 })();
 
-describe('asset node run-report i18n', () => {
-  it('found the keys and the reason codes at all', () => {
-    expect(nodeKeys.length).toBeGreaterThan(2);
+describe('asset node i18n', () => {
+  it('found the keys and the reason codes at all — empty lists would pass every case below', () => {
+    expect(usedKeys.length).toBeGreaterThan(10);
     expect(dropReasons.length).toBeGreaterThan(1);
   });
 
-  it.each(nodeKeys)('%s is translated in both locales', (key) => {
+  it.each(usedKeys)('%s is translated in both locales', (key) => {
     expect(translated(en, key), `${key} missing from en.json`).toBe(true);
     expect(translated(zh, key), `${key} missing from zh.json`).toBe(true);
   });
 
+  it('the run-report keys are part of this namespace, not a second one', () => {
+    // The unification itself, pinned. Moving `refsLimit` back under
+    // `assets.node.*` would leave the card half-translated again, and the
+    // source-derived list above would not notice — it only looks at
+    // `canvas.asset.*`.
+    for (const key of [
+      'canvas.asset.refsLimit',
+      'canvas.asset.refsDropped',
+      'canvas.asset.refsDroppedGroup',
+      'canvas.asset.bundleFailed',
+    ]) {
+      expect(usedKeys, `${key} is not asked for by the node`).toContain(key);
+    }
+    // And the retired namespace is gone from both locale files entirely.
+    expect(at(en, 'assets.node')).toBeUndefined();
+    expect(at(zh, 'assets.node')).toBeUndefined();
+  });
+
   it.each(dropReasons)('the %s reason has a label in both locales', (reason) => {
-    const key = `assets.node.dropReason.${reason}`;
+    const key = `canvas.asset.dropReason.${reason}`;
     expect(typeof at(en, key), `${key} missing from en.json`).toBe('string');
     expect(typeof at(zh, key), `${key} missing from zh.json`).toBe('string');
   });
 
+  it('the drag-create entry is named and described in both locales', () => {
+    for (const key of ['canvas.dragCreate.node.asset', 'canvas.dragCreate.desc.asset']) {
+      expect(typeof at(en, key)).toBe('string');
+      expect(typeof at(zh, key)).toBe('string');
+    }
+  });
+
   it('the zh values are actually translated, not copied English', () => {
+    // A copied English value passes a "the key exists" check while leaving zh
+    // users on English — the failure this file is really about.
     const declared = Object.keys(
-      (at(en, 'assets.node') ?? {}) as Record<string, unknown>,
+      (at(en, 'canvas.asset') ?? {}) as Record<string, unknown>,
     ).filter((k) => k !== 'dropReason');
     const copied = [
-      ...declared.map((k) => `assets.node.${k}`),
-      ...dropReasons.map((r) => `assets.node.dropReason.${r}`),
+      ...declared.map((k) => `canvas.asset.${k}`),
+      ...dropReasons.map((r) => `canvas.asset.dropReason.${r}`),
     ].filter((k) => at(en, k) === at(zh, k));
     expect(copied).toEqual([]);
   });
 
-  it('no locale carries an assets.node key nothing asks for', () => {
+  it('no locale carries a canvas.asset key nothing asks for', () => {
     const declared = [
       ...new Set(
-        Object.keys((at(en, 'assets.node') ?? {}) as Record<string, unknown>)
+        Object.keys((at(en, 'canvas.asset') ?? {}) as Record<string, unknown>)
           .filter((k) => k !== 'dropReason')
-          .map((k) => `assets.node.${k.replace(/_(one|other)$/, '')}`),
+          .map((k) => `canvas.asset.${k.replace(/_(one|other)$/, '')}`),
       ),
     ].sort();
-    expect(declared).toEqual(nodeKeys);
+    expect(declared).toEqual(usedKeys);
   });
 
   it('no locale carries a drop-reason label the contract does not name', () => {
     const declared = Object.keys(
-      (at(en, 'assets.node.dropReason') ?? {}) as Record<string, unknown>,
+      (at(en, 'canvas.asset.dropReason') ?? {}) as Record<string, unknown>,
     ).sort();
     expect(declared).toEqual(dropReasons);
+  });
+
+  it('the two locales carry exactly the same canvas.asset keys', () => {
+    const keys = (tree: Record<string, unknown>) =>
+      Object.keys((at(tree, 'canvas.asset') ?? {}) as Record<string, unknown>).sort();
+    expect(keys(zh)).toEqual(keys(en));
   });
 });

@@ -47,7 +47,16 @@ const SUMMARY = {
   is_system_preset: false,
 };
 
-const DETAIL = { ...SUMMARY, files: [], links: [], linked_by: [], loadouts: [] };
+const DETAIL = {
+  ...SUMMARY,
+  files: [],
+  links: [],
+  linked_by: [],
+  loadouts: [],
+  // Always on the wire: `UsedInResponse` has a default_factory, so a detail
+  // response never omits it.
+  used_in: { canvases: [], storyboards: [] },
+};
 
 function renderPicker(
   onPick = vi.fn(),

@@ -123,6 +123,7 @@ const DETAIL = {
   links: [],
   linked_by: [],
   loadouts: [],
+  used_in: { canvases: [], storyboards: [] },
 } as unknown as AssetRowDetail;
 
 const NODE_DATA = {

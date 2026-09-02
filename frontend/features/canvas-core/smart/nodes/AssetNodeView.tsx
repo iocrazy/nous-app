@@ -370,15 +370,15 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
                 .join('\n')}
               className="shrink-0 rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
             >
-              {t('assets.node.refsDropped', {
+              {t('canvas.asset.refsDropped', {
                 refs: droppedByReason
                   .map(([reason, count]) =>
-                    t('assets.node.refsDroppedGroup', {
+                    t('canvas.asset.refsDroppedGroup', {
                       count,
                       // An unrecognised code still renders as itself — a badge
                       // that omits a reference because nobody wrote its label
                       // is the silent drop all over again.
-                      reason: t(`assets.node.dropReason.${reason}`, reason),
+                      reason: t(`canvas.asset.dropReason.${reason}`, reason),
                       defaultValue: '{{count}} ({{reason}})',
                     }),
                   )
@@ -396,7 +396,7 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
             title={bundleError}
           >
             {t(
-              'assets.node.bundleFailed',
+              'canvas.asset.bundleFailed',
               'The last run could not read this asset. Nothing from it was sent.',
             )}
           </div>
@@ -430,7 +430,7 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
               // ceiling with no way down, and `patchNode` writes no history
               // entry, so there is no undo either.
               const blocked = !checked && atLimit;
-              const limitHint = t('assets.node.refsLimit', {
+              const limitHint = t('canvas.asset.refsLimit', {
                 count: maxRefs ?? 0,
                 defaultValue:
                   'This model takes {{count}} reference images. The rest are not sent.',
@@ -486,7 +486,7 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
             data-testid="asset-node-refs-limit"
             className="mt-1 text-[10px] text-canvas-muted"
           >
-            {t('assets.node.refsLimit', {
+            {t('canvas.asset.refsLimit', {
               count: maxRefs,
               defaultValue:
                 'This model takes {{count}} reference images. The rest are not sent.',

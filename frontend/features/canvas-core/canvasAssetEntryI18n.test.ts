@@ -19,6 +19,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { NODE_BAR_CHIP_KEYS } from './ui/TopNodeBar';
+
 const LOCALES = path.resolve(__dirname, '../../public/locales');
 const SOURCES = [
   path.join(__dirname, 'smart/nodes/OutputNodeToolbar.tsx'),
@@ -88,6 +90,41 @@ describe('canvas asset-entry i18n', () => {
         Object.keys((at(tree, `canvas.${ns}`) ?? {}) as Record<string, unknown>).sort();
       expect(keys(zh), `canvas.${ns}`).toEqual(keys(en));
     }
+  });
+
+  // ── The node bar's chip labels (`canvas.nodeBar.*`, P4 Task 8) ──
+  //
+  // The strip used to render `chip.label` — a bare English literal — for all
+  // ten chips, and P4 added two more the same way. They now go through
+  // `t('canvas.nodeBar.' + key, chip.label)`, which means every label still
+  // renders in English when a key is missing and reports nothing. The key set
+  // is read from `NODE_BAR_CHIP_KEYS`, the array the bar itself maps over, so
+  // an eleventh chip fails here until both locales name it.
+  it('found the chips at all — an empty list would pass every case below', () => {
+    expect(NODE_BAR_CHIP_KEYS.length).toBeGreaterThan(8);
+  });
+
+  it.each([...NODE_BAR_CHIP_KEYS])('the %s chip is labelled in both locales', (key) => {
+    expect(typeof at(en, `canvas.nodeBar.${key}`), `en ${key}`).toBe('string');
+    expect(typeof at(zh, `canvas.nodeBar.${key}`), `zh ${key}`).toBe('string');
+  });
+
+  it('no locale carries a chip label the bar does not render', () => {
+    const declared = Object.keys(
+      (at(en, 'canvas.nodeBar') ?? {}) as Record<string, unknown>,
+    ).sort();
+    expect(declared).toEqual([...NODE_BAR_CHIP_KEYS].sort());
+  });
+
+  it('the chip labels are actually translated, not copied English', () => {
+    // `LLM` is legitimately identical in both — it is an acronym we do not
+    // localize — and is the one exemption.
+    const copied = NODE_BAR_CHIP_KEYS.filter(
+      (key) =>
+        key !== 'llm' &&
+        at(en, `canvas.nodeBar.${key}`) === at(zh, `canvas.nodeBar.${key}`),
+    );
+    expect(copied).toEqual([]);
   });
 
   it('the count toasts keep their interpolation placeholders in zh', () => {

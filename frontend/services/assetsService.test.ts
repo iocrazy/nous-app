@@ -430,6 +430,70 @@ describe('fetchAssetDetail', () => {
     expect(asset.links).toEqual([]);
     expect(asset.linked_by).toEqual([]);
     expect(asset.loadouts).toEqual([]);
+    // `used_in` is declared required, so the normalizer owes both lists even
+    // when the payload has neither — a sidebar mapping over
+    // `used_in.canvases` must not crash on a pre-P4 response.
+    expect(asset.used_in).toEqual({ canvases: [], storyboards: [] });
+  });
+
+  it('carries used_in through with the canvases the server aggregated', async () => {
+    // The real `list_canvases_for_asset` row: string ids throughout, one entry
+    // per canvas with `node_ids` collected rather than one entry per node.
+    stubFetch({
+      success: true,
+      data: {
+        ...ASSET_ROW,
+        used_in: {
+          canvases: [
+            {
+              canvas_id: '727145299382534900',
+              canvas_name: 'Bamboo Sea Boards',
+              kind: 'smart',
+              project_id: '727145299382534000',
+              node_ids: ['asset-1', 'asset-2'],
+              loadout_ids: ['727145299382534401'],
+            },
+          ],
+          storyboards: [],
+        },
+      },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+
+    expect(asset.used_in.canvases).toHaveLength(1);
+    expect(asset.used_in.canvases[0].canvas_name).toBe('Bamboo Sea Boards');
+    expect(asset.used_in.canvases[0].node_ids).toEqual(['asset-1', 'asset-2']);
+    expect(asset.used_in.storyboards).toEqual([]);
+  });
+
+  it('keeps a half-filled used_in rather than dropping the half that came', async () => {
+    // A response with `canvases` but no `storyboards` key must not lose the
+    // canvases; replacing the whole object on any missing half is the obvious
+    // wrong version of the normalizer above.
+    stubFetch({
+      success: true,
+      data: {
+        ...ASSET_ROW,
+        used_in: {
+          canvases: [
+            {
+              canvas_id: '727145299382534900',
+              canvas_name: 'Bamboo Sea Boards',
+              kind: 'smart',
+              project_id: '727145299382534000',
+              node_ids: ['asset-1'],
+              loadout_ids: [],
+            },
+          ],
+        },
+      },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+
+    expect(asset.used_in.canvases).toHaveLength(1);
+    expect(asset.used_in.storyboards).toEqual([]);
   });
 
   it('keeps outgoing and incoming links apart', async () => {

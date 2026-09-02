@@ -9,6 +9,13 @@
 // this repo keeps re-learning; a disabled one with a reason is a promise the
 // user can read.
 //
+// USED IN answers two questions since P4 Task 8: which PROJECTS reference the
+// asset (`project_ids`, P2) and which CANVASES place a card for it
+// (`used_in.canvases`, shipped by P4 Task 1). The panel used to carry a
+// standing note saying canvas usage would arrive with P4; that note is gone,
+// because the answer is now real and a permanent "later" line is how a
+// shipped surface stays invisible.
+//
 // GENERATION HISTORY now sits under Used In. Task 7 left it out because
 // `GET /generated` had no `source_asset_id` filter and the only thing it could
 // have shown was the scope's whole inbox under this asset's name; Task 8 added
@@ -28,7 +35,11 @@ import {
 
 import { createCanvas } from '../../../../features/canvas-core/services/canvasService';
 import type { Project } from '../../../../types';
-import type { AssetLoadoutRow, AssetRowDetail } from '../../../../services/assetsService';
+import type {
+  AssetLoadoutRow,
+  AssetRowDetail,
+  UsedInCanvasRef,
+} from '../../../../services/assetsService';
 import { shortProjectLabel } from '../AssetCard';
 import { typeSingularKey } from '../assetTypeMeta';
 import { canvasKindFor } from './assetSheetModel';
@@ -203,38 +214,49 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
         )}
       </section>
 
-      <section data-testid="used-in-panel" className="flex flex-col gap-1.5">
+      <section data-testid="used-in-panel" className="flex flex-col gap-2">
         <h3 className="text-[11px] font-medium uppercase tracking-wide text-content-4">
           {t('assets.sheet.usedIn', 'Used In')}
         </h3>
-        {detail.project_ids.length === 0 ? (
-          <p className="text-[12px] text-content-4">
-            {t('assets.sheet.noProjects', 'No Projects Yet')}
+
+        <div className="flex flex-col gap-1">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-content-4">
+            {t('assets.sheet.usedInProjects', 'Projects')}
           </p>
-        ) : (
-          <ul className="flex flex-wrap gap-1">
-            {detail.project_ids.map((projectId) => (
-              <li
-                key={projectId}
-                data-testid="used-in-project"
-                data-project-id={projectId}
-                // Same fallback rule as `AssetCard`'s chips, from the same
-                // helper: a project whose name this page could not resolve is
-                // still a project the asset is used in, but a raw 15-digit
-                // Snowflake is not a label — the full id lives in the tooltip.
-                title={projectNames[projectId] ?? projectId}
-                className="max-w-full truncate rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3"
-              >
-                {projectNames[projectId] ?? shortProjectLabel(projectId)}
-              </li>
-            ))}
-          </ul>
-        )}
-        {/* Stated, not omitted: a Used In panel that lists projects only,
-            with no note, reads as "this asset is on no canvas". */}
-        <p className="text-[11px] text-content-4">
-          {t('assets.sheet.canvasUsageLater', 'Canvas usage arrives with P4')}
-        </p>
+          {detail.project_ids.length === 0 ? (
+            <p className="text-[12px] text-content-4">
+              {t('assets.sheet.noProjects', 'No Projects Yet')}
+            </p>
+          ) : (
+            <ul className="flex flex-wrap gap-1">
+              {detail.project_ids.map((projectId) => (
+                <li
+                  key={projectId}
+                  data-testid="used-in-project"
+                  data-project-id={projectId}
+                  // Same fallback rule as `AssetCard`'s chips, from the same
+                  // helper: a project whose name this page could not resolve is
+                  // still a project the asset is used in, but a raw 15-digit
+                  // Snowflake is not a label — the full id lives in the tooltip.
+                  title={projectNames[projectId] ?? projectId}
+                  className="max-w-full truncate rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3"
+                >
+                  {projectNames[projectId] ?? shortProjectLabel(projectId)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <UsedInCanvases
+          canvases={detail.used_in?.canvases ?? []}
+          projectNames={projectNames}
+          onOpenCanvas={onOpenCanvas}
+        />
+        {/* `used_in.storyboards` is on the wire and always empty — the
+            storyboard side has no ref mirror yet. Nothing is rendered for it
+            on purpose: a "Storyboards: none" row would state a fact this
+            release cannot actually check. */}
       </section>
 
       {scopeId && (
@@ -260,6 +282,92 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
         />
       )}
     </aside>
+  );
+};
+
+// --- Used In: canvases ------------------------------------------------------
+
+interface UsedInCanvasesProps {
+  canvases: UsedInCanvasRef[];
+  projectNames: Record<string, string>;
+  onOpenCanvas: (canvasId: string, nodeId?: string) => void;
+}
+
+/**
+ * The canvases that place a card for this asset (P4).
+ *
+ * Each row opens the canvas at its FIRST card (`?node=<id>` — the canvas's own
+ * latch selects and centres it), so the link lands on the thing the row is
+ * about rather than on a board the user then has to hunt through. The server
+ * aggregates per canvas, so a board carrying the asset three times is one row;
+ * the card count is said out loud when it is more than one, because "Bamboo
+ * Sea" alone would understate what removing the asset there would affect.
+ *
+ * The empty state is a SENTENCE, not an omission: a panel that renders nothing
+ * for "no canvases" is indistinguishable from one whose fetch quietly failed.
+ */
+const UsedInCanvases: React.FC<UsedInCanvasesProps> = ({
+  canvases,
+  projectNames,
+  onOpenCanvas,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-content-4">
+        {t('assets.sheet.usedInCanvases', 'Canvases')}
+      </p>
+      {canvases.length === 0 ? (
+        <p data-testid="used-in-no-canvases" className="text-[12px] text-content-4">
+          {t('assets.sheet.noCanvases', 'Not On Any Canvas Yet')}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {canvases.map((canvas) => (
+            <li
+              key={canvas.canvas_id}
+              data-testid="used-in-canvas"
+              data-canvas-id={canvas.canvas_id}
+              data-node-count={canvas.node_ids.length}
+              className="flex items-baseline justify-between gap-2"
+            >
+              <button
+                type="button"
+                data-testid="used-in-canvas-open"
+                // `node_ids[0]` may be absent on a row whose nodes were
+                // aggregated away by a concurrent save; `undefined` then makes
+                // `onOpenCanvas` navigate without `?node=`, which is the right
+                // fallback — the board still opens.
+                onClick={() => onOpenCanvas(canvas.canvas_id, canvas.node_ids[0])}
+                className="min-w-0 truncate text-left text-[12px] text-accent hover:underline"
+              >
+                {canvas.canvas_name}
+              </button>
+              <span className="flex shrink-0 items-center gap-1">
+                {canvas.node_ids.length > 1 && (
+                  <span
+                    data-testid="used-in-canvas-count"
+                    className="text-[10px] tabular-nums text-content-4"
+                  >
+                    {t('assets.sheet.canvasCards', {
+                      n: canvas.node_ids.length,
+                      defaultValue: '{{n}} Cards',
+                    })}
+                  </span>
+                )}
+                <span
+                  data-testid="used-in-canvas-project"
+                  data-project-id={canvas.project_id}
+                  className="max-w-[7rem] truncate rounded-full border border-line-strong px-2 py-0.5 text-[10px] text-content-3"
+                >
+                  {projectNames[canvas.project_id] ?? canvas.project_id}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 };
 

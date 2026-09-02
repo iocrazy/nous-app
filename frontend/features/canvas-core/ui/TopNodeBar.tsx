@@ -46,6 +46,9 @@ import {
 
 interface Chip {
   key: string;
+  /** English default. The rendered text is `canvas.nodeBar.<key>`, resolved
+   *  with this as the fallback — the same idiom `DragCreateMenu` uses for its
+   *  cards, so the two entry points cannot drift apart in one locale. */
   label: string;
   icon: LucideIcon;
   /** Chips that create a node outright. Absent on `pick` chips, which have
@@ -94,6 +97,14 @@ const CHIPS: Chip[] = [
   // does IS what this strip does: put nodes on the canvas.
   { key: 'project-assets', label: 'Project Assets', icon: Library, bulk: true },
 ];
+
+/**
+ * The chip keys, in bar order — exported so the i18n parity test enumerates
+ * them from THIS array rather than a hand-kept copy. The labels are addressed
+ * by a runtime-built key (`canvas.nodeBar.${key}`), so no literal exists in
+ * this file for a grep to find.
+ */
+export const NODE_BAR_CHIP_KEYS: readonly string[] = CHIPS.map((c) => c.key);
 
 export interface TopNodeBarProps {
   surfaceRef: React.RefObject<HTMLDivElement | null>;
@@ -233,7 +244,7 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
             className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
-            {chip.label}
+            {t(`canvas.nodeBar.${chip.key}`, chip.label)}
           </button>
         );
       })}

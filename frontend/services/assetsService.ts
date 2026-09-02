@@ -302,6 +302,36 @@ export interface AssetLoadoutRow {
   created_at: string;
 }
 
+/**
+ * One canvas that references this asset (`used_in.canvases`, P4 Task 1).
+ *
+ * `node_ids` is a LIST because a canvas may place the same asset on several
+ * cards; the server aggregates per canvas so a board using it three times
+ * appears ONCE. Every id is a string, the boundary's rule for Snowflakes.
+ */
+export interface UsedInCanvasRef {
+  canvas_id: string;
+  canvas_name: string;
+  /** `smart` / `storyboard` / `character` / … — the canvas row's own kind. */
+  kind: string;
+  project_id: string;
+  node_ids: string[];
+  loadout_ids: string[];
+}
+
+/**
+ * Where this asset is in use (spec §5.1).
+ *
+ * `storyboards` is declared and ALWAYS EMPTY today: the storyboard side has no
+ * ref mirror yet. It is on the wire rather than absent so a client renders "no
+ * storyboard usage" instead of branching on a missing key — and so the day it
+ * starts filling, nothing about the shape has to change.
+ */
+export interface AssetUsedIn {
+  canvases: UsedInCanvasRef[];
+  storyboards: unknown[];
+}
+
 export interface AssetRowDetail extends AssetRow {
   files: AssetFileRow[];
   /** Outgoing links (this asset → another). */
@@ -309,6 +339,9 @@ export interface AssetRowDetail extends AssetRow {
   /** Incoming links (another asset → this one). A different question. */
   linked_by: AssetLinkRow[];
   loadouts: AssetLoadoutRow[];
+  /** REQUIRED, like the wire: `AssetDetailResponse.used_in` has a
+   *  `default_factory`, so every `GET /assets/{id}` carries both lists. */
+  used_in: AssetUsedIn;
 }
 
 /** Per-type tallies for the sidebar badges (`GET /assets/counts`). */
@@ -531,6 +564,17 @@ function normalizeDetail(raw: unknown): AssetRowDetail {
     links: Array.isArray(row.links) ? row.links : [],
     linked_by: Array.isArray(row.linked_by) ? row.linked_by : [],
     loadouts: Array.isArray(row.loadouts) ? row.loadouts : [],
+    // Same reason as the four arrays above: the TYPE says `used_in` is always
+    // there, so the normalizer has to keep that promise for a payload written
+    // by a backend that predates it. Each list is checked on its own — a
+    // response carrying `canvases` but no `storyboards` must not lose the half
+    // it did send.
+    used_in: {
+      canvases: Array.isArray(row.used_in?.canvases) ? row.used_in.canvases : [],
+      storyboards: Array.isArray(row.used_in?.storyboards)
+        ? row.used_in.storyboards
+        : [],
+    },
   };
 }
 

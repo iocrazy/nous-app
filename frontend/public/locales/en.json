@@ -1907,7 +1907,10 @@
       "assetId": "Asset ID",
       "usedIn": "Used In",
       "noProjects": "No Projects Yet",
-      "canvasUsageLater": "Canvas usage arrives with P4",
+      "usedInProjects": "Projects",
+      "usedInCanvases": "Canvases",
+      "noCanvases": "Not On Any Canvas Yet",
+      "canvasCards": "{{n}} Cards",
       "addRole": "Add A Role",
       "addDescription": "Add A Description",
       "editField": "Edit {{field}}",
@@ -1983,19 +1986,6 @@
       "removeHint": "Takes it off your library shelf — it stays in this project",
       "removeNamed": "Remove {{name}} From Your Library",
       "removed": "Removed From Your Library — Still In This Project"
-    },
-    "node": {
-      "refsLimit_one": "This model takes {{count}} reference image. The rest are not sent.",
-      "refsLimit_other": "This model takes {{count}} reference images. The rest are not sent.",
-      "refsDropped": "Not sent: {{refs}}",
-      "refsDroppedGroup_one": "{{count}} ({{reason}})",
-      "refsDroppedGroup_other": "{{count}} ({{reason}})",
-      "bundleFailed": "The last run could not read this asset. Nothing from it was sent.",
-      "dropReason": {
-        "over_limit": "over the model's limit",
-        "no_image_file": "no image file",
-        "provider_no_refs": "model takes no references"
-      }
     },
     "sendToCanvas": {
       "title": "Send To Canvas",
@@ -3346,6 +3336,19 @@
       "all": "All",
       "noResults": "No prompt assets found"
     },
+    "nodeBar": {
+      "media": "Upload",
+      "shot": "Shot",
+      "prompt": "Prompt",
+      "llm": "LLM",
+      "image-gen": "Image Gen",
+      "video-gen": "Video Gen",
+      "loop": "Loop",
+      "timeline": "Timeline",
+      "output": "Output",
+      "asset": "Asset",
+      "project-assets": "Project Assets"
+    },
     "asset": {
       "title": "Asset",
       "removed": "Asset Removed",
@@ -3364,7 +3367,18 @@
       "allTypes": "All",
       "noResults": "No assets found",
       "listFailed": "Could not load the asset library",
-      "pickFailed": "Could not open that asset. Try again."
+      "pickFailed": "Could not open that asset. Try again.",
+      "refsLimit_one": "This model takes {{count}} reference image. The rest are not sent.",
+      "refsLimit_other": "This model takes {{count}} reference images. The rest are not sent.",
+      "refsDropped": "Not sent: {{refs}}",
+      "refsDroppedGroup_one": "{{count}} ({{reason}})",
+      "refsDroppedGroup_other": "{{count}} ({{reason}})",
+      "bundleFailed": "The last run could not read this asset. Nothing from it was sent.",
+      "dropReason": {
+        "over_limit": "over the model's limit",
+        "no_image_file": "no image file",
+        "provider_no_refs": "model takes no references"
+      }
     },
     "asAsset": {
       "action": "As Asset…",

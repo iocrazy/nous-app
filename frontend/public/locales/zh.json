@@ -1907,7 +1907,10 @@
       "assetId": "资产 ID",
       "usedIn": "使用于",
       "noProjects": "还没有关联项目",
-      "canvasUsageLater": "画布使用情况随 P4 上线",
+      "usedInProjects": "项目",
+      "usedInCanvases": "画布",
+      "noCanvases": "还没有出现在任何画布上",
+      "canvasCards": "{{n}} 个卡片",
       "addRole": "添加定位",
       "addDescription": "添加描述",
       "editField": "编辑{{field}}",
@@ -1983,19 +1986,6 @@
       "removeHint": "从资产库货架移走 —— 它仍留在本项目里",
       "removeNamed": "把 {{name}} 移出资产库",
       "removed": "已移出资产库 —— 仍留在本项目"
-    },
-    "node": {
-      "refsLimit_one": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
-      "refsLimit_other": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
-      "refsDropped": "未发送：{{refs}}",
-      "refsDroppedGroup_one": "{{count}} 张（{{reason}}）",
-      "refsDroppedGroup_other": "{{count}} 张（{{reason}}）",
-      "bundleFailed": "上次运行无法读取该素材，它的内容一项都没有发送。",
-      "dropReason": {
-        "over_limit": "超过模型上限",
-        "no_image_file": "没有图片文件",
-        "provider_no_refs": "该模型不支持参考图"
-      }
     },
     "sendToCanvas": {
       "title": "发送到画布",
@@ -3346,6 +3336,19 @@
       "all": "全部",
       "noResults": "未找到带提示词的素材"
     },
+    "nodeBar": {
+      "media": "上传",
+      "shot": "分镜",
+      "prompt": "提示词",
+      "llm": "大模型",
+      "image-gen": "图像生成",
+      "video-gen": "视频生成",
+      "loop": "循环",
+      "timeline": "时间线",
+      "output": "输出",
+      "asset": "素材",
+      "project-assets": "项目素材"
+    },
     "asset": {
       "title": "素材",
       "removed": "素材已删除",
@@ -3364,7 +3367,18 @@
       "allTypes": "全部",
       "noResults": "未找到素材",
       "listFailed": "无法加载素材库",
-      "pickFailed": "无法打开该素材，请重试。"
+      "pickFailed": "无法打开该素材，请重试。",
+      "refsLimit_one": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsLimit_other": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsDropped": "未发送：{{refs}}",
+      "refsDroppedGroup_one": "{{count}} 张（{{reason}}）",
+      "refsDroppedGroup_other": "{{count}} 张（{{reason}}）",
+      "bundleFailed": "上次运行无法读取该素材，它的内容一项都没有发送。",
+      "dropReason": {
+        "over_limit": "超过模型上限",
+        "no_image_file": "没有图片文件",
+        "provider_no_refs": "该模型不支持参考图"
+      }
     },
     "asAsset": {
       "action": "存为素材…",

@@ -142,6 +142,7 @@ import {
   CHARACTER_DETAIL,
   COSTUME_DETAIL,
   PRESET_PROMPT_DETAIL,
+  makeCanvasRef,
   makeDetail,
 } from './assetSheetFixtures';
 
@@ -745,14 +746,96 @@ describe('the deferred surfaces', () => {
     expect(agent).toHaveAttribute('title', 'Arrives with P5');
   });
 
-  it('Used In lists the projects by name and states the canvas gap', async () => {
+  it('Used In lists the projects by name', async () => {
     await renderSheet();
     await waitFor(() =>
       expect(screen.getByTestId('used-in-project')).toHaveTextContent('Bamboo Sea'),
     );
-    expect(screen.getByTestId('used-in-panel')).toHaveTextContent(
-      'Canvas usage arrives with P4',
+  });
+
+  // ── The canvas half of Used In (P4 Task 8) ──
+  //
+  // This panel carried a standing note — "Canvas usage arrives with P4" —
+  // because `used_in` did not exist. P4 Task 1 shipped it, so the note is gone
+  // and the list is the assertion. The fixtures below are the SERVER's shape
+  // (`list_canvases_for_asset`): string ids, one row per canvas with
+  // `node_ids` aggregated, `kind` carried but not rendered.
+
+  it('Used In lists the canvases, names their project, and counts the cards', async () => {
+    const detail = makeDetail({
+      ...CHARACTER_DETAIL,
+      used_in: {
+        canvases: [
+          makeCanvasRef({
+            canvas_id: '727145299382534900',
+            canvas_name: 'Bamboo Sea Boards',
+            project_id: '55',
+            node_ids: ['asset-1', 'asset-2'],
+            loadout_ids: ['727145299382534401'],
+          }),
+          makeCanvasRef({
+            canvas_id: '727145299382534901',
+            canvas_name: 'Night Raid Study',
+            kind: 'character',
+            project_id: '55',
+            node_ids: ['asset-9'],
+          }),
+        ],
+        storyboards: [],
+      },
+    });
+    await renderSheet(detail);
+
+    const rows = await screen.findAllByTestId('used-in-canvas');
+    expect(rows).toHaveLength(2);
+    // Visibility, not a bare count: the storyboard incident's duplicate nodes
+    // were in the DOM and permanently hidden (CLAUDE.md 前端上线验收).
+    expect(rows[0]).toBeVisible();
+    expect(rows[0]).toHaveTextContent('Bamboo Sea Boards');
+    expect(rows[0]).toHaveAttribute('data-canvas-id', '727145299382534900');
+    // The project chip comes from the page's own projects map, so it reads as
+    // a name rather than a snowflake.
+    expect(within(rows[0]).getByTestId('used-in-canvas-project')).toHaveTextContent(
+      'Bamboo Sea',
     );
+    // Two cards on one board is ONE row that says two — collapsing to the
+    // canvas name alone would understate what removing the asset there hits.
+    expect(within(rows[0]).getByTestId('used-in-canvas-count')).toHaveTextContent('2 Cards');
+    // …and a board with a single card says nothing rather than "1 Cards".
+    expect(within(rows[1]).queryByTestId('used-in-canvas-count')).toBeNull();
+    expect(screen.queryByTestId('used-in-no-canvases')).toBeNull();
+  });
+
+  it('opening a Used In canvas navigates to its FIRST card', async () => {
+    const detail = makeDetail({
+      ...CHARACTER_DETAIL,
+      used_in: {
+        canvases: [
+          makeCanvasRef({
+            canvas_id: '727145299382534900',
+            node_ids: ['asset-1', 'asset-2'],
+          }),
+        ],
+        storyboards: [],
+      },
+    });
+    await renderSheet(detail);
+    fireEvent.click(await screen.findByTestId('used-in-canvas-open'));
+    // `?node=` is the whole point: the canvas's own latch selects and centres
+    // that card. Without it the user lands on a board and has to hunt.
+    expect(navigate).toHaveBeenCalledWith(
+      resPath('/canvas/727145299382534900?node=asset-1'),
+    );
+  });
+
+  it('an asset on no canvas says so instead of rendering nothing', async () => {
+    // A panel that renders nothing for "none" is indistinguishable from one
+    // whose fetch quietly failed.
+    await renderSheet();
+    expect(await screen.findByTestId('used-in-no-canvases')).toHaveTextContent(
+      'Not On Any Canvas Yet',
+    );
+    expect(screen.queryByTestId('used-in-canvas')).toBeNull();
   });
 
   it('the generation history asks the inbox about THIS asset only', async () => {

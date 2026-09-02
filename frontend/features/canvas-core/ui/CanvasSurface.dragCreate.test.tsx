@@ -66,6 +66,7 @@ beforeEach(() => {
     links: [],
     linked_by: [],
     loadouts: [],
+    used_in: { canvases: [], storyboards: [] },
   });
 });
 

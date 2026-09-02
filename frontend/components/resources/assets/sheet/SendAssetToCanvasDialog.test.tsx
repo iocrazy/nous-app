@@ -75,6 +75,7 @@ const detail: AssetRowDetail = {
   links: [],
   linked_by: [],
   loadouts: [],
+  used_in: { canvases: [], storyboards: [] },
 };
 
 const project: Project = {

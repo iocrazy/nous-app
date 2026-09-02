@@ -47,7 +47,14 @@ beforeEach(() => {
   searchAssets.mockReset().mockResolvedValue([SUMMARY]);
   fetchAssetDetail
     .mockReset()
-    .mockResolvedValue({ ...SUMMARY, files: [], links: [], linked_by: [], loadouts: [] });
+    .mockResolvedValue({
+      ...SUMMARY,
+      files: [],
+      links: [],
+      linked_by: [],
+      loadouts: [],
+      used_in: { canvases: [], storyboards: [] },
+    });
   useCanvasCoreStore.getState().reset();
   useCanvasCoreStore.setState({
     canvasId: 'c1',

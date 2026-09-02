@@ -244,8 +244,15 @@ describe('Asset library i18n parity', () => {
     'assets.sheet.updated',
     'assets.sheet.assetId',
     'assets.sheet.usedIn',
+    'assets.sheet.usedInProjects',
     'assets.sheet.noProjects',
-    'assets.sheet.canvasUsageLater',
+    // The canvas half of Used In (P4 Task 8). `canvasUsageLater` is GONE: the
+    // panel used to carry a standing "arrives with P4" note, and P4 Task 1
+    // shipped `used_in.canvases`, so the note would now be a false statement
+    // sitting under a list that answers the same question.
+    'assets.sheet.usedInCanvases',
+    'assets.sheet.noCanvases',
+    'assets.sheet.canvasCards',
     'assets.sheet.addRole',
     'assets.sheet.setting',
     'assets.sheet.addSetting',
@@ -508,6 +515,8 @@ describe('Asset library i18n parity', () => {
       // `count` option as a PLURAL SELECTOR and would look for `_one` /
       // `_other` variants of these keys, none of which exist — the lookup
       // would fall through to the raw key with nothing failing anywhere.
+      // `{{n}}`, never `{{count}}` — see the note on the Task 8 block below.
+      'assets.sheet.canvasCards': ['n'],
       'assets.equip.title': ['slot'],
       'assets.equip.target': ['slot'],
       'assets.equip.targetWithLoadout': ['slot', 'loadout'],

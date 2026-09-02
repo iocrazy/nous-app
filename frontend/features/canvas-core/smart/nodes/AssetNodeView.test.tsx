@@ -102,6 +102,8 @@ const DETAIL: AssetRowDetail = {
   ],
   links: [],
   linked_by: [],
+  // Always on the wire (`UsedInResponse` has a default_factory).
+  used_in: { canvases: [], storyboards: [] },
   loadouts: [
     {
       id: LOADOUT_A,

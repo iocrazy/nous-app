@@ -195,8 +195,14 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 ### 3.7 既有表改动
 
 - `canvases` 加 `asset_id BIGINT NULL REFERENCES assets(id) ON DELETE SET NULL`；`kind` CHECK 增 `'costume'`（`project_id` 保持 NOT NULL，记录从哪个项目打开的）。
+  ⚠️ **枚举原本只有 DB 一侧（裁决 G）**：`costume` 在 CHECK 里存在，而 `schemas/canvas.py` 的 `CanvasKind` / `CreatableCanvasKind` 与 `frontend/features/canvas-core/types.ts` 都没有它，`canvasKindFor` 于是把 costume 降级成 `smart`。P4 Task 4 把两侧枚举补齐，`canvasKindFor(costume)` 返回 `'costume'`。
+  ✅ **`asset_id` 在 P4 起有读方**：空画布 + `canvases.asset_id` 非空 → 画布加载后播一张绑定该资产的 asset 卡。原来那条 `?characterId=` / `?entityId=` 查询串播种分支同批删除 —— 自 P3 Task 6 起就没有任何 UI 产出过那两个参数。
 - **新表 `canvas_asset_refs`**（镜像 `canvas_resource_refs`）：`(canvas_id, asset_id, node_id, loadout_id)`；`CanvasService.save` 从 `nodes_json` 提取 `type='asset'` 节点维护，失败不阻塞保存，可 backfill。
+  ✅ **P4 已接线**：抽取器是 `backend/app/services/canvas/asset_node_refs.py::extract_asset_node_refs`（**新模块名**，裁决 J —— 同目录下 `asset_refs.py::extract_asset_refs` 早被 **resource** refs 占用，旧名不改以免无关 churn，只在文件顶部加了一行注释指明它是哪一种），维护走 `canvas_service._sync_refs`，与 resource refs 同样 try/except + log。
+  ⚠️ **写法不能照抄 resource refs（裁决 I）**：`loadout_id` **不在唯一键里**（键是 `(canvas_id, asset_id, node_id)`），所以 `on_conflict_do_nothing` 会把换过造型的节点留在旧 `loadout_id` 上。实现是 **DELETE-all + `on_conflict_do_update(set_={loadout_id})`**，而且 DELETE 与 INSERT 在**同一个 `write_scope()` 事务**里 —— resource refs 那边用两个事务并称「部分失败是自愈而非损坏」，对这张表是假的：一个节点带着不存在的 asset 雪花会让 INSERT 抛错，DELETE 已提交则整块画布的 refs 全没了，且每次保存重复同一结局，表现就是 `used_in` 对着用户看得见的画布回答「没被用到」。
+  不属于本资产的 `loadout_id` 在插入时被置 NULL 并计数上报，不是静默丢弃。
 - `generated_media` 加 `review_state TEXT NOT NULL DEFAULT 'unreviewed' CHECK (IN ('unreviewed','saved','in_assets','deleted'))` 与 `source_asset_id BIGINT NULL`（从资产节点/实体画布生成时预填）。
+  ✅ **P4 起画布真的在写它（裁决 H）**：画布生成把最近上游 asset 节点写进 `params.source_asset_id`（外加 `params.loadout_id`），并由 `GenerationOrigin` 落到 `source_asset_id` **列**上，所以收件箱与实体页的 Generation history 看得到画布跑的图。同一批**退役了旧的 `entity_kind` / `entity_id` 戳**：它们的 id 是 `_legacy_project_*` 的行号，读的那半边（`fetchEntityGenerations`）自 P3 Task 6 起就没有调用方了，两半一起删，有负向测试钉住不会再写回。
   ⚠️ **`origin_kind` 不加 CHECK，也没有「扩枚举」这回事**（P0 实证纠偏）：该列自 mig 307 起就是裸 `TEXT NOT NULL`，`schema_baseline.sql` 确认从未有过 CHECK；而 `idx_genmedia_node_shot`（mig 354）的谓词是 `origin_kind IN ('shot_generate','shot_video')` —— 这两个值不在本文档原先列出的枚举里。对一个从没有约束的列「扩枚举」等于**新加限制**，会当场把活数据判违规。`origin_kind` 因此保持**代码级枚举、数据库不设约束**。
 - **Chat Uploads 迁入 `generated_media`**：temp 文件夹里的 `resources` 逐行登记为 `origin_kind='chat_upload'`、`promoted_resource_id` 指向自身、`review_state='saved'`（它们本来就在 resources）。temp 文件夹本身不再有特殊语义；`tempResources` 代码路径退役。⚠️ **P1 只做了这半边**：`ResourceGrid` 仍然把 `temp` 从根目录网格里滤掉，文件夹也没有改名为 "Chat uploads" —— "保留为普通文件夹、在 My Uploads 下可见"这一半**移交 P6**（与 `tempResources` 的删除同批）。功能上不阻塞：这些文件通过 Generated 收件箱可达。
 - `tags.prompt_trigger` 与 `resources.gen_prompt*` **保留不动**——文件级 prompt 仍可搜；提示词**模板**才是 `assets(type=prompt)`。
@@ -245,7 +251,7 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 |---|---|
 | `GET /assets?scope_id&type&project_id&q&limit&offset` | 图鉴列表；返回派生 `readiness / missing / project_ids / file_counts_by_slot / loadout_count`。**`readiness` / `tag` / `sort` 三个筛选参数是 P2**，P0 只实现前五个 |
 | `POST /assets` | 建实体；同名 → `409 {existing_asset_id}` |
-| `GET /assets/{id}` | 实体页全量：files by slot、links（含反向 worn_by/held_by）、loadouts、project refs、used_in（canvas_asset_refs + storyboard 引用）、generation_history（generated_media by source_asset_id） |
+| `GET /assets/{id}` | 实体页全量：files by slot、links（含反向 worn_by/held_by）、loadouts、project refs、used_in、generation_history（generated_media by source_asset_id）。✅ **`used_in` 自 P4 起是真的**（裁决 F）：`used_in.canvases[]` 每行 `{canvas_id, canvas_name, kind, project_id, node_ids[], loadout_ids[]}`，按画布聚合（一块画布放三张卡是一行三个 node_id），并**按调用方 scope 过滤**（系统预设对每个 scope 可读，不过滤会把别的 team 的画布名讲出去）。`used_in.storyboards` 声明在协议里且**恒为空** —— 分镜侧还没有 ref 镜像；写成「声明且为空」而不是「缺这个键」，是为了让客户端渲染「没有分镜引用」而不是去分支判断键存不存在。实体页右栏的 Used In 面板 P4 起渲染它（画布名可点，带 `?node=<第一张卡>`） |
 | `PATCH /assets/{id}` | 头部字段 / 提示词 / attrs；system preset 拒绝 |
 | `DELETE /assets/{id}` | 软删；画布节点回读得到 `asset_removed` |
 | `POST /assets/{id}/duplicate` | **P2**（P0 不实现：系统预设还不存在，而 Duplicate 的第一用途就是「预设落到自己 scope」）。复制实体（文件关联复制、links 复制、loadouts 复制），`duplicated_from` |
@@ -256,7 +262,7 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 | `POST /assets/{id}/prompt/translate` | 复用现有 translate agent |
 | `POST /assets/{id}/prompt/regenerate` | 复用 vision agent，从主图槽反推 |
 | `POST /assets/{id}/generate-slot` `{slot, loadout_id?, model?}` | "Generate missing"：用主图 + 一致性提示词 + 槽位模板生成，落 `generated_media(source_asset_id, params.target_slot)` |
-| `GET /assets/{id}/loadouts/{lid}/bundle?model=` | **投递协议**（§6.3）：返回裁剪后的 `{reference_resource_ids[], prompt}` |
+| `GET /assets/{id}/bundle?model=&loadout_id=` | **投递协议**（§6.3）：返回 `{prompt:{positive,negative}, reference_resource_ids[], dropped[], max_refs}`。⚠️ **P4 改了路径（裁决 C）**：原文写成 `/loadouts/{lid}/bundle`，但只有 character 有 loadout，其余五类根本没有可填的 `{lid}`；`loadout_id` 因此降为**可选查询参数**。`dropped[]` 是必须渲染的那一半 —— 每个被裁掉的参考都带 `reason`（`over_limit` / `no_image_file` / `provider_no_refs`），只读 id 列表会把「裁剪过的投递」报成完整投递 |
 | `POST /assets/{id}/project-refs` `{project_id}` / `DELETE` | Link / Unlink |
 | `GET /projects/{pid}/assets?type=` | 项目分级视图（= 上面 GET 的固定筛选） |
 | `POST /projects/{pid}/assets/import-from-script` | 现有"一键导入"改落 assets + refs |
@@ -293,11 +299,16 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 ### 6.3 画布（屏 6）
 
 - 新节点类型 `asset`：`{type:'asset', asset_id, loadout_id, selected_file_ids[]}`。渲染为迷你角色卡（头像 / 名 / loadout 切换 / 参考图勾选，灰掉空槽）。`selected_file_ids` 是节点状态，不写回资产。
-- **投递协议**（bundle）：生成节点上游有 asset 节点时，调 `/bundle?model=`，按 provider 能力表（`max_reference_images / aspect / multi_subject`）裁剪：优先级 主图槽 > 服装 worn > stills；超限的在节点上灰掉并提示 "seedream-4 accepts up to 3 references"。prompt 拼接顺序固定：`asset.prompt_positive` → `loadout.prompt_extra` → 各 costume/prop 的 `prompt_positive` → 场景 asset 的 `prompt_positive` → 用户文本；negative 取并集去重。**这层写成纯函数 + 单测**（每种 provider 一组用例），不散在节点里。
-- Output 节点 → Generated；Output 的 As Asset… 预填 `source_asset_id + loadout_id`。
+- **投递协议**（bundle）：生成节点上游有 asset 节点时，调 `GET /assets/{id}/bundle?model=&loadout_id=`，按 provider 能力表裁剪：优先级 主图槽 > 服装 worn > stills；超限的在节点上灰掉并提示。prompt 拼接顺序固定：`asset.prompt_positive` → `loadout.prompt_extra` → 各 costume/prop 的 `prompt_positive` → 场景 asset 的 `prompt_positive` → 用户文本；negative 取并集去重。**这层写成纯函数 + 单测**（每种 provider 一组用例），不散在节点里。
+  - **能力表在代码里，不在 `config.yml`（裁决 A）**：唯一真源是 `backend/app/services/generation/provider_protocols/base.py::ProviderCapabilities`，它自己的注释就明文禁止第二处真相，`config.yml` 里从来没有这个键。bundle 读 `resolve_generation_protocol(model).capabilities`，前端读 `GET /canvases/generation-capabilities`。未知 model → 422 `model_unknown`，不给保守缺省 —— 猜一个上限就是编一个答案。
+  - **`multi_subject` 删除（裁决 B）**：全仓库没有这个概念，写进能力表等于给一个不存在的开关留位置。
+  - **灰掉超限用 `max_refs`（裁决 E）**：卡片的参考勾选读 `useModelCapabilities(model).max_refs`（`null` = 未知 ⇒ 按全支持渲染），排序用与后端 `_slot_priority` 对齐的镜像常量，**最终真相仍是后端 `reconcile` 的 `dropped_knobs` 与 bundle 的 `dropped[]`**。
+  - **参考图要过资源桥（裁决 D）**：画布生成链原先只认 `/api/v1/generated-media/` 前缀的 URL，`resources` 的 URL 会被**静默丢弃且不进 dropped**。P4 建了桥 —— 后端 `generated_media_service` 认 `/api/v1/resources/{id}/(cover|file)` 并在 `system_request_scope` 下物化（校验该行属于**画布所在项目的 scope**，由 `canvas_id` 服务端推导，不信客户端），前端 `DURABLE_PREFIXES` 扩成两个前缀。解析不了的进结果的 `dropped_refs`，永不静默。
+- Output 节点 → Generated；Output 的 As Asset… 预填 `source_asset_id + loadout_id`（读 `GET /generated/{id}` 拿真行，不用节点数据合成 —— 那一列节点从来没见过）。
 - 动作 **Insert project assets**：在任意画布上按类型四条 lane 铺出本项目引用的资产节点（RunningHub 式制作画布，零手工）；不自动建"官方制作画布"。
 - 资产被删：节点显示 `Asset removed` 占位，不静默消失。
-- 复制节点 = 复制引用（同 asset_id）。
+- 复制节点 = 复制引用（同 asset_id）：`asset_id` / `loadout_id` / `selected_file_ids` **不进** `remapSmartTags`，有测试钉住。
+- **旧智能卡迁移**：加载后（不阻塞首屏）对 `character` / `location` / `prop` 节点按 `data.character_id` / `data.entity_id` 调 `GET /assets/resolve-legacy?kind=&legacy_id=`；命中 → **原地**改成 asset 节点（同 node id、同位置，连线不动），未命中（`{"asset_id": null}`，一个真的 200）→ 保留旧卡并打 `Unmigrated` 标记；请求失败 → 什么都不改（「问不到」不是「没有」）。写回走 `setNodesTransient`，不进历史也不强制保存 —— 仅仅打开一块老画布不该产生一次 PUT。
 
 ### 6.4 项目工作区（屏 6 下半）
 
@@ -351,9 +362,9 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 | **P1 Generated** | GeneratedView + 侧栏改造 + Chat Uploads 登记 + save-as-asset 端点 + SaveAsAssetDialog（Generated 入口） | P0 |
 | **P2 Assets 图鉴 + 实体页** | AssetsView / AssetCard / AssetSheetPage（六类）/ Board / 关系 / loadout / 提示词 agent 接线 / Generate missing | P0 |
 | **P3 项目分级视图 + 迁移执行** | 项目侧栏改数据源 / Link from library / import-from-script 改落 assets / 跑迁移 / 旧表 rename legacy | P2 |
-| **P4 画布** | asset 节点 / bundle 投递协议 / Output 预填 / Insert project assets / canvas_asset_refs | P2 |
+| **P4 画布** ✅ 2026-09-02 | asset 节点 / bundle 投递协议（含**资源参考桥**）/ Output 的 As Asset 预填 / Send To Canvas / Insert project assets / canvas_asset_refs + `used_in` 反查 / 旧智能卡加载时迁移 | P2 |
 | **P5 聊天 / agent** | pendingAsset / resolver / `<asset>` 框 / @ 选择器 | P2 |
-| **P6 清尾** | 删 legacy 表 / EntityAssetStrip / tempResources / temp_resource_sweeper（含 `ChatTempTtlPanel` + `tempTtlService`，P1 已下架其渲染点）；temp 文件夹改名 "Chat uploads" 并在 My Uploads 下可见（§3.7 未做的那半边）；My Uploads 右键与 Output 节点的 As Asset 入口 | P3 P4 |
+| **P6 清尾** | 删 legacy 表 / EntityAssetStrip / tempResources / temp_resource_sweeper（含 `ChatTempTtlPanel` + `tempTtlService`，P1 已下架其渲染点）；temp 文件夹改名 "Chat uploads" 并在 My Uploads 下可见（§3.7 未做的那半边）；My Uploads 右键的 As Asset 入口（**Output 节点那个 P4 已做**） | P3 P4 |
 
 P1 与 P2 可并行（不同 worktree）。
 
@@ -362,5 +373,7 @@ P1 与 P2 可并行（不同 worktree）。
 - **迁移同名合并误合**：不同项目里两个真的不同的"老张"。缓解：合并前列出清单人工过目；合并后的 asset `attrs.merged_from[]` 可拆回。
 - **画布节点旧数据**：现有画布没有 asset 节点，无影响；`kind=character` 画布反解失败的留普通画布，不丢数据。
 - **generated_media 体量**：Chat Uploads 登记会一次性加行；表本就设计为高流失层，索引 `(scope_id, review_state, created_at DESC)`。
-- **投递协议 provider 能力表会过时**：放 `config.yml`，缺省保守（1 张）；模型目录已有 admin 页，后续可并入。
+- **投递协议 provider 能力表会过时**：⚠️ **本条已按裁决 A 作废**。能力表**不放 `config.yml`** —— 它已经在代码里（`ProviderCapabilities`），再放一份就是两处真相；「缺省保守 1 张」也不做，未知 model 一律 422 `model_unknown`。过时的缓解是加 provider 时改那一个类，`GET /canvases/generation-capabilities` 与 bundle 同源读它。
 - **权限**：assets 沿用 team membership；system preset prompt 全局只读；跨 team 不可见（RLS + 后端 gate 双层）。
+- **协作者看不到自己在画布上跑出来的图（P4 已知缺口）**：画布生成的产物按**画布所属项目的 scope** 登记，而 Generated 收件箱的门是**团队成员身份**。一个不是团队成员的项目协作者因此跑得动生成、却在收件箱里看不到结果。这与 P3 Task 5 记下的是同一类缺口（项目协作者模型与团队作用域模型不重合），不在 P4 修复范围内。
+- **被「收养」的资产找不回旧卡（P4 已知缺口）**：迁移的 adopt 分支（把老实体并进一个手建资产）**不写 `attrs.legacy_ids`**，所以 `resolve-legacy` 对它们只能回 `null`，画布上的旧卡永远显示 `Unmigrated`。刻意不靠名字猜 —— 那会把卡片接到没人选过的资产上。正解是让 adopt 分支幂等地把 `[table, id]` 追加进 `attrs.legacy_ids`，然后重跑一次迁移把存量补齐（生产当前 adopted 计数为 0）。

@@ -106,6 +106,7 @@ const assetDetail = (over: Record<string, unknown> = {}) => ({
   links: [],
   linked_by: [],
   loadouts: [],
+  used_in: { canvases: [], storyboards: [] },
   ...over,
 });
 
