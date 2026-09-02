@@ -197,3 +197,57 @@ describe('generation recover marks (P1-13)', () => {
     expect(data?.gen_failed).toBe(1);
   });
 });
+
+// ── Requested ratio stamp (canvas fluency Task 7) ───────────────────────────
+// The output node has to reserve the right BOX before any bytes arrive, and
+// the ratio the user asked for lives on the PROMPT. Copying it onto the slot
+// at dispatch keeps the node view data-driven: it never walks the graph back
+// to its prompt (that would be a store subscription inside a memo-wrapped
+// node, i.e. exactly the per-node re-render Task 4 removed).
+
+function seedGenPrompt(gen: Record<string, unknown> | null): void {
+  useCanvasCoreStore.getState().reset();
+  useCanvasCoreStore.setState({
+    kind: 'smart',
+    canvasId: '9',
+    nodes: [{ ...PROMPT, data: { ...(PROMPT.data as object), gen } } as CanvasNode],
+    connections: [],
+    selection: [],
+  });
+}
+
+const ratioOf = () =>
+  (slotOf() as { gen_ratio?: string | null } | undefined)?.gen_ratio;
+
+describe('beginGenerationSlot stamps the requested ratio', () => {
+  it("copies the prompt's image ratio onto the slot at dispatch", () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: '16:9' });
+    beginGenerationSlot('p1', 2, 'image');
+    expect(ratioOf()).toBe('16:9');
+  });
+
+  it('uses the video aspect for a video run', () => {
+    seedGenPrompt({ kind: 'video', model: '', aspect: '9:16' });
+    beginGenerationSlot('p1', 1, 'video');
+    expect(ratioOf()).toBe('9:16');
+  });
+
+  it('is null when the prompt has no generation settings', () => {
+    seedGenPrompt(null);
+    beginGenerationSlot('p1', 1, 'image');
+    expect(ratioOf() ?? null).toBeNull();
+  });
+
+  it('refreshes on a re-run — a stale ratio would reserve the wrong box', () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: '16:9' });
+    beginGenerationSlot('p1', 1, 'image');
+    expect(ratioOf()).toBe('16:9');
+    // The user changes the ratio and runs again: the SAME slot is reused, so
+    // the stamp has to be rewritten rather than left at the first run's value.
+    useCanvasCoreStore.getState().patchNode('p1', {
+      data: { gen: { kind: 'image', model: '', ratio: '3:4' } },
+    });
+    beginGenerationSlot('p1', 1, 'image');
+    expect(ratioOf()).toBe('3:4');
+  });
+});

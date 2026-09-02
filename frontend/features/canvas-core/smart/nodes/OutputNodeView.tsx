@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react';
 
+import { cssAspectRatio } from '../aspectRatio';
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
@@ -86,7 +87,13 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     gen_pending = 0,
     gen_failed = 0,
     gen_recover = [],
+    gen_ratio,
   } = data as unknown as OutputNodeData;
+  // Every cell — shimmer, landed image, single preview — is boxed to the
+  // ratio the run ASKED for, so a result landing changes no layout (Task 7).
+  // `gen_ratio` is plain node data, which keeps this stable under the memo
+  // wrapper in nodes/registry.ts.
+  const cellAspect = cssAspectRatio(gen_ratio);
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
@@ -623,11 +630,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
              dispatched; each finished item replaces a cell as it arrives. */
           <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
             {(images ?? []).map((img, i) => (
-              <div key={`${img.url}-${i}`} className="group/cell relative">
+              <div
+                key={`${img.url}-${i}`}
+                data-testid="output-cell"
+                className="group/cell relative"
+                style={{ aspectRatio: cellAspect }}
+              >
                 <img
                   src={mediaSrc(img.url)}
                   alt={img.name || `Generated ${i + 1}`}
                   draggable={false}
+                  // Off-screen nodes on a big canvas must not each cost a
+                  // fetch + a main-thread decode the moment they mount.
+                  loading="lazy"
+                  decoding="async"
                   onDoubleClick={(e) => {
                     // IC: dblclick edits THIS image (a mask can be repainted);
                     // single click keeps the lightbox via the body handler.
@@ -639,7 +655,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                     setEditingUrl(img.url);
                     setEditorMode('preview');
                   }}
-                  className="block w-full cursor-zoom-in rounded object-contain"
+                  className="block h-full w-full cursor-zoom-in rounded object-contain"
                 />
                 {/* IC 图四: each grid item (e.g. a generated mask) can be
                     removed on its own. */}
@@ -662,37 +678,61 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               </div>
             ))}
             {Array.from({ length: gen_pending }, (_, i) => (
+              // The shimmer sits INSIDE the reserved box rather than being
+              // the box, so the wrapper an image later occupies and the
+              // wrapper a placeholder occupies are the same element type
+              // with the same style — nothing to reflow at the swap.
               <div
                 key={`pending-${i}`}
-                data-testid="output-pending-cell"
-                aria-label="Generating"
-                className="mh-loading-cell aspect-square w-full rounded"
-              />
+                data-testid="output-cell"
+                className="w-full"
+                style={{ aspectRatio: cellAspect }}
+              >
+                <div
+                  data-testid="output-pending-cell"
+                  aria-label="Generating"
+                  className="mh-loading-cell h-full w-full rounded"
+                />
+              </div>
             ))}
           </div>
         ) : kind === 'image' && (preview_url || images?.[0]?.url) ? (
-          <img
-            src={mediaSrc(preview_url || images?.[0]?.url)}
-            alt={preview_text || 'Output preview'}
-            draggable={false}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (!readOnly) setEditorMode('preview');
-              else openLightbox(0);
-            }}
-            className="block w-full cursor-zoom-in rounded object-contain"
-          />
+          <div
+            data-testid="output-cell"
+            className="w-full"
+            style={{ aspectRatio: cellAspect }}
+          >
+            <img
+              src={mediaSrc(preview_url || images?.[0]?.url)}
+              alt={preview_text || 'Output preview'}
+              draggable={false}
+              loading="lazy"
+              decoding="async"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (!readOnly) setEditorMode('preview');
+                else openLightbox(0);
+              }}
+              className="block h-full w-full cursor-zoom-in rounded object-contain"
+            />
+          </div>
         ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
           /* Clickable inline preview — the lightbox owns playback controls
              (G7 review #2: video slots previously rendered nothing). */
-          <video
-            data-testid="output-video-preview"
-            src={mediaSrc(preview_url || images?.[0]?.url)}
-            muted
-            preload="metadata"
-            onDoubleClick={() => openLightbox(0)}
-            className="block w-full cursor-zoom-in rounded"
-          />
+          <div
+            data-testid="output-cell"
+            className="w-full"
+            style={{ aspectRatio: cellAspect }}
+          >
+            <video
+              data-testid="output-video-preview"
+              src={mediaSrc(preview_url || images?.[0]?.url)}
+              muted
+              preload="metadata"
+              onDoubleClick={() => openLightbox(0)}
+              className="block h-full w-full cursor-zoom-in rounded object-contain"
+            />
+          </div>
         ) : preview_text ? (
           <div className="line-clamp-4 whitespace-pre-wrap text-sm text-canvas-text">
             {preview_text}

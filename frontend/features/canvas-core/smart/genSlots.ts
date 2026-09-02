@@ -74,6 +74,25 @@ export function upsertGenerationSlots(
 // their count on the node. All writes history-free, matching the slot's
 // operational-state contract.
 
+/** The ratio the prompt is ASKING for, copied onto the slot so the output
+ *  node can reserve each cell's box before anything loads (Task 7).
+ *
+ *  Stamped here rather than looked up from the view: the node views are
+ *  memo-wrapped (Task 4) and walking the graph back to the owning prompt
+ *  from inside one would reintroduce exactly the per-node store subscription
+ *  that change removed. Whatever the prompt says is copied VERBATIM,
+ *  including `auto` — resolving it needs the source image, which only the
+ *  dispatch side can measure; the view treats it as unknown. */
+function requestedRatioOf(prompt: unknown, mediaKind: OutputKind): string | null {
+  const gen = (asObj(prompt).data as { gen?: { ratio?: string; aspect?: string } })
+    ?.gen;
+  if (!gen) return null;
+  // Image prompts carry `ratio`, video prompts `aspect` (PromptGenSettings);
+  // each falls back to the other so a mis-tagged node still reserves a box.
+  const raw = mediaKind === 'video' ? (gen.aspect ?? gen.ratio) : (gen.ratio ?? gen.aspect);
+  return raw ?? null;
+}
+
 /** Find the slot node id for a prompt, if one exists. */
 function slotIdFor(promptId: string): string | null {
   const store = useCanvasCoreStore.getState();
@@ -92,13 +111,18 @@ export function beginGenerationSlot(
   const prompt = store.nodes.find((n) => asObj(n).id === promptId);
   if (!prompt) return;
 
+  // Re-read every run: the user can change the ratio between runs, and the
+  // slot is reused, so a stamp left at the first run's value would reserve
+  // the wrong box for the rest of the node's life.
+  const genRatio = requestedRatioOf(prompt, mediaKind);
+
   const existingId = slotIdFor(promptId);
   if (existingId) {
     // Archive the previous batch ONCE per run; the fresh batch then fills
     // progressively via appendGenerationResults.
     replaceOutputImagesWithHistory(existingId, [], mediaKind);
     store.patchNode(existingId, {
-      data: { gen_pending: count, gen_failed: 0 },
+      data: { gen_pending: count, gen_failed: 0, gen_ratio: genRatio },
     });
     return;
   }
@@ -116,6 +140,7 @@ export function beginGenerationSlot(
       images: [],
       gen_pending: count,
       gen_failed: 0,
+      gen_ratio: genRatio,
       gen_slot: { node_id: promptId, index: 0 } satisfies GenSlotTag,
     },
   } as CanvasNode;
