@@ -521,11 +521,16 @@ class AssetsService:
     ) -> Dict[str, Any]:
         """Add this asset to / remove it from the scope's library (mig 448).
 
-        The write behind ``POST``/``DELETE /assets/{id}/library``. It is the
-        same UPDATE ``update_asset`` would perform for ``{"in_library": ...}``
-        and goes through the same ``_require_writable`` gate — a system preset
-        is a 403 here too, because a global row's membership is not one team's
-        to change.
+        **The ONLY write path for ``in_library``**, and that is enforced rather
+        than asserted: ``AssetUpdate`` deliberately omits the field (its comment
+        says why) and ``extra="forbid"`` turns a PATCH aimed at the column into
+        a 422, so ``update_asset`` cannot reach it. Anything added here — an
+        audit row, a new refusal, a side effect — therefore applies to every
+        membership change there is. A guard test pins that this method stays the
+        single writer.
+
+        A system preset is a 403 (``_require_writable``): a global row's
+        membership is not one team's to change.
 
         **Idempotent, and it says so by returning the row rather than a
         boolean.** Adding an asset that is already in reports the same 200 and

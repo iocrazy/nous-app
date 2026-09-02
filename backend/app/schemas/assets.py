@@ -133,17 +133,25 @@ class AssetUpdate(BaseModel):
     cover_file_id: Optional[SnowflakeId] = None
     tags: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
-    # mig 448. PATCH-able because it is an ordinary writable column and
-    # ``AssetUpdate`` mirrors those — but the UI does NOT drive it from here:
-    # adding to / removing from the library is one named action, and it has its
-    # own pair of routes (``POST``/``DELETE /assets/{id}/library``) so the
-    # client sends an intent rather than a field write. Both land on the same
-    # UPDATE through the same ``_require_writable`` gate.
+
+    # ⚠️ ``in_library`` (mig 448) is DELIBERATELY ABSENT, and it is the one
+    # writable column this model does not mirror.
     #
-    # NOT nullable: ``in_library`` is NOT NULL, so it is absent from
-    # ``CLEARABLE_FIELDS`` and an explicit ``{"in_library": null}`` is a typed
-    # 422 (``field_not_nullable``), never a dropped key.
-    in_library: Optional[bool] = None
+    # Library membership has exactly ONE write path:
+    # ``POST``/``DELETE /assets/{id}/library`` →
+    # ``AssetsService.set_library_membership``. Declaring the field here would
+    # add a second one, and the two would converge only at the repository —
+    # so a rule later added to ``set_library_membership`` (an audit row, a
+    # refusal, a side effect) would be silently bypassed by anything PATCHing
+    # the column. That is the drift seam this exclusion removes rather than
+    # documents.
+    #
+    # ``extra="forbid"`` makes the exclusion a TYPED refusal rather than a
+    # silent drop: ``PATCH {"in_library": true}`` is a 422 naming the field, so
+    # a client that guesses wrong is told where the real action is instead of
+    # getting a 200 that changed nothing.
+    # Pinned by ``tests/services/assets/test_schemas.py`` and by the
+    # single-write-path guard in ``test_assets_library_membership.py``.
 
 
 class AssetReadiness(BaseModel):
@@ -170,9 +178,13 @@ class AssetResponse(BaseModel):
     source: AssetSource = "manual"
     duplicated_from: Optional[str] = None
     is_system_preset: bool = False
-    # mig 448 — see ``Assets.in_library``. Always present (NOT NULL column), so
-    # a client never has to infer membership from ``source``.
-    in_library: bool = True
+    # mig 448 — see ``Assets.in_library``. REQUIRED, no default, unlike its
+    # neighbours: this model is what FastAPI validates on the way out, and a
+    # default would let a service that stopped emitting the key ship a row the
+    # client reads as "in library". Membership decides whether the shelf shows
+    # the asset at all, so guessing it is worse than failing loudly — the same
+    # argument ``GenerateSlotPreview.aspect_ratio`` makes for its own frame.
+    in_library: bool
     tags: Dict[str, Any] = Field(default_factory=dict)
     sort_order: int = 0
     created_by: Optional[str] = None

@@ -139,6 +139,17 @@ class Assets(Base):
     # (source ``script_import`` / ``migrated``) and is visible on its project's
     # page but not on the shelf until someone adds it. Distinct from ``source``
     # on purpose: provenance is written once, membership is toggled.
+    #
+    # ⚠️ DEPLOY ORDER: mig 448 MUST land before this code. ``select(Assets)``
+    # names every mapped column, so this attribute appears in the SELECT list of
+    # EVERY asset read — not just the ones that filter on it. Against a database
+    # without the column, the shelf, the sheet, the counts badges, the project
+    # panel, Link From Library and the backfill workflow all fail with
+    # ``column assets.in_library does not exist`` (42703) until the migration
+    # runs. ``run-migration.yml`` and ``deploy-gpu.yml`` have no ordering
+    # guarantee (CLAUDE.md 已知缺口), so this is a live race, not a hypothetical.
+    # The reverse order is safe: an older model omits the column and its INSERTs
+    # take the DEFAULT.
     in_library: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )

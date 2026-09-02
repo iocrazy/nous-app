@@ -326,10 +326,10 @@ export type AssetCounts = Record<AssetType, number>;
  * Unknown keys are rejected (`extra="forbid"`): a typo'd field is a 422, not a
  * 200 that quietly did nothing.
  *
- * `in_library` is deliberately ABSENT even though the server accepts it here:
- * library membership is a named user action with its own pair of routes
- * ({@link setAssetLibraryMembership}), and leaving it off this type is what
- * keeps it out of the form-shaped bodies this interface exists to describe.
+ * `in_library` is absent because the SERVER does not accept it here either:
+ * `AssetUpdate` does not declare the field and forbids extras, so a PATCH
+ * aimed at it is a 422. Library membership has one write path,
+ * {@link setAssetLibraryMembership}.
  */
 export interface AssetUpdateBody {
   name?: string;
@@ -569,11 +569,11 @@ export async function deleteAsset(scopeId: string, id: string): Promise<void> {
 /**
  * Add this asset to the scope's library, or take it out (mig 448).
  *
- * ONE named action, not a `{ in_library }` PATCH — which is why
- * {@link AssetUpdateBody} deliberately does not carry the field. A PATCH body
- * is assembled from a form and `AssetUpdate` is `exclude_unset`, so building
- * one to flip a flag is how unrelated fields get rewritten; these two routes
- * send no body at all.
+ * The ONLY way to change membership. `PATCH {"in_library": ...}` is a 422 — the
+ * server does not declare the field — so this is not a preferred path among
+ * two, it is the path. A PATCH body is assembled from a form under
+ * `exclude_unset` anyway, so flipping a flag through one is how unrelated
+ * fields get rewritten; these two routes send no body at all.
  *
  * ⚠️ Removal is NOT a delete and NOT an unlink. The asset keeps its files,
  * links, loadouts and every project reference, and its project pages keep

@@ -403,11 +403,19 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
 async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
     """Per-type tallies for the scope's own LIBRARY — the sidebar's six badges.
 
-    Counts this scope's non-deleted, in-library assets only (mig 448): the
-    badges sit above the shelf, and the shelf defaults to ``library='in'``, so
-    counting project-originated rows here would put a number on the sidebar
-    that the grid below it cannot show. Adding one to the library moves its
-    badge; that is the point of the number.
+    Counts this scope's non-deleted, in-library assets only (mig 448). The badge
+    answers ONE fixed question — "how many are in my library" — so adding an
+    asset to the library moves it, which is the point of the number.
+
+    ⚠️ KNOWN DIVERGENCE, and it is wider than the preset one below. The shelf's
+    ``library`` filter is user-controlled, so on the ``out`` and ``all`` views
+    the grid holds rows this badge does not count and the two visibly disagree.
+    That is accepted rather than fixed: making the badge follow the filter would
+    mean it answered a different question depending on a chip, and "how many
+    assets do I have" would stop being comparable between visits. The badge is a
+    property of the library, not a row count for whatever is currently on
+    screen. If that ever needs to change, the honest fix is a second number
+    beside the grid, not re-pointing this one.
 
     Global system presets are
     NOT included: they are visible from every scope and belong to none, so
@@ -504,22 +512,19 @@ async def delete_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
 
 # ── library membership (mig 448) ────────────────────────────────────────────
 #
-# WHY A PAIR OF ROUTES AND NOT JUST PATCH. ``AssetUpdate.in_library`` exists and
-# works — this router keeps that surface because ``AssetUpdate`` mirrors the
-# writable columns and a hole in it is its own kind of surprise. But the CLIENT
-# uses these two, and the difference is not cosmetic:
+# WHY A PAIR OF ROUTES AND NOT PATCH. These two are the ONLY way to change
+# ``in_library``: ``AssetUpdate`` does not declare the field, and its
+# ``extra="forbid"`` turns ``PATCH {"in_library": ...}`` into a 422 naming it.
+# That is deliberate, and the reason is drift rather than taste — with both
+# surfaces live they would converge only at the repository, so a rule added to
+# ``set_library_membership`` later would be silently bypassed by the PATCH path.
 #
-#   * The user's act is "add this to my library" / "take it out", not "write
-#     false into a column". A named route is what lets the frontend send an
-#     INTENT, so the button has exactly one call to make and one failure to
-#     report — the typed-echo rule this router is built on.
-#   * A PATCH body is assembled from a form. ``AssetUpdate`` is
-#     ``exclude_unset``, so a client that builds one with ``{...row}`` sends
-#     every key it happens to hold; these routes carry NO body at all and
-#     therefore cannot rewrite a field the user did not touch.
-#
-# Both land on ``AssetsService.set_library_membership`` — one gate, one UPDATE,
-# one shape of refusal. There is no second code path to drift.
+# The shape also fits the act. The user's intent is "add this to my library" /
+# "take it out", not "write false into a column", so the client has exactly one
+# call to make and one failure to report — the typed-echo rule this router is
+# built on. And a PATCH body is assembled from a form under ``exclude_unset``,
+# so a client building one with ``{...row}`` sends every key it happens to hold;
+# these routes carry NO body and cannot rewrite a field the user did not touch.
 #
 # ORDERING: both sit under ``/assets/{asset_id}/…``, so they cannot capture the
 # literal ``/assets/counts`` above and nothing above can capture them. Pinned by

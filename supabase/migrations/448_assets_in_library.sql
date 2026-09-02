@@ -54,9 +54,16 @@ COMMENT ON COLUMN public.assets.in_library IS
 -- 2) One-off: project-originated rows are not library members --------------
 -- Idempotent by construction — the predicate names the rows, not a point in
 -- time, so a re-run is a no-op rather than a second flip.
+--
+-- ``AND in_library`` makes it a no-op at the STORAGE layer too, not just in
+-- outcome: without it a re-run rewrites every matching row (new tuple versions,
+-- dead tuples for vacuum, index churn) to set them to the value they already
+-- hold. On this table that is cheap either way, but a data step that touches
+-- zero rows on a second run is the one whose `UPDATE 0` says so out loud.
 UPDATE public.assets
    SET in_library = false
- WHERE source IN ('migrated', 'script_import');
+ WHERE source IN ('migrated', 'script_import')
+   AND in_library;
 
 -- 3) The shelf's index -----------------------------------------------------
 -- Mirrors idx_assets_scope_type (mig 445) with the membership predicate

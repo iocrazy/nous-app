@@ -26,7 +26,11 @@ them backwards:
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
+from pydantic import ValidationError
 
 from app.schemas.assets import AssetCreate, AssetUpdate, DuplicateRequest
 from app.services.assets import assets_service
@@ -202,29 +206,65 @@ async def test_an_unknown_asset_is_a_typed_404(svc):
     assert e.value.status == 404 and e.value.code == "asset_not_found"
 
 
-# ── the PATCH surface says the same thing ──────────────────────────────────
+# ── there is exactly ONE write path, and it stays that way ─────────────────
 
 
-@pytest.mark.asyncio
-async def test_patch_can_write_the_same_column(svc):
-    """``AssetUpdate.in_library`` and the two routes are ONE write, not two
-    code paths. The client uses the routes; this pins that the field surface
-    did not quietly become a second, differently-behaved way in."""
-    a = await _character(svc)
-    out = await svc.update_asset(int(a["id"]), SCOPE, AssetUpdate(in_library=False))
-    assert out["in_library"] is False
+def test_the_patch_surface_cannot_reach_the_column():
+    """``AssetUpdate`` does not declare ``in_library``, and ``extra="forbid"``
+    turns an attempt into a TYPED refusal rather than a silent drop.
+
+    This is what makes "one write path" a fact rather than a claim. With the
+    field declared, PATCH and the two routes would converge only at the
+    repository, so anything later added to ``set_library_membership`` — an
+    audit row, a refusal, a side effect — would be bypassed by the PATCH path
+    with nothing going red.
+    """
+    assert "in_library" not in AssetUpdate.model_fields
+
+    with pytest.raises(ValidationError) as e:
+        AssetUpdate(name="Sang Yao", in_library=False)
+    # Names the offending key, so a client that guessed wrong is told where the
+    # real action is instead of getting a 200 that changed nothing.
+    assert "in_library" in str(e.value)
 
 
-@pytest.mark.asyncio
-async def test_patching_it_to_null_is_a_typed_422_not_a_dropped_key(svc):
-    """``in_library`` is NOT NULL, so it is absent from ``CLEARABLE_FIELDS``.
-    Without that, ``{"in_library": null}`` would be silently dropped and the
-    request would answer 200 having changed nothing."""
-    a = await _character(svc)
-    with pytest.raises(AssetError) as e:
-        await svc.update_asset(int(a["id"]), SCOPE, AssetUpdate(in_library=None))
-    assert e.value.status == 422 and e.value.code == "field_not_nullable"
-    assert e.value.extra["fields"] == ["in_library"]
+def test_set_library_membership_is_the_only_writer_of_the_column():
+    """The divergence guard.
+
+    Reads the service's own source and asserts every write of ``in_library``
+    lives in a method that is allowed to make one. A second write path added
+    later — a new service helper, a field slipped back into a PATCH dump —
+    fails here even if its behaviour happens to match today, which is the point:
+    the invariant the router's comment states is checked, not trusted.
+
+    The four permitted sites are the creation defaults (``create_asset``
+    stamping the keyword argument, ``duplicate`` deciding the copy's own value,
+    ``_import_one`` passing False) and ``set_library_membership`` itself. Each
+    is a place where membership is DECIDED at birth or by the one named action —
+    none of them is a general-purpose column write.
+    """
+    source = Path(assets_service.__file__).read_text()
+    tree = ast.parse(source)
+
+    writers: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = ast.get_source_segment(source, node) or ""
+        # A write is the column name as a dict key or as a keyword argument;
+        # a bare mention inside a docstring or comment is not.
+        stripped = "\n".join(
+            line for line in body.splitlines() if not line.lstrip().startswith("#")
+        )
+        if '"in_library"' in stripped or "in_library=" in stripped:
+            writers.add(node.name)
+
+    assert writers == {
+        "create_asset",
+        "duplicate",
+        "_import_one",
+        "set_library_membership",
+    }, f"a new writer of in_library appeared: {sorted(writers)}"
 
 
 # ── the read side delegates the filter ─────────────────────────────────────

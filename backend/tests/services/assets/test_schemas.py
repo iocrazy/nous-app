@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import get_args
 
 import pytest
@@ -77,6 +77,9 @@ def test_asset_response_allows_null_scope_for_system_presets():
         name="Preset Lantern",
         is_system_preset=True,
         source="system_preset",
+        # Required since mig 448 — the serializer emits every column, so a
+        # response built without it is a shape the wire never produces.
+        in_library=True,
         created_at=now,
         updated_at=now,
         readiness={"state": "draft", "missing": ["primary"]},
@@ -343,18 +346,46 @@ def test_asset_counts_response_rejects_a_non_integer_tally():
 # ── mig 448: explicit library membership ───────────────────────────────────
 
 
-def test_in_library_is_on_the_response_and_the_patch_body():
+def test_the_response_carries_membership_and_the_patch_body_does_not():
     """The response carries it because a client must never have to infer
-    membership from ``source``; the PATCH body carries it because
-    ``AssetUpdate`` mirrors the writable columns."""
+    membership from ``source``.
+
+    ``AssetUpdate`` does NOT, and that asymmetry is the design: membership has
+    one write path (``POST``/``DELETE /assets/{id}/library``), and declaring the
+    field here would add a second that converges only at the repository.
+    """
     assert "in_library" in AssetResponse.model_fields
-    assert "in_library" in AssetUpdate.model_fields
+    assert "in_library" not in AssetUpdate.model_fields
 
 
-def test_the_response_defaults_to_a_member():
-    """NOT NULL DEFAULT true in the column, so the model's fallback must agree:
-    a row whose key somehow went missing must read as "in", never as "out"."""
-    assert AssetResponse.model_fields["in_library"].default is True
+def test_a_patch_aimed_at_membership_is_a_typed_refusal():
+    """``extra="forbid"`` is what turns the omission above into an ANSWER.
+    Without it the key would be silently dropped and the request would report
+    200 having changed nothing — the silent-no-op class this module refuses."""
+    with pytest.raises(ValidationError) as e:
+        AssetUpdate(name="Sang Yao", in_library=True)
+    assert "in_library" in str(e.value)
+
+
+def test_the_response_requires_membership_rather_than_defaulting_it():
+    """No default, unlike its neighbours.
+
+    This model is what FastAPI validates on the way out, so a default would let
+    a service that stopped emitting the key ship a row every client reads as "in
+    library". Membership decides whether the shelf shows the asset at all —
+    guessing it is worse than failing loudly.
+    """
+    assert AssetResponse.model_fields["in_library"].is_required()
+
+    with pytest.raises(ValidationError):
+        AssetResponse(
+            id="1",
+            asset_type="character",
+            name="Sang Yao",
+            created_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+            readiness={"state": "draft", "missing": []},
+        )
 
 
 def test_a_client_cannot_set_membership_at_creation():

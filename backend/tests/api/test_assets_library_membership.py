@@ -188,6 +188,24 @@ async def test_the_library_routes_are_not_shadowed_and_do_not_shadow_counts(app)
     assert app.state.fake.membership_calls == [(5, 9000, True)]
 
 
+@pytest.mark.asyncio
+async def test_patching_the_column_is_refused_at_the_wire(app):
+    """The other half of "one write path", checked where a client would try it.
+
+    ``AssetUpdate`` does not declare ``in_library`` and forbids extras, so this
+    is a 422 from FastAPI's own validation — the service is never reached. That
+    is what stops the PATCH surface becoming a second way in that converges with
+    these routes only at the repository.
+    """
+    async with _client(app) as c:
+        r = await c.patch("/api/v1/assets/5?scope_id=9000", json={"in_library": False})
+
+    assert r.status_code == 422, r.text
+    # Names the offending key, so the refusal is actionable rather than opaque.
+    assert "in_library" in r.text
+    assert app.state.fake.membership_calls == []
+
+
 # ── the read defaults ──────────────────────────────────────────────────────
 
 
