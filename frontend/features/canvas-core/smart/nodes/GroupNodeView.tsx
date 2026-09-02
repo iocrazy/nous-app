@@ -29,6 +29,7 @@ import {
   arrangeGroupChildren,
   gridColsFor,
   groupPreviewItems,
+  groupPreviewSources,
   groupSummary,
   ungroupNode,
 } from '../grouping';
@@ -131,16 +132,20 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   );
 
   // Whole-group preview (IC): grid items + member images, deduped.
-  // Selected as a STRING signature, not the array: its elements are fresh
-  // objects on every call, so neither reference nor shallow equality would
-  // hold and the card would re-render on every drag frame. Same shape as
-  // `promptStatusSig` in `CanvasSurface.tsx`.
-  const imageItemsSig = useCanvasCoreStore((s) =>
-    JSON.stringify(groupPreviewItems(s.nodes as never, id)),
+  // Subscribe to the contributing node REFERENCES, then derive outside the
+  // selector. Zustand runs selectors on every `set`, so deriving inside one
+  // put a full walk + a fresh LightboxItem per image on every drag frame,
+  // per group card — sixty times a second on the critical path of the
+  // gesture this work exists to smooth. A tick replaces only the node that
+  // moved, so `useShallow` over the sources holds and the memo below never
+  // re-runs. (Selecting the derived list directly cannot work: its elements
+  // are fresh objects, so no equality would ever hold.)
+  const previewSources = useCanvasCoreStore(
+    useShallow((s) => groupPreviewSources(s.nodes as never, id)),
   );
   const imageItems: LightboxItem[] = useMemo(
-    () => JSON.parse(imageItemsSig) as LightboxItem[],
-    [imageItemsSig],
+    () => groupPreviewItems(previewSources as never, id) as LightboxItem[],
+    [previewSources, id],
   );
 
   const onArrange = useCallback(() => {
