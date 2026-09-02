@@ -769,3 +769,60 @@ test('DAEMON_VERSION matches the version in package.json', async () => {
   assert.equal(DAEMON_VERSION, pkg.version);
   assert.match(DAEMON_VERSION, /^\d+\.\d+\.\d+$/);
 });
+
+// ── image argv ────────────────────────────────────────────────────────────
+//
+// The argv is the whole contract with gpt-image-2-skill: everything the
+// server decided about shape and quality either reaches the CLI here or is
+// lost silently. Pinning it as a pure function is what makes "the payload
+// carried a quality the daemon dropped" a red test instead of a support
+// ticket.
+//
+// DAEMON_VERSION is already imported above — importing it twice in one module
+// is a SyntaxError, so this section reuses that binding.
+import { buildImageArgs } from './index.mjs';
+
+test('buildImageArgs: forwards --quality when the server sends one', () => {
+  const args = buildImageArgs({
+    prompt: 'a cat', size: '1536x1024', quality: 'high', model: '', refs: [], out: '/w/out.png',
+  });
+  const i = args.indexOf('--quality');
+  assert.notEqual(i, -1, 'quality never reached the CLI — the knob P4 shows is a fake switch');
+  assert.equal(args[i + 1], 'high');
+});
+
+test('buildImageArgs: omits --quality entirely when absent — the CLI default is the honest choice', () => {
+  const args = buildImageArgs({ prompt: 'a cat', size: '1024x1024', model: '', refs: [], out: '/w/out.png' });
+  assert.equal(args.includes('--quality'), false);
+  // null / '' are "not set", not "set to nothing"
+  for (const q of [null, '']) {
+    const a = buildImageArgs({ prompt: 'p', size: '1024x1024', quality: q, model: '', refs: [], out: '/o' });
+    assert.equal(a.includes('--quality'), false, `quality=${JSON.stringify(q)}`);
+  }
+});
+
+test('buildImageArgs: keeps the 0.3.0 contract for size/model/refs byte-for-byte', () => {
+  const args = buildImageArgs({
+    prompt: 'p', size: '1024x1536', model: 'gpt-image-2', refs: ['/w/ref0.png', '/w/ref1.png'], out: '/w/out.png',
+  });
+  assert.deepEqual(args.slice(0, 2), ['images', 'edit']);          // refs ⇒ edit
+  assert.equal(args[args.indexOf('--size') + 1], '1024x1536');
+  assert.equal(args[args.indexOf('--model') + 1], 'gpt-image-2');
+  assert.deepEqual(args.filter((a, k) => args[k - 1] === '--ref-image'), ['/w/ref0.png', '/w/ref1.png']);
+  const noRefs = buildImageArgs({ prompt: 'p', size: '1024x1024', model: '', refs: [], out: '/o' });
+  assert.deepEqual(noRefs.slice(0, 2), ['images', 'generate']);   // no refs ⇒ generate
+  assert.equal(noRefs.includes('--model'), false);                 // empty model ⇒ CLI default
+});
+
+test('buildImageArgs: falls back to 1024x1024 when size is missing (old-server safety)', () => {
+  const args = buildImageArgs({ prompt: 'p', model: '', refs: [], out: '/o' });
+  assert.equal(args[args.indexOf('--size') + 1], '1024x1024');
+});
+
+// Exact, not ">=": the server refuses image jobs from daemons below 0.4.0, so
+// the number here is a contract term, not a changelog entry. Bumping the
+// daemon later means updating this line on purpose — and reading the server's
+// minimum at the same time.
+test('DAEMON_VERSION is 0.4.0 — image jobs are gated on it server-side', () => {
+  assert.equal(DAEMON_VERSION, '0.4.0');
+});
