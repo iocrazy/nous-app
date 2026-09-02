@@ -127,17 +127,49 @@ describe('CanvasEngine — mh-canvas-interacting spans the gesture', () => {
     expect(typeof props.onMoveEnd).toBe('function');
   });
 
+  it('carries the class from selection-drag start to selection-drag stop', () => {
+    // Dragging a MULTI-node selection is a different React Flow event pair
+    // (`onSelectionDrag*`, dispatched by XYDrag when the drag has no single
+    // node id). Task 5 only wired the solo-drag pair, so moving a selection
+    // — the heaviest gesture on the canvas, every selected card repainting
+    // its blur every frame — never downshifted at all.
+    const { props } = renderEngine();
+    expect(interacting()).toBe(false);
+    fire(props, 'onSelectionDragStart', {}, [NODE]);
+    expect(interacting()).toBe(true);
+    fire(props, 'onSelectionDragStop', {}, [NODE]);
+    expect(interacting()).toBe(false);
+  });
+
+  it('wires selection drag start/stop even when the caller passed neither', () => {
+    // Same reasoning as the move pair above: the downshift is the engine's
+    // own business, so it must not depend on a consumer having asked for
+    // the callback. `onSelectionDragStop` used to be handed to React Flow
+    // only when a consumer supplied one.
+    const { props } = renderEngine();
+    expect(typeof props.onSelectionDragStart).toBe('function');
+    expect(typeof props.onSelectionDragStop).toBe('function');
+  });
+
   it('still forwards the consumer callbacks it composes with', () => {
     const onNodeDragStart = vi.fn();
     const onMoveStart = vi.fn();
     const onMoveEnd = vi.fn();
-    const { props } = renderEngine({ onNodeDragStart, onMoveStart, onMoveEnd });
+    const onSelectionDragStop = vi.fn();
+    const { props } = renderEngine({
+      onNodeDragStart,
+      onMoveStart,
+      onMoveEnd,
+      onSelectionDragStop,
+    });
     fire(props, 'onNodeDragStart', {}, NODE);
     fire(props, 'onMoveStart', {}, VIEWPORT);
     fire(props, 'onMoveEnd', {}, VIEWPORT);
+    fire(props, 'onSelectionDragStop', {}, [NODE]);
     expect(onNodeDragStart).toHaveBeenCalledTimes(1);
     expect(onMoveStart).toHaveBeenCalledWith(VIEWPORT);
     expect(onMoveEnd).toHaveBeenCalledWith(VIEWPORT);
+    expect(onSelectionDragStop).toHaveBeenCalledWith([NODE]);
   });
 });
 
@@ -159,6 +191,26 @@ describe('CanvasEngine — overlapping gestures compose', () => {
     fire(props, 'onNodeDragStart', {}, NODE);
     fire(props, 'onMoveStart', {}, VIEWPORT);
     fire(props, 'onNodeDragStop', {}, NODE);
+    expect(interacting()).toBe(true);
+    fire(props, 'onMoveEnd', {}, VIEWPORT);
+    expect(interacting()).toBe(false);
+  });
+
+  it('keeps the class while a selection drag outlives the viewport move it began in', () => {
+    const { props } = renderEngine();
+    fire(props, 'onMoveStart', {}, VIEWPORT);
+    fire(props, 'onSelectionDragStart', {}, [NODE]);
+    fire(props, 'onMoveEnd', {}, VIEWPORT);
+    expect(interacting()).toBe(true);
+    fire(props, 'onSelectionDragStop', {}, [NODE]);
+    expect(interacting()).toBe(false);
+  });
+
+  it('keeps the class while a viewport move outlives the selection drag inside it', () => {
+    const { props } = renderEngine();
+    fire(props, 'onSelectionDragStart', {}, [NODE]);
+    fire(props, 'onMoveStart', {}, VIEWPORT);
+    fire(props, 'onSelectionDragStop', {}, [NODE]);
     expect(interacting()).toBe(true);
     fire(props, 'onMoveEnd', {}, VIEWPORT);
     expect(interacting()).toBe(false);
@@ -190,6 +242,17 @@ describe('CanvasEngine — a drag React Flow ABORTS still ends', () => {
   it('clears the class when the pointer is released with no drag-stop', () => {
     const { props } = renderEngine();
     fire(props, 'onNodeDragStart', {}, NODE);
+    expect(interacting()).toBe(true);
+    releasePointer('pointerup');
+    expect(interacting()).toBe(false);
+  });
+
+  it('clears the class when a SELECTION drag is released with no drag-stop', () => {
+    // The abort branch is in XYDrag, which is shared by both drag families —
+    // so a selection drag must ride the same pointer watchdog, not a flag of
+    // its own that nothing would ever take down.
+    const { props } = renderEngine();
+    fire(props, 'onSelectionDragStart', {}, [NODE]);
     expect(interacting()).toBe(true);
     releasePointer('pointerup');
     expect(interacting()).toBe(false);

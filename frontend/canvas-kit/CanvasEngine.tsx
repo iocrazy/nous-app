@@ -238,6 +238,10 @@ export interface CanvasEngineProps {
    */
   onNodeDragStop?: (node: AnyNode, ctx: NodeDragStopContext) => void;
   /** Multi-selection box-drag settled — the dragged nodes (guides already cleared). */
+  /** A multi-node selection started moving. Optional: the engine wires the
+   *  React Flow handler either way, because the interaction downshift below
+   *  is the engine's own business, not something a consumer opts into. */
+  onSelectionDragStart?: (nodes: AnyNode[]) => void;
   onSelectionDragStop?: (nodes: AnyNode[]) => void;
   /**
    * Viewport moved — fires on EVERY frame of a pan/zoom. Almost no caller
@@ -342,6 +346,7 @@ export function CanvasEngine({
   onNodeDragStart,
   onNodesSnap,
   onNodeDragStop,
+  onSelectionDragStart,
   onSelectionDragStop,
   onMove,
   onMoveStart,
@@ -420,7 +425,11 @@ export function CanvasEngine({
   //
   // TWO INDEPENDENT FLAGS, not one: a node drag can begin inside a live
   // viewport move (and vice versa), so ending one gesture must not clear the
-  // class while the other is still running. Flags rather than a counter
+  // class while the other is still running. Exactly two — solo node drags
+  // and multi-node SELECTION drags share `draggingRef`, since they are
+  // mutually exclusive (React Flow dispatches one pair or the other, never
+  // both) and a third flag would only add another way to leak one ON.
+  // Flags rather than a counter
   // because React Flow's move callbacks are not guaranteed to pair up —
   // `onMoveEnd` also fires for PROGRAMMATIC moves (`fitView`, `setViewport`)
   // with no matching start, and a counter would go negative or, worse, clear
@@ -643,12 +652,30 @@ export function CanvasEngine({
     ],
   );
 
+  // Moving a MULTI-node selection is its own React Flow event pair: XYDrag
+  // dispatches `onSelectionDrag*` instead of `onNodeDrag*` when the drag has
+  // no single node behind it. It is also the most expensive gesture on the
+  // canvas — every selected card repainting its blur every frame — so it
+  // rides the SAME drag flag and the SAME pointer watchdog as a solo drag
+  // rather than getting a third flag nothing would take down.
+  const handleSelectionDragStart = useCallback(
+    (_evt: unknown, dragged: AnyNode[]) => {
+      // The vanish watchdog needs an id to watch. Any node in the selection
+      // will do: Delete mid-drag takes the whole selection, so the first one
+      // disappearing is the signal.
+      beginDrag(dragged[0]?.id ?? null);
+      onSelectionDragStart?.(dragged);
+    },
+    [beginDrag, onSelectionDragStart],
+  );
+
   const handleSelectionDragStop = useCallback(
     (_evt: unknown, dragged: AnyNode[]) => {
+      endDrag();
       setGuides(NO_GUIDES);
       onSelectionDragStop?.(dragged);
     },
-    [onSelectionDragStop],
+    [endDrag, onSelectionDragStop],
   );
 
   // Adopt the shared canvas-kit keyboard layer for fit-view (f) and zoom (+/-).
@@ -923,7 +950,8 @@ export function CanvasEngine({
         onNodeDragStart={handleNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={handleNodeDragStop}
-        onSelectionDragStop={onSelectionDragStop ? handleSelectionDragStop : undefined}
+        onSelectionDragStart={handleSelectionDragStart}
+        onSelectionDragStop={handleSelectionDragStop}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgesChange={onEdgesChange}
         nodesDraggable={nodesDraggable}
