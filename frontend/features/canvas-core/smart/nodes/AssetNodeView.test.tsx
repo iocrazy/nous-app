@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { GeneratedApiError, NETWORK_STATUS } from '../../../../services/apiEnvelope';
 import type { AssetRowDetail } from '../../../../services/assetsService';
-import { AssetNodeView, orderedReferenceFiles } from './AssetNodeView';
+import { AssetNodeView } from './AssetNodeView';
 
 const fetchAssetDetail = vi.fn();
 
@@ -267,6 +267,24 @@ describe('AssetNodeView — loadouts', () => {
     expect(nodeData().selected_file_ids).toEqual([SHEET_FILE]);
   });
 
+  it('switching before the detail loads rebinds WITHOUT wiping the selection', async () => {
+    // The picker renders from the snapshot's `asset_type`, so it is live
+    // before `loadouts` arrive. The prune needs the file rows to tell which
+    // selections belong to the outfit being left; with none loaded every id
+    // looks inapplicable, and `patchNode` writes no history, so a wipe here
+    // would be unrecoverable.
+    fetchAssetDetail.mockReturnValue(new Promise(() => {}));
+    seedAndRender({
+      ...NODE_DATA,
+      loadout_id: LOADOUT_A,
+      selected_file_ids: [SHEET_FILE, WORN_A_FILE],
+    });
+    const select = screen.getByTestId('asset-node-loadout') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '' } });
+    expect(nodeData().loadout_id).toBeNull();
+    expect(nodeData().selected_file_ids).toEqual([SHEET_FILE, WORN_A_FILE]);
+  });
+
   it('shows no loadout picker for a non-character asset', async () => {
     fetchAssetDetail.mockResolvedValue({
       ...DETAIL,
@@ -289,6 +307,23 @@ describe('AssetNodeView — reference selection', () => {
     expect(boxes.length).toBe(2);
     expect(boxes[0].getAttribute('data-testid')).toBe(`asset-node-file-${SHEET_FILE}`);
     expect(list.textContent).toContain('Primary');
+  });
+
+  it('draws ONE row for a resource attached to two slots', async () => {
+    // `asset_files` is keyed (asset_id, resource_id, slot). Two rows for one
+    // resource would mean two checkboxes bound to the same id — they tick
+    // together and share a data-testid, which reads as a bug.
+    fetchAssetDetail.mockResolvedValue({
+      ...DETAIL,
+      files: [
+        file({ resource_id: SHEET_FILE, slot: 'sheet', sort_order: 0 }),
+        file({ resource_id: SHEET_FILE, slot: 'stills', sort_order: 3 }),
+      ],
+    });
+    seedAndRender();
+    const list = await screen.findByTestId('asset-node-files');
+    expect(list.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    expect(screen.getAllByTestId(`asset-node-file-${SHEET_FILE}`)).toHaveLength(1);
   });
 
   it('a checkbox toggles selected_file_ids both ways', async () => {
@@ -348,35 +383,5 @@ describe('AssetNodeView — the asset is gone', () => {
     seedAndRender();
     await waitFor(() => expect(screen.getByTestId('asset-node-load-error')).toBeTruthy());
     expect(nodeData().removed).toBeUndefined();
-  });
-});
-
-describe('orderedReferenceFiles', () => {
-  const files = DETAIL.files;
-
-  it('orders by the slot table, primary first, then sort_order', () => {
-    const out = orderedReferenceFiles(files, 'character', LOADOUT_A);
-    expect(out.map((f) => f.slot)).toEqual(['sheet', 'stills', 'worn']);
-  });
-
-  it('drops files pinned to another loadout, keeps loadout-free ones', () => {
-    const out = orderedReferenceFiles(files, 'character', LOADOUT_A);
-    expect(out.map((f) => f.resource_id)).not.toContain(WORN_B_FILE);
-    expect(out.map((f) => f.resource_id)).toContain(WORN_A_FILE);
-    expect(out.map((f) => f.resource_id)).toContain(SHEET_FILE);
-  });
-
-  it('with no loadout bound, every loadout-scoped file is out', () => {
-    const out = orderedReferenceFiles(files, 'character', null);
-    expect(out.map((f) => f.resource_id)).toEqual([SHEET_FILE, STILLS_FILE]);
-  });
-
-  it('a slot the type table does not name sorts last, not first', () => {
-    const out = orderedReferenceFiles(
-      [file({ resource_id: 'r9', slot: 'made_up' }), file({ resource_id: 'r1', slot: 'sheet' })],
-      'character',
-      null,
-    );
-    expect(out.map((f) => f.resource_id)).toEqual(['r1', 'r9']);
   });
 });

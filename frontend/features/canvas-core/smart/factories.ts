@@ -11,11 +11,7 @@
  * (it dedupes on insert), so simple suffixing is fine here.
  */
 
-import { PRIMARY_SLOT } from '../../../components/assets/assetSlots';
-import type {
-  AssetFileRow,
-  AssetRow,
-} from '../../../services/assetsService';
+import { primarySlotFileIds, type AssetNodeSeed } from './assetFiles';
 import type {
   AssetNodeData,
   SmartNode,
@@ -270,55 +266,16 @@ export function createLibEntityNode(
   };
 }
 
-/**
- * The row shape {@link createAssetNode} needs.
- *
- * `AssetRow` alone cannot seed `selected_file_ids`: it carries
- * `file_counts_by_slot` (a tally) but not the file rows themselves, which
- * only `GET /assets/{id}` returns. So the parameter is an `AssetRow` widened
- * with the optional `files` — `AssetRowDetail` is assignable as-is, and a
- * caller holding only a summary row still gets a valid node, just with an
- * empty selection.
- */
-export type AssetNodeSeed = AssetRow & { files?: readonly AssetFileRow[] };
+// `AssetNodeSeed` and the file predicates live in `./assetFiles` — one
+// module owns "which files does an asset card reference", so seeding and
+// rendering cannot answer it differently again. Re-exported here because a
+// caller of `createAssetNode` naturally looks for its parameter type
+// alongside it; this is the same declaration, not a second one.
+export type { AssetNodeSeed };
 
 export interface AssetFactoryOptions extends FactoryOptions {
   /** `asset_loadouts.id` to bind, or null/undefined for none. */
   loadoutId?: string | null;
-}
-
-/**
- * Reference files this card starts out selected: the PRIMARY slot's, in the
- * library's own `sort_order`.
- *
- * The primary slot is the one readiness is derived from, so it is the slot a
- * user means by "this asset" before they say otherwise. `prompt` has no
- * primary file slot (`PRIMARY_SLOT.prompt === null` — its body IS the
- * primary), so a prompt asset seeds an empty selection rather than falling
- * back to some other slot's files.
- *
- * When a loadout is bound, files pinned to a DIFFERENT loadout are excluded:
- * a loadout-scoped file belongs to that outfit only. Files with no loadout
- * are shared by every loadout and stay in.
- *
- * Exported for its test — the filter is the part worth pinning.
- */
-export function primarySlotFileIds(
-  asset: AssetNodeSeed,
-  loadoutId: string | null,
-): string[] {
-  const primary = PRIMARY_SLOT[asset.asset_type];
-  if (primary === null || primary === undefined) return [];
-  const files = asset.files ?? [];
-  return files
-    .filter((f) => f.slot === primary)
-    .filter(
-      (f) =>
-        loadoutId === null || f.loadout_id === null || f.loadout_id === loadoutId,
-    )
-    .slice()
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .map((f) => f.resource_id);
 }
 
 /**

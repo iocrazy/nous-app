@@ -14,12 +14,7 @@ import { PRIMARY_SLOT } from '../../../components/assets/assetSlots';
 import type { AssetFileRow, AssetRow } from '../../../services/assetsService';
 import { cloneSubgraph } from '../store/clipboard';
 import type { CanvasNode } from '../types';
-import {
-  _resetIdCounter,
-  createAssetNode,
-  primarySlotFileIds,
-  type AssetNodeSeed,
-} from './factories';
+import { _resetIdCounter, createAssetNode, type AssetNodeSeed } from './factories';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { canConnectSmart, SMART_NODE_DEFAULT_WIDTH } from './types';
 
@@ -155,42 +150,6 @@ describe('createAssetNode', () => {
       { randomSuffix: fixedSuffix },
     );
     expect(node.data.readiness_state).toBe('draft');
-  });
-});
-
-describe('primarySlotFileIds', () => {
-  it('is empty for every type whose primary slot is null', () => {
-    for (const [type, slot] of Object.entries(PRIMARY_SLOT)) {
-      if (slot !== null) continue;
-      expect(
-        primarySlotFileIds(
-          assetRow({
-            asset_type: type as AssetRow['asset_type'],
-            files: [fileRow({ slot: 'anything' })],
-          }),
-          null,
-        ),
-      ).toEqual([]);
-    }
-  });
-
-  it('excludes a file pinned to a different loadout', () => {
-    const files = [fileRow({ resource_id: WORN_A, loadout_id: LOADOUT_B })];
-    expect(primarySlotFileIds(assetRow({ files }), LOADOUT_A)).toEqual([]);
-    expect(primarySlotFileIds(assetRow({ files }), LOADOUT_B)).toEqual([WORN_A]);
-  });
-
-  it('with no loadout bound, loadout-scoped files are left out', () => {
-    const files = [
-      fileRow({ resource_id: SHEET_FILE }),
-      fileRow({ resource_id: WORN_A, loadout_id: LOADOUT_A }),
-    ];
-    // `loadoutId === null` keeps everything the card could legally use; a
-    // loadout-scoped primary file only belongs once that outfit is bound.
-    expect(primarySlotFileIds(assetRow({ files }), null)).toEqual([
-      SHEET_FILE,
-      WORN_A,
-    ]);
   });
 });
 

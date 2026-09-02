@@ -24,6 +24,10 @@
  *    in place is the point; a viewer clicking through to the library should
  *    not lose their board. It is also why this file needs no Router context
  *    beyond `useParams`, which answers `{}` (not a throw) when there is none.
+ *
+ * Which files the checklist offers is NOT decided here — `../assetFiles`
+ * owns that, and the factory seeds from the same module. They used to answer
+ * it separately and disagreed, which selected a file the card would not draw.
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
@@ -31,7 +35,7 @@ import { ExternalLink, PackageX } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { PRIMARY_SLOT, slotsFor } from '../../../../components/assets/assetSlots';
+import { PRIMARY_SLOT } from '../../../../components/assets/assetSlots';
 import {
   ASSET_TYPE_ICON,
   slotLabelKey,
@@ -40,11 +44,11 @@ import {
 import { GeneratedApiError } from '../../../../services/apiEnvelope';
 import {
   fetchAssetDetail,
-  type AssetFileRow,
   type AssetRowDetail,
 } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import { fileVisibleUnderLoadout, orderedReferenceFiles } from '../assetFiles';
 import { useCanvasScope } from '../canvasScope';
 import type { AssetNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
@@ -53,34 +57,6 @@ import { useNodeDataPatch } from './useNodeDataPatch';
 
 /** Detail-fetch outcome. `error` is "could not ask", never "is not there". */
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
-
-/**
- * The files this card may reference, primary slot first then the type's other
- * slots in table order, then anything in a slot the table does not name.
- *
- * Files pinned to a DIFFERENT loadout are dropped: a loadout-scoped file
- * belongs to that outfit alone, and offering it under another one would let a
- * user hand the generator the wrong costume. Files with no loadout are shared
- * and always shown.
- *
- * Exported for its test — the ordering and the loadout filter are the parts
- * worth pinning, not the markup around them.
- */
-export function orderedReferenceFiles(
-  files: readonly AssetFileRow[],
-  assetType: AssetNodeData['asset_type'],
-  loadoutId: string | null,
-): AssetFileRow[] {
-  const order = slotsFor(assetType);
-  const rank = (slot: string): number => {
-    const i = order.indexOf(slot);
-    return i === -1 ? order.length : i;
-  };
-  return files
-    .filter((f) => f.loadout_id === null || f.loadout_id === loadoutId)
-    .slice()
-    .sort((a, b) => rank(a.slot) - rank(b.slot) || a.sort_order - b.sort_order);
-}
 
 /**
  * The node's data AS THE STORE HOLDS IT RIGHT NOW.
@@ -164,12 +140,21 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
       // keeping them selected would ship another costume's references into
       // the next generation. Everything the user picked that still applies
       // survives, so this is a prune, not a reset.
+      const current = liveAssetData(id)?.selected_file_ids ?? [];
+      if (detail === null) {
+        // The prune needs the file rows to know which selections belong to
+        // the outfit being left. With none loaded, EVERY id looks
+        // inapplicable and the whole selection would be wiped — and
+        // `patchNode` writes no history entry, so there is no undo. Not
+        // knowing is a reason to change nothing but the binding.
+        patch({ loadout_id: next });
+        return;
+      }
       const stillApplies = new Set(
-        (detail?.files ?? [])
-          .filter((f) => f.loadout_id === null || f.loadout_id === next)
+        detail.files
+          .filter((f) => fileVisibleUnderLoadout(f, next))
           .map((f) => f.resource_id),
       );
-      const current = liveAssetData(id)?.selected_file_ids ?? [];
       patch({
         loadout_id: next,
         selected_file_ids: current.filter((rid) => stillApplies.has(rid)),
@@ -333,7 +318,7 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
               const checked = selected_file_ids.includes(f.resource_id);
               const slotName = t(slotLabelKey(f.slot), f.slot);
               return (
-                <li key={`${f.resource_id}-${f.slot}`}>
+                <li key={f.resource_id}>
                   <label
                     className="nodrag flex cursor-pointer items-center gap-1.5"
                     title={slotName}

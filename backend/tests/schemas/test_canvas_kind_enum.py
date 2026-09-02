@@ -40,14 +40,27 @@ MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 NOT_CREATABLE = {"classic", "storyboard"}
 
 
+def _migration_number(path: Path) -> int:
+    """The leading migration number, for ordering.
+
+    Sorting file NAMES is right only while every number has the same digit
+    count: ``1000_…`` sorts before ``280_…``, and this test would then answer
+    with a superseded CHECK while still passing.
+    """
+    return int(path.name.split("_", 1)[0])
+
+
 def _kinds_from_migrations() -> set[str]:
     """The literals the LATEST rewrite of ``canvases_kind_check`` allows."""
     pattern = re.compile(
         r"canvases_kind_check.*?CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)",
         re.IGNORECASE | re.DOTALL,
     )
+    numbered = [
+        p for p in MIGRATIONS.glob("*.sql") if p.name.split("_", 1)[0].isdigit()
+    ]
     latest: str | None = None
-    for path in sorted(MIGRATIONS.glob("*.sql")):
+    for path in sorted(numbered, key=_migration_number):
         found = pattern.findall(path.read_text(encoding="utf-8"))
         if found:
             latest = found[-1]

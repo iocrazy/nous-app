@@ -31,12 +31,17 @@ const MIGRATIONS = path.join(REPO_ROOT, 'supabase', 'migrations');
 
 /** Every literal `canvases_kind_check` allows, from the latest migration that
  *  rewrites it. Reading the newest one is the point: an older file's list is
- *  a superseded statement, not the current rule. */
+ *  a superseded statement, not the current rule.
+ *
+ *  Ordered by the leading migration NUMBER, not by file name. A lexicographic
+ *  sort is right only while every number has the same digit count: `1000_…`
+ *  sorts before `280_…`, and this test would then answer with a superseded
+ *  CHECK while still passing. */
 function kindsFromMigrations(): Set<string> {
   const files = fs
     .readdirSync(MIGRATIONS)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
+    .filter((f) => /^\d+_.*\.sql$/.test(f))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
   let latest: string | null = null;
   for (const file of files) {
     const sql = fs.readFileSync(path.join(MIGRATIONS, file), 'utf8');

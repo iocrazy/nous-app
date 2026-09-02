@@ -71,6 +71,11 @@ export function AssetPickerDialog({ onPick, onClose }: AssetPickerDialogProps) {
     let cancelled = false;
     setLoading(true);
     setListError(false);
+    // Everything in scope, presets included — `GET /assets` has no
+    // library-membership filter on this branch. If one arrives, this call is
+    // the decision point: a canvas picker offering library members only, or
+    // the whole scope. Neither is obviously right, so it wants an answer
+    // rather than whatever the parameter happens to default to.
     searchAssets(scopeId, {
       q: debounced.trim() || undefined,
       type: type ?? undefined,
