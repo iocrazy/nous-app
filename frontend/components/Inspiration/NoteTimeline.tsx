@@ -19,6 +19,7 @@ interface Props {
   onDelete: (n: InspirationNote) => void;
   onTagClick: (tag: string) => void;
   onToggleTask?: (note: InspirationNote, index: number) => void;
+  onRating?: (note: InspirationNote, value: number) => void;
   hasMore: boolean;
   loading: boolean;
   loadMore: () => void;
@@ -26,7 +27,7 @@ interface Props {
 }
 
 export const NoteTimeline: React.FC<Props> = ({
-  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, hasMore, loading, loadMore, filtered,
+  notes, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, onRating, hasMore, loading, loadMore, filtered,
 }) => {
   const { t } = useTranslation();
   const groups = useMemo(() => {
@@ -79,6 +80,7 @@ export const NoteTimeline: React.FC<Props> = ({
               onDelete={onDelete}
               onTagClick={onTagClick}
               onToggleTask={onToggleTask}
+              onRating={onRating}
             />
           ))}
         </React.Fragment>

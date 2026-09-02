@@ -48,6 +48,43 @@ describe('inspirationService', () => {
     expect(body.ref_hotspot.title).toBe('Hot');
   });
 
+  // ── rating (mig 448) ─────────────────────────────────────────────────────
+  // Wire shape: NoteOut serializes the bigint id as a STRING
+  // (coerce_numbers_to_str) but rating as a JSON number.
+
+  it('createNote sends rating in the SAME request as the body', async () => {
+    // The iOS Shortcut cannot do POST-then-PATCH; one call must carry both.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1', rating: 4, attachments: [] })));
+    await createNote('idea', undefined, 4);
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body);
+    expect(body.content_md).toBe('idea');
+    expect(body.rating).toBe(4);
+  });
+
+  it('createNote sends rating 0 rather than dropping it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1', rating: 0, attachments: [] })));
+    await createNote('idea', undefined, 0);
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(init.body).rating).toBe(0);
+  });
+
+  it('createNote omits rating entirely when unset (DB default applies)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1', rating: 0, attachments: [] })));
+    await createNote('idea');
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect('rating' in JSON.parse(init.body)).toBe(false);
+  });
+
+  it('updateNote PATCHes rating 0 (clearing stars is a real value)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1', rating: 0 })));
+    await updateNote('1', { rating: 0 });
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).toEqual({ rating: 0 });
+  });
+
   it('updateNote PATCHes only provided fields', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1' })));
     await updateNote('1', { pinned: true });

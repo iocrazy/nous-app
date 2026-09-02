@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
 import { NoteMarkdown } from './NoteMarkdown';
 import { AttachmentView } from './AttachmentView';
+import { RatingStars } from '../detail/DetailCardKit';
 import type { InspirationNote } from '../../services/inspirationService';
 
 interface Props {
@@ -15,6 +16,9 @@ interface Props {
   onDelete: (note: InspirationNote) => void;
   onTagClick: (tag: string) => void;
   onToggleTask?: (note: InspirationNote, index: number) => void;
+  /** Rate the note 0-5 (mig 448). Omitted → the stars are not rendered at all,
+   *  same optional-affordance convention as onToggleTask. */
+  onRating?: (note: InspirationNote, value: number) => void;
   /** Open the beats timeline this note is pinned to (Beats M4 reverse-nav). */
 }
 
@@ -23,7 +27,7 @@ function timeOf(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask }) => {
+export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, onRating }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -42,6 +46,11 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
       <div className="flex items-center gap-2 text-[11px] text-content-3 tabular-nums">
         <span>{timeOf(note.created_at)}</span>
         {note.pinned && <Pin size={11} className="text-[var(--accent-text)]" />}
+        {onRating && (
+          <div aria-label={t('inspiration.rating', 'Rating')}>
+            <RatingStars value={note.rating ?? 0} onChange={(v) => onRating(note, v)} size={12} />
+          </div>
+        )}
         <div className="relative ml-auto" ref={menuRef}>
           <button
             aria-label="Note actions"
