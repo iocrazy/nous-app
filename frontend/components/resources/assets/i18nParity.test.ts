@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 import { ASSET_TYPES, LINK_RELATIONS } from '../../assets/assetSlots';
 import { ASSET_SOURCES } from '../../../services/assetsService';
 import { RELATION_SECTION_KEYS } from './sheet/assetSheetModel';
-import { READINESS_VALUES, SORT_VALUES } from './assetFilters';
+import { LIBRARY_VALUES, READINESS_VALUES, SORT_VALUES } from './assetFilters';
 
 const LOCALES = path.resolve(__dirname, '../../../public/locales');
 
@@ -123,6 +123,7 @@ describe('Asset library i18n parity', () => {
     'assets.filter.anyTag',
     'assets.filter.noTags',
     'assets.filter.sort',
+    'assets.filter.library',
     'assets.card.open',
     'assets.card.missing',
     'assets.card.coverage',
@@ -132,6 +133,7 @@ describe('Asset library i18n parity', () => {
     'assets.empty.none',
     'assets.empty.ofType',
     'assets.empty.filtered',
+    'assets.empty.nothingOutOfLibrary',
     'assets.dialog.title',
     'assets.dialog.name',
     'assets.dialog.role',
@@ -147,8 +149,22 @@ describe('Asset library i18n parity', () => {
     'assets.err.asset_exists',
     'assets.err.system_preset_readonly',
     'assets.err.unreadable_body',
+    // Library membership (mig 449) — the shelf chip, the card badge, and the
+    // add/remove action shared by the project panel and the entity sheet.
+    // `assets.library.${value}` is built at runtime from LIBRARY_VALUES, so
+    // adding a fourth value fails here until both locales carry its label.
+    'assets.library.notInLibrary',
+    'assets.library.notInLibraryHint',
+    'assets.library.addToLibrary',
+    'assets.library.added',
+    'assets.library.removed',
+    'assets.library.addHint',
+    'assets.library.removeHint',
+    'assets.library.addNamed',
+    'assets.library.removeNamed',
     ...READINESS_VALUES.map((v) => `assets.readiness.${v}`),
     ...SORT_VALUES.map((v) => `assets.sort.${v}`),
+    ...LIBRARY_VALUES.map((v) => `assets.library.${v}`),
   ];
 
   // ── The entity sheet's copy (Task 7) ──

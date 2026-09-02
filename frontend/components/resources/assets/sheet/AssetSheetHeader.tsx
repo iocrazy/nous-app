@@ -22,7 +22,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Lock, Pencil, Repeat, X } from 'lucide-react';
+import { BookmarkMinus, BookmarkPlus, Check, Lock, Pencil, Repeat, X } from 'lucide-react';
 
 import type { AssetRowDetail, AssetUpdateBody } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
@@ -34,6 +34,14 @@ export interface AssetSheetHeaderProps {
   readOnly: boolean;
   /** Patch one field. The caller re-fetches on success and reports failures. */
   onPatch: (body: AssetUpdateBody) => void;
+  /**
+   * Flip library membership (mig 449). A NAMED action with its own routes, not
+   * a field write — which is why it is a separate prop rather than another
+   * `onPatch` call site. Omitted where no caller can perform it; the control
+   * then renders as a plain state chip, because a button whose every click is
+   * a no-op is worse than no button.
+   */
+  onToggleLibrary?: () => void;
   /** Loadout chips (characters only) render under the role line. */
   children?: React.ReactNode;
 }
@@ -42,6 +50,7 @@ export const AssetSheetHeader: React.FC<AssetSheetHeaderProps> = ({
   detail,
   readOnly,
   onPatch,
+  onToggleLibrary,
   children,
 }) => {
   const { t } = useTranslation();
@@ -103,6 +112,61 @@ export const AssetSheetHeader: React.FC<AssetSheetHeaderProps> = ({
           <span className="rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3">
             {t(typeSingularKey(detail.asset_type), detail.asset_type)}
           </span>
+
+          {/* Library membership. ALWAYS shown here, unlike on the card where
+              only the "out" state gets a badge: the sheet is where the user
+              acts on it, so the chip has to say which state they are acting
+              FROM. Read-only rows (system presets) get the chip without the
+              button — the server answers 403 for a preset, and offering a
+              click whose only outcome is a refusal is what this file already
+              refuses to do for the inline fields. */}
+          {readOnly || !onToggleLibrary ? (
+            <span
+              data-testid="sheet-library"
+              data-in-library={detail.in_library}
+              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                detail.in_library
+                  ? 'border-line-strong text-content-3'
+                  : 'border-warn-line bg-warn-soft text-warn'
+              }`}
+            >
+              {detail.in_library
+                ? t('assets.library.in', 'In Library')
+                : t('assets.library.notInLibrary', 'Not In Library')}
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid="sheet-library-toggle"
+              data-in-library={detail.in_library}
+              onClick={onToggleLibrary}
+              title={
+                detail.in_library
+                  ? t(
+                      'assets.library.removeHint',
+                      'Takes it off your library shelf — it stays in this project',
+                    )
+                  : t(
+                      'assets.library.addHint',
+                      'Puts it on your library shelf so other projects can use it',
+                    )
+              }
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                detail.in_library
+                  ? 'border-line-strong text-content-3 hover:text-content'
+                  : 'border-warn-line bg-warn-soft text-warn hover:opacity-80'
+              }`}
+            >
+              {detail.in_library ? (
+                <BookmarkMinus size={10} aria-hidden="true" />
+              ) : (
+                <BookmarkPlus size={10} aria-hidden="true" />
+              )}
+              {detail.in_library
+                ? t('assets.library.in', 'In Library')
+                : t('assets.library.addToLibrary', 'Add To Library')}
+            </button>
+          )}
 
           {detail.is_system_preset && (
             <span

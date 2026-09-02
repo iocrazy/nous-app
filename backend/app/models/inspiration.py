@@ -18,11 +18,13 @@ import uuid
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKeyConstraint,
     Index,
     PrimaryKeyConstraint,
+    SmallInteger,
     String,
     Text,
     Uuid,
@@ -39,6 +41,9 @@ class InspirationNotes(Base):
 
     __tablename__ = "inspiration_notes"
     __table_args__ = (
+        CheckConstraint(
+            "rating >= 0 AND rating <= 5", name="inspiration_notes_rating_check"
+        ),
         PrimaryKeyConstraint("id", name="inspiration_notes_pkey"),
         Index("idx_inspiration_notes_user_date", "user_id", "note_date"),
         Index("idx_inspiration_notes_user_pinned", "user_id", "pinned"),
@@ -63,6 +68,9 @@ class InspirationNotes(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     note_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    # 0-5 stars, mig 448. Nullable with server_default 0, mirroring
+    # resources.rating (mig 074) — 0 means "unrated", never NULL in practice.
+    rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

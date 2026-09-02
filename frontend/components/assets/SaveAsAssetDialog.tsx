@@ -502,7 +502,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   return (
     <UiModal
       isOpen
-      title={t('saveAsAsset.title', 'Save as Asset')}
+      title={t('saveAsAsset.title', 'Add To Asset')}
       onClose={onClose}
       widthClassName="w-[680px]"
       footer={

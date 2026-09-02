@@ -284,6 +284,7 @@ async def test_list_passes_filters_through_to_the_repository():
         "model": "doubao-seedream",
         "since": since,
         "source_asset_id": 727145299382534300,
+        "include_intermediate": False,
         "cursor": "c1",
         "limit": 7,
     }
@@ -812,3 +813,20 @@ async def test_a_page_with_no_canvas_rows_still_makes_exactly_one_lookup():
     item = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
     assert item["source"]["label"] == "Chat generation"
     assert canvases.calls == [[]]
+
+
+async def test_list_hides_intermediates_unless_asked():
+    """The inbox default and the opt-in, both reaching the repository.
+
+    The default matters more than it looks: ``include_intermediate`` absent
+    from the call would let the repository's own default decide, and this
+    service is where "the inbox does not show masks" is a stated contract
+    rather than an accident of a downstream signature.
+    """
+    svc, repo, _p = build()
+
+    await svc.list(SCOPE, str(SCOPE))
+    assert repo.last_filters["include_intermediate"] is False
+
+    await svc.list(SCOPE, str(SCOPE), include_intermediate=True)
+    assert repo.last_filters["include_intermediate"] is True

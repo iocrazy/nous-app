@@ -99,6 +99,7 @@ const deleteAsset = vi.fn();
 const duplicateAsset = vi.fn();
 const createLink = vi.fn();
 const deleteLink = vi.fn();
+const setAssetLibraryMembership = vi.fn();
 vi.mock('../../../../services/assetsService', () => ({
   fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
   updateAsset: (...a: unknown[]) => updateAsset(...a),
@@ -106,6 +107,7 @@ vi.mock('../../../../services/assetsService', () => ({
   duplicateAsset: (...a: unknown[]) => duplicateAsset(...a),
   createLink: (...a: unknown[]) => createLink(...a),
   deleteLink: (...a: unknown[]) => deleteLink(...a),
+  setAssetLibraryMembership: (...a: unknown[]) => setAssetLibraryMembership(...a),
   listAssets: vi.fn().mockResolvedValue([]),
   createLoadout: vi.fn().mockResolvedValue({}),
   updateLoadout: vi.fn().mockResolvedValue({}),
@@ -166,6 +168,7 @@ beforeEach(() => {
   duplicateAsset.mockResolvedValue({ ...CHARACTER_DETAIL, id: '999' });
   createLink.mockResolvedValue({});
   deleteLink.mockResolvedValue(undefined);
+  setAssetLibraryMembership.mockResolvedValue({});
   attachFiles.mockResolvedValue([{}]);
   previewGenerateSlot.mockResolvedValue({
     positive: 'character sheet…',
@@ -846,5 +849,83 @@ describe('the slot dialogs are wired to the board', () => {
     expect(screen.queryByTestId('pin-generate')).toBeNull();
     expect(screen.queryByTestId('equip-dialog')).toBeNull();
     expect(screen.queryByTestId('generate-missing-dialog')).toBeNull();
+  });
+});
+
+describe('library membership (mig 449)', () => {
+  it('an out-of-library asset offers Add To Library and sends the add', async () => {
+    const outsider = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      source: 'script_import',
+      in_library: false,
+    });
+    await renderSheet(outsider, []);
+
+    const toggle = screen.getByTestId('sheet-library-toggle');
+    expect(toggle.getAttribute('data-in-library')).toBe('false');
+    expect(toggle.textContent).toContain('Add To Library');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(setAssetLibraryMembership).toHaveBeenCalledWith(SCOPE_ID, outsider.id, true),
+    );
+    // A NAMED action, not a field write: `updateAsset` must not be how this
+    // happens, or a form-shaped body could rewrite fields nobody touched.
+    expect(updateAsset).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('Added To Your Library', 'success'),
+    );
+  });
+
+  it('a member offers the removal, and says the project keeps it', async () => {
+    await renderSheet();
+
+    const toggle = screen.getByTestId('sheet-library-toggle');
+    expect(toggle.getAttribute('data-in-library')).toBe('true');
+    expect(toggle.textContent).toContain('In Library');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(setAssetLibraryMembership).toHaveBeenCalledWith(
+        SCOPE_ID,
+        CHARACTER_DETAIL.id,
+        false,
+      ),
+    );
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        'Removed From Your Library — Still In This Project',
+        'success',
+      ),
+    );
+  });
+
+  it('a system preset shows the state but offers no click', async () => {
+    // The server answers 403 for a preset — a global row's membership is not
+    // one team's to change — so offering a button whose only outcome is a
+    // refusal is what this sheet refuses to do for every other control too.
+    const preset = makeDetail({
+      ...CHARACTER_DETAIL,
+      id: CHARACTER_DETAIL.id,
+      scope_id: null,
+      is_system_preset: true,
+    });
+    await renderSheet(preset, []);
+
+    expect(screen.queryByTestId('sheet-library-toggle')).toBeNull();
+    expect(screen.getByTestId('sheet-library').textContent).toContain('In Library');
+  });
+
+  it('reports a refusal rather than leaving the chip silently unmoved', async () => {
+    setAssetLibraryMembership.mockRejectedValue(new Error('boom'));
+    await renderSheet();
+
+    fireEvent.click(screen.getByTestId('sheet-library-toggle'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    expect(addToast.mock.calls.every(([, kind]) => kind !== 'success')).toBe(true);
   });
 });

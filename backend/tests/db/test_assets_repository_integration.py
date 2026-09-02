@@ -1237,3 +1237,131 @@ async def test_create_asset_inside_a_callers_uow_rolls_back_with_it(orm_dsn, pg,
         )
         == 1
     ), "joining the outer transaction lost the Default loadout"
+
+
+# ── 22. mig 449: explicit library membership, against the real server ───────
+
+
+@_skip
+async def test_library_filter_and_counts_split_the_two_membership_states(
+    orm_dsn, pg, fx
+):
+    """The three ``library=`` values and the badge exclusion, on real SQL.
+
+    Every one of these is a WHERE clause, so the unit suite can only prove that
+    SQLAlchemy emitted the text — a stubbed session replays whatever rows the
+    test author expected. What needs a server is that the predicates PARTITION:
+    ``in`` and ``out`` must be complements over the same rows, and ``all`` must
+    equal their union. A predicate that quietly matched nothing (or everything)
+    passes the compiled-SQL pins and fails here.
+
+    The counts assertion is the one with a user-visible failure mode: the badge
+    sits directly above the shelf, and the shelf defaults to ``in``. A badge
+    counting project-originated rows would name a number the grid beneath it
+    cannot show.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team = fx["team_id"]
+
+    member = await _make_asset(repo, fx, "character", _uniq("Adopted Lead"))
+    # ``create`` takes the column dict straight through, which is how the
+    # import path lands a row outside the library.
+    outsider = await _make_asset(
+        repo, fx, "character", _uniq("Imported Extra"), source="script_import"
+    )
+    await repo.create(
+        team,
+        {
+            "asset_type": "location",
+            "name": _uniq("Imported Grove"),
+            "source": "script_import",
+            "in_library": False,
+        },
+        fx["user_id"],
+    )
+
+    # The bare create defaults to a member — the DEFAULT is what every
+    # deliberate path relies on, so it is asserted rather than assumed.
+    assert member["in_library"] is True
+    # …and the explicit False actually reached the column.
+    assert (
+        await pg.fetchval(
+            "SELECT in_library FROM assets WHERE id = $1", int(outsider["id"])
+        )
+        is True
+    ), "source alone must NOT decide membership — only the explicit value does"
+
+    await repo.update(int(outsider["id"]), team, {"in_library": False})
+
+    def _ids(rows):
+        return {int(r["id"]) for r in rows}
+
+    inside = _ids(await repo.list(team, asset_type="character", library="in"))
+    outside = _ids(await repo.list(team, asset_type="character", library="out"))
+    everything = _ids(await repo.list(team, asset_type="character", library="all"))
+
+    assert int(member["id"]) in inside and int(member["id"]) not in outside
+    assert int(outsider["id"]) in outside and int(outsider["id"]) not in inside
+    # The partition property — this is what a predicate matching nothing, or
+    # everything, cannot satisfy.
+    assert inside & outside == set()
+    assert inside | outside == everything
+
+    # The default is "in": a caller that says nothing gets the library, not
+    # everything. Asserted on the REPO because the router default is a separate
+    # value that could drift from it.
+    assert _ids(await repo.list(team, asset_type="character")) == inside
+
+    counts = await repo.count_by_type(team)
+    assert counts["character"] == 1, "an out-of-library row inflated a badge"
+    assert counts["location"] == 0, counts
+
+
+@_skip
+async def test_removing_from_the_library_is_not_a_delete(orm_dsn, pg, fx):
+    """``set_library_membership`` moves ONE column. The row, its project refs
+    and its loadouts all stay — the whole reason membership is a flag rather
+    than a deletion is that the project page keeps showing these."""
+    from app.repositories.assets_repository import AssetsRepository
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetsService
+
+    repo = AssetsRepository()
+    service = AssetsService(assets_repo=repo)
+    team, uid = fx["team_id"], fx["user_id"]
+
+    row = await service.create_asset(
+        team, AssetCreate(asset_type="character", name=_uniq("Kept Hero")), uid
+    )
+    asset_id = int(row["id"])
+    await service.link_project(asset_id, team, int(fx["project_id"]), uid)
+
+    out = await service.set_library_membership(asset_id, team, in_library=False)
+    assert out["in_library"] is False
+
+    live = await pg.fetchrow(
+        "SELECT in_library, deleted_at FROM assets WHERE id = $1", asset_id
+    )
+    assert live["in_library"] is False and live["deleted_at"] is None
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_project_refs WHERE asset_id = $1", asset_id
+        )
+        == 1
+    ), "removing from the library unlinked the project"
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM asset_loadouts WHERE asset_id = $1", asset_id
+        )
+        == 1
+    ), "removing from the library dropped the Default loadout"
+
+    # Idempotent: asking again for the state it already holds is the outcome,
+    # not a conflict.
+    again = await service.set_library_membership(asset_id, team, in_library=False)
+    assert again["in_library"] is False
+
+    back = await service.set_library_membership(asset_id, team, in_library=True)
+    assert back["in_library"] is True

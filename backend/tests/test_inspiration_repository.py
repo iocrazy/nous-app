@@ -284,3 +284,94 @@ def test_repo_has_no_supabase_client():
     # old ``client.rpc`` path for context, so we don't substring-check that.)
     assert "get_async_supabase_admin" not in src
     assert "await client.table" not in src
+
+
+# ── rating (mig 448) ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_sets_rating_when_provided(monkeypatch):
+    """Shortcut path: one POST carries body + rating, so create() must persist
+    it rather than forcing a second PATCH."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "write_scope", _cm(session))
+
+    await InspirationNotesRepository().create(
+        user_id="u1",
+        content_md="x",
+        tags=[],
+        note_date="2026-07-07",
+        rating=4,
+    )
+
+    assert session.added[0].rating == 4
+
+
+@pytest.mark.asyncio
+async def test_create_sets_rating_zero_explicitly(monkeypatch):
+    """rating=0 is a real value, not "unset" — a truthiness guard would drop it."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "write_scope", _cm(session))
+
+    await InspirationNotesRepository().create(
+        user_id="u1",
+        content_md="x",
+        tags=[],
+        note_date="2026-07-07",
+        rating=0,
+    )
+
+    assert session.added[0].rating == 0
+
+
+@pytest.mark.asyncio
+async def test_create_omits_rating_when_none(monkeypatch):
+    """Unset → let the DB server_default (0) apply, same as ref_hotspot."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession()
+    monkeypatch.setattr(mod, "write_scope", _cm(session))
+
+    await InspirationNotesRepository().create(
+        user_id="u1", content_md="x", tags=[], note_date="2026-07-07"
+    )
+
+    assert getattr(session.added[0], "rating", None) is None
+
+
+@pytest.mark.asyncio
+async def test_update_sets_rating_zero(monkeypatch):
+    """Clearing a rating (5 → 0) must reach the SET clause; `if rating:` eats it."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession(_MappingResult([{"id": 1, "rating": 0}]))
+    monkeypatch.setattr(mod, "write_scope", _cm(session))
+
+    await InspirationNotesRepository().update("1", rating=0)
+
+    stmt = session.statements[0]
+    set_clause = str(stmt).lower().split("returning")[0]
+    assert "rating" in set_clause
+    assert 0 in stmt.compile().params.values()
+
+
+@pytest.mark.asyncio
+async def test_update_without_rating_leaves_it_untouched(monkeypatch):
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession(_MappingResult([{"id": 1, "pinned": True}]))
+    monkeypatch.setattr(mod, "write_scope", _cm(session))
+
+    await InspirationNotesRepository().update("1", pinned=True)
+
+    set_clause = str(session.statements[0]).lower().split("returning")[0]
+    assert "rating" not in set_clause

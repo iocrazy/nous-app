@@ -59,6 +59,7 @@ async def test_import_image_registers_and_returns_cover_url(monkeypatch):
         file=_StubUpload([b"img-bytes"]),
         canvas_id="123",
         node_id="prompt-1",
+        role=None,
     )
     data = resp["data"]
     assert data == {
@@ -72,7 +73,9 @@ async def test_import_image_registers_and_returns_cover_url(monkeypatch):
     assert captured["origin"].kind == "canvas_upload"
     assert captured["origin"].canvas_id == 123
     assert captured["origin"].node_id == "prompt-1"
-    assert captured["origin"].params == {"filename": "pic.png"}
+    # No explicit role → the visible default. A plain upload must never be
+    # classified as an intermediate.
+    assert captured["origin"].params == {"filename": "pic.png", "role": "user_upload"}
     # The temp file existed at register time — source_path was passed.
     assert captured["source_path"]
 
@@ -89,6 +92,7 @@ async def test_import_video_returns_stream_url(monkeypatch):
         file=_StubUpload([b"vid"], content_type="video/mp4", filename="clip.mp4"),
         canvas_id=None,
         node_id=None,
+        role=None,
     )
     assert resp["data"]["url"] == "/api/v1/generated-media/999/stream"
     assert resp["data"]["media_kind"] == "video"
@@ -118,13 +122,21 @@ async def test_import_rejects_oversize_and_bad_canvas_id(monkeypatch):
     monkeypatch.setattr(router_mod, "IMPORT_MAX_BYTES", 4)
     with pytest.raises(HTTPException) as exc:
         await import_generation(
-            _Auth(), file=_StubUpload([b"12345"]), canvas_id=None, node_id=None
+            _Auth(),
+            file=_StubUpload([b"12345"]),
+            canvas_id=None,
+            node_id=None,
+            role=None,
         )
     assert exc.value.status_code == 413
 
     with pytest.raises(HTTPException) as exc2:
         await import_generation(
-            _Auth(), file=_StubUpload([b"x"]), canvas_id="not-a-number", node_id=None
+            _Auth(),
+            file=_StubUpload([b"x"]),
+            canvas_id="not-a-number",
+            node_id=None,
+            role=None,
         )
     assert exc2.value.status_code == 400
 
@@ -139,6 +151,51 @@ async def test_import_rejects_empty_file(monkeypatch):
     _patch_scope_and_register(monkeypatch, captured)
     with pytest.raises(HTTPException) as exc:
         await import_generation(
-            _Auth(), file=_StubUpload([]), canvas_id=None, node_id=None
+            _Auth(), file=_StubUpload([]), canvas_id=None, node_id=None, role=None
         )
     assert exc.value.status_code == 400
+
+
+# ─── Role sub-classification (canvas_upload is three different things) ───────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["mask", "brush"])
+async def test_import_stamps_the_role_the_caller_sent(monkeypatch, role):
+    """The canvas editors bake masks / brush composites and upload them
+    through this very endpoint. Without the role they land in the inbox
+    looking exactly like a file the user chose."""
+    from app.api.generated_media_router import import_generation
+
+    captured = {}
+    _patch_scope_and_register(monkeypatch, captured)
+
+    await import_generation(
+        _Auth(),
+        file=_StubUpload([b"png"], filename=f"{role}.png"),
+        canvas_id="123",
+        node_id="out-1",
+        role=role,
+    )
+    assert captured["origin"].params["role"] == role
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_an_unknown_role(monkeypatch):
+    """A typo'd role must be a 400, not a silently visible upload.
+
+    Storing it would produce a row no filter ever matches, behaving exactly
+    like the missing classification it is a misspelling of.
+    """
+    from fastapi import HTTPException
+
+    from app.api.generated_media_router import import_generation
+
+    captured = {}
+    _patch_scope_and_register(monkeypatch, captured)
+
+    with pytest.raises(HTTPException) as exc:
+        await import_generation(_Auth(), file=_StubUpload([b"png"]), role="maks")
+    assert exc.value.status_code == 400
+    assert "maks" in str(exc.value.detail)
+    assert captured == {}  # nothing was registered

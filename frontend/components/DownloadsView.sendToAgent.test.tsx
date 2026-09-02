@@ -164,7 +164,16 @@ vi.mock('../services/dataService', () => ({
   getDownloadUrl: () => '', getMusicDownloadUrl: () => '',
 }));
 vi.mock('../utils/download', () => ({ downloadFile: vi.fn(), downloadWithAuth: vi.fn() }));
-vi.mock('../utils/awemeType', () => ({ getCoverUrl: () => '', getVideoUrl: () => '' }));
+// Only the two URL builders need stubbing (they would hit the network shape);
+// the rest of the module is real. Spreading the actual exports keeps the mock
+// from silently omitting helpers the view picks up later — the adaptive layout
+// now reads the media_type predicates from here, and a wholesale replacement
+// broke this file the moment it did.
+vi.mock('../utils/awemeType', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/awemeType')>()),
+  getCoverUrl: () => '',
+  getVideoUrl: () => '',
+}));
 
 import { DownloadsView } from './DownloadsView';
 

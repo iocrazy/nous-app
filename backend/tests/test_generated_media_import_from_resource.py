@@ -146,6 +146,9 @@ async def test_import_from_resource_registers_and_returns_cover_url(
     assert captured["source_path"] == os.path.realpath(str(abs_path))
     assert captured["mime"] == "image/png"
     assert captured["origin"].kind == "canvas_upload"
+    # A library asset minted purely so the i2i bridge can fetch it — the user
+    # already owns it in My Uploads, so it is an INPUT, not something to triage.
+    assert captured["origin"].params["role"] == "reference"
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,7 @@ import {
 import { createCanvas } from '../../../../features/canvas-core/services/canvasService';
 import type { Project } from '../../../../types';
 import type { AssetLoadoutRow, AssetRowDetail } from '../../../../services/assetsService';
+import { shortProjectLabel } from '../AssetCard';
 import { typeSingularKey } from '../assetTypeMeta';
 import { canvasKindFor } from './assetSheetModel';
 import { GenerationHistoryPanel } from './GenerationHistoryPanel';
@@ -210,9 +211,14 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
                 key={projectId}
                 data-testid="used-in-project"
                 data-project-id={projectId}
+                // Same fallback rule as `AssetCard`'s chips, from the same
+                // helper: a project whose name this page could not resolve is
+                // still a project the asset is used in, but a raw 15-digit
+                // Snowflake is not a label — the full id lives in the tooltip.
+                title={projectNames[projectId] ?? projectId}
                 className="max-w-full truncate rounded-full border border-line-strong px-2 py-0.5 text-[11px] text-content-3"
               >
-                {projectNames[projectId] ?? projectId}
+                {projectNames[projectId] ?? shortProjectLabel(projectId)}
               </li>
             ))}
           </ul>

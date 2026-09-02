@@ -222,7 +222,11 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         try {
           setPixCommitting(true);
           const file = new File([composite], 'brush.png', { type: 'image/png' });
-          const item = await importCanvasMedia(file, canvasId, id);
+          // Classified at the point of upload: this composite is an INPUT the
+          // editor baked, not something the user asked the library for. Left
+          // unclassified it lands in the Generated inbox looking exactly like
+          // a file they chose.
+          const item = await importCanvasMedia(file, canvasId, id, 'brush');
           patchData({
             images: [
               ...((images as Array<{ url: string }>) ?? []),
@@ -448,7 +452,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const file = new File([bytes], 'mask.png', { type: 'image/png' });
-        const item = await importCanvasMedia(file, canvasId, id);
+        // Same reason as the brush bake: a black-and-white mask is machine
+        // output feeding the next generation, never inbox triage material.
+        const item = await importCanvasMedia(file, canvasId, id, 'mask');
         const current = (useCanvasCoreStore
           .getState()
           .nodes.find((n) => (n as { id?: string }).id === id) as

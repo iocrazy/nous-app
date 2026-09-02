@@ -150,6 +150,16 @@ export interface GeneratedListOptions {
    * the scope's whole inbox rendered under one asset's name.
    */
   sourceAssetId?: string;
+  /**
+   * Show the machine-made `canvas_upload` rows the inbox hides by default —
+   * masks, brush composites, and library assets transcoded purely so the
+   * image-to-image bridge could fetch them. They are INPUTS to a generation,
+   * not products anyone is being asked to keep or discard.
+   *
+   * Opt-in, matching the router: a caller that omits it gets the inbox the
+   * user expects rather than a page padded with rows they cannot act on.
+   */
+  includeIntermediate?: boolean;
   cursor?: string;
   limit?: number;
 }
@@ -215,6 +225,10 @@ export async function fetchGenerated(
     model: opts.model,
     since: opts.since,
     source_asset_id: opts.sourceAssetId,
+    // Only sent when true. `include_intermediate=false` and the param being
+    // absent are the same request, and spelling out a default is one more
+    // place it can drift from the router's.
+    include_intermediate: opts.includeIntermediate ? 'true' : undefined,
     cursor: opts.cursor,
     limit: opts.limit === undefined ? undefined : String(opts.limit),
   });

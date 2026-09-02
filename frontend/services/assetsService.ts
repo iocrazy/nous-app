@@ -68,10 +68,31 @@ export interface AssetDetail extends AssetSummary {
   loadouts: AssetLoadout[];
 }
 
+/**
+ * Which side of `assets.in_library` a read wants (mig 449).
+ *
+ * `in` — the library: what somebody deliberately added. The server's own
+ * default, and what every shelf and picker means by "my assets".
+ * `out` — the project-originated rows nobody has adopted yet (script imports,
+ * migrated legacy entities). What the shelf's chip shows when the user asks
+ * "what is waiting to be added?".
+ * `all` — both. The project workspace's asset pages, whose job is showing what
+ * the PROJECT uses regardless of adoption.
+ */
+export type AssetLibraryFilter = 'in' | 'out' | 'all';
+
 export interface AssetSearchOptions {
   type?: AssetType;
   q?: string;
   limit?: number;
+  /**
+   * Omitted means the SERVER default, `in` — which is what every caller of
+   * this function wants: attaching a generation to an asset, or linking one
+   * into a project, targets the user's library, not the pile of names a script
+   * happened to mention. Passed through rather than hard-coded so a caller
+   * that genuinely needs to widen can, without a second function.
+   */
+  library?: AssetLibraryFilter;
 }
 
 /**
@@ -148,6 +169,7 @@ export async function searchAssets(
   const qs = query(scopeId, {
     type: opts.type,
     q: opts.q,
+    library: opts.library,
     limit: opts.limit === undefined ? undefined : String(opts.limit),
   });
   const data = await envelopeFetch<unknown>(`${BASE()}?${qs}`, {
@@ -223,6 +245,19 @@ export interface AssetRow {
   source: AssetSource;
   duplicated_from: string | null;
   is_system_preset: boolean;
+  /**
+   * Library membership (mig 449) — EXPLICIT, and distinct from `source`.
+   *
+   * `true` means somebody deliberately put this asset in the scope's library
+   * (created it, duplicated one, saved a generation as one). `false` means it
+   * arrived as a side effect of project work — a script import or the legacy
+   * migration — and lives on its project's page until someone adds it.
+   *
+   * Do NOT re-derive this from `source`: membership is toggled by the user,
+   * provenance is written once and never corrected, and an imported character
+   * the user adopted has `source === 'script_import'` with `in_library` true.
+   */
+  in_library: boolean;
   /** jsonb OBJECT of group → values (`{"role": ["lead"]}`), not a flat array. */
   tags: Record<string, unknown>;
   sort_order: number;
@@ -290,6 +325,11 @@ export type AssetCounts = Record<AssetType, number>;
  *
  * Unknown keys are rejected (`extra="forbid"`): a typo'd field is a 422, not a
  * 200 that quietly did nothing.
+ *
+ * `in_library` is absent because the SERVER does not accept it here either:
+ * `AssetUpdate` does not declare the field and forbids extras, so a PATCH
+ * aimed at it is a 422. Library membership has one write path,
+ * {@link setAssetLibraryMembership}.
  */
 export interface AssetUpdateBody {
   name?: string;
@@ -339,6 +379,8 @@ export interface AssetListOptions {
   readiness?: 'ready' | 'draft';
   /** One tag VALUE; matched across every tag group server-side. */
   tag?: string;
+  /** Omitted means the server default, `in` — the library shelf. */
+  library?: AssetLibraryFilter;
   sort?: 'recent' | 'name' | 'readiness';
   limit?: number;
   offset?: number;
@@ -449,6 +491,7 @@ export async function listAssets(
     q: opts.q,
     readiness: opts.readiness,
     tag: opts.tag,
+    library: opts.library,
     sort: opts.sort,
     limit: opts.limit === undefined ? undefined : String(opts.limit),
     offset: opts.offset === undefined ? undefined : String(opts.offset),
@@ -521,6 +564,39 @@ export async function updateAsset(
 /** Soft-delete. Resolves only on a real 2xx; otherwise it throws. */
 export async function deleteAsset(scopeId: string, id: string): Promise<void> {
   await sendJson<{ deleted: boolean }>(`${BASE()}/${id}?${query(scopeId)}`, 'DELETE');
+}
+
+/**
+ * Add this asset to the scope's library, or take it out (mig 449).
+ *
+ * The ONLY way to change membership. `PATCH {"in_library": ...}` is a 422 — the
+ * server does not declare the field — so this is not a preferred path among
+ * two, it is the path. A PATCH body is assembled from a form under
+ * `exclude_unset` anyway, so flipping a flag through one is how unrelated
+ * fields get rewritten; these two routes send no body at all.
+ *
+ * ⚠️ Removal is NOT a delete and NOT an unlink. The asset keeps its files,
+ * links, loadouts and every project reference, and its project pages keep
+ * showing it — only the library shelf and the sidebar badges stop counting it.
+ * {@link deleteAsset} is the destructive one.
+ *
+ * Idempotent: adding one that is already in answers 200 with the same row, so
+ * a double-clicked button does not report a failure for work that is done.
+ * Answers the UPDATED row, so the caller re-renders the card it acted on
+ * instead of guessing the new state or re-fetching.
+ *
+ * A system preset answers 403 `system_preset_readonly` — a global row's
+ * membership is not one team's to change.
+ */
+export async function setAssetLibraryMembership(
+  scopeId: string,
+  id: string,
+  inLibrary: boolean,
+): Promise<AssetRow> {
+  return sendJson<AssetRow>(
+    `${BASE()}/${id}/library?${query(scopeId)}`,
+    inLibrary ? 'POST' : 'DELETE',
+  );
 }
 
 /**

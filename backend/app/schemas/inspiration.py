@@ -10,11 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field
 class NoteCreateIn(BaseModel):
     content_md: str = Field(..., max_length=100_000)
     ref_hotspot: Optional[Dict[str, Any]] = None
+    # 0-5 stars (mig 448). Accepted at CREATE time so an external client (the
+    # iOS Shortcut) posts body + rating in ONE request instead of POST+PATCH.
+    # None = unset → the DB server_default (0) applies.
+    rating: Optional[int] = Field(None, ge=0, le=5)
 
 
 class NoteUpdateIn(BaseModel):
     content_md: Optional[str] = Field(None, max_length=100_000)
     pinned: Optional[bool] = None
+    rating: Optional[int] = Field(None, ge=0, le=5)
 
 
 class AttachmentOut(BaseModel):
@@ -32,6 +37,9 @@ class NoteOut(BaseModel):
     tags: List[str]
     ref_hotspot: Optional[Dict[str, Any]] = None
     pinned: bool
+    # Defaults to 0 so a dict without the key (pre-448 caller/fixture) renders
+    # as "unrated" instead of failing validation.
+    rating: int = 0
     note_date: str
     created_at: str
     updated_at: str

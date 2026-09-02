@@ -53,6 +53,9 @@ vi.mock('../../../contexts/ResourcesContext', () => ({
 vi.mock('../../../services/generatedMediaService', () => ({
   generatedMediaCoverUrl: (id: string) => `https://api.test/gen/${id}/cover`,
   generatedMediaStreamUrl: (id: string) => `https://api.test/gen/${id}/stream`,
+  // The FULL file, distinct from `/cover` — the lightbox must not be showing
+  // the thumbnail, so the two URLs have to be distinguishable here.
+  generatedMediaFileUrl: (id: string) => `https://api.test/gen/${id}/file`,
 }));
 
 const fetchProjects = vi.fn();
@@ -373,7 +376,7 @@ describe('GeneratedView — batch bar', () => {
     renderView();
     const bar = await selectFirstTwo();
 
-    fireEvent.click(within(bar).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Save To Uploads' }));
 
     await waitFor(() =>
       expect(batchGenerated).toHaveBeenCalledWith('727145299382534200', {
@@ -435,11 +438,11 @@ describe('GeneratedView — batch bar', () => {
     expect(batchGenerated).not.toHaveBeenCalled();
   });
 
-  it('routes the batch "As Asset…" into the dialog rather than the API', async () => {
+  it('routes the batch "Add To Asset" into the dialog rather than the API', async () => {
     renderView();
     const bar = await selectFirstTwo();
 
-    fireEvent.click(within(bar).getByRole('button', { name: 'As Asset…' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Add To Asset' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
     // The dialog owns the call; the view must not have fired one of its own.
@@ -490,7 +493,7 @@ describe('GeneratedView — single-card actions', () => {
     await screen.findByText('Prompt 0');
 
     const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Save To Uploads' }));
 
     await waitFor(() =>
       expect(saveGeneration).toHaveBeenCalledWith('727145299382534200', '727145299382534145'),
@@ -520,7 +523,7 @@ describe('GeneratedView — single-card actions', () => {
     await screen.findByText('Prompt 0');
 
     const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset…' }));
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Add To Asset' }));
 
     expect(await screen.findByTestId('save-as-asset-dialog')).toBeTruthy();
     expect(dialogProps?.items.map((i) => i.id)).toEqual([ITEM_A.id]);
@@ -540,7 +543,7 @@ describe('GeneratedView — single-card actions', () => {
     await screen.findByText('Prompt 0');
 
     const card = screen.getByText('Prompt 0').closest('[data-testid="generated-card"]')!;
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'As Asset…' }));
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'Add To Asset' }));
     await screen.findByTestId('save-as-asset-dialog');
 
     act(() => dialogDone!({
@@ -568,7 +571,7 @@ describe('GeneratedView — single-card actions', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Prompt 1' }));
     fireEvent.click(
       within(screen.getByTestId('generated-batch-bar')).getByRole('button', {
-        name: 'As Asset…',
+        name: 'Add To Asset',
       }),
     );
     await screen.findByTestId('save-as-asset-dialog');
@@ -657,5 +660,142 @@ describe('GeneratedView — clean up', () => {
 
     await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(2));
     expect(refreshGeneratedCounts).toHaveBeenCalled();
+  });
+});
+
+
+// ─── Intermediate canvas inputs ─────────────────────────────────────────────
+
+describe('GeneratedView — Intermediate Inputs filter', () => {
+  it('is off on first load and asks for nothing extra', async () => {
+    renderView();
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));
+    expect(lastListOptions().includeIntermediate).toBeUndefined();
+  });
+
+  it('turns the flag on, writes it to the URL and refetches', async () => {
+    renderView();
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Source/ }));
+    fireEvent.click(
+      await screen.findByRole('menuitemcheckbox', { name: 'Intermediate Inputs' }),
+    );
+
+    await waitFor(() => expect(currentSearch).toBe('?include_intermediate=true'));
+    await waitFor(() =>
+      expect(lastListOptions()).toEqual({
+        state: 'unreviewed',
+        includeIntermediate: true,
+      }),
+    );
+  });
+
+  it('is restored from the URL, not just settable from the menu', async () => {
+    // A pasted link has to reproduce the view. Without parsing it back the
+    // toggle would look off while the page was showing masks.
+    renderView('/team/t1/resources/generated?include_intermediate=true');
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));
+    expect(lastListOptions().includeIntermediate).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Source/ }));
+    expect(
+      (await screen.findByRole('menuitemcheckbox', { name: 'Intermediate Inputs' }))
+        .getAttribute('aria-checked'),
+    ).toBe('true');
+  });
+});
+
+// ─── Lightbox ───────────────────────────────────────────────────────────────
+
+describe('GeneratedView — preview lightbox', () => {
+  const openFirstCard = async () => {
+    renderView();
+    await waitFor(() => expect(fetchGenerated).toHaveBeenCalledTimes(1));
+    const cards = await screen.findAllByTestId('generated-card');
+    fireEvent.click(within(cards[0] as HTMLElement).getByRole('button', { name: /^Preview/ }));
+  };
+
+  it('opens from the thumbnail on the FULL file, not the thumbnail URL', async () => {
+    await openFirstCard();
+
+    const lightbox = await screen.findByTestId('pin-lightbox');
+    expect(lightbox).toBeTruthy();
+    expect(screen.getByTestId('pin-lightbox-image').getAttribute('src')).toBe(
+      'https://api.test/gen/727145299382534145/file',
+    );
+  });
+
+  it('shows the metadata panel with source, model, state and prompt', async () => {
+    await openFirstCard();
+
+    const meta = await screen.findByTestId('lightbox-metadata');
+    expect(meta.textContent).toContain('EP1 · Storyboard · Canvas');
+    expect(meta.textContent).toContain('gpt-image-2');
+    expect(meta.textContent).toContain('openai');
+    expect(meta.textContent).toContain('Prompt 0. more');
+  });
+
+  it('deep-links from the metadata panel', async () => {
+    await openFirstCard();
+
+    fireEvent.click(await screen.findByTestId('lightbox-source-link'));
+    await waitFor(() =>
+      expect(currentSearch).toBe('?node=n9'),
+    );
+  });
+
+  it('carries the same three actions the card offers', async () => {
+    await openFirstCard();
+
+    const panel = await screen.findByTestId('pin-lightbox-panel');
+    expect(within(panel).getByRole('button', { name: /Save To Uploads/ })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: /Add To Asset/ })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: /^Delete/ })).toBeTruthy();
+  });
+
+  it('runs the save action for the item on screen', async () => {
+    saveGeneration.mockResolvedValue({ ...ITEM_A, review_state: 'saved' });
+    await openFirstCard();
+
+    const panel = await screen.findByTestId('pin-lightbox-panel');
+    fireEvent.click(within(panel).getByRole('button', { name: /Save To Uploads/ }));
+
+    await waitFor(() =>
+      expect(saveGeneration).toHaveBeenCalledWith('727145299382534200', ITEM_A.id),
+    );
+  });
+
+  it('keeps the delete confirmation gate', async () => {
+    deleteGeneration.mockResolvedValue(undefined);
+    await openFirstCard();
+
+    const panel = await screen.findByTestId('pin-lightbox-panel');
+    fireEvent.click(within(panel).getByRole('button', { name: /^Delete/ }));
+    expect(deleteGeneration).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(await screen.findByTestId('pin-lightbox-panel')).getByRole('button', {
+        name: /Confirm Delete/,
+      }),
+    );
+    await waitFor(() =>
+      expect(deleteGeneration).toHaveBeenCalledWith('727145299382534200', ITEM_A.id),
+    );
+    // Closed BEFORE the row leaves the list: an index left pointing into a
+    // shrunken array shows the user a different generation than the one they
+    // just deleted.
+    await waitFor(() => expect(screen.queryByTestId('pin-lightbox')).toBeNull());
+  });
+
+  it('plays a video generation as a video, not a broken <img>', async () => {
+    fetchGenerated.mockResolvedValue({
+      items: [{ ...ITEM_A, media_kind: 'video' }],
+      next_cursor: null,
+    });
+    await openFirstCard();
+
+    expect(await screen.findByTestId('pin-lightbox-video')).toBeTruthy();
+    expect(screen.queryByTestId('pin-lightbox-image')).toBeNull();
   });
 });

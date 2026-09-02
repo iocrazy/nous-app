@@ -1722,7 +1722,8 @@
       "tag": "标签",
       "anyTag": "全部标签",
       "noTags": "本页没有标签",
-      "sort": "排序"
+      "sort": "排序",
+      "library": "资产库"
     },
     "sort": {
       "recent": "最近更新",
@@ -1742,7 +1743,8 @@
     "empty": {
       "none": "还没有任何资产",
       "ofType": "还没有{{type}}",
-      "filtered": "没有符合当前筛选条件的资产"
+      "filtered": "没有符合当前筛选条件的资产",
+      "nothingOutOfLibrary": "所有资产都已在你的资产库里"
     },
     "dialog": {
       "title": "新建{{type}}",
@@ -1968,6 +1970,20 @@
       "unlink": "把 {{name}} 移出本项目",
       "unlinkHint": "仅从本项目移除——资产仍保留在资产库中",
       "unlinked": "已移出本项目——资产仍在资产库中"
+    },
+    "library": {
+      "addHint": "加到资产库货架上，其他项目就能复用",
+      "addNamed": "把 {{name}} 加入资产库",
+      "addToLibrary": "加入资产库",
+      "added": "已加入资产库",
+      "all": "全部",
+      "in": "已在资产库",
+      "notInLibrary": "不在资产库",
+      "notInLibraryHint": "只属于这个项目 —— 加入资产库后其他项目也能用",
+      "out": "不在资产库",
+      "removeHint": "从资产库货架移走 —— 它仍留在本项目里",
+      "removeNamed": "把 {{name}} 移出资产库",
+      "removed": "已移出资产库 —— 仍留在本项目"
     }
   },
   "generated": {
@@ -1994,7 +2010,8 @@
       "shot_generate": "分镜图片",
       "shot_video": "分镜视频",
       "agent_run": "Agent",
-      "chat_upload": "对话上传"
+      "chat_upload": "对话上传",
+      "intermediate": "中间输入"
     },
     "type": {
       "image": "图片",
@@ -2018,17 +2035,20 @@
       "noModels": "本页没有模型信息"
     },
     "action": {
-      "save": "保存",
-      "saveAsAsset": "存为资产…",
+      "save": "保存到上传",
+      "saveAsAsset": "归入资产",
       "delete": "删除",
       "inMyUploads": "已在我的上传",
-      "openAsset": "打开资产"
+      "openAsset": "打开资产",
+      "saveHint": "转成正式文件放进我的上传",
+      "saveAsAssetHint": "挂到资产卡的槽位（角色、场景…）"
     },
     "card": {
       "select": "选择 {{title}}",
       "confirmDelete": "确认删除",
       "openCanvasNodeHint": "跳转到画布中的该节点",
-      "openSourceHint": "跳转到生成来源"
+      "openSourceHint": "跳转到生成来源",
+      "open": "预览 {{title}}"
     },
     "batch": {
       "selected": "已选 {{n}} 项",
@@ -2063,10 +2083,16 @@
       "asset_exists": "该作用域下已存在同名同类型的资产。",
       "invalid_slot": "该槽位不适用于此资产类型。",
       "unreadable_body": "服务器返回了无法解析的内容。"
+    },
+    "meta": {
+      "provider": "服务商",
+      "created": "创建时间",
+      "state": "状态",
+      "prompt": "提示词"
     }
   },
   "saveAsAsset": {
-    "title": "保存为资产",
+    "title": "归入资产",
     "assetType": "资产类型",
     "attachToLabel": "关联到",
     "attachTo": "关联到 {{name}}",
@@ -4568,6 +4594,7 @@
     "edit": "编辑",
     "pin": "置顶",
     "unpin": "取消置顶",
+    "rating": "评分",
     "delete": "删除",
     "deleteConfirm": "删除这条笔记？",
     "editNote": "编辑笔记",

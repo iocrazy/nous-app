@@ -5,6 +5,7 @@ import {
   RefreshCw,
   LayoutGrid,
   LayoutList,
+  LayoutTemplate,
   Smartphone,
   Loader2,
   Download,
@@ -18,6 +19,16 @@ import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
 import { loadPanelWidth, savePanelWidth } from './detail/DetailCardKit';
+import { computeJustifiedRows } from '../utils/justifiedLayout';
+import { aspectRatioOf, needsAspectMeasurement, matchesCurrentAspect } from '../utils/resourceAspect';
+import { useMeasuredAspectRatios } from '../hooks/useMeasuredAspectRatios';
+import { useContainerWidth } from '../hooks/useContainerWidth';
+
+/** Justified-view row target height and gap for the downloads grid. Taller than
+ *  the resource grid's 170 because these cards are mostly portrait video
+ *  covers, which read as too small at that height. */
+const JUSTIFIED_TARGET_ROW_HEIGHT = 200;
+const JUSTIFIED_GAP = 12;
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -349,6 +360,33 @@ export const DownloadsView: React.FC = () => {
         return bTime - aTime;
       });
   }, [library, isSearchActive, searchResults, searchVideoMap, searchQuery, tagSearchMap]);
+
+  // ─── Justified (adaptive) layout ───────────────────────
+  // Reuses the resource grid's layout pass, aspect helpers and per-frame
+  // measurement batching so the two surfaces cannot drift.
+  //
+  // Deliberate deviation: this list is NOT virtualized. The downloads grid has
+  // always rendered every loaded row (pagination bounds the DOM, not a window),
+  // so `useJustifiedVirtualizer` is not reused here — adopting it would mean
+  // retrofitting virtualization onto this view's scroll-memory and sentinel
+  // pagination, which is a separate change. `computeJustifiedRows` is the
+  // shared piece, and it is the piece that defines the look.
+  const { ref: justifiedContainerRef, width: justifiedWidth } = useContainerWidth();
+  const { measured: measuredAspects, report: reportAspect } = useMeasuredAspectRatios();
+
+  // Most downloads DO carry `resolution` (ytdlp writes it), so measurement is
+  // the exception here rather than the rule it is for uploads.
+  const justifiedAspects = useMemo(
+    () => filteredLibrary.map((item) => aspectRatioOf(item, measuredAspects[String(item.id)])),
+    [filteredLibrary, measuredAspects],
+  );
+  const justifiedRows = useMemo(
+    () => computeJustifiedRows(justifiedAspects, justifiedWidth, {
+      targetRowHeight: JUSTIFIED_TARGET_ROW_HEIGHT,
+      gap: JUSTIFIED_GAP,
+    }),
+    [justifiedAspects, justifiedWidth],
+  );
 
   // ─── Search handlers ──────────────────────────────────
   const handleSearchQueryChange = useCallback((query: string) => {
@@ -1164,6 +1202,13 @@ export const DownloadsView: React.FC = () => {
                 <LayoutGrid size={14} />
               </button>
               <button
+                onClick={() => setLibraryViewMode('justified')}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'justified' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
+                title={t('resources.justifiedView')}
+              >
+                <LayoutTemplate size={14} />
+              </button>
+              <button
                 onClick={() => setLibraryViewMode('feed')}
                 className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
                 title="Feed View"
@@ -1254,6 +1299,56 @@ export const DownloadsView: React.FC = () => {
           </div>
         ) : (
           <>
+            {libraryViewMode === 'justified' && (
+              <div ref={justifiedContainerRef} className="w-full">
+                {justifiedRows.map((row) => (
+                  <div
+                    key={`row-${row.start}`}
+                    className="flex items-start"
+                    style={{ gap: JUSTIFIED_GAP, paddingBottom: JUSTIFIED_GAP }}
+                  >
+                    {filteredLibrary.slice(row.start, row.end).map((item, idx) => {
+                      const ar = justifiedAspects[row.start + idx] || 1;
+                      return (
+                        <div
+                          key={item.platform_id}
+                          style={{ width: ar * row.height, flexShrink: 0 }}
+                          onTouchStart={() => startLongPress(item)}
+                          onTouchMove={cancelLongPress}
+                          onTouchEnd={cancelLongPress}
+                          onTouchCancel={cancelLongPress}
+                        >
+                          <CompactMediaCard
+                            data={item}
+                            resourceId={resourceIdMap[item.id]}
+                            aiStatus={aiStatusMap[item.id]}
+                            aspectRatio={ar}
+                            onThumbnailAspect={
+                              needsAspectMeasurement(item)
+                                ? (measuredAr) => {
+                                    if (matchesCurrentAspect(ar, measuredAr)) return;
+                                    reportAspect(String(item.id), measuredAr);
+                                  }
+                                : undefined
+                            }
+                            onClick={(e) => handleVideoClick(item, e)}
+                            onDoubleClick={() => handleVideoDoubleClick(item)}
+                            onContextMenu={handleContextMenu}
+                            isShared={sharedVideoIds.includes(item.platform_id)}
+                            isSelected={selectedVideo?.platform_id === item.platform_id}
+                            selectable
+                            isChecked={selectedIds.has(item.platform_id)}
+                            onToggleSelect={(e) => handleToggleSelect(item.platform_id, e)}
+                            forceShowCheckbox={multiSelectMode}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {libraryViewMode === 'grid' && (
               <div className="grid grid-cols-2 gap-3 downloads-grid">
                 {filteredLibrary.map((item) => (

@@ -721,6 +721,16 @@ async def _apply(plan: MigrationPlan, run_user_id: str) -> ApplyResult:
                     description=a["description"],
                     tags=a["tags"],
                     source="migrated",
+                    # mig 449: a migrated row only ever existed inside one
+                    # project, so it is NOT a library member until somebody
+                    # adopts it. Its project pages show it either way.
+                    #
+                    # Only on the CREATE branch. The adoption branch below
+                    # (``found is not None``) deliberately leaves the existing
+                    # row's membership alone: that row may be a hand-made asset
+                    # the user already put in their library, and a re-run of
+                    # this workflow must not evict it.
+                    in_library=False,
                     attrs={
                         "legacy_ids": [list(x) for x in a["legacy"]],
                         "merged_from": (

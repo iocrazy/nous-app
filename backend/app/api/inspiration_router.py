@@ -154,6 +154,7 @@ async def create_note(
         _uid(current_user),
         body.content_md,
         ref_hotspot=body.ref_hotspot,
+        rating=body.rating,
     )
     if row is None:
         raise HTTPException(status_code=502, detail="note persistence failed")
@@ -170,6 +171,7 @@ async def update_note(
             note_id,
             content_md=body.content_md,
             pinned=body.pinned,
+            rating=body.rating,
         )
     except NoteNotFound:
         raise HTTPException(status_code=404, detail="note not found")

@@ -370,3 +370,59 @@ async def test_update_note_without_content_change_skips_tag_sync(monkeypatch):
     await svc.update_note("user-1", "7", pinned=True)  # content_md=None
 
     assert called == []
+
+
+# ── rating (mig 448) ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_threads_rating_to_repo():
+    """The Shortcut posts body+rating in ONE call — the service must not drop
+    the rating on the way to the repo."""
+    svc = _service()
+    svc._notes.create.return_value = {"id": 1, "tags": [], "rating": 4}
+    await svc.create_note("u1", "idea", rating=4)
+    assert svc._notes.create.call_args.kwargs["rating"] == 4
+
+
+@pytest.mark.asyncio
+async def test_create_threads_rating_zero_to_repo():
+    svc = _service()
+    svc._notes.create.return_value = {"id": 1, "tags": [], "rating": 0}
+    await svc.create_note("u1", "idea", rating=0)
+    assert svc._notes.create.call_args.kwargs["rating"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_without_rating_passes_none():
+    svc = _service()
+    svc._notes.create.return_value = {"id": 1, "tags": []}
+    await svc.create_note("u1", "idea")
+    assert svc._notes.create.call_args.kwargs["rating"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_threads_rating_to_repo():
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.update.return_value = {"id": 1, "rating": 3}
+    await svc.update_note("u1", "1", rating=3)
+    assert svc._notes.update.call_args.kwargs["rating"] == 3
+
+
+@pytest.mark.asyncio
+async def test_update_threads_rating_zero_to_repo():
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "u1"}
+    svc._notes.update.return_value = {"id": 1, "rating": 0}
+    await svc.update_note("u1", "1", rating=0)
+    assert svc._notes.update.call_args.kwargs["rating"] == 0
+
+
+@pytest.mark.asyncio
+async def test_update_rating_rejects_non_owner_as_not_found():
+    svc = _service()
+    svc._notes.get_by_id.return_value = {"id": 1, "user_id": "someone-else"}
+    with pytest.raises(NoteNotFound):
+        await svc.update_note("u1", "1", rating=5)
+    svc._notes.update.assert_not_awaited()

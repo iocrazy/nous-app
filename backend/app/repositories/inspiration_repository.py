@@ -68,6 +68,7 @@ class InspirationNotesRepository:
         tags: List[str],
         note_date: str,
         ref_hotspot: Optional[Dict[str, Any]] = None,
+        rating: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             async with write_scope() as session:
@@ -79,6 +80,11 @@ class InspirationNotesRepository:
                 )
                 if ref_hotspot is not None:
                     obj.ref_hotspot = ref_hotspot
+                # `is not None`, not truthiness: rating=0 is a real value
+                # (explicitly unrated), only an omitted rating defers to the
+                # server_default.
+                if rating is not None:
+                    obj.rating = rating
                 session.add(obj)
                 await session.flush()
                 await session.refresh(obj)  # load server defaults
@@ -148,6 +154,7 @@ class InspirationNotesRepository:
         content_md: Optional[str] = None,
         tags: Optional[List[str]] = None,
         pinned: Optional[bool] = None,
+        rating: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             values: Dict[str, Any] = {"updated_at": datetime.datetime.now(timezone.utc)}
@@ -157,6 +164,9 @@ class InspirationNotesRepository:
                 values["tags"] = tags
             if pinned is not None:
                 values["pinned"] = pinned
+            # `is not None` so clearing a rating (5 -> 0) reaches the SET clause.
+            if rating is not None:
+                values["rating"] = rating
             async with write_scope() as session:
                 result = await session.execute(
                     sa_update(InspirationNotes)

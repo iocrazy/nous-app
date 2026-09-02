@@ -168,6 +168,7 @@ class GeneratedInboxService:
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
         source_asset_id: Optional[int] = None,
+        include_intermediate: bool = False,
         cursor: Optional[str] = None,
         limit: int = 60,
     ) -> dict[str, Any]:
@@ -180,6 +181,7 @@ class GeneratedInboxService:
             model=model,
             since=since,
             source_asset_id=source_asset_id,
+            include_intermediate=include_intermediate,
             cursor=cursor,
             limit=limit,
         )

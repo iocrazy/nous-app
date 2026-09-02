@@ -86,6 +86,11 @@ async def list_generated(
     model: Optional[str] = Query(None, max_length=200),
     since: Optional[datetime.datetime] = Query(None),
     source_asset_id: OptSnowflakeQuery = None,
+    # Masks, brush composites and transcoded references are INPUTS to a
+    # generation, not products to triage — hidden unless asked for. Opt-in
+    # rather than opt-out so a caller that forgets the flag gets the inbox the
+    # user expects, never a page padded with machine-made rows.
+    include_intermediate: bool = Query(False),
     cursor: Optional[str] = Query(None, max_length=500),
     limit: int = Query(60, ge=1, le=200),
 ):
@@ -111,6 +116,7 @@ async def list_generated(
             # surface as a 500, and an unvalidated one that silently dropped
             # would answer with the scope's WHOLE inbox under one asset's name.
             source_asset_id=int(source_asset_id) if source_asset_id else None,
+            include_intermediate=include_intermediate,
             cursor=cursor,
             limit=limit,
         )

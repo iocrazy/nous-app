@@ -66,7 +66,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Link2, Loader2, Plus, Unlink, Wand2, X } from 'lucide-react';
+import { BookmarkMinus, BookmarkPlus, Link2, Loader2, Plus, Unlink, Wand2, X } from 'lucide-react';
 
 import { useToast } from '../Toast';
 import { AssetCard } from '../resources/assets/AssetCard';
@@ -74,10 +74,13 @@ import { NewAssetDialog } from '../resources/assets/NewAssetDialog';
 import { typeLabelKey, typeSingularKey } from '../resources/assets/assetTypeMeta';
 import { ASSET_TYPES } from '../assets/assetSlots';
 import { useAssetFailureReporter } from '../resources/assets/useAssetFailure';
+import { fetchProjects } from '../../services/projectsService';
+import type { Project } from '../../types';
 import {
   importFromScript,
   linkProject,
   listProjectAssets,
+  setAssetLibraryMembership,
   unlinkProject,
 } from '../../services/assetsService';
 import type {
@@ -167,6 +170,15 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportFromScriptResponse | null>(null);
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
+  /** In flight for the library toggle. Separate from `unlinkingId` — the two
+   *  actions sit on the same card and do opposite things, so one spinner for
+   *  both would show the wrong control as busy. */
+  const [libraryBusyId, setLibraryBusyId] = useState<string | null>(null);
+  /** Project id → name, for `AssetCard`'s chips. An asset here may be used by
+   *  OTHER projects too, and those chips rendered raw Snowflake ids before
+   *  this list was fetched. A failure is non-fatal: the card falls back to a
+   *  short id form. */
+  const [projects, setProjects] = useState<Project[]>([]);
 
   /** Monotonic token — a refetch that lands after a newer one is dropped. */
   const requestRef = useRef(0);
@@ -194,6 +206,30 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
       });
     // `reportRef` is a ref (stable identity); listed only for exhaustive-deps.
   }, [projectId, assetType, reloadTick, reportRef]);
+
+  useEffect(() => {
+    let alive = true;
+    fetchProjects(teamId ? { teamId } : undefined)
+      .then((list) => {
+        if (alive) setProjects(list);
+      })
+      .catch((err) => {
+        // Recorded, not swallowed — but NOT surfaced as a toast: the panel's
+        // own job (this project's assets) is unaffected, and the only visible
+        // consequence is chips falling back to a short id.
+        console.error('[ProjectAssetsPanel] project list unavailable:', err);
+        if (alive) setProjects([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [teamId]);
+
+  const projectNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const project of projects) map[String(project.id)] = project.name;
+    return map;
+  }, [projects]);
 
   // Switching panels drops the previous type's import report: its counts
   // describe names that are not on screen any more.
@@ -240,6 +276,50 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
       }
     },
     [unlinkingId, scopeId, projectId, addToast, t, refetch, reportFailure],
+  );
+
+  /**
+   * Add this asset to the scope's library, or take it out (mig 449).
+   *
+   * This panel is where the distinction is VISIBLE: 一键导入 and the legacy
+   * migration land rows here outside the library, and this is the one click
+   * that promotes one. Removing is the inverse and is NOT an unlink — the copy
+   * on both the button and the toast says so, because on a page full of
+   * project entities "remove" reads as "delete" otherwise.
+   *
+   * Same scope rule as `unlink`: the asset's OWN `scope_id`, never the panel's
+   * guess. A row whose scope the caller is not a member of is refused 403 by
+   * the router, which is the honest answer — the alternative is aiming a write
+   * at the wrong library.
+   */
+  const toggleLibrary = useCallback(
+    async (asset: AssetRow) => {
+      if (libraryBusyId) return;
+      const rowScope = asset.scope_id ?? scopeId;
+      if (!rowScope) {
+        addToast(t('assets.project.scopeUnknown', 'Workspace Not Resolved Yet'), 'error');
+        return;
+      }
+      const next = !asset.in_library;
+      setLibraryBusyId(asset.id);
+      try {
+        await setAssetLibraryMembership(rowScope, asset.id, next);
+        addToast(
+          next
+            ? t('assets.library.added', 'Added To Your Library')
+            : t('assets.library.removed', 'Removed From Your Library — Still In This Project'),
+          'success',
+        );
+        refetch();
+      } catch (err) {
+        // Typed echo, not a silent no-op: the button did nothing and the user
+        // is told why, rather than being left to notice the badge never moved.
+        reportFailure(err);
+      } finally {
+        setLibraryBusyId(null);
+      }
+    },
+    [libraryBusyId, scopeId, addToast, t, refetch, reportFailure],
   );
 
   /** Created in the scope, then referenced from this project. The dialog does
@@ -481,7 +561,11 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
               // SIBLING overlay rather than a child — a button inside a button
               // is invalid HTML and swallows one of the two clicks.
               <div key={asset.id} className="relative">
-                <AssetCard asset={asset} onOpen={(row) => openSheet(row.id)} />
+                <AssetCard
+                  asset={asset}
+                  projectNames={projectNames}
+                  onOpen={(row) => openSheet(row.id)}
+                />
                 <button
                   type="button"
                   data-testid="unlink-asset"
@@ -502,6 +586,51 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
                     <Loader2 size={12} className="animate-spin" aria-hidden="true" />
                   ) : (
                     <Unlink size={12} aria-hidden="true" />
+                  )}
+                </button>
+
+                {/* Library membership. Its own control, opposite corner from
+                    Unlink: the two look alike and mean very different things
+                    (one changes which project shows the asset, the other
+                    changes whether the LIBRARY does), so they are kept apart
+                    and each carries its own sentence. */}
+                <button
+                  type="button"
+                  data-testid="toggle-library"
+                  data-asset-id={asset.id}
+                  data-in-library={asset.in_library}
+                  disabled={libraryBusyId !== null}
+                  onClick={() => void toggleLibrary(asset)}
+                  title={
+                    asset.in_library
+                      ? t(
+                          'assets.library.removeHint',
+                          'Takes it off your library shelf — it stays in this project',
+                        )
+                      : t(
+                          'assets.library.addHint',
+                          'Puts it on your library shelf so other projects can use it',
+                        )
+                  }
+                  aria-label={
+                    asset.in_library
+                      ? t('assets.library.removeNamed', {
+                          name: asset.name,
+                          defaultValue: 'Remove {{name}} From Your Library',
+                        })
+                      : t('assets.library.addNamed', {
+                          name: asset.name,
+                          defaultValue: 'Add {{name}} To Your Library',
+                        })
+                  }
+                  className="absolute right-1.5 bottom-1.5 rounded-full border border-line-strong bg-card/90 p-1 text-content-3 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {libraryBusyId === asset.id ? (
+                    <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                  ) : asset.in_library ? (
+                    <BookmarkMinus size={12} aria-hidden="true" />
+                  ) : (
+                    <BookmarkPlus size={12} aria-hidden="true" />
                   )}
                 </button>
               </div>
