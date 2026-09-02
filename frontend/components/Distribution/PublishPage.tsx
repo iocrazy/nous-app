@@ -3256,7 +3256,18 @@ export const PublishPage: React.FC = () => {
                         under a result list would claim the results came from
                         the highlighted chart. */}
                     {!musicQuery.trim() && musicCharts.length > 0 && (
-                      <div className="music-tabs" role="tablist" data-testid="music-tabs">
+                      <div className="music-tabrow">
+                        {/* The freshness line is a SIBLING of the scroller, not
+                            a child of it. Inside, its `margin-left:auto` pins it
+                            to the CONTENT edge, which on an account with a dozen
+                            chart tabs sits past the visible one — and the tab
+                            row hides its scrollbar, so the Refresh button was
+                            there but unreachable. */}
+                        <div
+                          className="music-tabs"
+                          role="tablist"
+                          data-testid="music-tabs"
+                        >
                         {musicCharts.map((chart) => {
                           const key = musicChartKey(chart);
                           return (
@@ -3273,6 +3284,7 @@ export const PublishPage: React.FC = () => {
                             </button>
                           );
                         })}
+                        </div>
                         {musicChartsMeta?.lastSuccessAt && (
                           <span className="music-fresh" data-testid="music-fresh">
                             {musicRefreshing

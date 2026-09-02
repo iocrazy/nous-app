@@ -25,9 +25,6 @@ from app.workflows.liveness_scanner import (  # noqa: F401
     liveness_scan_scheduled,
     reconcile_stranded_runs,
 )
-from app.workflows.music_charts_sweep import (  # noqa: F401
-    music_charts_sweep_workflow,
-)
 from app.workflows.publish_issue_mirror import (  # noqa: F401
     publish_issue_mirror_workflow,
 )
