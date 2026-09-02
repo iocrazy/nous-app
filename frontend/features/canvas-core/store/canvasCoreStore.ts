@@ -15,7 +15,8 @@
  *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty
  *                              once, and NO epoch bump (it is already on screen)
  *   - `noteDragStart()`      — captures pre-drag history base without starting timer
- *   - `setNodesDragTick()`   — mid-drag position update (no history timer reset)
+ *   - `setNodesDragTick()`   — mid-drag position update (no history timer,
+ *                              no dirty — drag end owns both)
  *   - `markDirty()`          — schedules a debounced save
  *   - `flushSave()`          — explicit save (e.g. on blur / route leave)
  *
@@ -320,11 +321,11 @@ interface CanvasState {
   noteDragStart(): void;
 
   /**
-   * Update node positions during a mid-drag tick.  Stores the new nodes
-   * array and marks the document dirty for eventual persistence, but does
-   * NOT touch the history-debounce timer.  The timer is started by the
-   * drag-end `setNodes` call so each drag produces exactly one history
-   * entry regardless of how many ticks it spans.
+   * Update node positions during a mid-drag tick. Stores the new nodes
+   * array and NOTHING else: no history-debounce timer, and (canvas fluency
+   * Task 6) no dirty/revision bump either. The drag-end `setNodes` call
+   * does both, so each drag produces exactly one history entry and one
+   * armed save regardless of how many ticks it spans.
    */
   setNodesDragTick(nodes: CanvasNode[]): void;
 
@@ -408,6 +409,13 @@ export function createCanvasCoreStore(
    *  when the debounced commit fires. Lets a user undo back to the state
    *  BEFORE the edit, not to a mid-burst intermediate. */
   let pendingHistoryBase: HistorySnapshot | null = null;
+  /** True while `setNodesDragTick` has written positions that no `markDirty`
+   *  has claimed yet (canvas fluency Task 6 — ticks no longer mark dirty).
+   *  A drag that ends normally clears this via the drag-end `setNodes`; a
+   *  drag still HELD when the surface unmounts never gets that call, and
+   *  `doSave`'s `persistedRevision >= revision` guard would then drop the
+   *  move on the floor. `flushSave()` reads this — see there. */
+  let unclaimedDragTick = false;
   /** Backing counter for `mountEpoch` (Task 5 评审修复轮1) — a plain closure
    *  variable rather than reading-then-incrementing store state, so every
    *  `loadCanvas()` call gets a strictly unique value even if called
@@ -492,9 +500,14 @@ export function createCanvasCoreStore(
         historyFuture: [],
       });
       pendingHistoryBase = null;
+      unclaimedDragTick = false;
     }
 
     function markDirty(): void {
+      // Whatever the outcome below, any drag positions sitting in `nodes`
+      // are now accounted for — either by the bump this call makes, or by a
+      // read-only session that will never save anything at all.
+      unclaimedDragTick = false;
       // Read-only session: no revision bump, no debounce re-arm. Bailing out
       // BEFORE the bump also keeps `revision === persistedRevision`, so an
       // incoming realtime row rebases cleanly instead of raising a conflict
@@ -961,6 +974,12 @@ export function createCanvasCoreStore(
       },
 
       async flushSave() {
+        // A drag still HELD when this runs (route leave / surface unmount
+        // mid-pointer-down) never got its drag-end `setNodes`, so its
+        // positions are in `nodes` with no revision bump behind them and
+        // `doSave` would early-return on `persistedRevision >= revision`.
+        // Claim them now — this is the one path that runs on unmount.
+        if (unclaimedDragTick) markDirty();
         if (debounceTimer) {
           clearTimeout(debounceTimer);
           debounceTimer = null;
@@ -992,11 +1011,25 @@ export function createCanvasCoreStore(
       },
 
       setNodesDragTick(nodes: CanvasNode[]) {
-        // Mid-drag: update positions, schedule save — but do NOT touch the
-        // history timer.  The pre-drag base was captured by noteDragStart();
-        // the drag-end setNodes() call will start the 250ms commit timer.
+        // Mid-drag: update positions ONLY. No history timer, and — since
+        // canvas fluency Task 6 — no `markDirty()` either.
+        //
+        // A drag is one edit, not one edit per frame. The drag-end
+        // `setNodes()` call marks dirty with the FINAL positions and starts
+        // the 250ms history commit, so a per-tick dirty bought nothing: it
+        // only bumped `revision` ~120 times per two-second drag, re-armed
+        // the 500ms save debounce on every frame, and flickered the save
+        // badge while the user was still holding the mouse. React Flow
+        // always closes a drag with a `dragging: false` position change
+        // (@xyflow/system XYDrag `end`, including its abort branch), which
+        // the surface routes to `setNodes` — so there is no drag that ends
+        // without one.
+        //
+        // `flushSave()` (route leave / surface unmount) still carries these
+        // positions — that is what `unclaimedDragTick` is for, since a drag
+        // interrupted by an unmount never reaches its drag-end `setNodes`.
+        unclaimedDragTick = true;
         set({ nodes });
-        markDirty();
       },
 
       setNodesTransient(nodes: CanvasNode[]) {

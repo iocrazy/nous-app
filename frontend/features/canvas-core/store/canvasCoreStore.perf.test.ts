@@ -13,6 +13,9 @@
  *             `setNodesDragTick()` updates positions without touching the
  *             history timer; `setNodes()` on drag-end starts the timer
  *             exactly once.
+ *     Task 6: the same treatment for the SAVE debounce — a tick no longer
+ *             marks dirty either, so drag end is the single arming point
+ *             for both. Contract pinned in canvasCoreStore.autosave.test.ts.
  *
  *   Fix 2 — Viewport writes per gesture
  *     Before: every `onMove` tick called `markDirty()`, bumping `revision`
@@ -167,7 +170,13 @@ describe('Fix 1: drag-tick history churn', () => {
     expect(afterUndo.position).toEqual({ x: 0, y: 0 });
   });
 
-  it('setNodesDragTick marks dirty so positions ARE saved after debounce', async () => {
+  it('dragged positions ARE saved — armed by drag end, not by the ticks', async () => {
+    // This test used to assert that a TICK marked dirty. Canvas fluency
+    // Task 6 moved that to drag end (a drag is one edit, not one per
+    // frame); the property it was really defending — the positions the
+    // drag moved through do get persisted — is unchanged and still pinned
+    // here. The arming contract itself lives in
+    // canvasCoreStore.autosave.test.ts.
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({
       ...stubs,
@@ -178,11 +187,16 @@ describe('Fix 1: drag-tick history churn', () => {
 
     useStore.getState().noteDragStart();
     useStore.getState().setNodesDragTick([
-      { id: 'a', position: { x: 99, y: 77 } },
+      { id: 'a', position: { x: 50, y: 40 } },
     ]);
 
-    // Save hasn't fired yet (debounce not expired).
+    // Mid-drag: nothing armed, so the debounce elapsing saves nothing.
+    await vi.advanceTimersByTimeAsync(200);
     expect(stubs.saveImpl).not.toHaveBeenCalled();
+
+    // Drag end.
+    useStore.getState().setNodes([{ id: 'a', position: { x: 99, y: 77 } }]);
+    expect(stubs.saveImpl).not.toHaveBeenCalled(); // debounce not expired
 
     await vi.advanceTimersByTimeAsync(200);
 
