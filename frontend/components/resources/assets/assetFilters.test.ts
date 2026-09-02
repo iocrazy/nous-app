@@ -31,7 +31,7 @@ describe('parseAssetFilters', () => {
       projectId: '55',
       readiness: 'draft',
       // Absent from the URL, so it holds the default rather than being null:
-      // `library` is the one filter with no "unset" state (mig 448).
+      // `library` is the one filter with no "unset" state (mig 449).
       library: 'in',
       tag: 'lead',
       sort: 'name',
@@ -41,7 +41,7 @@ describe('parseAssetFilters', () => {
   it('DEFAULT_LIBRARY matches the value the SERVER defaults to', () => {
     // This coupling is load-bearing and easy to break silently. The shelf
     // OMITS `library` when it equals `DEFAULT_LIBRARY`, so the rows that come
-    // back are decided by the server's own default (`in`, mig 448) no matter
+    // back are decided by the server's own default (`in`, mig 449) no matter
     // what this constant says — while the chip's summary is decided by THIS
     // constant. Set them apart and the chip reads "All" over a grid holding
     // only library members, and nothing fails.

@@ -248,10 +248,10 @@ async def list_assets(
     must be a 422, because quietly ignoring it returns the whole shelf looking
     filtered.
 
-    ``library`` DEFAULTS TO ``"in"`` (mig 448) — this is the LIBRARY shelf, and
+    ``library`` DEFAULTS TO ``"in"`` (mig 449) — this is the LIBRARY shelf, and
     membership is explicit, so project-originated rows (``script_import`` /
     ``migrated``) are absent unless somebody added them. ``out`` shows exactly
-    those, and ``all`` is the pre-448 behaviour. The default is the narrow one
+    those, and ``all`` is the pre-449 behaviour. The default is the narrow one
     on purpose: a shelf that quietly included every name a script mentioned is
     the state this change exists to end, and a caller that wants both says so.
     """
@@ -301,7 +301,7 @@ async def list_project_assets(
         None, pattern="^(character|location|prop|costume|prompt|audio)$"
     ),
 ):
-    """A project's own assets — BOTH membership states (mig 448).
+    """A project's own assets — BOTH membership states (mig 449).
 
     ``library="all"``, not the shelf's ``"in"``, and this is the whole point of
     making membership explicit rather than deleting the rows: a project's page
@@ -403,7 +403,7 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
 async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
     """Per-type tallies for the scope's own LIBRARY — the sidebar's six badges.
 
-    Counts this scope's non-deleted, in-library assets only (mig 448). The badge
+    Counts this scope's non-deleted, in-library assets only (mig 449). The badge
     answers ONE fixed question — "how many are in my library" — so adding an
     asset to the library moves it, which is the point of the number.
 
@@ -510,7 +510,7 @@ async def delete_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     return _ok({"deleted": True})
 
 
-# ── library membership (mig 448) ────────────────────────────────────────────
+# ── library membership (mig 449) ────────────────────────────────────────────
 #
 # WHY A PAIR OF ROUTES AND NOT PATCH. These two are the ONLY way to change
 # ``in_library``: ``AssetUpdate`` does not declare the field, and its

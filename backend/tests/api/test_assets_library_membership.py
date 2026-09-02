@@ -1,4 +1,4 @@
-"""The wire contract for explicit library membership (mig 448).
+"""The wire contract for explicit library membership (mig 449).
 
 Three surfaces, and each has its own way of going wrong silently:
 
@@ -6,7 +6,7 @@ Three surfaces, and each has its own way of going wrong silently:
   must be gated, typed, and must answer the ROW (the caller re-renders the card
   it just acted on).
 * ``GET /assets?library=`` — the shelf's default is ``in``. A default that
-  drifted back to ``all`` would restore the pre-448 shelf with nothing failing.
+  drifted back to ``all`` would restore the pre-449 shelf with nothing failing.
 * ``GET /projects/{id}/assets`` — the opposite default, ``all``, and it is NOT
   a caller preference: a script import that landed rows the project page then
   refuses to show is the silent no-op this router exists to prevent.

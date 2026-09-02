@@ -1515,7 +1515,7 @@ async def test_a_personal_projects_entity_canvas_links_after_the_mapping(
     assert again["canvases_no_scope"] >= 1
 
 
-# ── 12. mig 448: a migrated row is not a library member ─────────────────────
+# ── 12. mig 449: a migrated row is not a library member ─────────────────────
 
 
 @_skip

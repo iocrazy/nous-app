@@ -279,7 +279,7 @@ export const ProjectAssetsPanel: React.FC<ProjectAssetsPanelProps> = ({
   );
 
   /**
-   * Add this asset to the scope's library, or take it out (mig 448).
+   * Add this asset to the scope's library, or take it out (mig 449).
    *
    * This panel is where the distinction is VISIBLE: 一键导入 and the legacy
    * migration land rows here outside the library, and this is the one click

@@ -77,7 +77,7 @@ def test_asset_response_allows_null_scope_for_system_presets():
         name="Preset Lantern",
         is_system_preset=True,
         source="system_preset",
-        # Required since mig 448 — the serializer emits every column, so a
+        # Required since mig 449 — the serializer emits every column, so a
         # response built without it is a shape the wire never produces.
         in_library=True,
         created_at=now,
@@ -343,7 +343,7 @@ def test_asset_counts_response_rejects_a_non_integer_tally():
         AssetCountsResponse(character="many")
 
 
-# ── mig 448: explicit library membership ───────────────────────────────────
+# ── mig 449: explicit library membership ───────────────────────────────────
 
 
 def test_the_response_carries_membership_and_the_patch_body_does_not():

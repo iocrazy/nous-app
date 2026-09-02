@@ -1,4 +1,4 @@
-"""Explicit library membership (``assets.in_library``, mig 448) at the SERVICE
+"""Explicit library membership (``assets.in_library``, mig 449) at the SERVICE
 level, on the same in-memory fakes as the rest of this suite.
 
 THE RULING UNDER TEST. An asset is in the 资产库 only when somebody deliberately

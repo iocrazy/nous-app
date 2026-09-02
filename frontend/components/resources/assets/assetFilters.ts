@@ -40,7 +40,7 @@ export type ReadinessFilter = (typeof READINESS_VALUES)[number];
 export const SORT_VALUES = ['recent', 'name', 'readiness'] as const;
 export type AssetSort = (typeof SORT_VALUES)[number];
 
-/** Library membership (mig 448). Mirrors `assets_router.list_assets`'s
+/** Library membership (mig 449). Mirrors `assets_router.list_assets`'s
  *  `library` param — see `AssetLibraryFilter` for what each value means. */
 export const LIBRARY_VALUES = ['in', 'out', 'all'] as const;
 

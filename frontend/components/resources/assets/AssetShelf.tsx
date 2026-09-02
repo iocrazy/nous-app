@@ -64,7 +64,7 @@ const READINESS_FALLBACK: Record<ReadinessFilter, string> = {
   draft: 'Draft',
 };
 
-// Library membership (mig 448). The shelf shows `in` by default; `out` is how
+// Library membership (mig 449). The shelf shows `in` by default; `out` is how
 // a user finds the project-originated assets nobody has adopted yet, and `all`
 // is both. Worded as what the user would SAY, not as the wire value.
 const LIBRARY_FALLBACK: Record<AssetLibraryFilter, string> = {

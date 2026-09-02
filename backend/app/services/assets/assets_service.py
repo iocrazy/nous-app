@@ -310,7 +310,7 @@ class AssetsService:
         """Create one asset — and, for a character, its Default loadout — in ONE
         transaction.
 
-        ``in_library`` (mig 448) defaults to True and is keyword-only and
+        ``in_library`` (mig 449) defaults to True and is keyword-only and
         SERVER-SIDE, exactly like ``source``: ``AssetCreate`` does not carry the
         field, so no request body can reach it. True is the right default
         because every path that reaches this method through a ROUTE is a
@@ -419,7 +419,7 @@ class AssetsService:
         readiness is derived per row (``with_derived`` folds the batch slot
         counts in), so there is no column to filter or order by. Everything
         else — ``asset_type`` / ``project_id`` / ``q`` / ``tag`` / ``library``
-        (mig 448) / the two SQL orderings / limit / offset — is delegated
+        (mig 449) / the two SQL orderings / limit / offset — is delegated
         unchanged.
 
         Known limitation: because the readiness filter runs after the page has
@@ -519,7 +519,7 @@ class AssetsService:
     async def set_library_membership(
         self, asset_id: int, scope_id: int, *, in_library: bool
     ) -> Dict[str, Any]:
-        """Add this asset to / remove it from the scope's library (mig 448).
+        """Add this asset to / remove it from the scope's library (mig 449).
 
         **The ONLY write path for ``in_library``**, and that is enforced rather
         than asserted: ``AssetUpdate`` deliberately omits the field (its comment
@@ -613,7 +613,7 @@ class AssetsService:
                 "source": "duplicated",
                 "duplicated_from": int(src["id"]),
                 "is_system_preset": False,
-                # mig 448: duplicating is a deliberate act, so the COPY is a
+                # mig 449: duplicating is a deliberate act, so the COPY is a
                 # library member whatever the source was. Copying the source's
                 # membership would make "duplicate this script-imported
                 # character so I can edit it" produce a second row the shelf
@@ -1671,7 +1671,7 @@ class AssetsService:
                 AssetCreate(asset_type=asset_type, name=name),
                 user_id,
                 source=_IMPORT_SOURCE,
-                # mig 448: a script's cast list is the PROJECT's, not the
+                # mig 449: a script's cast list is the PROJECT's, not the
                 # library's. These rows show on the project page immediately
                 # (that route reads ``library='all'``) and reach the shelf only
                 # when someone clicks Add To Library.

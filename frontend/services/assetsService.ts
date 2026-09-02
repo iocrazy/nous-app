@@ -69,7 +69,7 @@ export interface AssetDetail extends AssetSummary {
 }
 
 /**
- * Which side of `assets.in_library` a read wants (mig 448).
+ * Which side of `assets.in_library` a read wants (mig 449).
  *
  * `in` — the library: what somebody deliberately added. The server's own
  * default, and what every shelf and picker means by "my assets".
@@ -246,7 +246,7 @@ export interface AssetRow {
   duplicated_from: string | null;
   is_system_preset: boolean;
   /**
-   * Library membership (mig 448) — EXPLICIT, and distinct from `source`.
+   * Library membership (mig 449) — EXPLICIT, and distinct from `source`.
    *
    * `true` means somebody deliberately put this asset in the scope's library
    * (created it, duplicated one, saved a generation as one). `false` means it
@@ -567,7 +567,7 @@ export async function deleteAsset(scopeId: string, id: string): Promise<void> {
 }
 
 /**
- * Add this asset to the scope's library, or take it out (mig 448).
+ * Add this asset to the scope's library, or take it out (mig 449).
  *
  * The ONLY way to change membership. `PATCH {"in_library": ...}` is a 422 — the
  * server does not declare the field — so this is not a preferred path among

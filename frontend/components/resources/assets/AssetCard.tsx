@@ -192,7 +192,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           </div>
         )}
 
-        {/* Library membership (mig 448). Rendered ONLY when the asset is out
+        {/* Library membership (mig 449). Rendered ONLY when the asset is out
             — a badge on every in-library card would be noise on the shelf,
             where being in the library is the norm. On the project panel, where
             both states sit side by side, this is what tells the user which

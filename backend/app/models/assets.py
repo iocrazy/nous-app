@@ -83,7 +83,7 @@ class Assets(Base):
             "asset_type",
             postgresql_where=text("deleted_at IS NULL"),
         ),
-        # mig 448 — the shelf/counts predicate, membership folded in.
+        # mig 449 — the shelf/counts predicate, membership folded in.
         Index(
             "idx_assets_scope_library",
             "scope_id",
@@ -133,14 +133,14 @@ class Assets(Base):
     is_system_preset: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    # mig 448 — EXPLICIT library membership. True = the user deliberately put
+    # mig 449 — EXPLICIT library membership. True = the user deliberately put
     # this asset in the scope's library (manual create, duplicate,
     # save-as-asset); False = it arrived as a side effect of project work
     # (source ``script_import`` / ``migrated``) and is visible on its project's
     # page but not on the shelf until someone adds it. Distinct from ``source``
     # on purpose: provenance is written once, membership is toggled.
     #
-    # ⚠️ DEPLOY ORDER: mig 448 MUST land before this code. ``select(Assets)``
+    # ⚠️ DEPLOY ORDER: mig 449 MUST land before this code. ``select(Assets)``
     # names every mapped column, so this attribute appears in the SELECT list of
     # EVERY asset read — not just the ones that filter on it. Against a database
     # without the column, the shelf, the sheet, the counts badges, the project

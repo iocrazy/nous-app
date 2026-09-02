@@ -178,14 +178,14 @@ def test_count_by_type_is_scoped_and_binds_the_scope_id():
 
 
 def test_count_by_type_counts_only_library_members():
-    """mig 448: the badges sit above a shelf that defaults to
+    """mig 449: the badges sit above a shelf that defaults to
     ``library='in'``. Counting project-originated rows here would put a number
     on the sidebar the grid below it cannot show — the same "badge and grid
     silently disagree" failure the preset exclusion above exists to prevent."""
     assert "public.assets.in_library IS true" in _counts_sql()
 
 
-# ── M3 (mig 448): explicit library membership ──────────────────────────────
+# ── M3 (mig 449): explicit library membership ──────────────────────────────
 
 
 def test_the_default_library_filter_is_in_not_all():

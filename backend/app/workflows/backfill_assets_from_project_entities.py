@@ -721,7 +721,7 @@ async def _apply(plan: MigrationPlan, run_user_id: str) -> ApplyResult:
                     description=a["description"],
                     tags=a["tags"],
                     source="migrated",
-                    # mig 448: a migrated row only ever existed inside one
+                    # mig 449: a migrated row only ever existed inside one
                     # project, so it is NOT a library member until somebody
                     # adopts it. Its project pages show it either way.
                     #

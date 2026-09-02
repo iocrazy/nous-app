@@ -300,7 +300,7 @@ describe('AssetShelf — the request', () => {
   });
 });
 
-describe('AssetShelf — library membership (mig 448)', () => {
+describe('AssetShelf — library membership (mig 449)', () => {
   it('defaults to the library and sends NO library param', async () => {
     // The server's own default is `in`. Sending it explicitly would produce
     // the identical request and put a param in the URL that says nothing —

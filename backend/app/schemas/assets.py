@@ -134,7 +134,7 @@ class AssetUpdate(BaseModel):
     tags: Optional[Dict[str, Any]] = None
     sort_order: Optional[int] = None
 
-    # ⚠️ ``in_library`` (mig 448) is DELIBERATELY ABSENT, and it is the one
+    # ⚠️ ``in_library`` (mig 449) is DELIBERATELY ABSENT, and it is the one
     # writable column this model does not mirror.
     #
     # Library membership has exactly ONE write path:
@@ -178,7 +178,7 @@ class AssetResponse(BaseModel):
     source: AssetSource = "manual"
     duplicated_from: Optional[str] = None
     is_system_preset: bool = False
-    # mig 448 — see ``Assets.in_library``. REQUIRED, no default, unlike its
+    # mig 449 — see ``Assets.in_library``. REQUIRED, no default, unlike its
     # neighbours: this model is what FastAPI validates on the way out, and a
     # default would let a service that stopped emitting the key ship a row the
     # client reads as "in library". Membership decides whether the shelf shows

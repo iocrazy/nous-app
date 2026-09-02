@@ -631,7 +631,7 @@ describe('ProjectAssetsPanel — import from script', () => {
   });
 });
 
-describe('ProjectAssetsPanel — library membership (mig 448)', () => {
+describe('ProjectAssetsPanel — library membership (mig 449)', () => {
   it('adds an out-of-library asset, says what happened, and refetches', async () => {
     // This panel is where the distinction is visible: 一键导入 lands rows here
     // outside the library, and this is the one click that promotes one.

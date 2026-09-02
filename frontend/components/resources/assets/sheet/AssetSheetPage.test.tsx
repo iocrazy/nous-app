@@ -852,7 +852,7 @@ describe('the slot dialogs are wired to the board', () => {
   });
 });
 
-describe('library membership (mig 448)', () => {
+describe('library membership (mig 449)', () => {
   it('an out-of-library asset offers Add To Library and sends the add', async () => {
     const outsider = makeDetail({
       ...CHARACTER_DETAIL,

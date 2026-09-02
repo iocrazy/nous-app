@@ -35,7 +35,7 @@ export interface AssetSheetHeaderProps {
   /** Patch one field. The caller re-fetches on success and reports failures. */
   onPatch: (body: AssetUpdateBody) => void;
   /**
-   * Flip library membership (mig 448). A NAMED action with its own routes, not
+   * Flip library membership (mig 449). A NAMED action with its own routes, not
    * a field write — which is why it is a separate prop rather than another
    * `onPatch` call site. Omitted where no caller can perform it; the control
    * then renders as a plain state chip, because a button whose every click is

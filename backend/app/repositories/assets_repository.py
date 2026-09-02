@@ -359,7 +359,7 @@ class AssetsRepository:
             # preset MAY carry a scope_id; the scope predicate alone would
             # therefore not be enough and this is not belt-and-braces.
             .where(Assets.is_system_preset.is_(False))
-            # mig 448: the badges count the LIBRARY, and the library is what
+            # mig 449: the badges count the LIBRARY, and the library is what
             # somebody deliberately added. Counting project-originated rows here
             # would put a number on the sidebar that the shelf below it cannot
             # show — the exact "badge and grid silently disagree" failure the

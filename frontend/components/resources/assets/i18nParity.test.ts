@@ -149,7 +149,7 @@ describe('Asset library i18n parity', () => {
     'assets.err.asset_exists',
     'assets.err.system_preset_readonly',
     'assets.err.unreadable_body',
-    // Library membership (mig 448) — the shelf chip, the card badge, and the
+    // Library membership (mig 449) — the shelf chip, the card badge, and the
     // add/remove action shared by the project panel and the entity sheet.
     // `assets.library.${value}` is built at runtime from LIBRARY_VALUES, so
     // adding a fourth value fails here until both locales carry its label.

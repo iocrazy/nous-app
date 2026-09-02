@@ -242,7 +242,7 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
   );
 
   /**
-   * Library membership (mig 448). A NAMED action, not a `patch({in_library})`
+   * Library membership (mig 449). A NAMED action, not a `patch({in_library})`
    * — see `setAssetLibraryMembership`. The sheet is the second place a user
    * can adopt a project-originated asset (the first is the project panel), and
    * it is the only one reachable from the shelf itself.
