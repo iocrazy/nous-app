@@ -9,7 +9,7 @@ import { defineConfig } from '@playwright/test';
 // how to run it: `npm run e2e:prod`.
 export default defineConfig({
   testDir: '.',
-  timeout: 45_000,
+  timeout: 90_000, // walkthrough is now 10 steps; 45s tripped the whole-test budget on a slow prod night (2026-09-02: token mint alone 17s) — the failure surfaced as "Target page ... has been closed" mid-step, not as a step assertion
   // Real network + real backend — a single flaky retry absorbs transient
   // CDN/gateway blips without masking a genuine break (CLAUDE.md「验收纪律」:
   // this walkthrough exists precisely so a genuine break is NEVER masked).
