@@ -151,10 +151,18 @@ const PROJECT_ASSETS = [
   },
 ];
 
+// generated_media ids are Snowflake BIGINTs stringified on the way out
+// (`_normalize` in generated_media_repository) — NOT the tidy 'r1' this
+// fixture used to carry. `mediaUrl`'s two-tier helpers only recognise
+// `/generated-media/<digits>/cover`, so a made-up id makes `mediaSrc` no-op
+// and this spec would prove nothing about the render thumbnail. Kept in step
+// with components/workspace/WorkspaceFiles.test.tsx.
+const R_IMAGE = '7412093847562137600';
+const R_VIDEO = '7412093847562137601';
 const RENDERS = {
   items: [
-    { id: 'r1', media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's1', created_at: '2026-07-08T00:00:00Z' },
-    { id: 'r2', media_kind: 'video', mime: 'video/mp4', origin_kind: 'shot_video', node_id: 's2', created_at: '2026-07-08T00:00:00Z' },
+    { id: R_IMAGE, media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's1', created_at: '2026-07-08T00:00:00Z' },
+    { id: R_VIDEO, media_kind: 'video', mime: 'video/mp4', origin_kind: 'shot_video', node_id: 's2', created_at: '2026-07-08T00:00:00Z' },
   ],
   next_cursor: null,
 };
@@ -257,8 +265,10 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
   });
 
   // Renders grid thumbnails — real bytes so the screenshot doesn't show a
-  // broken-image icon for the image-kind render.
-  await page.route('**/api/v1/generated-media/*/cover', (route) =>
+  // broken-image icon for the image-kind render. The trailing `*` is
+  // load-bearing: Playwright globs the FULL url including the query, and
+  // `mediaSrc` stamps a `?v=2` cache bust on every /cover it emits.
+  await page.route('**/api/v1/generated-media/*/cover*', (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(PNG_BASE64, 'base64') }),
   );
 }
@@ -417,8 +427,8 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.getByTestId('ws-module-files').click();
     await expect(page.getByTestId('ws-files')).toBeVisible();
     await page.getByTestId('ws-files-chip-renders').click();
-    await expect(page.getByTestId('ws-files-item-render-r1')).toBeVisible();
-    await expect(page.getByTestId('ws-files-item-render-r2')).toBeVisible();
+    await expect(page.getByTestId(`ws-files-item-render-${R_IMAGE}`)).toBeVisible();
+    await expect(page.getByTestId(`ws-files-item-render-${R_VIDEO}`)).toBeVisible();
 
     await page.screenshot({ path: 'e2e-artifacts/projects-workspace-dark.png', fullPage: true });
   });
@@ -448,7 +458,7 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
 
     await page.getByTestId('ws-module-files').click();
     await page.getByTestId('ws-files-chip-renders').click();
-    await expect(page.getByTestId('ws-files-item-render-r1')).toBeVisible();
+    await expect(page.getByTestId(`ws-files-item-render-${R_IMAGE}`)).toBeVisible();
 
     await page.screenshot({ path: 'e2e-artifacts/projects-workspace-light.png', fullPage: true });
   });
