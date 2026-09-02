@@ -183,9 +183,9 @@ _GENERATED_IMAGE_MIME = "image/png"
 async def _script_entity_names(project_id: int) -> Dict[str, List[str]]:
     """The script-derived names ``import_from_script`` lands, by asset type.
 
-    Same source as the two extract endpoints it replaced (deleted with mig
-    447): they read ``ProjectsService().get_project_entities`` and so does
-    this, so the import cannot disagree with what the project's own
+    Same source as the two extract endpoints it replaced (deleted in the
+    mig-447 PR): they read ``ProjectsService().get_project_entities`` and so
+    does this, so the import cannot disagree with what the project's own
     Characters/Locations views show.
     Locations are the only other derived kind: props/costumes have no
     derivation source (scene headers give locations, character cues give

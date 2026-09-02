@@ -901,8 +901,8 @@ export function EditorShell({
   // keeping it would have meant a POST per heading edit into a table no screen
   // shows. The successor is `Import From Script` on the assets panel, which is
   // deliberately a user action (see `ProjectAssetsPanel`). The legacy extract
-  // ENDPOINT is now gone too — deleted with mig 447, which renamed the table to
-  // `_legacy_project_lib_entities` ahead of the P6 DROP.
+  // ENDPOINT is now gone too — deleted in the mig-447 PR. Mig 447 itself only
+  // renamed the table to `_legacy_project_lib_entities`, ahead of the P6 DROP.
 
   // Legacy chapters with no scene pointing at them → read-only prose fallbacks.
   const orphanChapters = useMemo(() => {

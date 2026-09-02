@@ -1099,11 +1099,12 @@ async def get_project_entities(
 
 
 # ============================================
-# RETIRED (mig 447): the project-local character / location / prop CRUD
-# that lived here — GET|POST /{id}/characters, PATCH|DELETE
-# /{id}/characters/{cid}, POST /{id}/characters/extract, and the
-# /{id}/lib/{entity_type} quintet — read `project_characters` /
-# `project_lib_entities`. Those rows migrated to `assets` +
+# RETIRED in the same PR as mig 447: the project-local character /
+# location / prop CRUD that lived here — GET|POST /{id}/characters,
+# PATCH|DELETE /{id}/characters/{cid}, POST /{id}/characters/extract, and
+# the /{id}/lib/{entity_type} quintet — read `project_characters` /
+# `project_lib_entities`. That PR deleted these handlers; mig 447 itself
+# only renamed the two tables. Those rows migrated to `assets` +
 # `asset_project_refs` (production run 2026-09-02, reconciled
 # all-present) and the workspace pages now read
 # GET /{project_id}/assets in assets_router. The endpoints had zero

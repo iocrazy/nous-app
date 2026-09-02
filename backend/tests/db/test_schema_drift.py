@@ -77,6 +77,13 @@ _EXCLUDED_TABLES: frozenset[str] = frozenset(
 # live here now map their real post-migration-348 names
 # (zzz_deprecated_storyboard_*), so they are checked like everything else rather
 # than exempted. They disappear entirely when those tombstone tables are DROPped.
+#
+# ⚠️ THIS REPO HAS TWO PREFIXES FOR "RENAMED, AWAITING DROP", and a grep for
+# retired tables has to try both: ``zzz_deprecated_*`` (migration 348, the
+# storyboard tree) and ``_legacy_*`` (migration 447, _legacy_project_characters
+# / _legacy_project_lib_entities — the prefix spec §3.8 prescribes and the one
+# new retirements should use). Neither family is exempted here: their models
+# map the post-rename names, so every gate checks them like any other table.
 _ALLOWED_MISSING_TABLES: frozenset[str] = frozenset()
 
 # gate 2 — columns that exist LIVE but are missing from the model.

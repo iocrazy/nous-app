@@ -30,10 +30,11 @@ Skips cleanly when INTEGRATION_DATABASE_URL is unset. Every test builds its own
 team/projects/legacy rows with fresh ids and tears them down in a ``finally``.
 
 The plan under test is built from the fixture's OWN rows, not from
-``_load_inputs()`` — that helper reads _legacy_project_characters /
-_legacy_project_lib_entities (renamed by mig 447; the ORM models follow)
-GLOBALLY (deliberately: a partial scan would emit wrong merge groups), so a plan
-built from it would depend on whatever else lives in the shared drift database.
+``_load_inputs()`` — that helper reads ``_legacy_project_characters`` /
+``_legacy_project_lib_entities`` (renamed by mig 447; the ORM models follow)
+GLOBALLY (deliberately: a partial scan would emit wrong merge groups), so a
+plan built from it would depend on whatever else lives in the shared drift
+database.
 Case 5 exercises ``_load_inputs`` itself, which is where its ORM projection and
 the personal/unknown project split get their real execution.
 """
@@ -115,10 +116,9 @@ async def fx(pg) -> Dict[str, Any]:
     that at most one row, which is what lets ``_load_inputs`` batch the lookup
     instead of calling the one-user-per-query helper.
 
-    Legacy rows are NOT seeded here — each case seeds the ones it needs, because
-    what is in ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
-    is the input
-    under test.
+    Legacy rows are NOT seeded here — each case seeds the ones it needs,
+    because what is in ``_legacy_project_characters`` /
+    ``_legacy_project_lib_entities`` is the input under test.
     """
     user_id = uuid.uuid4()
     orphan_user_id = uuid.uuid4()
@@ -1338,9 +1338,9 @@ async def test_a_personal_projects_rows_land_in_the_owners_personal_team(
 
     Before P3 these rows were counted into a skip bucket and left in
     ``_legacy_project_characters`` / ``_legacy_project_lib_entities`` — while
-    the workspace
-    pages had already been switched to read ``assets`` and the old readers
-    deleted, which made them unreachable. This is the test that says they move.
+    the workspace pages had already been switched to read ``assets`` and the
+    old readers deleted, which made them unreachable. This is the test that
+    says they move.
 
     Four properties in one run, because they are only true together:
       * the rows land in the OWNER's personal team, not anywhere else;
