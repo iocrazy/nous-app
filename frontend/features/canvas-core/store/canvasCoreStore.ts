@@ -411,10 +411,17 @@ export function createCanvasCoreStore(
   let pendingHistoryBase: HistorySnapshot | null = null;
   /** True while `setNodesDragTick` has written positions that no `markDirty`
    *  has claimed yet (canvas fluency Task 6 — ticks no longer mark dirty).
-   *  A drag that ends normally clears this via the drag-end `setNodes`; a
-   *  drag still HELD when the surface unmounts never gets that call, and
-   *  `doSave`'s `persistedRevision >= revision` guard would then drop the
-   *  move on the floor. `flushSave()` reads this — see there. */
+   *  A drag that ends normally clears this via the drag-end `setNodes`.
+   *
+   *  INVARIANT: while this is true the document holds unsaved local work that
+   *  `revision` does not account for, so EVERY reader of "is the document
+   *  dirty?" must consult it too. Two consumers today:
+   *    - `flushSave()` — a drag still HELD when the surface unmounts never
+   *      gets its drag-end `setNodes`, and `doSave`'s
+   *      `persistedRevision >= revision` guard would drop the move.
+   *    - `applyRemoteUpdate()` guard 3 — a realtime row arriving mid-drag
+   *      must raise a conflict, not rebase the canvas under the pointer.
+   *  A third reader added later belongs on this list. */
   let unclaimedDragTick = false;
   /** Backing counter for `mountEpoch` (Task 5 评审修复轮1) — a plain closure
    *  variable rather than reading-then-incrementing store state, so every
@@ -1063,7 +1070,15 @@ export function createCanvasCoreStore(
         if (row.base_updated_at <= s.baseUpdatedAt) return;
 
         // Guard 3: local dirty edits exist — surface as conflict, never clobber.
-        if (s.revision > s.persistedRevision) {
+        //
+        // `unclaimedDragTick` is the second term because a drag in flight no
+        // longer moves `revision` (Task 6). Without it the rebase below runs
+        // UNDER THE USER'S POINTER: `applyServerRow` replaces `nodes`, bumps
+        // `viewportEpoch` (which `CanvasPage` answers by calling React Flow's
+        // own `setViewport` mid-gesture) and clears the history stacks along
+        // with the pre-drag base `noteDragStart()` just captured. A live drag
+        // is unsaved local work, exactly as it was before Task 6.
+        if (s.revision > s.persistedRevision || unclaimedDragTick) {
           set({ conflict: row });
           return;
         }

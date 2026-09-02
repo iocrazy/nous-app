@@ -192,3 +192,75 @@ describe('applyRemoteUpdate — conflict on dirty local edits', () => {
     expect(store.getState().baseUpdatedAt).toBe(TS0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D. A LIVE DRAG counts as dirty (canvas fluency Task 6, fix round 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('applyRemoteUpdate — a drag in flight is dirty', () => {
+  // Task 6 stopped `setNodesDragTick` from calling `markDirty()`, so mid-drag
+  // `revision === persistedRevision` — which is exactly what guard 3 reads.
+  // Without a second term the rebase branch runs UNDER THE USER'S POINTER:
+  // `applyServerRow` replaces `nodes`, bumps `viewportEpoch` (CanvasPage
+  // answers that by calling React Flow's own `setViewport` mid-gesture) and
+  // clears `historyPast`/`historyFuture`/`pendingHistoryBase`, destroying the
+  // pre-drag undo baseline `noteDragStart()` had just captured.
+  //
+  // `unclaimedDragTick` already means "positions in `nodes` that no revision
+  // bump has claimed", which is the same statement guard 3 is trying to make.
+
+  it('does not rebase a remote row while a drag tick is unclaimed', async () => {
+    const { store } = makeStore();
+    await store.getState().loadCanvas('100');
+
+    store.getState().noteDragStart();
+    store.getState().setNodesDragTick([{ id: 'dragged', position: { x: 40, y: 0 } }]);
+    // Precondition: the drag is invisible to the revision counter.
+    expect(store.getState().revision).toBe(store.getState().persistedRevision);
+
+    const epochBefore = store.getState().viewportEpoch;
+    const remoteRow: Canvas = {
+      ...baseCanvas,
+      base_updated_at: TS1,
+      viewport_json: { x: 999, y: 999, zoom: 2 },
+      nodes_json: [{ id: 'remote-would-clobber' }],
+    };
+    store.getState().applyRemoteUpdate(remoteRow);
+
+    const s = store.getState();
+    expect(s.nodes).toEqual([{ id: 'dragged', position: { x: 40, y: 0 } }]);
+    // No epoch bump — a bump makes CanvasPage move React Flow's transform
+    // while the user is still holding the node.
+    expect(s.viewportEpoch).toBe(epochBefore);
+    expect(s.baseUpdatedAt).toBe(TS0);
+    // The pre-drag undo baseline survives.
+    expect(s.canUndo()).toBe(true);
+    // Same destination as any other unsaved local edit.
+    expect(s.conflict).toEqual(remoteRow);
+  });
+
+  it('applies the same row once the drag has ended and saved', async () => {
+    // The guard must not latch: after drag end + a completed save the store
+    // is genuinely clean again, and a remote row is a normal rebase.
+    const { store } = makeStore();
+    await store.getState().loadCanvas('100');
+
+    store.getState().noteDragStart();
+    store.getState().setNodesDragTick([{ id: 'dragged', position: { x: 40, y: 0 } }]);
+    store.getState().setNodes([{ id: 'dragged', position: { x: 80, y: 0 } }]);
+    await store.getState().flushSave();
+    expect(store.getState().revision).toBe(store.getState().persistedRevision);
+
+    const remoteRow: Canvas = {
+      ...baseCanvas,
+      base_updated_at: TS2,
+      nodes_json: [{ id: 'remote-wins' }],
+    };
+    store.getState().applyRemoteUpdate(remoteRow);
+
+    const s = store.getState();
+    expect(s.nodes).toEqual([{ id: 'remote-wins' }]);
+    expect(s.baseUpdatedAt).toBe(TS2);
+    expect(s.conflict).toBeNull();
+  });
+});
