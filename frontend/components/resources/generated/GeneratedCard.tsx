@@ -117,9 +117,15 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     : created.toLocaleDateString();
   const metaLine = [item.model, createdLabel].filter(Boolean).join(' · ');
 
-  // Labels/tooltips resolved once: each is used as BOTH `title` and
-  // `aria-label`, and letting the two drift is how an icon button ends up
-  // announcing something different from what it promises on hover.
+  // Labels and hints, resolved once.
+  //
+  // `aria-label` is the SHORT name; `title` is the short name followed by the
+  // hint. The two are not the same string, deliberately — a screen reader
+  // announcing the whole explanation on every card is noise, while a hover
+  // tooltip that only repeats the icon's name teaches nothing. Building the
+  // title from `label` rather than the hint alone is what puts the new
+  // "Save To Uploads" wording in front of a sighted mouse user; before this
+  // it appeared only in the batch bar and the lightbox.
   const saveLabel = t('generated.action.save', 'Save To Uploads');
   const saveHint = t(
     'generated.action.saveHint',
@@ -131,6 +137,8 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     "Attach it to an asset card's slot (character, location, …)",
   );
   const deleteLabel = t('generated.action.delete', 'Delete');
+  // `Label — hint`. Delete has no hint, so its title is just the label.
+  const hintTitle = (label: string, hint: string) => `${label} — ${hint}`;
 
   const deepLink = item.source.deep_link;
   const sourceHint = item.source.node_id
@@ -262,7 +270,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             <button
               type="button"
               disabled={busy}
-              title={saveHint}
+              title={hintTitle(saveLabel, saveHint)}
               aria-label={saveLabel}
               onClick={() => onSave(item)}
               className={ICON_BTN}
@@ -272,7 +280,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             <button
               type="button"
               disabled={busy}
-              title={assetHint}
+              title={hintTitle(assetLabel, assetHint)}
               aria-label={assetLabel}
               onClick={() => onSaveAsAsset(item)}
               className={ICON_BTN_PRIMARY}
@@ -298,7 +306,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             <button
               type="button"
               disabled={busy}
-              title={assetHint}
+              title={hintTitle(assetLabel, assetHint)}
               aria-label={assetLabel}
               onClick={() => onSaveAsAsset(item)}
               className={ICON_BTN}

@@ -38,7 +38,8 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import select, type_coerce, update
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.session import read_scope, write_scope
 from app.models.generated_media import GeneratedMedia
@@ -60,13 +61,69 @@ def role_for_filename(filename: Optional[str]) -> Optional[str]:
     return LEGACY_FILENAME_ROLES.get(filename)
 
 
-@DBOS.workflow()
-async def backfill_canvas_upload_roles_workflow(
+def role_update_stmt(gen_id: int, role: str):
+    """The UPDATE for one row. Pure, so its two guarantees are compile-testable.
+
+    **Atomic merge, not read-modify-write.** ``params || '{"role": ...}'``
+    is evaluated by PostgreSQL against the row as it stands at UPDATE time.
+    The obvious ``values(params={**params_read_earlier, "role": role})`` would
+    write back a snapshot taken during the SELECT and silently drop anything
+    another writer had put in ``params`` in between. Nothing else writes these
+    legacy rows today, which is exactly why it would never have been noticed.
+
+    **The ``role IS NULL`` re-check** is what makes a re-run idempotent and,
+    more importantly, keeps it from reverting a hand-correction: a row an
+    operator re-classified by hand is no longer NULL and this UPDATE will not
+    match it.
+    """
+    return (
+        update(GeneratedMedia)
+        .where(
+            GeneratedMedia.id == int(gen_id),
+            GeneratedMedia.params[ROLE_KEY].astext.is_(None),
+        )
+        .values(
+            params=GeneratedMedia.params.op("||")(type_coerce({ROLE_KEY: role}, JSONB))
+        )
+    )
+
+
+def plan_role_backfill(rows: list[dict]) -> dict[str, Any]:
+    """Rows → what to stamp, and the tally an operator reads off the dry run.
+
+    Pure (no DB, no DBOS), following ``backfill_generated_inbox``'s planner:
+    the classification decision and the ``by_role`` number that decides whether
+    to go live are the parts worth pinning, and neither needs a database.
+    """
+    to_stamp: list[dict] = []
+    by_role: dict[str, int] = {}
+    unclassifiable = 0
+    for row in rows:
+        params = dict(row.get("params") or {})
+        role = role_for_filename(params.get("filename"))
+        if role is None:
+            unclassifiable += 1
+            continue
+        to_stamp.append({"id": row["id"], "role": role})
+        by_role[role] = by_role.get(role, 0) + 1
+    return {
+        "to_stamp": to_stamp,
+        "by_role": by_role,
+        "counts": {
+            "scanned": len(rows),
+            "unclassifiable": unclassifiable,
+            "classifiable": len(to_stamp),
+        },
+    }
+
+
+async def run_backfill(
     dry_run: bool = True,
     limit: int = 500,
     run_user_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Stamp ``params.role`` on pre-role canvas_upload masks and brush bakes."""
+    """The body. Separated from the DBOS shell so it is callable in a test —
+    same split as ``backfill_publish_task_team_ids``."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     manager = get_task_manager()
@@ -107,18 +164,16 @@ async def backfill_canvas_upload_roles_workflow(
 
     try:
         async with read_scope() as session:
-            rows = (
-                (
+            rows = [
+                dict(m)
+                for m in (
                     await session.execute(
-                        select(
-                            GeneratedMedia.id,
-                            GeneratedMedia.params,
-                        )
+                        select(GeneratedMedia.id, GeneratedMedia.params)
                         .where(
                             GeneratedMedia.origin_kind == "canvas_upload",
-                            # Already classified rows are skipped, which is
-                            # what makes a re-run cheap AND keeps a corrected
-                            # hand-fix from being reverted by the next run.
+                            # Already-classified rows are skipped, which makes
+                            # a re-run cheap AND keeps it from reverting a
+                            # hand-fix.
                             GeneratedMedia.params[ROLE_KEY].astext.is_(None),
                         )
                         .order_by(GeneratedMedia.id)
@@ -127,32 +182,27 @@ async def backfill_canvas_upload_roles_workflow(
                 )
                 .mappings()
                 .all()
-            )
+            ]
 
-        for row in rows:
-            result["scanned"] += 1
-            params = dict(row["params"] or {})
-            role = role_for_filename(params.get("filename"))
-            if role is None:
-                result["unclassifiable"] += 1
-                continue
-            if dry_run:
-                result["would_fix"] += 1
-                result["by_role"][role] = result["by_role"].get(role, 0) + 1
-                continue
-            async with write_scope() as session:
-                await session.execute(
-                    update(GeneratedMedia)
-                    .where(
-                        GeneratedMedia.id == row["id"],
-                        GeneratedMedia.params[ROLE_KEY].astext.is_(None),
+        plan = plan_role_backfill(rows)
+        result["scanned"] = plan["counts"]["scanned"]
+        result["unclassifiable"] = plan["counts"]["unclassifiable"]
+        # The tally is reported for BOTH modes: it is the number an operator
+        # reads off the dry run to decide whether to go live, so a dry run
+        # that returned an empty one would be useless for its only purpose.
+        result["by_role"] = dict(plan["by_role"])
+
+        if dry_run:
+            result["would_fix"] = plan["counts"]["classifiable"]
+        else:
+            for item in plan["to_stamp"]:
+                async with write_scope() as session:
+                    await session.execute(
+                        role_update_stmt(int(item["id"]), item["role"])
                     )
-                    .values(params={**params, ROLE_KEY: role})
-                )
-            result["fixed"] += 1
-            result["by_role"][role] = result["by_role"].get(role, 0) + 1
-            if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
-                result["fixed_ids"].append(str(row["id"]))
+                result["fixed"] += 1
+                if len(result["fixed_ids"]) < _AUDIT_IDS_CAP:
+                    result["fixed_ids"].append(str(item["id"]))
     except Exception:
         try:
             await manager.patch_metadata(task_id, result)
@@ -170,3 +220,13 @@ async def backfill_canvas_upload_roles_workflow(
     except Exception as e:
         logger.warning(f"[backfill-upload-roles] complete {task_id}: {e}")
     return result
+
+
+@DBOS.workflow()
+async def backfill_canvas_upload_roles_workflow(
+    dry_run: bool = True,
+    limit: int = 500,
+    run_user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """DBOS shell over :func:`run_backfill` (registered in ``_BACKFILLS``)."""
+    return await run_backfill(dry_run=dry_run, limit=limit, run_user_id=run_user_id)

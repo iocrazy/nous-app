@@ -307,15 +307,30 @@ describe('GeneratedCard — selection control mirrors My Uploads', () => {
 });
 
 describe('GeneratedCard — icon actions carry both a tooltip and a label', () => {
-  it('titles say what each action DOES, not just what it is called', () => {
+  it('titles carry the NAME and then what the action does', () => {
+    // Both halves are asserted. The name half is what puts the new copy in
+    // front of a sighted mouse user — with the hint alone, "Save To Uploads"
+    // appeared only in the batch bar and the lightbox. The hint half is what
+    // makes an icon legible at all.
     render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
 
     expect(
       screen.getByRole('button', { name: 'Save To Uploads' }).getAttribute('title'),
-    ).toBe('Turn this into a regular file in My Uploads');
+    ).toBe('Save To Uploads — Turn this into a regular file in My Uploads');
     expect(screen.getByRole('button', { name: 'Add To Asset' }).getAttribute('title')).toBe(
-      "Attach it to an asset card's slot (character, location, …)",
+      "Add To Asset — Attach it to an asset card's slot (character, location, …)",
     );
+  });
+
+  it('announces the SHORT name, not the whole explanation', () => {
+    // The split is the point: `aria-label` stays short so a screen reader
+    // walking a grid of 40 cards does not read the hint forty times.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+
+    const save = screen.getByRole('button', { name: 'Save To Uploads' });
+    expect(save.getAttribute('aria-label')).toBe('Save To Uploads');
+    expect(save.getAttribute('aria-label')).not.toContain('My Uploads folder');
+    expect(screen.getByRole('button', { name: 'Delete' }).getAttribute('title')).toBe('Delete');
   });
 
   it('renders an icon rather than a word', () => {

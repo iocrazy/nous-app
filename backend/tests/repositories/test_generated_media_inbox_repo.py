@@ -406,18 +406,69 @@ def test_include_intermediate_drops_the_role_predicate():
     assert "role" not in sql
 
 
-def test_count_by_state_excludes_intermediates_by_default():
+async def _count_by_state_sql(monkeypatch, *, include_intermediate: bool) -> str:
+    """The statement ``count_by_state`` ACTUALLY executes, compiled.
+
+    Captured off a fake session rather than rebuilt here. The previous version
+    of this test compiled ``_visible_role_criterion()`` standalone and checked
+    a signature default — neither of which reaches the query the method
+    builds, so deleting the exclusion from ``count_by_state`` left the whole
+    backend suite green while this test went on claiming to pin it. That is
+    the repo's own self-concealing-check pattern: a guard whose output looks
+    identical whether or not the thing it guards is there.
+    """
+    import app.repositories.generated_media_repository as mod
+
+    captured: dict = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_read_scope():
+        class _S:
+            async def execute(self, stmt):
+                captured["stmt"] = stmt
+
+                class _R:
+                    def all(self_inner):
+                        return []
+
+                return _R()
+
+        yield _S()
+
+    monkeypatch.setattr(mod, "read_scope", fake_read_scope, raising=True)
+    await GeneratedMediaRepository().count_by_state(
+        7, include_intermediate=include_intermediate
+    )
+    return _compiled(captured["stmt"])
+
+
+async def test_count_by_state_query_excludes_intermediates_by_default(monkeypatch):
     """The sidebar badge counts what the list can show.
 
-    Compiled from the same criterion the list uses, so a badge that promised
-    "12 unreviewed" over a page that can only render 3 is a test failure
-    rather than a user's discovery.
+    Asserted on the executed statement, so removing the two lines that add the
+    predicate turns this red. Without that, a badge promising "12 unreviewed"
+    over a page that can only render 3 would be a user's discovery rather than
+    a test failure.
     """
-    from app.repositories.generated_media_repository import _visible_role_criterion
+    sql = await _count_by_state_sql(monkeypatch, include_intermediate=False)
 
-    sql = _sql([_visible_role_criterion()])
-    assert "'mask'" in sql and "IS NULL" in sql
-    import inspect
+    assert "'mask'" in sql and "'brush'" in sql and "'reference'" in sql
+    # The NULL arm travels with it — a bare NOT IN here would zero the badge
+    # for every row written before roles existed.
+    assert "IS NULL" in sql and " OR " in sql
+    # ...and it is still the counting query, not something else that happens
+    # to mention a role.
+    assert "count(" in sql and "scope_id = 7" in sql
+    assert "GROUP BY" in sql
 
-    sig = inspect.signature(GeneratedMediaRepository.count_by_state)
-    assert sig.parameters["include_intermediate"].default is False
+
+async def test_count_by_state_include_flag_drops_the_predicate(monkeypatch):
+    """The negative control.
+
+    Without it the test above would also pass against a method that hides
+    intermediates unconditionally and ignores its own argument.
+    """
+    sql = await _count_by_state_sql(monkeypatch, include_intermediate=True)
+
+    assert "'mask'" not in sql and "role" not in sql
+    assert "count(" in sql and "scope_id = 7" in sql
