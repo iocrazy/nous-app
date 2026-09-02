@@ -162,6 +162,12 @@ describe('OutputNodeView — mask commit creates a MASK NODE (IC 生成遮罩节
 
     await waitFor(() => {
       expect(importCanvasMedia).toHaveBeenCalledTimes(1);
+      // Classified at the upload, not later: a mask that reaches the backend
+      // unclassified is indistinguishable from a user's own file and shows up
+      // in the Generated inbox as something to triage.
+      expect(
+        (importCanvasMedia as ReturnType<typeof vi.fn>).mock.calls[0][3],
+      ).toBe('mask');
     });
     const [file] = (importCanvasMedia as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(file.name).toBe('mask.png');

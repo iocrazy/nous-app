@@ -80,3 +80,41 @@ async def test_upscale_route_runs_cli_and_registers_result(
     body = resp.json()
     assert body["data"]["url"] == "/api/v1/generated-media/991/file"
     assert seen["cli"] == (str(src), "4k")
+
+
+@pytest.mark.asyncio
+async def test_upscale_result_is_stamped_upscale_result(monkeypatch):
+    """The third canvas_upload writer names itself.
+
+    Asserted on ``_register_upscale_result`` directly because the route test
+    above patches that seam out — patching the thing under test is how a
+    write site ends up with no coverage at all.
+
+    ``upscale_result`` is NOT an intermediate: the user asked for it, so it
+    stays in the inbox. The role exists so the row can say which writer made
+    it, which is what lets the other two be hidden without hiding this one.
+    """
+    import app.services.library.generated_media_service as gm
+    from app.services.library.generated_roles import INTERMEDIATE_ROLES
+
+    seen: dict = {}
+
+    async def _fake_register(**kwargs):
+        seen.update(kwargs)
+        return {"id": 991}
+
+    monkeypatch.setattr(gm, "register_generated_media", _fake_register)
+
+    await r._register_upscale_result(
+        user_id="u",
+        scope_id=42,
+        source_path="/tmp/up.png",
+        mime="image/png",
+        origin_params={"upscale": {"resolution": "4k"}},
+    )
+    origin = seen["origin"]
+    assert origin.kind == "canvas_upload"
+    assert origin.params["role"] == "upscale_result"
+    # the caller's own params survive the merge
+    assert origin.params["upscale"] == {"resolution": "4k"}
+    assert origin.params["role"] not in INTERMEDIATE_ROLES

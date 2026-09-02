@@ -33,6 +33,7 @@ def test_default_state_excludes_deleted_only():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "review_state != 'deleted'" in sql and "scope_id = 7" in sql
@@ -49,6 +50,7 @@ def test_state_and_origin_filters():
             model="seedream-4",
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "review_state = 'unreviewed'" in sql
@@ -67,6 +69,7 @@ def test_project_filter_goes_through_canvases():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "canvases" in sql and "project_id = 55" in sql
@@ -84,6 +87,7 @@ def test_since_filter():
             model=None,
             since=since,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "created_at >= '2026-08-01" in sql
@@ -106,6 +110,7 @@ def test_source_asset_filter_is_an_equality_on_the_stamped_column():
             model=None,
             since=None,
             source_asset_id=727145299382534300,
+            include_intermediate=False,
         )
     )
     assert "source_asset_id = 727145299382534300" in sql
@@ -127,6 +132,7 @@ def test_no_source_asset_filter_leaves_the_column_alone():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "source_asset_id" not in sql
@@ -346,3 +352,72 @@ async def test_a_live_reference_anywhere_keeps_the_object(monkeypatch):
         refcount=1,
     )
     assert removed == []
+
+
+# ─── Intermediate canvas inputs (masks / brush bakes / transcoded refs) ──────
+
+
+def _role_sql(*, include_intermediate: bool) -> str:
+    return _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=None,
+            include_intermediate=include_intermediate,
+        )
+    )
+
+
+def test_default_hides_intermediate_roles():
+    """The three hidden roles are named in the WHERE clause by default."""
+    sql = _role_sql(include_intermediate=False)
+    assert "'mask'" in sql and "'brush'" in sql and "'reference'" in sql
+    # upscale results are a product, not an input — never excluded
+    assert "'upscale_result'" not in sql
+
+
+def test_missing_role_stays_visible():
+    """The NULL arm is the whole reason this predicate is not a bare NOT IN.
+
+    ``params->>'role'`` is NULL for every row written before roles existed;
+    ``NULL NOT IN (...)`` is NULL and PostgreSQL drops the row. Without the
+    explicit IS NULL arm the default inbox would go empty in production while
+    every test that only checks "mask is excluded" stayed green.
+    """
+    sql = _role_sql(include_intermediate=False)
+    assert "IS NULL" in sql
+    # ...and it is an OR with the NOT IN, not an unrelated clause
+    assert " OR " in sql
+
+
+def test_include_intermediate_drops_the_role_predicate():
+    """The negative control: the flag really removes the filter.
+
+    Without this, the two tests above would pass against an implementation
+    that hides intermediates unconditionally and ignores the flag.
+    """
+    sql = _role_sql(include_intermediate=True)
+    assert "'mask'" not in sql and "'brush'" not in sql
+    assert "role" not in sql
+
+
+def test_count_by_state_excludes_intermediates_by_default():
+    """The sidebar badge counts what the list can show.
+
+    Compiled from the same criterion the list uses, so a badge that promised
+    "12 unreviewed" over a page that can only render 3 is a test failure
+    rather than a user's discovery.
+    """
+    from app.repositories.generated_media_repository import _visible_role_criterion
+
+    sql = _sql([_visible_role_criterion()])
+    assert "'mask'" in sql and "IS NULL" in sql
+    import inspect
+
+    sig = inspect.signature(GeneratedMediaRepository.count_by_state)
+    assert sig.parameters["include_intermediate"].default is False

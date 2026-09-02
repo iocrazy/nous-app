@@ -532,3 +532,31 @@ def test_router_is_mounted_on_the_api_router():
     paths = {r.path for r in api_router.routes}
     assert "/generated" in paths
     assert "/generated/counts" in paths
+
+
+# ─── Intermediate canvas inputs ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["unreviewed", "all"])
+async def test_intermediates_are_hidden_on_both_default_views(app, state):
+    """Neither the landing tab nor the ``all`` alias shows masks/refs.
+
+    Parametrised over both because ``all`` is the one a user reaches for when
+    something seems to be missing — if it silently included the machine-made
+    rows, "All" would be the tab that looks broken.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&state={state}")
+    assert r.status_code == 200
+    assert _filters(app)["include_intermediate"] is False
+
+
+@pytest.mark.asyncio
+async def test_include_intermediate_flag_reaches_the_service(app):
+    """The opt-in. Without this the two tests above pass against a router
+    that hardcodes False and ignores the query string entirely."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&include_intermediate=true")
+    assert r.status_code == 200
+    assert _filters(app)["include_intermediate"] is True
