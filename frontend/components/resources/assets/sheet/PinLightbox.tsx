@@ -13,6 +13,19 @@
 // What it keeps from that one: arrow-key + button navigation with a counter,
 // Escape to close, and a click on the backdrop (but not on the image) to
 // close.
+//
+// EXTENDED (Generated inbox) — additively, so the pin board's calls are
+// untouched. The four new props are all optional and all default to the
+// original behaviour:
+//
+//   srcFor        how an id becomes a URL          (default: the resource file)
+//   kindFor       image or video                   (default: image)
+//   metadataFor   a panel beside/below the media   (default: none)
+//   actionsFor    a row of buttons                 (default: none)
+//
+// Forking a second modal was the alternative and was rejected: two lightboxes
+// drift on the things nobody re-tests — Escape, backdrop clicks, arrow keys —
+// and the second one is always the one that loses them.
 
 import React, { useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -25,13 +38,22 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { getResourceFileUrl } from '../../../../services/resourceService';
 
 export interface PinLightboxProps {
-  /** Resource ids, in the order the board shows them. */
+  /** Ids, in the order the caller shows them. Resource ids by default; any
+   *  id `srcFor` understands when that prop is given. */
   resourceIds: string[];
   index: number;
-  /** Slot label for the caption — a pin is only meaningful with its slot. */
+  /** Caption for the whole viewer — a pin is only meaningful with its slot. */
   slotLabel: string;
   onIndexChange: (next: number) => void;
   onClose: () => void;
+  /** id → media URL. Defaults to the resource file route. */
+  srcFor?: (id: string) => string;
+  /** Renders a `<video controls>` instead of an `<img>` for 'video'. */
+  kindFor?: (id: string) => 'image' | 'video';
+  /** Details panel for the current item (source, model, date, state…). */
+  metadataFor?: (id: string) => React.ReactNode;
+  /** Action row for the current item, under the media. */
+  actionsFor?: (id: string) => React.ReactNode;
 }
 
 export const PinLightbox: React.FC<PinLightboxProps> = ({
@@ -40,6 +62,10 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
   slotLabel,
   onIndexChange,
   onClose,
+  srcFor = getResourceFileUrl,
+  kindFor,
+  metadataFor,
+  actionsFor,
 }) => {
   const { t } = useTranslation();
   const count = resourceIds.length;
@@ -65,6 +91,9 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
 
   if (count === 0) return null;
   const current = resourceIds[Math.min(Math.max(index, 0), count - 1)];
+  const isVideo = kindFor?.(current) === 'video';
+  const metadata = metadataFor?.(current);
+  const actions = actionsFor?.(current);
 
   return createPortal(
     <div
@@ -110,13 +139,23 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
             <ChevronLeft size={18} aria-hidden="true" />
           </button>
         )}
-        <img
-          src={getResourceFileUrl(current)}
-          alt={slotLabel}
-          data-testid="pin-lightbox-image"
-          data-resource-id={current}
-          className="max-h-full max-w-full object-contain"
-        />
+        {isVideo ? (
+          <video
+            src={srcFor(current)}
+            controls
+            data-testid="pin-lightbox-video"
+            data-resource-id={current}
+            className="max-h-full max-w-full object-contain"
+          />
+        ) : (
+          <img
+            src={srcFor(current)}
+            alt={slotLabel}
+            data-testid="pin-lightbox-image"
+            data-resource-id={current}
+            className="max-h-full max-w-full object-contain"
+          />
+        )}
         {count > 1 && (
           <button
             type="button"
@@ -129,6 +168,19 @@ export const PinLightbox: React.FC<PinLightboxProps> = ({
           </button>
         )}
       </div>
+
+      {(metadata || actions) && (
+        <div
+          data-testid="pin-lightbox-panel"
+          className="w-full max-w-3xl shrink-0 pt-4 text-white"
+          // Inside the backdrop's click target like the media is, so reading
+          // the metadata or pressing an action does not close the viewer.
+          onClick={(e) => e.stopPropagation()}
+        >
+          {metadata}
+          {actions && <div className="mt-3 flex flex-wrap gap-2">{actions}</div>}
+        </div>
+      )}
     </div>,
     document.body,
   );

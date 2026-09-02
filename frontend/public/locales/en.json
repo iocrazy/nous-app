@@ -1994,7 +1994,8 @@
       "shot_generate": "Storyboard Image",
       "shot_video": "Storyboard Video",
       "agent_run": "Agent",
-      "chat_upload": "Chat Upload"
+      "chat_upload": "Chat Upload",
+      "intermediate": "Intermediate Inputs"
     },
     "type": {
       "image": "Image",
@@ -2018,17 +2019,20 @@
       "noModels": "No Models On This Page"
     },
     "action": {
-      "save": "Save",
-      "saveAsAsset": "As Asset…",
+      "save": "Save To Uploads",
+      "saveAsAsset": "Add To Asset",
       "delete": "Delete",
       "inMyUploads": "In My Uploads",
-      "openAsset": "Open asset"
+      "openAsset": "Open asset",
+      "saveHint": "Turn this into a regular file in My Uploads",
+      "saveAsAssetHint": "Attach it to an asset card's slot (character, location, …)"
     },
     "card": {
       "select": "Select {{title}}",
       "confirmDelete": "Confirm Delete",
       "openCanvasNodeHint": "Opens the canvas at this node",
-      "openSourceHint": "Opens where this was generated"
+      "openSourceHint": "Opens where this was generated",
+      "open": "Preview {{title}}"
     },
     "batch": {
       "selected": "{{n}} selected",
@@ -2063,10 +2067,16 @@
       "asset_exists": "An asset with this name and type already exists here.",
       "invalid_slot": "That slot is not valid for this asset type.",
       "unreadable_body": "The server sent a response we could not read."
+    },
+    "meta": {
+      "provider": "Provider",
+      "created": "Created",
+      "state": "State",
+      "prompt": "Prompt"
     }
   },
   "saveAsAsset": {
-    "title": "Save as Asset",
+    "title": "Add To Asset",
     "assetType": "Asset Type",
     "attachToLabel": "Attach To",
     "attachTo": "Attach to {{name}}",

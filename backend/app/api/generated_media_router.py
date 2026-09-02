@@ -25,6 +25,12 @@ from pydantic import BaseModel
 from app.core.deps import AuthDep
 from app.db.scope import Scope, request_scope
 from app.repositories.generated_media_repository import GeneratedMediaRepository
+from app.services.library.generated_roles import (
+    REFERENCE,
+    ROLE_KEY,
+    UPSCALE_RESULT,
+    normalize_role,
+)
 from app.services.library.media_serving import (
     filesystem_response,
     range_stream_response,
@@ -155,6 +161,7 @@ async def import_generation(
     file: UploadFile = File(...),
     canvas_id: Optional[str] = Form(None),
     node_id: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
 ) -> dict:
     """Ingest a user-uploaded image/video into Tier-1 (canvas media node).
 
@@ -173,6 +180,14 @@ async def import_generation(
     mime = (file.content_type or "").lower()
     if not (mime.startswith("image/") or mime.startswith("video/")):
         raise HTTPException(status_code=400, detail="only image/* or video/* uploads")
+
+    # Rejected, not defaulted: a misspelled role that quietly became
+    # ``user_upload`` would put a mask back in the inbox with nothing saying
+    # the classification had failed.
+    try:
+        role_value = normalize_role(role)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     canvas_id_int: Optional[int] = None
     if canvas_id:
@@ -206,7 +221,10 @@ async def import_generation(
                 kind="canvas_upload",
                 canvas_id=canvas_id_int,
                 node_id=node_id,
-                params={"filename": file.filename or ""},
+                params={
+                    "filename": file.filename or "",
+                    ROLE_KEY: role_value,
+                },
             ),
         )
         gen_id = row.get("id")
@@ -375,7 +393,11 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
             scope_id=await _scope(auth),
             source_path=source_path,
             mime=mime,
-            origin=GenerationOrigin(kind="canvas_upload"),
+            # A library asset minted into a durable URL so the i2i bridge
+            # can fetch it. The user already owns this image in My Uploads;
+            # surfacing the copy in the inbox as something to triage is what
+            # this role stops.
+            origin=GenerationOrigin(kind="canvas_upload", params={ROLE_KEY: REFERENCE}),
         )
     finally:
         await loc_cm.__aexit__(None, None, None)
@@ -444,8 +466,14 @@ async def _register_upscale_result(**kwargs):
     )
 
     origin = kwargs.pop("origin_params")
+    # An upscale is something the user asked for, so it stays VISIBLE — the
+    # role is stamped to say which of the three canvas_upload writers made the
+    # row, not to hide it (see ``generated_roles.INTERMEDIATE_ROLES``).
     return await register_generated_media(
-        origin=GenerationOrigin(kind="canvas_upload", params=origin), **kwargs
+        origin=GenerationOrigin(
+            kind="canvas_upload", params={**(origin or {}), ROLE_KEY: UPSCALE_RESULT}
+        ),
+        **kwargs,
     )
 
 

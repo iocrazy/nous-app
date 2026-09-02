@@ -16,9 +16,9 @@
 //    half-applied batch as success.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, FolderInput, Loader2, PackagePlus, Trash2 } from 'lucide-react';
 
 import { useResourcesContext } from '../../../contexts/ResourcesContext';
 import { useToast } from '../../Toast';
@@ -40,10 +40,16 @@ import type {
 } from '../../../services/generatedService';
 import { GeneratedCard } from './GeneratedCard';
 import { CleanupDialog } from './CleanupDialog';
+import { PinLightbox } from '../assets/sheet/PinLightbox';
+import {
+  generatedMediaFileUrl,
+  generatedMediaStreamUrl,
+} from '../../../services/generatedMediaService';
 import { SaveAsAssetDialog } from '../../assets/SaveAsAssetDialog';
 import type { SaveAsAssetOutcome } from '../../assets/SaveAsAssetDialog';
 import {
   FILTER_STATES,
+  INTERMEDIATE_OPTION,
   MEDIA_KINDS,
   SINCE_PRESETS,
   SOURCE_OPTIONS,
@@ -155,6 +161,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
   const { addToast } = useToast();
   const { scopeId, teamId, refreshGeneratedCounts } = useResourcesContext();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const filters = useMemo<GeneratedFilters>(() => parseFilters(searchParams), [searchParams]);
   // A stable string for effect deps: `filters` is a fresh object every render,
@@ -182,6 +189,13 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [saveAsAssetItems, setSaveAsAssetItems] = useState<GeneratedItem[] | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  /** Index into `items` of the generation open in the lightbox, or null.
+   *  An INDEX, not an id, so the viewer's arrow keys walk the same list the
+   *  grid is showing rather than a snapshot of one card. */
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  /** Same two-click gate the card uses, kept per-viewer-session so moving to
+   *  the next generation cannot inherit a pending confirm. */
+  const [confirmingLightboxDelete, setConfirmingLightboxDelete] = useState(false);
   // Same two-click gate the card uses, and more load-bearing here: this
   // button destroys N rows at once with no per-row confirmation behind it.
   const [confirmingBatchDelete, setConfirmingBatchDelete] = useState(false);
@@ -466,6 +480,29 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
     });
   }, []);
 
+  /** Open the viewer on a card. Resolved to an index here rather than in the
+   *  card, so the lightbox's arrows walk the loaded page. */
+  const openLightbox = useCallback(
+    (item: GeneratedItem) => {
+      const index = items.findIndex((row) => row.id === item.id);
+      // -1 means the row left the list between render and click; opening the
+      // viewer on a clamped neighbour would show the user a different image
+      // than the one they clicked.
+      if (index >= 0) {
+        setConfirmingLightboxDelete(false);
+        setLightboxIndex(index);
+      }
+    },
+    [items],
+  );
+
+  // A page that reloads under an open viewer must not leave it pointing at
+  // whatever now sits at that index — the lightbox would silently swap to a
+  // different generation.
+  useEffect(() => {
+    setLightboxIndex(null);
+  }, [filterKey, reloadTick]);
+
   const selectedItems = useMemo(
     () => items.filter((row) => selectedIds.has(row.id)),
     [items, selectedIds],
@@ -501,6 +538,145 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
     if (!counts) return null;
     if (state === 'all') return counts.unreviewed + counts.saved + counts.in_assets;
     return counts[state];
+  };
+
+  /** The Source chip's count. The intermediate toggle is counted alongside
+   *  the origin kinds so the chip cannot read "Source" untouched while the
+   *  page is showing masks. */
+  const sourceChipSummary = (() => {
+    const n = filters.originKinds.length + (filters.includeIntermediate ? 1 : 0);
+    return n > 0 ? String(n) : null;
+  })();
+
+  const itemsById = useMemo(
+    () => new Map(items.map((row) => [row.id, row])),
+    [items],
+  );
+
+  /**
+   * The lightbox's details panel.
+   *
+   * `origin params` here means the fields the wire actually carries — prompt,
+   * model, provider, origin kind. `generated_media.params` is deliberately
+   * NOT on the wire (`GeneratedItem` drops it in `_build_item`), so there is
+   * no raw params blob to render and inventing one would be a second, unowned
+   * copy of the schema.
+   */
+  const renderLightboxMeta = (item: GeneratedItem | undefined) => {
+    if (!item) return null;
+    const created = new Date(item.created_at);
+    const createdLabel = Number.isNaN(created.getTime())
+      ? item.created_at
+      : created.toLocaleString();
+    const rows: Array<[string, React.ReactNode]> = [];
+    rows.push([
+      t('generated.filter.source', 'Source'),
+      item.source.deep_link ? (
+        <button
+          type="button"
+          data-testid="lightbox-source-link"
+          onClick={() => navigate(item.source.deep_link as string)}
+          className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+        >
+          <ExternalLink size={11} aria-hidden="true" />
+          {item.source.label}
+        </button>
+      ) : (
+        item.source.label
+      ),
+    ]);
+    if (item.model) rows.push([t('generated.filter.model', 'Model'), item.model]);
+    if (item.provider) {
+      rows.push([t('generated.meta.provider', 'Provider'), item.provider]);
+    }
+    rows.push([t('generated.meta.created', 'Created'), createdLabel]);
+    rows.push([
+      t('generated.meta.state', 'State'),
+      t(`generated.state.${item.review_state === 'in_assets' ? 'asset' : item.review_state === 'unreviewed' ? 'new' : item.review_state}`),
+    ]);
+    if (item.prompt) rows.push([t('generated.meta.prompt', 'Prompt'), item.prompt]);
+    return (
+      <dl
+        data-testid="lightbox-metadata"
+        className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-[12px]"
+      >
+        {rows.map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt className="whitespace-nowrap opacity-60">{label}</dt>
+            <dd className="min-w-0 break-words">{value}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    );
+  };
+
+  /** The lightbox's action row — the card's three actions, worded, because
+   *  a full-screen viewer has the room the 150px card does not. */
+  const renderLightboxActions = (item: GeneratedItem | undefined) => {
+    if (!item) return null;
+    const busy = busyIds.has(item.id);
+    const btn =
+      'inline-flex items-center gap-1.5 rounded-lg border border-white/30 px-2.5 py-1 ' +
+      'text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50';
+    return (
+      <>
+        {item.review_state === 'unreviewed' && (
+          <button
+            type="button"
+            disabled={busy}
+            title={t('generated.action.saveHint', 'Turn this into a regular file in My Uploads')}
+            onClick={() => void handleSave(item)}
+            className={btn}
+          >
+            <FolderInput size={13} aria-hidden="true" />
+            {t('generated.action.save', 'Save To Uploads')}
+          </button>
+        )}
+        {item.review_state !== 'in_assets' && (
+          <button
+            type="button"
+            disabled={busy}
+            title={t(
+              'generated.action.saveAsAssetHint',
+              "Attach it to an asset card's slot (character, location, …)",
+            )}
+            onClick={() => openSaveAsAsset([item])}
+            className={btn}
+          >
+            <PackagePlus size={13} aria-hidden="true" />
+            {t('generated.action.saveAsAsset', 'Add To Asset')}
+          </button>
+        )}
+        {item.review_state === 'unreviewed' &&
+          (confirmingLightboxDelete ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setConfirmingLightboxDelete(false);
+                // Close first: the row is about to leave `items`, and the
+                // viewer's index would then point at a different generation.
+                setLightboxIndex(null);
+                void handleDelete(item);
+              }}
+              className={`${btn} border-danger-line text-danger`}
+            >
+              <Trash2 size={13} aria-hidden="true" />
+              {t('generated.card.confirmDelete', 'Confirm Delete')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmingLightboxDelete(true)}
+              className={btn}
+            >
+              <Trash2 size={13} aria-hidden="true" />
+              {t('generated.action.delete', 'Delete')}
+            </button>
+          ))}
+      </>
+    );
   };
 
   const projectName = filters.projectId
@@ -579,31 +755,52 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
         <Chip
           chipId="source"
           label={t('generated.filter.source', 'Source')}
-          summary={filters.originKinds.length > 0 ? String(filters.originKinds.length) : null}
-          active={filters.originKinds.length > 0}
+          summary={sourceChipSummary}
+          active={filters.originKinds.length > 0 || filters.includeIntermediate}
         >
-          {() =>
-            SOURCE_OPTIONS.map((opt) => {
-              const checked = filters.originKinds.includes(opt.kind);
-              return (
-                <button
-                  key={opt.kind}
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={checked}
-                  className={`${MENU_ITEM} ${checked ? 'text-accent' : ''}`}
-                  onClick={() =>
-                    applyFilters({
-                      ...filters,
-                      originKinds: toggleOriginKind(filters.originKinds, opt.kind),
-                    })
-                  }
-                >
-                  {t(opt.labelKey, opt.fallback)}
-                </button>
-              );
-            })
-          }
+          {() => (
+            <>
+              {SOURCE_OPTIONS.map((opt) => {
+                const checked = filters.originKinds.includes(opt.kind);
+                return (
+                  <button
+                    key={opt.kind}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={checked}
+                    className={`${MENU_ITEM} ${checked ? 'text-accent' : ''}`}
+                    onClick={() =>
+                      applyFilters({
+                        ...filters,
+                        originKinds: toggleOriginKind(filters.originKinds, opt.kind),
+                      })
+                    }
+                  >
+                    {t(opt.labelKey, opt.fallback)}
+                  </button>
+                );
+              })}
+              {/* Separated, because this one is not an origin kind — it
+                  WIDENS the page rather than narrowing it. Grouping it with
+                  the kinds would suggest "show me only masks", which is not
+                  what it does. */}
+              <div className="my-1 border-t border-line" />
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={filters.includeIntermediate}
+                className={`${MENU_ITEM} ${filters.includeIntermediate ? 'text-accent' : ''}`}
+                onClick={() =>
+                  applyFilters({
+                    ...filters,
+                    includeIntermediate: !filters.includeIntermediate,
+                  })
+                }
+              >
+                {t(INTERMEDIATE_OPTION.labelKey, INTERMEDIATE_OPTION.fallback)}
+              </button>
+            </>
+          )}
         </Chip>
 
         <Chip
@@ -808,6 +1005,7 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
                   teamId={teamId}
                   busy={busyIds.has(item.id)}
                   onToggleSelect={toggleSelect}
+                  onOpen={openLightbox}
                   onSave={handleSave}
                   onSaveAsAsset={(one) => openSaveAsAsset([one])}
                   onDelete={handleDelete}
@@ -843,19 +1041,31 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
               defaultValue: '{{n}} selected',
             })}
           </span>
+          {/* Worded, unlike the card. The bar is one row for the whole
+              selection with room to spare, and an icon here would be the
+              only place in the flow where the destructive and the safe
+              action look alike. */}
           <button
             type="button"
+            title={t(
+              'generated.action.saveHint',
+              'Turn this into a regular file in My Uploads',
+            )}
             onClick={() => void runBatch('save')}
             className="rounded-lg border border-line-strong px-2.5 py-1 text-xs font-medium text-content hover:bg-island-2"
           >
-            {t('generated.action.save', 'Save')}
+            {t('generated.action.save', 'Save To Uploads')}
           </button>
           <button
             type="button"
+            title={t(
+              'generated.action.saveAsAssetHint',
+              "Attach it to an asset card's slot (character, location, …)",
+            )}
             onClick={() => openSaveAsAsset(selectedItems)}
             className="rounded-lg border border-accent bg-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
           >
-            {t('generated.action.saveAsAsset', 'As Asset…')}
+            {t('generated.action.saveAsAsset', 'Add To Asset')}
           </button>
           {confirmingBatchDelete && deletableSelection ? (
             <button
@@ -900,6 +1110,29 @@ export const GeneratedView: React.FC<GeneratedViewProps> = ({ onSaveAsAsset }) =
             {t('generated.batch.clear', 'Clear')}
           </button>
         </div>
+      )}
+
+      {lightboxIndex !== null && items.length > 0 && (
+        <PinLightbox
+          resourceIds={items.map((row) => row.id)}
+          index={lightboxIndex}
+          slotLabel={t('generated.title', 'Generated')}
+          onIndexChange={(next) => {
+            setConfirmingLightboxDelete(false);
+            setLightboxIndex(next);
+          }}
+          onClose={() => setLightboxIndex(null)}
+          // The FULL file, not `/cover` — a viewer opened to inspect a
+          // generation at full screen must not be showing the thumbnail.
+          srcFor={(id) =>
+            itemsById.get(id)?.media_kind === 'video'
+              ? generatedMediaStreamUrl(id)
+              : generatedMediaFileUrl(id)
+          }
+          kindFor={(id) => (itemsById.get(id)?.media_kind === 'video' ? 'video' : 'image')}
+          metadataFor={(id) => renderLightboxMeta(itemsById.get(id))}
+          actionsFor={(id) => renderLightboxActions(itemsById.get(id))}
+        />
       )}
 
       <SaveAsAssetDialog

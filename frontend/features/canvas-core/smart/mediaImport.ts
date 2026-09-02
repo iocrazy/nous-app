@@ -10,6 +10,21 @@
 import { apiFetch } from '../../../services/apiClient';
 import type { GeneratedImageRef } from './types';
 
+/**
+ * Sub-classification of a canvas upload, sent as the `role` form field and
+ * stored by the backend in `origin.params.role`
+ * (`app/services/library/generated_roles.py` owns the vocabulary — keep the
+ * two lists in step).
+ *
+ * `POST /generated-media/import` is not one thing: a person dropping a file
+ * on the canvas and the mask/brush editors baking a PNG both go through it,
+ * and until this existed the Generated inbox showed them side by side as if a
+ * writer were meant to triage a black-and-white mask. Absent means
+ * `user_upload` — the visible default — so every existing caller keeps its
+ * behaviour by saying nothing.
+ */
+export type CanvasUploadRole = 'user_upload' | 'mask' | 'brush';
+
 export const CANVAS_MEDIA_ACCEPT = 'image/*,video/*';
 export const CANVAS_MEDIA_MAX_BYTES = 50 * 1024 * 1024; // backend cap
 
@@ -22,11 +37,16 @@ export async function importCanvasMedia(
   file: File,
   canvasId: string | null,
   nodeId: string | null,
+  role?: CanvasUploadRole,
 ): Promise<GeneratedImageRef> {
   const form = new FormData();
   form.append('file', file);
   if (canvasId) form.append('canvas_id', canvasId);
   if (nodeId) form.append('node_id', nodeId);
+  // Omitted rather than sent as 'user_upload': the backend's absent-means-
+  // visible default is the single place that rule lives, and a client that
+  // spelled it out would be a second copy of it.
+  if (role && role !== 'user_upload') form.append('role', role);
   const response = await apiFetch('/api/v1/generated-media/import', {
     method: 'POST',
     raw: form,

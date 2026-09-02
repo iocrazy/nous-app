@@ -20,7 +20,7 @@ from sqlalchemy import case, cast
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlalchemy import insert as sa_insert
-from sqlalchemy import select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy import update as sa_update
 
 from app.db.scope import is_enforced, system_request_scope
@@ -34,6 +34,7 @@ from app.models import (
     ScriptScenes,
     ScriptShots,
 )
+from app.services.library.generated_roles import INTERMEDIATE_ROLES, ROLE_KEY
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 # How many rows one cleanup pass may look at. Defined HERE because this module
@@ -210,6 +211,20 @@ def _registered_resource_insert_stmt(**values):
     return sa_insert(GeneratedMedia).values(**values).returning(*_GM_COLS)
 
 
+def _visible_role_criterion():
+    """Rows whose ``params.role`` is not one of the hidden intermediates.
+
+    ``NOT IN`` alone is WRONG here and the bug would be invisible: a row with
+    no ``role`` yields SQL NULL from ``params->>'role'``, ``NULL NOT IN (...)``
+    is NULL, and the WHERE clause drops it. Every generation written before
+    roles existed would vanish from the inbox — an empty page that reads
+    exactly like "nothing generated yet". The explicit ``IS NULL`` arm is what
+    makes "unclassified" mean VISIBLE (see ``generated_roles``).
+    """
+    role = GeneratedMedia.params[ROLE_KEY].astext
+    return or_(role.is_(None), role.notin_(list(INTERMEDIATE_ROLES)))
+
+
 def _inbox_filters(
     *,
     scope_id: int,
@@ -220,6 +235,7 @@ def _inbox_filters(
     model: Optional[str],
     since: Optional[datetime.datetime],
     source_asset_id: Optional[int],
+    include_intermediate: bool,
 ) -> list:
     """Criteria for the Generated inbox list. Pure so tests can compile them.
 
@@ -231,6 +247,10 @@ def _inbox_filters(
     ``generate_slot``). Every parameter here is required with no default on
     purpose: a filter that can be forgotten silently widens the page to the
     whole scope, which reads exactly like a correct answer.
+
+    include_intermediate=False (what the inbox asks for) drops the masks,
+    brush composites and transcoded references that ride under
+    ``origin_kind='canvas_upload'`` — see ``generated_roles``.
     """
     crit = [GeneratedMedia.scope_id == int(scope_id)]
     if state:
@@ -253,6 +273,8 @@ def _inbox_filters(
         crit.append(GeneratedMedia.created_at >= since)
     if source_asset_id is not None:
         crit.append(GeneratedMedia.source_asset_id == int(source_asset_id))
+    if not include_intermediate:
+        crit.append(_visible_role_criterion())
     return crit
 
 
@@ -569,6 +591,7 @@ class GeneratedMediaRepository:
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
         source_asset_id: Optional[int] = None,
+        include_intermediate: bool = False,
         cursor: Optional[str] = None,
         limit: int = 60,
     ) -> dict:
@@ -588,6 +611,7 @@ class GeneratedMediaRepository:
                 model=model,
                 since=since,
                 source_asset_id=source_asset_id,
+                include_intermediate=include_intermediate,
             )
         )
         decoded = _decode_cursor(cursor)
@@ -650,13 +674,23 @@ class GeneratedMediaRepository:
             row = (await session.execute(stmt)).mappings().first()
         return _normalize(dict(row)) if row else None
 
-    async def count_by_state(self, scope_id: int) -> dict[str, int]:
-        """Per-state counts. Always returns all four keys (0 when absent)."""
-        stmt = (
-            select(GeneratedMedia.review_state, func.count())
-            .where(GeneratedMedia.scope_id == int(scope_id))
-            .group_by(GeneratedMedia.review_state)
+    async def count_by_state(
+        self, scope_id: int, *, include_intermediate: bool = False
+    ) -> dict[str, int]:
+        """Per-state counts. Always returns all four keys (0 when absent).
+
+        Counts what the inbox LISTS. The unreviewed number is rendered as a
+        badge on the sidebar, so a count that included the hidden
+        intermediates would send the user to a page that cannot show them the
+        rows it just promised — the same "N to review" over an empty list the
+        role split exists to end.
+        """
+        stmt = select(GeneratedMedia.review_state, func.count()).where(
+            GeneratedMedia.scope_id == int(scope_id)
         )
+        if not include_intermediate:
+            stmt = stmt.where(_visible_role_criterion())
+        stmt = stmt.group_by(GeneratedMedia.review_state)
         out = {"unreviewed": 0, "saved": 0, "in_assets": 0, "deleted": 0}
         async with read_scope() as session:
             for state, n in (await session.execute(stmt)).all():

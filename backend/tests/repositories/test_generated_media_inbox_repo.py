@@ -33,6 +33,7 @@ def test_default_state_excludes_deleted_only():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "review_state != 'deleted'" in sql and "scope_id = 7" in sql
@@ -49,6 +50,7 @@ def test_state_and_origin_filters():
             model="seedream-4",
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "review_state = 'unreviewed'" in sql
@@ -67,6 +69,7 @@ def test_project_filter_goes_through_canvases():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "canvases" in sql and "project_id = 55" in sql
@@ -84,6 +87,7 @@ def test_since_filter():
             model=None,
             since=since,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "created_at >= '2026-08-01" in sql
@@ -106,6 +110,7 @@ def test_source_asset_filter_is_an_equality_on_the_stamped_column():
             model=None,
             since=None,
             source_asset_id=727145299382534300,
+            include_intermediate=False,
         )
     )
     assert "source_asset_id = 727145299382534300" in sql
@@ -127,6 +132,7 @@ def test_no_source_asset_filter_leaves_the_column_alone():
             model=None,
             since=None,
             source_asset_id=None,
+            include_intermediate=False,
         )
     )
     assert "source_asset_id" not in sql
@@ -346,3 +352,123 @@ async def test_a_live_reference_anywhere_keeps_the_object(monkeypatch):
         refcount=1,
     )
     assert removed == []
+
+
+# ─── Intermediate canvas inputs (masks / brush bakes / transcoded refs) ──────
+
+
+def _role_sql(*, include_intermediate: bool) -> str:
+    return _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=None,
+            include_intermediate=include_intermediate,
+        )
+    )
+
+
+def test_default_hides_intermediate_roles():
+    """The three hidden roles are named in the WHERE clause by default."""
+    sql = _role_sql(include_intermediate=False)
+    assert "'mask'" in sql and "'brush'" in sql and "'reference'" in sql
+    # upscale results are a product, not an input — never excluded
+    assert "'upscale_result'" not in sql
+
+
+def test_missing_role_stays_visible():
+    """The NULL arm is the whole reason this predicate is not a bare NOT IN.
+
+    ``params->>'role'`` is NULL for every row written before roles existed;
+    ``NULL NOT IN (...)`` is NULL and PostgreSQL drops the row. Without the
+    explicit IS NULL arm the default inbox would go empty in production while
+    every test that only checks "mask is excluded" stayed green.
+    """
+    sql = _role_sql(include_intermediate=False)
+    assert "IS NULL" in sql
+    # ...and it is an OR with the NOT IN, not an unrelated clause
+    assert " OR " in sql
+
+
+def test_include_intermediate_drops_the_role_predicate():
+    """The negative control: the flag really removes the filter.
+
+    Without this, the two tests above would pass against an implementation
+    that hides intermediates unconditionally and ignores the flag.
+    """
+    sql = _role_sql(include_intermediate=True)
+    assert "'mask'" not in sql and "'brush'" not in sql
+    assert "role" not in sql
+
+
+async def _count_by_state_sql(monkeypatch, *, include_intermediate: bool) -> str:
+    """The statement ``count_by_state`` ACTUALLY executes, compiled.
+
+    Captured off a fake session rather than rebuilt here. The previous version
+    of this test compiled ``_visible_role_criterion()`` standalone and checked
+    a signature default — neither of which reaches the query the method
+    builds, so deleting the exclusion from ``count_by_state`` left the whole
+    backend suite green while this test went on claiming to pin it. That is
+    the repo's own self-concealing-check pattern: a guard whose output looks
+    identical whether or not the thing it guards is there.
+    """
+    import app.repositories.generated_media_repository as mod
+
+    captured: dict = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_read_scope():
+        class _S:
+            async def execute(self, stmt):
+                captured["stmt"] = stmt
+
+                class _R:
+                    def all(self_inner):
+                        return []
+
+                return _R()
+
+        yield _S()
+
+    monkeypatch.setattr(mod, "read_scope", fake_read_scope, raising=True)
+    await GeneratedMediaRepository().count_by_state(
+        7, include_intermediate=include_intermediate
+    )
+    return _compiled(captured["stmt"])
+
+
+async def test_count_by_state_query_excludes_intermediates_by_default(monkeypatch):
+    """The sidebar badge counts what the list can show.
+
+    Asserted on the executed statement, so removing the two lines that add the
+    predicate turns this red. Without that, a badge promising "12 unreviewed"
+    over a page that can only render 3 would be a user's discovery rather than
+    a test failure.
+    """
+    sql = await _count_by_state_sql(monkeypatch, include_intermediate=False)
+
+    assert "'mask'" in sql and "'brush'" in sql and "'reference'" in sql
+    # The NULL arm travels with it — a bare NOT IN here would zero the badge
+    # for every row written before roles existed.
+    assert "IS NULL" in sql and " OR " in sql
+    # ...and it is still the counting query, not something else that happens
+    # to mention a role.
+    assert "count(" in sql and "scope_id = 7" in sql
+    assert "GROUP BY" in sql
+
+
+async def test_count_by_state_include_flag_drops_the_predicate(monkeypatch):
+    """The negative control.
+
+    Without it the test above would also pass against a method that hides
+    intermediates unconditionally and ignores its own argument.
+    """
+    sql = await _count_by_state_sql(monkeypatch, include_intermediate=True)
+
+    assert "'mask'" not in sql and "role" not in sql
+    assert "count(" in sql and "scope_id = 7" in sql

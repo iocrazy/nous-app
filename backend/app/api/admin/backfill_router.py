@@ -24,6 +24,9 @@ from app.utils.admin_helpers import create_audit_log
 from app.workflows.backfill_assets_from_project_entities import (
     backfill_assets_from_project_entities,
 )
+from app.workflows.backfill_canvas_upload_roles import (
+    backfill_canvas_upload_roles_workflow,
+)
 from app.workflows.backfill_generated_inbox import backfill_generated_inbox
 from app.workflows.backfill_issue_scope import backfill_issue_scope_workflow
 from app.workflows.backfill_normalize_personal_project_team_ids import (
@@ -51,6 +54,7 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     ),
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
+    "canvas_upload_roles": backfill_canvas_upload_roles_workflow,
     # Kept deliberately through the legacy window: mig 447 renamed its source
     # tables to `_legacy_project_characters` / `_legacy_project_lib_entities`
     # and deleted every other reader, but an emergency re-run has to stay

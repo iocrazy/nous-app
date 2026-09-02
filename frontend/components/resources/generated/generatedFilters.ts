@@ -34,6 +34,22 @@ export const SOURCE_OPTIONS = [
 
 const SOURCE_KINDS: readonly string[] = SOURCE_OPTIONS.map((o) => o.kind);
 
+/**
+ * The Source chip's last row, and NOT an origin kind.
+ *
+ * `canvas_upload` is three unrelated things on the wire — a file a person
+ * dropped, a mask/brush composite an editor baked, and a library asset
+ * transcoded so the image-to-image bridge could fetch it. Only the first is
+ * something to triage, so the other two are hidden and this option asks for
+ * them back. It therefore toggles a BOOLEAN, not a membership in
+ * `originKinds`: adding it to that list would send the backend an
+ * origin_kind it has never written and quietly match nothing.
+ */
+export const INTERMEDIATE_OPTION = {
+  labelKey: 'generated.source.intermediate',
+  fallback: 'Intermediate Inputs',
+} as const;
+
 /** The Type chip. `media_kind` is open-ended on the wire, but only these two
  *  are ever produced today and only these two get a filter button. */
 export const MEDIA_KINDS = ['image', 'video'] as const;
@@ -63,6 +79,8 @@ export interface GeneratedFilters {
   mediaKind: MediaKind | null;
   model: string | null;
   since: SincePreset | null;
+  /** Show the masks / brush bakes / transcoded references the inbox hides. */
+  includeIntermediate: boolean;
 }
 
 export function defaultGeneratedFilters(): GeneratedFilters {
@@ -73,6 +91,7 @@ export function defaultGeneratedFilters(): GeneratedFilters {
     mediaKind: null,
     model: null,
     since: null,
+    includeIntermediate: false,
   };
 }
 
@@ -109,6 +128,9 @@ export function parseFilters(searchParams: URLSearchParams): GeneratedFilters {
     mediaKind: oneOf(searchParams.get('media_kind'), MEDIA_KINDS),
     model: nonEmpty(searchParams.get('model')),
     since: oneOf(searchParams.get('since'), SINCE_PRESETS),
+    // Only the literal the serializer writes turns this on. Accepting any
+    // truthy string would make `?include_intermediate=0` mean "yes".
+    includeIntermediate: searchParams.get('include_intermediate') === 'true',
   };
 }
 
@@ -124,6 +146,7 @@ export function serializeFilters(filters: GeneratedFilters): URLSearchParams {
   if (filters.mediaKind) sp.set('media_kind', filters.mediaKind);
   if (filters.model) sp.set('model', filters.model);
   if (filters.since) sp.set('since', filters.since);
+  if (filters.includeIntermediate) sp.set('include_intermediate', 'true');
   return sp;
 }
 
@@ -148,6 +171,7 @@ export function listOptionsFor(filters: GeneratedFilters, now: Date): GeneratedL
   if (filters.model) opts.model = filters.model;
   const since = sinceIsoFor(filters.since, now);
   if (since) opts.since = since;
+  if (filters.includeIntermediate) opts.includeIntermediate = true;
   return opts;
 }
 
@@ -164,6 +188,10 @@ export function hasActiveFilters(filters: GeneratedFilters): boolean {
     filters.projectId !== null ||
     filters.mediaKind !== null ||
     filters.model !== null ||
-    filters.since !== null
+    filters.since !== null ||
+    // Widening counts as active too: the "no results because you filtered"
+    // empty state is the wrong thing to show, but a chip that looks untouched
+    // while the page is showing masks is worse.
+    filters.includeIntermediate
   );
 }
