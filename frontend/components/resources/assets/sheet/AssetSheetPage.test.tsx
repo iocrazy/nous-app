@@ -662,13 +662,20 @@ describe('Open in canvas', () => {
     await waitFor(() => expect(createCanvas).toHaveBeenCalledWith('55', expect.anything()));
   });
 
-  it('a costume falls back to a smart canvas', async () => {
+  it('a costume opens a costume canvas, not a generic smart one', async () => {
+    // Renamed from "falls back to a smart canvas" (P4 ruling G). The old name
+    // described a BUG the test had frozen: `canvases_kind_check` has allowed
+    // 'costume' since mig 446, but neither enum carried it, so the sheet's
+    // fallback fired and the kind was silently downgraded on the way out.
     createCanvas.mockResolvedValue({ id: 'c3' });
     const costume = makeDetail({ ...COSTUME_DETAIL, id: COSTUME_DETAIL.id, project_ids: ['55'] });
     await renderSheet(costume, [CHARACTER_DETAIL]);
     fireEvent.click(screen.getByTestId('open-in-canvas'));
     await waitFor(() => expect(createCanvas).toHaveBeenCalled());
-    expect(createCanvas).toHaveBeenCalledWith('55', expect.objectContaining({ kind: 'smart' }));
+    expect(createCanvas).toHaveBeenCalledWith(
+      '55',
+      expect.objectContaining({ kind: 'costume' }),
+    );
   });
 });
 

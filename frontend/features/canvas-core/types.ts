@@ -24,6 +24,10 @@ export type CanvasKind =
   | 'character'
   | 'location'
   | 'prop'
+  // 'costume' (mig 446) has been legal in the DB CHECK since the asset
+  // library's P0 and was the one value neither enum carried — so a costume
+  // asset's "Open In Canvas" silently downgraded to 'smart'. P4 ruling G.
+  | 'costume'
   | 'storyboard';
 
 /** Kinds a NEW canvas may be created with (mirror of backend
@@ -41,7 +45,11 @@ export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
   kind === 'lite' ||
   kind === 'character' ||
   kind === 'location' ||
-  kind === 'prop';
+  kind === 'prop' ||
+  // 'costume' MUST be here, not just in the enum: `CanvasSurface` passes
+  // `nodeTypes` only for the smart family, and a kind outside it renders
+  // every node as React Flow's default — the blank-canvas failure class.
+  kind === 'costume';
 
 /** The library-entity canvas kinds — each seeds its own preset workflow. */
 export type EntityCanvasKind = 'character' | 'location' | 'prop';

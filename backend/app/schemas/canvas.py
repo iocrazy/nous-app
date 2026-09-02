@@ -26,10 +26,25 @@ from app.schemas.assets import SnowflakeId
 # (shot-nodes-on-canvas spec 2026-08-11 §2) — NOT in CreatableCanvasKind:
 # it is never user-created via POST /projects/{project_id}/canvases, only
 # via the dedicated get-or-create GET /canvases/storyboard endpoint.
+# 'costume' (mig 446) has been legal in ``canvases_kind_check`` since the asset
+# library's P0 while neither Literal carried it, so a costume asset's "Open In
+# Canvas" was downgraded to 'smart' by the client and the value was
+# unreachable through the API at all. P4 ruling G closed that; the DB CHECK is
+# the authority and ``tests/schemas/test_canvas_kind_enum.py`` reads it from
+# the migration rather than trusting a second hand-typed list.
 CanvasKind = Literal[
-    "smart", "lite", "classic", "character", "location", "prop", "storyboard"
+    "smart",
+    "lite",
+    "classic",
+    "character",
+    "location",
+    "prop",
+    "costume",
+    "storyboard",
 ]
-CreatableCanvasKind = Literal["smart", "lite", "character", "location", "prop"]
+CreatableCanvasKind = Literal[
+    "smart", "lite", "character", "location", "prop", "costume"
+]
 
 
 class CanvasViewport(BaseModel):

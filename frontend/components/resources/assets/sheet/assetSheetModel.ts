@@ -548,12 +548,23 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 /**
  * The canvas kind an "Open in canvas" would create for this asset type.
  *
- * Three of the six types have a canvas kind of their own; the rest open a
- * plain smart canvas. Returning `'smart'` rather than refusing is deliberate:
- * a costume board on a smart canvas is useful, and there is no kind to invent.
+ * Four of the six types have a canvas kind of their own; the rest (`prompt`,
+ * `audio`) open a plain smart canvas. Returning `'smart'` for those rather
+ * than refusing is deliberate: the board is useful either way, and there is
+ * no kind to invent.
  */
-export function canvasKindFor(assetType: AssetType): 'character' | 'location' | 'prop' | 'smart' {
-  if (assetType === 'character' || assetType === 'location' || assetType === 'prop') {
+export function canvasKindFor(
+  assetType: AssetType,
+): 'character' | 'location' | 'prop' | 'costume' | 'smart' {
+  if (
+    assetType === 'character' ||
+    assetType === 'location' ||
+    assetType === 'prop' ||
+    // 'costume' was legal in the DB CHECK (mig 446) but missing from both
+    // enums, so this branch used to fall through to 'smart' — the canvas got
+    // created, just under the wrong kind. P4 ruling G restored it.
+    assetType === 'costume'
+  ) {
     return assetType;
   }
   return 'smart';
