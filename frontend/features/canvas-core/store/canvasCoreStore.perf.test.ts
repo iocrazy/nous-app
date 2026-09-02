@@ -305,13 +305,13 @@ describe('Fix 2: one viewport write per gesture', () => {
     expect(useStore.getState().canUndo()).toBe(false);
   });
 
-  it('programmatic setViewport (undo/redo, tests) still bumps revision immediately', async () => {
+  it('a settled viewport bumps revision immediately — the debounce is on the SAVE, not the write', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
 
     const revBefore = useStore.getState().revision;
-    useStore.getState().setViewport({ x: 5, y: 10, zoom: 2 });
+    useStore.getState().setViewportSettled({ x: 5, y: 10, zoom: 2 });
     expect(useStore.getState().revision).toBe(revBefore + 1);
   });
 });

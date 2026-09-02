@@ -9,11 +9,13 @@
  *   - `loadCanvas(id)`  — pull the row
  *   - `applyNodeChanges(...)` / `applyConnectionChanges(...)` (TBD in a
  *     follow-up React Flow integration PR)
- *   - `setViewport`          — write the viewport + mark dirty + bump
- *                              `viewportEpoch` (React Flow runs UNCONTROLLED,
- *                              so the epoch is what actually moves the canvas)
  *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty
- *                              once, and NO epoch bump (it is already on screen)
+ *                              once, and NO epoch bump (it is already on
+ *                              screen). The ONLY viewport writer a gesture
+ *                              uses; there are no programmatic ones left —
+ *                              a caller that wants to MOVE the canvas drives
+ *                              React Flow's instance directly (`zoomPreview`,
+ *                              `CanvasPage`'s overview fly-in)
  *   - `noteDragStart()`      — captures pre-drag history base without starting timer
  *   - `setNodesDragTick()`   — mid-drag position update (no history timer,
  *                              no dirty — drag end owns both)
@@ -41,12 +43,7 @@ import type {
 } from '../types';
 import { healStaleGenSlots } from '../smart/healGenSlots';
 import { CONFLICT_SAVE_ERROR, readErrorStatus } from '../utils/saveFailure';
-import {
-  IDENTITY_VIEWPORT,
-  clampZoom,
-  panByScreenDelta,
-  zoomAroundScreenAnchor,
-} from '../utils/viewport';
+import { IDENTITY_VIEWPORT, clampZoom } from '../utils/viewport';
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_HISTORY_DEBOUNCE_MS = 250;
@@ -194,10 +191,14 @@ interface CanvasState {
 
   /**
    * Bumped by every viewport the STORE writes itself — the load, a canvas
-   * switch, a realtime rebase, a conflict resolve, and the three legacy
-   * programmatic writers below. NOT bumped by `setViewportSettled`, which
-   * carries a viewport that came FROM the canvas and is therefore already on
-   * screen.
+   * switch, a realtime rebase, a conflict resolve, `reset()`. NOT bumped by
+   * `setViewportSettled`, which carries a viewport that came FROM the canvas
+   * and is therefore already on screen.
+   *
+   * The invariant is "every store-side `viewport:` write bumps the epoch in
+   * the SAME set literal", and it is enforced by a source scan in
+   * `canvasCoreStore.viewport.test.ts` — a convention with no enforcement
+   * erodes the moment someone adds a writer.
    *
    * The reason this exists (Task 3 评审修复轮1): React Flow runs uncontrolled,
    * so a store write no longer moves anything — only an imperative
@@ -277,9 +278,6 @@ interface CanvasState {
   loadCanvas(canvasId: string): Promise<void>;
 
   // ---- Mutations (mark dirty) ----
-  setViewport(viewport: CanvasViewport): void;
-  panViewportBy(dx: number, dy: number): void;
-  zoomViewportAround(anchor: { x: number; y: number }, nextZoom: number): void;
   setNodes(nodes: CanvasNode[]): void;
   setConnections(connections: CanvasConnection[]): void;
   /** Patch a single node's `data` (or top-level fields) in place. Used
@@ -755,6 +753,7 @@ export function createCanvasCoreStore(
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,
+          viewportEpoch: (viewportEpochCounter += 1),
           nodes: [],
           connections: [],
           nodeOps: [],
@@ -788,38 +787,6 @@ export function createCanvasCoreStore(
           const message = err instanceof Error ? err.message : String(err);
           set({ loadStatus: 'error', loadError: message });
         }
-      },
-
-      // The surface is UNCONTROLLED since Task 3, so writing `viewport` moves
-      // nothing on its own — these three bump `viewportEpoch`, which is what
-      // makes `CanvasPage` push the value onto React Flow's instance. They
-      // have no production callers today (`zoomPreview` and the bare-`z`
-      // overview both drive the instance directly); the bump is here so that
-      // a future caller gets the behaviour the names promise rather than a
-      // silent store-only write.
-      setViewport(viewport: CanvasViewport) {
-        set({
-          viewport: { ...viewport, zoom: clampZoom(viewport.zoom) },
-          viewportEpoch: (viewportEpochCounter += 1),
-        });
-        markDirty();
-      },
-
-      panViewportBy(dx, dy) {
-        set({
-          viewport: panByScreenDelta(get().viewport, dx, dy),
-          viewportEpoch: (viewportEpochCounter += 1),
-        });
-        markDirty();
-      },
-
-      zoomViewportAround(anchor, nextZoom) {
-        const clamped = clampZoom(nextZoom);
-        set({
-          viewport: zoomAroundScreenAnchor(get().viewport, anchor, clamped),
-          viewportEpoch: (viewportEpochCounter += 1),
-        });
-        markDirty();
       },
 
       setNodes(nodes) {
@@ -1059,9 +1026,14 @@ export function createCanvasCoreStore(
       setViewportSettled(viewport: CanvasViewport) {
         // One gesture, one write, one dirty signal. No history entry —
         // panning is navigation, not a document edit (markDirty does not
-        // touch history). Deliberately no `viewportEpoch` bump: this value
-        // came FROM React Flow, so pushing it back would fight the user.
-        set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
+        // touch history).
+        set({
+          // viewportEpoch: intentionally NOT bumped — this value came FROM
+          // React Flow and is already on screen; announcing it would push it
+          // straight back and fight the user mid-gesture. The source scan in
+          // canvasCoreStore.viewport.test.ts reads this marker.
+          viewport: { ...viewport, zoom: clampZoom(viewport.zoom) },
+        });
         markDirty();
       },
 

@@ -23,6 +23,9 @@
  * on screen, and re-applying it would fight the user mid-pan.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Canvas, CanvasSaveResult, CanvasUpdatePayload } from '../types';
@@ -177,20 +180,98 @@ describe('canvasCoreStore — viewportEpoch (store-side writes announce themselv
     expect(useStore.getState().viewportEpoch).toBe(before);
   });
 
-  it('the legacy programmatic writers bump it too — they are store-side writes', async () => {
-    // `setViewport` / `panViewportBy` / `zoomViewportAround` have no
-    // production callers, but they are the shape a future caller would reach
-    // for, and under an uncontrolled surface a store write that does not
-    // announce itself simply does not move the canvas.
+  it('the three programmatic writers are gone, not kept "just in case"', () => {
+    // `setViewport` / `panViewportBy` / `zoomViewportAround` never had a
+    // production caller. Under an uncontrolled surface they were three more
+    // sites obliged to remember the epoch, with end-to-end behaviour nothing
+    // had ever exercised. A caller that wants to MOVE the canvas drives React
+    // Flow's instance directly (`zoomPreview`, `CanvasPage`'s overview
+    // fly-in), which is what the deleted names only pretended to do.
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 100 });
+    const state = useStore.getState() as unknown as Record<string, unknown>;
+
+    expect(state.setViewport).toBeUndefined();
+    expect(state.panViewportBy).toBeUndefined();
+    expect(state.zoomViewportAround).toBeUndefined();
+  });
+
+  it('reset() bumps the epoch with the viewport it writes', async () => {
+    // Harmless in practice — `reset()` also nulls `canvasId`, so the reader
+    // effect is skipped. Kept conforming anyway: one invariant with no
+    // exceptions is cheaper to hold than one with a footnote, and this was
+    // the live counter-example the source scan below would otherwise have to
+    // allow-list.
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
     const before = useStore.getState().viewportEpoch;
 
-    useStore.getState().setViewport({ x: 1, y: 1, zoom: 1 });
-    useStore.getState().panViewportBy(5, 5);
-    useStore.getState().zoomViewportAround({ x: 0, y: 0 }, 1.5);
+    useStore.getState().reset();
 
-    expect(useStore.getState().viewportEpoch).toBe(before + 3);
+    expect(useStore.getState().viewportEpoch).toBe(before + 1);
+  });
+});
+
+/**
+ * `viewportEpoch` is a CONVENTION: nothing in the type system links a
+ * `viewport:` write to the bump that makes it visible, and an unbumped write
+ * fails silently — the store and the transform on screen simply diverge, and
+ * the two placement readers map screen coordinates through a viewport nobody
+ * is looking at. A convention with no enforcement erodes, so this scans the
+ * source instead of any one behaviour.
+ *
+ * The rule: every `set({...})` in the store that assigns `viewport:` assigns
+ * `viewportEpoch:` in the SAME object literal. One documented exception —
+ * `setViewportSettled`, whose value came FROM React Flow and is therefore
+ * already on screen; pushing it back would fight the user mid-gesture.
+ */
+describe('viewportEpoch — the invariant is pinned in the source, not just in behaviour', () => {
+  const SOURCE = readFileSync(resolve(__dirname, './canvasCoreStore.ts'), 'utf8');
+
+  /** Every `set({ … })` call in the store, as its literal body text. */
+  function setLiterals(source: string): string[] {
+    const out: string[] = [];
+    const marker = 'set({';
+    let at = source.indexOf(marker);
+    while (at !== -1) {
+      let depth = 0;
+      let i = at + marker.length - 1;
+      for (; i < source.length; i += 1) {
+        if (source[i] === '{') depth += 1;
+        else if (source[i] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push(source.slice(at, i + 1));
+      at = source.indexOf(marker, i + 1);
+    }
+    return out;
+  }
+
+  it('finds the set() calls at all — a scan that matches nothing reports clean', () => {
+    // The scan's own failure mode is silence, so pin that it sees the file.
+    const literals = setLiterals(SOURCE);
+    expect(literals.length).toBeGreaterThan(5);
+    expect(literals.some((l) => l.includes('viewport:'))).toBe(true);
+  });
+
+  /** The only way to write `viewport:` without bumping: say so in the
+   *  literal, in these words. Nobody types this by accident. */
+  const OPT_OUT = 'viewportEpoch: intentionally NOT bumped';
+
+  it('every set() that writes viewport also names viewportEpoch in the same literal', () => {
+    const offenders = setLiterals(SOURCE).filter(
+      (literal) => /\bviewport:/.test(literal) && !literal.includes('viewportEpoch'),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('exactly one write opts out, and it is the one that came from React Flow', () => {
+    // An escape hatch nobody counts is an escape hatch everybody uses.
+    const optedOut = setLiterals(SOURCE).filter((literal) => literal.includes(OPT_OUT));
+    expect(optedOut).toHaveLength(1);
+    expect(optedOut[0]).toContain('clampZoom(viewport.zoom)');
   });
 });
