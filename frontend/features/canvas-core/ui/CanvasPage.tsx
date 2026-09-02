@@ -489,6 +489,35 @@ export function CanvasView({
     setRfReady(true);
   }, []);
 
+  // Persisted-viewport restore (canvas fluency Wave 1, Task 3). React Flow
+  // now runs UNCONTROLLED: `CanvasSurface` seeds `defaultViewport` once at
+  // mount and React Flow owns the transform after that, which is what makes a
+  // pan land on the same frame as the gesture. Two consequences have to be
+  // paid for here, imperatively:
+  //
+  //   * the row arrives AFTER the surface mounts, so the seed React Flow got
+  //     was the identity viewport, not the saved one;
+  //   * `CanvasView` is NOT remounted when the route's `:canvasId` changes
+  //     (it re-renders with a new prop), so switching canvases would
+  //     otherwise leave the previous canvas's transform in place.
+  //
+  // One apply per canvas id. The `onMoveEnd` this triggers lands on the value
+  // already in the store, and `CanvasSurface` drops that echo rather than
+  // dirtying a freshly loaded row.
+  //
+  // Declared BEFORE the heal effect below so that on a canvas whose saved
+  // viewport frames nothing, the restore applies first and the heal's
+  // `fitView` is what the user actually ends up looking at.
+  const viewportRestoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadStatus !== 'ready' || !canvasId) return;
+    if (viewportRestoredForRef.current === canvasId) return;
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    viewportRestoredForRef.current = canvasId;
+    void instance.setViewport(useCanvasCoreStore.getState().viewport);
+  }, [loadStatus, canvasId, rfReady]);
+
   // Empty-viewport self-heal (2026-08-12 production incident, canvas
   // 337610660408263): that row's saved `viewport_json`
   // ({x:181.47,y:106.68,zoom:0.514}) frames world x≈-352..2138 while all six
@@ -503,9 +532,10 @@ export function CanvasView({
   // VISUAL correction — going through the store would route it into the
   // viewport dirty channel (`setViewport` → `markDirty`) and persist a
   // viewport the user never chose. `instance.fitView()` moves React Flow's
-  // own transform; the store's `viewport` follows via `onMove` →
-  // `setViewportOnMove`, which by design does NOT bump revision (only the
-  // RAF `flushViewportDirty` does, and no user gesture fired here).
+  // own transform directly; the store learns the healed viewport through
+  // `onMoveEnd` → `setViewportSettled` like any other settled move, so the
+  // fit does get persisted — what it must never do is go through the store
+  // FIRST and repaint from there.
   //
   // One shot per canvas id, and only once nodes exist: a storyboard canvas
   // whose shot nodes arrive from the Task 4 reconcile a tick after load gets

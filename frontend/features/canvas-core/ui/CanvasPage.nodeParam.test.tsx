@@ -24,10 +24,13 @@ vi.mock('react-i18next', () => ({
 }));
 
 const fitView = vi.fn();
+// The real engine exposes this too — `CanvasView` calls it to restore the
+// persisted viewport on open and on canvas switch (uncontrolled since Task 3).
+const setViewport = vi.fn();
 vi.mock('./CanvasSurface', () => ({
   CanvasSurface: ({ onInit }: { onInit?: (instance: unknown) => void }) => {
     React.useEffect(() => {
-      onInit?.({ fitView });
+      onInit?.({ fitView, setViewport });
     }, [onInit]);
     return <div data-testid="canvas-surface" />;
   },

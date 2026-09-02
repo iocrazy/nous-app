@@ -103,7 +103,6 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
-  const viewport = useCanvasCoreStore((s) => s.viewport);
   const selection = useCanvasCoreStore((s) => s.selection);
   const kind = useCanvasCoreStore((s) => s.kind);
   /**
@@ -163,21 +162,26 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const setNodesDragTick = useCanvasCoreStore((s) => s.setNodesDragTick);
   const setNodesTransient = useCanvasCoreStore((s) => s.setNodesTransient);
   const flushHistory = useCanvasCoreStore((s) => s.flushHistory);
-  const setViewportOnMove = useCanvasCoreStore((s) => s.setViewportOnMove);
-  const flushViewportDirty = useCanvasCoreStore((s) => s.flushViewportDirty);
+  const setViewportSettled = useCanvasCoreStore((s) => s.setViewportSettled);
 
-  // RAF handle for coalescing per-tick onMove dirty signals (Fix 2).
-  const viewportRafRef = useRef<number | null>(null);
+  /**
+   * React Flow's transform is seeded once and then owned by React Flow
+   * (see `CanvasEngine.defaultViewport`). Read out of the store WITHOUT
+   * subscribing: re-rendering the surface with a new `defaultViewport` does
+   * nothing anyway, and subscribing would re-render the whole surface on
+   * every settled pan for no visible effect.
+   *
+   * At first mount the row usually has not arrived yet, so this is the
+   * identity viewport; `CanvasView` applies the persisted one imperatively
+   * once the load lands, and again on every canvas switch (the component is
+   * not remounted when `:canvasId` changes).
+   */
+  const [seedViewport] = useState(() => useCanvasCoreStore.getState().viewport);
 
   // On unmount (e.g. rail view switch mid-drag) commit any in-flight history
-  // base and cancel a pending viewport frame so nothing leaks into the next
-  // mount of the singleton store.
+  // base so nothing leaks into the next mount of the singleton store.
   useEffect(() => {
     return () => {
-      if (viewportRafRef.current !== null) {
-        cancelAnimationFrame(viewportRafRef.current);
-        viewportRafRef.current = null;
-      }
       flushHistory();
     };
   }, [flushHistory]);
@@ -415,20 +419,19 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
     [kind, readOnly],
   );
 
-  const onMove = useCallback(
-    (nextViewport: Viewport) => {
-      // Fix 2 — update viewport state immediately for React Flow controlled-mode
-      // rendering (so panning feels instant), but coalesce the markDirty() +
-      // revision-bump to at most once per animation frame via RAF.
-      setViewportOnMove(nextViewport);
-      if (viewportRafRef.current === null) {
-        viewportRafRef.current = requestAnimationFrame(() => {
-          viewportRafRef.current = null;
-          flushViewportDirty();
-        });
-      }
+  const onMoveEnd = useCallback(
+    (next: Viewport) => {
+      // React Flow also fires move-end for PROGRAMMATIC moves — the
+      // persisted-viewport restore on open / canvas switch, the empty-viewport
+      // heal's `fitView`, the `?node=` deep link. An echo that lands on the
+      // value already in the store is not a user edit: treating it as one
+      // would dirty every canvas the moment it is opened and schedule a save
+      // of the row just loaded.
+      const cur = useCanvasCoreStore.getState().viewport;
+      if (cur.x === next.x && cur.y === next.y && cur.zoom === next.zoom) return;
+      setViewportSettled(next);
     },
-    [setViewportOnMove, flushViewportDirty],
+    [setViewportSettled],
   );
 
   const isConnectionValid = useCallback<IsValidConnection>(
@@ -613,13 +616,13 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       nodes={rfNodes}
       edges={rfEdges}
       selectedIds={selection}
-      viewport={viewport}
+      defaultViewport={seedViewport}
       onNodesChange={onNodesChange}
       onNodeDragStart={noteDragStart}
       onNodeDragStop={onNodeDragStop}
       onNodesSnap={onNodesSnap}
       onEdgesChange={onEdgesChange}
-      onMove={onMove}
+      onMoveEnd={onMoveEnd}
       onSelectionChange={setSelection}
       // ---- Read-only: withdraw the editing gestures ----
       // Dragging a node and dragging a wire off a handle are the two

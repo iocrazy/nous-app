@@ -9,9 +9,10 @@
  *   - `loadCanvas(id)`  — pull the row
  *   - `applyNodeChanges(...)` / `applyConnectionChanges(...)` (TBD in a
  *     follow-up React Flow integration PR)
- *   - `setViewport`          — programmatic pan/zoom (bumps revision immediately)
- *   - `setViewportOnMove`    — RAF-throttled path for onMove (no revision bump per tick)
- *   - `flushViewportDirty`   — called at RAF frequency to batch viewport dirty signals
+ *   - `setViewport`          — write the viewport + mark dirty. Persistence
+ *                              only: React Flow runs UNCONTROLLED, so this
+ *                              records where the canvas is, it does not move it
+ *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty once
  *   - `noteDragStart()`      — captures pre-drag history base without starting timer
  *   - `setNodesDragTick()`   — mid-drag position update (no history timer reset)
  *   - `markDirty()`          — schedules a debounced save
@@ -325,23 +326,17 @@ interface CanvasState {
   flushHistory(): void;
 
   /**
-   * Update the viewport during an `onMove` tick without bumping `revision`
-   * or scheduling a save.  Callers must pair this with `flushViewportDirty`
-   * (called at RAF frequency) to coalesce N per-tick revision bumps into
-   * at most one per animation frame.
+   * A pan/zoom gesture settled at this viewport — write it and mark dirty,
+   * exactly once. This is the ONLY viewport channel the canvas surface has:
+   * React Flow owns the transform mid-gesture (uncontrolled, seeded from
+   * `defaultViewport`), so the frames in between never reach the store.
    *
-   * Programmatic viewport changes (panViewportBy, zoomViewportAround, etc.)
-   * continue to use `setViewport` which bumps revision immediately.
+   * Replaces the `setViewportOnMove` + RAF `flushViewportDirty` pair, which
+   * existed only to make a per-frame controlled-mode React state write
+   * survivable. Nothing writes per frame any more, so nothing needs
+   * coalescing.
    */
-  setViewportOnMove(viewport: CanvasViewport): void;
-
-  /**
-   * Bump `revision` and schedule a debounced save.  Intended to be called
-   * at RAF frequency from `CanvasSurface.onMove` rather than on every
-   * wheel/pan tick, reducing save-debounce timer-reset churn from
-   * O(pan_ticks) to O(1) per animation frame.
-   */
-  flushViewportDirty(): void;
+  setViewportSettled(viewport: CanvasViewport): void;
 
   // ---- Selection ----
   setSelection(ids: string[]): void;
@@ -740,6 +735,11 @@ export function createCanvasCoreStore(
         }
       },
 
+      // NOTE: since Task 3 the surface is UNCONTROLLED, so this and the two
+      // below record a viewport, they do not apply one. To actually move the
+      // canvas, call `setViewport`/`fitView` on the React Flow instance
+      // (`CanvasSurface`'s `onInit`); the store then hears about it through
+      // `onMoveEnd` → `setViewportSettled`.
       setViewport(viewport: CanvasViewport) {
         set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
         markDirty();
@@ -972,15 +972,11 @@ export function createCanvasCoreStore(
         flushPendingHistory();
       },
 
-      setViewportOnMove(viewport: CanvasViewport) {
-        // Update viewport for controlled-mode React Flow rendering without
-        // bumping revision.  Callers (CanvasSurface.onMove via RAF) call
-        // flushViewportDirty() at most once per animation frame.
+      setViewportSettled(viewport: CanvasViewport) {
+        // One gesture, one write, one dirty signal. No history entry —
+        // panning is navigation, not a document edit (markDirty does not
+        // touch history).
         set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
-      },
-
-      flushViewportDirty() {
-        // Called at RAF frequency — bumps revision and schedules a save.
         markDirty();
       },
 

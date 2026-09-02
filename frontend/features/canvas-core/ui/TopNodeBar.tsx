@@ -77,6 +77,12 @@ export interface TopNodeBarProps {
 }
 
 export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
+  // The store's viewport is SETTLED state since Task 3 (React Flow owns the
+  // transform mid-gesture and reports it back on `onMoveEnd`). That is the
+  // right source here: a chip click is a discrete action at rest, so the last
+  // settled value IS the current one. The same reasoning applies to
+  // `CanvasComposer.dropPosition` — both readers sit outside React Flow's
+  // provider, so `useViewport()` is not available to either of them anyway.
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);

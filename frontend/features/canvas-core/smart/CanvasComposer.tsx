@@ -124,6 +124,9 @@ export function CanvasComposer({
   runner: runnerOverride,
   teamId,
 }: CanvasComposerOptions = {}) {
+  // Settled viewport — see the note in `TopNodeBar`: new nodes are placed by
+  // a discrete click at rest, and this component renders outside React Flow's
+  // provider, so the store is both correct and the only option.
   const viewport = useCanvasCoreStore((s) => s.viewport);
   // Lite ("Smart") canvases hide the workflow-only add buttons — the IC
   // four-card create menu is their primary surface.

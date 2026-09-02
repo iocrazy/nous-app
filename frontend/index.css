@@ -1548,11 +1548,6 @@ body {
   );
 }
 
-/* Smoother ReactFlow viewport transitions */
-.react-flow__viewport {
-  transition: transform 0.05s ease-out;
-}
-
 /* Nicer edge styling */
 .react-flow__edge-path {
   stroke-linecap: round;

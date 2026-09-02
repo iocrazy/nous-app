@@ -162,8 +162,14 @@ export interface CanvasEngineProps {
   edges: Edge[];
   /** Selected node ids — drives the default (selection-tinted) MiniMap colour. */
   selectedIds?: string[];
-  /** Controlled viewport; omit for an uncontrolled surface (e.g. with fitView). */
-  viewport?: Viewport;
+  /**
+   * Initial viewport, read ONCE at mount. React Flow owns the transform from
+   * there — a pan frame never round-trips through React state, which is the
+   * whole point (canvas fluency Wave 1, Task 3). To move the viewport later,
+   * grab the instance via `onInit` and call its own `setViewport`/`fitView`;
+   * re-rendering with a different `defaultViewport` does nothing by design.
+   */
+  defaultViewport?: Viewport;
   /** Fit the graph into view on mount. */
   fitView?: boolean;
   /**
@@ -224,8 +230,21 @@ export interface CanvasEngineProps {
   onNodeDragStop?: (node: AnyNode, ctx: NodeDragStopContext) => void;
   /** Multi-selection box-drag settled — the dragged nodes (guides already cleared). */
   onSelectionDragStop?: (nodes: AnyNode[]) => void;
-  /** Viewport moved (caller owns any dirty-coalescing). */
+  /**
+   * Viewport moved — fires on EVERY frame of a pan/zoom. Almost no caller
+   * wants this: persisting from here means N writes per gesture. Prefer
+   * `onMoveEnd`, which fires once when the gesture settles.
+   */
   onMove?: (viewport: Viewport) => void;
+  /** Pan/zoom gesture started. */
+  onMoveStart?: (viewport: Viewport) => void;
+  /**
+   * Pan/zoom gesture settled — the one place a caller should persist the
+   * viewport from. Also fires for PROGRAMMATIC moves (`setViewport`,
+   * `fitView`), so a caller that treats it as "the user edited this" must
+   * check whether the value actually changed.
+   */
+  onMoveEnd?: (viewport: Viewport) => void;
   /** Selection changed — node ids in React Flow's selection order. */
   onSelectionChange?: (ids: string[]) => void;
   /** Double-click on a node (scene mode opens the chapter; others may ignore). */
@@ -303,7 +322,7 @@ export function CanvasEngine({
   nodes,
   edges,
   selectedIds,
-  viewport,
+  defaultViewport,
   fitView = false,
   minZoom,
   maxZoom,
@@ -316,6 +335,8 @@ export function CanvasEngine({
   onNodeDragStop,
   onSelectionDragStop,
   onMove,
+  onMoveStart,
+  onMoveEnd,
   onSelectionChange,
   onNodeDoubleClick,
   onSelectAll = NOOP,
@@ -433,9 +454,9 @@ export function CanvasEngine({
   // tolerance by the live zoom — otherwise a fixed flow px value snaps too
   // eagerly when zoomed in and never snaps when zoomed out.
   const guideTolerance = useCallback(() => {
-    const zoom = instanceRef.current?.getViewport?.().zoom ?? viewport?.zoom ?? 1;
+    const zoom = instanceRef.current?.getViewport?.().zoom ?? defaultViewport?.zoom ?? 1;
     return GUIDE_TOLERANCE_SCREEN_PX / (zoom > 0 ? zoom : 1);
-  }, [viewport]);
+  }, [defaultViewport]);
 
   // While a single node drags, match its edges against the others and draw the
   // alignment guides. The snap itself is applied once on drop so the node never
@@ -546,6 +567,25 @@ export function CanvasEngine({
       onMove?.(nextViewport);
     },
     [onMove],
+  );
+
+  // Wired to React Flow only when the caller asked for them: an absent
+  // handler means React Flow skips the callback entirely rather than
+  // calling into an empty shim on every frame of every gesture.
+  const handleMoveStart = useMemo(
+    () =>
+      onMoveStart
+        ? (_event: unknown, nextViewport: Viewport) => onMoveStart(nextViewport)
+        : undefined,
+    [onMoveStart],
+  );
+
+  const handleMoveEnd = useMemo(
+    () =>
+      onMoveEnd
+        ? (_event: unknown, nextViewport: Viewport) => onMoveEnd(nextViewport)
+        : undefined,
+    [onMoveEnd],
   );
 
   const handleSelectionChange = useCallback(
@@ -771,10 +811,12 @@ export function CanvasEngine({
         onConnect={allowConnect ? onConnect : undefined}
         onConnectStart={allowDragCreate ? dragToCreate.onConnectStart : undefined}
         onConnectEnd={allowDragCreate ? dragToCreate.onConnectEnd : undefined}
-        onMove={handleMove}
+        onMove={onMove ? handleMove : undefined}
+        onMoveStart={handleMoveStart}
+        onMoveEnd={handleMoveEnd}
         onSelectionChange={handleSelectionChange}
         isValidConnection={allowConnect ? isValidConnection : undefined}
-        viewport={viewport}
+        defaultViewport={defaultViewport}
         fitView={fitView}
         minZoom={minZoom}
         maxZoom={maxZoom}
@@ -797,6 +839,15 @@ export function CanvasEngine({
         // IC parity: the middle button pans from anywhere (left keeps its
         // pane-drag default).
         panOnDrag={[0, 1]}
+        // Trackpad convention shared by Figma / Miro / Infinite Canvas: two
+        // fingers PAN, pinch ZOOMS. Browsers report a trackpad pinch as a
+        // ctrl+wheel event, and React Flow routes that through `zoomOnPinch`
+        // — so `zoomOnScroll={false}` costs no zoom gesture, it only stops a
+        // plain scroll from zooming. A mouse wheel pans vertically here, the
+        // same as it does in those apps.
+        panOnScroll
+        zoomOnScroll={false}
+        zoomOnPinch
         onReconnect={onReconnect ? (oldEdge, next) => onReconnect(oldEdge, next) : undefined}
       >
         {/* 24px dot lattice per Infinite-Canvas (`radial-gradient … 24px`)
