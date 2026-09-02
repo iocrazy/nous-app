@@ -18,6 +18,7 @@ not one.
 
 from __future__ import annotations
 
+import asyncio
 import io
 from typing import Any, Callable, Optional
 
@@ -86,7 +87,18 @@ async def ensure_preview(
         if await store.exists(pkey):
             return await store.get_bytes(pkey)
         original = await store.get_bytes(loc.key)
-        preview = render_preview_webp(original)
+        # Off the event loop for two reasons. (1) Decode + LANCZOS + WebP
+        # method-4 is ~100-200 ms of pure CPU for the measured 1672x941
+        # originals, and a cold 24-node canvas fires a dozen first-hits at
+        # once — inline, nothing else in this worker progresses for 1-2 s.
+        # (2) ObjectStore._capped puts a WALL-CLOCK asyncio.wait_for around
+        # every storage call, so a blocked loop burns other requests' timeout
+        # budget without them making progress and turns a CPU spike into
+        # someone else's failed upload. Pillow drops the GIL in the codec
+        # loops, so this genuinely parallelises rather than just relocating
+        # the block. Exceptions raised in the thread propagate through the
+        # await into the same degradation branch below — unchanged contract.
+        preview = await asyncio.to_thread(render_preview_webp, original)
         await store.put_bytes(pkey, preview, PREVIEW_MIME)
         return preview
     except Exception as exc:

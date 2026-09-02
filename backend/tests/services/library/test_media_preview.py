@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import io
 import os
+import threading
 
 import pytest
 from PIL import Image
 
+from app.services.library import media_preview
 from app.services.library.media_preview import (
     PREVIEW_MAX_EDGE,
     PREVIEW_SUFFIX,
@@ -195,3 +197,59 @@ async def test_ensure_preview_returns_none_for_filesystem_rows_this_release():
 @pytest.mark.asyncio
 async def test_ensure_preview_returns_none_for_a_row_with_no_file_path():
     assert await ensure_preview({"mime": "image/png"}) is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_preview_still_degrades_when_the_render_raises_in_its_thread(
+    monkeypatch,
+):
+    """The render runs in a worker thread; its exceptions must still degrade.
+
+    The corrupt-original test covers the same branch with a real Pillow
+    failure, but this one makes the offload explicit: an exception raised
+    inside asyncio.to_thread propagates through the await, so moving the
+    render off the loop cannot silently turn a degradation into a 500.
+    """
+
+    def _boom(data: bytes) -> bytes:
+        raise RuntimeError("encoder exploded")
+
+    monkeypatch.setattr(media_preview, "render_preview_webp", _boom)
+    store = _FakeStore({"t1/a/b/orig": _png(1672, 941)})
+
+    out = await ensure_preview(
+        {"file_path": "sb://library/t1/a/b/orig", "mime": "image/png"},
+        store_factory=lambda b: store,
+    )
+
+    assert out is None
+    assert store.puts == [], "nothing may be written back when the render failed"
+
+
+@pytest.mark.asyncio
+async def test_ensure_preview_renders_off_the_event_loop_thread(monkeypatch):
+    """The CPU work must not run on the loop thread.
+
+    Inline, a cold canvas serializes ~1-2 s of fully blocked loop AND burns
+    ObjectStore._capped's wall-clock timeout budget for unrelated in-flight
+    storage calls. Pinning the thread identity is what stops a later edit
+    from quietly putting the render back on the loop.
+    """
+    loop_thread = threading.get_ident()
+    render_threads: list[int] = []
+    real = media_preview.render_preview_webp
+
+    def _spy(data: bytes) -> bytes:
+        render_threads.append(threading.get_ident())
+        return real(data)
+
+    monkeypatch.setattr(media_preview, "render_preview_webp", _spy)
+    store = _FakeStore({"t1/a/b/orig": _png(1672, 941)})
+
+    out = await ensure_preview(
+        {"file_path": "sb://library/t1/a/b/orig", "mime": "image/png"},
+        store_factory=lambda b: store,
+    )
+
+    assert out is not None
+    assert render_threads and loop_thread not in render_threads
