@@ -505,4 +505,40 @@ describe('music charts — freshness', () => {
     fireEvent.click(panel.getByTestId('music-refresh'));
     await waitFor(() => expect(refreshMusicCharts).toHaveBeenCalledTimes(1));
   });
+
+  it('keeps the freshness line OUT of the horizontally scrolling tab row', async () => {
+    // Shipped broken once: the line lived inside `.music-tabs`, which is a
+    // flex scroller with its scrollbar hidden. `margin-left:auto` pinned it to
+    // the CONTENT edge, so on an account with a dozen chart tabs the Refresh
+    // button rendered past the visible edge — present in the DOM, unreachable
+    // with the mouse. Every assertion above still passed.
+    //
+    // jsdom has no layout, so measuring is not available here; the STRUCTURE
+    // is the checkable stand-in, and it is the actual fix: as a sibling of the
+    // scroller the button cannot be scrolled out of view no matter how many
+    // tabs the account has.
+    refreshMusicCharts.mockClear();
+    const many = Array.from({ length: 12 }, (_, i) =>
+      chart(`c${i}`, String(i), `Chart ${i}`, [{ title: `T${i}` }]),
+    );
+    fetchMusicCharts.mockResolvedValue(chartsPage(many, {
+      stale: false, never_harvested: false, last_success_at: '2026-08-19T10:00:00Z',
+    }));
+    const panel = await openPanel();
+    await waitFor(() => expect(panel.getByTestId('music-fresh')).toBeInTheDocument());
+
+    const tabs = panel.getByTestId('music-tabs');
+    const fresh = panel.getByTestId('music-fresh');
+    expect(tabs.contains(fresh)).toBe(false);
+    // …and they are siblings in one row, so the line still sits beside the
+    // tabs rather than wrapping onto its own line.
+    expect(fresh.parentElement).toBe(tabs.parentElement);
+    // The tabs really are the overflowing part — if this ever stops being the
+    // scroller, the reasoning above no longer applies and this test should be
+    // revisited rather than silently kept green.
+    expect(tabs.className).toContain('music-tabs');
+    // All twelve tabs really are in the scroller — the crowding that made the
+    // button unreachable is reproduced here, not assumed away.
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(12);
+  });
 });

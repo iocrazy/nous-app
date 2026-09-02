@@ -574,7 +574,13 @@
    would push the track list below the fold on the first open, which is the
    one thing the tabs exist to prevent. `scrollbar-width: none` hides the bar,
    not the scrolling — the fade on the right edge is what says there is more. */
-.dist-v4 .music-tabs { display: flex; gap: 4px; padding: 8px 12px 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+/* The row that holds the scroller AND the freshness line. The scroller must
+   be allowed to SHRINK (min-width:0) — a flex item defaults to min-width:auto,
+   i.e. "never smaller than my content", which pushes any sibling off the
+   visible edge instead of scrolling. That is what put the Refresh button out
+   of reach on an account with a dozen chart tabs. */
+.dist-v4 .music-tabrow { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.dist-v4 .music-tabs { flex: 1 1 auto; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
 .dist-v4 .music-tabs::-webkit-scrollbar { display: none; }
 .dist-v4 .music-tab { flex: 0 0 auto; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; background: none; font: inherit; font-size: 12px; color: var(--content-4); cursor: pointer; white-space: nowrap; }
 .dist-v4 .music-tab:hover, .dist-v4 .music-tab:focus-visible { color: var(--content); outline: none; }
@@ -836,6 +842,6 @@
 
 /* Chart freshness (2026-08-30): the lists are a per-account cache with a 24h
    TTL; say when they were read and offer a re-read right where the tabs are. */
-.dist-v4 .music-fresh { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--content-4); white-space: nowrap; }
+.dist-v4 .music-fresh { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--content-4); white-space: nowrap; }
 .dist-v4 .music-fresh button { border: 0; background: transparent; color: var(--content-2); font: inherit; font-size: 11px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
 .dist-v4 .music-fresh button:disabled { opacity: .5; cursor: default; }
