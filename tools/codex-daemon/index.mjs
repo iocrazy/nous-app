@@ -37,8 +37,12 @@ import { fileURLToPath } from 'node:url';
  *
  *  Bump this whenever the server needs to tell old daemons apart from new
  *  ones — see MIN_TEXT_DAEMON_VERSION in
- *  backend/app/services/ai/adapters/codex_daemon.py. */
-export const DAEMON_VERSION = '0.3.0';
+ *  backend/app/services/ai/adapters/codex_daemon.py. Image jobs are gated the
+ *  same way by MIN_IMAGE_DAEMON_VERSION in
+ *  backend/app/services/codex/daemon_dispatch.py, which is what 0.4.0 marks:
+ *  a daemon at or above it forwards --quality, one below it drops the knob on
+ *  the floor. */
+export const DAEMON_VERSION = '0.4.0';
 
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
@@ -359,24 +363,39 @@ export async function downloadRef(url, dir, index) {
   return file;
 }
 
+/** Pure argv for `gpt-image-2-skill images …`. Exported so the argv can be
+ *  pinned without spawning anything. `size` stays the canonical shape key
+ *  (the server derives it from `ratio`; this side never owns a ratio table,
+ *  which is the second copy the generation-request contract exists to
+ *  prevent). A payload may carry `ratio` alongside it — this side ignores it.
+ *  `quality` is forwarded only when set — null/'' mean "not requested", and
+ *  the CLI default is the honest answer for that. */
+export function buildImageArgs({ prompt, size, quality, model, refs, out }) {
+  const args = [
+    'images',
+    refs.length ? 'edit' : 'generate',
+    '--prompt', String(prompt ?? ''),
+    '--out', out,
+    '--size', String(size || '1024x1024'),
+    '--format', 'png',
+    '--background', 'opaque',
+  ];
+  if (quality) args.push('--quality', String(quality));
+  if (model) args.push('--model', String(model));
+  for (const ref of refs) args.push('--ref-image', ref);
+  return args;
+}
+
 async function runImageJob(payload, workDir) {
   const out = path.join(workDir, 'out.png');
   const refs = [];
   for (const [i, url] of (payload.ref_urls ?? []).slice(0, 9).entries()) {
     refs.push(await downloadRef(url, workDir, i));
   }
-  const args = [
-    'images',
-    refs.length ? 'edit' : 'generate',
-    '--prompt', String(payload.prompt ?? ''),
-    '--out', out,
-    '--size', String(payload.size || '1024x1024'),
-    '--format', 'png',
-    '--background', 'opaque',
-  ];
-  if (payload.model) args.push('--model', String(payload.model));
-  for (const ref of refs) args.push('--ref-image', ref);
-  await runCommand('gpt-image-2-skill', args);
+  await runCommand('gpt-image-2-skill', buildImageArgs({
+    prompt: payload.prompt, size: payload.size, quality: payload.quality,
+    model: payload.model, refs, out,
+  }));
   return out;
 }
 

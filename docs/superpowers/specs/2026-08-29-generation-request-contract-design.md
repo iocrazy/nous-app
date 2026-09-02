@@ -131,7 +131,9 @@ GenFooterControls(按 caps 渲染) → params → generationRunner(auto→具体
 ## 5. 兼容与版本
 
 - **daemon 协议**：codex payload 从 `{prompt,size,model,ref_urls}` 变为 `{prompt,ratio,quality,model,ref_urls}`；dreamina 加 `video_mode`。daemon 客户端 `tools/codex-daemon/index.mjs` 同步改（ratio→`--size` 换算 + 画幅短语并入 prompt，复用 `codex_cli` 的两张表——抽到 `app/services/generation/aspect.py` 让 daemon 构建时能拿到同一份 JSON）。
-- **版本闸门**：沿用 `MIN_TEXT_DAEMON_VERSION`（`app/services/ai/adapters/codex_daemon.py:71`）的机制加 `MIN_IMAGE_DAEMON_VERSION`；旧 daemon 收到新 payload 前，服务器**同时发**旧键一版（`size` 由 ratio 换算填上——这本身就把 ❌ 修掉一半），下一版删旧键。
+- **版本闸门**：沿用 `MIN_TEXT_DAEMON_VERSION`（`app/services/ai/adapters/codex_daemon.py:71`）的机制加 `MIN_IMAGE_DAEMON_VERSION`；旧 daemon 收到新 payload 前，服务器**同时发**旧键一版（`size` 由 ratio 换算填上——这本身就把 ❌ 修掉一半），~~下一版删旧键~~（**已被 2026-09-02 的修正推翻，见下**）。
+
+  > **2026-09-02 修正（P3 实施时裁决）**：`size` **保留**为权威形状键，不删。删掉它会迫使比例→尺寸映射表在 daemon 的 JS 里复制一份（`index.mjs` 无法 import `aspect.py`），恰恰复活本契约要消灭的双表漂移。P3 的实质（`--quality` 真转发 + `MIN_IMAGE_DAEMON_VERSION` 版本闸门）不需要删它；`ratio` 继续随 payload 下发供日志/归因，daemon 不消费（`tools/codex-daemon/index.mjs` 原文：*“A payload may carry `ratio` alongside it — this side ignores it.”*）。因此本节第一条所写的「payload 从 `{prompt,size,...}` 变为 `{prompt,ratio,quality,...}`」实际落地为**两个键并存**。见 `docs/superpowers/plans/2026-09-02-generation-request-contract-p3.md` Global Constraints，以及 `app/services/generation/request.py::to_codex_daemon_payload` 的 docstring。
 - **既有数据**：不回填；`aspect_honored` 只对新记录有意义，查询时按 `params ? 'honored'` 过滤。
 - **UI**：capabilities 未下发（老后端）时按"全支持"渲染 = 今天的行为，不会变差。
 

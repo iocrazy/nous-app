@@ -49,13 +49,15 @@ const ARK: ModelCapabilities = {
   video_modes: [],
 };
 
-/** CodexLocalProtocol.capabilities: all eight ratios, but `quality: false`
- *  — the daemon's argv never appends `--quality`, so P1 declared the honest
- *  value rather than the intended one. (Server-side CodexProtocol is
- *  `quality: True`; these are two different rows.) */
+/** CodexLocalProtocol.capabilities, verbatim: all eight ratios and
+ *  `quality: true`. P1 declared `false` because the daemon's argv never
+ *  appended `--quality`; P3 flipped it back once daemon 0.4.0 forwards the
+ *  knob and `MIN_IMAGE_DAEMON_VERSION` refuses older daemons outright, so
+ *  the pill is no longer a fake switch. `quality: false` still hides the
+ *  pill — ARK covers that rule below. */
 const CODEX_LOCAL: ModelCapabilities = {
   ratios: ['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'],
-  quality: false,
+  quality: true,
   resolution: false,
   max_refs: 9,
   negative: false,
@@ -119,10 +121,10 @@ describe('GenFooterControls honours model capabilities', () => {
     expect(screen.getAllByTestId('resolution-option')).toHaveLength(3);
   });
 
-  it('codex-local: all eight ratios stay, but the fake quality pill goes', () => {
+  it('codex-local: all eight ratios stay, and so does the quality pill', () => {
     caps = CODEX_LOCAL;
     renderBar({ model: 'codex-local-image' });
-    expect(screen.queryByTestId('pill-quality')).toBeNull();
+    expect(screen.getByTestId('pill-quality')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('pill-size'));
     expect(ratioTexts()).toHaveLength(9);

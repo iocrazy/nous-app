@@ -156,10 +156,16 @@ class GenerationRequest:
     ) -> dict[str, Any]:
         """Payload for `tools/codex-daemon` image jobs.
 
-        Dual-sends `size` (what a 0.3.0 daemon reads) and `ratio` (what the
-        P3 daemon will read); `size` goes away once P3 ships. The aspect phrase
-        is appended to the prompt here because codex only honours shape
-        through language — the daemon must not have to know that.
+        Sends both `size` and `ratio`, and keeps doing so. `size` is the
+        canonical shape key — the daemon consumes it and nothing else for
+        shape; deleting it would force a ratio→size table into JS, recreating
+        the two-table drift this contract exists to end. `ratio` rides along
+        for logging and attribution only — `index.mjs` says in so many words
+        that this side ignores it. (`CodexLocalProtocol.resolution=False` is
+        the model's layer, not this one: we send `--size`, the model just
+        does not honour the pixel count.) The aspect phrase is appended to the
+        prompt here because codex only honours shape through language — the
+        daemon must not have to know that.
         """
         return {
             "engine": "codex",

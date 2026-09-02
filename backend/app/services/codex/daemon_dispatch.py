@@ -20,15 +20,50 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from loguru import logger
 
+from app.services.codex.daemon_version import (
+    reported_daemon_version,
+    version_at_least,
+)
+
 DEFAULT_TIMEOUT_S = 600
+
+# Image/video jobs on the codex engine need a daemon that forwards --quality
+# (0.4.0). Below that, `quality` is silently discarded one layer down — the
+# exact fake switch P4 removed from the UI — so the honest answer is a typed
+# refusal that tells the user how to update, not a quiet degrade.
+MIN_IMAGE_DAEMON_VERSION = "0.4.0"
+
+# The refusal has to survive the trip to the user, and be followable once it
+# gets there. Two constraints shape the string below, both learned the hard way:
+#
+# 1. ASCII ONLY. This message ends up in `dbos.workflow_status.error` as a
+#    pickle, and `public.dbos_error_to_text()` (migration 219) escape-renders
+#    that pickle, turns every byte >= 0x80 into a delimiter, and keeps only the
+#    LONGEST surviving chunk. One em-dash therefore silently deletes whichever
+#    half of the sentence is shorter. Measured against the live nous-db: with an
+#    em-dash the reported version and the minimum were both dropped, leaving
+#    only the tail. Do not "prettify" this punctuation back —
+#    ``test_refusal_message_is_pure_ascii`` fails if anyone does.
+# 2. It must name a command that actually works for the person reading it.
+#    A bare "re-run install.sh" does not: that path demands a pairing code
+#    (install.sh's pair block) and dies without one, and the reader is already
+#    paired by definition. `--update` is the route that keeps their token.
+_UPDATE_COMMAND = (
+    "curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master"
+    "/tools/codex-daemon/install.sh | sh -s -- --update"
+)
 
 
 class DaemonOfflineError(RuntimeError):
     """The user has no daemon connected right now."""
+
+
+class DaemonUpdateRequiredError(RuntimeError):
+    """The connected daemon is too old for this job; message says how to update."""
 
 
 class DaemonTransport(Protocol):
@@ -96,12 +131,14 @@ async def dispatch_to_daemon(
     mint_ticket: Optional[Callable[..., Any]] = None,
     attribution: Optional[dict[str, Any]] = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    daemon_version: Optional[Callable[[str], Awaitable[Optional[str]]]] = None,
 ) -> dict[str, Any]:
     """Send one job to the user's daemon and await its result.
 
-    Raises ``DaemonOfflineError`` when nothing is connected, ``TimeoutError``
-    when the daemon never answers, ``RuntimeError`` when it answers with a
-    failure (message carries the daemon's typed code).
+    Raises ``DaemonOfflineError`` when nothing is connected,
+    ``DaemonUpdateRequiredError`` when the connected daemon is older than this
+    job needs, ``TimeoutError`` when the daemon never answers, ``RuntimeError``
+    when it answers with a failure (message carries the daemon's typed code).
 
     ``attribution`` is the job's generation context. It goes on the TICKET,
     not into the job the daemon receives: the daemon never needs it, and the
@@ -119,6 +156,22 @@ async def dispatch_to_daemon(
         raise DaemonOfflineError(
             "your local codex daemon is not connected — run `nous-codex run`"
         )
+
+    if payload.get("engine") == "codex" and kind in ("image", "video"):
+        resolver = daemon_version or reported_daemon_version
+        reported = await resolver(user_id)
+        # None = could not find out (offline / presence-vs-table disagreement):
+        # not a verdict — skip, and let a later step raise the truthful error.
+        if reported is not None and not version_at_least(
+            reported, MIN_IMAGE_DAEMON_VERSION
+        ):
+            raise DaemonUpdateRequiredError(
+                f"your local codex daemon is {reported}; image generation needs "
+                f">= {MIN_IMAGE_DAEMON_VERSION}. No pairing code needed - update "
+                f"it in place with: {_UPDATE_COMMAND} "
+                "(on Windows, run install.ps1 with -Update instead; see "
+                "tools/codex-daemon/README.md, section Upgrading)"
+            )
 
     job_id = str(uuid.uuid4())
     ticket = mint_ticket(
