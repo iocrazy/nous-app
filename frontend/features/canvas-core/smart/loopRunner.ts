@@ -20,7 +20,7 @@
 // Pure orchestration: caller/handlers/stop are injected, no store access.
 
 import type { CanvasConnection, CanvasNode } from '../types';
-import { resolveEntityRef } from './entityRef';
+import { resolveAssetRef } from './assetRef';
 import {
   resolveEffectiveSourceUrl,
   resolveEffectiveSourceUrls,
@@ -122,7 +122,7 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
         opts.nodes,
         opts.connections,
       ),
-      entity_ref: resolveEntityRef(id, opts.nodes, opts.connections),
+      asset_ref: resolveAssetRef(id, opts.nodes, opts.connections),
     });
   }
   if (baseContexts.length === 0) {

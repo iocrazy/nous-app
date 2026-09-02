@@ -139,11 +139,18 @@ export function withGenerationRunner(
         params.video_mode = gen.video_mode;
       if (gen.kind === 'video' && ctx.source_urls?.length)
         params.source_urls = ctx.source_urls;
-      if (ctx.entity_ref) {
-        // CC5 asset backlink: params land verbatim in generated_media.params,
-        // which the library asset strips query by entity.
-        params.entity_kind = ctx.entity_ref.kind;
-        params.entity_id = ctx.entity_ref.id;
+      if (ctx.asset_ref) {
+        // Asset-library provenance (P4, plan ruling H): params land verbatim in
+        // generated_media.params, so a run carries the asset it was launched
+        // from — and the outfit, which is a different picture of the same
+        // character and therefore a separate answer to "what came from this".
+        //
+        // This REPLACED `entity_kind` / `entity_id`, whose ids were rows of
+        // `_legacy_project_characters` / `_legacy_project_lib_entities` and
+        // whose only reader had been gone since P3 Task 6. Both halves went
+        // together; a negative test pins that neither key is written again.
+        params.source_asset_id = ctx.asset_ref.asset_id;
+        if (ctx.asset_ref.loadout_id) params.loadout_id = ctx.asset_ref.loadout_id;
       }
 
       // IC 分隔符拆分: each split item dispatches independently — one

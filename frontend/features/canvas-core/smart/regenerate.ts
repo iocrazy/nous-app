@@ -17,7 +17,7 @@ import {
 import { onGenerationDispatched } from './dispatchEffects';
 import { markDroppedKnobs } from './droppedKnobs';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
-import { resolveEntityRef } from './entityRef';
+import { resolveAssetRef } from './assetRef';
 import { DEFAULT_SPLIT_SEPARATOR, splitPromptItems } from './promptSplit';
 import {
   resolveEffectiveSourceUrl,
@@ -105,7 +105,7 @@ export async function rerunPrompt(
     // its i2i / i2v input.
     source_url: resolveEffectiveSourceUrl(prompt!, nodes, connections),
     source_urls: resolveEffectiveSourceUrls(prompt!, nodes, connections),
-    entity_ref: resolveEntityRef(promptId, nodes, connections),
+    asset_ref: resolveAssetRef(promptId, nodes, connections),
     split_prompts: data.split_enabled
       ? splitPromptItems(data.body, data.split_separator ?? DEFAULT_SPLIT_SEPARATOR)
       : undefined,

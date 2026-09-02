@@ -43,7 +43,7 @@ import {
   markGenerationRecover,
   settleGenerationSlot,
 } from './genSlots';
-import { resolveEntityRef } from './entityRef';
+import { resolveAssetRef } from './assetRef';
 import { buildPromptAssetLoad } from './loadPromptAsset';
 import { importResourceAsCanvasMedia } from './mediaImport';
 import {
@@ -367,7 +367,7 @@ export function CanvasComposer({
             gen: data.gen ?? null,
             source_url: resolveEffectiveSourceUrl(n as never, nodes, connections),
             source_urls: resolveEffectiveSourceUrls(n as never, nodes, connections),
-            entity_ref: resolveEntityRef(id, nodes, connections),
+            asset_ref: resolveAssetRef(id, nodes, connections),
           };
         })
         .filter((v): v is RunnerContext => v !== null);

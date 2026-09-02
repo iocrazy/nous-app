@@ -448,7 +448,7 @@ export function CanvasView({
   // hand-written URL, and the un-parameterised path (an empty entity canvas
   // seeding an UNBOUND card) is unaffected — so this is left intact rather
   // than trimmed. Re-establishing an entry point from the asset library is P4
-  // canvas work, together with `smart/entityRef.ts`.
+  // Task 6 work; the provenance half moved to `smart/assetRef.ts` in Task 5.
   const [searchParams] = useSearchParams();
   const seededRef = useRef<string | null>(null);
   useEffect(() => {

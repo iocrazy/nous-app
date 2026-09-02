@@ -39,7 +39,7 @@ const baseCtx = (over: Partial<RunnerContext> = {}): RunnerContext =>
     gen: { kind: 'image', model: 'm', ratio: 'auto', count: 1 },
     source_url: '/api/v1/generated-media/7/cover',
     source_urls: ['/api/v1/generated-media/7/cover'],
-    entity_ref: null,
+    asset_ref: null,
     ...over,
   }) as RunnerContext;
 

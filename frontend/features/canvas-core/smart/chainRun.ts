@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { markDroppedKnobs } from './droppedKnobs';
 import { withGenerationRunner } from './generationRunner';
-import { resolveEntityRef } from './entityRef';
+import { resolveAssetRef } from './assetRef';
 import {
   resolveEffectiveSourceUrl,
   resolveEffectiveSourceUrls,
@@ -183,7 +183,7 @@ export async function startChainRun(tailId: string): Promise<boolean> {
           gen: data.gen ?? null,
           source_url: resolveEffectiveSourceUrl(prompt, live.nodes, live.connections),
           source_urls: resolveEffectiveSourceUrls(prompt, live.nodes, live.connections),
-          entity_ref: resolveEntityRef(thin.promptId, live.nodes, live.connections),
+          asset_ref: resolveAssetRef(thin.promptId, live.nodes, live.connections),
         };
         return resolveCaller()(ctx);
       },

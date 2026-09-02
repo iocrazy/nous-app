@@ -78,7 +78,7 @@ describe('withGenerationRunner', () => {
     expect(baseCaller).not.toHaveBeenCalled();
   });
 
-  it('stamps entity ownership into dispatch params (CC5 asset backlink)', async () => {
+  it('stamps asset provenance into dispatch params (source_asset_id + loadout_id)', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockResolvedValue({
       phase: 'completed',
@@ -89,7 +89,7 @@ describe('withGenerationRunner', () => {
     await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', ratio: '3:4', count: 1 },
-      entity_ref: { kind: 'character', id: '123456789' },
+      asset_ref: { asset_id: '123456789', loadout_id: '987654321' },
     });
 
     expect(dispatchGenerations).toHaveBeenCalledWith('9', {
@@ -98,8 +98,56 @@ describe('withGenerationRunner', () => {
       prompt: 'hello',
       model: '',
       count: 1,
-      params: { ratio: '3:4', entity_kind: 'character', entity_id: '123456789' },
+      params: {
+        ratio: '3:4',
+        source_asset_id: '123456789',
+        loadout_id: '987654321',
+      },
     });
+  });
+
+  it('omits loadout_id when the card binds no outfit', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
+    });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+      asset_ref: { asset_id: '123456789', loadout_id: null },
+    });
+
+    const params = dispatchGenerations.mock.calls[0][1].params;
+    expect(params).toEqual({ source_asset_id: '123456789' });
+    expect('loadout_id' in params).toBe(false);
+  });
+
+  // NEGATIVE (plan ruling H): the retired stamp must never come back. Its ids
+  // were `_legacy_project_*` rows and its only reader has been gone since P3
+  // Task 6 — writing it again would resume emitting provenance nothing reads,
+  // pointed at tables scheduled for DROP in P6.
+  it('never writes the retired entity_kind / entity_id stamp', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
+    });
+
+    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+      asset_ref: { asset_id: '123456789', loadout_id: '987654321' },
+      // A legacy-shaped field on the context must not be picked up either.
+      ...({ entity_ref: { kind: 'character', id: '42' } } as Record<string, unknown>),
+    });
+
+    const params = dispatchGenerations.mock.calls[0][1].params;
+    expect(Object.keys(params)).not.toContain('entity_kind');
+    expect(Object.keys(params)).not.toContain('entity_id');
   });
 
   it('reports a failed task in-band', async () => {

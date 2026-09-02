@@ -13,7 +13,7 @@
  * the lifecycle UX stays exercisable without a backend.
  */
 
-import type { EntityRef } from './entityRef';
+import type { AssetRef } from './assetRef';
 import type { PromptGenSettings, PromptNodeData } from './types';
 
 export type PromptStatus = PromptNodeData['run_status'];
@@ -33,9 +33,12 @@ export interface RunnerContext {
   source_urls?: string[];
   /** IC 分隔符: pre-split prompt items — each dispatches independently. */
   split_prompts?: string[];
-  /** Owning library card (CC5) — stamped into generation params so the
-   *  produced media backlinks to its character/location/prop. */
-  entity_ref?: EntityRef | null;
+  /** Owning ASSET card (asset-library P4) — the nearest upstream `asset`
+   *  node, stamped into generation params as `source_asset_id` / `loadout_id`
+   *  so the produced media backlinks to the library entity it came from.
+   *  Replaced the `entity_kind`/`entity_id` stamp, which pointed at the
+   *  `_legacy_project_*` tables (plan ruling H). */
+  asset_ref?: AssetRef | null;
 }
 
 export interface RunnerResult {
