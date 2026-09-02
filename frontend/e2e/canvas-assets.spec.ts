@@ -199,7 +199,15 @@ interface Recorded {
   /** Every generation dispatch body, in order. */
   dispatches: Record<string, unknown>[];
   /** Every `/assets/{id}/bundle` query, in order. */
-  bundleQueries: { assetId: string; model: string | null; loadoutId: string | null }[];
+  bundleQueries: {
+    assetId: string;
+    model: string | null;
+    loadoutId: string | null;
+    /** EVERY `selected_file_ids` value, in wire order. `[]` here means the
+     *  parameter was absent — which the endpoint reads as "no checklist, send
+     *  every file". `['']` is the other thing: an explicitly empty pick. */
+    selectedFileIds: string[];
+  }[];
   /** Every `resolve-legacy` query, in order. */
   legacyQueries: { kind: string | null; legacyId: string | null }[];
 }
@@ -253,6 +261,7 @@ async function routeCanvasApi(
         assetId: bundle[1],
         model: url.searchParams.get('model'),
         loadoutId: url.searchParams.get('loadout_id'),
+        selectedFileIds: url.searchParams.getAll('selected_file_ids'),
       });
       return route.fulfill({ json: { success: true, data: BUNDLE } });
     }
@@ -436,6 +445,16 @@ test('an asset card wired into a prompt puts its references and its prompt into 
   expect(rec.bundleQueries).toHaveLength(1);
   expect(rec.bundleQueries[0].assetId).toBe(ASSET_ID);
   expect(rec.bundleQueries[0].model).toBe(MODEL);
+  // The card's checklist rides on the SAME query — the seeded `sheet` plus the
+  // `stills` ticked above — because the provider ceiling has to be applied
+  // WITHIN it. Trimming server-side over every file the asset owns and
+  // intersecting client-side afterwards is the same two steps in the wrong
+  // order, and it delivers nothing whenever the user's picks are not a prefix
+  // of the priority order. Asserted on the real query string rather than
+  // through the service stub, because the spelling is the contract: a
+  // zero-length repeated parameter is indistinguishable from an absent one,
+  // and absent means "send them all".
+  expect(rec.bundleQueries[0].selectedFileIds).toEqual([SHEET_FILE, STILLS_FILE]);
 
   const body = rec.dispatches[0] as {
     prompt: string;
