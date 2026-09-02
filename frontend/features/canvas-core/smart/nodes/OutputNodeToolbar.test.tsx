@@ -27,7 +27,7 @@ describe('OutputNodeToolbar', () => {
     const onPreview = vi.fn();
     const onRerun = vi.fn();
     render(
-      <OutputNodeToolbar items={ITEMS} onPreview={onPreview} onRerun={onRerun} pinned />,
+      <OutputNodeToolbar items={ITEMS} onPreview={onPreview} onRerun={onRerun} pinned hovered={false} />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     expect(onPreview).toHaveBeenCalled();
@@ -39,11 +39,11 @@ describe('OutputNodeToolbar', () => {
 
   it('hides Rerun without a source prompt and disables it while rerunning', () => {
     const { rerender } = render(
-      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned />,
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned hovered={false} />,
     );
     expect(screen.queryByRole('button', { name: 'Rerun' })).toBeNull();
     rerender(
-      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} rerunning pinned />,
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} rerunning pinned hovered={false} />,
     );
     expect(
       (screen.getByRole('button', { name: 'Rerun' }) as HTMLButtonElement).disabled,
@@ -51,12 +51,12 @@ describe('OutputNodeToolbar', () => {
   });
 
   it('renders nothing with no items', () => {
-    render(<OutputNodeToolbar items={[]} onPreview={vi.fn()} pinned />);
+    render(<OutputNodeToolbar items={[]} onPreview={vi.fn()} pinned hovered={false} />);
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
 
   it('every button is nodrag so clicks never start a node drag', () => {
-    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} pinned />);
+    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} pinned hovered={false} />);
     const buttons = screen
       .getByTestId('output-node-toolbar')
       .querySelectorAll('button');
@@ -73,6 +73,7 @@ it('renders a Brush key that opens the brush editor when wired', () => {
       onPreview={() => {}}
       onBrush={onBrush}
       pinned
+      hovered={false}
     />,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Brush' }));
@@ -101,8 +102,16 @@ describe('OutputNodeToolbar — mounted only when it can be used (fluency T5)', 
     expect(screen.getByTestId('output-node-toolbar')).toBeInTheDocument();
   });
 
-  it('defaults to absent — an unstated hover is not a hover', () => {
-    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} />);
-    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  it('is VISIBLE when hover revealed it, not merely mounted at opacity-0', () => {
+    // The mount gate and the opacity class have to agree. `group-hover` is
+    // the CSS :hover, which is NOT the hook's focus-within state — so a bar
+    // revealed by focus alone used to compute to opacity-0: a focused
+    // control the keyboard user cannot see.
+    render(
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned={false} hovered />,
+    );
+    const bar = screen.getByTestId('output-node-toolbar');
+    expect(bar.classList.contains('opacity-100')).toBe(true);
+    expect(bar.classList.contains('opacity-0')).toBe(false);
   });
 });

@@ -64,8 +64,28 @@ function renderEngine(extra: Record<string, unknown> = {}) {
       {...extra}
     />,
   );
-  return { view, props: capturedProps };
+  // `nodes` LAST, after the spread: this helper's whole job is to replace the
+  // node list, so `extra.nodes` must not win here the way it does above.
+  const rerenderWithNodes = (nodes: unknown[]) =>
+    act(() => {
+      view.rerender(
+        <CanvasEngine
+          edges={[]}
+          onNodesChange={() => {}}
+          onEdgesChange={() => {}}
+          {...extra}
+          nodes={nodes as never}
+        />,
+      );
+    });
+  return { view, props: capturedProps, rerenderWithNodes };
 }
+
+/** Release the pointer WITHOUT React Flow ever dispatching its drag-stop. */
+const releasePointer = (type: 'pointerup' | 'pointercancel' = 'pointerup') =>
+  act(() => {
+    document.dispatchEvent(new Event(type, { bubbles: true }));
+  });
 
 const fire = (props: Record<string, unknown>, name: string, ...args: unknown[]) =>
   act(() => {
@@ -153,6 +173,69 @@ describe('CanvasEngine — overlapping gestures compose', () => {
   });
 });
 
+describe('CanvasEngine — a drag React Flow ABORTS still ends', () => {
+  // React Flow's drag `end` handler returns before dispatching
+  // `onNodeDragStop` whenever `abortDrag` is set
+  // (@xyflow/system/dist/esm/index.js:2262-2267). Two paths set it: a second
+  // touch landing mid-drag (pinch on a touch device), and the dragged node
+  // vanishing from `nodeLookup` — which the Delete/Backspace binding at
+  // features/canvas-core/ui/useCanvasShortcuts.ts:243 can do from a
+  // window-level listener while a drag is held.
+  //
+  // The start already fired, so nothing would ever clear the flag: the whole
+  // app stays flat — every card without blur, shadow OR selection ring — for
+  // the rest of the session. An unpaired START is the direction that pins the
+  // class ON, and it is the opposite of the unpaired-end case above.
+
+  it('clears the class when the pointer is released with no drag-stop', () => {
+    const { props } = renderEngine();
+    fire(props, 'onNodeDragStart', {}, NODE);
+    expect(interacting()).toBe(true);
+    releasePointer('pointerup');
+    expect(interacting()).toBe(false);
+  });
+
+  it('clears it on pointercancel too (touch drag interrupted by a second touch)', () => {
+    const { props } = renderEngine();
+    fire(props, 'onNodeDragStart', {}, NODE);
+    releasePointer('pointercancel');
+    expect(interacting()).toBe(false);
+  });
+
+  it('clears it the moment the dragged node disappears from the node list', () => {
+    // Delete pressed mid-drag: do not make the user release the mouse before
+    // the canvas looks right again.
+    const { props, rerenderWithNodes } = renderEngine({ nodes: [NODE] });
+    fire(props, 'onNodeDragStart', {}, NODE);
+    expect(interacting()).toBe(true);
+    rerenderWithNodes([]);
+    expect(interacting()).toBe(false);
+  });
+
+  it('leaves other nodes disappearing alone while the dragged one survives', () => {
+    const other = { id: 'n2', position: { x: 9, y: 9 }, data: {} };
+    const { props, rerenderWithNodes } = renderEngine({ nodes: [NODE, other] });
+    fire(props, 'onNodeDragStart', {}, NODE);
+    rerenderWithNodes([NODE]);
+    expect(interacting()).toBe(true);
+  });
+
+  it('a pointer release never cuts short a live viewport move', () => {
+    // The watchdog is scoped to the DRAG flag only. With a drag live inside a
+    // pan, its `pointerup` fires while the pan is still running (React Flow's
+    // own onMoveEnd comes later), so a watchdog that cleared both flags would
+    // give every card its blur back mid-pan — the exact stutter this task
+    // removes, reintroduced through the abort fix.
+    const { props } = renderEngine();
+    fire(props, 'onMoveStart', {}, VIEWPORT);
+    fire(props, 'onNodeDragStart', {}, NODE);
+    releasePointer('pointerup');
+    expect(interacting()).toBe(true);
+    fire(props, 'onMoveEnd', {}, VIEWPORT);
+    expect(interacting()).toBe(false);
+  });
+});
+
 describe('CanvasEngine — the class never outlives the canvas', () => {
   it('clears it on unmount even mid-drag', () => {
     const { view, props } = renderEngine();
@@ -178,5 +261,19 @@ describe('index.css — what the interacting class actually costs', () => {
 
   it('drops the blur on floating canvas chrome as well', () => {
     expect(css).toMatch(/\.mh-canvas-interacting \.canvas-island/);
+  });
+
+  it('keeps the selection ring — only the soft shadow goes', () => {
+    // `.mh-canvas-interacting .mh-node` (0-2-0) sets `box-shadow: none`,
+    // which outranks `.mh-node-selected` (0-1-0) whose ENTIRE ring is a
+    // box-shadow. Without an override every selected card loses its ring the
+    // instant you grab it or pan — including the card under the cursor.
+    expect(css).toMatch(
+      /\.mh-canvas-interacting \.mh-node-selected[^}]*box-shadow:\s*0 0 0 1px var\(--canvas-strong\)/s,
+    );
+    // …and it must NOT drag the 56px soft shadow back in with it.
+    expect(css).not.toMatch(
+      /\.mh-canvas-interacting \.mh-node-selected[^}]*var\(--mh-node-shadow\)/s,
+    );
   });
 });

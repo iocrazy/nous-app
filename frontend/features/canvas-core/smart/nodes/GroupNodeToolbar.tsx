@@ -30,8 +30,10 @@ export interface GroupNodeToolbarProps {
    * Pointer over the group card, or focus inside it (fluency Wave 2, Task 5).
    * Unpinned and unhovered the bar is NOT RENDERED — same reasoning as
    * OutputNodeToolbar: a frosted island faded to `opacity-0` still repaints.
+   * REQUIRED for the same reason — a forgotten prop must not silently
+   * render nothing.
    */
-  hovered?: boolean;
+  hovered: boolean;
 }
 
 export function GroupNodeToolbar({
@@ -53,7 +55,9 @@ export function GroupNodeToolbar({
     <div
       data-testid="group-node-toolbar"
       className={`canvas-island absolute -top-10 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl px-1.5 py-1 transition-opacity duration-150 ${
-        pinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        // See OutputNodeToolbar: `group-hover` is CSS :hover, not the node
+        // view's focus-within state, so `hovered` has to be here too.
+        pinned || hovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
       }`}
     >
       {/* IC shows icon+text on every key (整理排列/预览/宫格拼接/批量下载/

@@ -433,12 +433,71 @@ export function CanvasEngine({
       draggingRef.current || movingRef.current,
     );
   }, []);
+  // Which node the live drag is moving — read by the abort watchdog below.
+  const draggingNodeIdRef = useRef<string | null>(null);
+  // Detaches the abort watchdog; non-null exactly while a drag is live.
+  const detachDragWatchRef = useRef<(() => void) | null>(null);
+
+  // React Flow does NOT always close a drag it opened. Its `end` handler
+  // returns before dispatching `onNodeDragStop` whenever `abortDrag` is set
+  // (@xyflow/system/dist/esm/index.js:2262-2267), which happens on a second
+  // touch landing mid-drag and on the dragged node vanishing from
+  // `nodeLookup`. The latter is a keystroke away: the Delete/Backspace
+  // binding in features/canvas-core/ui/useCanvasShortcuts.ts is a
+  // window-level listener that fires happily while a drag is held.
+  //
+  // An unpaired START is the dangerous direction — it pins the class ON, and
+  // nothing would ever take it off, so the whole app stays flat for the rest
+  // of the session. The two flags are idempotent under unpaired ENDS but
+  // cannot help here, so a drag carries its own watchdog: the pointer being
+  // released ends the drag whether or not React Flow says so.
+  const endDrag = useCallback(() => {
+    detachDragWatchRef.current?.();
+    detachDragWatchRef.current = null;
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    draggingNodeIdRef.current = null;
+    syncInteracting();
+  }, [syncInteracting]);
+
+  const beginDrag = useCallback(
+    (nodeId: string | null) => {
+      draggingRef.current = true;
+      draggingNodeIdRef.current = nodeId;
+      syncInteracting();
+      detachDragWatchRef.current?.();
+      const onRelease = () => endDrag();
+      // `pointerup`/`pointercancel`, not `mouseup`: d3-drag (which React Flow
+      // uses) registers a capture-phase `mouseup` on the window and calls
+      // stopImmediatePropagation, so a mouseup listener here would never run.
+      // It does not touch pointer events. In a normal drag these arrive just
+      // before React Flow's drag-stop, and clearing twice is a no-op.
+      document.addEventListener('pointerup', onRelease);
+      document.addEventListener('pointercancel', onRelease);
+      detachDragWatchRef.current = () => {
+        document.removeEventListener('pointerup', onRelease);
+        document.removeEventListener('pointercancel', onRelease);
+      };
+    },
+    [endDrag, syncInteracting],
+  );
+
+  // Second half of the abort cover: Delete pressed mid-drag should restore the
+  // canvas immediately, not make the user release the mouse first.
+  useEffect(() => {
+    const id = draggingNodeIdRef.current;
+    if (id != null && !nodes.some((n) => n.id === id)) endDrag();
+  }, [nodes, endDrag]);
+
   // A drag interrupted by navigation must not leave the WHOLE app blur-less:
   // the class lives on <body>, so it outlives this component unless we clear
-  // it ourselves.
+  // it ourselves. Detach before clearing, so a late release is silent.
   useEffect(
     () => () => {
+      detachDragWatchRef.current?.();
+      detachDragWatchRef.current = null;
       draggingRef.current = false;
+      draggingNodeIdRef.current = null;
       movingRef.current = false;
       document.body.classList.remove(INTERACTING_CLASS);
     },
@@ -447,12 +506,11 @@ export function CanvasEngine({
 
   const handleNodeDragStart = useCallback(
     (_evt: unknown, node?: AnyNode) => {
-      draggingRef.current = true;
-      syncInteracting();
+      beginDrag(node?.id ?? null);
       dragStartPosRef.current = node ? { ...node.position } : null;
       onNodeDragStart?.();
     },
-    [onNodeDragStart, syncInteracting],
+    [onNodeDragStart, beginDrag],
   );
 
   // Snap-connect hit test (Infinite parity): Alt held, solo drag, probe point
@@ -523,8 +581,7 @@ export function CanvasEngine({
     (evt: unknown, node: AnyNode) => {
       // First, before any early return below: the gesture is over whichever
       // branch this drop takes.
-      draggingRef.current = false;
-      syncInteracting();
+      endDrag();
       setGuides(NO_GUIDES);
       setSnapTargetId(null);
       // Snap-connect drop: the caller creates the edge and restores the node's
@@ -582,7 +639,7 @@ export function CanvasEngine({
       guideTolerance,
       snapConnectTarget,
       onSnapConnect,
-      syncInteracting,
+      endDrag,
     ],
   );
 

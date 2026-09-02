@@ -73,6 +73,8 @@ function renderNode(selected = true, data: Record<string, unknown> = {}) {
   );
 }
 
+const bar = () => screen.getByTestId('output-node-toolbar');
+
 describe('OutputNodeView floating toolbar (P2-3)', () => {
   it('mounts the toolbar on media nodes; text nodes get none', () => {
     renderNode();
@@ -96,7 +98,7 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
     renderNode(false);
     const card = screen.getByTestId('smart-output-node');
     fireEvent.mouseEnter(card);
-    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
+    expect(bar().classList.contains('opacity-100')).toBe(true);
     fireEvent.mouseLeave(card);
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
@@ -113,7 +115,11 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
       .querySelector('button[aria-label="Preview"]')!;
     fireEvent.focus(preview);
     fireEvent.mouseLeave(card);
-    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
+    // Mounted AND visible. `group-hover` is the CSS :hover, which the pointer
+    // has just left — so a bar kept alive by focus alone would compute to
+    // opacity-0: a focused control the keyboard user cannot see.
+    expect(bar().classList.contains('opacity-100')).toBe(true);
+    expect(bar().classList.contains('opacity-0')).toBe(false);
     fireEvent.blur(preview);
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
@@ -125,14 +131,14 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
     renderNode(false);
     const card = screen.getByTestId('smart-output-node');
     fireEvent.mouseEnter(card);
-    const bar = screen.getByTestId('output-node-toolbar');
-    const preview = bar.querySelector('button[aria-label="Preview"]')!;
-    const download = bar.querySelector('button[aria-label="Download"]')!;
+    const preview = bar().querySelector('button[aria-label="Preview"]')!;
+    const download = bar().querySelector('button[aria-label="Download"]')!;
     fireEvent.focus(preview);
     fireEvent.mouseLeave(card);
     // Focus leaves Preview, but it is heading for Download — inside the card.
     fireEvent.blur(preview, { relatedTarget: download });
-    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
+    expect(bar().classList.contains('opacity-100')).toBe(true);
+    expect(bar().classList.contains('opacity-0')).toBe(false);
   });
 
   it('Preview opens the lightbox immediately — no 250ms delay', () => {
@@ -162,6 +168,7 @@ describe('IC editing keys on the toolbar (⑥)', () => {
         onMask={() => {}}
         onSplit={() => {}}
         pinned
+        hovered={false}
       />,
     );
     for (const label of ['Preview', 'Crop', 'Expand', 'Mask', 'Split', 'Download']) {
