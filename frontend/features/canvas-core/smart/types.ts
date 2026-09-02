@@ -11,6 +11,7 @@
  * UI layer just calls into it.
  */
 
+import type { AssetType } from '../../../components/assets/assetSlots';
 import type { CropRegion } from '../editor/types';
 import type { CanvasNode } from '../types';
 
@@ -39,7 +40,12 @@ export type SmartNodeType =
   | 'group'
   | 'character'
   | 'location'
-  | 'prop';
+  | 'prop'
+  // Asset-library reference card (P4 Task 4). Unlike `character`/`location`/
+  // `prop` — which bind rows of the two `_legacy_project_*` tables — this one
+  // points at an `assets` row and is the type the backend's
+  // `extract_asset_node_refs` mirrors into `canvas_asset_refs`.
+  | 'asset';
 
 export type LoopMode = 'serial' | 'parallel';
 
@@ -401,6 +407,51 @@ export interface LibEntityNodeData {
 }
 
 /**
+ * Asset-library reference card (P4 Task 4).
+ *
+ * The node is a POINTER, never a copy: everything below except
+ * `loadout_id` / `selected_file_ids` is a display SNAPSHOT taken when the
+ * card was placed, so a node renders before its detail fetch resolves and
+ * still renders when that fetch fails. The library row stays the authority —
+ * the view refreshes the snapshot from `fetchAssetDetail` and never writes
+ * back to `assets`.
+ *
+ * `asset_id` / `loadout_id` are Snowflake bigints as STRINGS (the assets
+ * router stringifies every BIGINT column). The backend extractor
+ * `services/canvas/asset_node_refs.py` reads exactly `type === 'asset'` +
+ * `data.asset_id` + `data.loadout_id` and mirrors them into
+ * `canvas_asset_refs` on every save — renaming either key silently empties
+ * that mirror, which is why they are spelled the wire's way and not the
+ * frontend's.
+ *
+ * `selected_file_ids` holds RESOURCE ids (`asset_files.resource_id`), the
+ * same vocabulary the bundle endpoint answers in. It is node-local on
+ * purpose: two cards for one asset may reference different files, and
+ * writing the choice back to the library would make one canvas's framing
+ * decision everyone else's.
+ *
+ * `removed` is set only when the detail fetch answers 404 — the asset was
+ * deleted out from under the canvas. A network failure or a 403 must NOT
+ * set it: the card would then claim a deletion that never happened, and the
+ * flag persists into `nodes_json`.
+ */
+export interface AssetNodeData {
+  /** `assets.id` — Snowflake as string. The backend extractor's key. */
+  asset_id: string;
+  /** `asset_loadouts.id` for a character's outfit, or null = no loadout. */
+  loadout_id: string | null;
+  /** `asset_files.resource_id` values this card feeds downstream. */
+  selected_file_ids: string[];
+  // ── Display snapshot ──────────────────────────────────────────────────
+  name: string;
+  asset_type: AssetType;
+  cover_file_id: string | null;
+  readiness_state: 'ready' | 'draft';
+  /** The asset is gone (detail answered 404). Absent = not known to be gone. */
+  removed?: boolean;
+}
+
+/**
  * Connect-rule predicate for smart mode.
  *
  *   shot   → prompt          ✓
@@ -417,6 +468,10 @@ export interface LibEntityNodeData {
  *   loop   → shot            ✗ (shots are sources)
  *   output → anything        ✗ (outputs are terminal)
  *   *      → shot            ✗ (shots are sources only)
+ *   asset  → prompt/shot/llm ✓ (a library reference feeds authoring)
+ *   asset  → anything else   ✗
+ *   *      → asset           ✗ (asset cards are pure sources — nothing
+ *                            writes back into the library over a wire)
  *   <unknown type>           allow — the surface is mode-aware, custom
  *                            future types opt in their own rules.
  */
@@ -431,6 +486,12 @@ export function canConnectSmart(
     return (
       targetType === 'group' || targetType === 'prompt' || targetType === 'loop'
     );
+  // Asset-library cards (P4 Task 4) are PURE SOURCES: they feed the three
+  // authoring consumers and accept nothing. Stated BEFORE the `→ shot`
+  // blanket refusal below, which would otherwise swallow `asset → shot`.
+  if (targetType === 'asset') return false;
+  if (sourceType === 'asset')
+    return targetType === 'prompt' || targetType === 'shot' || targetType === 'llm';
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;
@@ -484,6 +545,9 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   character: 280,
   location: 280,
   prop: 280,
+  // Wider than the entity cards: the asset card stacks a cover + meta row
+  // above a loadout select and a scrolling reference-file checklist.
+  asset: 300,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {

@@ -11,7 +11,13 @@
  * (it dedupes on insert), so simple suffixing is fine here.
  */
 
+import { PRIMARY_SLOT } from '../../../components/assets/assetSlots';
 import type {
+  AssetFileRow,
+  AssetRow,
+} from '../../../services/assetsService';
+import type {
+  AssetNodeData,
   SmartNode,
   LlmNodeData,
   MediaNode,
@@ -260,6 +266,87 @@ export function createLibEntityNode(
       badge_tag: data.badge_tag ?? '',
       description: data.description ?? '',
       cover_url: data.cover_url ?? null,
+    },
+  };
+}
+
+/**
+ * The row shape {@link createAssetNode} needs.
+ *
+ * `AssetRow` alone cannot seed `selected_file_ids`: it carries
+ * `file_counts_by_slot` (a tally) but not the file rows themselves, which
+ * only `GET /assets/{id}` returns. So the parameter is an `AssetRow` widened
+ * with the optional `files` — `AssetRowDetail` is assignable as-is, and a
+ * caller holding only a summary row still gets a valid node, just with an
+ * empty selection.
+ */
+export type AssetNodeSeed = AssetRow & { files?: readonly AssetFileRow[] };
+
+export interface AssetFactoryOptions extends FactoryOptions {
+  /** `asset_loadouts.id` to bind, or null/undefined for none. */
+  loadoutId?: string | null;
+}
+
+/**
+ * Reference files this card starts out selected: the PRIMARY slot's, in the
+ * library's own `sort_order`.
+ *
+ * The primary slot is the one readiness is derived from, so it is the slot a
+ * user means by "this asset" before they say otherwise. `prompt` has no
+ * primary file slot (`PRIMARY_SLOT.prompt === null` — its body IS the
+ * primary), so a prompt asset seeds an empty selection rather than falling
+ * back to some other slot's files.
+ *
+ * When a loadout is bound, files pinned to a DIFFERENT loadout are excluded:
+ * a loadout-scoped file belongs to that outfit only. Files with no loadout
+ * are shared by every loadout and stay in.
+ *
+ * Exported for its test — the filter is the part worth pinning.
+ */
+export function primarySlotFileIds(
+  asset: AssetNodeSeed,
+  loadoutId: string | null,
+): string[] {
+  const primary = PRIMARY_SLOT[asset.asset_type];
+  if (primary === null || primary === undefined) return [];
+  const files = asset.files ?? [];
+  return files
+    .filter((f) => f.slot === primary)
+    .filter(
+      (f) =>
+        loadoutId === null || f.loadout_id === null || f.loadout_id === loadoutId,
+    )
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((f) => f.resource_id);
+}
+
+/**
+ * Asset-library reference card (P4 Task 4).
+ *
+ * Everything but `asset_id` / `loadout_id` / `selected_file_ids` is a display
+ * SNAPSHOT — see `AssetNodeData`. `removed` is deliberately NOT seeded: its
+ * absence means "not known to be gone", and writing `false` here would put a
+ * claim into `nodes_json` that nothing has checked yet.
+ */
+export function createAssetNode(
+  asset: AssetNodeSeed,
+  opts: AssetFactoryOptions = {},
+): SmartNode<AssetNodeData> {
+  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+  const loadoutId = opts.loadoutId ?? null;
+  return {
+    id: makeId('asset', random),
+    type: 'asset',
+    position: opts.position ?? DEFAULT_POSITION,
+    data: {
+      asset_id: asset.id,
+      loadout_id: loadoutId,
+      selected_file_ids: primarySlotFileIds(asset, loadoutId),
+      name: asset.name,
+      asset_type: asset.asset_type,
+      cover_file_id: asset.cover_file_id ?? null,
+      readiness_state: asset.readiness?.state === 'ready' ? 'ready' : 'draft',
     },
   };
 }

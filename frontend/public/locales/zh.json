@@ -3245,7 +3245,8 @@
         "timeline": "时间线",
         "media": "上传",
         "group": "分组",
-        "llm": "LLM"
+        "llm": "LLM",
+        "asset": "素材"
       },
       "desc": {
         "shot": "分镜卡——承载一拍的媒体素材",
@@ -3255,7 +3256,8 @@
         "timeline": "多段成片按序拼接",
         "media": "把图片或视频导入画布",
         "group": "把媒体、提示词、循环收进同一组",
-        "llm": "节点里的对话模型——文本进，文本出"
+        "llm": "节点里的对话模型——文本进，文本出",
+        "asset": "引用角色、场景、道具或提示词"
       }
     },
     "toolbar": {
@@ -3318,6 +3320,26 @@
       "searchPlaceholder": "按文件名搜索…",
       "all": "全部",
       "noResults": "未找到带提示词的素材"
+    },
+    "asset": {
+      "title": "素材",
+      "removed": "素材已删除",
+      "loadout": "素材造型",
+      "loadoutNone": "无造型",
+      "references": "参考文件",
+      "noFiles": "暂无参考文件",
+      "useFile": "使用 {{slot}} 参考",
+      "primary": "主槽",
+      "openSheet": "打开详情页",
+      "loading": "加载中…",
+      "loadFailed": "无法加载该素材",
+      "pickerTitle": "添加素材",
+      "searchLabel": "搜索素材",
+      "searchPlaceholder": "搜索素材…",
+      "allTypes": "全部",
+      "noResults": "未找到素材",
+      "listFailed": "无法加载素材库",
+      "pickFailed": "无法打开该素材，请重试。"
     }
   },
   "modelParams": {

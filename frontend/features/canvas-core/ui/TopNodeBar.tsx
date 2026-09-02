@@ -8,9 +8,10 @@
  * their preset workflows.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import {
   BotMessageSquare,
+  Boxes,
   Clapperboard,
   Film,
   ImagePlus,
@@ -22,10 +23,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { AssetPickerDialog } from '../smart/nodes/AssetPickerDialog';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
 import type { CanvasNode } from '../types';
 import {
+  createAssetNode,
   createLlmNode,
   createLoopNode,
   createMediaNode,
@@ -39,7 +42,11 @@ interface Chip {
   key: string;
   label: string;
   icon: LucideIcon;
-  make: (position: { x: number; y: number }) => CanvasNode;
+  /** Chips that create a node outright. Absent on `pick` chips, which have
+   *  to ask the library which asset first. */
+  make?: (position: { x: number; y: number }) => CanvasNode;
+  /** Opens the asset picker instead of creating immediately. */
+  pick?: true;
 }
 
 const CHIPS: Chip[] = [
@@ -70,6 +77,9 @@ const CHIPS: Chip[] = [
   { key: 'loop', label: 'Loop', icon: Repeat2, make: (p) => createLoopNode({}, { position: p }) as CanvasNode },
   { key: 'timeline', label: 'Timeline', icon: Film, make: (p) => createTimelineNode({}, { position: p }) as CanvasNode },
   { key: 'output', label: 'Output', icon: MonitorPlay, make: (p) => createOutputNode({}, { position: p }) as CanvasNode },
+  // Asset-library reference (P4 Task 4). No `make`: which asset is a
+  // question only the library can answer, so this one opens the picker.
+  { key: 'asset', label: 'Asset', icon: Boxes, pick: true },
 ];
 
 export interface TopNodeBarProps {
@@ -78,21 +88,41 @@ export interface TopNodeBarProps {
 
 export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
   const viewport = useCanvasCoreStore((s) => s.viewport);
-  const nodes = useCanvasCoreStore((s) => s.nodes);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
 
-  const addAtCenter = useCallback(
-    (chip: Chip) => {
-      const rect = surfaceRef.current?.getBoundingClientRect();
-      const screenCenter = rect
-        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-        : { x: 0, y: 0 };
-      const node = chip.make(screenToWorld(screenCenter, viewport));
-      setNodes([...nodes, node]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const centreInWorld = useCallback(() => {
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    const screenCenter = rect
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : { x: 0, y: 0 };
+    return screenToWorld(screenCenter, viewport);
+  }, [surfaceRef, viewport]);
+
+  const append = useCallback(
+    (node: CanvasNode) => {
+      // Read the LIVE list rather than the closure's: the picker resolves
+      // asynchronously, and a stale `nodes` would drop anything created
+      // while its detail fetch was in flight.
+      const current = useCanvasCoreStore.getState().nodes;
+      setNodes([...current, node]);
       setSelection([String((node as { id?: unknown }).id)]);
     },
-    [surfaceRef, viewport, nodes, setNodes, setSelection],
+    [setNodes, setSelection],
+  );
+
+  const addAtCenter = useCallback(
+    (chip: Chip) => {
+      if (chip.pick) {
+        setPickerOpen(true);
+        return;
+      }
+      if (!chip.make) return;
+      append(chip.make(centreInWorld()));
+    },
+    [append, centreInWorld],
   );
 
   return (
@@ -116,6 +146,14 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
           </button>
         );
       })}
+      {pickerOpen && (
+        <AssetPickerDialog
+          onPick={(asset) =>
+            append(createAssetNode(asset, { position: centreInWorld() }) as CanvasNode)
+          }
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

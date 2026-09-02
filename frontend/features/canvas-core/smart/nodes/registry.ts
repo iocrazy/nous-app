@@ -5,6 +5,7 @@
  * RF docs).
  */
 
+import { AssetNodeView } from './AssetNodeView';
 import { CharacterNodeView } from './CharacterNodeView';
 import { LibEntityNodeView } from './LibEntityNodeView';
 import { GroupNodeView } from './GroupNodeView';
@@ -17,6 +18,7 @@ import { ShotNodeView } from './ShotNodeView';
 import { TimelineNodeView } from './TimelineNodeView';
 
 export const SMART_NODE_TYPES = {
+  asset: AssetNodeView,
   character: CharacterNodeView,
   location: LibEntityNodeView,
   prop: LibEntityNodeView,

@@ -3245,7 +3245,8 @@
         "timeline": "Timeline",
         "media": "Upload",
         "group": "Group",
-        "llm": "LLM"
+        "llm": "LLM",
+        "asset": "Asset"
       },
       "desc": {
         "shot": "Shot card — media for one storyboard beat",
@@ -3255,7 +3256,8 @@
         "timeline": "Multi-segment film, stitched in order",
         "media": "Import images or video onto the canvas",
         "group": "Collect media, prompts and loops together",
-        "llm": "Chat model in a node — text in, text out"
+        "llm": "Chat model in a node — text in, text out",
+        "asset": "Reference a character, location, prop or prompt"
       }
     },
     "toolbar": {
@@ -3318,6 +3320,26 @@
       "searchPlaceholder": "Search by filename…",
       "all": "All",
       "noResults": "No prompt assets found"
+    },
+    "asset": {
+      "title": "Asset",
+      "removed": "Asset Removed",
+      "loadout": "Asset loadout",
+      "loadoutNone": "No loadout",
+      "references": "Reference Files",
+      "noFiles": "No reference files",
+      "useFile": "Use {{slot}} reference",
+      "primary": "Primary",
+      "openSheet": "Open Sheet",
+      "loading": "Loading…",
+      "loadFailed": "Could not load this asset",
+      "pickerTitle": "Add Asset",
+      "searchLabel": "Search assets",
+      "searchPlaceholder": "Search assets…",
+      "allTypes": "All",
+      "noResults": "No assets found",
+      "listFailed": "Could not load the asset library",
+      "pickFailed": "Could not open that asset. Try again."
     }
   },
   "modelParams": {
