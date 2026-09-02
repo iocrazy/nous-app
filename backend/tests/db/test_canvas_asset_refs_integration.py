@@ -14,10 +14,12 @@ SQLAlchemy and can only be settled on a real server:
     loadout surviving a re-save. ``DO NOTHING`` (what the resource-refs sibling
     uses, where every column is IN the key) would leave the old value and still
     report success — a wrong answer with a 200 on it.
-  * ``array_agg(DISTINCT ...)`` must be the DISTINCT *keyword*.
-    ``func.distinct(x)`` compiles happily to a ``distinct(x)`` FUNCTION CALL
-    that Postgres has no such function for — a unit test with a stubbed session
-    cannot tell the two apart.
+  * ``array_agg(DISTINCT ...)`` must really dedupe. (The SPELLING is not the
+    hazard: ``func.distinct(x)`` compiles to ``distinct(x)``, which Postgres
+    accepts inside an aggregate — it parses as the keyword plus a parenthesised
+    expression, verified on pg17. Do not reintroduce the claim that it is a
+    rejected function call.) What a stubbed session cannot see is the DISTINCT
+    being dropped altogether, which duplicates a loadout id shared by two nodes.
   * the scope filter's ``COALESCE(projects.team_id, personal_team.id)`` has to
     resolve a personal project through a real LEFT JOIN on ``teams``, and the
     two FK cascades (canvas delete → refs gone; loadout delete → SET NULL) are
@@ -408,6 +410,144 @@ async def test_upsert_refreshes_a_conflicting_row_when_the_delete_is_suppressed(
         "ON CONFLICT ... DO UPDATE SET loadout_id must refresh the value; "
         f"DO NOTHING would leave loadout A ({fx['loadout_a']}) here"
     )
+
+
+@_skip
+async def test_a_failed_insert_leaves_the_previous_refs_intact(orm_dsn, pg, fx):
+    """The rollback property — the one the two-session version got wrong.
+
+    DELETE and INSERT used to run in separate ``write_scope()`` sessions, so a
+    failing INSERT left the committed DELETE standing and the canvas kept NO
+    refs at all — including refs to assets that were perfectly fine. It stayed
+    that way: every later save re-ran the same DELETE and failed the same
+    INSERT, the backfill failed identically, and ``used_in`` answered "used
+    nowhere" for an asset visibly on the canvas. Measured before the fix:
+
+        before: [good]   raised: IntegrityError   after: []
+
+    The sibling case above proves the SAVE survives an unresolvable asset_id;
+    this proves the MIRROR does too. Both must hold — one is about the user's
+    document, the other about the derived table.
+    """
+    canvas = fx["team_canvas"]
+    ghost = 727145299382534145  # well-formed snowflake, no such asset
+
+    await _save(pg, canvas, [_asset_node("good", fx["asset_id"], fx["loadout_a"])])
+    assert [r["node_id"] for r in await _refs(pg, canvas)] == ["good"]
+
+    await _save(
+        pg,
+        canvas,
+        [
+            _asset_node("good", fx["asset_id"], fx["loadout_a"]),
+            _asset_node("ghost", ghost),
+        ],
+    )
+
+    rows = await _refs(pg, canvas)
+    assert [r["node_id"] for r in rows] == ["good"], (
+        "a failed INSERT must roll its DELETE back; the healthy ref is gone, "
+        f"so the canvas's mirror was wiped by one bad node. rows={rows}"
+    )
+    assert rows[0]["loadout_id"] == fx["loadout_a"]
+
+
+@_skip
+async def test_a_loadout_from_another_asset_is_stored_as_null(orm_dsn, pg, fx):
+    """``loadout_id``'s FK only requires the row to EXIST — nothing ties it to
+    ``asset_id``. Pinned on a real server because that is where the FK's actual
+    strictness lives: a schema that DID constrain the pair would reject the row
+    outright and this test would fail differently, which is worth knowing.
+
+    The ref survives with a NULL loadout (the asset is genuinely on the canvas);
+    only the costume half is refused, and the count comes back so the service
+    can log it.
+    """
+    other = await pg.fetchval(
+        "INSERT INTO assets (scope_id, asset_type, name, created_by) "
+        "VALUES ($1,'costume',$2,$3) RETURNING id",
+        fx["team_id"],
+        f"Other Asset {uuid.uuid4().hex[:8]}",
+        uuid.UUID(fx["owner"]),
+    )
+    foreign_loadout = await pg.fetchval(
+        "INSERT INTO asset_loadouts (asset_id, name) VALUES ($1,'Not Yours') "
+        "RETURNING id",
+        other,
+    )
+    try:
+        await _save(
+            pg,
+            fx["team_canvas"],
+            [
+                _asset_node("ok", fx["asset_id"], fx["loadout_a"]),
+                _asset_node("stolen", fx["asset_id"], foreign_loadout),
+            ],
+        )
+        rows = {r["node_id"]: r for r in await _refs(pg, fx["team_canvas"])}
+        assert set(rows) == {"ok", "stolen"}, "both refs must survive"
+        assert rows["ok"]["loadout_id"] == fx["loadout_a"]
+        assert rows["stolen"]["loadout_id"] is None, (
+            "a loadout owned by a different asset must be blanked, or "
+            "used_in.loadout_ids would name a costume this asset does not own"
+        )
+    finally:
+        await pg.execute("DELETE FROM assets WHERE id = $1", int(other))
+
+
+@_skip
+async def test_replace_for_canvas_reports_how_many_loadouts_it_refused(orm_dsn, pg, fx):
+    """The count is the only signal that the costume half was dropped — the row
+    itself just looks loadout-less. Asserted on the repository's return value,
+    which is what ``_sync_refs`` logs."""
+    from app.repositories.canvas_asset_refs_repository import (
+        CanvasAssetRefsRepository,
+    )
+
+    other = await pg.fetchval(
+        "INSERT INTO assets (scope_id, asset_type, name, created_by) "
+        "VALUES ($1,'costume',$2,$3) RETURNING id",
+        fx["team_id"],
+        f"Other Asset {uuid.uuid4().hex[:8]}",
+        uuid.UUID(fx["owner"]),
+    )
+    foreign_loadout = await pg.fetchval(
+        "INSERT INTO asset_loadouts (asset_id, name) VALUES ($1,'Not Yours') "
+        "RETURNING id",
+        other,
+    )
+    repo = CanvasAssetRefsRepository()
+    try:
+        clean = await repo.replace_for_canvas(
+            str(fx["team_canvas"]),
+            [
+                {
+                    "asset_id": fx["asset_id"],
+                    "node_id": "ok",
+                    "loadout_id": fx["loadout_a"],
+                }
+            ],
+        )
+        assert clean == 0, "a well-owned loadout must not be counted as refused"
+
+        refused = await repo.replace_for_canvas(
+            str(fx["team_canvas"]),
+            [
+                {
+                    "asset_id": fx["asset_id"],
+                    "node_id": "ok",
+                    "loadout_id": fx["loadout_a"],
+                },
+                {
+                    "asset_id": fx["asset_id"],
+                    "node_id": "stolen",
+                    "loadout_id": int(foreign_loadout),
+                },
+            ],
+        )
+        assert refused == 1
+    finally:
+        await pg.execute("DELETE FROM assets WHERE id = $1", int(other))
 
 
 # ── 2. the reverse lookup + its scope filter ───────────────────────────────

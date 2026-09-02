@@ -52,18 +52,35 @@ class _FakeResult:
 
 
 class _CapturingSession:
-    def __init__(self, rows: List[dict] | None = None) -> None:
+    """Records statements, and answers the loadout-ownership SELECT.
+
+    ``owned`` is the (loadout_id, asset_id) set the fake pretends
+    ``asset_loadouts`` holds — the write path now reads it, so a fake that
+    answered nothing would make every loadout look disowned and quietly turn
+    the insert pins into assertions about NULLs.
+    """
+
+    def __init__(
+        self,
+        rows: List[dict] | None = None,
+        owned: List[tuple] | None = None,
+    ) -> None:
         self.statements: List[Any] = []
         self._rows = rows or []
+        self._owned = owned or []
 
     async def execute(self, stmt: Any) -> _FakeResult:
         self.statements.append(stmt)
+        if "asset_loadouts" in _sql(stmt) and "SELECT" in _sql(stmt):
+            return _FakeResult(self._owned)
         return _FakeResult(self._rows)
 
 
-def _fake_scope(session: _CapturingSession):
+def _fake_scope(session: _CapturingSession, counter: List[int] | None = None):
     @asynccontextmanager
     async def _scope():
+        if counter is not None:
+            counter[0] += 1
         yield session
 
     return _scope
@@ -77,11 +94,11 @@ def _sql(stmt) -> str:
     )
 
 
-def _patch(monkeypatch, session):
+def _patch(monkeypatch, session, write_counter: List[int] | None = None):
     import app.repositories.canvas_asset_refs_repository as repo_mod
 
     monkeypatch.setattr(repo_mod, "read_scope", _fake_scope(session))
-    monkeypatch.setattr(repo_mod, "write_scope", _fake_scope(session))
+    monkeypatch.setattr(repo_mod, "write_scope", _fake_scope(session, write_counter))
 
 
 # ── 1. the upsert clause ───────────────────────────────────────────────────
@@ -90,8 +107,9 @@ def _patch(monkeypatch, session):
 async def test_replace_for_canvas_upserts_the_loadout_instead_of_ignoring_it(
     monkeypatch,
 ):
-    session = _CapturingSession()
-    _patch(monkeypatch, session)
+    session = _CapturingSession(owned=[(_LO, _A)])
+    scopes = [0]
+    _patch(monkeypatch, session, scopes)
 
     await CanvasAssetRefsRepository().replace_for_canvas(
         "5001",
@@ -101,8 +119,14 @@ async def test_replace_for_canvas_upserts_the_loadout_instead_of_ignoring_it(
         ],
     )
 
-    assert len(session.statements) == 2, "expected a DELETE then one INSERT"
-    delete_sql, insert_sql = (_sql(s) for s in session.statements)
+    assert scopes[0] == 1, (
+        "DELETE and INSERT must share ONE write_scope (one transaction). With "
+        "two, a failed INSERT leaves the committed DELETE standing and the "
+        f"canvas keeps NO refs at all. write_scope entered {scopes[0]}x"
+    )
+    # DELETE, the loadout-ownership SELECT, then the INSERT.
+    assert len(session.statements) == 3
+    delete_sql, _owner_sql, insert_sql = (_sql(s) for s in session.statements)
 
     assert delete_sql.startswith("DELETE FROM public.canvas_asset_refs")
     assert "canvas_id = 5001" in delete_sql
@@ -131,12 +155,59 @@ async def test_replace_for_canvas_with_no_refs_deletes_and_stops(monkeypatch):
     session = _CapturingSession()
     _patch(monkeypatch, session)
 
-    await CanvasAssetRefsRepository().replace_for_canvas("5001", [])
+    assert await CanvasAssetRefsRepository().replace_for_canvas("5001", []) == 0
 
     assert len(session.statements) == 1
     assert _sql(session.statements[0]).startswith(
         "DELETE FROM public.canvas_asset_refs"
     )
+
+
+async def test_a_loadout_belonging_to_another_asset_is_nulled_and_counted(
+    monkeypatch,
+):
+    """The FK only requires the loadout to EXIST; nothing ties it to the asset.
+
+    A node pairing asset A with asset B's loadout must be stored with
+    ``loadout_id`` NULL — the asset really is on the canvas, so dropping the
+    whole ref would lose the more important half — and the count must come back
+    so the caller can log it. Storing it verbatim would make
+    ``used_in.loadout_ids`` name a costume the asset does not own, on a table
+    documented as the source of truth for which loadout is in use.
+    """
+    other_asset_loadout = 999
+    session = _CapturingSession(owned=[(_LO, _A)])  # 999 belongs to nobody here
+    _patch(monkeypatch, session)
+
+    disowned = await CanvasAssetRefsRepository().replace_for_canvas(
+        "5001",
+        [
+            {"asset_id": _A, "node_id": "ok", "loadout_id": _LO},
+            {"asset_id": _A, "node_id": "stolen", "loadout_id": other_asset_loadout},
+        ],
+    )
+
+    assert disowned == 1
+    insert_sql = _sql(session.statements[-1])
+    assert f"'ok', {_LO}" in insert_sql, insert_sql
+    assert "'stolen', NULL" in insert_sql, (
+        "the foreign loadout must be blanked, not stored: " + insert_sql
+    )
+
+
+async def test_no_ownership_query_runs_when_no_ref_carries_a_loadout(monkeypatch):
+    """The common case (props, locations, an unbound character) must not pay for
+    a lookup with nothing to look up."""
+    session = _CapturingSession()
+    _patch(monkeypatch, session)
+
+    disowned = await CanvasAssetRefsRepository().replace_for_canvas(
+        "5001", [{"asset_id": _A, "node_id": "n1", "loadout_id": None}]
+    )
+
+    assert disowned == 0
+    assert len(session.statements) == 2  # DELETE + INSERT, no SELECT
+    assert "asset_loadouts" not in _sql(session.statements[1])
 
 
 # ── 2/3. the reverse lookup ────────────────────────────────────────────────

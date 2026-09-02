@@ -27,12 +27,22 @@ returned alongside the good ones — a silent drop is exactly the
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 # BIGINT's exclusive upper bound. A value past this parses fine in Python
 # and then fails at asyncpg BIND — the same boundary ``within_int64``
 # enforces on the request side of /assets.
 _INT64_EXCLUSIVE_MAX = 2**63
+
+# ASCII digits ONLY, and never ``str.isdigit()``. ``isdigit()`` is true for
+# characters ``int()`` then handles inconsistently: "²" makes ``int()`` RAISE
+# (breaking this module's never-raises contract and costing the whole canvas
+# its mirror for that save), while Arabic-Indic "١٢٣" parses to 123 — a ref
+# for an asset nobody named, reported as ``skipped == 0``. Same shape as
+# ``SNOWFLAKE_PATTERN`` on the request side of /assets, so the two boundaries
+# agree about what an id looks like.
+_ASCII_DIGITS = re.compile(r"^[0-9]{1,20}$")
 
 
 def extract_asset_node_refs(
@@ -101,6 +111,9 @@ def _as_snowflake(value: Any) -> Optional[int]:
       precision, so the id it names is not the id that was meant.
     * anything outside ``[1, 2**63)`` — 0/negatives are not snowflakes, and a
       larger value fails at driver BIND rather than at this boundary.
+    * non-ASCII digits — see ``_ASCII_DIGITS``. They are the one input class
+      that could make this function RAISE or, worse, quietly resolve to a
+      DIFFERENT id than the characters name.
     """
     if value is None or isinstance(value, bool):
         return None
@@ -108,7 +121,7 @@ def _as_snowflake(value: Any) -> Optional[int]:
         num = value
     elif isinstance(value, str):
         text = value.strip()
-        if not text.isdigit():
+        if not _ASCII_DIGITS.match(text):
             return None
         num = int(text)
     else:

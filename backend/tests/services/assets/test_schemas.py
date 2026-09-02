@@ -405,19 +405,15 @@ def test_a_client_cannot_set_membership_at_creation():
 # ── P4: used_in — the canvas mirror the detail response carries ────────────
 
 
-def test_asset_detail_response_declares_every_key_get_asset_emits():
-    """The ORM-column pin above covers the asset ROW; this covers the four
-    relation keys and ``used_in`` that ``get_asset`` bolts on afterwards.
+def test_asset_detail_response_declares_the_used_in_contract():
+    """``used_in`` must be the TYPED model, not a bare dict waved through.
 
-    Same silent-drop hazard, different source: these are not columns of any
-    table, so ``Assets.__table__.columns`` cannot see them. ``used_in`` was the
-    fifth such key and the one most likely to be forgotten — nothing fails when
-    a response model omits a key, the field simply stops reaching the client.
+    The set of keys ``get_asset`` emits is pinned dynamically — by driving the
+    real method — in ``test_assets_service.py``; this one only fixes the type,
+    which that test cannot see (a dict would satisfy it just as well).
     """
     from app.schemas.assets import UsedInResponse
 
-    derived_detail_keys = {"files", "links", "linked_by", "loadouts", "used_in"}
-    assert derived_detail_keys <= set(AssetDetailResponse.model_fields)
     assert (
         AssetDetailResponse.model_fields["used_in"].annotation is UsedInResponse
     ), "used_in must be the typed model, not a bare dict passed through unvalidated"

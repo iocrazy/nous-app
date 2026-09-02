@@ -196,7 +196,17 @@ class CanvasService:
                     f"canvas {canvas_id}: {skipped} asset node(s) skipped "
                     "(asset_id absent or not a snowflake)"
                 )
-            await self.asset_refs_repo.replace_for_canvas(canvas_id, asset_refs)
+            disowned = await self.asset_refs_repo.replace_for_canvas(
+                canvas_id, asset_refs
+            )
+            if disowned:
+                # A node paired an asset with another asset's loadout. The ref
+                # is kept with loadout_id NULL (the asset IS on the canvas);
+                # only this line says the costume half was refused.
+                logger.warning(
+                    f"canvas {canvas_id}: {disowned} asset ref(s) stored without "
+                    "their loadout (the loadout belongs to a different asset)"
+                )
         except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
             logger.error(f"canvas {canvas_id} asset-refs sync failed (non-fatal): {e}")
 

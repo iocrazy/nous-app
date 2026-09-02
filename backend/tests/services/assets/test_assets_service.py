@@ -1347,3 +1347,39 @@ async def test_list_canvas_refs_returns_the_same_rows_used_in_carries(svc):
     detail = await svc.get_asset(int(c["id"]), SCOPE)
 
     assert rows == detail["used_in"]["canvases"]
+
+
+@pytest.mark.asyncio
+async def test_detail_response_declares_every_key_get_asset_actually_emits(svc):
+    """The derived-key guard, DERIVED — not a hand-listed set.
+
+    ``Envelope[AssetDetailResponse]`` silently DROPS any key the model does not
+    declare, so a sixth relation bolted onto ``get_asset`` would never reach the
+    client and nothing would fail. Its sibling in ``test_schemas.py`` takes the
+    asset ROW's expectation from ``Assets.__table__.columns``; these keys are not
+    columns of anything, so the only honest source is the method itself. Driving
+    it here — where the fakes live — means a new key extends this test by
+    existing, instead of needing someone to remember to add its name.
+    """
+    from app.schemas.assets import AssetDetailResponse
+
+    # The ONE key the model drops on purpose, same exclusion (and same reason)
+    # as the AssetResponse column pin in test_schemas.py: every read filters
+    # ``deleted_at IS NULL``, so a row reaching a response always has it null
+    # and it carries no information. Spelled as a one-name allowlist rather
+    # than a hand-listed expectation, so a SEVENTH key still fails here.
+    DELIBERATELY_UNDECLARED = {"deleted_at"}
+
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    emitted = set(await svc.get_asset(int(c["id"]), SCOPE))
+
+    missing = emitted - set(AssetDetailResponse.model_fields) - DELIBERATELY_UNDECLARED
+    assert not missing, (
+        "get_asset emits keys AssetDetailResponse does not declare; the response "
+        f"model will drop them on the way out: {sorted(missing)}"
+    )
+    # Positive control: the guard is only meaningful if the emitted set really
+    # contains the derived relations, not just the plain column names.
+    assert {"files", "links", "linked_by", "loadouts", "used_in"} <= emitted

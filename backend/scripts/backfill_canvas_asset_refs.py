@@ -38,17 +38,20 @@ async def main() -> None:
     total_canvases = 0
     total_refs = 0
     total_skipped = 0
+    total_disowned = 0
     for row in rows:
         refs, skipped = extract_asset_node_refs(row["nodes_json"])
-        await refs_repo.replace_for_canvas(str(row["id"]), refs)
+        total_disowned += await refs_repo.replace_for_canvas(str(row["id"]), refs)
         total_canvases += 1
         total_refs += len(refs)
         total_skipped += skipped
     logger.info(
-        "backfill done: {} canvases, {} refs, {} skipped asset nodes",
+        "backfill done: {} canvases, {} refs, {} skipped asset nodes, "
+        "{} refs stored without a non-owned loadout",
         total_canvases,
         total_refs,
         total_skipped,
+        total_disowned,
     )
 
 

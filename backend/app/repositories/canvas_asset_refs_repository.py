@@ -47,14 +47,35 @@ class CanvasAssetRefsRepository:
 
     async def replace_for_canvas(
         self, canvas_id: str, refs: List[Dict[str, Any]]
-    ) -> None:
+    ) -> int:
         """Replace ALL asset refs for a canvas with ``refs``.
 
-        Two statements (DELETE then one multi-row INSERT), NOT wrapped in a
-        single transaction — same rationale as the resource-refs sibling: refs
-        are derived and rebuildable, so a partial failure is self-healing
-        rather than corrupting, and replace-all keeps the logic trivially
-        correct (the extracted set IS the desired state). Idempotent.
+        Returns how many refs had their ``loadout_id`` dropped as not belonging
+        to their asset (see ``_null_unowned_loadouts``) — reported, never
+        silent.
+
+        DELETE-then-INSERT, both in ONE ``write_scope()`` session, i.e. ONE
+        transaction. The resource-refs sibling deliberately uses two, arguing
+        that a partial failure is "self-healing rather than corrupting". For
+        THIS table that argument is false, and was measured on a real server:
+        one node carrying a well-formed snowflake for an asset that does not
+        exist makes the INSERT raise, and with the DELETE already committed the
+        canvas is left with NO refs at all — including the refs of every other
+        asset on it. It stays that way, because each later save re-runs the same
+        DELETE and fails the same INSERT, and the backfill fails identically. The
+        visible result is ``used_in`` answering "used nowhere" for an asset the
+        user can see on the canvas: a wrong answer with a 200 on it, which is the
+        very failure the ``DO UPDATE`` clause below exists to prevent.
+
+        One transaction makes the rollback do what the sentence claimed: a
+        failed INSERT restores the previous refs, so the mirror is stale rather
+        than empty, and the next good save fixes it. That vector is rare today
+        but grows with this plan — P4 Task 4 makes asset nodes copyable between
+        canvases and Task 6 migrates legacy cards, both of which can plant an
+        ``asset_id`` the target scope no longer has.
+
+        Replace-all keeps the logic trivially correct (the extracted set IS the
+        desired state) and idempotent.
 
         ``on_conflict_do_update(set_={"loadout_id": ...})``, NOT
         ``do_nothing``: ``loadout_id`` is outside the primary key, so a node
@@ -68,33 +89,69 @@ class CanvasAssetRefsRepository:
         silently.
         """
         cid = int(str(canvas_id))
+        rows = [
+            {
+                "canvas_id": cid,
+                "asset_id": int(r["asset_id"]),
+                "node_id": str(r["node_id"]),
+                "loadout_id": (
+                    int(r["loadout_id"]) if r.get("loadout_id") is not None else None
+                ),
+            }
+            for r in refs
+        ]
         async with write_scope() as session:
             await session.execute(
                 sa_delete(CanvasAssetRefs).where(CanvasAssetRefs.canvas_id == cid)
             )
-        if not refs:
-            return
-        stmt = pg_insert(CanvasAssetRefs).values(
-            [
-                {
-                    "canvas_id": cid,
-                    "asset_id": int(r["asset_id"]),
-                    "node_id": str(r["node_id"]),
-                    "loadout_id": (
-                        int(r["loadout_id"])
-                        if r.get("loadout_id") is not None
-                        else None
-                    ),
-                }
-                for r in refs
-            ]
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=_CONFLICT_KEY,
-            set_={"loadout_id": stmt.excluded.loadout_id},
-        )
-        async with write_scope() as session:
+            if not rows:
+                return 0
+            disowned = await self._null_unowned_loadouts(session, rows)
+            stmt = pg_insert(CanvasAssetRefs).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=_CONFLICT_KEY,
+                set_={"loadout_id": stmt.excluded.loadout_id},
+            )
             await session.execute(stmt)
+        return disowned
+
+    @staticmethod
+    async def _null_unowned_loadouts(session, rows: List[Dict[str, Any]]) -> int:
+        """Blank any ``loadout_id`` that does not belong to its row's asset, and
+        return how many were blanked. Mutates ``rows`` in place.
+
+        The FK only requires the loadout row to EXIST — nothing in the schema
+        ties it to ``asset_id``. Without this, a node pairing asset A with a
+        loadout of asset B is stored verbatim and ``used_in.loadout_ids`` then
+        names a costume that asset does not own: the mirror is described as the
+        source of truth for which loadout is in use, so it must not assert a
+        pairing the asset library would reject.
+
+        NULL (plus a count the caller logs) rather than dropping the whole ref:
+        the node really does reference the asset, and "this asset is on this
+        canvas" is the more important half of the fact. Runs in the caller's
+        write transaction, so it reads the same snapshot the INSERT writes.
+        """
+        wanted = {
+            (r["loadout_id"], r["asset_id"])
+            for r in rows
+            if r["loadout_id"] is not None
+        }
+        if not wanted:
+            return 0
+        result = await session.execute(
+            select(AssetLoadouts.id, AssetLoadouts.asset_id).where(
+                AssetLoadouts.id.in_({lid for lid, _ in wanted})
+            )
+        )
+        owned = {(int(lid), int(aid)) for lid, aid in result.all()}
+        disowned = 0
+        for r in rows:
+            lid = r["loadout_id"]
+            if lid is not None and (lid, r["asset_id"]) not in owned:
+                r["loadout_id"] = None
+                disowned += 1
+        return disowned
 
     # -- reads --------------------------------------------------------
 

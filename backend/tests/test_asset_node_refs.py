@@ -39,6 +39,10 @@ def test_missing_loadout_becomes_none_and_is_not_a_skip():
         {"asset_id": _A, "loadout_id": None},
         {"asset_id": _A, "loadout_id": ""},
         {"asset_id": _A, "loadout_id": "not-a-snowflake"},
+        # The same two Unicode-digit traps on the loadout side: "²" must not
+        # raise, and "١٢٣" must not become loadout 123.
+        {"asset_id": _A, "loadout_id": "\u00b2"},
+        {"asset_id": _A, "loadout_id": "\u0661\u0662\u0663"},
     ):
         refs, skipped = extract_asset_node_refs(
             [{"id": "asset-1", "type": "asset", "data": data}]
@@ -66,6 +70,13 @@ def test_missing_loadout_becomes_none_and_is_not_a_skip():
         [_A],
         str(2**63),  # first value BIGINT cannot hold → fails at driver BIND
         "0",
+        # Non-ASCII digits: ``str.isdigit()`` is true for both, and ``int()``
+        # then treats them differently. "²" RAISES (the whole canvas would lose
+        # its mirror for that save, not just this node); "١٢٣" parses to 123 —
+        # a ref for an asset nobody named, which would have been reported as
+        # skipped == 0. Neither may be reinterpreted, both must be counted.
+        "\u00b2",
+        "\u0661\u0662\u0663",
     ],
 )
 def test_non_snowflake_asset_id_is_skipped_and_counted(bad):
@@ -158,8 +169,27 @@ def test_node_without_id_falls_back_to_its_index():
     assert refs[0]["node_id"] == "node_0"
 
 
-@pytest.mark.parametrize("junk", [None, {}, "nodes", 42, [None, 7, "x"]])
+@pytest.mark.parametrize(
+    "junk",
+    [
+        None,
+        {},
+        "nodes",
+        42,
+        [None, 7, "x"],
+        # A whole-canvas save carrying the raising input class. Before the
+        # ASCII fix this propagated a ValueError out of the extractor.
+        [{"id": "n", "type": "asset", "data": {"asset_id": "\u00b2"}}],
+        [{"id": "n", "type": "asset", "data": {"loadout_id": "\u00b2"}}],
+    ],
+)
 def test_malformed_nodes_json_never_raises(junk):
     """This runs on the canvas-save hot path; an exception here would be logged
-    and the mirror skipped, but the extractor must not be the thing that fails."""
-    assert extract_asset_node_refs(junk) == ([], 0)
+    and the mirror skipped, but the extractor must not be the thing that fails.
+
+    Asserted on the return SHAPE rather than ``== ([], 0)``: the two
+    Unicode-digit cases correctly report ``skipped == 1``. What every case here
+    shares is that no ref is invented and nothing propagates."""
+    refs, skipped = extract_asset_node_refs(junk)
+    assert refs == []
+    assert isinstance(skipped, int) and skipped >= 0
