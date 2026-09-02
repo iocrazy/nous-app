@@ -1,6 +1,6 @@
 import { Trash2 } from 'lucide-react';
 
-import { cssAspectRatio } from '../aspectRatio';
+import { cssAspectRatio, cssAspectRatioOrNull } from '../aspectRatio';
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
@@ -89,11 +89,27 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     gen_recover = [],
     gen_ratio,
   } = data as unknown as OutputNodeData;
-  // Every cell — shimmer, landed image, single preview — is boxed to the
-  // ratio the run ASKED for, so a result landing changes no layout (Task 7).
-  // `gen_ratio` is plain node data, which keeps this stable under the memo
-  // wrapper in nodes/registry.ts.
+  // The box a cell reserves before anything loads, so a result landing
+  // changes no layout (Task 7). `gen_ratio` is plain node data, which keeps
+  // this stable under the memo wrapper in nodes/registry.ts.
+  //
+  // Two forms, because the branches want different answers when no ratio is
+  // known. The GRID has a placeholder and the image that replaces it, and
+  // they must resolve to ONE box or the swap reflows — square is the
+  // fallback there, and the shimmer cell was hard `aspect-square` before
+  // this work anyway. The SINGLE preview usually is not a generation slot at
+  // all: history archives, extend/outpaint results, upscale tiles, timeline
+  // films, loop outputs and entity templates all arrive with no ratio and
+  // never regenerate, so a square would letterboxed them permanently — most
+  // visibly the history archive, which renders the same images as the live
+  // slot directly above it. Those size themselves, as they always did.
   const cellAspect = cssAspectRatio(gen_ratio);
+  const soloAspect = cssAspectRatioOrNull(gen_ratio) ?? undefined;
+  // `h-full` only alongside a box. Filling a container that has no height of
+  // its own is how the un-boxed branches would collapse instead of falling
+  // back to the media's own size, which is the whole point of not boxing
+  // them — so the two always travel together.
+  const soloFill = soloAspect ? 'h-full ' : '';
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
@@ -700,7 +716,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           <div
             data-testid="output-cell"
             className="w-full"
-            style={{ aspectRatio: cellAspect }}
+            style={{ aspectRatio: soloAspect }}
           >
             <img
               src={mediaSrc(preview_url || images?.[0]?.url)}
@@ -713,7 +729,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 if (!readOnly) setEditorMode('preview');
                 else openLightbox(0);
               }}
-              className="block h-full w-full cursor-zoom-in rounded object-contain"
+              className={`block ${soloFill}w-full cursor-zoom-in rounded object-contain`}
             />
           </div>
         ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
@@ -722,7 +738,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           <div
             data-testid="output-cell"
             className="w-full"
-            style={{ aspectRatio: cellAspect }}
+            style={{ aspectRatio: soloAspect }}
           >
             <video
               data-testid="output-video-preview"
@@ -730,7 +746,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               muted
               preload="metadata"
               onDoubleClick={() => openLightbox(0)}
-              className="block h-full w-full cursor-zoom-in rounded object-contain"
+              className={`block ${soloFill}w-full cursor-zoom-in rounded object-contain`}
             />
           </div>
         ) : preview_text ? (

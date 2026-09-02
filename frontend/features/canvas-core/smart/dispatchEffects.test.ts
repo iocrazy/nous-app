@@ -127,3 +127,18 @@ describe('every dispatch site shares the effect', () => {
     }
   });
 });
+
+describe('onGenerationDispatched forwards the dispatched ratio to the slot', () => {
+  // The runner resolves `auto` by measuring the source. That answer has to
+  // reach the slot, or the box it reserves describes a request nobody made.
+  it('the slot is stamped with the ratio the dispatch used', () => {
+    seed();
+    onGenerationDispatched('p1', 2, 'image', ['t1', 't2'], '16:9');
+    const slot = useCanvasCoreStore
+      .getState()
+      .nodes.find(
+        (n) => ((n as Record<string, unknown>).data as { gen_slot?: unknown })?.gen_slot,
+      ) as Record<string, unknown> | undefined;
+    expect((slot?.data as { gen_ratio?: string | null })?.gen_ratio).toBe('16:9');
+  });
+});

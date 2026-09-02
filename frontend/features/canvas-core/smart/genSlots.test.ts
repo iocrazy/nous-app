@@ -251,3 +251,35 @@ describe('beginGenerationSlot stamps the requested ratio', () => {
     expect(ratioOf()).toBe('3:4');
   });
 });
+
+describe('beginGenerationSlot prefers the ratio the dispatch actually used', () => {
+  // The prompt's raw value is not the request for the default image path:
+  // 'auto' (and unset) are resolved by measuring the source, and only the
+  // runner knows the answer. So the dispatched value wins, and the prompt's
+  // own value is only the fallback for callers that have none.
+
+  it('stamps the dispatched ratio over the prompt saying auto', () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: 'auto' });
+    beginGenerationSlot('p1', 1, 'image', '16:9');
+    expect(ratioOf()).toBe('16:9');
+  });
+
+  it('stamps it on a re-run too — the slot is reused', () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: 'auto' });
+    beginGenerationSlot('p1', 1, 'image', '16:9');
+    beginGenerationSlot('p1', 1, 'image', '3:4');
+    expect(ratioOf()).toBe('3:4');
+  });
+
+  it("falls back to the prompt's own value when the dispatch sent none", () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: '21:9' });
+    beginGenerationSlot('p1', 1, 'image', null);
+    expect(ratioOf()).toBe('21:9');
+  });
+
+  it('falls back for callers that pass no ratio at all (recover marks)', () => {
+    seedGenPrompt({ kind: 'image', model: '', ratio: '21:9' });
+    beginGenerationSlot('p1', 1, 'image');
+    expect(ratioOf()).toBe('21:9');
+  });
+});

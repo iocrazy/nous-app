@@ -74,15 +74,14 @@ export function upsertGenerationSlots(
 // their count on the node. All writes history-free, matching the slot's
 // operational-state contract.
 
-/** The ratio the prompt is ASKING for, copied onto the slot so the output
- *  node can reserve each cell's box before anything loads (Task 7).
+/** FALLBACK only — the ratio as the prompt node has it written down.
  *
- *  Stamped here rather than looked up from the view: the node views are
- *  memo-wrapped (Task 4) and walking the graph back to the owning prompt
- *  from inside one would reintroduce exactly the per-node store subscription
- *  that change removed. Whatever the prompt says is copied VERBATIM,
- *  including `auto` — resolving it needs the source image, which only the
- *  dispatch side can measure; the view treats it as unknown. */
+ *  This is not what the run uses on the default image path: `'auto'` (which
+ *  is what the picker shows) and an unset value both mean "follow the source
+ *  image", and the runner resolves them by measuring it at dispatch. Callers
+ *  that know the dispatched value pass it in and this is not consulted; it
+ *  covers the ones that have none (recover marks, legacy entry points), and
+ *  the video side, where the aspect is sent verbatim anyway. */
 function requestedRatioOf(prompt: unknown, mediaKind: OutputKind): string | null {
   const gen = (asObj(prompt).data as { gen?: { ratio?: string; aspect?: string } })
     ?.gen;
@@ -106,15 +105,18 @@ export function beginGenerationSlot(
   promptId: string,
   count: number,
   mediaKind: OutputKind,
+  /** The aspect the dispatch actually sent (already auto-resolved). `null`
+   *  or omitted falls back to the prompt's own value. */
+  dispatchedRatio: string | null = null,
 ): void {
   const store = useCanvasCoreStore.getState();
   const prompt = store.nodes.find((n) => asObj(n).id === promptId);
   if (!prompt) return;
 
-  // Re-read every run: the user can change the ratio between runs, and the
-  // slot is reused, so a stamp left at the first run's value would reserve
-  // the wrong box for the rest of the node's life.
-  const genRatio = requestedRatioOf(prompt, mediaKind);
+  // Recomputed every run: the user can change the ratio between runs, and
+  // the slot is reused, so a stamp left at the first run's value would
+  // reserve the wrong box for the rest of the node's life.
+  const genRatio = dispatchedRatio ?? requestedRatioOf(prompt, mediaKind);
 
   const existingId = slotIdFor(promptId);
   if (existingId) {

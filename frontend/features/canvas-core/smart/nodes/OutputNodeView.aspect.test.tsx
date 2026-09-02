@@ -114,3 +114,58 @@ describe('OutputNodeView — intrinsic cell size (Task 7)', () => {
     expect(img.getAttribute('decoding')).toBe('async');
   });
 });
+
+describe('OutputNodeView — the reserved box is only for slots that have a ratio', () => {
+  // The grid branch is the placeholder/landed pair: both cells must agree on
+  // ONE box or the swap reflows, so it takes the square fallback when nothing
+  // is known (and the pending cell was hard `aspect-square` before this work
+  // anyway — the fallback takes nothing away).
+  //
+  // The single-preview and video branches are different. Most output nodes
+  // that reach them are not generation slots at all and will never carry a
+  // ratio: the history archive holding the previous batch, an extend/outpaint
+  // result (whose whole point is a CHANGED aspect), upscale tiles, timeline
+  // films, loop outputs, entity templates. Those images used to size to their
+  // own shape, and imposing a square on them permanently letterboxes them —
+  // most visibly the history archive, which renders the SAME images as the
+  // live slot directly above it. So here the box is applied only when a ratio
+  // is actually known.
+
+  it('the grid still falls back to a square when no ratio is known', () => {
+    renderOutput({ gen_pending: 1, images: [IMG] });
+    for (const cell of screen.getAllByTestId('output-cell'))
+      expect(cell.style.aspectRatio).toBe('1 / 1');
+  });
+
+  it('a single preview with no ratio imposes no box at all', () => {
+    renderOutput({ images: [IMG], preview_url: IMG.url });
+    expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('');
+  });
+
+  it("a single preview whose ratio is 'auto' imposes no box either", () => {
+    // 'auto' reaching the view means the dispatch could not resolve it, so
+    // the shape is genuinely unknown — square would be a guess, not a
+    // fallback with a placeholder to agree with.
+    renderOutput({ gen_ratio: 'auto', images: [IMG], preview_url: IMG.url });
+    expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('');
+  });
+
+  it('a single preview with a known ratio takes the box', () => {
+    renderOutput({ gen_ratio: '16:9', images: [IMG], preview_url: IMG.url });
+    expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('16 / 9');
+  });
+
+  it('a video preview with no ratio imposes no box', () => {
+    renderOutput({ kind: 'video', preview_url: '/api/v1/generated-media/5/stream' });
+    expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('');
+  });
+
+  it('a video preview takes the box its run asked for', () => {
+    renderOutput({
+      kind: 'video',
+      gen_ratio: '9:16',
+      preview_url: '/api/v1/generated-media/5/stream',
+    });
+    expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('9 / 16');
+  });
+});
