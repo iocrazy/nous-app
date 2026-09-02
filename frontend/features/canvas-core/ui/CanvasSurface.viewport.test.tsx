@@ -72,29 +72,20 @@ describe('CanvasSurface — uncontrolled viewport', () => {
     expect(capturedProps.viewport).toBeUndefined();
   });
 
-  it('gives React Flow no per-frame move channel: 10 pan frames touch nothing', () => {
+  it('gives React Flow no per-frame move channel, so a pan frame reaches nothing', () => {
+    // React Flow emits `onMove` on every frame of a pan. The surface not
+    // listening is the whole optimisation, and it is a structural property —
+    // there is no handler to drive, so driving one would be theatre. What
+    // makes this falsifiable is mutation M4: rewire a dirtying `onMove` and
+    // this assertion is the one that fails.
     seed();
     render(<CanvasSurface />);
-    const before = useCanvasCoreStore.getState().revision;
 
-    // React Flow emits `onMove` on every frame of a pan. The surface must
-    // not be listening — so these ten frames land nowhere. If anyone rewires
-    // a dirtying per-frame handler, the revision/save assertions below fail.
     expect(capturedProps.onMove).toBeUndefined();
-    const perFrame = capturedProps.onMove as
-      | ((e: unknown, v: unknown) => void)
-      | undefined;
-    for (let i = 0; i < 10; i++) {
-      perFrame?.(null, { x: i * 5, y: 0, zoom: 1 });
-    }
-
-    const s = useCanvasCoreStore.getState();
-    expect(s.revision).toBe(before);
-    expect(s.saveStatus).toBe('idle');
-    expect(s.viewport).toEqual(SAVED_VIEWPORT);
+    expect(capturedProps.onMoveStart).toBeUndefined();
   });
 
-  it('persists once when the gesture settles', () => {
+  it('persists once per settle, no matter how long the gesture was', () => {
     seed();
     render(<CanvasSurface />);
     const before = useCanvasCoreStore.getState().revision;
@@ -106,6 +97,8 @@ describe('CanvasSurface — uncontrolled viewport', () => {
     });
 
     const s = useCanvasCoreStore.getState();
+    // Exactly one — the old RAF path bumped once per animation frame, so a
+    // two-second pan cost ~120 revisions and as many save-debounce resets.
     expect(s.revision).toBe(before + 1);
     expect(s.viewport).toEqual({ x: 40, y: 60, zoom: 1.25 });
   });

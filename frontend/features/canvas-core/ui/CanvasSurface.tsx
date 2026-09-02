@@ -180,6 +180,12 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
 
   // On unmount (e.g. rail view switch mid-drag) commit any in-flight history
   // base so nothing leaks into the next mount of the singleton store.
+  //
+  // Known trade: a pan INTERRUPTED by unmount is lost. With no per-frame
+  // channel, `onMoveEnd` never fires for a gesture the user navigates away
+  // from mid-drag, so the last SETTLED viewport is what persists. Accepted
+  // for the frame budget — the alternative is the per-frame write this task
+  // removed.
   useEffect(() => {
     return () => {
       flushHistory();
@@ -422,11 +428,18 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const onMoveEnd = useCallback(
     (next: Viewport) => {
       // React Flow also fires move-end for PROGRAMMATIC moves — the
-      // persisted-viewport restore on open / canvas switch, the empty-viewport
-      // heal's `fitView`, the `?node=` deep link. An echo that lands on the
-      // value already in the store is not a user edit: treating it as one
-      // would dirty every canvas the moment it is opened and schedule a save
-      // of the row just loaded.
+      // `viewportEpoch` apply on open / switch / rebase / conflict resolve,
+      // the empty-viewport heal's `fitView`, the `?node=` deep link. An echo
+      // that lands on the value already in the store is not a user edit:
+      // treating it as one would dirty every canvas the moment it is opened
+      // and schedule a save of the row just loaded.
+      //
+      // One echo DOES get through, deliberately: the store clamps zoom to
+      // [0.05, 8] while React Flow is given [0.1, 4] below, so a row saved at
+      // zoom 0.07 or 6 comes back clamped and compares unequal. Letting that
+      // through rewrites the row with a zoom the surface can actually
+      // display, which is the self-consistent outcome — the alternative
+      // leaves the store holding a zoom that is permanently not on screen.
       const cur = useCanvasCoreStore.getState().viewport;
       if (cur.x === next.x && cur.y === next.y && cur.zoom === next.zoom) return;
       setViewportSettled(next);

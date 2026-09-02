@@ -15,6 +15,12 @@
  * `scheduleSave` is observed through its only externally visible effect — a
  * call to the injected `saveImpl` after the debounce elapses. Spying on the
  * private timer would pass even if the timer never reached the network.
+ *
+ * Fix round 1 adds `viewportEpoch`: the store cannot reach React Flow's
+ * instance, so a viewport it writes ITSELF (load, switch, realtime rebase,
+ * conflict resolve) has to announce that the canvas needs moving. A viewport
+ * that arrived FROM the canvas (`setViewportSettled`) must not — it is already
+ * on screen, and re-applying it would fight the user mid-pan.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -110,5 +116,81 @@ describe('canvasCoreStore — settled viewport', () => {
 
     expect(useStore.getState().historyPast).toHaveLength(0);
     expect(useStore.getState().canUndo()).toBe(false);
+  });
+});
+
+describe('canvasCoreStore — viewportEpoch (store-side writes announce themselves)', () => {
+  it('a load bumps the epoch', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    const before = useStore.getState().viewportEpoch;
+
+    await useStore.getState().loadCanvas('4242');
+
+    expect(useStore.getState().viewportEpoch).toBe(before + 1);
+  });
+
+  it('a realtime rebase bumps the epoch', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+    const before = useStore.getState().viewportEpoch;
+
+    useStore.getState().applyRemoteUpdate({
+      ...baseCanvas,
+      viewport_json: { x: 7, y: 8, zoom: 2 },
+      base_updated_at: '2026-06-10T13:00:00+00:00',
+    });
+
+    expect(useStore.getState().viewport).toEqual({ x: 7, y: 8, zoom: 2 });
+    expect(useStore.getState().viewportEpoch).toBe(before + 1);
+  });
+
+  it('a conflict resolve bumps the epoch', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.setState({
+      conflict: {
+        ...baseCanvas,
+        viewport_json: { x: -1, y: -2, zoom: 3 },
+        base_updated_at: '2026-06-10T14:00:00+00:00',
+      },
+    });
+    const before = useStore.getState().viewportEpoch;
+
+    useStore.getState().resolveConflictWithServer();
+
+    expect(useStore.getState().viewport).toEqual({ x: -1, y: -2, zoom: 3 });
+    expect(useStore.getState().viewportEpoch).toBe(before + 1);
+  });
+
+  it('a settled viewport does NOT bump the epoch', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+    const before = useStore.getState().viewportEpoch;
+
+    useStore.getState().setViewportSettled({ x: 1, y: 2, zoom: 1.5 });
+    useStore.getState().setViewportSettled({ x: 3, y: 4, zoom: 1.6 });
+
+    expect(useStore.getState().viewportEpoch).toBe(before);
+  });
+
+  it('the legacy programmatic writers bump it too — they are store-side writes', async () => {
+    // `setViewport` / `panViewportBy` / `zoomViewportAround` have no
+    // production callers, but they are the shape a future caller would reach
+    // for, and under an uncontrolled surface a store write that does not
+    // announce itself simply does not move the canvas.
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
+    await useStore.getState().loadCanvas('4242');
+    const before = useStore.getState().viewportEpoch;
+
+    useStore.getState().setViewport({ x: 1, y: 1, zoom: 1 });
+    useStore.getState().panViewportBy(5, 5);
+    useStore.getState().zoomViewportAround({ x: 0, y: 0 }, 1.5);
+
+    expect(useStore.getState().viewportEpoch).toBe(before + 3);
   });
 });

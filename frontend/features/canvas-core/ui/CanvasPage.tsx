@@ -489,34 +489,55 @@ export function CanvasView({
     setRfReady(true);
   }, []);
 
-  // Persisted-viewport restore (canvas fluency Wave 1, Task 3). React Flow
-  // now runs UNCONTROLLED: `CanvasSurface` seeds `defaultViewport` once at
-  // mount and React Flow owns the transform after that, which is what makes a
-  // pan land on the same frame as the gesture. Two consequences have to be
-  // paid for here, imperatively:
+  // Store viewport → React Flow transform. THE single owner of that
+  // direction (canvas fluency Wave 1, Task 3 评审修复轮1).
   //
-  //   * the row arrives AFTER the surface mounts, so the seed React Flow got
-  //     was the identity viewport, not the saved one;
-  //   * `CanvasView` is NOT remounted when the route's `:canvasId` changes
-  //     (it re-renders with a new prop), so switching canvases would
-  //     otherwise leave the previous canvas's transform in place.
+  // React Flow runs UNCONTROLLED — `CanvasSurface` seeds `defaultViewport`
+  // once and React Flow owns the transform after that, which is what makes a
+  // pan land on the same frame as the gesture. The price is that a viewport
+  // the STORE writes moves nothing by itself. Four writes need bridging, and
+  // the store marks all four with one `viewportEpoch` bump:
   //
-  // One apply per canvas id. The `onMoveEnd` this triggers lands on the value
-  // already in the store, and `CanvasSurface` drops that echo rather than
-  // dirtying a freshly loaded row.
+  //   * the initial load (the row arrives AFTER the surface mounts, so the
+  //     seed React Flow got was the identity viewport);
+  //   * a canvas switch — `CanvasView` is NOT remounted when `:canvasId`
+  //     changes, it re-renders with a new prop;
+  //   * a realtime rebase (`applyRemoteUpdate`);
+  //   * a conflict resolve (`resolveConflictWithServer`).
+  //
+  // Everything acted on is read LIVE from `getState()`. The subscribed
+  // `viewportEpoch` is only the trigger. The first version of this effect read
+  // a render-time `loadStatus` and got it wrong in the one case it was written
+  // for: on a switch the loader effect flips the store to `'loading'`
+  // synchronously, but an effect in the same commit still closes over
+  // `'ready'` — React does not re-render between effects — so it latched the
+  // NEW canvas id while applying the OLD canvas's viewport, and the re-run
+  // after the new row landed returned early. Same-commit staleness is why the
+  // `canvasId` check compares against the STORE's id (the `:275` idiom), not
+  // against anything captured at render.
+  //
+  // The `onMoveEnd` this triggers reports the value just applied, which
+  // `CanvasSurface`'s no-change guard drops — otherwise opening a canvas
+  // would dirty it and schedule a save of the row just loaded.
+  //
+  // `rfReady` is in the deps for the not-yet-initialised case: a bump that
+  // arrives before React Flow's `onInit` finds no instance, changes no
+  // latch, and is applied by the re-run when the instance shows up.
   //
   // Declared BEFORE the heal effect below so that on a canvas whose saved
   // viewport frames nothing, the restore applies first and the heal's
   // `fitView` is what the user actually ends up looking at.
-  const viewportRestoredForRef = useRef<string | null>(null);
+  const viewportEpoch = useCanvasCoreStore((s) => s.viewportEpoch);
+  const viewportEpochAppliedRef = useRef(0);
   useEffect(() => {
-    if (loadStatus !== 'ready' || !canvasId) return;
-    if (viewportRestoredForRef.current === canvasId) return;
     const instance = rfInstanceRef.current;
     if (!instance) return;
-    viewportRestoredForRef.current = canvasId;
-    void instance.setViewport(useCanvasCoreStore.getState().viewport);
-  }, [loadStatus, canvasId, rfReady]);
+    const state = useCanvasCoreStore.getState();
+    if (state.viewportEpoch === viewportEpochAppliedRef.current) return;
+    if (state.canvasId !== canvasId) return;
+    viewportEpochAppliedRef.current = state.viewportEpoch;
+    void instance.setViewport(state.viewport);
+  }, [viewportEpoch, canvasId, rfReady]);
 
   // Empty-viewport self-heal (2026-08-12 production incident, canvas
   // 337610660408263): that row's saved `viewport_json`

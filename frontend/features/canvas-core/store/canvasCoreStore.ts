@@ -9,10 +9,11 @@
  *   - `loadCanvas(id)`  — pull the row
  *   - `applyNodeChanges(...)` / `applyConnectionChanges(...)` (TBD in a
  *     follow-up React Flow integration PR)
- *   - `setViewport`          — write the viewport + mark dirty. Persistence
- *                              only: React Flow runs UNCONTROLLED, so this
- *                              records where the canvas is, it does not move it
- *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty once
+ *   - `setViewport`          — write the viewport + mark dirty + bump
+ *                              `viewportEpoch` (React Flow runs UNCONTROLLED,
+ *                              so the epoch is what actually moves the canvas)
+ *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty
+ *                              once, and NO epoch bump (it is already on screen)
  *   - `noteDragStart()`      — captures pre-drag history base without starting timer
  *   - `setNodesDragTick()`   — mid-drag position update (no history timer reset)
  *   - `markDirty()`          — schedules a debounced save
@@ -189,6 +190,24 @@ interface CanvasState {
    * cleanup for the read side of this guard.
    */
   mountEpoch: number;
+
+  /**
+   * Bumped by every viewport the STORE writes itself — the load, a canvas
+   * switch, a realtime rebase, a conflict resolve, and the three legacy
+   * programmatic writers below. NOT bumped by `setViewportSettled`, which
+   * carries a viewport that came FROM the canvas and is therefore already on
+   * screen.
+   *
+   * The reason this exists (Task 3 评审修复轮1): React Flow runs uncontrolled,
+   * so a store write no longer moves anything — only an imperative
+   * `setViewport` on React Flow's own instance does, and the store cannot
+   * reach that instance. This counter is how a store-side write says "the
+   * canvas needs moving"; `CanvasPage` owns the single effect that answers it.
+   * Without it the store and the visible transform silently diverge, and the
+   * two placement readers (`TopNodeBar`, `CanvasComposer`) map screen
+   * coordinates through a viewport nobody is looking at.
+   */
+  viewportEpoch: number;
 
   // ---- Document ----
   viewport: CanvasViewport;
@@ -394,6 +413,10 @@ export function createCanvasCoreStore(
    *  `loadCanvas()` call gets a strictly unique value even if called
    *  reentrantly before a previous `set()` has been observed. */
   let mountEpochCounter = 0;
+  /** Backing counter for `viewportEpoch` — same reasoning as `mountEpoch`'s:
+   *  a closure variable, so two writes in one tick get distinct values even
+   *  before either `set()` has been observed. */
+  let viewportEpochCounter = 0;
 
   const useStore = create<CanvasState>((set, get) => {
     /**
@@ -425,6 +448,11 @@ export function createCanvasCoreStore(
         projectId: row.project_id ?? null,
         episodeId: row.episode_id ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
+        // A server row's viewport is a STORE-side write, on all three paths
+        // that reach here (`loadCanvas`, `applyRemoteUpdate`'s rebase,
+        // `resolveConflictWithServer`). Announce it so `CanvasPage` moves the
+        // real transform to match — see `viewportEpoch`.
+        viewportEpoch: (viewportEpochCounter += 1),
         // Sanitize on load: interaction paths (alignment snap, group
         // membership) historically persisted RF-internal size snapshots
         // (measured/width/height) into rows — stale ones clamp a node's
@@ -668,6 +696,7 @@ export function createCanvasCoreStore(
       loadStatus: 'idle',
       loadError: null,
       mountEpoch: 0,
+      viewportEpoch: 0,
       viewport: IDENTITY_VIEWPORT,
       nodes: [],
       connections: [],
@@ -735,18 +764,26 @@ export function createCanvasCoreStore(
         }
       },
 
-      // NOTE: since Task 3 the surface is UNCONTROLLED, so this and the two
-      // below record a viewport, they do not apply one. To actually move the
-      // canvas, call `setViewport`/`fitView` on the React Flow instance
-      // (`CanvasSurface`'s `onInit`); the store then hears about it through
-      // `onMoveEnd` → `setViewportSettled`.
+      // The surface is UNCONTROLLED since Task 3, so writing `viewport` moves
+      // nothing on its own — these three bump `viewportEpoch`, which is what
+      // makes `CanvasPage` push the value onto React Flow's instance. They
+      // have no production callers today (`zoomPreview` and the bare-`z`
+      // overview both drive the instance directly); the bump is here so that
+      // a future caller gets the behaviour the names promise rather than a
+      // silent store-only write.
       setViewport(viewport: CanvasViewport) {
-        set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
+        set({
+          viewport: { ...viewport, zoom: clampZoom(viewport.zoom) },
+          viewportEpoch: (viewportEpochCounter += 1),
+        });
         markDirty();
       },
 
       panViewportBy(dx, dy) {
-        set({ viewport: panByScreenDelta(get().viewport, dx, dy) });
+        set({
+          viewport: panByScreenDelta(get().viewport, dx, dy),
+          viewportEpoch: (viewportEpochCounter += 1),
+        });
         markDirty();
       },
 
@@ -754,6 +791,7 @@ export function createCanvasCoreStore(
         const clamped = clampZoom(nextZoom);
         set({
           viewport: zoomAroundScreenAnchor(get().viewport, anchor, clamped),
+          viewportEpoch: (viewportEpochCounter += 1),
         });
         markDirty();
       },
@@ -975,7 +1013,8 @@ export function createCanvasCoreStore(
       setViewportSettled(viewport: CanvasViewport) {
         // One gesture, one write, one dirty signal. No history entry —
         // panning is navigation, not a document edit (markDirty does not
-        // touch history).
+        // touch history). Deliberately no `viewportEpoch` bump: this value
+        // came FROM React Flow, so pushing it back would fight the user.
         set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
         markDirty();
       },
