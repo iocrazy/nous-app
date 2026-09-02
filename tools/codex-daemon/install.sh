@@ -6,6 +6,13 @@
 # Anything after the pairing code is forwarded to `pair`, so this works too:
 #   … | sh -s -- <PAIRING-CODE> --name "studio mac"
 #
+# UPGRADING an already-paired machine (no pairing code needed — the existing
+# device token is kept and the service is restarted on the new code):
+#   curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- --update
+#
+# Running it with no arguments at all does the same thing when this machine is
+# already paired; it only asks for a pairing code when there is nothing to keep.
+#
 # Installs the two CLIs if missing, drops the daemon in
 # ~/.local/share/nous-codex/, pairs it with your nous account, and registers
 # it as a login service so it survives closing the terminal and rebooting.
@@ -16,9 +23,21 @@ set -eu
 RAW_URL="https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs"
 INSTALL_DIR="${HOME}/.local/share/nous-codex"
 SCRIPT="${INSTALL_DIR}/nous-codex.mjs"
+# Must match `xdgConfigHome()` in index.mjs — this is only read, never written.
+CONFIG_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/nous-codex/config.json"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# Is there a pairing worth keeping? `pair` writes device_id + device_token, so
+# the token's presence is the same condition `install-service` itself checks.
+has_pairing() { grep -q '"device_token"' "$CONFIG_FILE" 2>/dev/null; }
+
+UPDATE_ONLY=0
+if [ "${1-}" = "--update" ]; then
+  UPDATE_ONLY=1
+  shift
+fi
 
 # ── node ≥ 20 ─────────────────────────────────────────────────────────────
 command -v node >/dev/null 2>&1 || die "Node.js 20+ is required but 'node' was not found.
@@ -73,23 +92,41 @@ if [ ! -f "${HOME}/.codex/auth.json" ]; then
 fi
 say "codex login found"
 
-# ── pair ──────────────────────────────────────────────────────────────────
+# ── pair (skipped when this is an update) ─────────────────────────────────
+#
+# An upgrade must NOT re-pair: re-pairing mints a second device row and
+# invalidates nothing, so the honest upgrade keeps the token that is already
+# there. A pairing code given explicitly still wins — that is how you move a
+# machine to a different account.
 CODE="${1-}"
 # Everything after the code (e.g. --name "studio mac") is forwarded to `pair`.
 [ "$#" -gt 0 ] && shift
-if [ -z "$CODE" ]; then
-  # `curl … | sh` leaves stdin as the pipe, so read from the terminal.
-  if [ -r /dev/tty ]; then
-    printf 'Pairing code (nous → Settings → AI → Local CLI → Pair a device): '
-    read -r CODE </dev/tty
-  else
-    die "no pairing code given. Usage: install.sh <PAIRING-CODE>"
-  fi
-fi
-[ -n "$CODE" ] || die "no pairing code given. Usage: install.sh <PAIRING-CODE>"
 
-say ""
-node "$SCRIPT" pair "$CODE" "$@"
+if [ "$UPDATE_ONLY" -eq 1 ]; then
+  has_pairing || die "--update needs a machine that is already paired, but ${CONFIG_FILE} holds no device token.
+Install it fresh instead, with a code from nous → Settings → AI → Local CLI → Pair a device:
+    curl -fsSL ${RAW_URL%/index.mjs}/install.sh | sh -s -- <PAIRING-CODE>"
+  say "keeping the existing pairing (${CONFIG_FILE})"
+elif [ -z "$CODE" ] && has_pairing; then
+  # Already paired and nothing was asked for: this is an upgrade.
+  UPDATE_ONLY=1
+  say "already paired (${CONFIG_FILE}) — updating in place."
+  say "Pass a pairing code instead if you meant to re-pair this machine."
+else
+  if [ -z "$CODE" ]; then
+    # `curl … | sh` leaves stdin as the pipe, so read from the terminal.
+    if [ -r /dev/tty ]; then
+      printf 'Pairing code (nous → Settings → AI → Local CLI → Pair a device): '
+      read -r CODE </dev/tty
+    else
+      die "no pairing code given. Usage: install.sh <PAIRING-CODE>   (or install.sh --update to upgrade an already-paired machine)"
+    fi
+  fi
+  [ -n "$CODE" ] || die "no pairing code given. Usage: install.sh <PAIRING-CODE>   (or install.sh --update to upgrade an already-paired machine)"
+
+  say ""
+  node "$SCRIPT" pair "$CODE" "$@"
+fi
 
 # ── run at login, restart on crash ────────────────────────────────────────
 say ""
@@ -99,5 +136,9 @@ node "$SCRIPT" install-service
 say ""
 node "$SCRIPT" status
 say ""
-say "Done. The device should now appear online in nous → Settings → AI → Local CLI."
+if [ "$UPDATE_ONLY" -eq 1 ]; then
+  say "Updated. The service was restarted on the new daemon; the pairing was left alone."
+else
+  say "Done. The device should now appear online in nous → Settings → AI → Local CLI."
+fi
 say "To remove it later:  node ${SCRIPT} uninstall-service"

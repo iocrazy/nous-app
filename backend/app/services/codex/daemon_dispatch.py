@@ -37,6 +37,26 @@ DEFAULT_TIMEOUT_S = 600
 # refusal that tells the user how to update, not a quiet degrade.
 MIN_IMAGE_DAEMON_VERSION = "0.4.0"
 
+# The refusal has to survive the trip to the user, and be followable once it
+# gets there. Two constraints shape the string below, both learned the hard way:
+#
+# 1. ASCII ONLY. This message ends up in `dbos.workflow_status.error` as a
+#    pickle, and `public.dbos_error_to_text()` (migration 219) escape-renders
+#    that pickle, turns every byte >= 0x80 into a delimiter, and keeps only the
+#    LONGEST surviving chunk. One em-dash therefore silently deletes whichever
+#    half of the sentence is shorter. Measured against the live nous-db: with an
+#    em-dash the reported version and the minimum were both dropped, leaving
+#    only the tail. Do not "prettify" this punctuation back —
+#    ``test_refusal_message_is_pure_ascii`` fails if anyone does.
+# 2. It must name a command that actually works for the person reading it.
+#    A bare "re-run install.sh" does not: that path demands a pairing code
+#    (install.sh's pair block) and dies without one, and the reader is already
+#    paired by definition. `--update` is the route that keeps their token.
+_UPDATE_COMMAND = (
+    "curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master"
+    "/tools/codex-daemon/install.sh | sh -s -- --update"
+)
+
 
 class DaemonOfflineError(RuntimeError):
     """The user has no daemon connected right now."""
@@ -147,8 +167,10 @@ async def dispatch_to_daemon(
         ):
             raise DaemonUpdateRequiredError(
                 f"your local codex daemon is {reported}; image generation needs "
-                f">= {MIN_IMAGE_DAEMON_VERSION} — re-run tools/codex-daemon/install.sh "
-                "(or install.ps1 on Windows) and restart it"
+                f">= {MIN_IMAGE_DAEMON_VERSION}. No pairing code needed - update "
+                f"it in place with: {_UPDATE_COMMAND} "
+                "(on Windows, run install.ps1 with -Update instead; see "
+                "tools/codex-daemon/README.md, section Upgrading)"
             )
 
     job_id = str(uuid.uuid4())

@@ -8,6 +8,7 @@ channel) — a transport seam keeps these tests hermetic.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 
 import pytest
 
@@ -155,7 +156,39 @@ async def test_old_daemon_is_refused_with_a_typed_update_error_before_any_send()
         )
     assert t.sent == []  # refused BEFORE the job left
     assert "0.3.0" in str(exc.value) and "0.4.0" in str(exc.value)
-    assert "install.sh" in str(exc.value)  # the user can act on it
+    # Followable as written: the bare "re-run install.sh" this used to say
+    # lands on a path that demands a pairing code and dies without one, and
+    # the reader of this message is already paired. --update is the route
+    # that keeps their token.
+    assert "install.sh | sh -s -- --update" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_refusal_message_is_pure_ascii():
+    """The message must survive `public.dbos_error_to_text()` intact.
+
+    That extractor (migration 219) escape-renders the pickle DBOS stores in
+    ``dbos.workflow_status.error``, replaces every byte >= 0x80 with a
+    delimiter, and keeps only the LONGEST chunk. So a single non-ASCII
+    character silently deletes whichever half of the sentence is shorter.
+    Verified against the live nous-db: with an em-dash, the reported version
+    and the required minimum were both dropped and the user was left with the
+    tail alone — the half that does not say what is wrong. Anyone tempted to
+    put nicer punctuation back has to delete this test first.
+    """
+    t = _FakeTransport(online=True, result={"gen_id": "1"})
+    with pytest.raises(DaemonUpdateRequiredError) as exc:
+        await dispatch_to_daemon(
+            user_id="u1",
+            scope_id=1,
+            kind="image",
+            payload={"engine": "codex", "prompt": "x"},
+            transport=t,
+            mint_ticket=lambda **_: "t",
+            timeout_s=1,
+            daemon_version=await _v("0.3.0"),
+        )
+    assert all(ord(c) < 128 for c in str(exc.value))
 
 
 @pytest.mark.asyncio
@@ -253,3 +286,28 @@ async def test_dreamina_jobs_are_not_gated_this_release():
         daemon_version=await _v("0.3.0"),
     )
     assert out == {"gen_id": "1"}
+
+
+def test_the_command_the_refusal_names_is_one_the_installer_accepts():
+    """The message is only useful if that flag exists on the other side.
+
+    This is the cross-file half of the fix: the refusal used to name a bare
+    ``install.sh`` run, which the installer answers by demanding a pairing
+    code the reader does not have. Nothing connected the two files, so the
+    wording and the script could drift apart without a single test failing.
+    Reads the installer rather than restating it.
+    """
+    from app.services.codex.daemon_dispatch import _UPDATE_COMMAND
+
+    install_sh = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "tools"
+        / "codex-daemon"
+        / "install.sh"
+    )
+    script = install_sh.read_text()  # missing file must fail, not skip
+    assert "--update" in _UPDATE_COMMAND
+    # The flag is parsed, not merely mentioned in a comment.
+    assert 'if [ "${1-}" = "--update" ]; then' in script
+    # And the exact one-liner the user is told to paste is documented there.
+    assert _UPDATE_COMMAND in script

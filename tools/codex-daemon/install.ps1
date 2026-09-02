@@ -10,12 +10,19 @@
 #   # trailing args are forwarded to `pair`:
 #   … ABCD2345 --name "studio pc"
 #
+# UPGRADING an already-paired machine (no pairing code; the device token is
+# kept and the scheduled task is re-registered on the new code):
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) -Update
+#
 # $env:NOUS_API_BASE is honoured while this script runs, but a scheduled task
 # carries no environment of its own — set it with `setx NOUS_API_BASE "…"` (or
 # System Properties -> Environment Variables) so the background task sees it.
 
 param(
   [string]$PairingCode,
+  # Update an already-paired machine: keep the device token, just re-download
+  # the daemon and re-register the task. Mirrors `install.sh --update`.
+  [switch]$Update,
   # Everything after the code (e.g. --name "studio pc") is forwarded to `pair`.
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$RemainingArgs
@@ -30,6 +37,15 @@ $PSNativeCommandUseErrorActionPreference = $true
 $RawUrl     = 'https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'nous-codex'
 $Script     = Join-Path $InstallDir 'nous-codex.mjs'
+# Must match `xdgConfigHome()` in index.mjs — read only, never written here.
+$ConfigHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $env:USERPROFILE '.config' }
+$ConfigFile = Join-Path (Join-Path $ConfigHome 'nous-codex') 'config.json'
+
+# Is there a pairing worth keeping? `pair` writes device_id + device_token, so
+# the token's presence is the same condition `install-service` itself checks.
+function Test-Pairing {
+  (Test-Path $ConfigFile) -and ((Get-Content $ConfigFile -Raw -ErrorAction SilentlyContinue) -match '"device_token"')
+}
 
 # Write-Error is terminating under $ErrorActionPreference = 'Stop', so the
 # `exit 1` that used to follow it was unreachable.
@@ -87,15 +103,31 @@ if (-not (Test-Path $authJson)) {
 }
 Write-Host 'codex login found'
 
-# ── pair ──────────────────────────────────────────────────────────────────
-if (-not $PairingCode) {
-  $PairingCode = Read-Host 'Pairing code (nous → Settings → AI → Local CLI → Pair a device)'
-}
-if (-not $PairingCode) { Die 'no pairing code given.' }
+# ── pair (skipped when this is an update) ─────────────────────────────────
+#
+# An upgrade must NOT re-pair: re-pairing mints a second device row, so the
+# honest upgrade keeps the token that is already there. An explicit pairing
+# code still wins — that is how you move a machine to a different account.
+$UpdateOnly = [bool]$Update
+if ($UpdateOnly) {
+  if (-not (Test-Pairing)) {
+    Die "-Update needs a machine that is already paired, but $ConfigFile holds no device token. Install it fresh instead, with a code from nous -> Settings -> AI -> Local CLI -> Pair a device."
+  }
+  Write-Host "keeping the existing pairing ($ConfigFile)"
+} elseif (-not $PairingCode -and (Test-Pairing)) {
+  $UpdateOnly = $true
+  Write-Host "already paired ($ConfigFile) — updating in place."
+  Write-Host 'Pass a pairing code instead if you meant to re-pair this machine.'
+} else {
+  if (-not $PairingCode) {
+    $PairingCode = Read-Host 'Pairing code (nous → Settings → AI → Local CLI → Pair a device)'
+  }
+  if (-not $PairingCode) { Die 'no pairing code given. Pass -Update instead to upgrade an already-paired machine.' }
 
-Write-Host ''
-node $Script pair $PairingCode @RemainingArgs
-Assert-NativeOk 'nous-codex pair'
+  Write-Host ''
+  node $Script pair $PairingCode @RemainingArgs
+  Assert-NativeOk 'nous-codex pair'
+}
 
 # ── run at logon ──────────────────────────────────────────────────────────
 Write-Host ''
@@ -105,5 +137,9 @@ Assert-NativeOk 'nous-codex install-service'
 Write-Host ''
 node $Script status
 Write-Host ''
-Write-Host 'Done. The device should now appear online in nous → Settings → AI → Local CLI.'
+if ($UpdateOnly) {
+  Write-Host 'Updated. The task was re-registered on the new daemon; the pairing was left alone.'
+} else {
+  Write-Host 'Done. The device should now appear online in nous → Settings → AI → Local CLI.'
+}
 Write-Host "To remove it later:  node $Script uninstall-service"

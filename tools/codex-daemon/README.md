@@ -54,6 +54,42 @@ for.
 
 (`npx @nous/codex-daemon` will work once the package is published to npm.)
 
+## Upgrading
+
+Already paired? Update in place. **No pairing code is needed** — the existing
+device token is kept, and the service is restarted on the new code:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.sh | sh -s -- --update
+```
+
+Windows:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/install.ps1))) -Update
+```
+
+Running the installer with **no arguments** on an already-paired machine does
+the same thing; `--update` just says so out loud and fails instead of falling
+back to pairing when there is nothing to keep. Passing a pairing code always
+re-pairs — that is how you move a machine to a different account.
+
+Manually, the upgrade is the download plus `install-service`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iocrazy/nous-app/master/tools/codex-daemon/index.mjs \
+  -o ~/.local/share/nous-codex/nous-codex.mjs
+node ~/.local/share/nous-codex/nous-codex.mjs install-service   # restarts it
+```
+
+`install-service` is deliberately re-runnable: it rewrites the unit/plist and
+then **restarts** rather than `enable --now`, which would leave the old daemon
+running while `status` reported everything green.
+
+**When you need this:** nous refuses image and video jobs from a daemon older
+than 0.4.0, because older builds silently drop the `quality` setting instead of
+passing it to `codex`. The refusal names your version and this command.
+
 ## Commands
 
 | Command | What it does |
