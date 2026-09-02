@@ -445,10 +445,15 @@ class AssetsRepository:
         """The asset a legacy project entity became, or ``None``.
 
         ``None`` genuinely means "no asset in this scope carries that
-        provenance". Two ways a real migrated entity can produce it, both
-        expected: the migration ADOPTED an existing hand-made asset (adoption
-        never writes ``attrs``, by design — see ``_apply``'s docstring), and an
-        entity whose project never migrated has no asset at all.
+        provenance", and the remaining cause is an entity whose project never
+        migrated — it has no asset at all.
+
+        ADOPTION used to be a second cause and is not one any more: ``_apply``
+        appends the run's ``(table, id)`` pairs to the adopted asset's
+        ``attrs.legacy_ids``, so an entity the migration merged into a
+        hand-made asset resolves here like any other. A row migrated BEFORE
+        that change still answers ``None`` until the backfill is re-run, which
+        is safe to do — the stamp is idempotent.
         """
         async with read_scope() as session:
             row = (

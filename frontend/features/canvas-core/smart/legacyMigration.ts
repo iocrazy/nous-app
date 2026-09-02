@@ -16,11 +16,12 @@
  *    connections; that is the whole reason this is a rewrite and not a
  *    delete-and-add.
  *  * A MISS IS A BADGE, NOT A DELETION AND NOT A GUESS. `{"asset_id": null}` is
- *    a real 200 with two documented causes — the entity's project never
- *    migrated, or the migration ADOPTED a hand-made asset (adoption writes no
- *    `attrs.legacy_ids` by design). Neither is recoverable from the client, and
- *    matching on name would rewire a card to an asset nobody chose. The card
- *    stays exactly as it is and says `Unmigrated` out loud.
+ *    a real 200 meaning the entity's project never migrated — or that it
+ *    migrated by ADOPTION before the run started stamping the adopted asset's
+ *    `attrs.legacy_ids`, which a re-run of the backfill repairs. Neither is
+ *    recoverable from the client, and matching on name would rewire a card to
+ *    an asset nobody chose. The card stays exactly as it is and says
+ *    `Unmigrated` out loud.
  *  * A FAILED REQUEST CHANGES NOTHING AT ALL. "Could not ask" is not "there is
  *    no asset". Marking a card unmigrated because the network blinked would
  *    write a claim nobody checked into `nodes_json` — the same distinction

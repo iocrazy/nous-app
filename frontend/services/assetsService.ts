@@ -734,12 +734,13 @@ export type LegacyEntityKind = 'character' | 'location' | 'prop';
  * The asset a pre-P3 canvas card became, or `null` when there is none.
  *
  * `null` is a 200, not an error: the question was well formed and the answer is
- * "no asset in this scope carries that provenance". It has TWO documented
- * causes and neither is guessable from here — the entity's project never
- * migrated, or the migration ADOPTED a hand-made asset (adoption writes no
- * `attrs.legacy_ids` by design). A caller must therefore treat `null` as
- * "unmigrated" and leave the legacy card alone. Matching on name or type
- * instead would rewire a card to an asset nobody chose.
+ * "no asset in this scope carries that provenance" — the entity's project
+ * never migrated. (Adoption used to be a second cause; the migration now
+ * stamps the adopted asset's `attrs.legacy_ids`, so an entity merged into a
+ * hand-made asset resolves like any other. Rows migrated before that change
+ * still answer `null` until the backfill is re-run.) A caller must treat
+ * `null` as "unmigrated" and leave the legacy card alone. Matching on name or
+ * type instead would rewire a card to an asset nobody chose.
  *
  * `legacyId` is a Snowflake string on the way out; the router parses it back to
  * the JSON number the migration wrote.

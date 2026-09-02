@@ -544,8 +544,8 @@ test('a legacy card the server cannot map says Unmigrated rather than guessing',
   await routeCanvasApi(page, rec, {
     canvasId,
     nodes: [legacyCharacterNode('337610660408112')],
-    // A real 200 with `asset_id: null` — the project never migrated, or the
-    // migration ADOPTED a hand-made asset (adoption writes no legacy ids).
+    // A real 200 with `asset_id: null` — the project never migrated (or was
+    // adopted by a run predating the adoption stamp; a re-run repairs those).
     resolveLegacyTo: null,
   });
 

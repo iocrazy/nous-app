@@ -34,6 +34,14 @@ lower(name))`` — for every planned key, and counts only the project refs the p
 actually asked for (an adopted asset may carry older refs to projects outside
 this plan; those are not this run's business).
 
+An adopted asset DOES get the run's provenance appended to
+``attrs.legacy_ids`` (set semantics; everything else in ``attrs`` is left
+alone). Without it ``GET /assets/resolve-legacy`` — which matches on that key —
+could not find the asset an adopted entity became, and a pre-P3 canvas card
+pointing at that entity would wear the ``Unmigrated`` badge permanently. A
+re-run over already-stamped rows adds nothing and marks nothing dirty, so it
+does not move ``updated_at``.
+
 THE FIVE STEPS, in the order the run performs them (spec §4):
 1/2. legacy rows → assets + ``asset_project_refs`` + Default loadout (``_apply``)
 1/2-tail. ``portrait_url`` / ``cover_url`` → ``cover_file_id`` + ``unsorted``
@@ -679,17 +687,60 @@ class ApplyResult(TypedDict):
     the generated_media mapping.
 
     Both are built from the PLAN's own ``legacy`` lists, for created and
-    ADOPTED assets alike. Re-deriving them from ``attrs.legacy_ids`` instead
-    would be wrong in the one case that matters: adoption never writes
-    ``attrs`` (a hand-made asset the run claimed keeps its own attrs), so a
-    re-run — or any run with adoptions — would silently map nothing for those
-    rows. The plan already knows which legacy rows belong to which key; that
-    is the authority.
+    ADOPTED assets alike, and they stay that way even though adoption now
+    stamps ``attrs.legacy_ids`` as well. The plan knows which legacy rows
+    belong to which key before any row is written; ``attrs`` knows it only
+    after, and only for rows this run reached. Reading the indexes back out of
+    the column would make them depend on the write having already succeeded —
+    a strictly weaker source for something the two later steps use to decide
+    what to write next.
     """
 
     counts: Dict[str, int]
     asset_id_by_key: Dict[Tuple[int, str, str], int]
     asset_id_by_ref: Dict[LegacyRef, int]
+
+
+def _with_legacy_ids(
+    attrs: Optional[Dict[str, Any]], legacy: Sequence[LegacyRef]
+) -> Optional[Dict[str, Any]]:
+    """``attrs`` with ``legacy`` merged into ``legacy_ids``, or None if unchanged.
+
+    A re-run over an already-stamped asset issues no UPDATE and its
+    ``updated_at`` does not move — a migration re-run must not look like a user
+    edit. ⚠️ That guarantee rests on APPEND-WITH-SET-SEMANTICS, not on the
+    ``None`` short circuit: SQLAlchemy compares the attribute's committed value
+    at flush time and skips the UPDATE when the new one is equal, so returning
+    ``base`` here instead of ``None`` is behaviourally identical (verified by
+    mutation against a real Postgres). The short circuit is a cheaper way to
+    reach the same place, and nothing may be built on it that the equality
+    comparison does not already provide. What DOES break the guarantee is
+    replacing ``legacy_ids`` instead of merging into it, which is why the pins
+    are on the merged VALUE.
+
+    Set semantics over ``(table, id)`` pairs, insertion order preserved. The
+    id is written as a JSON NUMBER — the same shape ``_apply``'s create branch
+    writes and the shape ``resolve_legacy``'s containment query looks for; a
+    string would be a value that never matches and never reports why.
+
+    An existing ``legacy_ids`` of the wrong shape (not a list, or entries that
+    are not 2-element pairs) is preserved verbatim rather than repaired: this
+    function is a stamp, not a migration of its own, and silently rewriting a
+    value nobody in this run wrote is how a fix becomes a data loss.
+    """
+    base = dict(attrs or {})
+    raw = base.get("legacy_ids")
+    current = raw if isinstance(raw, list) else []
+    seen = {
+        (str(x[0]), int(x[1]))
+        for x in current
+        if isinstance(x, (list, tuple)) and len(x) == 2
+    }
+    additions = [[str(t), int(i)] for (t, i) in legacy if (str(t), int(i)) not in seen]
+    if not additions:
+        return None
+    base["legacy_ids"] = list(current) + additions
+    return base
 
 
 async def _apply(plan: MigrationPlan, run_user_id: str) -> ApplyResult:
@@ -755,6 +806,33 @@ async def _apply(plan: MigrationPlan, run_user_id: str) -> ApplyResult:
             else:
                 asset_id = int(found.id)
                 existing += 1
+                # Stamp the provenance onto the adopted asset too.
+                #
+                # Adoption used to write nothing here, on the reasoning that a
+                # hand-made asset keeps its own ``attrs``. Correct as far as it
+                # went, and it left ``GET /assets/resolve-legacy`` — which
+                # matches on ``attrs.legacy_ids`` — unable to find the asset an
+                # adopted entity became. The canvas consequence is concrete: a
+                # pre-P3 card pointing at that entity wears the `Unmigrated`
+                # badge forever, even though a perfectly good asset exists and
+                # the run knows exactly which one.
+                #
+                # APPEND with set semantics, never replace: the asset may
+                # already carry legacy ids from an earlier run or from another
+                # project's entity that merged into the same name, and dropping
+                # those would break the very lookups this line exists to
+                # enable. Everything else in ``attrs`` is copied through
+                # untouched — this adds one key's worth of provenance, it does
+                # not take the row over. ``merged_from`` is deliberately not
+                # written: that records a MERGE the run performed, and adopting
+                # one asset is not one.
+                #
+                # A NEW dict is assigned rather than mutated in place: the JSONB
+                # column is a plain ``dict`` on the ORM, so an in-place append
+                # is invisible to the unit of work and would flush nothing.
+                stamped = _with_legacy_ids(found.attrs, a["legacy"])
+                if stamped is not None:
+                    found.attrs = stamped
             asset_id_by_key[_key(a["scope_id"], a["asset_type"], a["name"])] = asset_id
             for ref in a["legacy"]:
                 asset_id_by_ref[(str(ref[0]), int(ref[1]))] = asset_id

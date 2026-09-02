@@ -406,17 +406,40 @@ def test_a_client_cannot_set_membership_at_creation():
 
 
 def test_asset_detail_response_declares_the_used_in_contract():
-    """``used_in`` must be the TYPED model, not a bare dict waved through.
+    """``used_in`` must be the TYPED model, not a bare dict waved through —
+    and OPTIONAL, because it is opt-in on the route.
 
     The set of keys ``get_asset`` emits is pinned dynamically — by driving the
     real method — in ``test_assets_service.py``; this one only fixes the type,
     which that test cannot see (a dict would satisfy it just as well).
     """
+    from typing import Optional, get_args
+
     from app.schemas.assets import UsedInResponse
 
-    assert (
-        AssetDetailResponse.model_fields["used_in"].annotation is UsedInResponse
-    ), "used_in must be the typed model, not a bare dict passed through unvalidated"
+    field = AssetDetailResponse.model_fields["used_in"]
+    assert field.annotation == Optional[UsedInResponse], (
+        "used_in must be the typed model (not a bare dict passed through "
+        "unvalidated) and Optional (it is only computed on request)"
+    )
+    assert UsedInResponse in get_args(field.annotation)
+
+
+def test_used_in_is_absent_by_default_rather_than_an_empty_pair():
+    """The response must not CLAIM "used nowhere" for a caller that did not ask.
+
+    ``?include_used_in`` gates a five-table aggregate. A ``default_factory``
+    here would hand every unasked caller an empty ``used_in``, which reads as a
+    computed answer — and the client cannot tell the two apart."""
+    field = AssetDetailResponse.model_fields["used_in"]
+    assert field.default is None
+    assert field.default_factory is None, (
+        "a default_factory would manufacture an empty used_in for callers who "
+        "never asked for one"
+    )
+    # And the sibling fields still DO default, so this is a deliberate
+    # exception rather than the whole model losing its defaults.
+    assert AssetDetailResponse.model_fields["files"].default_factory is list
 
 
 def test_used_in_defaults_to_both_halves_present_and_empty():

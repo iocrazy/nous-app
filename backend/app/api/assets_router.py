@@ -472,11 +472,11 @@ async def resolve_legacy(
     them as provenance.
 
     ``{"asset_id": null}`` is a 200: the question was well formed and the answer
-    is "no asset carries that provenance" (never migrated, or the migration
-    ADOPTED a hand-made asset, which writes no ``attrs``). Only an unmappable
-    ``kind`` refuses — that is a bad request, and the router's own pattern
-    already turns the common spelling mistakes into a 422 before the service
-    sees them.
+    is "no asset carries that provenance" — the entity's project never
+    migrated, or it was adopted by a run predating the adoption stamp (a
+    re-run repairs those). Only an unmappable ``kind`` refuses — that is a bad
+    request, and the router's own pattern already turns the common spelling
+    mistakes into a 422 before the service sees them.
     """
     try:
         sid = await _gate(scope_id, auth)
