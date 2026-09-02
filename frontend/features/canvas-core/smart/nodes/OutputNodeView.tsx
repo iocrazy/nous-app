@@ -93,22 +93,26 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   // changes no layout (Task 7). `gen_ratio` is plain node data, which keeps
   // this stable under the memo wrapper in nodes/registry.ts.
   //
-  // Two forms, because the branches want different answers when no ratio is
-  // known. The GRID has a placeholder and the image that replaces it, and
-  // they must resolve to ONE box or the swap reflows — square is the
-  // fallback there, and the shimmer cell was hard `aspect-square` before
-  // this work anyway. The SINGLE preview usually is not a generation slot at
-  // all: history archives, extend/outpaint results, upscale tiles, timeline
-  // films, loop outputs and entity templates all arrive with no ratio and
-  // never regenerate, so a square would letterboxed them permanently — most
-  // visibly the history archive, which renders the same images as the live
-  // slot directly above it. Those size themselves, as they always did.
-  const cellAspect = cssAspectRatio(gen_ratio);
+  // Reserving a box only earns its keep when a placeholder and the thing that
+  // replaces it must resolve to ONE element — otherwise it is a guess imposed
+  // on media that knows its own shape. So the square fallback is gated on
+  // there being something pending to agree with, in BOTH branches.
+  //
+  // Without that gate the ratio-less nodes get letterboxed permanently:
+  // history archives, extend/outpaint results (whose whole point is a CHANGED
+  // aspect), upscale tiles, timeline films, loop outputs and entity templates
+  // all arrive with no ratio and never regenerate. The history archive is the
+  // most visible — it accumulates, so it reaches the multi-image GRID branch
+  // after two runs, and it renders the same images as the live slot directly
+  // above it. Those size themselves, as they always did.
+  const gridAspect =
+    gen_pending > 0 ? cssAspectRatio(gen_ratio) : cssAspectRatioOrNull(gen_ratio) ?? undefined;
   const soloAspect = cssAspectRatioOrNull(gen_ratio) ?? undefined;
   // `h-full` only alongside a box. Filling a container that has no height of
   // its own is how the un-boxed branches would collapse instead of falling
   // back to the media's own size, which is the whole point of not boxing
   // them — so the two always travel together.
+  const gridFill = gridAspect ? 'h-full ' : '';
   const soloFill = soloAspect ? 'h-full ' : '';
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -650,7 +654,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 key={`${img.url}-${i}`}
                 data-testid="output-cell"
                 className="group/cell relative"
-                style={{ aspectRatio: cellAspect }}
+                style={{ aspectRatio: gridAspect }}
               >
                 <img
                   src={mediaSrc(img.url)}
@@ -671,7 +675,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                     setEditingUrl(img.url);
                     setEditorMode('preview');
                   }}
-                  className="block h-full w-full cursor-zoom-in rounded object-contain"
+                  className={`block ${gridFill}w-full cursor-zoom-in rounded object-contain`}
                 />
                 {/* IC 图四: each grid item (e.g. a generated mask) can be
                     removed on its own. */}
@@ -702,7 +706,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                 key={`pending-${i}`}
                 data-testid="output-cell"
                 className="w-full"
-                style={{ aspectRatio: cellAspect }}
+                style={{ aspectRatio: gridAspect }}
               >
                 <div
                   data-testid="output-pending-cell"

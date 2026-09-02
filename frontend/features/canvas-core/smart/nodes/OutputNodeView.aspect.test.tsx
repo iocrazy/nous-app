@@ -168,4 +168,41 @@ describe('OutputNodeView — the reserved box is only for slots that have a rati
     });
     expect(screen.getByTestId('output-cell').style.aspectRatio).toBe('9 / 16');
   });
+
+  it('a ratio-less multi-image archive imposes no box on its grid cells', () => {
+    // outputHistory.replaceOutputImagesWithHistory mints exactly this shape:
+    // `images` plus `history_for`, no `gen_ratio`, nothing pending. It
+    // ACCUMULATES, so two runs of a count:1 prompt already take the grid
+    // branch — and an archive never regenerates, so a square fallback here
+    // is permanent letterboxing, not a placeholder waiting to be replaced.
+    renderOutput({
+      history_for: 'p1',
+      images: [IMG, { ...IMG, url: '/api/v1/generated-media/2/cover' }],
+    });
+    const cells = screen.getAllByTestId('output-cell');
+    expect(cells).toHaveLength(2);
+    for (const cell of cells) expect(cell.style.aspectRatio).toBe('');
+  });
+
+  it('an unboxed grid cell does not stretch its image to a height it has not got', () => {
+    // `h-full` inside a wrapper with no reserved box collapses the image —
+    // the same pairing rule the single-preview branch already follows.
+    renderOutput({
+      history_for: 'p1',
+      images: [IMG, { ...IMG, url: '/api/v1/generated-media/2/cover' }],
+    });
+    for (const img of screen.getAllByRole('img'))
+      expect(img.className).not.toContain('h-full');
+  });
+
+  it('a pending grid with no ratio keeps the square its placeholder needs', () => {
+    // The live-run case is unchanged: a shimmer cell and the image that
+    // replaces it must resolve to ONE box.
+    renderOutput({ gen_pending: 2, images: [IMG] });
+    const cells = screen.getAllByTestId('output-cell');
+    expect(cells).toHaveLength(3);
+    for (const cell of cells) expect(cell.style.aspectRatio).toBe('1 / 1');
+    for (const img of screen.getAllByRole('img'))
+      expect(img.className).toContain('h-full');
+  });
 });
