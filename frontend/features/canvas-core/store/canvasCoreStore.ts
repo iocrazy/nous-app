@@ -36,6 +36,7 @@ import type {
   CanvasNode,
   CanvasViewport,
 } from '../types';
+import { healStaleGenSlots } from '../smart/healGenSlots';
 import { CONFLICT_SAVE_ERROR, readErrorStatus } from '../utils/saveFailure';
 import {
   IDENTITY_VIEWPORT,
@@ -436,7 +437,12 @@ export function createCanvasCoreStore(
         // `dedupeNodesById`: a row with duplicated node ids renders as a
         // blank canvas (see that helper's doc comment) — collapse to the
         // first occurrence before anything downstream sees the set.
-        nodes: dedupeNodesById((row.nodes_json ?? []).map(stripRfInternals)),
+        // `healStaleGenSlots`: a pending shimmer count whose owner (runner /
+        // resume registry) is gone would pulse forever — clamp it here, same
+        // hook and same spirit as the dedupe above (2026-09-02 screenshot).
+        nodes: healStaleGenSlots(
+          dedupeNodesById((row.nodes_json ?? []).map(stripRfInternals)),
+        ),
         connections: row.connections_json ?? [],
         nodeOps: row.node_ops_json ?? [],
         connectionOps: row.connection_ops_json ?? [],
