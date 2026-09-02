@@ -298,23 +298,9 @@ describe('reset — the drag tick is closure state, so reset owns it', () => {
     expect(store.getState().revision).toBe(store.getState().persistedRevision);
   });
 
-  it('a remote row on the NEXT canvas rebases instead of raising a conflict', async () => {
-    const { store } = makeStore();
-    await store.getState().loadCanvas('100');
-    store.getState().noteDragStart();
-    store.getState().setNodesDragTick([{ id: 'dragged', position: { x: 40, y: 0 } }]);
-    store.getState().reset();
-
-    await store.getState().loadCanvas('100');
-    const remoteRow: Canvas = {
-      ...baseCanvas,
-      base_updated_at: TS2,
-      nodes_json: [{ id: 'remote-wins' }],
-    };
-    store.getState().applyRemoteUpdate(remoteRow);
-
-    const s = store.getState();
-    expect(s.nodes).toEqual([{ id: 'remote-wins' }]);
-    expect(s.conflict).toBeNull();
-  });
+  // A second case here — "a remote row on the NEXT canvas rebases instead of
+  // raising a conflict" — was deleted: `applyServerRow` clears
+  // `unclaimedDragTick` on every path that reaches it, so that test passed
+  // with the reset() clear and without it. A test that cannot fail is not
+  // coverage, it is a claim of coverage.
 });
