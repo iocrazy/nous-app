@@ -89,8 +89,18 @@ vi.mock('../../../../services/projectsService', () => ({
 }));
 
 const createCanvas = vi.fn();
+const listCanvases = vi.fn();
 vi.mock('../../../../features/canvas-core/services/canvasService', () => ({
   createCanvas: (...a: unknown[]) => createCanvas(...a),
+  // Send To Canvas (P4 Task 6) reads the target project's canvases. A mock
+  // that omits an export the component imports is a crash on first access,
+  // not a missing feature — the stub has to grow with the module.
+  listCanvases: (...a: unknown[]) => listCanvases(...a),
+}));
+
+const sendAssetToCanvas = vi.fn();
+vi.mock('../../../../features/canvas-core/services/sendAssetToCanvas', () => ({
+  sendAssetToCanvas: (...a: unknown[]) => sendAssetToCanvas(...a),
 }));
 
 const fetchAssetDetail = vi.fn();
@@ -679,13 +689,58 @@ describe('Open in canvas', () => {
   });
 });
 
+describe('Send To Canvas', () => {
+  it('navigates to the chosen canvas with ?node= so the new card is centred', async () => {
+    // The node id is the whole reason the page appends a query string: the
+    // canvas's own `?node=` latch selects and fits that node. Landing on the
+    // board without it drops the user somewhere they have to search.
+    listCanvases.mockResolvedValue([
+      {
+        id: 'c7',
+        project_id: '55',
+        name: 'Board One',
+        kind: 'smart',
+        viewport_json: { x: 0, y: 0, zoom: 1 },
+        nodes_json: [],
+        connections_json: [],
+        node_ops_json: [],
+        connection_ops_json: [],
+        base_updated_at: '2026-09-02T10:00:00+00:00',
+        created_at: '2026-09-01T00:00:00+00:00',
+        updated_at: '2026-09-02T10:00:00+00:00',
+        created_by: null,
+      },
+    ]);
+    sendAssetToCanvas.mockResolvedValue({
+      ok: true,
+      canvasId: 'c7',
+      nodeId: 'asset-1-abcd',
+    });
+
+    await renderSheet();
+    fireEvent.click(screen.getByTestId('send-to-canvas'));
+    fireEvent.click(await screen.findByTestId('send-asset-project-option'));
+    fireEvent.click(await screen.findByTestId('send-asset-canvas-option'));
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/team/42/canvas/c7?node=asset-1-abcd'),
+    );
+    expect(listCanvases).toHaveBeenCalledWith('55');
+  });
+});
+
 describe('the deferred surfaces', () => {
-  it('Send To Canvas and Send To Agent are disabled with a reason', async () => {
+  // Send To Canvas USED to be asserted disabled here, beside Send To Agent.
+  // P4 Task 6 shipped it, so the two are no longer the same case: one opens a
+  // picker, the other is still a placeholder. Asserting both halves keeps the
+  // distinction pinned — a regression that re-disabled the canvas action, or
+  // one that quietly enabled the agent action, each fails its own line.
+  it('Send To Canvas is live and Send To Agent still names its phase', async () => {
     await renderSheet();
     const canvas = screen.getByTestId('send-to-canvas');
     const agent = screen.getByTestId('send-to-agent');
-    expect(canvas).toBeDisabled();
-    expect(canvas).toHaveAttribute('title', 'Arrives with P4');
+    expect(canvas).toBeEnabled();
+    expect(canvas).not.toHaveAttribute('title');
     expect(agent).toBeDisabled();
     expect(agent).toHaveAttribute('title', 'Arrives with P5');
   });

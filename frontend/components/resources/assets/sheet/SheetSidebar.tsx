@@ -2,12 +2,12 @@
 //
 // The sheet's right column: the action stack, Details, and Used In.
 //
-// Two deliberate absences, both recorded rather than quietly skipped:
-//
-//  * SEND TO CANVAS / SEND TO AGENT are DISABLED with a title naming the phase
-//    that brings them (P4 / P5). A live button that does nothing is the silent
-//    no-op this repo keeps re-learning; a disabled one with a reason is a
-//    promise the user can read.
+// SEND TO CANVAS is live as of P4 Task 6 — it opens
+// `SendAssetToCanvasDialog`, which appends a reference card to a canvas the
+// user picks. SEND TO AGENT is still DISABLED with a title naming the phase
+// that brings it (P5): a live button that does nothing is the silent no-op
+// this repo keeps re-learning; a disabled one with a reason is a promise the
+// user can read.
 //
 // GENERATION HISTORY now sits under Used In. Task 7 left it out because
 // `GET /generated` had no `source_asset_id` filter and the only thing it could
@@ -33,6 +33,7 @@ import { shortProjectLabel } from '../AssetCard';
 import { typeSingularKey } from '../assetTypeMeta';
 import { canvasKindFor } from './assetSheetModel';
 import { GenerationHistoryPanel } from './GenerationHistoryPanel';
+import { SendAssetToCanvasDialog } from './SendAssetToCanvasDialog';
 
 export interface SheetSidebarProps {
   /** Null until the resources context resolves one; the history panel is the
@@ -61,7 +62,13 @@ export interface SheetSidebarProps {
   onDuplicate: () => void;
   onDelete: () => void;
   busy: boolean;
-  onOpenCanvas: (canvasId: string) => void;
+  /**
+   * Go to a canvas. `nodeId` is passed by Send To Canvas so the page can
+   * navigate with `?node=<id>` — the canvas's own latch then selects and
+   * centres the card that was just added. Without it the user lands on a
+   * board and has to hunt for what they sent.
+   */
+  onOpenCanvas: (canvasId: string, nodeId?: string) => void;
   /** Navigate to the Generated inbox, filtered to unreviewed. */
   onOpenInbox: () => void;
   onError: (err: unknown) => void;
@@ -90,6 +97,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
   onError,
 }) => {
   const { t } = useTranslation();
+  const [sendOpen, setSendOpen] = useState(false);
 
   return (
     <aside data-testid="sheet-sidebar" className="flex w-64 shrink-0 flex-col gap-4">
@@ -97,8 +105,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
         <button
           type="button"
           data-testid="send-to-canvas"
-          disabled
-          title={t('assets.sheet.arrivesWithP4', 'Arrives with P4')}
+          onClick={() => setSendOpen(true)}
           className={ACTION}
         >
           <Frame size={13} aria-hidden="true" />
@@ -235,6 +242,21 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
           scopeId={scopeId}
           assetId={detail.id}
           onOpenInbox={onOpenInbox}
+        />
+      )}
+
+      {sendOpen && (
+        <SendAssetToCanvasDialog
+          detail={detail}
+          loadoutId={loadout?.id ?? null}
+          projects={projects}
+          projectsLoading={projectsLoading}
+          projectsFailed={projectsFailed}
+          onClose={() => setSendOpen(false)}
+          onDone={(canvasId, nodeId) => {
+            setSendOpen(false);
+            onOpenCanvas(canvasId, nodeId);
+          }}
         />
       )}
     </aside>

@@ -9,6 +9,9 @@
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { MapPin, Package } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+import { UnmigratedBadge } from './UnmigratedBadge';
 
 import type { LibEntityNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
@@ -21,8 +24,9 @@ const META = {
 } as const;
 
 export function LibEntityNodeView({ id, type, data, selected }: NodeProps) {
-  const { name, badge_tag, description, cover_url } =
+  const { name, badge_tag, description, cover_url, unmigrated } =
     data as unknown as LibEntityNodeData;
+  const { t } = useTranslation();
   const patch = useNodeDataPatch(id);
   // Inline edits write the canvas document. Text fields take `readOnly`,
   // never `disabled` — a viewer must still be able to select and copy the
@@ -39,6 +43,7 @@ export function LibEntityNodeView({ id, type, data, selected }: NodeProps) {
     >
       <div className="mh-node-head">
         <div className="mh-node-title">{meta.title}</div>
+        {unmigrated && <UnmigratedBadge t={t} />}
         {badge_tag && (
           <span
             data-testid="lib-entity-badge"

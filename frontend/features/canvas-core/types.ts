@@ -73,6 +73,14 @@ export type CanvasConnectionOp = Record<string, unknown>;
 export interface Canvas {
   id: string;
   project_id: string;
+  /**
+   * The asset this canvas belongs to (`canvases.asset_id`, mig 446), set by
+   * the asset sheet's "Open In Canvas". `CanvasResponse` has declared it since
+   * asset-library P2 Task 1; it was missing here, so the seeding rule that
+   * depends on it (P4 Task 6 — an EMPTY asset-bound canvas gets one card for
+   * that asset) had no typed field to read.
+   */
+  asset_id?: string | null;
   /** Owning episode for a `kind==='storyboard'` row (Task 1, mig 421);
    *  absent/null for every other kind. Snowflake bigint as string. */
   episode_id?: string | null;

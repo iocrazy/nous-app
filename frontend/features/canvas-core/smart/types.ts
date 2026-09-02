@@ -390,26 +390,49 @@ export type AnySmartNode =
   | LoopNode
   | CharacterNode;
 
-/** Character canvas (kind='character'): the bible-card node the preset agent
- *  workflow hangs off. Binds a project_characters row when opened from the
- *  library; unbound (character_id null) when hand-placed. */
+/**
+ * Character canvas (kind='character'): the bible-card node the preset agent
+ * workflow hung off. Binds a `_legacy_project_characters` row when it was
+ * opened from the old library; unbound (character_id null) when hand-placed.
+ *
+ * LEGACY. Nothing creates one any more — P4 Task 6 removed the last producer
+ * (the character canvas's seeding template) and replaced it with the asset
+ * card. The type, the view and this shape stay because saved canvases still
+ * hold these nodes, and `legacyMigration.ts` rewrites the bound ones into
+ * asset cards as each canvas loads.
+ */
 export interface CharacterNodeData {
-  /** project_characters row id (snowflake string), or null = unbound. */
+  /** `_legacy_project_characters` row id (snowflake string), or null = unbound. */
   character_id: string | null;
   name: string;
   role_tag: string;
   description: string;
   portrait_url: string | null;
+  /**
+   * The asset library has no asset carrying this card's provenance (P4 Task 6).
+   *
+   * Set ONLY when `GET /assets/resolve-legacy` answered an explicit `null` —
+   * never when the request failed, which is "could not ask". The card then
+   * renders an `Unmigrated` badge instead of pretending it is still connected
+   * to a library that no longer knows it.
+   */
+  unmigrated?: boolean;
 }
 
-/** Location/prop canvas (SP2): the library-card node the preset workflow
- *  hangs off. Binds a project_lib_entities row; unbound when hand-placed. */
+/**
+ * Location/prop canvas (SP2): the library-card node the preset workflow hung
+ * off. Binds a `_legacy_project_lib_entities` row; unbound when hand-placed.
+ *
+ * LEGACY, on the same terms as {@link CharacterNodeData} above.
+ */
 export interface LibEntityNodeData {
   entity_id: string | null;
   name: string;
   badge_tag: string;
   description: string;
   cover_url: string | null;
+  /** See {@link CharacterNodeData.unmigrated}. */
+  unmigrated?: boolean;
 }
 
 /**

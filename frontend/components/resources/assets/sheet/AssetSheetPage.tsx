@@ -538,7 +538,11 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
           onCopyLoadoutPrompt={() => void onCopyLoadoutPrompt()}
           onDuplicate={() => void onDuplicate()}
           onDelete={() => void onDelete()}
-          onOpenCanvas={(canvasId) => navigate(resPath(`/canvas/${canvasId}`))}
+          onOpenCanvas={(canvasId, nodeId) =>
+            navigate(
+              resPath(`/canvas/${canvasId}${nodeId ? `?node=${encodeURIComponent(nodeId)}` : ''}`),
+            )
+          }
           onOpenInbox={openInbox}
           onError={report}
         />

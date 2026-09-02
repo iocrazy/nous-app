@@ -1888,7 +1888,6 @@
       "notLoopable": "Not Loopable",
       "sendToCanvas": "Send To Canvas",
       "sendToAgent": "Send To Agent",
-      "arrivesWithP4": "Arrives with P4",
       "arrivesWithP5": "Arrives with P5",
       "copyLoadoutPrompt": "Copy Loadout Prompt",
       "promptCopied": "Prompt Copied",
@@ -1996,6 +1995,19 @@
         "over_limit": "over the model's limit",
         "no_image_file": "no image file",
         "provider_no_refs": "model takes no references"
+      }
+    },
+    "sendToCanvas": {
+      "title": "Send To Canvas",
+      "newCanvas": "New Canvas",
+      "noCanvases": "This Project Has No Canvases Yet",
+      "canvasesUnavailable": "Could not load the canvases here",
+      "err": {
+        "loadFailed": "Could not open that canvas",
+        "readOnly": "You can only read that canvas",
+        "conflict": "Someone else is editing that canvas. Try again.",
+        "saveFailed": "Could not add the card to that canvas",
+        "createFailed": "Could not create the canvas"
       }
     }
   },
@@ -3353,6 +3365,28 @@
       "noResults": "No assets found",
       "listFailed": "Could not load the asset library",
       "pickFailed": "Could not open that asset. Try again."
+    },
+    "asAsset": {
+      "action": "As Asset…",
+      "noScope": "Open this canvas from a workspace to save assets",
+      "noGeneration": "This image has no library record to save",
+      "lookupFailed": "Could not read this generation",
+      "saved": "Saved to {{name}}"
+    },
+    "projectAssets": {
+      "noProject": "This canvas has no project",
+      "empty": "This project has no assets yet",
+      "allPresent": "Every project asset is already here",
+      "inserted": "Added {{inserted}}",
+      "insertedWithSkipped": "Added {{inserted}} · {{skipped}} already here",
+      "failed": "Could not load the project assets"
+    },
+    "legacyCard": {
+      "unmigrated": "Unmigrated",
+      "unmigratedHint": "No asset in this workspace matches this card. Replace it with an asset card to use it in generations."
+    },
+    "assetSeed": {
+      "failed": "Could not load this canvas asset"
     }
   },
   "modelParams": {

@@ -211,8 +211,22 @@ describe('Asset library i18n parity', () => {
     'assets.sheet.notLoopable',
     'assets.sheet.sendToCanvas',
     'assets.sheet.sendToAgent',
-    'assets.sheet.arrivesWithP4',
+    // `arrivesWithP4` is gone: Send To Canvas shipped in P4 Task 6, so the
+    // button no longer wears a "coming later" title and the string has no
+    // renderer. `arrivesWithP5` stays — Send To Agent is still a placeholder.
     'assets.sheet.arrivesWithP5',
+    // Send To Canvas's own dialog (P4 Task 6). Every failure reason has its
+    // own line: a read-only canvas, a lost optimistic-lock race and a dead
+    // request are three different things to do next.
+    'assets.sendToCanvas.title',
+    'assets.sendToCanvas.newCanvas',
+    'assets.sendToCanvas.noCanvases',
+    'assets.sendToCanvas.canvasesUnavailable',
+    'assets.sendToCanvas.err.loadFailed',
+    'assets.sendToCanvas.err.readOnly',
+    'assets.sendToCanvas.err.conflict',
+    'assets.sendToCanvas.err.saveFailed',
+    'assets.sendToCanvas.err.createFailed',
     'assets.sheet.copyLoadoutPrompt',
     'assets.sheet.promptCopied',
     'assets.sheet.copyFailed',

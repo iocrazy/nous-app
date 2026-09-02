@@ -240,6 +240,29 @@ export async function fetchGenerated(
   return normalizePage(data);
 }
 
+/**
+ * ONE inbox card by id — the same wire shape {@link fetchGenerated} lists.
+ *
+ * The canvas's "As Asset…" is the caller: an output node holds a
+ * `GeneratedImageRef` whose `id` IS the `generated_media` row, and
+ * `SaveAsAssetDialog` takes {@link GeneratedItem} rows, not canvas node data.
+ * Reading the row rather than synthesizing one is what makes the dialog's
+ * `source_asset_id` prefill real — that column is populated server-side and
+ * the node never saw it.
+ *
+ * A row in another scope is a typed 404 ({@link GeneratedApiError}), never an
+ * empty body: "not yours" and "not there" are the same answer to a caller who
+ * may not learn which.
+ */
+export async function fetchGeneratedItem(
+  scopeId: string,
+  id: string,
+): Promise<GeneratedItem> {
+  return envelopeFetch<GeneratedItem>(`${BASE()}/${id}?${query(scopeId)}`, {
+    headers: await getAuthHeaders(),
+  });
+}
+
 /** Tab counters for the current scope. */
 export async function fetchGeneratedCounts(scopeId: string): Promise<GeneratedCounts> {
   return envelopeFetch<GeneratedCounts>(`${BASE()}/counts?${query(scopeId)}`, {

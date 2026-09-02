@@ -612,6 +612,43 @@ export async function fetchAssetDetail(
 }
 
 /**
+ * The three pre-P3 canvas card kinds `GET /assets/resolve-legacy` can map.
+ *
+ * These are the smart node TYPES the old entity canvases wrote
+ * (`character` / `location` / `prop`), and they are also the two legacy tables'
+ * vocabulary — `character` came from `_legacy_project_characters`, the other
+ * two from `_legacy_project_lib_entities`. The backend owns that mapping; the
+ * client only has to name the kind.
+ */
+export type LegacyEntityKind = 'character' | 'location' | 'prop';
+
+/**
+ * The asset a pre-P3 canvas card became, or `null` when there is none.
+ *
+ * `null` is a 200, not an error: the question was well formed and the answer is
+ * "no asset in this scope carries that provenance". It has TWO documented
+ * causes and neither is guessable from here — the entity's project never
+ * migrated, or the migration ADOPTED a hand-made asset (adoption writes no
+ * `attrs.legacy_ids` by design). A caller must therefore treat `null` as
+ * "unmigrated" and leave the legacy card alone. Matching on name or type
+ * instead would rewire a card to an asset nobody chose.
+ *
+ * `legacyId` is a Snowflake string on the way out; the router parses it back to
+ * the JSON number the migration wrote.
+ */
+export async function resolveLegacyAsset(
+  scopeId: string,
+  kind: LegacyEntityKind,
+  legacyId: string,
+): Promise<string | null> {
+  const data = await envelopeFetch<{ asset_id?: string | null } | null>(
+    `${BASE()}/resolve-legacy?${query(scopeId, { kind, legacy_id: legacyId })}`,
+    { headers: await getAuthHeaders() },
+  );
+  return data?.asset_id ?? null;
+}
+
+/**
  * Edit an asset. Pass ONLY the fields the user changed — see
  * {@link AssetUpdateBody} for why an over-complete body clears things.
  *

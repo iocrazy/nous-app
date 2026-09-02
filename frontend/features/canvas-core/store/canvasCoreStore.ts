@@ -172,6 +172,16 @@ interface CanvasState {
    *  every other kind, and NULL until load resolves. Gates Task 4's
    *  reconcile orchestration in `CanvasPage.tsx`. */
   episodeId: string | null;
+  /**
+   * The asset this canvas belongs to (`canvases.asset_id`, mig 446), or NULL.
+   *
+   * Set by "Open In Canvas" on the asset sheet, which is what makes an empty
+   * entity canvas seedable: P4 Task 6 gives such a canvas ONE asset card bound
+   * to this id, replacing the old `?characterId=` query-parameter seeding whose
+   * producer was retired in P3. NULL until load resolves, and NULL for every
+   * canvas that was not created from an asset.
+   */
+  assetId: string | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
   /**
@@ -429,6 +439,7 @@ export function createCanvasCoreStore(
         name: row.name ?? null,
         projectId: row.project_id ?? null,
         episodeId: row.episode_id ?? null,
+        assetId: row.asset_id ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
         // Sanitize on load: interaction paths (alignment snap, group
         // membership) historically persisted RF-internal size snapshots
@@ -670,6 +681,7 @@ export function createCanvasCoreStore(
       name: null,
       projectId: null,
       episodeId: null,
+      assetId: null,
       loadStatus: 'idle',
       loadError: null,
       mountEpoch: 0,
@@ -702,6 +714,7 @@ export function createCanvasCoreStore(
           name: null,
           projectId: null,
           episodeId: null,
+          assetId: null,
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,

@@ -1888,7 +1888,6 @@
       "notLoopable": "不循环",
       "sendToCanvas": "发送到画布",
       "sendToAgent": "发送给智能体",
-      "arrivesWithP4": "随 P4 上线",
       "arrivesWithP5": "随 P5 上线",
       "copyLoadoutPrompt": "复制造型提示词",
       "promptCopied": "提示词已复制",
@@ -1996,6 +1995,19 @@
         "over_limit": "超过模型上限",
         "no_image_file": "没有图片文件",
         "provider_no_refs": "该模型不支持参考图"
+      }
+    },
+    "sendToCanvas": {
+      "title": "发送到画布",
+      "newCanvas": "新建画布",
+      "noCanvases": "该项目还没有画布",
+      "canvasesUnavailable": "无法加载该项目的画布",
+      "err": {
+        "loadFailed": "无法打开该画布",
+        "readOnly": "你对该画布只有查看权限",
+        "conflict": "有人正在编辑该画布，请重试。",
+        "saveFailed": "无法把卡片添加到该画布",
+        "createFailed": "无法创建画布"
       }
     }
   },
@@ -3353,6 +3365,28 @@
       "noResults": "未找到素材",
       "listFailed": "无法加载素材库",
       "pickFailed": "无法打开该素材，请重试。"
+    },
+    "asAsset": {
+      "action": "存为素材…",
+      "noScope": "请从工作区打开画布后再存为素材",
+      "noGeneration": "这张图没有可保存的素材库记录",
+      "lookupFailed": "无法读取这次生成记录",
+      "saved": "已存入 {{name}}"
+    },
+    "projectAssets": {
+      "noProject": "该画布未关联项目",
+      "empty": "该项目还没有素材",
+      "allPresent": "项目素材已全部在画布上",
+      "inserted": "已添加 {{inserted}} 个",
+      "insertedWithSkipped": "已添加 {{inserted}} 个 · {{skipped}} 个已在画布上",
+      "failed": "无法加载项目素材"
+    },
+    "legacyCard": {
+      "unmigrated": "未迁移",
+      "unmigratedHint": "此工作区没有与该卡片对应的素材。请改用素材卡片，才能参与生成。"
+    },
+    "assetSeed": {
+      "failed": "无法加载该画布绑定的素材"
     }
   },
   "modelParams": {

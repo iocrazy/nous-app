@@ -32,6 +32,7 @@ import {
   listProjectAssets,
   previewGenerateSlot,
   regeneratePrompt,
+  resolveLegacyAsset,
   searchAssets,
   translatePrompt,
   unlinkProject,
@@ -961,5 +962,45 @@ describe('scope_id and auth ride on every new call', () => {
     const [url] = callAt(spy);
     expect(url.searchParams.get('scope_id')).toBe(SCOPE);
     expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+});
+
+// ── resolve-legacy (P4 Task 6) ──────────────────────────────────────────────
+//
+// `GET /assets/resolve-legacy?scope_id=&kind=&legacy_id=` answers
+// `{"asset_id": "<id>" | null}`. Both arms are real answers the canvas acts
+// on, so both are pinned — and the null arm is a 200, not an error.
+
+describe('resolveLegacyAsset', () => {
+  it('sends the scope, the kind and the legacy id, and returns the asset id', async () => {
+    const spy = stubFetch({ success: true, data: { asset_id: '727145299382534201' } });
+    const out = await resolveLegacyAsset(SCOPE, 'character', '400000000000000001');
+    expect(out).toBe('727145299382534201');
+    const url = calledUrl(spy);
+    expect(url.pathname).toBe('/api/v1/assets/resolve-legacy');
+    expect(url.searchParams.get('scope_id')).toBe(SCOPE);
+    expect(url.searchParams.get('kind')).toBe('character');
+    expect(url.searchParams.get('legacy_id')).toBe('400000000000000001');
+  });
+
+  it('returns null for an unmigrated entity — a 200, not a throw', async () => {
+    stubFetch({ success: true, data: { asset_id: null } });
+    await expect(resolveLegacyAsset(SCOPE, 'prop', '400000000000000009')).resolves.toBeNull();
+  });
+
+  it('keeps the id a STRING, so a Snowflake never rides as a number', async () => {
+    stubFetch({ success: true, data: { asset_id: '727145299382534201' } });
+    const out = await resolveLegacyAsset(SCOPE, 'location', '4');
+    expect(typeof out).toBe('string');
+  });
+
+  it('a typed refusal still throws', async () => {
+    stubFetch(
+      { success: false, error: { code: 'not_a_member', detail: 'nope' } },
+      403,
+    );
+    await expect(
+      resolveLegacyAsset(SCOPE, 'character', '1'),
+    ).rejects.toBeInstanceOf(GeneratedApiError);
   });
 });
