@@ -283,3 +283,64 @@ def test_note_out_defaults_rating_to_zero_for_legacy_rows():
     from app.schemas.inspiration import NoteOut
 
     assert NoteOut(**_ROW).rating == 0
+
+
+# ── HTTP boundary: JSON body key → Pydantic field (mig 448) ────────────────
+#
+# Every other rating test calls the handler function directly with an
+# already-constructed NoteCreateIn, which skips the one seam the iOS Shortcut
+# actually depends on: the raw JSON key "rating" binding to the model field.
+# This drives it through a real request/response cycle instead.
+
+
+def _rating_client():
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from app.api.inspiration_router import get_inspiration_actor
+    from app.api.inspiration_router import router as inspiration_router
+
+    app = FastAPI()
+    app.include_router(inspiration_router, prefix="/api/v1")
+
+    async def _actor():
+        return USER
+
+    app.dependency_overrides[get_inspiration_actor] = _actor
+    return TestClient(app), app
+
+
+def test_post_notes_binds_rating_from_json_body():
+    svc = AsyncMock()
+    svc.create_note.return_value = {**_ROW, "rating": 4}
+    client, app = _rating_client()
+    try:
+        with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+            resp = client.post(
+                "/api/v1/inspiration/notes",
+                json={"content_md": "x", "rating": 4},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    assert resp.json()["rating"] == 4
+    assert svc.create_note.call_args.kwargs["rating"] == 4
+
+
+def test_post_notes_rejects_out_of_range_rating_with_422():
+    """The ge/le bounds are enforced by FastAPI at the boundary, not only by a
+    hand-built model in a unit test."""
+    svc = AsyncMock()
+    client, app = _rating_client()
+    try:
+        with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+            resp = client.post(
+                "/api/v1/inspiration/notes",
+                json={"content_md": "x", "rating": 6},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 422
+    svc.create_note.assert_not_awaited()

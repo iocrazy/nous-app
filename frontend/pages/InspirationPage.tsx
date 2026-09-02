@@ -274,6 +274,11 @@ export const InspirationPage: React.FC = () => {
   };
 
   const onRating = async (note: InspirationNote, value: number) => {
+    // Currently UNREACHABLE: RatingStars maps a click on the already-selected
+    // star to 0, so the value it emits never equals the current one. Kept as a
+    // symmetric no-op guard (onToggleTask has the same early return, and that
+    // one IS reachable) and as cover if that contract ever changes. No test
+    // pins this line — do not read it as covered behaviour.
     if ((note.rating ?? 0) === value) return;
     // Same seq-guard as onToggleTask: claim this note's latest write slot
     // BEFORE the optimistic update, so a response that lands after a newer

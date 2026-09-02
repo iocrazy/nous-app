@@ -22,6 +22,7 @@ const NOTE = (id: string, md: string): InspirationNote => ({
   tags: [],
   ref_hotspot: null,
   pinned: false,
+  rating: 0,
   note_date: '2026-07-10',
   created_at: '2026-07-10T09:00:00+00:00',
   updated_at: '2026-07-10T09:00:00+00:00',
