@@ -58,6 +58,9 @@ export type ResourcesFilterParams = Omit<
 
 const EMPTY_FILTER_PARAMS: ResourcesFilterParams = {};
 
+/** localStorage key for the resource grid's view mode preference. */
+export const RESOURCES_VIEW_MODE_KEY = 'mediahub_resources_view_mode';
+
 export interface ResourcesContextType {
   // ── Scope / URL-derived state ──
   isPersonal: boolean;
@@ -340,7 +343,27 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
   const [multiSelectMode, setMultiSelectMode] = useState(false);
 
   // ── View / UI state ──
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'justified'>('grid');
+  // Default view is the Eagle-style adaptive ("justified") layout: thumbnails
+  // keep their own proportions instead of being letterboxed onto a fixed tile.
+  // Persisted like the flatten preference below so a deliberate switch to the
+  // uniform grid or the list survives a reload.
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'justified'>(() => {
+    try {
+      const stored = localStorage.getItem(RESOURCES_VIEW_MODE_KEY);
+      if (stored === 'grid' || stored === 'list' || stored === 'justified') return stored;
+    } catch (err) {
+      // Privacy mode / disabled storage — fall through to the default.
+      console.error('Failed to read stored resources view mode:', err);
+    }
+    return 'justified';
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(RESOURCES_VIEW_MODE_KEY, viewMode);
+    } catch (err) {
+      console.error('Failed to persist resources view mode:', err);
+    }
+  }, [viewMode]);
   // "Show child files" — flatten folders into a recursive flat file list.
   // Persisted so the preference survives reloads (mirrors useLibrary's pattern).
   const [flattenFolders, setFlattenFolders] = useState<boolean>(() => {

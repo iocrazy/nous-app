@@ -32,6 +32,14 @@ interface CompactMediaCardProps {
   forceShowCheckbox?: boolean;
   resourceId?: string;
   aiStatus?: { transcript_status?: string; summary_status?: string; visual_analysis_status?: string; has_prompt?: boolean };
+  /** Adaptive view: render the thumbnail at this ratio (w/h) instead of the
+   *  fixed 2:3 tile, so rows can justify. Omitted elsewhere, keeping the
+   *  uniform grid exactly as it was. */
+  aspectRatio?: number;
+  /** Adaptive view: report the cover's natural ratio once it loads, for items
+   *  whose `resolution` the server did not record. See ResourceCard for the
+   *  same contract and utils/justifiedLayout.ts for the re-layout ripple. */
+  onThumbnailAspect?: (aspect: number) => void;
 }
 
 // Helper to get AI status icon styling
@@ -64,7 +72,7 @@ const getTagColor = (tag: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId, aiStatus }) => {
+export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClick, onDoubleClick, onContextMenu, isShared, isSelected, selectable, isChecked, onToggleSelect, forceShowCheckbox, resourceId, aiStatus, aspectRatio, onThumbnailAspect }) => {
   const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedShare, setCopiedShare] = useState(false);
@@ -234,7 +242,8 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
       {/* Thumbnail Container - Sprite Scrub or Video Autoplay on Hover */}
       <div
         ref={thumbRef}
-        className="relative w-full overflow-hidden bg-black aspect-[2/3] cursor-pointer"
+        className={`relative w-full overflow-hidden bg-black cursor-pointer ${aspectRatio == null ? 'aspect-[2/3]' : ''}`}
+        style={aspectRatio == null ? undefined : { aspectRatio }}
         onClick={onClick}
         onMouseEnter={isVideo ? handleThumbMouseEnter : undefined}
         onMouseLeave={isVideo ? handleThumbMouseLeave : undefined}
@@ -254,6 +263,13 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             referrerPolicy="no-referrer"
             loading="lazy"
             decoding="async"
+            onLoad={(e) => {
+              if (!onThumbnailAspect) return;
+              const img = e.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                onThumbnailAspect(img.naturalWidth / img.naturalHeight);
+              }
+            }}
             onError={() => setImageError(true)}
           />
         )}

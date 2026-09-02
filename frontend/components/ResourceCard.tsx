@@ -39,6 +39,15 @@ interface ResourceCardProps {
   isTranscoding?: boolean;
   // Justified view: real aspect ratio (w/h) for the thumbnail (no letterbox bars)
   aspectRatio?: number;
+  /** Adaptive view: report the thumbnail's natural ratio once it loads, for
+   *  resources whose dimensions the server did not send (every upload).
+   *
+   *  The grid batches these per animation frame and re-runs the justified
+   *  layout. Because that packing is sequential, a corrected ratio repartitions
+   *  its own row AND every row after it — the caller drops measurements that
+   *  merely confirm the placeholder, and the layout keeps the untouched prefix,
+   *  but items below the change can still shift. See utils/justifiedLayout.ts. */
+  onThumbnailAspect?: (aspect: number) => void;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -119,6 +128,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   compositeId,
   isTranscoding = false,
   aspectRatio,
+  onThumbnailAspect,
 }) => {
   const { t } = useTranslation();
   const resource = item.resource;
@@ -413,6 +423,13 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             alt={filename}
             className={`w-full h-full ${aspectRatio == null ? 'object-contain' : 'object-cover'} transition-opacity duration-150 ${isHovering && spriteLoaded ? 'opacity-0' : 'opacity-100'}`}
             loading="lazy"
+            onLoad={(e) => {
+              if (!onThumbnailAspect) return;
+              const img = e.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                onThumbnailAspect(img.naturalWidth / img.naturalHeight);
+              }
+            }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         ) : (
