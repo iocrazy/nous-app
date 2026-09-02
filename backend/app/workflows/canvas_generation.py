@@ -133,33 +133,85 @@ def _absolute_media_url(url: str) -> str:
 #   not_in_scope      — the resource row is not in this generation's scope
 #   no_image_file     — no materializable image bytes behind the row
 #   materialize_failed— bytes exist, reading them failed
-#   scope_unresolved  — the run has no user / no personal team to check against
+#   scope_unresolved  — the generation's scope could not be derived at all (no
+#                       project row behind the canvas, and no personal team for
+#                       the runner to fall back to)
 #   unresolved        — the generated-media bridge yielded nothing and does not
 #                       report which of missing-row / wrong-kind / unreadable
 #                       applied (it answers Optional[str] by design, and three
 #                       other callers depend on that)
 
 
-async def _generation_scope_id(user_id: Optional[str]) -> Optional[int]:
+async def _canvas_project_scope_id(canvas_id: int) -> Optional[int]:
+    """The asset scope of the canvas's project — its team, or the OWNER's
+    personal team when ``projects.team_id`` is NULL. None when unresolvable.
+
+    Same rule ``assets_router._project_scope_id`` applies, and deliberately the
+    OWNER's team rather than the runner's: a project guard admits collaborators
+    via ``project_members``, and resolving the CALLER's personal team for one of
+    them would aim the reference check at a scope the file was never in — the
+    references would all come back ``not_in_scope`` while the picture sat in the
+    project everybody is looking at.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Canvases, Projects
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Projects.owner_id, Projects.team_id)
+                .select_from(Canvases)
+                .join(Projects, Projects.id == Canvases.project_id)
+                .where(Canvases.id == int(canvas_id))
+            )
+        ).first()
+    if row is None:
+        return None
+    owner_id, team_id = row
+    if team_id is not None:
+        return int(team_id)
+    if owner_id is None:
+        return None
+    return int(await _resolve_personal_team_id(str(owner_id)))
+
+
+async def _generation_scope_id(
+    canvas_id: Optional[int], user_id: Optional[str]
+) -> Optional[int]:
     """The scope a resource reference must belong to, or None.
 
-    The workflow carries no ``scope_id``: ``persist_canvas_generation_step``
-    and the daemon dispatch BOTH derive it as the user's personal team, and so
-    does ``POST /canvases/assets/zip`` when it scope-checks generated-media ids.
-    Deriving it a fourth way here would be a fourth definition of "this
-    generation's scope" — so this reuses the same one.
+    Derived SERVER-SIDE, from the generation's own canvas: canvas → project →
+    the project's team, or the owner's personal team when the project has none.
+    Nothing the client sends is consulted, because the scope is the thing being
+    checked — taking it from the request would make the check answer to the
+    party it exists to constrain.
 
-    None (no user_id, or no personal team row) is reported as
-    ``scope_unresolved`` rather than treated as "everything allowed": a scope
-    check that cannot run has not passed.
+    A canvas in a TEAM project is why this cannot just be the runner's personal
+    team. Asset files there belong to the team scope, so a personal-team check
+    would refuse every one of them (``not_in_scope``) on a board whose whole
+    point is shared references. Before this, that was the only rule.
+
+    Falls back to the runner's personal team ONLY when there is no canvas — the
+    one case with no project to ask. None (no canvas and no user, no project
+    row, no personal team) is reported as ``scope_unresolved`` rather than
+    treated as "everything allowed": a scope check that cannot run has not
+    passed.
     """
-    if not user_id:
-        return None
     try:
+        if canvas_id is not None:
+            scope = await _canvas_project_scope_id(int(canvas_id))
+            if scope is not None:
+                return scope
+        if not user_id:
+            return None
         return int(await _resolve_personal_team_id(str(user_id)))
-    except Exception as exc:  # no personal team row / DB unreachable
+    except Exception as exc:  # no project/personal team row, DB unreachable
         logger.warning(
-            "[canvas_generation][refs] could not resolve scope for user {}: {}",
+            "[canvas_generation][refs] could not resolve scope for canvas {} "
+            "user {}: {}",
+            canvas_id,
             user_id,
             exc,
         )
@@ -167,13 +219,20 @@ async def _generation_scope_id(user_id: Optional[str]) -> Optional[int]:
 
 
 async def _resolve_reference_paths(
-    stack: Any, refs: tuple[str, ...] | list[str], *, user_id: Optional[str]
+    stack: Any,
+    refs: tuple[str, ...] | list[str],
+    *,
+    user_id: Optional[str],
+    canvas_id: Optional[int] = None,
 ) -> tuple[list[str], list[Dict[str, Any]]]:
     """``(local_paths, dropped_refs)`` for the branches that need FILES.
 
     The scope is resolved at most once, and only when a resource-shaped
     reference is actually present — a run whose refs are all generated-media
-    must not start failing because the personal-team lookup is unavailable.
+    must not start failing because a scope lookup is unavailable.
+
+    ``canvas_id`` is what makes the scope the CANVAS's rather than the runner's;
+    see ``_generation_scope_id``.
     """
     from app.services.library.generated_media_service import (
         classify_reference_url,
@@ -198,7 +257,7 @@ async def _resolve_reference_paths(
             continue
         if kind == "resource":
             if not scope_resolved:
-                scope_id = await _generation_scope_id(user_id)
+                scope_id = await _generation_scope_id(canvas_id, user_id)
                 scope_resolved = True
             if scope_id is None:
                 dropped.append({"url": str(url), "reason": "scope_unresolved"})
@@ -218,13 +277,17 @@ async def _resolve_reference_paths(
 
 
 async def _resolve_reference_urls(
-    refs: tuple[str, ...] | list[str], *, user_id: Optional[str]
+    refs: tuple[str, ...] | list[str],
+    *,
+    user_id: Optional[str],
+    canvas_id: Optional[int] = None,
 ) -> tuple[list[str], list[Dict[str, Any]]]:
     """``(absolute_urls, dropped_refs)`` for the DAEMON branch.
 
     The daemon fetches references over the public API, so it wants URLs, not
     paths — but a resource URL still has to clear the same two gates first
-    (in scope, has image bytes) before it is handed to the user's machine.
+    (in the CANVAS's scope, has image bytes) before it is handed to the user's
+    machine.
     Generated-media URLs keep exactly their previous treatment: absolutise and
     go, with no extra round trip.
     """
@@ -244,7 +307,7 @@ async def _resolve_reference_urls(
             continue
         if kind == "resource":
             if not scope_resolved:
-                scope_id = await _generation_scope_id(user_id)
+                scope_id = await _generation_scope_id(canvas_id, user_id)
                 scope_resolved = True
             if scope_id is None:
                 dropped.append({"url": str(url), "reason": "scope_unresolved"})
@@ -330,7 +393,7 @@ async def generate_canvas_media_step(
         eff, dropped = req.reconcile(caps)
 
         ref_urls, dropped_refs = await _resolve_reference_urls(
-            eff.refs, user_id=user_id
+            eff.refs, user_id=user_id, canvas_id=canvas_id
         )
 
         if engine == "dreamina":
@@ -463,7 +526,7 @@ async def generate_canvas_media_step(
 
         async with AsyncExitStack() as stack:
             local_refs, dropped_refs = await _resolve_reference_paths(
-                stack, eff.refs, user_id=user_id
+                stack, eff.refs, user_id=user_id, canvas_id=canvas_id
             )
             kwargs: dict = {
                 "prompt": eff.prompt,
@@ -515,7 +578,7 @@ async def generate_canvas_media_step(
 
     async with AsyncExitStack() as stack:
         local_refs, dropped_refs = await _resolve_reference_paths(
-            stack, eff.refs, user_id=user_id
+            stack, eff.refs, user_id=user_id, canvas_id=canvas_id
         )
         result = await provider.generate(
             prompt,
