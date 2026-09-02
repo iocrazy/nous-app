@@ -69,6 +69,7 @@ class NotesService:
         user_id: str,
         content_md: str,
         ref_hotspot: Optional[Dict[str, Any]] = None,
+        rating: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         # Single-connection save pipeline: the note-row INSERT, the tag-pool
         # resolve, and the note_tags junction sync all join ONE ambient
@@ -84,6 +85,7 @@ class NotesService:
                     tags=parse_tags(content_md),
                     note_date=_today_shanghai(),
                     ref_hotspot=ref_hotspot,
+                    rating=rating,
                 )
                 if row is None:
                     raise _NoteWriteAborted()
@@ -130,6 +132,7 @@ class NotesService:
         *,
         content_md: Optional[str] = None,
         pinned: Optional[bool] = None,
+        rating: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         await self._owned(user_id, note_id)
         tags = parse_tags(content_md) if content_md is not None else None
@@ -144,6 +147,7 @@ class NotesService:
                     content_md=content_md,
                     tags=tags,
                     pinned=pinned,
+                    rating=rating,
                 )
                 if row is None:
                     raise _NoteWriteAborted()
