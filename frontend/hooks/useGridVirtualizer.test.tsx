@@ -110,8 +110,11 @@ describe('useGridVirtualizer cold-load column measurement', () => {
  * mutation. The sub-768 cases below are the ones that can, and the 1340/780 pair
  * is kept only as a plain size-stability check.
  *
- * Mutation-checked: re-inserting `width < 768 → 2` turns the three sub-768
- * assertions red (see the report for the recorded failure count).
+ * Mutation-checked: re-inserting `width < 768 → 2` turns TWO of these red — the
+ * 767 case and the 1056/736 case. The 375 case stays green under the mutation
+ * ON PURPOSE: its whole point is that the band rule reaches 2 columns there by
+ * itself, which is why the mobile branch was redundant. The 1340/780 pair stays
+ * green too, for the reason given on it below.
  */
 describe('useGridVirtualizer — container narrowing must not resize cards', () => {
   beforeEach(() => {

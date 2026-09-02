@@ -7,15 +7,15 @@ import { useCallback, useEffect, useState } from 'react'
  * are conditionally rendered (they mount only once there are items), so on a
  * cold load the node attaches AFTER the first render. A `useEffect(..., [])`
  * reading a RefObject would run once at mount, find null, never attach the
- * observer, and leave the width pinned at 0 — which downstream reads as "not
- * measured yet" forever. Driving the effect off callback-ref state re-runs it
- * the moment the node attaches.
+ * observer, and leave the width pinned at 0 — which the uniform grid reads as
+ * "not measured yet" and renders as a permanent 2-column layout. Driving the
+ * effect off callback-ref state re-runs it the moment the node attaches.
  *
  * The width is also read synchronously on attach so the first painted frame
  * already has the real number; the observer callback lands a frame later.
  *
- * Shared by the resource grid's justified virtualizer and the downloads grid,
- * so the two cannot drift on this detail.
+ * Shared by all three grids — the resource grid's uniform virtualizer, its
+ * justified virtualizer, and the downloads grid — so they cannot drift on this.
  */
 export function useContainerWidth(): {
   ref: (node: HTMLElement | null) => void
@@ -33,6 +33,17 @@ export function useContainerWidth(): {
 
     const initial = containerEl.getBoundingClientRect().width
     if (initial > 0) setWidth(initial)
+
+    // Environments without ResizeObserver (jsdom, very old browsers) still get
+    // the synchronous measurement above — a correct first layout that simply
+    // never reflows. Reported rather than swallowed, because "the grid stopped
+    // responding to resizes" is otherwise indistinguishable from a layout bug.
+    if (typeof ResizeObserver === 'undefined') {
+      console.error(
+        'ResizeObserver unavailable: grid width measured once at attach and will not track resizes.',
+      )
+      return
+    }
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]

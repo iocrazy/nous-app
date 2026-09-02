@@ -13,20 +13,52 @@ import { MOCK_LIBRARY } from '../constants';
 import { LibraryTab } from '../components/LibraryTabs';
 import { SearchResult } from '../services/searchService';
 
-/** The download library's view modes. `adaptive` is the Eagle-style justified
- *  layout shared with the resource grid; the other three are pre-existing. */
-export const LIBRARY_VIEW_MODES = ['adaptive', 'grid', 'list', 'feed'] as const;
+/** The download library's view modes.
+ *
+ *  `justified` is the Eagle-style adaptive layout shared with the resource
+ *  grid. It deliberately carries the SAME id as `ResourcesContext`'s view mode
+ *  rather than a second spelling: one layout with two names ("adaptive" here,
+ *  "justified" there) reads as two features to anyone grepping. The
+ *  user-facing label is `resources.justifiedView`, which is "自适应模式" in zh.
+ *  The other three modes are pre-existing. */
+export const LIBRARY_VIEW_MODES = ['justified', 'grid', 'list', 'feed'] as const;
 export type LibraryViewMode = (typeof LIBRARY_VIEW_MODES)[number];
 
 /** localStorage blob holding the download library's UI preferences. */
 export const LIBRARY_PREFS_KEY = 'mediahub_library_preferences';
 
+/** Default view mode for anyone without a deliberate choice on record. */
+export const DEFAULT_LIBRARY_VIEW_MODE: LibraryViewMode = 'justified';
+
 /**
- * The download library's initial view mode: a stored preference if it names a
- * real mode, else the Eagle-style adaptive layout (matching the resource grid).
+ * Stamped into the preferences blob whenever the view mode is written by this
+ * version of the code. Its ABSENCE is the migration signal — see below.
+ */
+export const LIBRARY_VIEW_MODE_VERSION = 1;
+
+/**
+ * The download library's initial view mode.
  *
- * Extracted from the hook so the default, the validation and the
- * storage-unavailable path are testable without standing up useLibrary's
+ * ── The one-time migration, and why it is needed ──────────────────────────
+ *
+ * `viewMode` in this blob is NOT proof that anyone chose anything. The
+ * persistence effect below used to write the whole blob unconditionally on
+ * mount, and `LibraryProvider` wraps the entire app shell (`AppLayout.tsx:69`),
+ * not just the downloads route — so every user who has ever opened the app has
+ * `{"viewMode":"grid"}` on disk, written by an effect, with no click behind it.
+ * Honouring that verbatim would mean the new default reached nobody who has
+ * ever used the product, which is a shortfall a comment cannot fix.
+ *
+ * So: a blob with NO `viewModeVersion` predates this change, and its stored
+ * `grid` is treated as the effect artefact it is — migrated to the default
+ * once. `list` and `feed` are kept even unversioned, because neither was ever
+ * the default, so storing one required a real click.
+ *
+ * After the migration the blob is stamped (see the effect below), so a user
+ * who then picks `grid` keeps `grid` forever.
+ *
+ * Extracted from the hook so the default, the validation, the migration and
+ * the storage-unavailable path are testable without standing up useLibrary's
  * supabase/service dependencies.
  */
 export function readStoredLibraryViewMode(): LibraryViewMode {
@@ -35,15 +67,32 @@ export function readStoredLibraryViewMode(): LibraryViewMode {
     if (saved) {
       const parsed = JSON.parse(saved);
       const mode = parsed?.viewMode;
-      if (typeof mode === 'string' && (LIBRARY_VIEW_MODES as readonly string[]).includes(mode)) {
-        return mode as LibraryViewMode;
+      if (typeof mode !== 'string' || !(LIBRARY_VIEW_MODES as readonly string[]).includes(mode)) {
+        return DEFAULT_LIBRARY_VIEW_MODE;
       }
+      const stamped = typeof parsed?.viewModeVersion === 'number';
+      if (!stamped && mode === 'grid') return DEFAULT_LIBRARY_VIEW_MODE;
+      return mode as LibraryViewMode;
     }
   } catch (err) {
     // Privacy mode, disabled storage, or a corrupt blob — never silent.
     console.error('Failed to read stored library view mode:', err);
   }
-  return 'adaptive';
+  return DEFAULT_LIBRARY_VIEW_MODE;
+}
+
+/** The preferences blob as this version writes it. */
+export function serializeLibraryPrefs(prefs: {
+  activeTab: string;
+  selectedTeamId: string | null;
+  viewMode: LibraryViewMode;
+}): string {
+  return JSON.stringify({
+    activeTab: prefs.activeTab,
+    selectedTeamId: prefs.selectedTeamId,
+    viewMode: prefs.viewMode,
+    viewModeVersion: LIBRARY_VIEW_MODE_VERSION,
+  });
 }
 
 interface UseLibraryParams {
@@ -130,12 +179,28 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
   const isTeamLibraryActive = activeLibraryTab === 'team-library';
 
   // --- Persistence ---
+  // Writes only when the blob would actually CHANGE. The old unconditional
+  // write is what manufactured a `viewMode` for users who never picked one
+  // (see readStoredLibraryViewMode); a no-op write on mount is exactly the
+  // thing that turned a default into a fake preference.
+  //
+  // The mount write is not removed outright, because `activeTab` and
+  // `selectedTeamId` still need persisting when they differ from what is on
+  // disk, and because it is what stamps `viewModeVersion` so the migration
+  // above runs once rather than on every load. Identical content writes
+  // nothing.
   useEffect(() => {
-    localStorage.setItem('mediahub_library_preferences', JSON.stringify({
-      activeTab: activeLibraryTab,
-      selectedTeamId,
-      viewMode: libraryViewMode,
-    }));
+    try {
+      const next = serializeLibraryPrefs({
+        activeTab: activeLibraryTab,
+        selectedTeamId,
+        viewMode: libraryViewMode,
+      });
+      if (localStorage.getItem(LIBRARY_PREFS_KEY) === next) return;
+      localStorage.setItem(LIBRARY_PREFS_KEY, next);
+    } catch (err) {
+      console.error('Failed to persist library preferences:', err);
+    }
   }, [activeLibraryTab, selectedTeamId, libraryViewMode]);
 
   // Abort controller for in-flight library queries — cancelled on re-load/unmount

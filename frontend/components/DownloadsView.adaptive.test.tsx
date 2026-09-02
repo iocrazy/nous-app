@@ -84,7 +84,7 @@ vi.mock('../contexts/LibraryContext', () => ({
   useLibraryContext: () => ({
     library: VIDEOS, isLoadingLibrary: false, libraryError: null, totalCount: VIDEOS.length,
     hasMoreData: false, isLoadingMore: false, loadMoreRef: { current: null },
-    isSentinelVisible: false, loadMoreLibrary: vi.fn(), libraryViewMode: 'adaptive',
+    isSentinelVisible: false, loadMoreLibrary: vi.fn(), libraryViewMode: 'justified',
     setLibraryViewMode: vi.fn(), sharedVideoIds: [], setLibrary: vi.fn(),
     loadLibraryData: vi.fn(), handleUpdateLibraryItem: vi.fn(),
     setFilterParams: vi.fn(),

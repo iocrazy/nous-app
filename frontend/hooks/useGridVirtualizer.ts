@@ -1,6 +1,6 @@
-import { useCallback, useState, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { columnsForWidth } from '../utils/gridColumns'
+import { useContainerWidth } from './useContainerWidth'
 
 interface UseGridVirtualizerOpts {
   scrollRef: React.RefObject<HTMLElement>
@@ -12,7 +12,7 @@ interface UseGridVirtualizerOpts {
 interface UseGridVirtualizerResult {
   columns: number
   rowVirtualizer: ReturnType<typeof useVirtualizer>
-  containerRef: (node: HTMLDivElement | null) => void
+  containerRef: (node: HTMLElement | null) => void
   totalSize: number
 }
 
@@ -23,14 +23,9 @@ interface UseGridVirtualizerResult {
  * The caller should attach `containerRef` to the inner content wrapper div
  * (full-width) so the ResizeObserver can measure available layout width.
  *
- * `containerRef` is a CALLBACK ref (not a RefObject) on purpose: the grid
- * container is conditionally rendered (only when there are items), so it
- * mounts AFTER the first render on a cold load. A `useEffect(..., [])` reading
- * a RefObject would run once at mount, find the ref null, and never attach the
- * observer — leaving width stuck at 0 → columnsForWidth(0) → a permanent
- * 2-column layout. The callback-ref state node re-runs the observer effect the
- * moment the div attaches, and measures immediately so we don't render one
- * frame at the fallback width.
+ * Width measurement is delegated to `useContainerWidth`, which all three grids
+ * now share; the callback-ref rationale (and the cold-load 2-column regression
+ * it prevents) lives there.
  */
 export function useGridVirtualizer({
   scrollRef,
@@ -38,35 +33,7 @@ export function useGridVirtualizer({
   estimateRowHeight,
   fixedColumns,
 }: UseGridVirtualizerOpts): UseGridVirtualizerResult {
-  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
-  const [width, setWidth] = useState(0)
-
-  // Callback ref: fires with the node when the (conditionally-rendered)
-  // container attaches and with null when it detaches, driving the effect below.
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
-    setContainerEl(node)
-  }, [])
-
-  // Observe the container div width; re-runs whenever the node (re)attaches.
-  useEffect(() => {
-    if (!containerEl) return
-
-    // Measure synchronously on attach so the first painted frame already has
-    // the real width (the ResizeObserver callback lands a frame later).
-    const initial = containerEl.getBoundingClientRect().width
-    if (initial > 0) setWidth(initial)
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) {
-        setWidth(entry.contentRect.width)
-      }
-    })
-    observer.observe(containerEl)
-    return () => {
-      observer.disconnect()
-    }
-  }, [containerEl])
+  const { ref: containerRef, width } = useContainerWidth()
 
   // Column count is derived from the container width alone, via a card-width
   // band. There is deliberately no "mobile" branch here: this hook only ever

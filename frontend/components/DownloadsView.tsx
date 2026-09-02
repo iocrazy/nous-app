@@ -1202,8 +1202,8 @@ export const DownloadsView: React.FC = () => {
                 <LayoutGrid size={14} />
               </button>
               <button
-                onClick={() => setLibraryViewMode('adaptive')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'adaptive' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
+                onClick={() => setLibraryViewMode('justified')}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'justified' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
                 title={t('resources.justifiedView')}
               >
                 <LayoutTemplate size={14} />
@@ -1299,7 +1299,7 @@ export const DownloadsView: React.FC = () => {
           </div>
         ) : (
           <>
-            {libraryViewMode === 'adaptive' && (
+            {libraryViewMode === 'justified' && (
               <div ref={adaptiveContainerRef} className="w-full">
                 {adaptiveRows.map((row) => (
                   <div
