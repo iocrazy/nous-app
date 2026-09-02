@@ -600,7 +600,7 @@ claude mcp add --transport stdio supabase -- npx -y @bytebase/dbhub \
 - P0 只到数据层 + `/api/v1/assets` 基础 API，无 UI；P1 已补上 Generated 收件箱（见下），其余分期见 spec §9。
 - **Generated 收件箱**（P1, 2026-08-29）= `generated_media` + `review_state`；API `/api/v1/generated`；Project Assets / Temp 视图已退役；temp sweeper 已停调度，清理走 `/generated/cleanup`（两步：先 dry-run 预览再确认，不自动、不静默 —— 这正是当年退役 TTL 的原因）。
 - **资产库 UI**（P2, 2026-08-30）：`资源库 → Assets` 三条路由 —— `resources/assets`（全部）/ `resources/assets/:assetType`（单类型货架）/ `resources/assets/item/:assetId`（实体页）。⚠️ 实体页侧栏的 `Send To Canvas` / `Send To Agent` 是**刻意 disabled** 的占位（title 写着 Arrives with P4 / P5），不是坏按钮——别当缺陷去修。
-- **项目工作区素材页**（P3, 2026-08-31）：侧栏 Characters / Locations / Props / Costumes 四个模块已改读 `GET /api/v1/projects/{pid}/assets`（`asset_project_refs` 的项目视图），一键导入落 `POST /projects/{pid}/assets/import-from-script`（`source='script_import'`）。`project_characters` / `project_lib_entities` 两张项目本地表**前端已零写入方**，重命名/退役由后续独立 PR 处理；旧 extract 端点本期未动。
+- **项目工作区素材页**（P3, 2026-08-31）：侧栏 Characters / Locations / Props / Costumes 四个模块已改读 `GET /api/v1/projects/{pid}/assets`（`asset_project_refs` 的项目视图），一键导入落 `POST /projects/{pid}/assets/import-from-script`（`source='script_import'`）。`project_characters` / `project_lib_entities` 两张项目本地表**已于 mig 447 改名 `_legacy_*`**（生产迁移 2026-09-02 跑完并对账全中），`/projects/{id}/characters*` 与 `/projects/{id}/lib/*` 全部端点、两个 repository、两份 schema 同批删除；唯一剩下的读方是迁移 workflow（窗口期内可应急重跑）。**DROP 是 P6**，一个版本周期后执行。
 
 ## AI Library (Phase 1) — Agent Framework
 

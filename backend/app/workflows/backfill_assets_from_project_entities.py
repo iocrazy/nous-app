@@ -1,6 +1,17 @@
-"""backfill_assets_from_project_entities — project_characters + project_lib_entities
-→ team-scoped assets (spec §4). THE BACKFILL PARADIGM (backfill_issue_scope.py):
-DBOS workflow, ``dry_run=True`` by default, idempotent, failures raise.
+"""backfill_assets_from_project_entities — _legacy_project_characters +
+_legacy_project_lib_entities → team-scoped assets (spec §4). THE BACKFILL
+PARADIGM (backfill_issue_scope.py): DBOS workflow, ``dry_run=True`` by
+default, idempotent, failures raise.
+
+SOURCE TABLES ARE NOW ``_legacy_*``, AND THIS WORKFLOW IS ON THE SAME CLOCK.
+The live run happened 2026-09-02 (8 assets + 8 project refs, reconciled
+all-present, re-run 0/8/0, 3 entity canvases linked); mig 447 then renamed
+both source tables and deleted every other reader — the REST endpoints and
+their two repositories. This module is kept ONLY so an emergency re-run stays
+possible during the one-release legacy window, and it is scheduled for
+removal together with the P6 DROP (spec §3.8). It reaches the tables through
+the ``ProjectCharacters`` / ``ProjectLibEntities`` ORM models, whose
+``__tablename__`` mig 447 repointed, so no SQL here names a table.
 
 P0 shipped the PLANNER and the dry-run path only; execution was blocked by a
 ``_reject_execution_until_p3()`` guard because ``_apply`` / ``_reconcile`` had
@@ -253,6 +264,15 @@ def parse_entity_canvas_name(name: Optional[str], kind: str) -> Optional[str]:
 # card binds ``project_characters`` via ``character_id``, a location/prop card
 # binds ``project_lib_entities`` via ``entity_id``. Both land in JSONB as
 # STRINGS (``String(raw)``), so the id is parsed, never compared as text.
+#
+# THESE STRINGS KEEP THE PRE-RENAME SPELLING ON PURPOSE — do not "fix" them
+# to ``_legacy_*``. They are not SQL identifiers (every read goes through the
+# ORM models); they are provenance labels. The 2026-09-02 production run
+# already wrote them into ``assets.attrs.legacy_ids``, so changing them would
+# make a re-run stamp a different label for the same source row and leave the
+# two runs' provenance disagreeing. Same reason ``_fold``'s table arguments
+# below stay as they are. Nothing reads the persisted value back; the label
+# only has to be stable and internally consistent, which it is.
 _ENTITY_KIND_TO_LEGACY_TABLE = {
     "character": "project_characters",
     "location": "project_lib_entities",

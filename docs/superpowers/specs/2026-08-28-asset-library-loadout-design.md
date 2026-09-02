@@ -204,6 +204,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 ### 3.8 退役
 
 - `project_characters`、`project_lib_entities` → 迁到 `assets` 后 DROP（分两步：先 rename 成 `_legacy_*` 一个版本周期，再删）。
+  ✅ **rename 半程已完成（mig 447）**：生产迁移 2026-09-02 跑完并对账全中（8 assets + 8 refs，重跑 0/8/0，3 张实体画布挂上），两张表随即改名 `_legacy_project_characters` / `_legacy_project_lib_entities`；同一个 PR 删掉了 `/projects/{id}/characters*` 与 `/projects/{id}/lib/*` 全部端点、两个 repository 和两份 Pydantic schema（删除时前端零调用方，已复核）。**唯一剩下的读方**是迁移 workflow `backfill_assets_from_project_entities`（ORM 模型 `__tablename__` 已跟着改名），刻意保留以便窗口期内应急重跑；它与 `_BACKFILLS` 注册项一并在 P6 随 DROP 删除。
+  ⏳ **DROP 待做（P6）**：一个版本周期后执行。索引/约束/RLS policy 名仍是改名前的拼写（`ALTER TABLE ... RENAME` 只换 OID 指向不换名字），随 DROP 一起消失，刻意不单独改名。回滚 = 改回原名 + 还原两个 `__tablename__`，无数据变更。
 - `canvas_resource_refs` 保留（文件级反查照旧）。
 - `temp_resource_sweeper` 的**调度早已停用**（cron 装饰器自 2026-06-13 起就是注释掉的，已在 merge base 核实）；P1 只移除了它那个 bundle 导入 —— 也就是说这**不是**一次对现存用户的行为改变。代码删除留 P6。
 - 智能文件夹"提示词库"是用户数据，不动；文档提示用 Assets → Prompts。

@@ -30,7 +30,8 @@ Skips cleanly when INTEGRATION_DATABASE_URL is unset. Every test builds its own
 team/projects/legacy rows with fresh ids and tears them down in a ``finally``.
 
 The plan under test is built from the fixture's OWN rows, not from
-``_load_inputs()`` — that helper reads project_characters/project_lib_entities
+``_load_inputs()`` — that helper reads _legacy_project_characters /
+_legacy_project_lib_entities (renamed by mig 447; the ORM models follow)
 GLOBALLY (deliberately: a partial scan would emit wrong merge groups), so a plan
 built from it would depend on whatever else lives in the shared drift database.
 Case 5 exercises ``_load_inputs`` itself, which is where its ORM projection and
@@ -115,7 +116,8 @@ async def fx(pg) -> Dict[str, Any]:
     instead of calling the one-user-per-query helper.
 
     Legacy rows are NOT seeded here — each case seeds the ones it needs, because
-    what is in ``project_characters`` / ``project_lib_entities`` is the input
+    what is in ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
+    is the input
     under test.
     """
     user_id = uuid.uuid4()
@@ -197,11 +199,13 @@ async def fx(pg) -> Dict[str, Any]:
         }
     finally:
         await pg.execute(
-            "DELETE FROM project_characters WHERE project_id = ANY($1::bigint[])",
+            "DELETE FROM _legacy_project_characters "
+            "WHERE project_id = ANY($1::bigint[])",
             all_projects,
         )
         await pg.execute(
-            "DELETE FROM project_lib_entities WHERE project_id = ANY($1::bigint[])",
+            "DELETE FROM _legacy_project_lib_entities "
+            "WHERE project_id = ANY($1::bigint[])",
             all_projects,
         )
         # generated_media has no FK to teams, so it is deleted by hand and
@@ -239,7 +243,7 @@ async def fx(pg) -> Dict[str, Any]:
 async def _seed_character(pg, project_id: int, name: str, **kw) -> int:
     return int(
         await pg.fetchval(
-            "INSERT INTO project_characters "
+            "INSERT INTO _legacy_project_characters "
             "(project_id, name, role_tag, description, tags, portrait_url) "
             "VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id",
             project_id,
@@ -255,7 +259,7 @@ async def _seed_character(pg, project_id: int, name: str, **kw) -> int:
 async def _seed_entity(pg, project_id: int, entity_type: str, name: str, **kw) -> int:
     return int(
         await pg.fetchval(
-            "INSERT INTO project_lib_entities "
+            "INSERT INTO _legacy_project_lib_entities "
             "(project_id, entity_type, name, badge_tag, description, tags, cover_url) "
             "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING id",
             project_id,
@@ -275,7 +279,8 @@ async def _rows_for(pg, project_ids: List[int]):
     chars = [
         dict(r)
         for r in await pg.fetch(
-            "SELECT * FROM project_characters WHERE project_id = ANY($1::bigint[]) "
+            "SELECT * FROM _legacy_project_characters "
+            "WHERE project_id = ANY($1::bigint[]) "
             "ORDER BY id",
             project_ids,
         )
@@ -283,7 +288,8 @@ async def _rows_for(pg, project_ids: List[int]):
     ents = [
         dict(r)
         for r in await pg.fetch(
-            "SELECT * FROM project_lib_entities WHERE project_id = ANY($1::bigint[]) "
+            "SELECT * FROM _legacy_project_lib_entities "
+            "WHERE project_id = ANY($1::bigint[]) "
             "ORDER BY id",
             project_ids,
         )
@@ -1331,7 +1337,8 @@ async def test_a_personal_projects_rows_land_in_the_owners_personal_team(
     """C-1, end to end.
 
     Before P3 these rows were counted into a skip bucket and left in
-    ``project_characters`` / ``project_lib_entities`` — while the workspace
+    ``_legacy_project_characters`` / ``_legacy_project_lib_entities`` — while
+    the workspace
     pages had already been switched to read ``assets`` and the old readers
     deleted, which made them unreachable. This is the test that says they move.
 
