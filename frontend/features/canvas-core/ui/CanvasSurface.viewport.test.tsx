@@ -82,7 +82,12 @@ describe('CanvasSurface — uncontrolled viewport', () => {
     render(<CanvasSurface />);
 
     expect(capturedProps.onMove).toBeUndefined();
-    expect(capturedProps.onMoveStart).toBeUndefined();
+    // `onMoveStart` used to be absent here too. Task 5 made the ENGINE wire
+    // it unconditionally so it can toggle `mh-canvas-interacting`; it fires
+    // once per gesture, not once per frame, so the per-frame property this
+    // test guards is unaffected. The surface still passes no start handler
+    // of its own — what it must not have is the per-frame channel above.
+    expect(typeof capturedProps.onMoveStart).toBe('function');
   });
 
   it('persists once per settle, no matter how long the gesture was', () => {

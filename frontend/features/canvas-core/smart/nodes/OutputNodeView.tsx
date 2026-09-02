@@ -41,6 +41,7 @@ import { ensureResourceId } from '../mediaEditBridge';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
+import { useNodeReveal } from './useNodeReveal';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
@@ -511,10 +512,15 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     [resource_id, id],
   );
 
+  // Mount the floating toolbar only while the card is hovered / focused
+  // (fluency T5) — see useNodeReveal.
+  const { revealed, revealHandlers } = useNodeReveal();
+
   return (
     <div
       data-testid="smart-output-node"
       className={`group mh-node relative border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
+      {...revealHandlers}
       style={{
         // Width lives in node DATA (persisted), never in RF's measured
         // width — reading props.width created a measurement feedback loop
@@ -554,6 +560,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         <OutputNodeToolbar
           items={lightboxItems}
           pinned={selected}
+          hovered={revealed}
           onPreview={() => openLightbox(0)}
           onCrop={canCrop ? openEditor : undefined}
           onExpand={canSplit ? openOutpaintEditor : undefined}

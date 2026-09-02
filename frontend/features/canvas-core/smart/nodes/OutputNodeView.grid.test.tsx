@@ -59,6 +59,9 @@ const baseProps = {
   draggable: true,
   selectable: true,
   deletable: true,
+    // Individual renders pass `selected` where they drive the floating
+  // toolbar: since fluency T5 the bar is mounted only while the card is
+  // pinned (selected) or hovered.
   selected: false,
   dragging: false,
   isConnectable: true,
@@ -113,7 +116,7 @@ describe('OutputNodeView — Split button', () => {
     const fullData = seedImageOutput('source-123');
     render(
       <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+        <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     expect(screen.getByRole('button', { name: 'Split' })).toBeInTheDocument();
@@ -123,7 +126,7 @@ describe('OutputNodeView — Split button', () => {
     const fullData = seedImageOutput(null);
     render(
       <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+        <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument();
@@ -145,7 +148,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
 
     render(
       <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+        <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Split' }));
@@ -209,7 +212,7 @@ describe('OutputNodeView — grid commit spawns tile nodes', () => {
 
     render(
       <Wrap>
-        <OutputNodeView {...baseProps} id="o1" type="output" data={fullData} />
+        <OutputNodeView {...baseProps} selected id="o1" type="output" data={fullData} />
       </Wrap>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Split' }));

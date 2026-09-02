@@ -26,6 +26,12 @@ export interface GroupNodeToolbarProps {
   readOnly?: boolean;
   /** Pin visible (the node is selected); otherwise hover reveals. */
   pinned?: boolean;
+  /**
+   * Pointer over the group card, or focus inside it (fluency Wave 2, Task 5).
+   * Unpinned and unhovered the bar is NOT RENDERED — same reasoning as
+   * OutputNodeToolbar: a frosted island faded to `opacity-0` still repaints.
+   */
+  hovered?: boolean;
 }
 
 export function GroupNodeToolbar({
@@ -38,8 +44,11 @@ export function GroupNodeToolbar({
   onUngroup,
   readOnly,
   pinned,
+  hovered,
 }: GroupNodeToolbarProps) {
   const hasContent = imageCount > 0 || memberCount > 0;
+  // Mount gate (T5) — see OutputNodeToolbar.
+  if (!pinned && !hovered) return null;
   return (
     <div
       data-testid="group-node-toolbar"

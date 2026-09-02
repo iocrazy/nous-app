@@ -107,12 +107,19 @@ describe('CanvasEngine — uncontrolled viewport', () => {
     expect(onMoveEnd).toHaveBeenCalledWith(SEED_VIEWPORT);
   });
 
-  it('omits the move callbacks entirely when the caller passes none', () => {
+  it('omits the PER-FRAME move callback when the caller passes none', () => {
     // A surface that does not care about the viewport (editor NodesView)
     // must not make React Flow call into an empty shim every frame.
+    //
+    // Task 5 narrowed this to `onMove` alone. `onMoveStart`/`onMoveEnd` used
+    // to be omitted too, on the same reasoning — but they fire ONCE per
+    // gesture, not once per frame, so there was never a per-frame cost to
+    // avoid, and the engine now needs them itself to toggle
+    // `mh-canvas-interacting`. See CanvasEngine.interacting.test.tsx.
     const props = renderEngineAndCaptureReactFlowProps();
-    expect(props.onMoveStart).toBeUndefined();
-    expect(props.onMoveEnd).toBeUndefined();
+    expect(props.onMove).toBeUndefined();
+    expect(typeof props.onMoveStart).toBe('function');
+    expect(typeof props.onMoveEnd).toBe('function');
   });
 });
 

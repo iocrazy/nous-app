@@ -37,6 +37,7 @@ import type { GeneratedImageRef, GroupNodeData } from '../types';
 import type { CanvasNode } from '../../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { GroupNodeToolbar } from './GroupNodeToolbar';
+import { useNodeReveal } from './useNodeReveal';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -207,6 +208,10 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   // Adaptive column count (IC smartGroupThumbLayout): min 2, max 4, √n.
   const cols = gridColsFor(shown.length + pending);
 
+  // Mount the floating toolbar only while the card is hovered / focused
+  // (fluency T5) — see useNodeReveal.
+  const { revealed, revealHandlers } = useNodeReveal();
+
   return (
     <div
       data-testid="smart-group-node"
@@ -215,6 +220,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       className={`group mh-group-node relative flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
+      {...revealHandlers}
       onDragOver={(e) => {
         // No drag-over highlight in a read-only session: a ring that
         // promises a drop we then refuse is the same lie as a lit button.
@@ -249,6 +255,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         onUngroup={onUngroup}
         readOnly={readOnly}
         pinned={Boolean(selected)}
+        hovered={revealed}
       />
       <input
         className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text read-only:opacity-80 read-only:cursor-default"

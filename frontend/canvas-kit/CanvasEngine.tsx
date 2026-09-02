@@ -70,6 +70,15 @@ const SNAP_GRID: [number, number] = [8, 8];
 /** Stable empty-guides object so clearing never allocates a new render key. */
 const NO_GUIDES: AlignmentGuides = {};
 
+/**
+ * Set on <body> for the duration of a drag or a pan/zoom. Deliberately on
+ * <body> and not on the engine's own container: the frosted chrome this
+ * downshifts (`.canvas-island` toolbars, palettes, menus) is portalled or
+ * positioned outside the engine subtree, so a container-scoped class would
+ * reach only half of it. Exported so consumers can assert on it.
+ */
+export const INTERACTING_CLASS = 'mh-canvas-interacting';
+
 /** Alignment snap tolerance, in SCREEN pixels (divided by zoom at use). */
 const GUIDE_TOLERANCE_SCREEN_PX = 5;
 /** Node box used for guide math before React Flow has measured a node (flow px). */
@@ -400,12 +409,50 @@ export function CanvasEngine({
   // Hovered snap-connect target (drives the `mh-snap-target` highlight).
   const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
 
+  // ---------------------------------------------------------------------
+  // Interaction downshift (canvas fluency Wave 2, Task 5).
+  //
+  // While a gesture is live the engine puts `mh-canvas-interacting` on
+  // <body>; `index.css` keys off it to drop backdrop blur, card shadow and
+  // transitions on node cards. None of that is perceivable mid-gesture, and
+  // a blur is the most expensive thing a compositor can be asked to redo on
+  // every frame for every card on screen.
+  //
+  // TWO INDEPENDENT FLAGS, not one: a node drag can begin inside a live
+  // viewport move (and vice versa), so ending one gesture must not clear the
+  // class while the other is still running. Flags rather than a counter
+  // because React Flow's move callbacks are not guaranteed to pair up —
+  // `onMoveEnd` also fires for PROGRAMMATIC moves (`fitView`, `setViewport`)
+  // with no matching start, and a counter would go negative or, worse, clear
+  // a live drag.
+  const draggingRef = useRef(false);
+  const movingRef = useRef(false);
+  const syncInteracting = useCallback(() => {
+    document.body.classList.toggle(
+      INTERACTING_CLASS,
+      draggingRef.current || movingRef.current,
+    );
+  }, []);
+  // A drag interrupted by navigation must not leave the WHOLE app blur-less:
+  // the class lives on <body>, so it outlives this component unless we clear
+  // it ourselves.
+  useEffect(
+    () => () => {
+      draggingRef.current = false;
+      movingRef.current = false;
+      document.body.classList.remove(INTERACTING_CLASS);
+    },
+    [],
+  );
+
   const handleNodeDragStart = useCallback(
     (_evt: unknown, node?: AnyNode) => {
+      draggingRef.current = true;
+      syncInteracting();
       dragStartPosRef.current = node ? { ...node.position } : null;
       onNodeDragStart?.();
     },
-    [onNodeDragStart],
+    [onNodeDragStart, syncInteracting],
   );
 
   // Snap-connect hit test (Infinite parity): Alt held, solo drag, probe point
@@ -474,6 +521,10 @@ export function CanvasEngine({
 
   const handleNodeDragStop = useCallback(
     (evt: unknown, node: AnyNode) => {
+      // First, before any early return below: the gesture is over whichever
+      // branch this drop takes.
+      draggingRef.current = false;
+      syncInteracting();
       setGuides(NO_GUIDES);
       setSnapTargetId(null);
       // Snap-connect drop: the caller creates the edge and restores the node's
@@ -524,7 +575,15 @@ export function CanvasEngine({
       // Full path (scene): hand the caller everything to persist as it sees fit.
       onNodeDragStop?.(node, { isGroupDrop, snappedPosition, nodes: rfNodesRef.current });
     },
-    [toRect, onNodesSnap, onNodeDragStop, guideTolerance, snapConnectTarget, onSnapConnect],
+    [
+      toRect,
+      onNodesSnap,
+      onNodeDragStop,
+      guideTolerance,
+      snapConnectTarget,
+      onSnapConnect,
+      syncInteracting,
+    ],
   );
 
   const handleSelectionDragStop = useCallback(
@@ -569,23 +628,27 @@ export function CanvasEngine({
     [onMove],
   );
 
-  // Wired to React Flow only when the caller asked for them: an absent
-  // handler means React Flow skips the callback entirely rather than
-  // calling into an empty shim on every frame of every gesture.
-  const handleMoveStart = useMemo(
-    () =>
-      onMoveStart
-        ? (_event: unknown, nextViewport: Viewport) => onMoveStart(nextViewport)
-        : undefined,
-    [onMoveStart],
+  // ALWAYS wired, unlike `onMove` above: these fire once per gesture, not
+  // once per frame, and the engine itself needs them for the interaction
+  // downshift — a surface that does not persist its viewport still wants
+  // its cards to stop blurring while it pans. The consumer callback is
+  // composed with, never replaced.
+  const handleMoveStart = useCallback(
+    (_event: unknown, nextViewport: Viewport) => {
+      movingRef.current = true;
+      syncInteracting();
+      onMoveStart?.(nextViewport);
+    },
+    [onMoveStart, syncInteracting],
   );
 
-  const handleMoveEnd = useMemo(
-    () =>
-      onMoveEnd
-        ? (_event: unknown, nextViewport: Viewport) => onMoveEnd(nextViewport)
-        : undefined,
-    [onMoveEnd],
+  const handleMoveEnd = useCallback(
+    (_event: unknown, nextViewport: Viewport) => {
+      movingRef.current = false;
+      syncInteracting();
+      onMoveEnd?.(nextViewport);
+    },
+    [onMoveEnd, syncInteracting],
   );
 
   const handleSelectionChange = useCallback(

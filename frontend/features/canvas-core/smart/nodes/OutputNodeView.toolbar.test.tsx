@@ -82,13 +82,57 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
 
-  it('pins visible while selected (hover reveal handles the rest)', () => {
+  it('pins mounted while selected; unselected the bar is not in the DOM', () => {
     renderNode(true);
-    const bar = screen.getByTestId('output-node-toolbar');
-    expect(bar.className).toContain('opacity-100');
+    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
     cleanup();
+    // Fluency T5: unselected + no pointer over the card means the frosted
+    // island is not rendered at all, not merely faded to opacity-0.
     renderNode(false);
-    expect(screen.getByTestId('output-node-toolbar').className).toContain('opacity-0');
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('hovering the card mounts the bar, leaving it unmounts it again', () => {
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
+    fireEvent.mouseLeave(card);
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('keeps the bar mounted while focus is inside the card', () => {
+    // Keyboard reachability: once a hover has revealed the bar and focus has
+    // moved into it, moving the mouse away must NOT yank the focused control
+    // out of the document.
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    const preview = screen
+      .getByTestId('output-node-toolbar')
+      .querySelector('button[aria-label="Preview"]')!;
+    fireEvent.focus(preview);
+    fireEvent.mouseLeave(card);
+    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
+    fireEvent.blur(preview);
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('survives tabbing from one toolbar button to the next', () => {
+    // `focusout` fires BEFORE the matching `focusin`. A blur handler that
+    // does not look at `relatedTarget` unmounts the bar in that gap, so the
+    // button the keyboard user was tabbing TO never exists to receive focus.
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    const bar = screen.getByTestId('output-node-toolbar');
+    const preview = bar.querySelector('button[aria-label="Preview"]')!;
+    const download = bar.querySelector('button[aria-label="Download"]')!;
+    fireEvent.focus(preview);
+    fireEvent.mouseLeave(card);
+    // Focus leaves Preview, but it is heading for Download — inside the card.
+    fireEvent.blur(preview, { relatedTarget: download });
+    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
   });
 
   it('Preview opens the lightbox immediately — no 250ms delay', () => {

@@ -72,3 +72,20 @@ describe('GroupNodeToolbar', () => {
     expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
   });
 });
+
+describe('GroupNodeToolbar — mounted only when it can be used (fluency T5)', () => {
+  // Same downshift as the output bar: a frosted island that is merely
+  // faded out still repaints on every frame of a drag or a pan.
+  it('is absent from the DOM until hovered or pinned', () => {
+    renderBar({ pinned: false, hovered: false });
+    expect(screen.queryByTestId('group-node-toolbar')).toBeNull();
+    cleanup();
+    renderBar({ pinned: false, hovered: true });
+    expect(screen.getByTestId('group-node-toolbar')).toBeInTheDocument();
+  });
+
+  it('mounts while pinned even with no pointer over the node', () => {
+    renderBar({ pinned: true, hovered: false });
+    expect(screen.getByTestId('group-node-toolbar')).toBeInTheDocument();
+  });
+});

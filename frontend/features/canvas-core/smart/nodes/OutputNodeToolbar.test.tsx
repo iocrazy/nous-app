@@ -27,7 +27,7 @@ describe('OutputNodeToolbar', () => {
     const onPreview = vi.fn();
     const onRerun = vi.fn();
     render(
-      <OutputNodeToolbar items={ITEMS} onPreview={onPreview} onRerun={onRerun} />,
+      <OutputNodeToolbar items={ITEMS} onPreview={onPreview} onRerun={onRerun} pinned />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     expect(onPreview).toHaveBeenCalled();
@@ -39,11 +39,11 @@ describe('OutputNodeToolbar', () => {
 
   it('hides Rerun without a source prompt and disables it while rerunning', () => {
     const { rerender } = render(
-      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} />,
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned />,
     );
     expect(screen.queryByRole('button', { name: 'Rerun' })).toBeNull();
     rerender(
-      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} rerunning />,
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} rerunning pinned />,
     );
     expect(
       (screen.getByRole('button', { name: 'Rerun' }) as HTMLButtonElement).disabled,
@@ -51,12 +51,12 @@ describe('OutputNodeToolbar', () => {
   });
 
   it('renders nothing with no items', () => {
-    render(<OutputNodeToolbar items={[]} onPreview={vi.fn()} />);
+    render(<OutputNodeToolbar items={[]} onPreview={vi.fn()} pinned />);
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
 
   it('every button is nodrag so clicks never start a node drag', () => {
-    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} />);
+    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} onRerun={vi.fn()} pinned />);
     const buttons = screen
       .getByTestId('output-node-toolbar')
       .querySelectorAll('button');
@@ -72,8 +72,37 @@ it('renders a Brush key that opens the brush editor when wired', () => {
       items={[{ url: '/gm/1/file', name: 'a.png' }]}
       onPreview={() => {}}
       onBrush={onBrush}
+      pinned
     />,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Brush' }));
   expect(onBrush).toHaveBeenCalled();
+});
+
+describe('OutputNodeToolbar — mounted only when it can be used (fluency T5)', () => {
+  // Before this task the bar was always in the DOM and merely faded with
+  // `opacity-0`. A hidden-but-present frosted island still costs the
+  // compositor a blur + shadow on every node, every frame of every pan.
+  it('is absent from the DOM until hovered or pinned', () => {
+    const { rerender } = render(
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned={false} hovered={false} />,
+    );
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+    rerender(
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned={false} hovered />,
+    );
+    expect(screen.getByTestId('output-node-toolbar')).toBeInTheDocument();
+  });
+
+  it('mounts while pinned even with no pointer over the node', () => {
+    render(
+      <OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} pinned hovered={false} />,
+    );
+    expect(screen.getByTestId('output-node-toolbar')).toBeInTheDocument();
+  });
+
+  it('defaults to absent — an unstated hover is not a hover', () => {
+    render(<OutputNodeToolbar items={ITEMS} onPreview={vi.fn()} />);
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
 });

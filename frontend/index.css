@@ -1238,6 +1238,33 @@ body {
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
   backdrop-filter: blur(12px);
 }
+
+/* Interaction downshift (canvas fluency Wave 2, Task 5). `CanvasEngine` puts
+   `mh-canvas-interacting` on <body> for the duration of a node drag or a
+   pan/zoom. A backdrop blur asks the compositor to re-read everything behind
+   the card on EVERY frame, and the 56px soft shadow repaints with it — with
+   a few dozen cards on screen that is the whole frame budget. A `transition`
+   is worse than useless mid-gesture: it interpolates toward a target the
+   cursor has already left, so the card lags what you are dragging.
+
+   None of this is perceivable while the thing is moving, and it all comes
+   back the instant the gesture settles — the RESTING look is unchanged. */
+.mh-canvas-interacting .mh-node,
+.mh-canvas-interacting .mh-group-node {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  transition: none;
+}
+/* Floating chrome keeps its fill, border and shadow (it is stationary — a
+   collapsing island would read as a flicker); only the per-frame backdrop
+   read goes. `--canvas-panel` is 92% opaque, so losing the blur barely
+   shows. */
+.mh-canvas-interacting .canvas-island {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: none;
+}
 [data-theme="dark"] .mh-group-node {
   border-color: rgba(148, 163, 184, 0.28);
   background: color-mix(in srgb, var(--canvas-card) 28%, transparent);

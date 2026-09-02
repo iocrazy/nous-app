@@ -49,6 +49,14 @@ export interface OutputNodeToolbarProps {
   readOnly?: boolean;
   /** Pin visible (the node is selected); otherwise hover reveals. */
   pinned?: boolean;
+  /**
+   * Pointer is over the node card, or focus is somewhere inside it (fluency
+   * Wave 2, Task 5). Unpinned and unhovered the bar is NOT RENDERED — it used
+   * to sit in the DOM at `opacity-0`, and a hidden frosted island still costs
+   * the compositor a backdrop blur + shadow on every card on every frame of
+   * every drag and pan. Absent means false: an unstated hover is not a hover.
+   */
+  hovered?: boolean;
 }
 
 export function OutputNodeToolbar({
@@ -66,9 +74,14 @@ export function OutputNodeToolbar({
   rerunning,
   readOnly,
   pinned,
+  hovered,
 }: OutputNodeToolbarProps) {
   const [downloadError, setDownloadError] = useState(false);
   if (items.length === 0) return null;
+  // Mount gate (T5). The opacity classes below still do the FADE, so the
+  // reveal keeps its 150ms ease instead of popping — they just no longer
+  // carry the job of hiding it.
+  if (!pinned && !hovered) return null;
 
   const onDownload = () => {
     setDownloadError(false);
