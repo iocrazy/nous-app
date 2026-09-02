@@ -8,8 +8,10 @@
 
 import { create } from 'zustand';
 
+import type { CanvasConnection, CanvasNode } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { markDroppedKnobs } from './droppedKnobs';
+import { graphIndexFor, topologyKeyOf } from './graphIndex';
 import { withGenerationRunner } from './generationRunner';
 import { resolveEntityRef } from './entityRef';
 import {
@@ -130,6 +132,35 @@ export function isChainTail(
   };
   walk(nodeId);
   return !hasDownstreamPrompt;
+}
+
+/**
+ * Every prompt id that is a chain tail, computed once per graph SHAPE
+ * (Wave 1+2 Task 4 — render cost).
+ *
+ * `isChainTail` runs a topo sort, and each prompt card used to run its own
+ * on every drag frame: O(P) topo sorts per frame. The result depends only on
+ * node ids/types and edge endpoints, so it is keyed on
+ * {@link topologyKeyOf} — which does not move while a node is being dragged.
+ * One cache slot: the graph shape changes far less often than the frame it
+ * is rendered in, and holding older shapes would pin their strings forever.
+ */
+let chainTailCache: { key: string; tails: ReadonlySet<string> } | null = null;
+
+export function chainTailsFor(
+  nodes: CanvasNode[],
+  connections: CanvasConnection[],
+): ReadonlySet<string> {
+  const key = topologyKeyOf(graphIndexFor(nodes, connections));
+  if (chainTailCache && chainTailCache.key === key) return chainTailCache.tails;
+  const tails = new Set<string>();
+  for (const n of nodes) {
+    if (typeOf(n) !== 'prompt') continue;
+    const id = idOf(n);
+    if (id && isChainTail(id, nodes, connections)) tails.add(id);
+  }
+  chainTailCache = { key, tails };
+  return tails;
 }
 
 function resolveCaller(): PromptCaller {

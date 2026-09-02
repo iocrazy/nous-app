@@ -13,6 +13,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import { downloadBlob, downloadName } from '../downloadMedia';
 import { downloadCanvasAssetsZip } from '../../services/canvasGenerationService';
@@ -46,10 +47,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const { label, items, uploading } = data as unknown as GroupNodeData;
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
-  const storeNodes = useCanvasCoreStore((s) => s.nodes);
-  const summary = useMemo(
-    () => groupSummary(storeNodes as never, id),
-    [storeNodes, id],
+  // Per-node selectors, never a subscription to `s.nodes` (Wave 1+2 Task 4):
+  // that array is replaced on every drag frame, so subscribing to it
+  // re-rendered this card whenever ANY node moved. `groupSummary` returns
+  // three counts — `useShallow` holds the previous object while they match.
+  const summary = useCanvasCoreStore(
+    useShallow((s) => groupSummary(s.nodes as never, id)),
   );
   const memberCount = useCanvasCoreStore(
     (s) =>
@@ -127,9 +130,16 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   );
 
   // Whole-group preview (IC): grid items + member images, deduped.
+  // Selected as a STRING signature, not the array: its elements are fresh
+  // objects on every call, so neither reference nor shallow equality would
+  // hold and the card would re-render on every drag frame. Same shape as
+  // `promptStatusSig` in `CanvasSurface.tsx`.
+  const imageItemsSig = useCanvasCoreStore((s) =>
+    JSON.stringify(groupPreviewItems(s.nodes as never, id)),
+  );
   const imageItems: LightboxItem[] = useMemo(
-    () => groupPreviewItems(storeNodes as never, id),
-    [storeNodes, id],
+    () => JSON.parse(imageItemsSig) as LightboxItem[],
+    [imageItemsSig],
   );
 
   const onArrange = useCallback(() => {

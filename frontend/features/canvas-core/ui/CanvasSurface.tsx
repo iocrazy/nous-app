@@ -52,10 +52,36 @@ import { setRfInstance } from './rfInstance';
 
 type AnyNode = Node;
 
-function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
+/**
+ * Identity cache for the RF projection (Wave 1+2 Task 4 — render cost).
+ *
+ * A drag tick replaces the store's nodes ARRAY and the dragged node's object;
+ * every other node keeps its reference (xyflow's `applyChanges` pushes
+ * unchanged elements through untouched). Rebuilding the projection anyway
+ * handed React Flow a fresh object for every node on every frame, so its
+ * per-node reference check failed and the whole graph re-rendered ~60×/s.
+ *
+ * Keyed on the CanvasNode object, so a mutation always misses. The only
+ * derived field that does not live on the node is `selected` (it comes from
+ * the selection set), hence the stored selected-state alongside the entry.
+ * Nodes without a string `id` fall back to a positional id and are therefore
+ * never cached — the same object at another index would resolve differently.
+ */
+const rfNodeCache = new WeakMap<object, { selected: boolean; rf: AnyNode }>();
+
+export function toReactFlowNodes(
+  nodes: CanvasNode[],
+  selectionSet: ReadonlySet<string>,
+): AnyNode[] {
   return nodes.map((node, idx) => {
     const obj = node as Record<string, unknown>;
+    const cacheable = typeof obj.id === 'string' && typeof node === 'object' && node !== null;
     const id = typeof obj.id === 'string' ? obj.id : `node-${idx}`;
+    const isSelected = selectionSet.has(id);
+    if (cacheable) {
+      const hit = rfNodeCache.get(node as object);
+      if (hit && hit.selected === isSelected) return hit.rf;
+    }
     const position =
       obj.position && typeof obj.position === 'object'
         ? (obj.position as { x: number; y: number })
@@ -83,7 +109,18 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
       obj.style && typeof obj.style === 'object'
         ? { style: obj.style as Record<string, unknown> }
         : {};
-    return { id, position, type, data, ...measured, ...parentId, ...style } as AnyNode;
+    const rf = {
+      id,
+      position,
+      type,
+      data,
+      selected: isSelected,
+      ...measured,
+      ...parentId,
+      ...style,
+    } as AnyNode;
+    if (cacheable) rfNodeCache.set(node as object, { selected: isSelected, rf });
+    return rf;
   });
 }
 
@@ -195,11 +232,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const selectionSet = useMemo(() => new Set(selection), [selection]);
 
   const rfNodes = useMemo(
-    () =>
-      toReactFlowNodes(nodes).map((n) => ({
-        ...n,
-        selected: selectionSet.has(n.id),
-      })),
+    () => toReactFlowNodes(nodes, selectionSet),
     [nodes, selectionSet],
   );
   // Stable signature of non-idle prompt run statuses. Drag ticks swap the
