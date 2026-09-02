@@ -308,6 +308,9 @@ def test_quality_survives_reconcile_and_reaches_the_codex_daemon_payload():
         params={"ratio": "16:9", "quality": "high"},
         source_url=None,
     )
+    # Resolved by provider key: the catalog's model-name → actual_provider
+    # mapping is a DB lookup, and test_generation_capabilities_endpoint.py
+    # owns it. What THIS test pins is the real declaration, not a stub.
     caps = resolve_generation_protocol("codex-local").capabilities
     eff, dropped = req.reconcile(caps)
     assert dropped == []  # P1 had ["quality"] here

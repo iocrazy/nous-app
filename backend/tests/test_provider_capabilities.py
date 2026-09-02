@@ -52,11 +52,18 @@ def test_codex_quality_is_true_on_both_transports_now_that_the_gate_exists():
     Server ``codex`` appends ``--quality`` (``codex_cli.py``). The paired
     daemon does too from 0.4.0 (``buildImageArgs`` in
     ``tools/codex-daemon/index.mjs``), and a daemon below that version never
-    receives such a job at all: ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION``
-    refuses it with a typed ``DaemonUpdateRequiredError`` telling the user to
-    update. So there is no path left on which a forwarded quality is silently
-    discarded — which is what made P1's honest ``False`` necessary and what
-    now makes ``True`` the honest value.
+    receives such a job whenever its version can be read:
+    ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION`` refuses it with a typed
+    ``DaemonUpdateRequiredError`` telling the user to update. That closes the
+    path P1's honest ``False`` was reporting, which is what now makes ``True``
+    the honest value.
+
+    Named rather than rounded away: a version that comes back ``None`` is let
+    through by design — ``None`` is "could not find out", not a verdict
+    (``daemon_version.reported_daemon_version``) — so a presence-vs-table
+    disagreement can still hand ``quality`` to a daemon that drops it. An
+    online build reporting no version is not that case: it reads
+    ``UNVERSIONED`` (``0.0.0``) and is refused.
     """
     assert _proto("codex").capabilities.quality is True
     assert _proto("codex-local").capabilities.quality is True

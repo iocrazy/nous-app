@@ -161,7 +161,9 @@ class GenerationRequest:
         shape; deleting it would force a ratio→size table into JS, recreating
         the two-table drift this contract exists to end. `ratio` rides along
         for logging and attribution only — `index.mjs` says in so many words
-        that this side ignores it. The aspect phrase is appended to the
+        that this side ignores it. (`CodexLocalProtocol.resolution=False` is
+        the model's layer, not this one: we send `--size`, the model just
+        does not honour the pixel count.) The aspect phrase is appended to the
         prompt here because codex only honours shape through language — the
         daemon must not have to know that.
         """

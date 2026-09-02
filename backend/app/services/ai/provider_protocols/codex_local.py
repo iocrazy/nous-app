@@ -36,14 +36,28 @@ class CodexLocalProtocol(ProviderProtocol):
     #
     # ``quality=True`` here is a fact, not a promise. Two things make it one:
     # ``buildImageArgs`` in ``tools/codex-daemon/index.mjs`` appends
-    # ``--quality`` from 0.4.0 onward, and a daemon older than that never
-    # receives an image/video job at all —
+    # ``--quality`` from 0.4.0 onward, and an older daemon never receives an
+    # image/video job WHENEVER ITS VERSION CAN BE READ —
     # ``daemon_dispatch.MIN_IMAGE_DAEMON_VERSION`` refuses it with a typed
-    # ``DaemonUpdateRequiredError`` that tells the user how to update. So no
-    # path remains on which a forwarded quality is discarded one layer down
-    # where nobody can see it, which is exactly what P1's honest ``False``
-    # was reporting. The server path forwards it too (``codex_cli.py``'s
-    # ``--quality``), so the two codex rows agree again.
+    # ``DaemonUpdateRequiredError`` that tells the user how to update. That
+    # closes the path P1's honest ``False`` was reporting: a forwarded quality
+    # discarded one layer down where nobody can see it. The server path
+    # forwards it too (``codex_cli.py``'s ``--quality``), so the two codex
+    # rows agree again.
+    #
+    # The one hole left is deliberate and narrow: a daemon whose version comes
+    # back as ``None`` is let THROUGH, because ``None`` is "could not find
+    # out", not a verdict (``daemon_version.reported_daemon_version``) —
+    # telling someone to update a daemon that may not be running is the worse
+    # wrong answer. An online build that simply reports no version is NOT in
+    # that hole; it reads as ``UNVERSIONED`` (``0.0.0``) and is refused. So
+    # only a presence-vs-table disagreement can still land ``quality`` on a
+    # 0.3.x daemon that drops it.
+    #
+    # ``resolution=False`` below is a different layer, not a contradiction:
+    # the daemon really does put ``--size`` in its argv (it is the canonical
+    # shape key — see ``request.py::to_codex_daemon_payload``), the MODEL just
+    # treats the pixel count as a hint, which is what ``honours_ratio`` says.
     capabilities = ProviderCapabilities(
         ratios=ALL_RATIOS,
         quality=True,
