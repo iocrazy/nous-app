@@ -664,7 +664,13 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       selectedIds={selection}
       defaultViewport={seedViewport}
       onNodesChange={onNodesChange}
+      // Both drag gestures capture the SAME pre-drag undo baseline. A
+      // multi-node selection is its own React Flow event pair, and leaving
+      // it unwired meant its baseline was only taken at drag end — Undo then
+      // rewound to a position the gesture had already reached, not to where
+      // the user picked the selection up.
       onNodeDragStart={noteDragStart}
+      onSelectionDragStart={noteDragStart}
       onNodeDragStop={onNodeDragStop}
       onNodesSnap={onNodesSnap}
       onEdgesChange={onEdgesChange}

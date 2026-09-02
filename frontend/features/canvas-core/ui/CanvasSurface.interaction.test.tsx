@@ -146,3 +146,40 @@ describe('CanvasSurface — onNodesChange persistence hygiene', () => {
     expect(useCanvasCoreStore.getState().canUndo()).toBe(true); // history captured
   });
 });
+
+describe('CanvasSurface — undo baseline for a MULTI-node drag', () => {
+  // `noteDragStart()` captures the pre-drag snapshot the undo stack will
+  // rewind to. Solo drags got it from `onNodeDragStart`; a multi-node
+  // selection drag is a DIFFERENT React Flow event pair (XYDrag dispatches
+  // `onSelectionDrag*` when no single node is behind the gesture), and it
+  // was wired to nothing — so the baseline was only captured at drag END,
+  // i.e. mid-gesture, and Undo rewound to the positions the drag had
+  // already reached rather than to where it started.
+  function seedOne(): void {
+    seed('smart', [{ id: 'a', type: 'output', position: { x: 0, y: 0 }, data: {} }], ['a']);
+  }
+
+  it('a selection drag start captures the pre-drag baseline', () => {
+    const noteDragStart = vi.fn();
+    seedOne();
+    useCanvasCoreStore.setState({ noteDragStart });
+    render(<CanvasSurface />);
+
+    expect(typeof capturedProps.onSelectionDragStart).toBe('function');
+    (capturedProps.onSelectionDragStart as (e: unknown, n: unknown[]) => void)(
+      {},
+      [{ id: 'a' }],
+    );
+    expect(noteDragStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('a solo drag start still captures it — the two gestures agree', () => {
+    const noteDragStart = vi.fn();
+    seedOne();
+    useCanvasCoreStore.setState({ noteDragStart });
+    render(<CanvasSurface />);
+
+    (capturedProps.onNodeDragStart as (e: unknown, n: unknown) => void)({}, { id: 'a' });
+    expect(noteDragStart).toHaveBeenCalledTimes(1);
+  });
+});
