@@ -8,13 +8,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, ExternalLink, Trash2 } from 'lucide-react';
+import { ExternalLink, FolderInput, PackagePlus, Trash2 } from 'lucide-react';
 
 import type { GeneratedItem, ReviewState } from '../../../services/generatedService';
 import {
   generatedMediaCoverUrl,
   generatedMediaStreamUrl,
 } from '../../../services/generatedMediaService';
+import { SelectionCheck } from '../SelectionCheck';
 
 export interface GeneratedCardProps {
   item: GeneratedItem;
@@ -24,6 +25,8 @@ export interface GeneratedCardProps {
   /** Disables the mutating actions while this card's request is in flight. */
   busy?: boolean;
   onToggleSelect: (id: string) => void;
+  /** Open the full-size viewer. Absent → the thumbnail is not clickable. */
+  onOpen?: (item: GeneratedItem) => void;
   onSave: (item: GeneratedItem) => void;
   onSaveAsAsset: (item: GeneratedItem) => void;
   onDelete: (item: GeneratedItem) => void;
@@ -62,13 +65,29 @@ const ACTION_BTN =
   'text-content transition-colors hover:border-line-strong hover:bg-island-2 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
-const ACTION_BTN_PRIMARY =
-  'flex-1 rounded-md border border-accent bg-accent px-2 py-1 text-[11px] font-medium ' +
-  'text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50';
-
 const ACTION_BTN_GHOST =
   'flex-1 rounded-md border border-transparent px-2 py-1 text-[11px] font-medium ' +
   'text-content-3 disabled:cursor-not-allowed disabled:opacity-60';
+
+// Icon buttons, because at 150px a card cannot hold three worded buttons
+// without truncating all three into nonsense. Every one carries BOTH a
+// `title` (hover) and an `aria-label` (screen readers, and what the tests
+// address them by) — an icon with neither is a button whose meaning exists
+// only in the designer's head.
+const ICON_BTN =
+  'flex h-7 flex-1 items-center justify-center rounded-md border border-line-strong ' +
+  'bg-card text-content-2 transition-colors hover:bg-island-2 hover:text-content ' +
+  'disabled:cursor-not-allowed disabled:opacity-50';
+
+const ICON_BTN_PRIMARY =
+  'flex h-7 flex-1 items-center justify-center rounded-md border border-accent ' +
+  'bg-accent text-white transition-colors hover:opacity-90 ' +
+  'disabled:cursor-not-allowed disabled:opacity-50';
+
+const ICON_BTN_DANGER =
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line-strong ' +
+  'text-content-4 transition-colors hover:border-danger-line hover:text-danger ' +
+  'disabled:cursor-not-allowed disabled:opacity-50';
 
 export const GeneratedCard: React.FC<GeneratedCardProps> = ({
   item,
@@ -76,6 +95,7 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
   teamId,
   busy = false,
   onToggleSelect,
+  onOpen,
   onSave,
   onSaveAsAsset,
   onDelete,
@@ -96,6 +116,21 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
     ? item.created_at
     : created.toLocaleDateString();
   const metaLine = [item.model, createdLabel].filter(Boolean).join(' · ');
+
+  // Labels/tooltips resolved once: each is used as BOTH `title` and
+  // `aria-label`, and letting the two drift is how an icon button ends up
+  // announcing something different from what it promises on hover.
+  const saveLabel = t('generated.action.save', 'Save To Uploads');
+  const saveHint = t(
+    'generated.action.saveHint',
+    'Turn this into a regular file in My Uploads',
+  );
+  const assetLabel = t('generated.action.saveAsAsset', 'Add To Asset');
+  const assetHint = t(
+    'generated.action.saveAsAssetHint',
+    "Attach it to an asset card's slot (character, location, …)",
+  );
+  const deleteLabel = t('generated.action.delete', 'Delete');
 
   const deepLink = item.source.deep_link;
   const sourceHint = item.source.node_id
@@ -126,46 +161,54 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
       data-review-state={item.review_state}
     >
       <div className="relative aspect-square bg-island-2">
-        {isVideo ? (
-          <video
-            src={generatedMediaStreamUrl(item.id)}
-            poster={coverUrl}
-            muted
-            preload="metadata"
-            className="h-full w-full object-cover"
-            aria-label={item.title}
-          />
-        ) : (
-          <img src={coverUrl} alt={item.title} className="h-full w-full object-cover" />
-        )}
+        {/* The thumbnail is the preview affordance — the card had none, so a
+            generation could only ever be seen at 150px. A button, not an
+            onClick on the <img>: it has to be tabbable and it has to say
+            what it does. */}
+        <button
+          type="button"
+          data-testid="generated-card-open"
+          aria-label={t('generated.card.open', {
+            title: item.title,
+            defaultValue: 'Preview {{title}}',
+          })}
+          disabled={!onOpen}
+          onClick={() => onOpen?.(item)}
+          className="block h-full w-full cursor-zoom-in disabled:cursor-default"
+        >
+          {isVideo ? (
+            <video
+              src={generatedMediaStreamUrl(item.id)}
+              poster={coverUrl}
+              muted
+              preload="metadata"
+              className="h-full w-full object-cover"
+              aria-hidden="true"
+            />
+          ) : (
+            <img src={coverUrl} alt="" className="h-full w-full object-cover" />
+          )}
+        </button>
 
+        {/* Moved to the BOTTOM-left: the selection circle now owns top-left
+            (matching My Uploads), and stacking two controls in one corner is
+            how the old square check ended up hard to hit. */}
         <span
-          className={`absolute left-1.5 top-1.5 rounded-full border px-1.5 text-[10px] font-semibold ${pill.className}`}
+          className={`pointer-events-none absolute bottom-1.5 left-1.5 rounded-full border px-1.5 text-[10px] font-semibold ${pill.className}`}
         >
           {t(pill.labelKey, pill.fallback)}
         </span>
 
-        {/* Always in the DOM (a hover-only checkbox is unreachable by
-            keyboard and by test); only its chrome fades in. */}
-        <label
-          className={`absolute right-1.5 top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded border transition-opacity ${
-            selected
-              ? 'border-accent bg-accent text-white opacity-100'
-              : 'border-line-strong bg-card text-transparent opacity-0 group-hover:opacity-100 focus-within:opacity-100'
-          }`}
-        >
-          <input
-            type="checkbox"
-            className="sr-only"
-            checked={selected}
-            aria-label={t('generated.card.select', {
-              title: item.title,
-              defaultValue: 'Select {{title}}',
-            })}
-            onChange={() => onToggleSelect(item.id)}
-          />
-          <Check size={12} aria-hidden="true" />
-        </label>
+        {/* Always in the DOM (a hover-only control is unreachable by keyboard
+            and by test); only its chrome fades in. */}
+        <SelectionCheck
+          checked={selected}
+          label={t('generated.card.select', {
+            title: item.title,
+            defaultValue: 'Select {{title}}',
+          })}
+          onToggle={() => onToggleSelect(item.id)}
+        />
       </div>
 
       <div className="px-2 pb-1.5 pt-2 text-[11px] leading-snug text-content-3">
@@ -219,27 +262,32 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             <button
               type="button"
               disabled={busy}
+              title={saveHint}
+              aria-label={saveLabel}
               onClick={() => onSave(item)}
-              className={ACTION_BTN}
+              className={ICON_BTN}
             >
-              {t('generated.action.save', 'Save')}
+              <FolderInput size={14} aria-hidden="true" />
             </button>
             <button
               type="button"
               disabled={busy}
+              title={assetHint}
+              aria-label={assetLabel}
               onClick={() => onSaveAsAsset(item)}
-              className={ACTION_BTN_PRIMARY}
+              className={ICON_BTN_PRIMARY}
             >
-              {t('generated.action.saveAsAsset', 'As Asset…')}
+              <PackagePlus size={14} aria-hidden="true" />
             </button>
             <button
               type="button"
               disabled={busy}
-              aria-label={t('generated.action.delete', 'Delete')}
+              title={deleteLabel}
+              aria-label={deleteLabel}
               onClick={() => setConfirmingDelete(true)}
-              className="shrink-0 rounded-md border border-line-strong px-1.5 py-1 text-content-4 transition-colors hover:border-danger-line hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+              className={ICON_BTN_DANGER}
             >
-              <Trash2 size={12} aria-hidden="true" />
+              <Trash2 size={14} aria-hidden="true" />
             </button>
           </>
         ) : item.review_state === 'saved' ? (
@@ -250,10 +298,12 @@ export const GeneratedCard: React.FC<GeneratedCardProps> = ({
             <button
               type="button"
               disabled={busy}
+              title={assetHint}
+              aria-label={assetLabel}
               onClick={() => onSaveAsAsset(item)}
-              className={ACTION_BTN}
+              className={ICON_BTN}
             >
-              {t('generated.action.saveAsAsset', 'As Asset…')}
+              <PackagePlus size={14} aria-hidden="true" />
             </button>
           </>
         ) : (

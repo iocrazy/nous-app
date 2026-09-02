@@ -74,6 +74,32 @@ export const UNREVIEWED = ITEMS[0]; // canvas_run, has source_asset_id
 export const SAVED = ITEMS[1]; // chat_upload
 export const IN_ASSETS = ITEMS[2]; // shot_generate
 
+/**
+ * A `canvas_upload` row the backend classifies as an INTERMEDIATE — a mask the
+ * canvas editor baked, stamped `params.role = 'mask'`.
+ *
+ * Derived from a captured row rather than hand-written, and deliberately
+ * carrying NO marker of its own: `generated_media.params` is not on the wire
+ * (`GeneratedItem` drops it), so an intermediate is indistinguishable from any
+ * other row in the response body. Whether it appears at all is decided by the
+ * SERVER, from the `include_intermediate` query flag — which is exactly what
+ * the stub models and what the spec asserts.
+ */
+export const INTERMEDIATE: WireGeneratedItem = {
+  ...ITEMS[0],
+  id: '727145299382534777',
+  origin_kind: 'canvas_upload',
+  review_state: 'unreviewed',
+  promoted_resource_id: null,
+  source_asset_id: null,
+  source: {
+    ...ITEMS[0].source,
+    kind: 'canvas_upload',
+    label: 'EP1 · Storyboard · Canvas',
+  },
+  title: 'mask.png',
+};
+
 /** The scope every captured row belongs to — also the team in the test URL. */
 export const SCOPE_ID = UNREVIEWED.scope_id;
 

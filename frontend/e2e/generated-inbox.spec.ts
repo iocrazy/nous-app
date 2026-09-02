@@ -25,6 +25,7 @@ import {
   CLEANUP_DRY,
   COUNTS,
   IN_ASSETS,
+  INTERMEDIATE,
   ITEMS,
   PNG_1X1,
   SAVED,
@@ -78,7 +79,9 @@ async function useEnglish(page: Page): Promise<void> {
 
 async function stubInbox(page: Page): Promise<InboxState> {
   const state: InboxState = {
-    rows: new Map(ITEMS.map((row) => [row.id, { ...row }])),
+    rows: new Map(
+      [...ITEMS, INTERMEDIATE].map((row) => [row.id, { ...row }]),
+    ),
     requests: [],
   };
 
@@ -98,8 +101,15 @@ async function stubInbox(page: Page): Promise<InboxState> {
 
     if (method === 'GET' && p.endsWith('/generated')) {
       const state_ = url.searchParams.get('state') ?? 'unreviewed';
+      // The SERVER decides whether intermediates are in the page — the
+      // response body carries no marker a client could filter on
+      // (`generated_media.params` is not on the wire). A stub that always
+      // returned the mask would let a client that never sends the flag pass.
+      const withIntermediates = url.searchParams.get('include_intermediate') === 'true';
       const items = [...state.rows.values()].filter(
-        (row) => state_ === 'all' || row.review_state === state_,
+        (row) =>
+          (state_ === 'all' || row.review_state === state_) &&
+          (withIntermediates || row.id !== INTERMEDIATE.id),
       );
       return envelope(route, { items, next_cursor: null });
     }
@@ -169,6 +179,18 @@ function card(page: Page, id: string) {
   return page.locator(`[data-testid="generated-card"][data-generation-id="${id}"]`);
 }
 
+/**
+ * The clean-up dialog's Preview button.
+ *
+ * `exact` is not optional decoration: every card's thumbnail is now a button
+ * named "Preview <title>", and Playwright's `name` matches as a SUBSTRING, so
+ * the bare form resolves to every card plus this one and fails strict mode.
+ * (Same trap as the douyin publish selectors — see CLAUDE.md.)
+ */
+function previewButton(page: Page) {
+  return page.getByRole('button', { name: 'Preview', exact: true });
+}
+
 function tab(page: Page, name: string) {
   return page.getByRole('tab', { name: new RegExp(`^${name}`) });
 }
@@ -199,7 +221,7 @@ test.describe('Generated inbox', () => {
     expect(state.requests.some((r) => r.startsWith('GET /api/v1/generated?'))).toBe(true);
   });
 
-  test('As Asset… attaches to the suggested asset and the row moves to In Assets', async ({
+  test('Add To Asset attaches to the suggested asset and the row moves to In Assets', async ({
     page,
   }) => {
     await useEnglish(page);
@@ -209,7 +231,7 @@ test.describe('Generated inbox', () => {
     await page.goto(INBOX_URL);
     await expect(card(page, UNREVIEWED.id)).toBeVisible();
 
-    await card(page, UNREVIEWED.id).getByRole('button', { name: 'As Asset…' }).click();
+    await card(page, UNREVIEWED.id).getByRole('button', { name: 'Add To Asset' }).click();
 
     const dialog = page.getByTestId('save-as-asset-dialog');
     await expect(dialog).toBeVisible();
@@ -278,7 +300,7 @@ test.describe('Generated inbox', () => {
     // TTL sweeper was that nothing purges without the user seeing the size.
     await expect(confirmDelete).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Preview' }).click();
+    await previewButton(page).click();
     await expect(page.getByTestId('cleanup-sample').first()).toBeVisible();
 
     await expect(confirmDelete).toBeVisible();
@@ -289,7 +311,7 @@ test.describe('Generated inbox', () => {
     await page.getByLabel('Older Than (Days)').fill('90');
     await expect(confirmDelete).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Preview' }).click();
+    await previewButton(page).click();
     await expect(confirmDelete).toBeVisible();
     await confirmDelete.click();
 
@@ -300,5 +322,97 @@ test.describe('Generated inbox', () => {
     await expect(card(page, UNREVIEWED.id)).toHaveCount(0);
     const live = state.requests.filter((r) => r.includes('/generated/cleanup'));
     expect(live.length).toBe(3); // two previews + one real delete
+  });
+
+  test('intermediate canvas inputs are hidden until the Source filter asks for them', async ({
+    page,
+  }) => {
+    await useEnglish(page);
+    await setupStubbedSession(page, { teamId: SCOPE_ID });
+    const state = await stubInbox(page);
+
+    await page.goto(INBOX_URL);
+    await expect(card(page, UNREVIEWED.id)).toBeVisible();
+    // Anchored on a card that IS there: "the mask is absent" alone is also
+    // true of a page that never loaded.
+    await expect(card(page, INTERMEDIATE.id)).toHaveCount(0);
+    expect(
+      state.requests.some((r) => r.includes('include_intermediate')),
+    ).toBe(false);
+
+    await page.getByRole('button', { name: /^Source/ }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Intermediate Inputs' }).click();
+
+    await expect(card(page, INTERMEDIATE.id)).toBeVisible();
+    await expect(card(page, UNREVIEWED.id)).toBeVisible();
+    expect(
+      state.requests.some((r) => r.includes('include_intermediate=true')),
+    ).toBe(true);
+  });
+
+  test('the thumbnail opens a lightbox with the full file, its metadata and its actions', async ({
+    page,
+  }) => {
+    await useEnglish(page);
+    await setupStubbedSession(page, { teamId: SCOPE_ID });
+    await stubInbox(page);
+
+    await page.goto(INBOX_URL);
+    await expect(card(page, UNREVIEWED.id)).toBeVisible();
+
+    await card(page, UNREVIEWED.id).getByRole('button', { name: /^Preview/ }).click();
+
+    await expect(page.getByTestId('pin-lightbox')).toBeVisible();
+    // The FULL file route, not `/cover` — a viewer showing the thumbnail is
+    // the failure this replaces, and only the URL can tell them apart.
+    await expect(page.getByTestId('pin-lightbox-image')).toHaveAttribute(
+      'src',
+      new RegExp(`/generated-media/${UNREVIEWED.id}/file$`),
+    );
+
+    const meta = page.getByTestId('lightbox-metadata');
+    await expect(meta).toBeVisible();
+    await expect(meta).toContainText(UNREVIEWED.source.label);
+    await expect(meta).toContainText(UNREVIEWED.model);
+
+    const panel = page.getByTestId('pin-lightbox-panel');
+    await expect(panel.getByRole('button', { name: /Save To Uploads/ })).toBeVisible();
+    await expect(panel.getByRole('button', { name: /Add To Asset/ })).toBeVisible();
+
+    // Escape still closes — the shared modal's contract survived the
+    // extension, which is the whole reason it was extended rather than forked.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('pin-lightbox')).toHaveCount(0);
+  });
+
+  test('the selection control is a circle at the top-left of the thumbnail', async ({
+    page,
+  }) => {
+    await useEnglish(page);
+    await setupStubbedSession(page, { teamId: SCOPE_ID });
+    await stubInbox(page);
+
+    await page.goto(INBOX_URL);
+    const target = card(page, UNREVIEWED.id);
+    await expect(target).toBeVisible();
+
+    const check = target.getByRole('checkbox', { name: /^Select/ });
+    // Hover first: the control is transparent until then, and a real user
+    // cannot click what they cannot see.
+    await target.hover();
+    await expect(check).toBeVisible();
+
+    const cardBox = await target.boundingBox();
+    const checkBox = await check.boundingBox();
+    if (!cardBox || !checkBox) throw new Error('no layout box — the card did not render');
+    // Left half, top quarter. Geometry rather than class names, because what
+    // regressed was where the user's eye goes.
+    expect(checkBox.x).toBeLessThan(cardBox.x + cardBox.width / 2);
+    expect(checkBox.y).toBeLessThan(cardBox.y + cardBox.height / 4);
+
+    await check.click();
+    await expect(page.getByTestId('generated-batch-bar')).toBeVisible();
+    // Selecting must not also throw the viewer open over the grid.
+    await expect(page.getByTestId('pin-lightbox')).toHaveCount(0);
   });
 });

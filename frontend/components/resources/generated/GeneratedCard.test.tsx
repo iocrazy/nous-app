@@ -113,8 +113,10 @@ describe('GeneratedCard — per-state affordances', () => {
     render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
 
     expect(screen.getByText('New')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'As Asset…' })).toBeTruthy();
+    // Icon buttons: the accessible name is the ONLY thing naming them, so
+    // this is not a formality — an icon without it is an unlabelled control.
+    expect(screen.getByRole('button', { name: 'Save To Uploads' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
   });
 
@@ -123,9 +125,9 @@ describe('GeneratedCard — per-state affordances', () => {
 
     expect(screen.getByText('Saved')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'In My Uploads' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'As Asset…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add To Asset' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save To Uploads' })).toBeNull();
   });
 
   it('renders the Asset label with only "Open asset"', () => {
@@ -133,8 +135,8 @@ describe('GeneratedCard — per-state affordances', () => {
 
     expect(screen.getByText('Asset')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open asset' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'As Asset…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save To Uploads' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add To Asset' })).toBeNull();
   });
 
   it('navigates to the asset ITEM route (P2) with the source asset id', () => {
@@ -168,10 +170,10 @@ describe('GeneratedCard — per-state affordances', () => {
     const h = handlers();
     render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...h} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save To Uploads' }));
     expect(h.onSave).toHaveBeenCalledWith(UNREVIEWED);
 
-    fireEvent.click(screen.getByRole('button', { name: 'As Asset…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add To Asset' }));
     expect(h.onSaveAsAsset).toHaveBeenCalledWith(UNREVIEWED);
   });
 });
@@ -216,7 +218,7 @@ describe('GeneratedCard — delete confirmation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(h.onDelete).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save To Uploads' })).toBeTruthy();
   });
 });
 
@@ -226,14 +228,16 @@ describe('GeneratedCard — selection and thumbnail', () => {
     render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...h} />);
 
     const box = screen.getByRole('checkbox', { name: /Select/ });
-    expect(box).toHaveProperty('checked', false);
+    expect(box.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(box);
     expect(h.onToggleSelect).toHaveBeenCalledWith('727145299382534145');
   });
 
   it('reflects the selected prop', () => {
     render(<GeneratedCard item={UNREVIEWED} selected teamId="t1" {...handlers()} />);
-    expect(screen.getByRole('checkbox', { name: /Select/ })).toHaveProperty('checked', true);
+    expect(screen.getByRole('checkbox', { name: /Select/ }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
   });
 
   it('uses the cover URL for an image', () => {
@@ -259,5 +263,114 @@ describe('GeneratedCard — selection and thumbnail', () => {
     expect(video?.getAttribute('src')).toBe('https://api.test/gen/727145299382534145/stream');
     expect(video).toHaveProperty('muted', true);
     expect(video?.hasAttribute('autoplay')).toBe(false);
+  });
+});
+
+
+describe('GeneratedCard — selection control mirrors My Uploads', () => {
+  it('sits at the TOP-LEFT of the thumbnail and is a circle', () => {
+    // The whole point of the change: the old control was a SQUARE at the
+    // top-RIGHT, which is nowhere near what a My Uploads card does. Asserting
+    // the position classes is the only way a regression here is caught —
+    // "a checkbox exists" was already true of the wrong one.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+
+    const box = screen.getByRole('checkbox', { name: /Select/ });
+    expect(box.className).toContain('rounded-full');
+    const wrapper = box.parentElement as HTMLElement;
+    expect(wrapper.className).toContain('top-2');
+    expect(wrapper.className).toContain('left-2');
+    expect(wrapper.className).not.toContain('right-');
+  });
+
+  it('is in the DOM even when unselected and unhovered', () => {
+    // A control that only mounts on hover is unreachable by keyboard and
+    // invisible to every test that would guard it.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+    expect(screen.getByRole('checkbox', { name: /Select/ })).toBeTruthy();
+  });
+
+  it('does not open the lightbox when it is clicked', () => {
+    // It sits ON the thumbnail, which is now a button. Without the
+    // stopPropagation, picking a card for a batch action would also throw the
+    // viewer open over it.
+    const h = handlers();
+    const onOpen = vi.fn();
+    render(
+      <GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" onOpen={onOpen} {...h} />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Select/ }));
+    expect(h.onToggleSelect).toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('GeneratedCard — icon actions carry both a tooltip and a label', () => {
+  it('titles say what each action DOES, not just what it is called', () => {
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+
+    expect(
+      screen.getByRole('button', { name: 'Save To Uploads' }).getAttribute('title'),
+    ).toBe('Turn this into a regular file in My Uploads');
+    expect(screen.getByRole('button', { name: 'Add To Asset' }).getAttribute('title')).toBe(
+      "Attach it to an asset card's slot (character, location, …)",
+    );
+  });
+
+  it('renders an icon rather than a word', () => {
+    // If the button ever regains a text node, the name assertions above stop
+    // proving anything about an ICON button.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+    const save = screen.getByRole('button', { name: 'Save To Uploads' });
+    expect(save.textContent).toBe('');
+    expect(save.querySelector('svg')).toBeTruthy();
+  });
+});
+
+describe('GeneratedCard — thumbnail opens the viewer', () => {
+  it('calls onOpen with the item', () => {
+    const onOpen = vi.fn();
+    render(
+      <GeneratedCard
+        item={UNREVIEWED}
+        selected={false}
+        teamId="t1"
+        onOpen={onOpen}
+        {...handlers()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Preview Prompt 0/ }));
+    expect(onOpen).toHaveBeenCalledWith(UNREVIEWED);
+  });
+
+  it('is disabled — not silently inert — when no handler was given', () => {
+    // A clickable-looking thumbnail that does nothing is the failure mode
+    // this replaces; saying so in the DOM is the honest version.
+    render(<GeneratedCard item={UNREVIEWED} selected={false} teamId="t1" {...handlers()} />);
+    expect(screen.getByRole('button', { name: /Preview Prompt 0/ })).toHaveProperty(
+      'disabled',
+      true,
+    );
+  });
+
+  it('keeps the source deep-link button working alongside it', () => {
+    const onOpen = vi.fn();
+    render(
+      <GeneratedCard
+        item={UNREVIEWED}
+        selected={false}
+        teamId="t1"
+        onOpen={onOpen}
+        {...handlers()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /EP1 · Storyboard · Canvas/ }));
+    expect(navigate).toHaveBeenCalledWith(
+      '/team/727145299382534200/canvas/325005725244722?node=n9',
+    );
+    expect(onOpen).not.toHaveBeenCalled();
   });
 });

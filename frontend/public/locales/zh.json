@@ -1994,7 +1994,8 @@
       "shot_generate": "分镜图片",
       "shot_video": "分镜视频",
       "agent_run": "Agent",
-      "chat_upload": "对话上传"
+      "chat_upload": "对话上传",
+      "intermediate": "中间输入"
     },
     "type": {
       "image": "图片",
@@ -2018,17 +2019,20 @@
       "noModels": "本页没有模型信息"
     },
     "action": {
-      "save": "保存",
-      "saveAsAsset": "存为资产…",
+      "save": "保存到上传",
+      "saveAsAsset": "归入资产",
       "delete": "删除",
       "inMyUploads": "已在我的上传",
-      "openAsset": "打开资产"
+      "openAsset": "打开资产",
+      "saveHint": "转成正式文件放进我的上传",
+      "saveAsAssetHint": "挂到资产卡的槽位（角色、场景…）"
     },
     "card": {
       "select": "选择 {{title}}",
       "confirmDelete": "确认删除",
       "openCanvasNodeHint": "跳转到画布中的该节点",
-      "openSourceHint": "跳转到生成来源"
+      "openSourceHint": "跳转到生成来源",
+      "open": "预览 {{title}}"
     },
     "batch": {
       "selected": "已选 {{n}} 项",
@@ -2063,10 +2067,16 @@
       "asset_exists": "该作用域下已存在同名同类型的资产。",
       "invalid_slot": "该槽位不适用于此资产类型。",
       "unreadable_body": "服务器返回了无法解析的内容。"
+    },
+    "meta": {
+      "provider": "服务商",
+      "created": "创建时间",
+      "state": "状态",
+      "prompt": "提示词"
     }
   },
   "saveAsAsset": {
-    "title": "保存为资产",
+    "title": "归入资产",
     "assetType": "资产类型",
     "attachToLabel": "关联到",
     "attachTo": "关联到 {{name}}",
