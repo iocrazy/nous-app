@@ -24,11 +24,11 @@ import { aspectRatioOf, needsAspectMeasurement, matchesCurrentAspect } from '../
 import { useMeasuredAspectRatios } from '../hooks/useMeasuredAspectRatios';
 import { useContainerWidth } from '../hooks/useContainerWidth';
 
-/** Adaptive-view row target height and gap for the downloads grid. Taller than
+/** Justified-view row target height and gap for the downloads grid. Taller than
  *  the resource grid's 170 because these cards are mostly portrait video
  *  covers, which read as too small at that height. */
-const ADAPTIVE_TARGET_ROW_HEIGHT = 200;
-const ADAPTIVE_GAP = 12;
+const JUSTIFIED_TARGET_ROW_HEIGHT = 200;
+const JUSTIFIED_GAP = 12;
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -361,7 +361,7 @@ export const DownloadsView: React.FC = () => {
       });
   }, [library, isSearchActive, searchResults, searchVideoMap, searchQuery, tagSearchMap]);
 
-  // ─── Adaptive (justified) layout ───────────────────────
+  // ─── Justified (adaptive) layout ───────────────────────
   // Reuses the resource grid's layout pass, aspect helpers and per-frame
   // measurement batching so the two surfaces cannot drift.
   //
@@ -371,21 +371,21 @@ export const DownloadsView: React.FC = () => {
   // retrofitting virtualization onto this view's scroll-memory and sentinel
   // pagination, which is a separate change. `computeJustifiedRows` is the
   // shared piece, and it is the piece that defines the look.
-  const { ref: adaptiveContainerRef, width: adaptiveWidth } = useContainerWidth();
+  const { ref: justifiedContainerRef, width: justifiedWidth } = useContainerWidth();
   const { measured: measuredAspects, report: reportAspect } = useMeasuredAspectRatios();
 
   // Most downloads DO carry `resolution` (ytdlp writes it), so measurement is
   // the exception here rather than the rule it is for uploads.
-  const adaptiveAspects = useMemo(
+  const justifiedAspects = useMemo(
     () => filteredLibrary.map((item) => aspectRatioOf(item, measuredAspects[String(item.id)])),
     [filteredLibrary, measuredAspects],
   );
-  const adaptiveRows = useMemo(
-    () => computeJustifiedRows(adaptiveAspects, adaptiveWidth, {
-      targetRowHeight: ADAPTIVE_TARGET_ROW_HEIGHT,
-      gap: ADAPTIVE_GAP,
+  const justifiedRows = useMemo(
+    () => computeJustifiedRows(justifiedAspects, justifiedWidth, {
+      targetRowHeight: JUSTIFIED_TARGET_ROW_HEIGHT,
+      gap: JUSTIFIED_GAP,
     }),
-    [adaptiveAspects, adaptiveWidth],
+    [justifiedAspects, justifiedWidth],
   );
 
   // ─── Search handlers ──────────────────────────────────
@@ -1300,15 +1300,15 @@ export const DownloadsView: React.FC = () => {
         ) : (
           <>
             {libraryViewMode === 'justified' && (
-              <div ref={adaptiveContainerRef} className="w-full">
-                {adaptiveRows.map((row) => (
+              <div ref={justifiedContainerRef} className="w-full">
+                {justifiedRows.map((row) => (
                   <div
                     key={`row-${row.start}`}
                     className="flex items-start"
-                    style={{ gap: ADAPTIVE_GAP, paddingBottom: ADAPTIVE_GAP }}
+                    style={{ gap: JUSTIFIED_GAP, paddingBottom: JUSTIFIED_GAP }}
                   >
                     {filteredLibrary.slice(row.start, row.end).map((item, idx) => {
-                      const ar = adaptiveAspects[row.start + idx] || 1;
+                      const ar = justifiedAspects[row.start + idx] || 1;
                       return (
                         <div
                           key={item.platform_id}
