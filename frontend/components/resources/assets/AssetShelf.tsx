@@ -36,6 +36,7 @@ import { NewAssetDialog } from './NewAssetDialog';
 import { ASSET_TYPE_ICON, typeLabelKey, typeSingularKey } from './assetTypeMeta';
 import {
   ASSET_PAGE_SIZE,
+  LIBRARY_VALUES,
   SORT_VALUES,
   READINESS_VALUES,
   assetListOptionsFor,
@@ -47,6 +48,7 @@ import {
   type AssetSort,
   type ReadinessFilter,
 } from './assetFilters';
+import type { AssetLibraryFilter } from '../../../services/assetsService';
 
 const MENU_ITEM =
   'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-content-2 hover:bg-island-2';
@@ -60,6 +62,15 @@ const SORT_FALLBACK: Record<AssetSort, string> = {
 const READINESS_FALLBACK: Record<ReadinessFilter, string> = {
   ready: 'Ready',
   draft: 'Draft',
+};
+
+// Library membership (mig 449). The shelf shows `in` by default; `out` is how
+// a user finds the project-originated assets nobody has adopted yet, and `all`
+// is both. Worded as what the user would SAY, not as the wire value.
+const LIBRARY_FALLBACK: Record<AssetLibraryFilter, string> = {
+  in: 'In Library',
+  out: 'Not In Library',
+  all: 'All',
 };
 
 // ─── Filter chip ────────────────────────────────────────────────────────────
@@ -359,14 +370,27 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
     ? (projectNames[filters.projectId] ?? filters.projectId)
     : null;
 
-  const emptyMessage = hasActiveAssetFilters(filters)
-    ? t('assets.empty.filtered', 'No Assets Match These Filters')
-    : assetType
-      ? t('assets.empty.ofType', {
-          type: t(typeLabelKey(assetType), assetType),
-          defaultValue: 'No {{type}} Yet',
-        })
-      : t('assets.empty.none', 'No Assets Yet');
+  /** Whether anything OTHER than the library chip is narrowing the shelf — the
+   *  "nothing left to adopt" line is only honest when the library chip is the
+   *  sole reason the grid is empty. */
+  const hasOtherFilters =
+    filters.projectId !== null || filters.readiness !== null || filters.tag !== null;
+
+  // The `out` shelf gets its own line rather than the generic filtered one:
+  // "No Assets Match These Filters" would leave a user who just clicked "Not
+  // In Library" hunting for a filter they did not set, when the answer is the
+  // good news that there is nothing left to adopt.
+  const emptyMessage =
+    filters.library === 'out' && !hasOtherFilters
+      ? t('assets.empty.nothingOutOfLibrary', 'Every Asset Is Already In Your Library')
+      : hasActiveAssetFilters(filters)
+        ? t('assets.empty.filtered', 'No Assets Match These Filters')
+        : assetType
+          ? t('assets.empty.ofType', {
+              type: t(typeLabelKey(assetType), assetType),
+              defaultValue: 'No {{type}} Yet',
+            })
+          : t('assets.empty.none', 'No Assets Yet');
 
   // "Import from script" writes into ONE project, so it is only meaningful
   // once a project is picked. P3 owns the actual flow; this is the doorway.
@@ -576,6 +600,40 @@ export const AssetShelf: React.FC<AssetShelfProps> = ({ assetType }) => {
                   }}
                 >
                   {t(`assets.readiness.${value}`, READINESS_FALLBACK[value])}
+                </button>
+              ))}
+            </>
+          )}
+        </Chip>
+
+        <Chip
+          chipId="library"
+          label={t('assets.filter.library', 'Library')}
+          summary={t(
+            `assets.library.${filters.library}`,
+            LIBRARY_FALLBACK[filters.library],
+          )}
+          // Active when the shelf is NARROWED away from its default. `all`
+          // widens rather than narrows, so it is not "active" in the sense the
+          // other chips use — but it IS a departure from the default, so the
+          // summary always shows which of the three is in force.
+          active={filters.library === 'out'}
+        >
+          {(close) => (
+            <>
+              {LIBRARY_VALUES.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={filters.library === value}
+                  className={MENU_ITEM}
+                  onClick={() => {
+                    applyFilters({ ...filters, library: value });
+                    close();
+                  }}
+                >
+                  {t(`assets.library.${value}`, LIBRARY_FALLBACK[value])}
                 </button>
               ))}
             </>

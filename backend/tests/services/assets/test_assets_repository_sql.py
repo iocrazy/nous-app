@@ -175,3 +175,58 @@ def test_count_by_type_is_scoped_and_binds_the_scope_id():
     assert "public.assets.scope_id = " in sql
     # The scope is a bound parameter, never spliced into the SQL text.
     assert str(SCOPE) not in sql
+
+
+def test_count_by_type_counts_only_library_members():
+    """mig 449: the badges sit above a shelf that defaults to
+    ``library='in'``. Counting project-originated rows here would put a number
+    on the sidebar the grid below it cannot show — the same "badge and grid
+    silently disagree" failure the preset exclusion above exists to prevent."""
+    assert "public.assets.in_library IS true" in _counts_sql()
+
+
+# ── M3 (mig 449): explicit library membership ──────────────────────────────
+
+
+def test_the_default_library_filter_is_in_not_all():
+    """The DEFAULT is the load-bearing half of this change. A repo default of
+    "all" would mean any caller that forgot the argument silently widened the
+    shelf back to including every name a script mentioned."""
+    assert _sql() == _sql(library="in")
+    assert "public.assets.in_library IS true" in _sql()
+
+
+def test_library_out_selects_the_other_side():
+    sql = _sql(library="out")
+    assert "public.assets.in_library IS false" in sql
+    assert "public.assets.in_library IS true" not in sql
+
+
+def test_library_all_emits_no_membership_predicate_at_all():
+    """The negative control, and the reason ``_library_predicate`` returns None
+    for "all" instead of a ``true`` tautology: with a tautology this assertion
+    could not tell "unfiltered" from "filtered to everything"."""
+    sql = _sql(library="all")
+    # ``select(Assets)`` names the column in the SELECT list either way, so the
+    # assertion has to be about the PREDICATE form specifically.
+    assert "public.assets.in_library" in sql, "sanity: the column is still selected"
+    assert "public.assets.in_library IS" not in sql
+    assert "in_library IS" not in sql.split("WHERE", 1)[1]
+
+
+def test_unknown_library_value_raises_instead_of_falling_back():
+    """Same rule as ``sort``: a silent fallback to "in" would answer a
+    different question than the caller asked and look exactly like a working
+    filter. The router pins the vocabulary, so this is a programming error."""
+    with pytest.raises(ValueError):
+        _sql(library="yes")
+
+
+def test_the_membership_predicate_composes_with_the_other_filters():
+    """The four narrowing clauses are independent — a shelf filtered to one
+    project AND to library members must emit both, not the last one written."""
+    sql = _sql(library="out", asset_type="character", tag="hero", project_id=55)
+    assert "public.assets.in_library IS false" in sql
+    assert "public.assets.asset_type = " in sql
+    assert "jsonb_path_exists" in sql
+    assert "asset_project_refs" in sql

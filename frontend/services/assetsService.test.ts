@@ -68,6 +68,7 @@ const ASSET_ROW = {
   source: 'manual',
   duplicated_from: null,
   is_system_preset: false,
+  in_library: true,
   tags: {},
   sort_order: 0,
   created_by: '4a2f0e9c-3d1b-4d4a-9a1e-0f6a6d0f1c22',
