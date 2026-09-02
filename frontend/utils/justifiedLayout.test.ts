@@ -63,6 +63,25 @@ describe('computeJustifiedRows', () => {
     expect(last.height).toBe(TARGET);
   });
 
+  it('degenerates to a uniform grid when every item is square', () => {
+    // The "no dimensions known yet" case for non-visual files: all aspect
+    // ratios equal 1. Every full row must then hold the same number of items
+    // at the same height, i.e. look exactly like the fixed grid.
+    const ars = Array(20).fill(1);
+    const rows = computeJustifiedRows(ars, WIDTH, { targetRowHeight: TARGET, gap: GAP });
+
+    const fullRows = rows.slice(0, -1);
+    expect(fullRows.length).toBeGreaterThan(1);
+
+    const counts = new Set(fullRows.map((r) => r.end - r.start));
+    expect(counts.size).toBe(1);
+
+    for (const row of fullRows) {
+      expect(row.height).toBeCloseTo(fullRows[0].height, 6);
+      expect(rowWidth(row, ars)).toBeCloseTo(WIDTH, 6);
+    }
+  });
+
   it('gives an ultra-wide item its own compressed row', () => {
     // ar=3 clamped max; 3*170=510 fits 1000 so pair with squares; use a
     // narrow container to force solo: 3*170=510 > 400 → solo row scaled down.

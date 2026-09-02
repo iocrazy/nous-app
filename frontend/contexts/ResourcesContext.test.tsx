@@ -85,7 +85,11 @@ vi.mock('../services/assetsService', () => ({
   fetchAssetCounts: vi.fn(),
 }));
 
-import { ResourcesProvider, useResourcesContext } from './ResourcesContext';
+import {
+  ResourcesProvider,
+  useResourcesContext,
+  RESOURCES_VIEW_MODE_KEY,
+} from './ResourcesContext';
 import { fetchGeneratedCounts } from '../services/generatedService';
 import { fetchAssetCounts } from '../services/assetsService';
 
@@ -118,6 +122,7 @@ let select: (ids: string[]) => void = () => {};
 let go: (to: string) => void = () => {};
 
 let refreshAssets: () => void = () => {};
+let setView: (m: 'grid' | 'list' | 'justified') => void = () => {};
 
 function Harness() {
   const ctx = useResourcesContext();
@@ -125,8 +130,10 @@ function Harness() {
   refreshAssets = ctx.refreshAssetCounts;
   select = (ids) => ctx.setSelectedIds(new Set(ids));
   go = (to) => ctx.navigate(to);
+  setView = ctx.setViewMode;
   return (
     <div>
+      <span data-testid="viewMode">{ctx.viewMode}</span>
       <span data-testid="count">{String(ctx.generatedUnreviewedCount)}</span>
       <span data-testid="selected">{[...ctx.selectedIds].join(',')}</span>
       <span data-testid="view">{ctx.sidebarView}</span>
@@ -380,5 +387,58 @@ describe('ResourcesContext — asset counts', () => {
     expect(assetCounts).not.toHaveBeenCalled();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe('ResourcesContext — grid view mode preference', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('defaults to the adaptive (justified) layout for a first-time user', () => {
+    // Eagle-style rows are the default look: thumbnails keep their own
+    // proportions instead of being letterboxed onto a fixed tile.
+    renderAt('/team/42/resources/library');
+    expect(screen.getByTestId('viewMode').textContent).toBe('justified');
+  });
+
+  it('restores a stored preference instead of the default', () => {
+    localStorage.setItem(RESOURCES_VIEW_MODE_KEY, 'grid');
+    renderAt('/team/42/resources/library');
+    expect(screen.getByTestId('viewMode').textContent).toBe('grid');
+  });
+
+  it('persists a switch so it survives a reload', () => {
+    const first = renderAt('/team/42/resources/library');
+    act(() => setView('list'));
+    expect(localStorage.getItem(RESOURCES_VIEW_MODE_KEY)).toBe('list');
+
+    // Remount: a fresh provider must come back on 'list', not 'justified'.
+    first.unmount();
+    renderAt('/team/42/resources/library');
+    expect(screen.getByTestId('viewMode').textContent).toBe('list');
+  });
+
+  it('ignores a stored value that is not a known mode', () => {
+    // A stale or hand-edited key must not put the grid into an unrenderable
+    // state — fall back to the default rather than trusting the string.
+    localStorage.setItem(RESOURCES_VIEW_MODE_KEY, 'mosaic');
+    renderAt('/team/42/resources/library');
+    expect(screen.getByTestId('viewMode').textContent).toBe('justified');
+  });
+
+  it('still renders when localStorage throws (privacy mode)', () => {
+    const spy = vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('storage disabled');
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    renderAt('/team/42/resources/library');
+    expect(screen.getByTestId('viewMode').textContent).toBe('justified');
+    // Never a silent swallow — the failure is reported.
+    expect(errSpy).toHaveBeenCalled();
+
+    spy.mockRestore();
+    errSpy.mockRestore();
   });
 });

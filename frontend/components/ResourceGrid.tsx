@@ -45,21 +45,8 @@ import { useFilterBarVisibility } from '../hooks/useFilterBarVisibility';
 import { ResourceFetchUrlModal } from './ResourceFetchUrlModal';
 import { useGridVirtualizer } from '../hooks/useGridVirtualizer';
 import { useJustifiedVirtualizer } from '../hooks/useJustifiedVirtualizer';
-
-// ─── Justified layout helper ────────────────────────────
-// Derive a display aspect ratio (w/h) for a resource, clamped to a sane range.
-// Used by the Eagle-style "justified" view to size thumbnails by their real
-// proportions while keeping rows roughly equal-height.
-function aspectRatioOf(resource?: { resolution?: string | null; mime_type?: string | null }): number {
-  const res = resource?.resolution;
-  if (res) {
-    const m = res.match(/(\d+)\s*[x:×]\s*(\d+)/i);
-    if (m) { const w = +m[1], h = +m[2]; if (w > 0 && h > 0) return Math.min(3, Math.max(0.4, w / h)); }
-  }
-  const mt = resource?.mime_type || '';
-  if (mt.startsWith('video/')) return 16 / 9;
-  return 1; // square fallback for images/audio/other without resolution
-}
+import { useMeasuredAspectRatios } from '../hooks/useMeasuredAspectRatios';
+import { aspectRatioOf, needsAspectMeasurement } from '../utils/resourceAspect';
 
 // ─── Skeleton components ────────────────────────────────
 
@@ -404,9 +391,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
 
   // Justified virtualizer — variable-height rows from a pure layout pre-pass
   // (the old flex-wrap markup mounted ALL cards; 100k in justified mode died).
+  //
+  // Ratios come from `resource.resolution` where the server has it, and from
+  // the loaded thumbnail otherwise (uploads never carry dimensions). Measured
+  // values land batched per frame, so the rows re-justify once, not per image.
+  const { measured: measuredAspects, report: reportAspect } = useMeasuredAspectRatios();
   const justifiedAspectRatios = useMemo(
-    () => sortedItems.map((it) => aspectRatioOf(it.resource)),
-    [sortedItems],
+    () => sortedItems.map((it) => aspectRatioOf(it.resource, measuredAspects[String(it.id)])),
+    [sortedItems, measuredAspects],
   );
   const {
     rows: justifiedRows,
@@ -1151,6 +1143,11 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           onDoubleClick={() => onResourceDoubleClick(item)}
                           viewMode="grid"
                           aspectRatio={ar}
+                          onThumbnailAspect={
+                            needsAspectMeasurement(item.resource)
+                              ? (measuredAr) => reportAspect(String(item.id), measuredAr)
+                              : undefined
+                          }
                           isSelected={selectedResource?.id === item.id}
                           showRestoreAction={isRecycleView}
                           onTrash={isRecycleView ? undefined : handleTrash}

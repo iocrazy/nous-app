@@ -64,14 +64,24 @@ describe('useGridVirtualizer cold-load column measurement', () => {
 
     // observe() must have fired at least once now that the node is attached.
     expect(observeCalls).toBeGreaterThanOrEqual(1)
-    // width 1400 → columnsForWidth = min(8, floor(1400/172)) = 8.
+    // width 1400 → floor((1400+12)/172) = 8 columns of ~164px.
     expect(screen.getByTestId('columns').textContent).toBe('8')
   })
 
   it('measures a wide container present from the first render', () => {
-    observedWidth = 1720 // floor(1720/172) = 10 → capped at 8
+    // width 1720 → floor((1720+12)/172) = 10 columns of ~161px.
+    //
+    // This used to assert 8, pinning the old `Math.min(8, ...)` column cap. The
+    // cap is gone: a fixed column ceiling and a max-card-width band are
+    // contradictory (at 2400px an 8-column grid means 289px cards, well past
+    // the 220px cap), and the band is what makes the layout size-stable when
+    // the info panel opens. 10 columns here also matches what the sibling
+    // `.downloads-grid` CSS rule — auto-fill minmax(160px, 220px) — produces
+    // at the same width, so the virtualized grid and the folder grid above it
+    // no longer disagree about card size.
+    observedWidth = 1720
     render(<Harness showContainer />)
     expect(observeCalls).toBeGreaterThanOrEqual(1)
-    expect(screen.getByTestId('columns').textContent).toBe('8')
+    expect(screen.getByTestId('columns').textContent).toBe('10')
   })
 })

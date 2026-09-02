@@ -1,27 +1,88 @@
 import { describe, it, expect } from 'vitest'
-import { columnsForWidth } from './gridColumns'
+import {
+  columnsForWidth,
+  cardWidthFor,
+  MIN_CARD_WIDTH,
+  MAX_CARD_WIDTH,
+} from './gridColumns'
 
 describe('columnsForWidth', () => {
   it('returns 2 for width=0 (safe default before first measure)', () => {
-    expect(columnsForWidth(0, false)).toBe(2)
+    expect(columnsForWidth(0)).toBe(2)
   })
 
-  it('returns 2 for mobile width regardless of calculation', () => {
-    expect(columnsForWidth(375, true)).toBe(2)
+  it('returns 2 for a non-finite width', () => {
+    expect(columnsForWidth(Number.NaN)).toBe(2)
   })
 
-  it('returns 4 for width=800 on desktop', () => {
-    // Math.floor(800 / 172) = Math.floor(4.65) = 4
-    expect(columnsForWidth(800, false)).toBe(4)
+  it('yields 2 columns at a phone container width', () => {
+    // 375px: floor((375+12)/172) = 2. The old rule special-cased "mobile" to
+    // reach the same answer; the band rule gets there on its own.
+    expect(columnsForWidth(375)).toBe(2)
   })
 
-  it('clamps to 8 for very wide screens', () => {
-    // Math.floor(2000 / 172) = Math.floor(11.6) = 11 → clamped to 8
-    expect(columnsForWidth(2000, false)).toBe(8)
+  it('never lets a card exceed the max-width cap', () => {
+    for (let w = 120; w <= 3000; w += 7) {
+      const cols = columnsForWidth(w)
+      expect(cardWidthFor(w, cols)).toBeLessThanOrEqual(MAX_CARD_WIDTH + 0.001)
+    }
   })
 
-  it('returns 2 (min clamp) for narrow-but-not-zero width', () => {
-    // Math.floor(300 / 172) = Math.floor(1.74) = 1 → clamped to 2
-    expect(columnsForWidth(300, false)).toBe(2)
+  it('keeps cards at or above the min width whenever the container allows it', () => {
+    // Above the point where one min-width card fits, cards stay in band.
+    for (let w = MIN_CARD_WIDTH * 4; w <= 3000; w += 7) {
+      const cols = columnsForWidth(w)
+      expect(cardWidthFor(w, cols)).toBeGreaterThanOrEqual(MIN_CARD_WIDTH * 0.9)
+    }
+  })
+
+  it('adds columns monotonically as the container widens', () => {
+    let prev = 0
+    for (let w = 200; w <= 3000; w += 13) {
+      const cols = columnsForWidth(w)
+      expect(cols).toBeGreaterThanOrEqual(prev)
+      prev = cols
+    }
+  })
+})
+
+describe('reflow stability — info panel opening must not resize cards', () => {
+  // The reported bug: clicking a resource opens the 320px info panel, the grid
+  // container goes 1340 → ~780, and the grid used to collapse to 2 columns of
+  // ~384px cards (2.1x bigger). Card width must now stay put; only the column
+  // count drops.
+  it('keeps card width within +/-15% from 1340px to 780px', () => {
+    const wide = cardWidthFor(1340, columnsForWidth(1340))
+    const narrow = cardWidthFor(780, columnsForWidth(780))
+
+    expect(columnsForWidth(1340)).toBeGreaterThan(columnsForWidth(780))
+    expect(Math.abs(narrow - wide) / wide).toBeLessThan(0.15)
+  })
+
+  it('keeps card width inside the design band across every panel-open step', () => {
+    // Sweep the desktop range against a 320px panel opening.
+    //
+    // Note on the bound: a tighter-than-band guarantee is NOT achievable with a
+    // discrete column count. Going from n to n+1 columns changes card width by
+    // n/(n+1) — 25% at the 3->4 boundary — so no column rule can hold +/-15% at
+    // every width. What IS guaranteed is that both layouts stay inside the
+    // [MIN, MAX] card band, i.e. the worst case is bounded by 220/160 = 1.375x
+    // rather than the 2.1x blow-up the old rule produced.
+    for (let full = 900; full <= 2400; full += 20) {
+      const withPanel = full - 320
+      const a = cardWidthFor(full, columnsForWidth(full))
+      const b = cardWidthFor(withPanel, columnsForWidth(withPanel))
+
+      for (const cardWidth of [a, b]) {
+        expect(cardWidth).toBeLessThanOrEqual(MAX_CARD_WIDTH + 0.001)
+        expect(cardWidth).toBeGreaterThanOrEqual(MIN_CARD_WIDTH - 0.001)
+      }
+      expect(Math.abs(b - a) / a).toBeLessThan(MAX_CARD_WIDTH / MIN_CARD_WIDTH - 1)
+    }
+  })
+
+  it('regression: 780px does NOT produce a 2-column giant-card layout', () => {
+    expect(columnsForWidth(780)).toBeGreaterThan(2)
+    expect(cardWidthFor(780, columnsForWidth(780))).toBeLessThan(250)
   })
 })

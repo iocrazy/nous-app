@@ -68,9 +68,12 @@ export function useGridVirtualizer({
     }
   }, [containerEl])
 
-  // isMobile: treat container widths below 768px as mobile.
-  const isMobile = width > 0 && width < 768
-  const columns = (fixedColumns && fixedColumns > 0) ? fixedColumns : columnsForWidth(width, isMobile)
+  // Column count is derived from the container width alone, via a card-width
+  // band. There is deliberately no "mobile" branch here: this hook only ever
+  // saw the CONTAINER width, so a `width < 768` test fired whenever the info
+  // panel opened on a normal desktop and collapsed the grid into two giant
+  // columns. See utils/gridColumns.ts for the full history.
+  const columns = (fixedColumns && fixedColumns > 0) ? fixedColumns : columnsForWidth(width)
 
   // Guard: columns must be >= 1 to avoid division-by-zero in Math.ceil.
   const safeColumns = Math.max(1, columns)
