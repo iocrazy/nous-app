@@ -73,11 +73,27 @@ export async function importCanvasMedia(
  * already-uploaded resource-library asset via
  * POST /generated-media/import-from-resource.
  *
- * The i2i bridge does now resolve `/api/v1/resources/{id}/(cover|file)`
- * directly (asset-library P4 Task 3), so this detour is no longer what makes
- * a Library pick usable as a reference. It stays because the media node's
- * items are `generated_media` ROWS, not just urls: the output/Save-as-Asset
- * path reads `GeneratedImageRef.id`, and a bare resource url has none.
+ * WHY IT IS STILL HERE. The i2i bridge does now resolve
+ * `/api/v1/resources/{id}/(cover|file)` directly (asset-library P4 Task 3), so
+ * this detour is no longer what makes a Library pick usable as a reference —
+ * which was its original and only stated reason. It stays because the media
+ * node's items are `generated_media` ROWS, not just urls: the
+ * output/Save-as-Asset path reads `GeneratedImageRef.id`, and a bare resource
+ * url has none.
+ *
+ * WHAT IT COSTS, AND WHO PAYS IT. The row this mints is stamped
+ * `params.role = 'reference'` server-side
+ * (`generated_media_router` → `app/services/library/generated_roles.py`), which
+ * puts it in `INTERMEDIATE_ROLES` and therefore OFF the Generated inbox's
+ * default tabs. That is deliberate and it is the reason the detour is
+ * tolerable: nobody asked for this image, it already exists in My Uploads, and
+ * before the role existed the inbox showed it beside real products as if a
+ * writer were meant to triage it.
+ *
+ * The two facts point in opposite directions and both are true: the reference
+ * ARGUMENT for this function is gone, the row-id argument is not, and the
+ * inbox noise the detour used to create is now suppressed rather than fixed.
+ * Whoever removes this function needs all three.
  */
 export async function importResourceAsCanvasMedia(
   resourceId: string,

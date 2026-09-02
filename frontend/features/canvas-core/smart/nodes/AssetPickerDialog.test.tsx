@@ -99,6 +99,7 @@ describe('AssetPickerDialog', () => {
         q: undefined,
         type: undefined,
         limit: 60,
+        library: 'all',
       }),
     );
     expect(await screen.findByText('Cole Bannon')).toBeTruthy();
@@ -115,8 +116,22 @@ describe('AssetPickerDialog', () => {
         q: undefined,
         type: 'prop',
         limit: 60,
+        library: 'all',
       }),
     );
+  });
+
+  it("asks for library:'all' EXPLICITLY — the server default would hide migrated assets", async () => {
+    // mig 449 gave `GET /assets` a membership filter whose server default is
+    // `'in'`. Omitting the parameter here narrows this picker to library
+    // members, which hides script imports and every asset the P4 legacy-card
+    // migration created — the exact population a canvas showing a migrated
+    // card needs to be able to find. Pinned on the VALUE, not on "the key is
+    // present": `'in'` and `undefined` would both be wrong and only one of
+    // them is visible in a diff.
+    renderPicker();
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    expect(searchAssets.mock.calls[0][1].library).toBe('all');
   });
 
   it('picking fetches the DETAIL row and hands THAT to the caller', async () => {

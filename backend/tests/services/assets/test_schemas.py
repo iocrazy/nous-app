@@ -402,6 +402,8 @@ def test_a_client_cannot_set_membership_at_creation():
     assert "in_library" not in AssetCreate.model_fields
     made = AssetCreate(asset_type="character", name="Sang Yao", in_library=False)
     assert not hasattr(made, "in_library")
+
+
 # ── P4: used_in — the canvas mirror the detail response carries ────────────
 
 

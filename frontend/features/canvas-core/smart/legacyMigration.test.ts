@@ -39,7 +39,15 @@ function assetRow(over: Partial<AssetRow> = {}): AssetRow {
     prompt_negative_zh: null,
     platform_params: {},
     cover_file_id: null,
-    source: 'manual',
+    // `migrated` / not in the library, because that is what this fixture
+    // MODELS: the asset a pre-P3 card resolves to was created by the
+    // backfill, and mig 449 puts migration-created rows OUT of the library
+    // (membership is a deliberate act). It is also why the canvas asset
+    // picker has to ask for `library: 'all'` — the default `'in'` would hide
+    // exactly these rows, leaving a user able to see a migrated card on the
+    // board and unable to find its asset in the picker.
+    source: 'migrated',
+    in_library: false,
     duplicated_from: null,
     is_system_preset: false,
     tags: {},

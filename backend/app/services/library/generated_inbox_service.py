@@ -206,6 +206,16 @@ class GeneratedInboxService:
         already is for :meth:`save` and :meth:`delete`. Making the by-id read
         stricter than the actions available on the same row would mean "you can
         promote it but you cannot look at it".
+
+        It applies no ``include_intermediate`` filter either, for the same
+        reason and one more. ``generated_roles`` marks machine-made rows
+        (``canvas_upload`` and friends) intermediate so :meth:`list` can keep
+        them off the landing tab; a caller who NAMES a row has already got past
+        the browsing problem that filter solves, and hiding it here would 404 a
+        row whose id the client is holding. The two knobs are therefore
+        deliberately absent rather than defaulted — this method answers "give
+        me THAT row", and neither ``review_state`` nor intermediacy changes
+        which row that is.
         """
         row = await self.gen_repo.get(int(gen_id), int(scope_id))
         if row is None:

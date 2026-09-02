@@ -83,6 +83,7 @@ const DETAIL: AssetRowDetail = {
   platform_params: {},
   cover_file_id: SHEET_FILE,
   source: 'manual',
+  in_library: true,
   duplicated_from: null,
   is_system_preset: false,
   tags: {},

@@ -74,6 +74,7 @@ function row(id: string, type: AssetType, name: string): AssetRow {
     platform_params: {},
     cover_file_id: null,
     source: 'manual',
+    in_library: true,
     duplicated_from: null,
     is_system_preset: false,
     tags: {},

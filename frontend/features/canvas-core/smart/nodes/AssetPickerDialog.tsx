@@ -71,15 +71,24 @@ export function AssetPickerDialog({ onPick, onClose }: AssetPickerDialogProps) {
     let cancelled = false;
     setLoading(true);
     setListError(false);
-    // Everything in scope, presets included — `GET /assets` has no
-    // library-membership filter on this branch. If one arrives, this call is
-    // the decision point: a canvas picker offering library members only, or
-    // the whole scope. Neither is obviously right, so it wants an answer
-    // rather than whatever the parameter happens to default to.
+    // `library: 'all'` — EXPLICIT, and the explicitness is the point.
+    //
+    // This call named itself the decision point for the day a membership
+    // filter arrived. It has (mig 449), and its SERVER DEFAULT is `'in'`, so
+    // omitting the parameter here would silently narrow this picker to library
+    // members — hiding script imports and, more to the point, every asset the
+    // P4 legacy-card migration created. That is exactly the population this
+    // canvas points at: a user whose old card resolved to a migrated asset
+    // would see it on the board and be unable to find it in the picker.
+    //
+    // The other callers of `searchAssets` (attach a generation, link into a
+    // project) genuinely do want the shelf, which is why the default stays
+    // `'in'` and this one caller opts out rather than the default changing.
     searchAssets(scopeId, {
       q: debounced.trim() || undefined,
       type: type ?? undefined,
       limit: LIMIT,
+      library: 'all',
     })
       .then((found) => {
         if (cancelled) return;
