@@ -63,9 +63,16 @@ vi.mock('react-i18next', () => ({
 
 const SCOPE = '727145299382534100';
 const ASSET_ID = '727145299382534300';
-const F1 = '900000000000000001';
-const F2 = '900000000000000002';
-const F3 = '900000000000000003';
+// Named by SLOT, because the whole point of the fixture is that delivery order
+// is not declaration order. `SLOTS.character` declares
+// sheet → stills → expressions → extras → worn; `_slot_priority` delivers
+// sheet → worn → stills → expressions → extras. A fixture holding only `sheet`
+// and `stills` — the previous one — is the single arrangement where the two
+// orders coincide, so it could not see the card ranking by the wrong one.
+const SHEET = '900000000000000001';
+const STILLS = '900000000000000002';
+const EXPRESSIONS = '900000000000000003';
+const WORN = '900000000000000004';
 
 const file = (resource_id: string, slot: string, sort_order: number) => ({
   asset_id: ASSET_ID,
@@ -92,7 +99,7 @@ const DETAIL = {
   prompt_positive_zh: null,
   prompt_negative_zh: null,
   platform_params: {},
-  cover_file_id: F1,
+  cover_file_id: SHEET,
   source: 'manual',
   duplicated_from: null,
   is_system_preset: false,
@@ -102,10 +109,17 @@ const DETAIL = {
   created_at: '2026-09-01T00:00:00+00:00',
   updated_at: '2026-09-01T00:00:00+00:00',
   readiness: { state: 'ready', missing: [] },
-  file_counts_by_slot: { sheet: 1, stills: 2 },
+  file_counts_by_slot: { sheet: 1, stills: 1, expressions: 1, worn: 1 },
   project_ids: [],
   loadout_count: 0,
-  files: [file(F1, 'sheet', 0), file(F2, 'stills', 1), file(F3, 'stills', 2)],
+  files: [
+    // Deliberately supplied in DECLARATION order, so a card that simply keeps
+    // the API's order renders the wrong one.
+    file(SHEET, 'sheet', 0),
+    file(STILLS, 'stills', 1),
+    file(EXPRESSIONS, 'expressions', 2),
+    file(WORN, 'worn', 3),
+  ],
   links: [],
   linked_by: [],
   loadouts: [],
@@ -114,10 +128,11 @@ const DETAIL = {
 const NODE_DATA = {
   asset_id: ASSET_ID,
   loadout_id: null as string | null,
-  selected_file_ids: [F1, F2],
+  // Two checked, and NOT the two the declaration order would put first.
+  selected_file_ids: [SHEET, WORN],
   name: 'Cole Bannon',
   asset_type: 'character' as const,
-  cover_file_id: F1,
+  cover_file_id: SHEET,
   readiness_state: 'ready' as const,
 };
 
@@ -213,48 +228,76 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('the checklist is drawn in DELIVERY order', () => {
+  it('renders primary, then worn, then stills, then the declaration tail', () => {
+    // `SLOTS.character` declares sheet → stills → expressions → extras → worn.
+    // `_slot_priority` delivers sheet → worn → stills → expressions → extras,
+    // and the bundle trims the tail of THAT. A card drawn in declaration order
+    // dims the wrong rows; drawn in delivery order the ceiling is legible —
+    // what the provider drops is exactly what is at the bottom.
+    seedAndRender(NODE_DATA, [{ id: 'p1', model: 'codex' }]);
+    return waitFor(() => {
+      const ids = screen
+        .getAllByRole('checkbox')
+        .map((el) => el.getAttribute('data-testid'));
+      expect(ids).toEqual([
+        `asset-node-file-${SHEET}`,
+        `asset-node-file-${WORN}`,
+        `asset-node-file-${STILLS}`,
+        `asset-node-file-${EXPRESSIONS}`,
+      ]);
+    });
+  });
+});
+
 describe('over-limit greying', () => {
   it('greys the unchecked rows once the selection reaches the model ceiling', async () => {
     // seedream-4 takes 2; the card already has 2 checked.
     seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
-    await waitFor(() => expect(box(F3)).toBeDisabled());
-    expect(row(F3)).toHaveAttribute('data-over-limit', 'true');
+    await waitFor(() => expect(box(STILLS)).toBeDisabled());
+    expect(row(STILLS)).toHaveAttribute('data-over-limit', 'true');
+    expect(box(EXPRESSIONS)).toBeDisabled();
     expect(screen.getByTestId('asset-node-refs-limit')).toBeInTheDocument();
   });
 
   it('never disables a CHECKED row — the user must be able to take it off', async () => {
     seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
-    await waitFor(() => expect(box(F3)).toBeDisabled());
-    expect(box(F1)).not.toBeDisabled();
-    expect(box(F2)).not.toBeDisabled();
+    await waitFor(() => expect(box(STILLS)).toBeDisabled());
+    expect(box(SHEET)).not.toBeDisabled();
+    expect(box(WORN)).not.toBeDisabled();
   });
 
-  it('marks the checked rows PAST the ceiling without disabling them', async () => {
-    // Three checked against a ceiling of two: the third will be trimmed.
-    seedAndRender({ ...NODE_DATA, selected_file_ids: [F1, F2, F3] }, [
+  it('marks the checked rows PAST the ceiling by DELIVERY rank, not list input order', async () => {
+    // The I1 case, concretely. sheet + expressions + worn checked, ceiling 2.
+    // The bundle sends sheet and worn and drops `expressions`, because `worn`
+    // outranks it. Ranking by the declaration order instead dims `worn` — the
+    // file that IS sent — and leaves `expressions` un-dimmed.
+    seedAndRender({ ...NODE_DATA, selected_file_ids: [SHEET, EXPRESSIONS, WORN] }, [
       { id: 'p1', model: 'seedream-4' },
     ]);
     await waitFor(() =>
-      expect(row(F3)).toHaveAttribute('data-over-limit', 'true'),
+      expect(row(EXPRESSIONS)).toHaveAttribute('data-over-limit', 'true'),
     );
-    expect(row(F1)).not.toHaveAttribute('data-over-limit');
-    expect(row(F2)).not.toHaveAttribute('data-over-limit');
-    expect(box(F3)).not.toBeDisabled();
+    expect(row(SHEET)).not.toHaveAttribute('data-over-limit');
+    expect(row(WORN)).not.toHaveAttribute('data-over-limit');
+    // Checked rows stay operable at the ceiling.
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
   });
 
   it('greys every unchecked row for a model that takes NO references', async () => {
     seedAndRender({ ...NODE_DATA, selected_file_ids: [] }, [
       { id: 'p1', model: 'ark-seedream' },
     ]);
-    await waitFor(() => expect(box(F1)).toBeDisabled());
-    expect(box(F2)).toBeDisabled();
-    expect(box(F3)).toBeDisabled();
+    await waitFor(() => expect(box(SHEET)).toBeDisabled());
+    expect(box(WORN)).toBeDisabled();
+    expect(box(STILLS)).toBeDisabled();
+    expect(box(EXPRESSIONS)).toBeDisabled();
   });
 
   it('imposes no limit when the model is generous', async () => {
     seedAndRender(NODE_DATA, [{ id: 'p1', model: 'codex' }]);
     await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
-    expect(box(F3)).not.toBeDisabled();
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
     expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
   });
 
@@ -262,14 +305,14 @@ describe('over-limit greying', () => {
     listGenerationCapabilities.mockRejectedValue(new Error('HTTP 500'));
     seedAndRender(NODE_DATA, [{ id: 'p1', model: 'seedream-4' }]);
     await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
-    expect(box(F3)).not.toBeDisabled();
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
     expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
   });
 
   it('imposes no limit when the card feeds nothing', async () => {
     seedAndRender(NODE_DATA, []);
     await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
-    expect(box(F3)).not.toBeDisabled();
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
   });
 
   it('imposes no limit when two downstream prompts disagree on the model', async () => {
@@ -280,7 +323,7 @@ describe('over-limit greying', () => {
       { id: 'p2', model: 'codex' },
     ]);
     await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
-    expect(box(F3)).not.toBeDisabled();
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
     expect(screen.queryByTestId('asset-node-refs-limit')).toBeNull();
   });
 });
@@ -290,19 +333,19 @@ describe('the last run’s bundle report', () => {
     seedAndRender({
       ...NODE_DATA,
       last_bundle_dropped: [
-        { resource_id: F2, reason: 'over_limit' },
-        { resource_id: F3, reason: 'over_limit' },
+        { resource_id: STILLS, reason: 'over_limit' },
+        { resource_id: EXPRESSIONS, reason: 'over_limit' },
       ],
     });
     const badge = await screen.findByTestId('asset-node-dropped');
     expect(badge).toHaveTextContent('2');
-    expect(badge.getAttribute('title')).toContain(F2);
+    expect(badge.getAttribute('title')).toContain(STILLS);
   });
 
   it('renders an unrecognised reason code as itself rather than omitting it', async () => {
     seedAndRender({
       ...NODE_DATA,
-      last_bundle_dropped: [{ resource_id: F2, reason: 'brand_new_reason' }],
+      last_bundle_dropped: [{ resource_id: STILLS, reason: 'brand_new_reason' }],
     });
     const badge = await screen.findByTestId('asset-node-dropped');
     expect(badge).toHaveTextContent('brand_new_reason');

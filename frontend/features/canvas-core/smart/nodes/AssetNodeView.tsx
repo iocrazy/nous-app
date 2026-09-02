@@ -153,8 +153,16 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
   );
   const caps = useModelCapabilities(genModel);
   const maxRefs = caps?.max_refs ?? null;
-  // Rank among the CHECKED rows, in list order — the same order the bundle
-  // trims from the tail of.
+  // Rank among the CHECKED rows. `files` is ordered by
+  // `referenceSlotPriority` — the mirror of the backend `_slot_priority` that
+  // `reference_order` walks — so list position IS delivery position, and the
+  // provider's cap trims this list's tail. Ranking by any other order (the
+  // slot DECLARATION order, say) dims a file that is in fact sent.
+  //
+  // ⚠️ `max_refs` is a limit on the REQUEST, and this is one card. Two asset
+  // cards feeding one prompt can each sit under the ceiling while the run
+  // exceeds it; that overflow surfaces afterwards as `dropped_knobs: ['refs']`
+  // on the prompt node. Nothing here promises a request-level guarantee.
   const selectedRank = useMemo(() => {
     const rank = new Map<string, number>();
     let i = 0;

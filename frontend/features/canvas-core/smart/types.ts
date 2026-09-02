@@ -160,9 +160,14 @@ export interface PromptNodeData {
   image_refs?: { url: string; alias: string; kind: string }[];
   /**
    * Negative prompt text loaded from an asset's prompt library entry
-   * (Phase 2). Optional; absent for hand-typed prompts. The generation
-   * pipeline does not consume it yet — providers that support negative
-   * prompts will pick it up when the runner grows that capability.
+   * (Phase 2). Optional; absent for hand-typed prompts.
+   *
+   * LIVE since asset-library P4 Task 5: `generationRunner` ships it as
+   * `params.negative`, merged with whatever the upstream asset cards
+   * contribute and deduped. Whether the provider accepts one is decided
+   * server-side by `GenerationRequest.reconcile`, which drops it and names
+   * `negative` in `dropped_knobs` — so a model that ignores negatives says so
+   * on the node rather than silently discarding the text.
    */
   negative_body?: string;
   /**

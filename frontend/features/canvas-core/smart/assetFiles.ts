@@ -23,7 +23,10 @@
  * question; the two are kept apart on purpose.
  */
 
-import { PRIMARY_SLOT, slotsFor } from '../../../components/assets/assetSlots';
+import {
+  PRIMARY_SLOT,
+  referenceSlotPriority,
+} from '../../../components/assets/assetSlots';
 import type {
   AssetFileRow,
   AssetRow,
@@ -81,9 +84,19 @@ export function primarySlotFileIds(
 }
 
 /**
- * The rows the card's checklist draws: primary slot first, then the type's
- * other slots in table order, then anything in a slot the table does not
- * name.
+ * The rows the card's checklist draws, IN THE ORDER THE BUNDLE WILL SEND THEM:
+ * primary → `worn` → `stills` → the type's remaining slots → `unsorted`, then
+ * anything in a slot no table names (alphabetically, so it is deterministic).
+ *
+ * That is `referenceSlotPriority`, the mirror of the backend's
+ * `_slot_priority`, and NOT `slotsFor` — which is what this used to walk. The
+ * two differ for `character`, the type this whole feature centres on:
+ * declaration order puts `worn` LAST, delivery order puts it second. Drawing
+ * the list in one order while the provider's `max_refs` trims the tail of the
+ * other made the card dim a file that WAS sent and leave un-dimmed the one that
+ * was dropped — then the post-run badge on the same card said the opposite.
+ * Rendering in delivery order makes the ceiling legible instead: what the
+ * provider drops is exactly what is at the bottom.
  *
  * ONE ROW PER RESOURCE. `asset_files` is keyed `(asset_id, resource_id,
  * slot)`, so the same resource can be attached to two slots — but the
@@ -101,7 +114,12 @@ export function orderedReferenceFiles(
   assetType: AssetType,
   loadoutId: string | null,
 ): AssetFileRow[] {
-  const order = slotsFor(assetType);
+  const order = referenceSlotPriority(assetType);
+  // An unnamed slot (a file left over from a renamed one) still gets its turn,
+  // last and in a deterministic order — the same tail `reference_order` appends
+  // with `sorted(set(files_by_slot) - set(order))`. Dropping it, or leaving its
+  // position to whatever order the rows arrived in, would be a reference the
+  // user attached and cannot see the fate of.
   const rank = (slot: string): number => {
     const i = order.indexOf(slot);
     return i === -1 ? order.length : i;
@@ -109,7 +127,12 @@ export function orderedReferenceFiles(
   const sorted = files
     .filter((f) => fileVisibleUnderLoadout(f, loadoutId))
     .slice()
-    .sort((a, b) => rank(a.slot) - rank(b.slot) || a.sort_order - b.sort_order);
+    .sort(
+      (a, b) =>
+        rank(a.slot) - rank(b.slot) ||
+        (rank(a.slot) === order.length ? a.slot.localeCompare(b.slot) : 0) ||
+        a.sort_order - b.sort_order,
+    );
   const seen = new Set<string>();
   return sorted.filter((f) => {
     if (seen.has(f.resource_id)) return false;

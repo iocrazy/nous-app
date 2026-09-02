@@ -152,6 +152,15 @@ async def _canvas_project_scope_id(canvas_id: int) -> Optional[int]:
     them would aim the reference check at a scope the file was never in — the
     references would all come back ``not_in_scope`` while the picture sat in the
     project everybody is looking at.
+
+    ``Canvases.deleted_at`` is deliberately NOT filtered, unlike the reverse
+    lookups in ``canvas_asset_refs_repository`` (which answer "where is this
+    asset used" and must not list deleted boards). This answers "what scope is
+    this RUNNING generation in", and a run dispatched seconds before someone
+    deleted the canvas still has to resolve — refusing it would turn a delete
+    into a batch of ``scope_unresolved`` references on work already in flight.
+    Deleting a canvas revokes no access to the project's files, so nothing is
+    widened by allowing it.
     """
     from sqlalchemy import select
 
@@ -193,10 +202,15 @@ async def _generation_scope_id(
     would refuse every one of them (``not_in_scope``) on a board whose whole
     point is shared references. Before this, that was the only rule.
 
-    Falls back to the runner's personal team ONLY when there is no canvas — the
-    one case with no project to ask. None (no canvas and no user, no project
-    row, no personal team) is reported as ``scope_unresolved`` rather than
-    treated as "everything allowed": a scope check that cannot run has not
+    Falls back to the runner's personal team whenever the canvas cannot answer:
+    no canvas at all, or a canvas whose project row is gone. That fallback is
+    NARROWER than the pre-P4 rule, never wider — it is the same personal team
+    the old code always used — so a run that loses its project degrades to the
+    previous behaviour instead of failing.
+
+    ``None`` (nothing resolvable at either step: no project AND no personal
+    team, or no canvas and no user) is reported as ``scope_unresolved`` rather
+    than treated as "everything allowed": a scope check that cannot run has not
     passed.
     """
     try:

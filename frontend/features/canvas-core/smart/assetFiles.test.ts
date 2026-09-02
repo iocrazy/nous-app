@@ -22,7 +22,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ASSET_TYPES, PRIMARY_SLOT } from '../../../components/assets/assetSlots';
+import {
+  ASSET_TYPES,
+  PRIMARY_SLOT,
+  referenceSlotPriority,
+  slotsFor,
+} from '../../../components/assets/assetSlots';
 import type { AssetFileRow, AssetRow } from '../../../services/assetsService';
 import {
   fileVisibleUnderLoadout,
@@ -184,10 +189,47 @@ describe('orderedReferenceFiles', () => {
     fileRow({ resource_id: WORN_B, slot: 'worn', loadout_id: LOADOUT_B }),
   ];
 
-  it('orders by the slot table, primary first, then sort_order', () => {
+  it('orders by DELIVERY priority: primary, then worn, then stills', () => {
+    // NOT the slot declaration order — `SLOTS.character` puts `worn` LAST.
+    // This is `_slot_priority`, which is what the bundle sends and therefore
+    // what the provider's cap trims the tail of.
     expect(
       orderedReferenceFiles(FILES, 'character', LOADOUT_A).map((f) => f.slot),
-    ).toEqual(['sheet', 'stills', 'worn']);
+    ).toEqual(['sheet', 'worn', 'stills']);
+  });
+
+  it('differs from the declaration order for character — the case that matters', () => {
+    // A control for the test above. If the two orders ever coincided, every
+    // assertion here would keep passing while the property they protect had
+    // quietly stopped existing.
+    expect(referenceSlotPriority('character')).not.toEqual(slotsFor('character'));
+    expect(referenceSlotPriority('character').indexOf('worn')).toBeLessThan(
+      referenceSlotPriority('character').indexOf('expressions'),
+    );
+  });
+
+  it('ranks worn ahead of expressions and extras', () => {
+    // The concrete divergence: a character with `sheet`, `expressions` and
+    // `worn` checked against `max_refs: 2` gets sheet + worn, and it is
+    // `expressions` the bundle drops. The card has to say the same thing.
+    const out = orderedReferenceFiles(
+      [
+        fileRow({ resource_id: 'r-extras', slot: 'extras' }),
+        fileRow({ resource_id: 'r-expr', slot: 'expressions' }),
+        fileRow({ resource_id: 'r-worn', slot: 'worn' }),
+        fileRow({ resource_id: 'r-stills', slot: 'stills' }),
+        fileRow({ resource_id: 'r-sheet', slot: 'sheet' }),
+      ],
+      'character',
+      null,
+    );
+    expect(out.map((f) => f.resource_id)).toEqual([
+      'r-sheet',
+      'r-worn',
+      'r-stills',
+      'r-expr',
+      'r-extras',
+    ]);
   });
 
   it('drops files pinned to another loadout, keeps the shared ones', () => {
@@ -216,6 +258,23 @@ describe('orderedReferenceFiles', () => {
         null,
       ).map((f) => f.resource_id),
     ).toEqual(['r1', 'r9']);
+  });
+
+  it('orders several unnamed slots by NAME, as reference_order does', () => {
+    // `reference_order` appends `sorted(set(files_by_slot) - set(order))`.
+    // Leaving these to arrival order would make the tail of the list — the
+    // part the cap drops — depend on which row the API happened to return
+    // first.
+    expect(
+      orderedReferenceFiles(
+        [
+          fileRow({ resource_id: 'r-z', slot: 'zeta' }),
+          fileRow({ resource_id: 'r-a', slot: 'alpha' }),
+        ],
+        'character',
+        null,
+      ).map((f) => f.resource_id),
+    ).toEqual(['r-a', 'r-z']);
   });
 
   it('one resource attached to two slots draws ONE row, in the better slot', () => {

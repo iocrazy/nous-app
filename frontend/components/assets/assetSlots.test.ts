@@ -16,8 +16,10 @@ import {
   LINK_RULES,
   PRIMARY_SLOT,
   SLOTS,
+  REFERENCE_SLOT_PRIORITY,
   UNSORTED,
   linkAllowed,
+  referenceSlotPriority,
   slotsFor,
 } from './assetSlots';
 
@@ -94,6 +96,60 @@ describe('slotsFor', () => {
     const first = slotsFor('prop');
     first.push('bogus');
     expect(slotsFor('prop')).toEqual(['turnaround', 'in_scene', 'details', 'unsorted']);
+  });
+});
+
+// ─── Reference delivery priority ────────────────────────────────────────────
+//
+// `REFERENCE_SLOT_PRIORITY` mirrors `slot_generation.py::_slot_priority`, which
+// is a DERIVED order, not a table: primary, then `worn`/`stills` hoisted, then
+// the declaration order, then `unsorted`. The authoritative pin is the
+// backend's `test_slots_frontend_mirror.py`, which compares every row against
+// `_slot_priority`'s own output. What this file adds is the frontend-internal
+// half of the same question: a slot added to `SLOTS` and forgotten here would
+// pass the backend pin only until Python was updated too, and would meanwhile
+// render a checkbox the ceiling ranks last for no reason.
+
+describe('REFERENCE_SLOT_PRIORITY', () => {
+  it('is a superset of every slot the type actually accepts', () => {
+    for (const type of ASSET_TYPES) {
+      for (const slot of slotsFor(type)) {
+        expect(
+          REFERENCE_SLOT_PRIORITY[type],
+          `${type}.${slot} has no place in the delivery order`,
+        ).toContain(slot);
+      }
+    }
+  });
+
+  it('leads with the primary slot, which the cap must never drop', () => {
+    for (const type of ASSET_TYPES) {
+      const primary = PRIMARY_SLOT[type];
+      if (primary === null) continue;
+      expect(REFERENCE_SLOT_PRIORITY[type][0], `${type} does not lead with its primary`).toBe(
+        primary,
+      );
+    }
+  });
+
+  it('hoists worn and stills ahead of the declaration order (spec §6.3)', () => {
+    // The character case is the one that diverges, and the one the canvas card
+    // ranks its checklist by. `worn` is LAST in `SLOTS.character`.
+    const priority = REFERENCE_SLOT_PRIORITY.character;
+    expect(priority.indexOf('worn')).toBeLessThan(priority.indexOf('expressions'));
+    expect(priority.indexOf('stills')).toBeLessThan(priority.indexOf('expressions'));
+    expect(priority).not.toEqual(slotsFor('character'));
+  });
+
+  it('ends with unsorted for every type', () => {
+    for (const type of ASSET_TYPES) {
+      expect(REFERENCE_SLOT_PRIORITY[type].at(-1), `${type}`).toBe(UNSORTED);
+    }
+  });
+
+  it('returns a fresh array so callers cannot mutate the table', () => {
+    referenceSlotPriority('prop').push('bogus');
+    expect(referenceSlotPriority('prop')).not.toContain('bogus');
   });
 });
 
