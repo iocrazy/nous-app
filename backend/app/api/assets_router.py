@@ -347,10 +347,10 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
     depend on data the caller cannot predict, and the two codes would still
     need the same body to be read.
 
-    The old ``/{project_id}/characters/extract`` and
-    ``/{project_id}/lib/{type}/extract`` endpoints are deliberately untouched:
-    they still own ``project_characters`` / ``project_lib_entities``, and this
-    endpoint writes neither.
+    This replaced the old ``/{project_id}/characters/extract`` and
+    ``/{project_id}/lib/{type}/extract`` endpoints, which the mig-447 PR
+    deleted. Mig 447 itself renamed the two project-local tables they wrote
+    to ``_legacy_*``; the DROP is P6. Nothing writes those tables any more.
     """
     try:
         await _project_gate(project_id, auth, write=True)

@@ -7,13 +7,17 @@
 // asset strips query. BFS from the prompt so the NEAREST bound card wins
 // when branches merge.
 //
-// P4 OWNS THIS FILE'S MIGRATION. The ids it resolves are `project_characters`
-// / `project_lib_entities` rows bound to canvas entity cards — the same legacy
-// tables the workspace's Characters / Locations / Props / Costumes pages left
-// behind in P3 (they read `assets` now). The card-side reader is already gone
-// (P3 Task 6 retired `EntityAssetStrip`), so this stamp currently has no
-// in-app consumer; re-pointing entity cards at `assets` / `canvas_asset_refs`
-// is P4 canvas work, deliberately not done here.
+// P4 OWNS THIS FILE'S MIGRATION. The ids it resolves are rows of the two
+// project-local tables the workspace's Characters / Locations / Props /
+// Costumes pages left behind in P3 (they read `assets` now) — renamed
+// `_legacy_project_characters` / `_legacy_project_lib_entities` by mig 447,
+// with the DROP scheduled for P6. The card-side reader is already gone (P3
+// Task 6 retired `EntityAssetStrip`), so this stamp currently has no in-app
+// consumer; re-pointing entity cards at `assets` / `canvas_asset_refs` is P4
+// canvas work, deliberately not done here. THE STAMPED VALUES DO NOT CHANGE
+// WITH THE RENAME: the backfill's provenance labels keep the pre-rename
+// spelling so already-migrated rows stay comparable (see
+// `_ENTITY_KIND_TO_LEGACY_TABLE` in backfill_assets_from_project_entities).
 
 import type { CanvasConnection, CanvasNode } from '../types';
 

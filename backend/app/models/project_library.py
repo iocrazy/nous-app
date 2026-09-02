@@ -1,15 +1,33 @@
 """Project authored-library ORM models (character canvas epic).
 
-  * ``ProjectCharacters``     — project_characters    (mig 357)
-  * ``ProjectLibEntities``    — project_lib_entities  (mig 358; locations +
-    props in one table, keyed by ``entity_type``)
+  * ``ProjectCharacters``     — _legacy_project_characters   (mig 357,
+    renamed by mig 447)
+  * ``ProjectLibEntities``    — _legacy_project_lib_entities (mig 358;
+    locations + props in one table keyed by ``entity_type``; renamed by
+    mig 447)
   * ``ProjectStyleProfile``   — project_style_profile (Canvas+AI M8; one row
     per project)
+  * the workflow-template / project-stage-node families (unaffected)
 
-Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch);
-the repos ``str()`` ``id``/``project_id`` on the way out. No scope mixin:
-ownership is scoped by the explicit ``project_id`` predicate in every repo
-method (service-role/RLS-bypass model), so the choke point stays inert.
+THE TWO ``_legacy_*`` MODELS ARE ON DEATH ROW. Their rows moved to ``assets``
++ ``asset_project_refs`` when ``backfill_assets_from_project_entities`` ran in
+production (2026-09-02, reconciled all-present), and mig 447 renamed the
+tables for one release cycle before the P6 DROP (spec §3.8). The REST
+endpoints and the two repositories that used to read them are gone with that
+same PR; the ONLY surviving consumer is that migration workflow, kept
+importable so an emergency re-run stays possible inside the window. Do not
+write new code against them — new entity work goes to ``app/models/assets.py``.
+
+Their index / constraint / RLS-policy names still carry the pre-rename
+spelling: ``ALTER TABLE ... RENAME`` re-points OIDs, not names, and mig 447
+deliberately left them alone because they die with the table. The names
+declared below therefore must keep matching the live database — do not
+"tidy" them either.
+
+Snowflake BIGINT ids ride as strings at the API boundary (bigIntSafeFetch).
+No scope mixin: ownership was scoped by an explicit ``project_id`` predicate
+in every caller (service-role/RLS-bypass model), so the choke point stays
+inert.
 """
 
 from __future__ import annotations
@@ -148,9 +166,13 @@ class ProjectStyleProfile(Base):
 
 
 class ProjectCharacters(Base):
-    """Authored character library rows for a project (mig 357)."""
+    """Authored character library rows for a project (mig 357).
 
-    __tablename__ = "project_characters"
+    RETIRED — table renamed to ``_legacy_project_characters`` by mig 447;
+    DROP is P6. Read only by ``backfill_assets_from_project_entities``.
+    """
+
+    __tablename__ = "_legacy_project_characters"
     __table_args__ = (
         ForeignKeyConstraint(
             ["project_id"],
@@ -626,9 +648,13 @@ class ProjectStageNodeDeps(Base):
 
 class ProjectLibEntities(Base):
     """Generalized project library: locations + props keyed by entity_type
-    (mig 358)."""
+    (mig 358).
 
-    __tablename__ = "project_lib_entities"
+    RETIRED — table renamed to ``_legacy_project_lib_entities`` by mig 447;
+    DROP is P6. Read only by ``backfill_assets_from_project_entities``.
+    """
+
+    __tablename__ = "_legacy_project_lib_entities"
     __table_args__ = (
         ForeignKeyConstraint(
             ["project_id"],

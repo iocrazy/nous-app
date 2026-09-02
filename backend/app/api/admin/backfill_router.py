@@ -51,6 +51,10 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     ),
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
+    # Kept deliberately through the legacy window: mig 447 renamed its source
+    # tables to `_legacy_project_characters` / `_legacy_project_lib_entities`
+    # and deleted every other reader, but an emergency re-run has to stay
+    # possible until the P6 DROP. This entry goes with that DROP.
     "assets_from_project_entities": backfill_assets_from_project_entities,
     "generated_inbox": backfill_generated_inbox,
 }

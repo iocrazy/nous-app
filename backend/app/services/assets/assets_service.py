@@ -183,10 +183,10 @@ _GENERATED_IMAGE_MIME = "image/png"
 async def _script_entity_names(project_id: int) -> Dict[str, List[str]]:
     """The script-derived names ``import_from_script`` lands, by asset type.
 
-    Same source as the two endpoints that predate it —
-    ``projects_router.extract_project_characters`` and ``extract_lib_entities``
-    both read ``ProjectsService().get_project_entities`` — so the import cannot
-    disagree with what the project's own Characters/Locations views show.
+    Same source as the two extract endpoints it replaced (deleted in the
+    mig-447 PR): they read ``ProjectsService().get_project_entities`` and so
+    does this, so the import cannot disagree with what the project's own
+    Characters/Locations views show.
     Locations are the only other derived kind: props/costumes have no
     derivation source (scene headers give locations, character cues give
     characters), which is why they are absent here rather than empty.
@@ -1546,9 +1546,9 @@ class AssetsService:
         (``link_project`` -> False), so it reports all ``skipped``/
         ``already_linked`` and creates nothing. Pinned by the router tests.
 
-        Deliberately does NOT touch ``project_characters`` /
-        ``project_lib_entities``: the old extract endpoints still own those
-        tables and stay untouched (their retirement belongs to the rename PR).
+        Does not touch the legacy project-local tables, which as of mig 447
+        are named ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
+        and have no reader left but the migration workflow (DROP is P6).
 
         **No cap on the name count, accepted deliberately.** The batch costs two
         round-trips per name (create + link), so a 300-name script is ~600
