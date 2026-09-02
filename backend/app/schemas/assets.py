@@ -564,6 +564,21 @@ class GenerateSlotResponse(BaseModel):
 T = TypeVar("T")
 
 
+class ResolveLegacyResponse(BaseModel):
+    """GET /assets/resolve-legacy — the asset a pre-P3 canvas card became.
+
+    ``asset_id`` is explicitly nullable and always present. "Nothing migrated
+    with that provenance" is a real answer the caller has to act on (it keeps
+    the legacy card as-is), and it must not arrive as a missing key that reads
+    the same as a truncated body.
+
+    A string, like every other id on this router — ``assets.id`` is a Snowflake
+    BIGINT and a JSON number would lose precision in the browser.
+    """
+
+    asset_id: Optional[str] = None
+
+
 class Envelope(BaseModel, Generic[T]):
     """Success wrapper. ``success`` is always True here — a failure is an
     :class:`ErrorEnvelope`, returned as a raw JSONResponse so it bypasses this

@@ -61,11 +61,13 @@ from app.schemas.assets import (
     ProjectRefRequest,
     PromptTranslateRequest,
     RemovedResponse,
+    ResolveLegacyResponse,
     UnlinkedResponse,
     UsedInCanvasRef,
     within_int64,
 )
 from app.services.assets.assets_service import AssetError, AssetsService
+from app.services.assets.legacy_refs import LEGACY_KINDS
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(tags=["assets"])
@@ -86,6 +88,15 @@ OptSnowflakeQuery = Annotated[
     Optional[str], Query(pattern=_SNOWFLAKE), AfterValidator(within_int64)
 ]
 SnowflakePath = Annotated[str, Path(pattern=_SNOWFLAKE), AfterValidator(within_int64)]
+# A REQUIRED snowflake in the query string. ``ScopeIdQuery`` is the same shape,
+# but naming a legacy row id after the scope would make the two look
+# interchangeable at the call site — they are not, and one of them is the tenant
+# boundary.
+SnowflakeQuery = Annotated[str, Query(pattern=_SNOWFLAKE), AfterValidator(within_int64)]
+# The three card kinds that ever carried a legacy project-entity id. Pinned to
+# the mapping's own key set (``LEGACY_KINDS``) rather than typed out again, so a
+# kind cannot be accepted here that the resolver has no table label for.
+LegacyKindQuery = Annotated[str, Query(pattern="^(" + "|".join(LEGACY_KINDS) + ")$")]
 # Path ids declared as ``int`` have the same reachable-500: FastAPI parses any
 # digit string into a Python int, which only fails once asyncpg tries to bind it.
 IdPath = Annotated[int, Path(ge=0, lt=_INT64_EXCLUSIVE_MAX)]
@@ -431,6 +442,48 @@ async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
         return _ok(await _service().count_by_type(sid))
     except AssetError as e:
         return _err(e)
+
+
+# ── legacy provenance lookup ────────────────────────────────────────────────
+#
+# ⚠️ ORDER IS LOAD-BEARING, exactly as for ``/assets/counts`` above: registered
+# below ``/assets/{asset_id}`` the literal "resolve-legacy" would be captured as
+# an ``int`` path param and answer 422 about an id nobody sent. Pinned by
+# ``tests/api/test_assets_resolve_legacy.py``.
+
+
+@router.get(
+    "/assets/resolve-legacy",
+    response_model=Envelope[ResolveLegacyResponse],
+    responses=_ERRORS,
+)
+async def resolve_legacy(
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    kind: LegacyKindQuery,
+    legacy_id: SnowflakeQuery,
+):
+    """Map a pre-P3 canvas card to the asset the migration produced.
+
+    Canvases saved before P3 hold ``character`` / ``location`` / ``prop`` cards
+    keyed by ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
+    row ids. Those are NOT ``assets.id``, so nothing downstream may treat one as
+    an asset — which is why the canvas resolves them HERE instead of stamping
+    them as provenance.
+
+    ``{"asset_id": null}`` is a 200: the question was well formed and the answer
+    is "no asset carries that provenance" (never migrated, or the migration
+    ADOPTED a hand-made asset, which writes no ``attrs``). Only an unmappable
+    ``kind`` refuses — that is a bad request, and the router's own pattern
+    already turns the common spelling mistakes into a 422 before the service
+    sees them.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        out = await _service().resolve_legacy(sid, kind, int(legacy_id))
+    except AssetError as e:
+        return _err(e)
+    return _ok(out)
 
 
 # ── single asset ────────────────────────────────────────────────────────────

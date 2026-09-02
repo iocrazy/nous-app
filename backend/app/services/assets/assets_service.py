@@ -51,6 +51,7 @@ from app.services.ai.media.image_generation_service import (
     ImageGenerationService,
 )
 from app.services.assets.bundle import build_bundle
+from app.services.assets.legacy_refs import LEGACY_KINDS, legacy_table_for_kind
 from app.services.assets.slot_generation import (
     SlotNotGeneratable,
     reference_order,
@@ -470,6 +471,33 @@ class AssetsService:
         changes when the user creates or deletes something.
         """
         return await self.assets.count_by_type(int(scope_id))
+
+    async def resolve_legacy(
+        self, scope_id: int, kind: str, legacy_id: int
+    ) -> Dict[str, Any]:
+        """``{"asset_id": "<id>" | None}`` — the asset a legacy card points at.
+
+        A canvas saved before P3 still holds ``character`` / ``location`` /
+        ``prop`` cards keyed by ``_legacy_project_*`` row ids, which are NOT
+        ``assets.id``. This is the one-way map from those to the asset the
+        migration produced.
+
+        ``None`` is a real answer (nothing migrated with that provenance — see
+        the repository method), so it rides in a 200 body rather than a 404: a
+        404 would say "your request was wrong", when the request was fine and
+        the answer is "no such asset". An unmappable KIND is the opposite and
+        does raise, because that IS a bad request.
+        """
+        table = legacy_table_for_kind(kind)
+        if table is None:
+            raise AssetError(
+                422,
+                "unknown_legacy_kind",
+                f"Not a legacy entity kind: {kind!r}",
+                {"kinds": list(LEGACY_KINDS)},
+            )
+        found = await self.assets.resolve_legacy(int(scope_id), table, int(legacy_id))
+        return {"asset_id": str(found) if found is not None else None}
 
     async def get_asset(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
         row = await self._require(asset_id, scope_id)

@@ -110,6 +110,28 @@ class FakeAssetsRepo:
         r = self.rows.get(int(asset_id))
         return r if r and self._visible(r, scope_id) else None
 
+    async def resolve_legacy(self, scope_id, legacy_table, legacy_id):
+        """In-memory stand-in for the JSONB containment read.
+
+        Models the same three predicates the real statement carries — own scope
+        (presets are NOT unioned in, unlike ``get``), not soft-deleted, and the
+        ``[table, id]`` pair present in ``attrs.legacy_ids`` — plus the ``ORDER
+        BY id`` tiebreak, so a test can tell the two apart.
+        """
+        want = [str(legacy_table), int(legacy_id)]
+        hits = [
+            r
+            for r in self.rows.values()
+            if r.get("scope_id") is not None
+            and int(r["scope_id"]) == int(scope_id)
+            and r.get("deleted_at") is None
+            and any(
+                list(pair) == want
+                for pair in (r.get("attrs") or {}).get("legacy_ids", [])
+            )
+        ]
+        return min((int(r["id"]) for r in hits), default=None)
+
     async def list(self, scope_id, **kw):
         self.list_calls.append(kw)
         return [r for r in self.rows.values() if self._visible(r, scope_id)]
