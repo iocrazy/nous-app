@@ -263,6 +263,18 @@ class GenerationOrigin:
     parent_resource_id: Optional[int] = None
     derivation_kind: Optional[str] = None
     conversation_id: Optional[int] = None
+    # The asset a run was launched FROM. Goes in the COLUMN, which is what
+    # ``GET /generated?source_asset_id=`` filters on and what the asset sheet's
+    # generation history reads. Writers that only stamp it into ``params``
+    # produce a row no reader on that path can find — the params copy is
+    # provenance for a human reading one row, the column is the index.
+    #
+    # ``generated_media.source_asset_id`` FK-references ``assets.id``, so a
+    # value that does not exist is an IntegrityError that kills the whole
+    # registration. Callers that take this from client-supplied data MUST
+    # resolve it against a real asset first (see
+    # ``canvas_generation._source_asset_id_for``).
+    source_asset_id: Optional[int] = None
 
 
 async def register_generated_media(
@@ -341,6 +353,7 @@ async def register_generated_media(
         parent_resource_id=origin.parent_resource_id,
         derivation_kind=origin.derivation_kind,
         conversation_id=origin.conversation_id,
+        source_asset_id=origin.source_asset_id,
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()

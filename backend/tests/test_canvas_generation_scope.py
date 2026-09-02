@@ -216,3 +216,114 @@ async def test_the_daemon_branch_uses_the_canvas_scope_too(monkeypatch):
     assert seen == [TEAM_SCOPE]
     assert urls == [f"https://api.test{url}"]
     assert dropped == []
+
+
+# ── the OUTPUT lands in the same scope the inputs were checked against ──────
+#
+# T5 left the two halves disagreeing: after the change above, a team canvas
+# checked its reference INPUTS against the team while registering its PRODUCT
+# into the runner's personal team. The picture everybody on the board was
+# waiting for did not appear in the team's Generated inbox at all.
+
+
+@pytest.mark.asyncio
+async def test_a_team_canvas_registers_its_product_in_the_team_scope(monkeypatch):
+    _patch_project_rows(monkeypatch, {CANVAS_TEAM: (OWNER, TEAM_SCOPE)})
+    _patch_personal(monkeypatch, {RUNNER: RUNNER_PERSONAL_SCOPE})
+
+    assert await wf._registration_scope_id(CANVAS_TEAM, RUNNER) == TEAM_SCOPE
+
+
+@pytest.mark.asyncio
+async def test_a_personal_project_canvas_registers_in_the_OWNERS_team(monkeypatch):
+    """The owner's, not the runner's — the same rule the reference check uses.
+    A collaborator's product belongs beside the board, not in their own
+    library."""
+    _patch_project_rows(monkeypatch, {CANVAS_PERSONAL: (OWNER, None)})
+    _patch_personal(
+        monkeypatch, {RUNNER: RUNNER_PERSONAL_SCOPE, OWNER: OWNER_PERSONAL_SCOPE}
+    )
+
+    scope = await wf._registration_scope_id(CANVAS_PERSONAL, RUNNER)
+
+    assert scope == OWNER_PERSONAL_SCOPE
+    assert scope != RUNNER_PERSONAL_SCOPE
+
+
+@pytest.mark.asyncio
+async def test_no_canvas_registers_in_the_runners_personal_team(monkeypatch):
+    """The pre-P4 behaviour, kept — there is no project to ask."""
+    _patch_project_rows(monkeypatch, {})
+    _patch_personal(monkeypatch, {RUNNER: RUNNER_PERSONAL_SCOPE})
+
+    assert await wf._registration_scope_id(None, RUNNER) == RUNNER_PERSONAL_SCOPE
+
+
+@pytest.mark.asyncio
+async def test_registration_and_reference_checking_read_the_same_scope(monkeypatch):
+    """The property, not three examples of it: one run, one scope.
+
+    Two scopes for one run is what this change exists to remove, and a future
+    edit that gave the product its own rule would still pass the three cases
+    above.
+    """
+    _patch_project_rows(
+        monkeypatch,
+        {CANVAS_TEAM: (OWNER, TEAM_SCOPE), CANVAS_PERSONAL: (OWNER, None)},
+    )
+    _patch_personal(
+        monkeypatch, {RUNNER: RUNNER_PERSONAL_SCOPE, OWNER: OWNER_PERSONAL_SCOPE}
+    )
+
+    for canvas in (CANVAS_TEAM, CANVAS_PERSONAL, None):
+        assert await wf._registration_scope_id(canvas, RUNNER) == (
+            await wf._generation_scope_id(canvas, RUNNER)
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_scope_raises_rather_than_picking_one(monkeypatch):
+    """``None`` means the scope could not be named. Registration is required on
+    this path, so filing the product somewhere arbitrary would put a generated
+    file in a tenant it does not belong to — and there is no undo for that."""
+    _patch_project_rows(monkeypatch, {CANVAS_ORPHAN: None})
+    _patch_personal(monkeypatch, {})  # the runner has no personal team either
+
+    with pytest.raises(RuntimeError) as e:
+        await wf._registration_scope_id(CANVAS_ORPHAN, RUNNER)
+    assert "registration scope" in str(e.value)
+
+
+@pytest.mark.asyncio
+async def test_persist_files_a_team_canvas_product_in_the_team_scope(monkeypatch):
+    """The wiring, not just the helper.
+
+    Every other test here can pass while ``persist_canvas_generation_step``
+    still calls ``_resolve_personal_team_id`` directly — which is exactly the
+    state T5 left it in.
+    """
+    from unittest.mock import AsyncMock
+
+    _patch_project_rows(monkeypatch, {CANVAS_TEAM: (OWNER, TEAM_SCOPE)})
+    _patch_personal(monkeypatch, {RUNNER: RUNNER_PERSONAL_SCOPE})
+    register = AsyncMock(return_value={"id": 55})
+    monkeypatch.setattr(wf, "register_generated_media", register)
+    monkeypatch.setattr(wf, "_source_asset_id_for", AsyncMock(return_value=None))
+
+    await wf.persist_canvas_generation_step(
+        media={
+            "media_kind": "image",
+            "local_path": None,
+            "remote_url": "https://cdn/x.png",
+            "provider": "volcengine",
+            "model": "doubao-seedream",
+        },
+        user_id=RUNNER,
+        canvas_id=CANVAS_TEAM,
+        node_id="n1",
+        prompt="p",
+        params={},
+    )
+
+    assert register.await_args.kwargs["scope_id"] == TEAM_SCOPE
+    assert register.await_args.kwargs["scope_id"] != RUNNER_PERSONAL_SCOPE

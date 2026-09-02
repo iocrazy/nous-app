@@ -232,6 +232,92 @@ async def _generation_scope_id(
         return None
 
 
+async def _registration_scope_id(
+    canvas_id: Optional[int], user_id: Optional[str]
+) -> int:
+    """The scope a canvas run's PRODUCT is registered into.
+
+    The SAME scope its references are checked against (``_generation_scope_id``)
+    — canvas → project → the project's team, or the owner's personal team when
+    the project has none, falling back to the runner's personal team when there
+    is no canvas or no project row.
+
+    Before P4 this was always the runner's personal team, which left a team
+    board checking its inputs against the team while filing its output in one
+    person's private inbox: the picture everybody on the board is waiting for
+    would not appear in the team's Generated inbox at all. Two scopes for one
+    run is not a defensible split, and the input side is the one the asset
+    library forced to be right.
+
+    Raises rather than guessing when nothing resolves. Registration is REQUIRED
+    on this path (route C), so a scope we cannot name has to stop the step —
+    picking one would file the product where the user cannot see it, and a
+    generated file in the wrong tenant is not a failure you can undo by
+    retrying.
+    """
+    scope = await _generation_scope_id(canvas_id, user_id)
+    if scope is None:
+        raise RuntimeError(
+            "canvas generation persist could not resolve a registration scope "
+            f"(canvas={canvas_id}, user={user_id})"
+        )
+    return int(scope)
+
+
+async def _source_asset_id_for(
+    params: Optional[Dict[str, Any]], scope_id: int
+) -> Optional[int]:
+    """``params.source_asset_id`` → a verified ``assets.id``, or None.
+
+    The canvas stamps this from the upstream asset card, so the value arrives
+    CLIENT-SUPPLIED and as a string (snowflake ids ride as strings on the wire).
+    Two things therefore have to happen before it can reach the column:
+
+    * parse it — a non-numeric value is a client bug, logged and dropped;
+    * resolve it in the registration scope — ``source_asset_id`` FK-references
+      ``assets.id``, so a stale or fabricated id would be an IntegrityError that
+      kills the whole registration. A provenance stamp must never be able to
+      lose the picture.
+
+    Dropping is always to ``None`` with a log, never a raise: the generation
+    itself succeeded, and the row is still complete without the stamp (the
+    params copy survives either way). Resolving it in the REGISTRATION scope
+    also means a card pointing at another tenant's asset cannot claim it —
+    that reference would already have been refused ``not_in_scope`` upstream.
+    """
+    raw = (params or {}).get("source_asset_id")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        asset_id = int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "[canvas_generation][persist] ignoring non-numeric source_asset_id {!r}",
+            raw,
+        )
+        return None
+    try:
+        from app.repositories.assets_repository import AssetsRepository
+
+        row = await AssetsRepository().get(asset_id, int(scope_id))
+    except Exception as exc:  # a lookup failure must not lose the generation
+        logger.warning(
+            "[canvas_generation][persist] could not verify source_asset_id {}: {}",
+            asset_id,
+            exc,
+        )
+        return None
+    if row is None:
+        logger.warning(
+            "[canvas_generation][persist] source_asset_id {} is not readable in "
+            "scope {} — provenance dropped",
+            asset_id,
+            scope_id,
+        )
+        return None
+    return asset_id
+
+
 async def _resolve_reference_paths(
     stack: Any,
     refs: tuple[str, ...] | list[str],
@@ -477,9 +563,16 @@ async def generate_canvas_media_step(
         # rides the ticket because the daemon's upload — not this workflow —
         # is what creates the row. Deliberately NOT the payload: that carries
         # ref urls and the augmented prompt, and this sits in Redis.
+        daemon_scope_id = await _registration_scope_id(canvas_id, user_id)
         result = await dispatch_to_daemon(
             user_id=str(user_id),
-            scope_id=int(await _resolve_personal_team_id(str(user_id))),
+            # The same scope ``persist_canvas_generation_step`` registers a
+            # server-side product into. The daemon's upload endpoint is what
+            # creates the row on this branch, so the scope has to ride the
+            # ticket — and it has to be the SAME rule, or which tenant a team
+            # board's picture lands in would depend on which provider the run
+            # happened to pick.
+            scope_id=daemon_scope_id,
             kind=kind if kind in ("image", "video") else "image",
             payload=payload,
             attribution={
@@ -497,6 +590,12 @@ async def generate_canvas_media_step(
                 "requested": req.knobs_dict(),
                 "effective": eff.knobs_dict(),
                 "dropped": dropped,
+                # Resolved HERE, not echoed from the client: the daemon's
+                # upload endpoint writes the row, and this is the column the
+                # asset sheet's history filters on. Verified against a real
+                # asset in the registration scope first — the column is an FK,
+                # so an id that does not resolve would kill the upload.
+                "source_asset_id": await _source_asset_id_for(params, daemon_scope_id),
             },
         )
         return {
@@ -704,8 +803,12 @@ async def persist_canvas_generation_step(
         if not user_id:
             raise ValueError("canvas generation persist has no user_id")
         media_kind = str(media.get("media_kind") or "image")
-        scope_id = int(await _resolve_personal_team_id(str(user_id)))
+        scope_id = await _registration_scope_id(canvas_id, user_id)
         params = {**(params or {}), **await _outcome_of(media, media_kind)}
+        # The COLUMN, not only the params copy: ``GET /generated?source_asset_id=``
+        # and the asset sheet's generation history both filter the column, so a
+        # stamp that lives only in ``params`` has no reader on this path.
+        source_asset_id = await _source_asset_id_for(params, scope_id)
         row = await register_generated_media(
             user_id=str(user_id),
             scope_id=scope_id,
@@ -724,6 +827,7 @@ async def persist_canvas_generation_step(
                 provider=media.get("provider"),
                 params=params,
                 derivation_kind=f"{media_kind}_gen",
+                source_asset_id=source_asset_id,
             ),
         )
         gen_id = row.get("id")

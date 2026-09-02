@@ -249,6 +249,11 @@ async def _register_daemon_result(**kwargs: Any) -> dict:
             # arrived and must not be shadowed by an outcome key.
             params={**outcome, **params},
             derivation_kind=f"{media_kind}_gen",
+            # Server-resolved at dispatch (``canvas_generation`` verified it
+            # against a real asset in this scope) and carried on the TICKET, so
+            # the daemon can neither supply nor alter it. Absent for a ticket
+            # minted before this field existed — ``None`` then, never a guess.
+            source_asset_id=attribution.get("source_asset_id"),
         )
     else:
         # No attribution: an older daemon, or a caller that is genuinely an

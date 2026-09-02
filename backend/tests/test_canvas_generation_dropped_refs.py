@@ -365,8 +365,8 @@ async def test_persist_carries_the_ledger_through_both_of_its_returns():
 
     with (
         patch(
-            "app.workflows.canvas_generation._resolve_personal_team_id",
-            new=AsyncMock(return_value=str(SCOPE)),
+            "app.workflows.canvas_generation._registration_scope_id",
+            new=AsyncMock(return_value=int(SCOPE)),
         ),
         patch(
             "app.workflows.canvas_generation.register_generated_media",

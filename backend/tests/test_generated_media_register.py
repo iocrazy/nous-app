@@ -166,3 +166,67 @@ async def test_register_requires_exactly_one_source(monkeypatch):
             mime="image/png",
             origin=origin,
         )  # both
+
+
+@pytest.mark.asyncio
+async def test_register_writes_source_asset_id_into_the_column(tmp_path, monkeypatch):
+    """``GenerationOrigin.source_asset_id`` must reach the INSERT, not just the
+    dataclass.
+
+    ``GET /generated?source_asset_id=`` and the asset sheet's generation
+    history both filter ``generated_media.source_asset_id`` — the COLUMN. A
+    writer that only put the id in ``params`` produced rows neither of them
+    could find, which is the defect this field was added to close.
+    """
+    import app.services.library.generated_media_service as gm
+
+    src = tmp_path / "produced.png"
+    src.write_bytes(b"\x89PNG")
+    captured: dict = {}
+
+    monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+    monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
+
+    await gm.register_generated_media(
+        user_id="u1",
+        scope_id=42,
+        source_path=str(src),
+        mime="image/png",
+        origin=gm.GenerationOrigin(
+            kind="canvas_run",
+            source_asset_id=700000000000000001,
+            params={"source_asset_id": "700000000000000001"},
+        ),
+    )
+
+    assert captured["params"]["source_asset_id"] == 700000000000000001
+    # And the params copy is still there — the two are not alternatives.
+    assert captured["params"]["params"]["source_asset_id"] == "700000000000000001"
+
+
+@pytest.mark.asyncio
+async def test_register_leaves_the_column_null_when_no_asset_was_named(
+    tmp_path, monkeypatch
+):
+    """The negative control for the test above: the column is bound on every
+    insert, so "it was written" has to mean the VALUE arrived, not the key."""
+    import app.services.library.generated_media_service as gm
+
+    src = tmp_path / "produced.png"
+    src.write_bytes(b"\x89PNG")
+    captured: dict = {}
+
+    monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+    monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
+
+    await gm.register_generated_media(
+        user_id="u1",
+        scope_id=42,
+        source_path=str(src),
+        mime="image/png",
+        origin=gm.GenerationOrigin(kind="canvas_run"),
+    )
+
+    assert captured["params"]["source_asset_id"] is None
