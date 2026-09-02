@@ -499,7 +499,27 @@ class AssetsService:
         found = await self.assets.resolve_legacy(int(scope_id), table, int(legacy_id))
         return {"asset_id": str(found) if found is not None else None}
 
-    async def get_asset(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
+    async def get_asset(
+        self, asset_id: int, scope_id: int, *, include_used_in: bool = False
+    ) -> Dict[str, Any]:
+        """One asset with its files, links and loadouts.
+
+        ``used_in`` is OPT-IN and ABSENT unless asked for. It is a five-table
+        aggregate (``canvas_asset_refs`` ⋈ ``canvases`` ⋈ ``projects`` ⋈
+        ``teams``, two ``array_agg(DISTINCT …)`` and a COALESCE scope
+        predicate), and the only caller that renders it is the asset sheet's
+        Used In panel. Every other caller asks this endpoint for the card's
+        face — name, type, cover, readiness, loadouts, files — and one canvas
+        can hold dozens of asset cards, each fetching its own detail on mount.
+        Charging all of them for a panel none of them draws is a fan-out that
+        arrived in the same branch as the aggregate and was never measured
+        against it.
+
+        ABSENT, not empty: an empty ``used_in`` is a claim ("this asset is used
+        nowhere") and a caller that did not ask has no basis for it. The
+        response model declares it ``Optional`` for exactly that reason, and
+        the client keeps the same distinction.
+        """
         row = await self._require(asset_id, scope_id)
         out = (await self._derived([row]))[0]
         files = await self.relations.list_files(int(asset_id))
@@ -513,12 +533,13 @@ class AssetsService:
         # preset is readable from EVERY scope, so an unfiltered read would
         # answer with other teams' canvas names. ``storyboards`` is a
         # deliberate empty list — see UsedInResponse.
-        out["used_in"] = {
-            "canvases": await self.canvas_refs.list_canvases_for_asset(
-                str(asset_id), str(scope_id)
-            ),
-            "storyboards": [],
-        }
+        if include_used_in:
+            out["used_in"] = {
+                "canvases": await self.canvas_refs.list_canvases_for_asset(
+                    str(asset_id), str(scope_id)
+                ),
+                "storyboards": [],
+            }
         return out
 
     async def list_canvas_refs(

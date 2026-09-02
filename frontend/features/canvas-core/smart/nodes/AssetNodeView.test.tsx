@@ -225,6 +225,16 @@ describe('AssetNodeView — snapshot render', () => {
     await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalledWith(SCOPE, ASSET_ID));
   });
 
+  it('does NOT pay for used_in — the card renders no usage panel (I2)', async () => {
+    // One canvas can hold dozens of these, and each fetches its own detail on
+    // mount; "Insert Project Assets" fills a board in one click. `used_in` is
+    // a five-table aggregate server-side, and nothing on this card draws it.
+    seedAndRender();
+    await waitFor(() => expect(fetchAssetDetail).toHaveBeenCalled());
+    const opts = fetchAssetDetail.mock.calls[0][2];
+    expect(opts?.usedIn).toBeFalsy();
+  });
+
   it('does not ask at all when the route carries no team segment', () => {
     seedAndRender(NODE_DATA, { teamId: null });
     expect(fetchAssetDetail).not.toHaveBeenCalled();

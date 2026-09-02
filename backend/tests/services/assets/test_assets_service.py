@@ -1330,7 +1330,7 @@ async def test_get_detail_carries_used_in_with_both_halves(svc):
         }
     ]
 
-    d = await svc.get_asset(int(c["id"]), SCOPE)
+    d = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
 
     assert d["used_in"]["canvases"] == svc.canvas_refs.rows
     assert d["used_in"]["storyboards"] == []
@@ -1343,7 +1343,7 @@ async def test_get_detail_scopes_the_used_in_read_to_the_caller(svc):
     c = await svc.create_asset(
         SCOPE, AssetCreate(asset_type="character", name="C"), USER
     )
-    await svc.get_asset(int(c["id"]), SCOPE)
+    await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
     assert svc.canvas_refs.calls == [(c["id"], str(SCOPE))]
 
 
@@ -1366,7 +1366,7 @@ async def test_list_canvas_refs_returns_the_same_rows_used_in_carries(svc):
     svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
 
     rows = await svc.list_canvas_refs(int(c["id"]), SCOPE)
-    detail = await svc.get_asset(int(c["id"]), SCOPE)
+    detail = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
 
     assert rows == detail["used_in"]["canvases"]
 
@@ -1395,7 +1395,11 @@ async def test_detail_response_declares_every_key_get_asset_actually_emits(svc):
     c = await svc.create_asset(
         SCOPE, AssetCreate(asset_type="character", name="C"), USER
     )
-    emitted = set(await svc.get_asset(int(c["id"]), SCOPE))
+    # The RICHEST call — every optional half asked for — because the guard is
+    # about keys the response model would DROP, and a key can only be dropped
+    # if it was emitted. Running the default (no ``used_in``) would silently
+    # shrink what this test inspects.
+    emitted = set(await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True))
 
     missing = emitted - set(AssetDetailResponse.model_fields) - DELIBERATELY_UNDECLARED
     assert not missing, (
@@ -1405,3 +1409,63 @@ async def test_detail_response_declares_every_key_get_asset_actually_emits(svc):
     # Positive control: the guard is only meaningful if the emitted set really
     # contains the derived relations, not just the plain column names.
     assert {"files", "links", "linked_by", "loadouts", "used_in"} <= emitted
+
+
+# ── used_in is OPT-IN (I2) ─────────────────────────────────────────────────
+#
+# `used_in.canvases` is a five-table aggregate, and the canvas puts dozens of
+# asset cards on one board, each fetching its own detail on mount. None of them
+# renders usage. These pin that the default costs nothing and reports honestly.
+
+
+@pytest.mark.asyncio
+async def test_the_default_detail_does_not_read_the_canvas_mirror(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+
+    await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert svc.canvas_refs.calls == []
+
+
+@pytest.mark.asyncio
+async def test_used_in_is_absent_not_empty_when_it_was_not_asked_for(svc):
+    """ "Nobody looked" and "used nowhere" are different facts. An empty
+    ``used_in`` is a claim, and a caller that skipped the aggregate has no
+    basis for it — the sheet would render "Used nowhere" for an answer that was
+    never computed."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    d = await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert "used_in" not in d
+
+
+@pytest.mark.asyncio
+async def test_asking_for_used_in_still_answers_both_halves(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+
+    d = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
+
+    assert d["used_in"] == {"canvases": [], "storyboards": []}
+    assert svc.canvas_refs.calls == [(c["id"], str(SCOPE))]
+
+
+@pytest.mark.asyncio
+async def test_the_split_out_endpoint_is_unaffected_by_the_flag(svc):
+    """``GET /assets/{id}/canvas-refs`` exists so a caller can ask for usage on
+    its own. It has no flag and never had one."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    rows = await svc.list_canvas_refs(int(c["id"]), SCOPE)
+
+    assert rows == svc.canvas_refs.rows

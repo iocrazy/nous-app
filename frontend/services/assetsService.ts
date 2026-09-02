@@ -339,9 +339,20 @@ export interface AssetRowDetail extends AssetRow {
   /** Incoming links (another asset → this one). A different question. */
   linked_by: AssetLinkRow[];
   loadouts: AssetLoadoutRow[];
-  /** REQUIRED, like the wire: `AssetDetailResponse.used_in` has a
-   *  `default_factory`, so every `GET /assets/{id}` carries both lists. */
-  used_in: AssetUsedIn;
+  /**
+   * OPTIONAL, like the wire — `undefined` means NOBODY ASKED.
+   *
+   * `used_in` is opt-in (`fetchAssetDetail(..., { usedIn: true })`) because it
+   * costs a five-table aggregate server-side and only the asset sheet's Used
+   * In panel renders it, while a canvas can hold dozens of asset cards each
+   * fetching their own detail on mount.
+   *
+   * Three states, and they are three different facts: `undefined` (not
+   * asked), present with empty lists (asked, used nowhere), present and
+   * populated. Defaulting the first into the second would make a panel say
+   * "Used nowhere" about an answer nobody computed.
+   */
+  used_in?: AssetUsedIn;
 }
 
 /** Per-type tallies for the sidebar badges (`GET /assets/counts`). */
@@ -593,17 +604,20 @@ function normalizeDetail(raw: unknown): AssetRowDetail {
     links: Array.isArray(row.links) ? row.links : [],
     linked_by: Array.isArray(row.linked_by) ? row.linked_by : [],
     loadouts: Array.isArray(row.loadouts) ? row.loadouts : [],
-    // Same reason as the four arrays above: the TYPE says `used_in` is always
-    // there, so the normalizer has to keep that promise for a payload written
-    // by a backend that predates it. Each list is checked on its own — a
-    // response carrying `canvases` but no `storyboards` must not lose the half
-    // it did send.
-    used_in: {
-      canvases: Array.isArray(row.used_in?.canvases) ? row.used_in.canvases : [],
-      storyboards: Array.isArray(row.used_in?.storyboards)
-        ? row.used_in.storyboards
-        : [],
-    },
+    // NOT defaulted, unlike the four arrays above — that is the whole point of
+    // the opt-in. A response with no `used_in` (nobody asked, or an older
+    // backend) stays `undefined`; only a response that HAS one is normalized,
+    // and then each list is checked on its own so a payload carrying
+    // `canvases` but no `storyboards` does not lose the half it did send.
+    used_in:
+      row.used_in === undefined || row.used_in === null
+        ? undefined
+        : {
+            canvases: Array.isArray(row.used_in.canvases) ? row.used_in.canvases : [],
+            storyboards: Array.isArray(row.used_in.storyboards)
+              ? row.used_in.storyboards
+              : [],
+          },
   };
 }
 
@@ -672,13 +686,34 @@ export async function fetchAssetCounts(scopeId: string): Promise<AssetCounts> {
   });
 }
 
-/** One asset with its files, links and loadouts. */
+export interface AssetDetailOptions {
+  /**
+   * Ask for `used_in` — the Used In panel's canvases.
+   *
+   * OFF by default, and that is a cost decision with a visible consequence:
+   * server-side it is a five-table aggregate, and a canvas board can hold
+   * dozens of asset cards that each fetch their own detail on mount. A caller
+   * that does not set this gets `used_in === undefined`, which means "not
+   * asked" — never "used nowhere".
+   *
+   * The sheet sets it. The canvas card, the asset picker, the legacy-card
+   * migration and the seeding path all render the asset's face only, so they
+   * do not.
+   */
+  usedIn?: boolean;
+}
+
+/** One asset with its files, links and loadouts (and, on request, its usage). */
 export async function fetchAssetDetail(
   scopeId: string,
   id: string,
+  opts: AssetDetailOptions = {},
 ): Promise<AssetRowDetail> {
+  const qs = query(scopeId, {
+    include_used_in: opts.usedIn ? 'true' : undefined,
+  });
   return normalizeDetail(
-    await envelopeFetch<unknown>(`${BASE()}/${id}?${query(scopeId)}`, {
+    await envelopeFetch<unknown>(`${BASE()}/${id}?${qs}`, {
       headers: await getAuthHeaders(),
     }),
   );

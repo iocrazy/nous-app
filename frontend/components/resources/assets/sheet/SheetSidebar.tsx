@@ -248,6 +248,14 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
           )}
         </div>
 
+        {/* `used_in` is OPT-IN on `GET /assets/{id}` and this page is the one
+            caller that asks for it, so the `?.` here is a real branch, not
+            defensiveness: an `undefined` means the aggregate was not run.
+            Rendering it as an empty list is right for this panel — the sheet
+            always asks, so reaching here without one is a bug in this file's
+            own fetch, and "no canvases" is the least wrong thing to draw while
+            it is. It must NOT become the default in the service layer, where
+            "nobody asked" and "used nowhere" have to stay distinguishable. */}
         <UsedInCanvases
           canvases={detail.used_in?.canvases ?? []}
           projectNames={projectNames}

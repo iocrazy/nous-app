@@ -120,7 +120,10 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     if (!scopeId) return;
     let alive = true;
     setLoading(true);
-    fetchAssetDetail(scopeId, assetId)
+    // The one caller that asks for `used_in` — the Used In panel below renders
+    // it. It is opt-in because it costs a five-table aggregate server-side and
+    // no other caller of this endpoint draws it.
+    fetchAssetDetail(scopeId, assetId, { usedIn: true })
       .then((row) => {
         if (!alive) return;
         setDetail(row);
@@ -179,6 +182,9 @@ export const AssetSheetPage: React.FC<AssetSheetPageProps> = ({ assetId }) => {
     }
     let alive = true;
     const ids = relatedKey.split(',');
+    // No `usedIn` here: these are the LINKED assets, rendered as chips. Their
+    // own usage is not on this page, and asking would multiply the aggregate
+    // by the number of links.
     Promise.allSettled(ids.map((id) => fetchAssetDetail(scopeId, id))).then((results) => {
       if (!alive) return;
       const next: Record<string, AssetRow | undefined> = {};

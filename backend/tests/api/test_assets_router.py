@@ -150,10 +150,16 @@ class _FakeService:
             raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
         return asset_row(id="2", name=payload.name, asset_type=payload.asset_type)
 
-    async def get_asset(self, asset_id, scope_id):
+    async def get_asset(self, asset_id, scope_id, *, include_used_in=False):
+        self.calls.append(("get_asset", scope_id, {"include_used_in": include_used_in}))
         if asset_id == 404:
             raise AssetError(404, "asset_not_found", "nope")
-        return detail_row(id=str(asset_id))
+        row = detail_row(id=str(asset_id))
+        # Mirrors the service: the key is ABSENT when it was not asked for, so
+        # a router test can see the difference the flag actually makes.
+        if not include_used_in:
+            row.pop("used_in", None)
+        return row
 
     # The bundle's selection is recorded RAW so a test can tell the three wire
     # states apart: absent (None), given, and given-but-empty. Collapsing any
@@ -714,3 +720,26 @@ async def test_an_over_long_selection_entry_is_refused_at_the_boundary(app):
             + ("9" * 41)
         )
     assert r.status_code == 422
+
+
+# ── used_in is opt-in on the detail route (I2) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_detail_route_does_not_ask_for_used_in_by_default(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/v1/assets/5?scope_id=9000")
+    assert r.status_code == 200
+    assert app.state.fake.calls[-1] == ("get_asset", 9000, {"include_used_in": False})
+    # NULL on the wire, not an empty pair: "nobody looked" must stay
+    # distinguishable from "used nowhere".
+    assert r.json()["data"]["used_in"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_detail_route_passes_the_flag_through(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/v1/assets/5?scope_id=9000&include_used_in=true")
+    assert r.status_code == 200
+    assert app.state.fake.calls[-1] == ("get_asset", 9000, {"include_used_in": True})
+    assert r.json()["data"]["used_in"] == {"canvases": [], "storyboards": []}

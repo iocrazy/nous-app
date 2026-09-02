@@ -314,7 +314,14 @@ class AssetDetailResponse(AssetResponse):
     links: List[AssetLinkResponse] = Field(default_factory=list)  # outgoing
     linked_by: List[AssetLinkResponse] = Field(default_factory=list)  # incoming
     loadouts: List[LoadoutResponse] = Field(default_factory=list)
-    used_in: UsedInResponse = Field(default_factory=UsedInResponse)
+    # OPT-IN (``?include_used_in=true``), and NULL rather than empty when it
+    # was not asked for. An empty ``used_in`` is the claim "this asset is used
+    # nowhere"; a caller that did not pay for the five-table aggregate has no
+    # basis for making it, and a client that cannot tell the two apart renders
+    # "Used nowhere" for an answer nobody computed. Three states on the wire —
+    # null (not asked), empty lists (asked, none), populated — and the client
+    # keeps all three.
+    used_in: Optional[UsedInResponse] = None
 
 
 class AttachFileRequest(BaseModel):

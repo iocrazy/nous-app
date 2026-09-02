@@ -292,3 +292,68 @@ async def test_list_for_canvas_hides_soft_deleted_assets_but_keeps_loadoutless_r
     assert "JOIN public.assets ON" in sql and "LEFT OUTER JOIN public.assets" not in sql
     assert "public.assets.deleted_at IS NULL" in sql
     assert "LEFT OUTER JOIN public.asset_loadouts" in sql
+
+
+# ── 4. the aggregate is not run unless it was asked for (I2) ───────────────
+#
+# `used_in.canvases` is the only five-table join on this surface, and
+# `AssetNodeView` fetches `GET /assets/{id}` once PER CARD on mount — a board
+# filled by "Insert Project Assets" costs one detail request per asset. None of
+# those cards renders usage.
+#
+# This pin is on the COMPILED SQL rather than on a call count, because a call
+# count answers "did the service invoke the repository" while the cost this is
+# about is "did a statement reach Postgres". They come apart the moment someone
+# adds a cache, a batch or an early return.
+
+
+async def _detail_statements(monkeypatch, **kw) -> List[str]:
+    """The SQL `get_asset` compiles through the REAL canvas-refs repository."""
+    from app.repositories.canvas_asset_refs_repository import (
+        CanvasAssetRefsRepository,
+    )
+    from app.schemas.assets import AssetCreate
+    from app.services.assets.assets_service import AssetsService
+    from tests.services.assets.test_assets_service import (
+        SCOPE,
+        USER,
+        FakeAssetsRepo,
+        FakeRelationsRepo,
+    )
+
+    session = _CapturingSession(rows=[])
+    _patch(monkeypatch, session)
+    svc = AssetsService(
+        assets_repo=FakeAssetsRepo(),
+        relations_repo=FakeRelationsRepo(),
+        canvas_refs_repo=CanvasAssetRefsRepository(),
+    )
+    a = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    await svc.get_asset(int(a["id"]), SCOPE, **kw)
+    return [_sql(s) for s in session.statements]
+
+
+async def test_the_used_in_aggregate_is_absent_from_a_default_detail(monkeypatch):
+    sql = await _detail_statements(monkeypatch)
+
+    assert sql == [], (
+        "GET /assets/{id} compiled a canvas-mirror statement without being "
+        f"asked for used_in: {sql}"
+    )
+
+
+async def test_asking_for_used_in_compiles_exactly_the_scoped_aggregate(monkeypatch):
+    """The positive control. Without it, the test above passes just as happily
+    on a build where `list_canvases_for_asset` stopped working entirely."""
+    sql = await _detail_statements(monkeypatch, include_used_in=True)
+
+    assert len(sql) == 1, sql
+    one = sql[0]
+    assert "canvas_asset_refs" in one
+    assert "array_agg" in one and "distinct" in one.lower()
+    # Still the five-table, scope-limited shape — this is the cost the flag
+    # exists to make optional, so the flag must not have quietly cheapened it.
+    for table in ("canvases", "projects", "teams"):
+        assert table in one, f"{table} missing from the used_in aggregate"

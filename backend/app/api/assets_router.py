@@ -494,10 +494,37 @@ async def resolve_legacy(
     response_model=Envelope[AssetDetailResponse],
     responses=_ERRORS,
 )
-async def get_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+async def get_asset(
+    asset_id: IdPath,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    include_used_in: bool = Query(
+        False,
+        description=(
+            "Include used_in.canvases (the asset sheet's Used In panel). "
+            "Off by default: it is a five-table aggregate and most callers "
+            "render only the asset's face."
+        ),
+    ),
+):
+    """One asset with its files, links, loadouts — and, on request, its usage.
+
+    ``used_in`` costs a five-table aggregate (``canvas_asset_refs`` joined
+    through ``canvases``/``projects``/``teams``, two ``array_agg(DISTINCT …)``),
+    and one canvas can carry dozens of asset cards that each fetch their detail
+    on mount. So it is opt-in, and the answer is NULL — not an empty
+    ``used_in`` — when it was not asked for: "nobody looked" and "used nowhere"
+    are different facts and must not share a response. The sheet asks; the
+    canvas card, the picker, the legacy migration and the seeding path do not.
+
+    ``GET /assets/{id}/canvas-refs`` answers the same rows on their own, for a
+    caller that wants to refresh usage without re-reading the whole detail.
+    """
     try:
         sid = await _gate(scope_id, auth)
-        return _ok(await _service().get_asset(asset_id, sid))
+        return _ok(
+            await _service().get_asset(asset_id, sid, include_used_in=include_used_in)
+        )
     except AssetError as e:
         return _err(e)
 

@@ -430,10 +430,41 @@ describe('fetchAssetDetail', () => {
     expect(asset.links).toEqual([]);
     expect(asset.linked_by).toEqual([]);
     expect(asset.loadouts).toEqual([]);
-    // `used_in` is declared required, so the normalizer owes both lists even
-    // when the payload has neither — a sidebar mapping over
-    // `used_in.canvases` must not crash on a pre-P4 response.
+    // `used_in` is NOT defaulted, unlike the four arrays: the caller did not
+    // ask for it, so the honest answer is "nobody looked" rather than an empty
+    // pair that reads as "used nowhere".
+    expect(asset.used_in).toBeUndefined();
+    expect(url.searchParams.has('include_used_in')).toBe(false);
+  });
+
+  it('asks for used_in only when the caller opts in', async () => {
+    const spy = stubFetch({ success: true, data: ASSET_ROW });
+
+    await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
+    expect(callAt(spy)[0].searchParams.get('include_used_in')).toBe('true');
+  });
+
+  it('keeps an asked-for-but-empty used_in apart from an absent one', async () => {
+    // The two states the opt-in creates, and the whole reason `used_in` is
+    // optional in the type: `{canvases: [], storyboards: []}` means the
+    // aggregate ran and found nothing; `undefined` means it never ran.
+    stubFetch({
+      success: true,
+      data: { ...ASSET_ROW, used_in: { canvases: [], storyboards: [] } },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
     expect(asset.used_in).toEqual({ canvases: [], storyboards: [] });
+  });
+
+  it('reads a null used_in as absent, the way the wire spells "not asked"', async () => {
+    stubFetch({ success: true, data: { ...ASSET_ROW, used_in: null } });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+
+    expect(asset.used_in).toBeUndefined();
   });
 
   it('carries used_in through with the canvases the server aggregated', async () => {
@@ -459,12 +490,12 @@ describe('fetchAssetDetail', () => {
       },
     });
 
-    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
 
-    expect(asset.used_in.canvases).toHaveLength(1);
-    expect(asset.used_in.canvases[0].canvas_name).toBe('Bamboo Sea Boards');
-    expect(asset.used_in.canvases[0].node_ids).toEqual(['asset-1', 'asset-2']);
-    expect(asset.used_in.storyboards).toEqual([]);
+    expect(asset.used_in?.canvases).toHaveLength(1);
+    expect(asset.used_in?.canvases[0].canvas_name).toBe('Bamboo Sea Boards');
+    expect(asset.used_in?.canvases[0].node_ids).toEqual(['asset-1', 'asset-2']);
+    expect(asset.used_in?.storyboards).toEqual([]);
   });
 
   it('keeps a half-filled used_in rather than dropping the half that came', async () => {
@@ -490,10 +521,10 @@ describe('fetchAssetDetail', () => {
       },
     });
 
-    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
 
-    expect(asset.used_in.canvases).toHaveLength(1);
-    expect(asset.used_in.storyboards).toEqual([]);
+    expect(asset.used_in?.canvases).toHaveLength(1);
+    expect(asset.used_in?.storyboards).toEqual([]);
   });
 
   it('keeps outgoing and incoming links apart', async () => {
