@@ -23,7 +23,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { mediaSrc } from '../smart/mediaUrl';
+import { fullResSrc } from '../smart/mediaUrl';
 import { CropTool } from './CropTool';
 import { GridSplitTool } from './GridSplitTool';
 import { MaskBrushTool } from './MaskBrushTool';
@@ -277,7 +277,7 @@ export function UnifiedImageEditor({
         <div className="absolute right-0 flex items-center gap-1.5">
           <a
             data-testid="editor-download"
-            href={mediaSrc(src)}
+            href={fullResSrc(src)}
             download
             aria-label="Download image"
             className="nodrag flex h-8 w-8 items-center justify-center rounded-lg border border-canvas-line text-canvas-text hover:bg-canvas-bg"
@@ -521,7 +521,7 @@ export function UnifiedImageEditor({
       >
         {mode === 'preview' && (
           <img
-            src={mediaSrc(src)}
+            src={fullResSrc(src)}
             alt={alt}
             className="max-h-full max-w-full object-contain"
             style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}
@@ -535,13 +535,13 @@ export function UnifiedImageEditor({
         )}
         {mode === 'crop' && (
           <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
-            <CropTool src={mediaSrc(src)} alt={alt} value={region} onChange={setRegion} />
+            <CropTool src={fullResSrc(src)} alt={alt} value={region} onChange={setRegion} />
           </div>
         )}
         {mode === 'outpaint' && (
           <div className="flex flex-col items-center gap-2">
             <OutpaintTool
-              src={mediaSrc(src)}
+              src={fullResSrc(src)}
               alt={alt}
               value={padding}
               onChange={setPadding}
@@ -560,7 +560,7 @@ export function UnifiedImageEditor({
         {mode === 'mask' && (
           <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
           <MaskBrushTool
-            src={mediaSrc(src)}
+            src={fullResSrc(src)}
             alt={alt}
             value={strokes}
             onChange={setStrokes}
@@ -585,7 +585,7 @@ export function UnifiedImageEditor({
         )}
         {mode === 'resize' && (
           <img
-            src={mediaSrc(src)}
+            src={fullResSrc(src)}
             alt={alt}
             className="max-h-full max-w-full object-contain opacity-90"
             style={{ transform: `scale(${Math.max(scale, 0.2)})` }}
@@ -599,7 +599,7 @@ export function UnifiedImageEditor({
         )}
         {mode === 'split' && (
           <div style={zoom !== 100 ? { transform: `scale(${zoom / 100})` } : undefined}>
-          <GridSplitTool src={mediaSrc(src)} alt={alt} value={lines} onChange={setLines} />
+          <GridSplitTool src={fullResSrc(src)} alt={alt} value={lines} onChange={setLines} />
           </div>
         )}
         {mode === 'preview' && items && items.length > 1 && onNavigate && (

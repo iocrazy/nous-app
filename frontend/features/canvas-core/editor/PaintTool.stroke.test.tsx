@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { UnifiedImageEditor } from './UnifiedImageEditor';
 
-vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => u }));
+vi.mock('../smart/mediaUrl', () => ({
+  mediaSrc: (u: string) => u,
+  fullResSrc: (u: string) => u,
+  fullResPath: (u: string) => u,
+}));
 
 describe('brush canvas', () => {
   it('mounts the paint canvas in the brush tab and tolerates pointer input', () => {

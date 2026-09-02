@@ -32,7 +32,10 @@ const apiFetch = vi.fn<(path: string, opts?: unknown) => Promise<Response>>();
 vi.mock('../../../services/apiClient', () => ({
   apiFetch: (path: string, opts?: unknown) => apiFetch(path, opts),
 }));
-vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => `https://api.test${u}` }));
+// The real mediaUrl helper runs here on purpose: the point of this suite is
+// WHICH url the base fetch asks for, and a stubbed helper would answer that
+// question for it. Only the API base is stubbed.
+vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
 import { PaintCanvas, type PaintCanvasHandle } from './PaintCanvas';
 
@@ -135,7 +138,13 @@ describe('PaintCanvas.exportComposite — fetches the base itself', () => {
 
     const out = await ref.current!.exportComposite();
 
-    expect(apiFetch).toHaveBeenCalledWith('/api/v1/generated-media/7/cover', expect.anything());
+    // Full resolution, and still a RELATIVE path — apiFetch builds its own
+    // base (auth + dual-channel failover), so handing it an absolute url
+    // would bypass that.
+    expect(apiFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/v1\/generated-media\/7\/cover\?[^ ]*full=1/),
+      expect.anything(),
+    );
     expect(out.blob).not.toBeNull();
     expect(out.baseIncluded).toBe(true);
     expect(ctx.drawImage, 'base + overlay').toHaveBeenCalledTimes(2);
