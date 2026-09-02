@@ -23,6 +23,19 @@ wholesale:
   so a bundle for a text-to-image-only provider drops EVERY reference — and
   says so, rather than shipping a payload the provider will ignore.
 
+**The candidate population is the caller's SELECTION when it gives one.**
+``selected_resource_ids`` narrows the file map before anything is ranked, so the
+provider's ceiling trims the top N *of what the user ticked*, not the top N of
+everything the asset owns intersected with what they ticked. Those two are not
+the same answer, and the difference is not academic: with six files, a ceiling
+of three and a single tick on the file ranked fourth, "trim first" delivers
+NOTHING while reporting the user's own pick as ``over_limit`` — the card says
+the provider's limit was the problem when the real cause was the order of the
+two steps. ``None`` means "no selection given" and every file is a candidate,
+which is what the asset sheet asks for; an EMPTY sequence means "the user
+ticked nothing" and is honoured as such (no references, and nothing dropped —
+nothing was chosen to drop).
+
 **Nothing is dropped silently.** Every candidate reference either comes back in
 ``reference_resource_ids`` or appears in ``dropped`` with one of three reasons:
 
@@ -135,6 +148,43 @@ def _partition_files(
     return keep, drop
 
 
+def _restrict_to_selection(
+    files_by_slot: Dict[str, List[Dict[str, Any]]],
+    selected_resource_ids: Optional[Sequence[Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """The slot map narrowed to the resources the caller ticked.
+
+    Applied BEFORE ranking and trimming, which is the whole point — see the
+    module docstring. ``None`` passes the map through untouched (no selection
+    was given); anything else is honoured literally, including an empty
+    sequence.
+
+    Comparison is on ``str(resource_id)`` because the two sides arrive in
+    different shapes: the file rows carry the DB's ``int`` Snowflake, the
+    selection arrives off the wire as the string the client holds in
+    ``selected_file_ids``. Comparing them raw is the "index built on strings,
+    response gives numbers" mismatch this repo already paid for once.
+
+    An id in the selection that names no file of this asset simply matches
+    nothing. It is neither delivered nor reported — there is no file to report
+    ON, and the sheet's own checklist cannot draw a row for it either. That is
+    the disclosed stale-selection gap (a loadout changed before the detail
+    loaded), not a silent drop of something deliverable.
+
+    Empty slot lists are not carried over: an empty map and a map of empty
+    lists must be the same input to the ranker.
+    """
+    if selected_resource_ids is None:
+        return files_by_slot or {}
+    keep = {str(rid) for rid in selected_resource_ids}
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for slot, rows in (files_by_slot or {}).items():
+        picked = [r for r in (rows or []) if str(r.get("resource_id")) in keep]
+        if picked:
+            out[slot] = picked
+    return out
+
+
 def _all_in_priority_order(
     files_by_slot: Dict[str, List[Dict[str, Any]]], asset_type: str
 ) -> List[int]:
@@ -158,6 +208,7 @@ def build_bundle(
     files_by_slot: Dict[str, List[Dict[str, Any]]],
     caps: ProviderCapabilities,
     user_text: Optional[str] = None,
+    selected_resource_ids: Optional[Sequence[Any]] = None,
 ) -> Dict[str, Any]:
     """Compose one asset's delivery payload for one provider.
 
@@ -183,6 +234,13 @@ def build_bundle(
     ``max_refs`` is echoed so the caller can render "3 of 5 sent" without
     re-deriving the ceiling from the two list lengths — which would read
     ``max_refs`` as 3 for an asset that only has 3 files.
+
+    ``selected_resource_ids`` is the caller's checklist and it bounds the WHOLE
+    answer: both lists — delivered and dropped — are drawn from it alone. A
+    caller that ticked three files and had all three sent therefore gets an
+    EMPTY ``dropped``, rather than a report about files it never asked for. See
+    ``_restrict_to_selection`` and the module docstring for why the narrowing
+    happens before the ranking rather than after it.
     """
     asset_type = str(asset_row.get("asset_type") or "")
     linked_positive = _linked_positive_texts(linked_assets)
@@ -206,7 +264,8 @@ def build_bundle(
         )
     )
 
-    with_image, without_image = _partition_files(files_by_slot)
+    candidates = _restrict_to_selection(files_by_slot, selected_resource_ids)
+    with_image, without_image = _partition_files(candidates)
     dropped: List[DroppedReference] = [
         {"resource_id": str(rid), "reason": "no_image_file"}
         for rid in _all_in_priority_order(without_image, asset_type)

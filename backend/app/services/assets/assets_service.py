@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import os
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -1459,6 +1459,7 @@ class AssetsService:
         *,
         model: str,
         loadout_id: Optional[Any] = None,
+        selected_file_ids: Optional[Sequence[Any]] = None,
         user_id: str,
     ) -> Dict[str, Any]:
         """What this asset hands the generator running ``model``.
@@ -1473,6 +1474,16 @@ class AssetsService:
         that is disabled, owner-scoped to someone else, hidden by the caller's
         Settings, or simply absent is one 422 — ``model_unknown`` — because
         from the caller's side those are one fact.
+
+        ``selected_file_ids`` is the CALLER'S CHECKLIST, and passing it is what
+        makes the provider ceiling trim the right population. ``None`` means
+        "no checklist" — every file the asset owns is a candidate, which is the
+        asset sheet's question. A canvas card always has a checklist (possibly
+        empty), and handing it over here rather than intersecting the answer
+        afterwards is the difference between "the top N of what you picked" and
+        "the top N of everything, then whichever of those you picked" — the
+        second delivers nothing at all whenever the picks are not a prefix of
+        the priority order. See ``build_bundle``'s ``_restrict_to_selection``.
 
         ⚠️ ``build_bundle`` accepts a ``user_text`` tail (spec §6.3's "what the
         person typed on the node"); NO route passes one yet. The canvas node
@@ -1496,7 +1507,14 @@ class AssetsService:
             await self.relations.list_files(int(asset_id)), loadout
         )
         await self._stamp_image_availability(files_by_slot)
-        return build_bundle(row, loadout, linked, files_by_slot, caps)
+        return build_bundle(
+            row,
+            loadout,
+            linked,
+            files_by_slot,
+            caps,
+            selected_resource_ids=selected_file_ids,
+        )
 
     async def _stamp_image_availability(
         self, files_by_slot: Dict[str, List[Dict[str, Any]]]

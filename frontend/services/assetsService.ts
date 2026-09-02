@@ -499,9 +499,12 @@ export interface DroppedReference {
 /**
  * What an asset hands a generator running one specific model (spec §6.3).
  *
- * `dropped` is the load-bearing half and must be rendered: every reference the
- * asset owns that is not in `reference_resource_ids` is in there with a
- * reason. Reading only the id list reports a trimmed delivery as a complete
+ * `dropped` is the load-bearing half and must be rendered: every reference
+ * IN SCOPE OF THE REQUEST that is not in `reference_resource_ids` is in there
+ * with a reason. `selectedFileIds` is what bounds that scope — with one, both
+ * lists describe the caller's own picks, so a run in which everything chosen
+ * was sent reports nothing rather than a standing alarm about files the caller
+ * never asked for. Reading only the id list reports a trimmed delivery as a complete
  * one — the recorded "选了也生成了但图里没有" failure.
  *
  * `max_refs` is the PROVIDER's ceiling, echoed so a caller can say "2 of 5
@@ -519,6 +522,26 @@ export interface BundleOptions {
   /** A catalog row NAME, the same vocabulary the model picker shows. */
   model: string;
   loadoutId?: string;
+  /**
+   * The caller's checklist — the resource ids it wants considered.
+   *
+   * THREE states, and the third is the one that needs the care:
+   *
+   *  * `undefined` — no checklist. Every file the asset owns is a candidate,
+   *    which is what the asset sheet asks.
+   *  * a non-empty array — those files, and only those.
+   *  * an EMPTY array — the user unticked everything. Sent as one empty value
+   *    (`?selected_file_ids=`) because a zero-length repeated parameter is
+   *    indistinguishable from an absent one on the wire, and the backend reads
+   *    absent as "send them all". Collapsing the two here would ship exactly
+   *    the references the user just removed.
+   *
+   * Passing it is what makes the provider's ceiling trim the right population.
+   * Trimming server-side over everything and intersecting client-side after is
+   * the SAME two steps in the wrong order, and it delivers nothing whenever
+   * the picks are not a prefix of the priority order.
+   */
+  selectedFileIds?: readonly string[];
 }
 
 /**
@@ -535,6 +558,12 @@ export async function fetchBundle(
   opts: BundleOptions,
 ): Promise<AssetBundle> {
   const qs = query(scopeId, { model: opts.model, loadout_id: opts.loadoutId });
+  if (opts.selectedFileIds !== undefined) {
+    // `append`, not `set`: the parameter is repeatable. The empty-array arm
+    // still appends once — see `BundleOptions.selectedFileIds`.
+    if (opts.selectedFileIds.length === 0) qs.append('selected_file_ids', '');
+    else for (const id of opts.selectedFileIds) qs.append('selected_file_ids', id);
+  }
   return envelopeFetch<AssetBundle>(`${BASE()}/${assetId}/bundle?${qs}`, {
     headers: await getAuthHeaders(),
   });

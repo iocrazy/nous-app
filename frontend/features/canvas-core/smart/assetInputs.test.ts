@@ -120,6 +120,7 @@ describe('resolveAssetInputs', () => {
     expect(fetchBundle).toHaveBeenCalledWith(SCOPE, '55', {
       model: 'seedream-4',
       loadoutId: '99',
+      selectedFileIds: [],
     });
   });
 
@@ -127,15 +128,52 @@ describe('resolveAssetInputs', () => {
     fetchBundle.mockResolvedValue(bundle());
     const nodes = [assetNode('a1', { asset_id: '55' }), node('p1', 'prompt')];
     await run(nodes, [edge('a1', 'p1')]);
-    expect(fetchBundle.mock.calls[0][2]).toEqual({ model: 'codex', loadoutId: undefined });
+    expect(fetchBundle.mock.calls[0][2]).toEqual({
+      model: 'codex',
+      loadoutId: undefined,
+      selectedFileIds: [],
+    });
   });
 
-  it('intersects the selection with the bundle, in BUNDLE order', async () => {
-    // The bundle is the provider-aware priority order (primary slot leads,
-    // trimmed at max_refs). Ticking boxes bottom-up must not change which
-    // reference the provider sees first.
+  // ── the selection goes TO the endpoint; the answer is taken as given ─────
+  //
+  // This block replaces a test that pinned a CLIENT-SIDE intersection against
+  // an UNTRIMMED bundle — which is why the branch's central defect survived a
+  // green suite. The endpoint trims the provider ceiling within the selection
+  // now, so the only thing left to pin here is that the selection is sent and
+  // the answer is not second-guessed.
+
+  it('sends the card checklist so the ceiling trims within it', async () => {
+    fetchBundle.mockResolvedValue(bundle());
+    const nodes = [
+      assetNode('a1', { asset_id: '55', selected_file_ids: ['12', '10'] }),
+      node('p1', 'prompt'),
+    ];
+    await run(nodes, [edge('a1', 'p1')]);
+    expect(fetchBundle.mock.calls[0][2].selectedFileIds).toEqual(['12', '10']);
+  });
+
+  it('sends an EMPTY checklist rather than none when nothing is ticked', async () => {
+    // `undefined` would mean "no checklist" to the endpoint, and it answers
+    // that with every file the asset owns. A card with every box unticked must
+    // contribute zero references, not all of them.
+    fetchBundle.mockResolvedValue(bundle());
+    const nodes = [
+      assetNode('a1', { selected_file_ids: [] }),
+      node('p1', 'prompt'),
+    ];
+    await run(nodes, [edge('a1', 'p1')]);
+    expect(fetchBundle.mock.calls[0][2].selectedFileIds).toEqual([]);
+    expect(fetchBundle.mock.calls[0][2].selectedFileIds).not.toBeUndefined();
+  });
+
+  it('delivers what the bundle answered, in BUNDLE order, without re-filtering', async () => {
+    // The endpoint already applied the checklist. Intersecting again here is
+    // how `top_N(selection)` silently became `top_N(all) ∩ selection`: a
+    // low-priority pick that the endpoint DID deliver would be filtered back
+    // out by a stale client-side copy of the selection.
     fetchBundle.mockResolvedValue(
-      bundle({ reference_resource_ids: ['10', '11', '12'] }),
+      bundle({ reference_resource_ids: ['10', '12'], max_refs: 2 }),
     );
     const nodes = [
       assetNode('a1', { selected_file_ids: ['12', '10', '77'] }),
@@ -145,6 +183,59 @@ describe('resolveAssetInputs', () => {
     expect(out.reference_urls).toEqual([
       assetReferenceUrl('10'),
       assetReferenceUrl('12'),
+    ]);
+  });
+
+  it('keeps a delivered reference the local selection no longer lists', async () => {
+    // The endpoint is the authority on what was sent. If the two ever
+    // disagree, reporting the run as having shipped LESS than it did is the
+    // dishonest direction — the reference reached the provider either way.
+    fetchBundle.mockResolvedValue(bundle({ reference_resource_ids: ['44'] }));
+    const nodes = [
+      assetNode('a1', { selected_file_ids: ['10'] }),
+      node('p1', 'prompt'),
+    ];
+    const out = await run(nodes, [edge('a1', 'p1')]);
+    expect(out.reference_urls).toEqual([assetReferenceUrl('44')]);
+  });
+
+  it('reports nothing dropped when everything chosen was sent (I1)', async () => {
+    // The badge cried wolf on the happy path before this: the endpoint put
+    // every non-top-N file of the ASSET into `dropped`, so a freshly placed
+    // card — which seeds the primary slot alone — reported drops on every run.
+    // A badge that fires on the default path stops being read, which then
+    // costs the real case its only warning.
+    fetchBundle.mockResolvedValue(
+      bundle({ reference_resource_ids: ['10'], dropped: [], max_refs: 3 }),
+    );
+    const nodes = [
+      assetNode('a1', { selected_file_ids: ['10'] }),
+      node('p1', 'prompt'),
+    ];
+    const out = await run(nodes, [edge('a1', 'p1')]);
+    expect(out.contributions[0].dropped).toEqual([]);
+    expect(out.reference_urls).toEqual([assetReferenceUrl('10')]);
+  });
+
+  it('carries a drop whose id IS in the selection, verbatim', async () => {
+    // The overlap case that no test on this branch had: `dropped` and the
+    // checklist share an id, because the pick genuinely lost the priority
+    // contest inside its own selection. That is what makes the badge a
+    // per-run answer instead of a standing description of the asset.
+    fetchBundle.mockResolvedValue(
+      bundle({
+        reference_resource_ids: ['10'],
+        dropped: [{ resource_id: '12', reason: 'over_limit' }],
+        max_refs: 1,
+      }),
+    );
+    const nodes = [
+      assetNode('a1', { selected_file_ids: ['10', '12'] }),
+      node('p1', 'prompt'),
+    ];
+    const out = await run(nodes, [edge('a1', 'p1')]);
+    expect(out.contributions[0].dropped).toEqual([
+      { resource_id: '12', reason: 'over_limit' },
     ]);
   });
 

@@ -155,6 +155,19 @@ class _FakeService:
             raise AssetError(404, "asset_not_found", "nope")
         return detail_row(id=str(asset_id))
 
+    # The bundle's selection is recorded RAW so a test can tell the three wire
+    # states apart: absent (None), given, and given-but-empty. Collapsing any
+    # two of those here would hide exactly the bug the router's normalization
+    # exists to prevent.
+    async def get_bundle(self, asset_id, scope_id, **kw):
+        self.calls.append(("bundle", scope_id, dict(kw)))
+        return {
+            "prompt": {"positive": "p", "negative": ""},
+            "reference_resource_ids": [],
+            "dropped": [],
+            "max_refs": 3,
+        }
+
     # Set to a resource_id that should blow up, to exercise the batch path.
     fail_on_resource_id = None
 
@@ -643,3 +656,61 @@ async def test_create_defaults_to_manual_when_source_is_omitted(app):
         )
     assert r.status_code == 201, r.text
     assert app.state.fake.created_sources == ["manual"]
+
+
+# ── the bundle's selection parameter, on the wire (C1) ─────────────────────
+#
+# THREE states, and a query string can only tell them apart because the empty
+# one is spelled `?selected_file_ids=` rather than by omitting the parameter.
+# These three tests are the pin on that spelling: without them, "absent" and
+# "empty" collapse into each other and unticking every box on a card would ship
+# every reference the user just removed.
+
+
+async def _bundle_kwargs(app, query):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/assets/5/bundle?scope_id=9000&model=m{query}")
+    assert r.status_code == 200, r.text
+    kind, _, kw = app.state.fake.calls[-1]
+    assert kind == "bundle"
+    return kw
+
+
+@pytest.mark.asyncio
+async def test_an_absent_selection_reaches_the_service_as_none(app):
+    """The asset sheet's request, unchanged by this parameter's arrival."""
+    kw = await _bundle_kwargs(app, "")
+    assert kw["selected_file_ids"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_selection_arrives_in_order(app):
+    kw = await _bundle_kwargs(
+        app, "&selected_file_ids=727145299382534146&selected_file_ids=8"
+    )
+    assert kw["selected_file_ids"] == ("727145299382534146", "8")
+
+
+@pytest.mark.asyncio
+async def test_an_empty_selection_is_empty_not_absent(app):
+    """`?selected_file_ids=` is "the user unticked everything". It must NOT
+    arrive as None — that is the state that means "send them all"."""
+    kw = await _bundle_kwargs(app, "&selected_file_ids=")
+    assert kw["selected_file_ids"] == ()
+    assert kw["selected_file_ids"] is not None
+
+
+@pytest.mark.asyncio
+async def test_a_blank_entry_among_real_ids_is_dropped_not_carried(app):
+    kw = await _bundle_kwargs(app, "&selected_file_ids=7&selected_file_ids=%20")
+    assert kw["selected_file_ids"] == ("7",)
+
+
+@pytest.mark.asyncio
+async def test_an_over_long_selection_entry_is_refused_at_the_boundary(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(
+            "/api/v1/assets/5/bundle?scope_id=9000&model=m&selected_file_ids="
+            + ("9" * 41)
+        )
+    assert r.status_code == 422

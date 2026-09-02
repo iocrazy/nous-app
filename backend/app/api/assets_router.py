@@ -22,7 +22,7 @@ from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import AfterValidator
+from pydantic import AfterValidator, StringConstraints
 from sqlalchemy import select
 
 from app.core.deps import AuthDep
@@ -534,6 +534,32 @@ async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQu
 # ends in ``model_unknown``.
 ModelQuery = Annotated[str, Query(min_length=1, max_length=100)]
 
+# The card's checklist, repeatable: ``?selected_file_ids=1&selected_file_ids=2``.
+#
+# THREE states, and the third is the one worth spelling out:
+#
+# * ABSENT (``None``) — no checklist. Every file the asset owns is a candidate.
+#   This is what the asset sheet asks, and it is why the sheet-side callers did
+#   not have to change when this parameter arrived.
+# * PRESENT with ids — those files, and only those, are candidates.
+# * PRESENT and EMPTY — the user unticked everything. On the wire that is
+#   ``?selected_file_ids=`` (one empty value), which FastAPI hands over as
+#   ``[""]``: distinguishable from absent, which a zero-length repeated
+#   parameter is NOT. Blank entries are stripped below, so it arrives at the
+#   service as an empty tuple and the answer is zero references — NOT "all of
+#   them", which is what collapsing this state into ABSENT would ship.
+#
+# Bounded twice — 500 entries, 40 characters each (a Snowflake is 19) — so a
+# hostile query string is a 422 at the boundary rather than a long round trip.
+# Ids are NOT parsed to int here: the service compares on ``str`` because the
+# file rows and the wire disagree about the type of a Snowflake, and an id that
+# names no file of this asset must simply match nothing, not fail a request
+# that can still be answered honestly.
+SelectedFilesQuery = Annotated[
+    Optional[List[Annotated[str, StringConstraints(max_length=40)]]],
+    Query(max_length=500),
+]
+
 
 @router.get(
     "/assets/{asset_id}/bundle",
@@ -546,6 +572,7 @@ async def asset_bundle(
     scope_id: ScopeIdQuery,
     model: ModelQuery,
     loadout_id: OptSnowflakeQuery = None,
+    selected_file_ids: SelectedFilesQuery = None,
 ):
     """What this asset hands a generator running ``model`` (spec §6.3).
 
@@ -556,10 +583,19 @@ async def asset_bundle(
     all). A default model here would quietly answer for a provider the caller
     is not about to use.
 
-    ``dropped`` is the load-bearing half. Every reference the asset owns that
-    is not in ``reference_resource_ids`` appears there with a reason — a
-    reference chosen, not sent, and not reported is the recorded
+    ``dropped`` is the load-bearing half. Every reference **in scope of the
+    request** that is not in ``reference_resource_ids`` appears there with a
+    reason — a reference chosen, not sent, and not reported is the recorded
     "选了也生成了但图里没有" failure.
+
+    ``selected_file_ids`` is what puts the "in scope of the request" in that
+    sentence, and it bounds BOTH lists. Without it the ceiling would trim the
+    asset's whole file list and the caller would be left to intersect the
+    result with its own checklist — which drops the user's picks whenever they
+    are not a prefix of the priority order, and then blames the provider's
+    limit for it. It also means a caller whose picks were all delivered gets an
+    empty ``dropped`` instead of a standing false alarm about files it never
+    chose.
     """
     try:
         sid = await _gate(scope_id, auth)
@@ -569,6 +605,11 @@ async def asset_bundle(
                 sid,
                 model=model,
                 loadout_id=loadout_id,
+                selected_file_ids=(
+                    None
+                    if selected_file_ids is None
+                    else tuple(v for v in selected_file_ids if v.strip())
+                ),
                 user_id=auth.user_id,
             )
         )

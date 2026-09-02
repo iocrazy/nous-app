@@ -221,6 +221,16 @@ beforeEach(() => {
       negative: false,
       video_modes: [],
     },
+    // A one-reference ceiling: the smallest number that can tell "rank within
+    // the selection" apart from "rank within every file the asset owns".
+    'ark-seedream-1ref': {
+      ratios: ['1:1'],
+      quality: false,
+      resolution: false,
+      max_refs: 1,
+      negative: false,
+      video_modes: [],
+    },
   });
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -283,6 +293,28 @@ describe('over-limit greying', () => {
     expect(row(WORN)).not.toHaveAttribute('data-over-limit');
     // Checked rows stay operable at the ceiling.
     expect(box(EXPRESSIONS)).not.toBeDisabled();
+  });
+
+  it('ranks within the SELECTION, so an unchecked leader costs no slot (C1)', async () => {
+    // The population half of the alignment, and the half the earlier fix
+    // missed. Ceiling 1, and the ONLY tick is on `expressions` — which ranks
+    // FOURTH among the asset's files. Counting the whole file list would put
+    // it at rank 3 and dim it as `over_limit`; counting the selection puts it
+    // at rank 0 and it is delivered.
+    //
+    // The endpoint now answers the same way (`build_bundle` trims within
+    // `selected_file_ids`), so this assertion and the run agree. Before C1 the
+    // card said "will be sent" here while the run shipped NOTHING and the
+    // post-run badge blamed the provider's limit.
+    seedAndRender({ ...NODE_DATA, selected_file_ids: [EXPRESSIONS] }, [
+      { id: 'p1', model: 'ark-seedream-1ref' },
+    ]);
+    await waitFor(() => expect(box(SHEET)).toBeDisabled());
+    expect(row(EXPRESSIONS)).not.toHaveAttribute('data-over-limit');
+    expect(box(EXPRESSIONS)).not.toBeDisabled();
+    // The unchecked higher-priority rows are blocked because the ceiling is
+    // FULL, which is a different statement from "this pick will be dropped".
+    expect(row(SHEET)).toHaveAttribute('data-over-limit', 'true');
   });
 
   it('greys every unchecked row for a model that takes NO references', async () => {

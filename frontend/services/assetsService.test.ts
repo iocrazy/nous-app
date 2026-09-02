@@ -977,6 +977,45 @@ describe('bundle', () => {
     expect(bundle.dropped[0].reason).toBe('provider_no_refs');
   });
 
+  // ── the checklist's three wire states ──────────────────────────────────
+  //
+  // These pin the SPELLING, which is the only thing that keeps "unticked
+  // everything" apart from "did not ask". A zero-length repeated parameter is
+  // indistinguishable from an absent one, and absent means "send them all" —
+  // so an empty selection has to put one empty value on the wire.
+
+  it('omits selected_file_ids entirely when no checklist is given', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(callAt(spy)[0].searchParams.has('selected_file_ids')).toBe(false);
+  });
+
+  it('repeats selected_file_ids once per picked file, in order', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, {
+      model: 'seedream-4',
+      selectedFileIds: ['727145299382534147', '727145299382534146'],
+    });
+
+    expect(callAt(spy)[0].searchParams.getAll('selected_file_ids')).toEqual([
+      '727145299382534147',
+      '727145299382534146',
+    ]);
+  });
+
+  it('spells an EMPTY checklist as one empty value, not as absence', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4', selectedFileIds: [] });
+
+    const params = callAt(spy)[0].searchParams;
+    expect(params.has('selected_file_ids')).toBe(true);
+    expect(params.getAll('selected_file_ids')).toEqual(['']);
+  });
+
   it('surfaces model_unknown as a typed error, not an empty bundle', async () => {
     stubFetch(
       { success: false, error: { code: 'model_unknown', detail: 'not available' } },

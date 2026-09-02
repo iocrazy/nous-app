@@ -396,3 +396,140 @@ def test_an_unknown_asset_type_fails_loudly():
             by_slot(file_row(1, "sheet")),
             caps(3),
         )
+
+
+# ── the selection bounds the answer (C1) ───────────────────────────────────
+#
+# The defect this section exists for: the ceiling used to trim the asset's WHOLE
+# file list and the canvas card then intersected the result with its own
+# checklist. That composes to `top_N(all) ∩ selection`, which is not
+# `top_N(selection)` — and the two differ on an ordinary interaction, not an
+# exotic one. `test_a_lone_low_priority_pick_is_delivered` is the reproduction:
+# under the old order it delivered zero references and reported the user's own
+# pick as `over_limit`, i.e. it blamed the provider for the harness's mistake.
+
+
+def test_a_lone_low_priority_pick_is_delivered():
+    """One tick, on the file ranked FOURTH, with a ceiling of three.
+
+    `top_N(all) ∩ selection` = `["1","2","3"] ∩ {"4"}` = **nothing**, and the
+    old `dropped` blamed `over_limit`. `top_N(selection)` delivers it.
+    """
+    out = build_bundle(asset(), None, [], FILES, caps(3), selected_resource_ids=["4"])
+
+    assert out["reference_resource_ids"] == ["4"]
+    assert out["dropped"] == []
+
+
+def test_the_ceiling_trims_within_the_selection_not_across_all_files():
+    """Four picked, three allowed: the trim is over the four, in priority
+    order — not over the five the asset owns."""
+    out = build_bundle(
+        asset(), None, [], FILES, caps(3), selected_resource_ids=["5", "4", "3", "2"]
+    )
+
+    assert out["reference_resource_ids"] == ["2", "3", "4"]
+    assert out["dropped"] == [{"resource_id": "5", "reason": "over_limit"}]
+
+
+def test_dropped_and_the_selection_do_overlap_when_the_pick_really_lost():
+    """The case no test on this branch used to have: an id that is BOTH picked
+    and dropped. That overlap is what makes `dropped` a per-run answer rather
+    than a standing description of the asset."""
+    out = build_bundle(
+        asset(), None, [], FILES, caps(1), selected_resource_ids=["1", "3"]
+    )
+
+    dropped_ids = {d["resource_id"] for d in out["dropped"]}
+    assert out["reference_resource_ids"] == ["1"]
+    # Both halves matter: the picked loser IS reported, and nothing the user
+    # never picked is reported alongside it.
+    assert dropped_ids == {"3"}
+
+
+def test_files_the_user_did_not_pick_are_not_reported_as_dropped():
+    """I1: a run in which everything chosen was sent reports NOTHING.
+
+    The old behaviour put every non-top-N file of the asset into `dropped`, so
+    a freshly placed card (which seeds the primary slot alone) cried wolf on
+    every single run — and a badge that cries wolf on the happy path is how the
+    badge stops being read."""
+    out = build_bundle(asset(), None, [], FILES, caps(3), selected_resource_ids=["1"])
+
+    assert out["reference_resource_ids"] == ["1"]
+    assert out["dropped"] == []
+
+
+def test_an_empty_selection_delivers_and_reports_nothing():
+    """`[]` is "the user unticked everything", NOT "no selection given".
+
+    Collapsing it into `None` would ship every reference the user just
+    removed."""
+    out = build_bundle(asset(), None, [], FILES, caps(9), selected_resource_ids=[])
+
+    assert out["reference_resource_ids"] == []
+    assert out["dropped"] == []
+
+
+def test_no_selection_still_means_every_file():
+    """The asset sheet's question, unchanged: `None` is not `[]`."""
+    out = build_bundle(asset(), None, [], FILES, caps(9), selected_resource_ids=None)
+
+    assert out["reference_resource_ids"] == ["1", "2", "3", "4", "5"]
+
+
+def test_a_picked_file_with_no_image_is_still_reported():
+    """Selection narrows the population; it does not silence it. A file the
+    user ticked that has no image bytes must still come back as
+    `no_image_file`, or the card shows a checked row that vanished."""
+    files = by_slot(
+        file_row(1, "sheet"),
+        file_row(2, "worn", has_image=False),
+        file_row(3, "stills"),
+    )
+
+    out = build_bundle(
+        asset(), None, [], files, caps(9), selected_resource_ids=["2", "3"]
+    )
+
+    assert out["reference_resource_ids"] == ["3"]
+    assert out["dropped"] == [{"resource_id": "2", "reason": "no_image_file"}]
+
+
+def test_a_selection_id_naming_no_file_matches_nothing():
+    """A stale id (a loadout changed before the card's detail loaded) is
+    neither delivered nor reported — there is no file to report on. The
+    disclosed M3 gap, pinned so a later change to it is a decision."""
+    out = build_bundle(
+        asset(), None, [], FILES, caps(9), selected_resource_ids=["1", "999"]
+    )
+
+    assert out["reference_resource_ids"] == ["1"]
+    assert out["dropped"] == []
+
+
+def test_the_selection_is_compared_as_strings_not_by_identity():
+    """The two sides disagree about the type of a Snowflake: file rows carry
+    the DB's int, the wire carries the client's string. Comparing raw is the
+    "index built on strings, response gives numbers" mismatch this repo has
+    already paid for once."""
+    out = build_bundle(
+        asset(),
+        None,
+        [],
+        by_slot(file_row(727145299382534146, "sheet")),
+        caps(9),
+        selected_resource_ids=["727145299382534146"],
+    )
+
+    assert out["reference_resource_ids"] == ["727145299382534146"]
+
+
+def test_the_selection_does_not_reorder_the_delivery():
+    """Ticking order is not delivery order. The provider reads the first
+    reference as the lead one, so it must be the priority order's lead."""
+    out = build_bundle(
+        asset(), None, [], FILES, caps(9), selected_resource_ids=["5", "1", "3"]
+    )
+
+    assert out["reference_resource_ids"] == ["1", "3", "5"]

@@ -432,3 +432,77 @@ async def test_an_asset_with_no_files_reads_no_media_rows(svc, catalog):
 
     assert calls == []
     assert out["reference_resource_ids"] == [] and out["dropped"] == []
+
+
+# ── the card's checklist reaches the trim (C1) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_selection_narrows_the_population_before_the_ceiling(svc, catalog):
+    """Four files, a ceiling of two, and the user picked the two that rank
+    LAST. The old order delivered nothing and reported both picks as
+    `over_limit`; the answer must be the two they picked."""
+    a = await _asset(svc)
+    for rid, slot in (
+        (SHEET_FILE, "sheet"),
+        (WORN_FILE, "worn"),
+        (STILLS_FILE, "stills"),
+        (EXTRAS_FILE, "extras"),
+    ):
+        await _attach(svc, a["id"], rid, slot)
+    catalog.models[MODEL] = _caps(2)
+
+    out = await _bundle(svc, a["id"], selected_file_ids=[STILLS_FILE, EXTRAS_FILE])
+
+    assert out["reference_resource_ids"] == [STILLS_FILE, EXTRAS_FILE]
+    assert out["dropped"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_selection_leaves_the_sheets_answer_unchanged(svc, catalog):
+    """The parameter is opt-in: the asset sheet never passes one and still
+    gets every file the asset owns."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    await _attach(svc, a["id"], WORN_FILE, "worn")
+    catalog.models[MODEL] = _caps(9)
+
+    out = await _bundle(svc, a["id"])
+
+    assert out["reference_resource_ids"] == [SHEET_FILE, WORN_FILE]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_selection_is_not_no_selection(svc, catalog):
+    """Unticking every box must ship zero references — collapsing `[]` into
+    `None` would ship exactly the files the user just removed."""
+    a = await _asset(svc)
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    catalog.models[MODEL] = _caps(9)
+
+    out = await _bundle(svc, a["id"], selected_file_ids=[])
+
+    assert out["reference_resource_ids"] == [] and out["dropped"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_loadout_filter_still_applies_within_a_selection(svc, catalog):
+    """The two narrowings compose, and the loadout is the stricter one: a file
+    pinned to another outfit is not deliverable however hard it is ticked."""
+    a = await _asset(svc)
+    mine = await svc.create_loadout(int(a["id"]), SCOPE, LoadoutCreate(name="Gala"))
+    theirs = await svc.create_loadout(int(a["id"]), SCOPE, LoadoutCreate(name="Field"))
+    await _attach(svc, a["id"], SHEET_FILE, "sheet")
+    await _attach(svc, a["id"], WORN_FILE, "worn", loadout_id=str(mine["id"]))
+    await _attach(svc, a["id"], STILLS_FILE, "stills", loadout_id=str(theirs["id"]))
+    catalog.models[MODEL] = _caps(9)
+
+    out = await _bundle(
+        svc,
+        a["id"],
+        loadout_id=mine["id"],
+        selected_file_ids=[WORN_FILE, STILLS_FILE],
+    )
+
+    assert out["reference_resource_ids"] == [WORN_FILE]
+    assert out["dropped"] == []

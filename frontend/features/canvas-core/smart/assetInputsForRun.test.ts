@@ -92,6 +92,9 @@ describe('resolveAssetInputsForRun', () => {
     expect(fetchBundle).toHaveBeenCalledWith(SCOPE, '55', {
       model: 'codex',
       loadoutId: undefined,
+      // The card's checklist rides along so the provider ceiling is applied
+      // WITHIN it, server-side. Losing it here is the C1 defect.
+      selectedFileIds: ['10'],
     });
     expect(out.reference_urls).toEqual(['/api/v1/resources/10/cover']);
     expect(out.prompt_prefix).toBe('Ava, red coat');

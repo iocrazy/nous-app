@@ -153,11 +153,18 @@ export function AssetNodeView({ id, data, selected }: NodeProps) {
   );
   const caps = useModelCapabilities(genModel);
   const maxRefs = caps?.max_refs ?? null;
-  // Rank among the CHECKED rows. `files` is ordered by
-  // `referenceSlotPriority` — the mirror of the backend `_slot_priority` that
-  // `reference_order` walks — so list position IS delivery position, and the
-  // provider's cap trims this list's tail. Ranking by any other order (the
-  // slot DECLARATION order, say) dims a file that is in fact sent.
+  // Rank among the CHECKED rows — the SAME population and the SAME order the
+  // bundle now trims.
+  //
+  // Both halves of that sentence are load-bearing. `files` is ordered by
+  // `referenceSlotPriority`, the mirror of the backend `_slot_priority` that
+  // `reference_order` walks, so list position IS delivery position; and the
+  // endpoint is handed this card's `selected_file_ids` and applies the
+  // provider's ceiling WITHIN them (`build_bundle::_restrict_to_selection`),
+  // so the checked rows past position `maxRefs` are exactly the ones it drops.
+  // Get either half wrong and the card contradicts itself across one run: it
+  // used to align the two ORDERS while leaving the two POPULATIONS different,
+  // which dimmed nothing before the run and then blamed the provider after it.
   //
   // ⚠️ `max_refs` is a limit on the REQUEST, and this is one card. Two asset
   // cards feeding one prompt can each sit under the ceiling while the run

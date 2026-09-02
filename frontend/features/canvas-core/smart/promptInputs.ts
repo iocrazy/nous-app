@@ -309,17 +309,26 @@ export async function resolveAssetInputs(
         bundle = await call(opts.scopeId, String(data.asset_id), {
           model: opts.model,
           loadoutId: data.loadout_id ?? undefined,
+          // The card's checklist goes TO the endpoint, which trims the
+          // provider's ceiling within it. See the note below the call.
+          selectedFileIds: data.selected_file_ids ?? [],
         });
       } catch (err) {
         console.error('[resolveAssetInputs] bundle fetch failed:', err);
         return { ...base, error: err instanceof Error ? err.message : String(err) };
       }
-      // BUNDLE order, not selection order: the bundle is the provider-aware
-      // priority (primary slot first, tail-dropped at max_refs), and reordering
-      // it by the order the user happened to tick boxes in would hand the
-      // provider a different lead reference than the one the endpoint chose.
-      const picked = new Set(data.selected_file_ids ?? []);
-      const ids = bundle.reference_resource_ids.filter((rid) => picked.has(rid));
+      // TAKEN AS GIVEN — no intersection here, deliberately.
+      //
+      // The endpoint was handed the selection and trimmed within it, so its
+      // answer already IS "the top max_refs of what this card ticked", in the
+      // provider-aware priority order (primary slot first, tail-dropped).
+      // Re-filtering it against the same selection would be a no-op at best;
+      // what this code used to do was the reverse — the endpoint trimmed over
+      // ALL the asset's files and this line intersected afterwards, which is
+      // `top_N(all) ∩ selection` and delivers NOTHING whenever the picks are
+      // not a prefix of the priority order. Reordering by tick order would be
+      // its own bug: the provider reads the first reference as the lead one.
+      const ids = bundle.reference_resource_ids;
       return {
         ...base,
         urls: ids.map(assetReferenceUrl),
