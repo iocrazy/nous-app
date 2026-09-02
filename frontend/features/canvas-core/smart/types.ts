@@ -11,6 +11,8 @@
  * UI layer just calls into it.
  */
 
+import type { AssetType } from '../../../components/assets/assetSlots';
+import type { DroppedReference } from '../../../services/assetsService';
 import type { CropRegion } from '../editor/types';
 import type { CanvasNode } from '../types';
 
@@ -39,7 +41,12 @@ export type SmartNodeType =
   | 'group'
   | 'character'
   | 'location'
-  | 'prop';
+  | 'prop'
+  // Asset-library reference card (P4 Task 4). Unlike `character`/`location`/
+  // `prop` — which bind rows of the two `_legacy_project_*` tables — this one
+  // points at an `assets` row and is the type the backend's
+  // `extract_asset_node_refs` mirrors into `canvas_asset_refs`.
+  | 'asset';
 
 export type LoopMode = 'serial' | 'parallel';
 
@@ -101,6 +108,18 @@ export interface ShotNodeData {
   stale?: boolean;
 }
 
+/** One reference a generation run could not use, and why.
+ *
+ * Mirrors the backend's `dropped_refs` entries verbatim (route: workflow
+ * result → task_tracking metadata → generationRunner). `reason` is a code,
+ * not a sentence: the UI owns the wording, and both locales have to be able
+ * to say it. An unrecognised code still renders — falling back to the raw
+ * code beats a badge that silently omits a reference. */
+export interface DroppedRef {
+  url: string;
+  reason: string;
+}
+
 export interface PromptNodeData {
   body: string;
   /** IC promptH: user-dragged textarea height in px (persisted so the
@@ -141,9 +160,14 @@ export interface PromptNodeData {
   image_refs?: { url: string; alias: string; kind: string }[];
   /**
    * Negative prompt text loaded from an asset's prompt library entry
-   * (Phase 2). Optional; absent for hand-typed prompts. The generation
-   * pipeline does not consume it yet — providers that support negative
-   * prompts will pick it up when the runner grows that capability.
+   * (Phase 2). Optional; absent for hand-typed prompts.
+   *
+   * LIVE since asset-library P4 Task 5: `generationRunner` ships it as
+   * `params.negative`, merged with whatever the upstream asset cards
+   * contribute and deduped. Whether the provider accepts one is decided
+   * server-side by `GenerationRequest.reconcile`, which drops it and names
+   * `negative` in `dropped_knobs` — so a model that ignores negatives says so
+   * on the node rather than silently discarding the text.
    */
   negative_body?: string;
   /**
@@ -164,6 +188,20 @@ export interface PromptNodeData {
    * the badge sits next to, never an older one.
    */
   last_dropped?: string[];
+  /**
+   * References the backend could not USE on the LAST run (P4 asset library),
+   * each with a machine-readable reason: `unknown_shape` / `not_in_scope` /
+   * `no_image_file` / `materialize_failed` / `scope_unresolved` /
+   * `unresolved`. Written by the same `markDroppedKnobs` call that writes
+   * `last_dropped`, from `metadata.dropped_refs`, and rendered in the same
+   * "Ignored" badge.
+   *
+   * Separate from `last_dropped` rather than folded into it because the two
+   * are ORTHOGONAL results of one run: a knob can be dropped, a reference
+   * can be dropped, or both. Merging them into one string list would make
+   * "which references were lost" unanswerable from the node's own state.
+   */
+  last_dropped_refs?: DroppedRef[];
   /** @-selected input image url (IC parity ⑤ — the mention picker's
    *  「输入图」tab): overrides which wired input feeds i2i. Stale refs
    *  fall back to the first input (resolveEffectiveSourceUrl). */
@@ -352,26 +390,113 @@ export type AnySmartNode =
   | LoopNode
   | CharacterNode;
 
-/** Character canvas (kind='character'): the bible-card node the preset agent
- *  workflow hangs off. Binds a project_characters row when opened from the
- *  library; unbound (character_id null) when hand-placed. */
+/**
+ * Character canvas (kind='character'): the bible-card node the preset agent
+ * workflow hung off. Binds a `_legacy_project_characters` row when it was
+ * opened from the old library; unbound (character_id null) when hand-placed.
+ *
+ * LEGACY. Nothing creates one any more — P4 Task 6 removed the last producer
+ * (the character canvas's seeding template) and replaced it with the asset
+ * card. The type, the view and this shape stay because saved canvases still
+ * hold these nodes, and `legacyMigration.ts` rewrites the bound ones into
+ * asset cards as each canvas loads.
+ */
 export interface CharacterNodeData {
-  /** project_characters row id (snowflake string), or null = unbound. */
+  /** `_legacy_project_characters` row id (snowflake string), or null = unbound. */
   character_id: string | null;
   name: string;
   role_tag: string;
   description: string;
   portrait_url: string | null;
+  /**
+   * The asset library has no asset carrying this card's provenance (P4 Task 6).
+   *
+   * Set ONLY when `GET /assets/resolve-legacy` answered an explicit `null` —
+   * never when the request failed, which is "could not ask". The card then
+   * renders an `Unmigrated` badge instead of pretending it is still connected
+   * to a library that no longer knows it.
+   */
+  unmigrated?: boolean;
 }
 
-/** Location/prop canvas (SP2): the library-card node the preset workflow
- *  hangs off. Binds a project_lib_entities row; unbound when hand-placed. */
+/**
+ * Location/prop canvas (SP2): the library-card node the preset workflow hung
+ * off. Binds a `_legacy_project_lib_entities` row; unbound when hand-placed.
+ *
+ * LEGACY, on the same terms as {@link CharacterNodeData} above.
+ */
 export interface LibEntityNodeData {
   entity_id: string | null;
   name: string;
   badge_tag: string;
   description: string;
   cover_url: string | null;
+  /** See {@link CharacterNodeData.unmigrated}. */
+  unmigrated?: boolean;
+}
+
+/**
+ * Asset-library reference card (P4 Task 4).
+ *
+ * The node is a POINTER, never a copy: everything below except
+ * `loadout_id` / `selected_file_ids` is a display SNAPSHOT taken when the
+ * card was placed, so a node renders before its detail fetch resolves and
+ * still renders when that fetch fails. The library row stays the authority —
+ * the view refreshes the snapshot from `fetchAssetDetail` and never writes
+ * back to `assets`.
+ *
+ * `asset_id` / `loadout_id` are Snowflake bigints as STRINGS (the assets
+ * router stringifies every BIGINT column). The backend extractor
+ * `services/canvas/asset_node_refs.py` reads exactly `type === 'asset'` +
+ * `data.asset_id` + `data.loadout_id` and mirrors them into
+ * `canvas_asset_refs` on every save — renaming either key silently empties
+ * that mirror, which is why they are spelled the wire's way and not the
+ * frontend's.
+ *
+ * `selected_file_ids` holds RESOURCE ids (`asset_files.resource_id`), the
+ * same vocabulary the bundle endpoint answers in. It is node-local on
+ * purpose: two cards for one asset may reference different files, and
+ * writing the choice back to the library would make one canvas's framing
+ * decision everyone else's.
+ *
+ * `removed` is set only when the detail fetch answers 404 — the asset was
+ * deleted out from under the canvas. A network failure or a 403 must NOT
+ * set it: the card would then claim a deletion that never happened, and the
+ * flag persists into `nodes_json`.
+ */
+export interface AssetNodeData {
+  /** `assets.id` — Snowflake as string. The backend extractor's key. */
+  asset_id: string;
+  /** `asset_loadouts.id` for a character's outfit, or null = no loadout. */
+  loadout_id: string | null;
+  /** `asset_files.resource_id` values this card feeds downstream. */
+  selected_file_ids: string[];
+  // ── Display snapshot ──────────────────────────────────────────────────
+  name: string;
+  asset_type: AssetType;
+  cover_file_id: string | null;
+  readiness_state: 'ready' | 'draft';
+  /** The asset is gone (detail answered 404). Absent = not known to be gone. */
+  removed?: boolean;
+  // ── Last run's bundle report (P4 Task 5) ──────────────────────────────
+  /**
+   * References the bundle endpoint would NOT send on the last run this card
+   * fed, each with the backend's reason (`over_limit` / `no_image_file` /
+   * `provider_no_refs`). Rewritten by every run, INCLUDING a clean one — which
+   * clears it — so the badge always describes the run it sits beside.
+   *
+   * This is the asset-side half of the same discipline `last_dropped` serves on
+   * the prompt node: a delivery the provider trimmed must say so somewhere, or
+   * "选了也生成了但图里没有" happens with nothing on screen explaining it.
+   */
+  last_bundle_dropped?: DroppedReference[];
+  /**
+   * The bundle request itself failed, and why. NOT the same as an empty
+   * `last_bundle_dropped`: "we could not ask" and "nothing was dropped" are
+   * different answers, and collapsing them reports a card that contributed
+   * nothing as a card that had nothing to contribute.
+   */
+  last_bundle_error?: string | null;
 }
 
 /**
@@ -391,6 +516,10 @@ export interface LibEntityNodeData {
  *   loop   → shot            ✗ (shots are sources)
  *   output → anything        ✗ (outputs are terminal)
  *   *      → shot            ✗ (shots are sources only)
+ *   asset  → prompt/shot/llm ✓ (a library reference feeds authoring)
+ *   asset  → anything else   ✗
+ *   *      → asset           ✗ (asset cards are pure sources — nothing
+ *                            writes back into the library over a wire)
  *   <unknown type>           allow — the surface is mode-aware, custom
  *                            future types opt in their own rules.
  */
@@ -405,6 +534,12 @@ export function canConnectSmart(
     return (
       targetType === 'group' || targetType === 'prompt' || targetType === 'loop'
     );
+  // Asset-library cards (P4 Task 4) are PURE SOURCES: they feed the three
+  // authoring consumers and accept nothing. Stated BEFORE the `→ shot`
+  // blanket refusal below, which would otherwise swallow `asset → shot`.
+  if (targetType === 'asset') return false;
+  if (sourceType === 'asset')
+    return targetType === 'prompt' || targetType === 'shot' || targetType === 'llm';
   if (targetType === 'shot') return false;
   // Media cards are sources like shot: they feed prompts/loops only.
   if (targetType === 'media') return false;
@@ -458,6 +593,9 @@ export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
   character: 280,
   location: 280,
   prop: 280,
+  // Wider than the entity cards: the asset card stacks a cover + meta row
+  // above a loadout select and a scrolling reference-file checklist.
+  asset: 300,
 };
 
 export const LOOP_MODE_TONE: Record<LoopMode, string> = {

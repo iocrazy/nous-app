@@ -67,6 +67,11 @@ class GenerationRequest:
     negative: Optional[str]
     video_mode: Optional[VideoMode]
     duration: Optional[int]
+    # References the GLOBAL ``MAX_REFS`` ceiling removed before any provider was
+    # consulted. Carried on the request rather than dropped on the floor so
+    # ``reconcile`` can report it — see ``from_params``. Defaulted so no
+    # existing construction has to change.
+    refs_truncated: int = 0
 
     @classmethod
     def from_params(
@@ -80,11 +85,21 @@ class GenerationRequest:
     ) -> "GenerationRequest":
         k: Literal["image", "video"] = "video" if kind == "video" else "image"
         raw_refs = params.get("source_urls")
-        refs = [
+        usable = [
             u
             for u in (raw_refs if isinstance(raw_refs, list) else [])
             if isinstance(u, str) and u
-        ][:MAX_REFS] or ([source_url] if source_url else [])
+        ]
+        # The global ceiling, and HOW MANY it took. This slice used to be
+        # silent: only the per-provider ``caps.max_refs`` trim appended "refs"
+        # to ``dropped_knobs``, so a request cut from twelve to nine here went
+        # out looking complete. Asset cards make the list easy to push past
+        # nine — two characters and a location on one prompt will do it — so
+        # the count travels to ``reconcile`` and is reported there.
+        refs = usable[:MAX_REFS]
+        truncated = len(usable) - len(refs)
+        if not refs and source_url:
+            refs = [source_url]
         mode = _clean(params.get("video_mode"))
         return cls(
             kind=k,
@@ -98,6 +113,7 @@ class GenerationRequest:
             negative=_clean(params.get("negative")),
             video_mode=mode if mode in ("frames", "multimodal") else None,  # type: ignore[arg-type]
             duration=_positive_int(params.get("duration")),
+            refs_truncated=truncated,
         )
 
     def reconcile(
@@ -106,7 +122,10 @@ class GenerationRequest:
         """Drop what this provider cannot honour and SAY which knobs went.
 
         The list is in a fixed order so metadata/tests read the same way.
-        Never silent: an empty list means everything requested will be sent.
+        Never silent: an empty list means everything requested will be sent —
+        including the references the GLOBAL ceiling removed before this method
+        ever saw the request (``refs_truncated``), which is why that count is
+        folded in below rather than left for nobody to report.
         """
         dropped: list[str] = []
         eff = self
@@ -124,13 +143,25 @@ class GenerationRequest:
         # jimeng-local declares 0 because its text2image CLI takes no --image),
         # while VIDEO refs ride on ``video_modes`` as first/last frame or
         # multimodal. Applying the image cap to a frames2video job emptied it.
-        # The global 9 ceiling is enforced upstream in ``from_params``.
+        #
+        # The global 9 ceiling is enforced upstream in ``from_params``, which
+        # records how many it took in ``refs_truncated``. It is reported HERE,
+        # through the same "refs" entry, because ``dropped`` is the one list a
+        # caller reads and a second vocabulary for "you asked for references
+        # that were not sent" would just be a second thing to forget to render.
+        # ``refs`` appears AT MOST ONCE however many stages trimmed — the badge
+        # counts reasons, not stages.
+        refs_over_ceiling = eff.refs_truncated > 0
         if eff.kind == "video":
             if eff.refs and not caps.video_modes:
                 eff = replace(eff, refs=())
                 dropped.append("refs")
+            elif refs_over_ceiling:
+                dropped.append("refs")
         elif len(eff.refs) > caps.max_refs:
             eff = replace(eff, refs=eff.refs[: caps.max_refs])
+            dropped.append("refs")
+        elif refs_over_ceiling:
             dropped.append("refs")
         if eff.negative and not caps.negative:
             eff = replace(eff, negative=None)

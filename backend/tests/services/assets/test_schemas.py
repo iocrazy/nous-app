@@ -402,3 +402,148 @@ def test_a_client_cannot_set_membership_at_creation():
     assert "in_library" not in AssetCreate.model_fields
     made = AssetCreate(asset_type="character", name="Sang Yao", in_library=False)
     assert not hasattr(made, "in_library")
+
+
+# ── P4: used_in — the canvas mirror the detail response carries ────────────
+
+
+def test_asset_detail_response_declares_the_used_in_contract():
+    """``used_in`` must be the TYPED model, not a bare dict waved through —
+    and OPTIONAL, because it is opt-in on the route.
+
+    The set of keys ``get_asset`` emits is pinned dynamically — by driving the
+    real method — in ``test_assets_service.py``; this one only fixes the type,
+    which that test cannot see (a dict would satisfy it just as well).
+    """
+    from typing import Optional, get_args
+
+    from app.schemas.assets import UsedInResponse
+
+    field = AssetDetailResponse.model_fields["used_in"]
+    assert field.annotation == Optional[UsedInResponse], (
+        "used_in must be the typed model (not a bare dict passed through "
+        "unvalidated) and Optional (it is only computed on request)"
+    )
+    assert UsedInResponse in get_args(field.annotation)
+
+
+def test_used_in_is_absent_by_default_rather_than_an_empty_pair():
+    """The response must not CLAIM "used nowhere" for a caller that did not ask.
+
+    ``?include_used_in`` gates a five-table aggregate. A ``default_factory``
+    here would hand every unasked caller an empty ``used_in``, which reads as a
+    computed answer — and the client cannot tell the two apart."""
+    field = AssetDetailResponse.model_fields["used_in"]
+    assert field.default is None
+    assert field.default_factory is None, (
+        "a default_factory would manufacture an empty used_in for callers who "
+        "never asked for one"
+    )
+    # And the sibling fields still DO default, so this is a deliberate
+    # exception rather than the whole model losing its defaults.
+    assert AssetDetailResponse.model_fields["files"].default_factory is list
+
+
+def test_used_in_defaults_to_both_halves_present_and_empty():
+    """A missing half must read as "nothing here", not as an absent key: the
+    sheet branches on ``used_in.canvases.length``, and ``undefined.length``
+    throws where ``[].length`` renders an empty panel."""
+    from app.schemas.assets import UsedInResponse
+
+    assert UsedInResponse().model_dump() == {"canvases": [], "storyboards": []}
+
+
+def test_used_in_canvas_ref_keeps_every_field_the_repository_emits():
+    """``CanvasAssetRefsRepository.list_canvases_for_asset`` returns these six
+    keys; anything the model does not declare vanishes on the way out."""
+    from app.schemas.assets import UsedInCanvasRef
+
+    emitted = {
+        "canvas_id",
+        "canvas_name",
+        "kind",
+        "project_id",
+        "node_ids",
+        "loadout_ids",
+    }
+    assert emitted <= set(UsedInCanvasRef.model_fields)
+
+
+def test_bundle_response_requires_every_half_including_dropped():
+    """Nothing here may be defaulted. ``dropped`` in particular: an optional
+    empty list lets a service that stopped reporting drops answer "nothing was
+    dropped", which is the silent drop the field was added to end."""
+    from app.schemas.assets import BundleResponse
+
+    required = {
+        name for name, f in BundleResponse.model_fields.items() if f.is_required()
+    }
+    assert required == {"prompt", "reference_resource_ids", "dropped", "max_refs"}
+
+
+def test_bundle_reference_ids_are_strings_not_numbers():
+    """BIGINT resource ids. A JSON number past 2**53 loses precision in the
+    browser — the bigIntSafeFetch discipline, at the schema."""
+    from app.schemas.assets import BundleResponse
+
+    model = BundleResponse(
+        prompt={"positive": "p", "negative": ""},
+        reference_resource_ids=["727145299382534146"],
+        dropped=[],
+        max_refs=3,
+    )
+    assert model.reference_resource_ids == ["727145299382534146"]
+    assert all(isinstance(x, str) for x in model.reference_resource_ids)
+
+
+def test_bundle_drop_reasons_are_a_closed_vocabulary():
+    """The three the protocol defines — and nothing else. A reason the UI has
+    no string for renders as a blank row, which is a drop the user cannot
+    see."""
+    import typing
+
+    from app.schemas.assets import DroppedReason
+
+    assert set(typing.get_args(DroppedReason)) == {
+        "no_image_file",
+        "over_limit",
+        "provider_no_refs",
+    }
+
+
+def test_bundle_rejects_an_invented_drop_reason():
+    from pydantic import ValidationError
+
+    from app.schemas.assets import BundleResponse
+
+    with pytest.raises(ValidationError):
+        BundleResponse(
+            prompt={"positive": "", "negative": ""},
+            reference_resource_ids=[],
+            dropped=[{"resource_id": "1", "reason": "because"}],
+            max_refs=3,
+        )
+
+
+def test_bundle_carries_no_multi_subject_field():
+    """Ruling B: the spec's ``multi_subject`` capability has no referent
+    anywhere in this repo, so the wire does not invent one."""
+    from app.schemas.assets import BundleResponse
+
+    assert "multi_subject" not in BundleResponse.model_fields
+
+
+def test_used_in_canvas_ref_node_ids_is_a_list_not_a_count():
+    """A count would be enough to render "used in 2 places" and useless for the
+    click that jumps to one of them — the list is the feature."""
+    from app.schemas.assets import UsedInCanvasRef
+
+    ref = UsedInCanvasRef(
+        canvas_id="1",
+        canvas_name="Looks",
+        kind="smart",
+        project_id="2",
+        node_ids=["a", "b"],
+        loadout_ids=[],
+    )
+    assert ref.node_ids == ["a", "b"]

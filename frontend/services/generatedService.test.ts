@@ -17,6 +17,7 @@ import {
   deleteGeneration,
   fetchGenerated,
   fetchGeneratedCounts,
+  fetchGeneratedItem,
   GeneratedApiError,
   saveGeneration,
   saveGenerationAsAsset,
@@ -508,5 +509,44 @@ describe('failover reporting', () => {
     await fetchGenerated(SCOPE).catch(() => {});
 
     expect(failoverMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── one item by id (P4 Task 6) ──────────────────────────────────────────────
+//
+// The canvas's "As Asset…" reads the row behind an output image so
+// `SaveAsAssetDialog` gets a real `GeneratedItem` — including the
+// `source_asset_id` its prefill depends on, which the canvas node never held.
+// The body below is the SAME shape the list returns, because the router
+// decorates both through one code path.
+
+describe('fetchGeneratedItem', () => {
+  it('reads /generated/{id} with the scope and returns the decorated row', async () => {
+    const spy = stubFetch({ success: true, data: PAGE_BODY.data.items[0] });
+    const item = await fetchGeneratedItem(SCOPE, '727145299382534145');
+    expect(item.id).toBe('727145299382534145');
+    expect(item.source_asset_id).toBe('727145299382534201');
+    expect(item.source.deep_link).toContain('?node=n9');
+    expect(item.title).toBe('Prompt 0');
+    const url = calledUrl(spy);
+    expect(url.pathname).toBe('/api/v1/generated/727145299382534145');
+    expect(url.searchParams.get('scope_id')).toBe(SCOPE);
+  });
+
+  it('carries the auth header', async () => {
+    const spy = stubFetch({ success: true, data: PAGE_BODY.data.items[0] });
+    await fetchGeneratedItem(SCOPE, '727145299382534145');
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+
+  it('a row in another scope throws the typed 404, never an empty item', async () => {
+    stubFetch(
+      { success: false, error: { code: 'generation_not_found', detail: 'nope' } },
+      404,
+    );
+    await expect(fetchGeneratedItem(SCOPE, '1')).rejects.toMatchObject({
+      code: 'generation_not_found',
+      status: 404,
+    });
   });
 });

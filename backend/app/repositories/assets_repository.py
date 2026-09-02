@@ -402,6 +402,69 @@ class AssetsRepository:
                 out[str(asset_type)] = int(n)
         return out
 
+    def _resolve_legacy_stmt(self, scope_id: int, legacy_table: str, legacy_id: int):
+        """The SELECT behind :meth:`resolve_legacy`.
+
+        Matches on JSONB CONTAINMENT (``attrs @> '{"legacy_ids": [[t, id]]}'``)
+        rather than on an unnested comparison: ``legacy_ids`` is a list of
+        ``[table, id]`` pairs (a merged asset carries several), and containment
+        is the operator that answers "is this pair one of them" without the
+        caller having to know how many there are. It also matches BOTH elements
+        of the pair together — comparing the id alone would let a
+        ``project_characters`` id 7 answer for a ``project_lib_entities`` id 7,
+        which is a different entity in a different table.
+
+        Only ``legacy_ids`` is searched. ``attrs.merged_from`` repeats the same
+        pairs for a merged asset, but it is a record of the merge, not the
+        identity map; a containment probe keyed on the ``legacy_ids`` KEY cannot
+        match it, which is the intended behaviour rather than an accident.
+
+        Scope-limited, and system presets are NOT unioned in the way
+        :meth:`get` unions them: a preset has no legacy row behind it, so
+        widening the read would only add rows that can never match.
+
+        ``ORDER BY id`` is not decoration — nothing in the schema forbids two
+        assets carrying the same legacy pair (a hand-edited ``attrs``, or a
+        partially-applied migration re-run), and ``LIMIT 1`` without an order is
+        a coin flip between them.
+        """
+        return (
+            select(Assets.id)
+            .where(Assets.scope_id == int(scope_id))
+            .where(Assets.deleted_at.is_(None))
+            .where(
+                Assets.attrs.contains({"legacy_ids": [[legacy_table, int(legacy_id)]]})
+            )
+            .order_by(Assets.id.asc())
+            .limit(1)
+        )
+
+    async def resolve_legacy(
+        self, scope_id: int, legacy_table: str, legacy_id: int
+    ) -> Optional[int]:
+        """The asset a legacy project entity became, or ``None``.
+
+        ``None`` genuinely means "no asset in this scope carries that
+        provenance", and the remaining cause is an entity whose project never
+        migrated — it has no asset at all.
+
+        ADOPTION used to be a second cause and is not one any more: ``_apply``
+        appends the run's ``(table, id)`` pairs to the adopted asset's
+        ``attrs.legacy_ids``, so an entity the migration merged into a
+        hand-made asset resolves here like any other. A row migrated BEFORE
+        that change still answers ``None`` until the backfill is re-run, which
+        is safe to do — the stamp is idempotent.
+        """
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    self._resolve_legacy_stmt(
+                        int(scope_id), str(legacy_table), int(legacy_id)
+                    )
+                )
+            ).first()
+        return int(row[0]) if row else None
+
     async def soft_delete(self, asset_id: int, scope_id: int) -> bool:
         async with write_scope() as session:
             res = await session.execute(

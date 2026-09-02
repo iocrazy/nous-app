@@ -130,6 +130,17 @@ Every canvas assertion here checks `.react-flow__node:visible`.
    card are visible.
 5. **Canvas tab** — the real storyboard React Flow canvas; at least one
    node renders VISIBLE (not just present in the DOM).
+5b. **Asset card on the canvas (P4)** — an asset-library reference is a node
+   type now, and it is the P4 surface most exposed to the 2026-08-12 failure
+   mode: each card renders from its OWN detail fetch, so a broken scope leaves
+   a card that is present and blank. The board may legitimately hold no asset
+   card, so the assertion is a disjunction (an asset card is visible, or the
+   canvas says it is empty, or the ordinary nodes of step 5 are what this board
+   holds). Which branch was taken is written into the run as a `p4-asset-card`
+   ANNOTATION rather than swallowed — a step that cannot fail must at least
+   report that it checked nothing, which is the same rule the readiness probes
+   follow. To make it a real check, put one asset card on the fixture episode's
+   canvas.
 6. **Shot List tab, view three** — the flat per-shot table, seeded shot row
    visible.
 7. **Script module** — the inline-mounted editor shell loads.

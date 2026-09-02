@@ -280,11 +280,48 @@ class LoadoutResponse(BaseModel):
     created_at: datetime
 
 
+class UsedInCanvasRef(BaseModel):
+    """One canvas that references this asset (P4).
+
+    ``node_ids`` is a LIST because a canvas may place the same asset on several
+    nodes; collapsing to a count would lose the ability to jump to one. Ids are
+    strings for the usual snowflake-precision reason.
+    """
+
+    canvas_id: str
+    canvas_name: str
+    kind: str
+    project_id: str
+    node_ids: List[str] = Field(default_factory=list)
+    loadout_ids: List[str] = Field(default_factory=list)
+
+
+class UsedInResponse(BaseModel):
+    """Where an asset is in use (spec §5.1 ``used_in``).
+
+    ``storyboards`` is declared and always EMPTY today — the storyboard side has
+    no ref mirror yet (a later phase). It is here rather than absent so the
+    client renders "no storyboard usage" instead of branching on a missing key,
+    and so the day it starts filling nothing on the wire has to change shape.
+    """
+
+    canvases: List[UsedInCanvasRef] = Field(default_factory=list)
+    storyboards: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class AssetDetailResponse(AssetResponse):
     files: List[AssetFileResponse] = Field(default_factory=list)
     links: List[AssetLinkResponse] = Field(default_factory=list)  # outgoing
     linked_by: List[AssetLinkResponse] = Field(default_factory=list)  # incoming
     loadouts: List[LoadoutResponse] = Field(default_factory=list)
+    # OPT-IN (``?include_used_in=true``), and NULL rather than empty when it
+    # was not asked for. An empty ``used_in`` is the claim "this asset is used
+    # nowhere"; a caller that did not pay for the five-table aggregate has no
+    # basis for making it, and a client that cannot tell the two apart renders
+    # "Used nowhere" for an answer nobody computed. Three states on the wire —
+    # null (not asked), empty lists (asked, none), populated — and the client
+    # keeps all three.
+    used_in: Optional[UsedInResponse] = None
 
 
 class AttachFileRequest(BaseModel):
@@ -449,6 +486,71 @@ class SkippedReference(BaseModel):
     reason: str
 
 
+class BundlePrompt(BaseModel):
+    """The two prompt halves of a bundle.
+
+    Nested rather than flattened to ``positive``/``negative`` so a caller that
+    forwards "the prompt" forwards BOTH — ``negative`` is provenance the
+    generation records, and a flat shape is how it gets left behind.
+    """
+
+    positive: str
+    negative: str
+
+
+DroppedReason = Literal["no_image_file", "over_limit", "provider_no_refs"]
+"""Why a reference the asset owns is not in the delivered list.
+
+A closed vocabulary, declared here so FastAPI VALIDATES it on the way out: an
+invented reason fails loudly rather than reaching a UI that has no string for
+it and renders nothing — which is the silent drop this whole field exists to
+end.
+
+``provider_no_refs`` is deliberately NOT folded into ``over_limit``: a ceiling
+of zero is not a contest this file lost, and the user's remedy is a different
+model rather than fewer picks."""
+
+
+class DroppedReference(BaseModel):
+    """One reference that will NOT be sent, and why."""
+
+    resource_id: str
+    reason: DroppedReason
+
+
+class BundleResponse(BaseModel):
+    """``GET /assets/{id}/bundle`` — the delivery payload for one model.
+
+    Every field is REQUIRED, ``dropped`` included. A defaulted empty list would
+    let a service that stopped reporting drops answer "nothing was dropped",
+    which is the exact failure the field was added to prevent.
+    """
+
+    prompt: BundlePrompt
+    reference_resource_ids: List[str] = Field(
+        ...,
+        description=(
+            "The asset's files that fit this provider, in priority order "
+            "(primary slot, worn, stills, the rest), trimmed to max_refs."
+        ),
+    )
+    dropped: List[DroppedReference] = Field(
+        ...,
+        description=(
+            "Every reference the asset owns that is NOT in the list above, "
+            "each with its reason. Present and empty when nothing was dropped."
+        ),
+    )
+    max_refs: int = Field(
+        ...,
+        description=(
+            "How many references this provider accepts (0 = none at all). "
+            "Echoed so a caller can say '3 of 5 sent' without inferring the "
+            "ceiling from the two list lengths."
+        ),
+    )
+
+
 class GenerateSlotResponse(BaseModel):
     """202 body. ``failed`` is present even when empty — a caller must not
     have to infer "did any of them fail?" from ``len(generation_ids)``."""
@@ -467,6 +569,21 @@ class GenerateSlotResponse(BaseModel):
 # what puts a real schema in the OpenAPI document the frontend types read off.
 
 T = TypeVar("T")
+
+
+class ResolveLegacyResponse(BaseModel):
+    """GET /assets/resolve-legacy — the asset a pre-P3 canvas card became.
+
+    ``asset_id`` is explicitly nullable and always present. "Nothing migrated
+    with that provenance" is a real answer the caller has to act on (it keeps
+    the legacy card as-is), and it must not arrive as a missing key that reads
+    the same as a truncated body.
+
+    A string, like every other id on this router — ``assets.id`` is a Snowflake
+    BIGINT and a JSON number would lose precision in the browser.
+    """
+
+    asset_id: Optional[str] = None
 
 
 class Envelope(BaseModel, Generic[T]):

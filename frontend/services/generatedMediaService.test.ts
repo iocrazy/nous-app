@@ -5,7 +5,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  fetchEntityGenerations,
   fetchGenerations,
   generatedMediaCoverUrl,
   generatedMediaFileUrl,
@@ -72,25 +71,6 @@ describe('fetchGenerations', () => {
     const page = await fetchGenerations();
     expect(page.items).toEqual([]);
     expect(Array.isArray(page.items)).toBe(true);
-  });
-});
-
-describe('fetchEntityGenerations', () => {
-  it('unwraps a well-formed entity page', async () => {
-    const spy = stubFetch({ data: { items: [{ id: '9' }], next_cursor: null } });
-    const page = await fetchEntityGenerations('character', '42');
-    const [url] = spy.mock.calls[0] as [string, ...unknown[]];
-    expect(url).toContain('entity_kind=character');
-    expect(url).toContain('entity_id=42');
-    expect(page.items).toHaveLength(1);
-  });
-
-  // Regression #1457: the entity asset strip crashed on this exact shape.
-  it('normalizes a malformed entity page to an empty items array', async () => {
-    stubFetch({ data: [] });
-    const page = await fetchEntityGenerations('character', '42');
-    expect(page.items).toEqual([]);
-    expect(page.next_cursor).toBeNull();
   });
 });
 

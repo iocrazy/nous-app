@@ -12,7 +12,8 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Literal, Optional
+from urllib.parse import urlsplit
 
 import aiofiles
 import httpx
@@ -262,6 +263,18 @@ class GenerationOrigin:
     parent_resource_id: Optional[int] = None
     derivation_kind: Optional[str] = None
     conversation_id: Optional[int] = None
+    # The asset a run was launched FROM. Goes in the COLUMN, which is what
+    # ``GET /generated?source_asset_id=`` filters on and what the asset sheet's
+    # generation history reads. Writers that only stamp it into ``params``
+    # produce a row no reader on that path can find — the params copy is
+    # provenance for a human reading one row, the column is the index.
+    #
+    # ``generated_media.source_asset_id`` FK-references ``assets.id``, so a
+    # value that does not exist is an IntegrityError that kills the whole
+    # registration. Callers that take this from client-supplied data MUST
+    # resolve it against a real asset first (see
+    # ``canvas_generation._source_asset_id_for``).
+    source_asset_id: Optional[int] = None
 
 
 async def register_generated_media(
@@ -340,6 +353,7 @@ async def register_generated_media(
         parent_resource_id=origin.parent_resource_id,
         derivation_kind=origin.derivation_kind,
         conversation_id=origin.conversation_id,
+        source_asset_id=origin.source_asset_id,
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()
@@ -553,3 +567,236 @@ async def generated_media_local_path(
             yield None
             return
         yield str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Resource-URL → local-file bridge (canvas generation, asset-library P4)
+# ---------------------------------------------------------------------------
+
+# The asset library's reference channel is ``resources``, not
+# ``generated_media``: ``asset_files.resource_id`` points at a resource row and
+# the bundle protocol hands out ``reference_resource_ids``. Until this bridge
+# existed the canvas generation chain accepted ONLY
+# ``/api/v1/generated-media/…`` URLs, so an asset reference reached
+# ``eff.refs`` and then vanished — not in the picture, not in ``dropped_knobs``,
+# not anywhere. Both serving endpoints are accepted: ``/cover`` (the derived
+# image) and ``/file`` (the original).
+RESOURCE_URL_RE = re.compile(r"/resources/(\d+)/(?:cover|file)$")
+
+# The audit line every ``Resources`` read below is filed under. Distinct from
+# ``AssetsService._REFERENCE_READ_REASON`` on purpose: that one justifies the
+# generate-slot run, this one justifies the canvas workflow, and an audit log
+# that files the second under the first is a true-looking line about the wrong
+# access.
+CANVAS_REFERENCE_READ_REASON = "canvas-generation: resolve resource reference"
+
+ReferenceUrlKind = Literal["genmedia", "resource", "unknown"]
+
+
+@dataclass(frozen=True)
+class ResourceRefResolution:
+    """What came of trying to turn one resource URL into a local file.
+
+    Exactly one half is ever set. ``path`` is a readable local file; ``reason``
+    is a machine-readable code the caller reports to the user. There is no
+    third state where both are None — "it did not work and we cannot say why"
+    is the silent drop this type exists to make impossible.
+    """
+
+    path: Optional[str] = None
+    reason: Optional[str] = None
+
+
+# The host ``canvas_generation._absolute_media_url`` falls back to when
+# ``PUBLIC_API_BASE`` is unset — which is the default, since that setting is not
+# declared in ``core/config.py``. Spelled once, here, and read by the minter
+# through this module so the two cannot drift apart.
+_DEFAULT_PUBLIC_API_BASE = "https://api.nous.ink"
+
+
+def _own_hosts() -> frozenset[str]:
+    """The hosts whose absolute URLs are OURS to resolve.
+
+    A reference URL is only ever a key into our own database, but the DAEMON
+    branch of ``canvas_generation`` passes it through to the user's machine to
+    FETCH — so an absolute URL pointing somewhere else must never be classified
+    as one of ours. Derived from the same settings that MINT these URLs:
+    ``MEDIA_PUBLIC_URL`` for ``_reference_url``, and for ``_absolute_media_url``
+    both ``PUBLIC_API_BASE`` *and* the literal it falls back to when that
+    setting is absent.
+
+    ⚠️ That fallback is the reason ``_DEFAULT_PUBLIC_API_BASE`` is listed here.
+    ``PUBLIC_API_BASE`` is not declared in ``core/config.py`` at all, so in the
+    default configuration ``_absolute_media_url`` mints URLs on
+    ``https://api.nous.ink`` — and without this entry, a URL we minted
+    ourselves would come back from ``classify_reference_url`` as ``unknown``.
+    Latent rather than live (no producer feeds an absolutised URL back into
+    ``eff.refs``, and the failure would be a reported drop rather than a silent
+    one), but "the minter and the recogniser disagree about our own host" is
+    not a difference to leave standing.
+
+    A host configured nowhere still contributes nothing, so relative paths —
+    what every producer in this repo emits — remain the only shape that
+    qualifies out of the box beyond our own two names.
+    """
+    hosts: set[str] = set()
+    for value in (
+        getattr(settings, "MEDIA_PUBLIC_URL", "") or "",
+        getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE,
+    ):
+        netloc = urlsplit(str(value)).netloc.lower()
+        if netloc:
+            hosts.add(netloc)
+    return frozenset(hosts)
+
+
+def _same_origin_path(url: str) -> Optional[str]:
+    """The PATH component of a URL we serve, or None for a foreign one.
+
+    ``//evil.example/resources/1/cover`` is protocol-relative — it looks like a
+    path and is not one, so the leading-slash test explicitly excludes it. The
+    scheme test is case-insensitive by construction (``urlsplit`` lowercases
+    it), which is what refuses ``HTTPS://cdn.example/…``.
+    """
+    text = str(url or "").strip()
+    if not text:
+        return None
+    if text.startswith("/") and not text.startswith("//"):
+        return text
+    parsed = urlsplit(text)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    if parsed.netloc.lower() not in _own_hosts():
+        return None
+    return parsed.path or None
+
+
+def classify_reference_url(url: str) -> tuple[ReferenceUrlKind, Optional[int]]:
+    """Which durable-reference shape this URL is, and the row id in it.
+
+    One place branches on the shape so every caller branches the same way.
+    Stricter than ``GENERATED_MEDIA_URL_RE.search`` alone: an absolute URL is
+    only recognised when its host is ours (see ``_own_hosts``). Every producer
+    in this repo emits a relative path, so nothing legitimate is refused — and
+    a URL this returns ``unknown`` for is REPORTED by the caller, never
+    dropped in silence.
+    """
+    path = _same_origin_path(url)
+    if not path:
+        return ("unknown", None)
+    match = GENERATED_MEDIA_URL_RE.search(path)
+    if match:
+        return ("genmedia", int(match.group(1)))
+    match = RESOURCE_URL_RE.search(path)
+    if match:
+        return ("resource", int(match.group(1)))
+    return ("unknown", None)
+
+
+async def _resource_reference_stored_path(
+    url: str, *, scope_id: int, media_kind: str = "image"
+) -> tuple[Optional[str], Optional[str]]:
+    """``(stored_path, reason)`` for one resource reference URL.
+
+    Reuses the assets side's bridge rather than forking it — the scope test is
+    ``AssetRelationsRepository.resource_in_scope`` and the column read is
+    ``resource_media_rows`` (which carries the ``system_request_scope`` wrap
+    ``Resources`` requires under ``SCOPE_ENFORCE_RESOURCES``), and the
+    original → thumbnail → cover ladder is ``_reference_stored_path``, the same
+    one ``AssetsService._materialize_references`` walks. Two ladders that have
+    to agree about which file is "the image" is how the preview and the run
+    start showing different pictures.
+
+    The scope test runs OUTSIDE the SYSTEM wrap, and must: that wrap exists so
+    a cross-user read passes the choke point at all, and asking "is this in the
+    caller's scope" from inside it would ask the question with the answer
+    already suppressed.
+
+    Imported lazily because ``assets_service`` imports THIS module at module
+    level — a top-level import here would be a cycle.
+    """
+    kind, resource_id = classify_reference_url(url)
+    if kind != "resource" or resource_id is None:
+        return (None, "unknown_shape")
+    if media_kind != "image":
+        # The ladder resolves IMAGE bytes only; a resource is never a video
+        # reference on this path. Reported, not silently skipped.
+        return (None, "no_image_file")
+
+    from app.repositories.asset_relations_repository import AssetRelationsRepository
+    from app.services.assets.assets_service import _reference_stored_path
+
+    relations = AssetRelationsRepository()
+    if not await relations.resource_in_scope(int(resource_id), int(scope_id)):
+        return (None, "not_in_scope")
+    rows = await relations.resource_media_rows(
+        [int(resource_id)], system_reason=CANVAS_REFERENCE_READ_REASON
+    )
+    row = rows.get(int(resource_id))
+    if not row:
+        # In scope per ``resource_items`` but the ``resources`` row is gone.
+        return (None, "no_image_file")
+    stored = _reference_stored_path(dict(row))
+    if not stored:
+        return (None, "no_image_file")
+    return (str(stored), None)
+
+
+async def resource_reference_reason(
+    url: str, *, scope_id: int, media_kind: str = "image"
+) -> Optional[str]:
+    """None when this resource URL is servable to the caller, else the code.
+
+    For the branch that needs the URL rather than the bytes (the codex/dreamina
+    daemon fetches refs over the public API): it must still refuse a reference
+    that is out of scope or has no image behind it, and it must say which.
+    """
+    _stored, reason = await _resource_reference_stored_path(
+        url, scope_id=scope_id, media_kind=media_kind
+    )
+    return reason
+
+
+@asynccontextmanager
+async def resource_local_path(
+    url: str, *, scope_id: int, media_kind: str = "image"
+) -> AsyncIterator[ResourceRefResolution]:
+    """Yield a readable local path for a resource-library reference URL.
+
+    The resource twin of ``generated_media_local_path``, with two differences
+    the shapes genuinely have: a resource row is SCOPED (a generated-media row
+    reached through a durable URL is not), and a miss here yields a REASON
+    rather than a bare ``None`` — this bridge is the one whose failures the
+    user is shown, so collapsing "not yours" / "no image" / "unreadable" into
+    one blank would be the silent drop with extra steps.
+
+    ``materialize()`` carries the containment guard (a ``..`` rel_path can
+    never escape ``DOWNLOAD_PATH``) and the object-store streaming, so this
+    does not re-implement either. The temp file it may create lives until this
+    block exits.
+    """
+    stored, reason = await _resource_reference_stored_path(
+        url, scope_id=scope_id, media_kind=media_kind
+    )
+    if reason or not stored:
+        yield ResourceRefResolution(reason=reason or "no_image_file")
+        return
+
+    # Same AsyncExitStack shape as generated_media_local_path: the try/except
+    # is scoped to ENTRY alone, so an exception thrown back in at the yield
+    # below (the provider blowing up while holding the file) propagates
+    # untouched instead of being reported as a materialize failure.
+    async with AsyncExitStack() as stack:
+        try:
+            tmp_path = await stack.enter_async_context(materialize(stored))
+        except Exception as exc:
+            logger.warning(
+                f"[resource_local_path] materialize failed for "
+                f"url={url!r} stored={stored!r}: {exc!r}"
+            )
+            yield ResourceRefResolution(reason="materialize_failed")
+            return
+        if not os.path.isfile(str(tmp_path)):
+            yield ResourceRefResolution(reason="materialize_failed")
+            return
+        yield ResourceRefResolution(path=str(tmp_path))

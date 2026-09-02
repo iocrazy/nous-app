@@ -19,7 +19,7 @@ vi.mock('../services/canvasGenerationService', async () => {
 });
 
 import { PollStopped } from '../services/canvasGenerationService';
-import { withGenerationRunner } from './generationRunner';
+import { noAssetInputs, withGenerationRunner } from './generationRunner';
 import {
   runPrompts,
   runSinglePrompt,
@@ -91,6 +91,7 @@ describe('withGenerationRunner stop plumbing', () => {
     pollGeneration.mockRejectedValue(new PollStopped('t1'));
     const base: PromptCaller = async () => ({ ok: true, text: '', error: null });
     const runner = withGenerationRunner(base, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       shouldStop: () => true,
     });
@@ -113,7 +114,7 @@ describe('withGenerationRunner stop plumbing', () => {
     );
     const shouldStop = vi.fn(() => false);
     const base: PromptCaller = async () => ({ ok: true, text: '', error: null });
-    const runner = withGenerationRunner(base, { canvasId: '9', shouldStop });
+    const runner = withGenerationRunner(base, { assetInputs: noAssetInputs, canvasId: '9', shouldStop });
     await runner({ ...ctxOf('p1'), gen: { kind: 'image', model: '', count: 1 } });
     expect(shouldStop).toHaveBeenCalledWith('p1');
   });

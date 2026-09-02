@@ -110,6 +110,28 @@ class FakeAssetsRepo:
         r = self.rows.get(int(asset_id))
         return r if r and self._visible(r, scope_id) else None
 
+    async def resolve_legacy(self, scope_id, legacy_table, legacy_id):
+        """In-memory stand-in for the JSONB containment read.
+
+        Models the same three predicates the real statement carries — own scope
+        (presets are NOT unioned in, unlike ``get``), not soft-deleted, and the
+        ``[table, id]`` pair present in ``attrs.legacy_ids`` — plus the ``ORDER
+        BY id`` tiebreak, so a test can tell the two apart.
+        """
+        want = [str(legacy_table), int(legacy_id)]
+        hits = [
+            r
+            for r in self.rows.values()
+            if r.get("scope_id") is not None
+            and int(r["scope_id"]) == int(scope_id)
+            and r.get("deleted_at") is None
+            and any(
+                list(pair) == want
+                for pair in (r.get("attrs") or {}).get("legacy_ids", [])
+            )
+        ]
+        return min((int(r["id"]) for r in hits), default=None)
+
     async def list(self, scope_id, **kw):
         self.list_calls.append(kw)
         return [r for r in self.rows.values() if self._visible(r, scope_id)]
@@ -377,10 +399,31 @@ class FakeRelationsRepo:
         return [p for (x, p) in self.refs if x == a]
 
 
+class FakeCanvasRefsRepo:
+    """The canvas→asset mirror, from the asset side (READ only — it is
+    maintained by CanvasService on canvas save, never by these routes).
+
+    ``calls`` records the scope the service handed down: that argument is the
+    whole safety story of ``used_in`` (a system preset is readable from every
+    scope, so an unscoped read would name other teams' canvases), and a fake
+    that ignored it would let the filter be dropped without a test noticing.
+    """
+
+    def __init__(self):
+        self.rows: list[dict] = []
+        self.calls: list[tuple[str, str | None]] = []
+
+    async def list_canvases_for_asset(self, asset_id, scope_id=None):
+        self.calls.append((str(asset_id), None if scope_id is None else str(scope_id)))
+        return list(self.rows)
+
+
 @pytest.fixture
 def svc():
     return AssetsService(
-        assets_repo=FakeAssetsRepo(), relations_repo=FakeRelationsRepo()
+        assets_repo=FakeAssetsRepo(),
+        relations_repo=FakeRelationsRepo(),
+        canvas_refs_repo=FakeCanvasRefsRepo(),
     )
 
 
@@ -1263,3 +1306,166 @@ async def test_race_409_still_carries_a_real_id_when_it_has_one(svc, uow_spy):
             SCOPE, AssetCreate(asset_type="location", name="Bamboo Grove"), USER
         )
     assert ei.value.extra["existing_asset_id"] == "4242"
+
+
+# ── P4: used_in — the canvas mirror, scope-limited ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_detail_carries_used_in_with_both_halves(svc):
+    """``used_in.storyboards`` is present and empty on purpose (no storyboard
+    mirror yet). Absent and empty are different answers: the sheet renders "no
+    usage" for the second and throws on the first."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [
+        {
+            "canvas_id": "5001",
+            "canvas_name": "Looks",
+            "kind": "smart",
+            "project_id": "9000",
+            "node_ids": ["asset-1"],
+            "loadout_ids": [],
+        }
+    ]
+
+    d = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
+
+    assert d["used_in"]["canvases"] == svc.canvas_refs.rows
+    assert d["used_in"]["storyboards"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_detail_scopes_the_used_in_read_to_the_caller(svc):
+    """A system preset is readable from EVERY scope, so an unscoped read here
+    would answer with other teams' canvas names on a row anyone can fetch."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
+    assert svc.canvas_refs.calls == [(c["id"], str(SCOPE))]
+
+
+@pytest.mark.asyncio
+async def test_list_canvas_refs_404s_instead_of_answering_an_empty_list(svc):
+    """ "Not yours" must not be reported as "unused" — the caller cannot tell
+    those apart from a 200 with `[]`, and would render an empty usage panel for
+    an asset they have no access to."""
+    with pytest.raises(AssetError) as ei:
+        await svc.list_canvas_refs(999, SCOPE)
+    assert ei.value.status == 404 and ei.value.code == "asset_not_found"
+    assert svc.canvas_refs.calls == []  # never reached the mirror
+
+
+@pytest.mark.asyncio
+async def test_list_canvas_refs_returns_the_same_rows_used_in_carries(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    rows = await svc.list_canvas_refs(int(c["id"]), SCOPE)
+    detail = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
+
+    assert rows == detail["used_in"]["canvases"]
+
+
+@pytest.mark.asyncio
+async def test_detail_response_declares_every_key_get_asset_actually_emits(svc):
+    """The derived-key guard, DERIVED — not a hand-listed set.
+
+    ``Envelope[AssetDetailResponse]`` silently DROPS any key the model does not
+    declare, so a sixth relation bolted onto ``get_asset`` would never reach the
+    client and nothing would fail. Its sibling in ``test_schemas.py`` takes the
+    asset ROW's expectation from ``Assets.__table__.columns``; these keys are not
+    columns of anything, so the only honest source is the method itself. Driving
+    it here — where the fakes live — means a new key extends this test by
+    existing, instead of needing someone to remember to add its name.
+    """
+    from app.schemas.assets import AssetDetailResponse
+
+    # The ONE key the model drops on purpose, same exclusion (and same reason)
+    # as the AssetResponse column pin in test_schemas.py: every read filters
+    # ``deleted_at IS NULL``, so a row reaching a response always has it null
+    # and it carries no information. Spelled as a one-name allowlist rather
+    # than a hand-listed expectation, so a SEVENTH key still fails here.
+    DELIBERATELY_UNDECLARED = {"deleted_at"}
+
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    # The RICHEST call — every optional half asked for — because the guard is
+    # about keys the response model would DROP, and a key can only be dropped
+    # if it was emitted. Running the default (no ``used_in``) would silently
+    # shrink what this test inspects.
+    emitted = set(await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True))
+
+    missing = emitted - set(AssetDetailResponse.model_fields) - DELIBERATELY_UNDECLARED
+    assert not missing, (
+        "get_asset emits keys AssetDetailResponse does not declare; the response "
+        f"model will drop them on the way out: {sorted(missing)}"
+    )
+    # Positive control: the guard is only meaningful if the emitted set really
+    # contains the derived relations, not just the plain column names.
+    assert {"files", "links", "linked_by", "loadouts", "used_in"} <= emitted
+
+
+# ── used_in is OPT-IN (I2) ─────────────────────────────────────────────────
+#
+# `used_in.canvases` is a five-table aggregate, and the canvas puts dozens of
+# asset cards on one board, each fetching its own detail on mount. None of them
+# renders usage. These pin that the default costs nothing and reports honestly.
+
+
+@pytest.mark.asyncio
+async def test_the_default_detail_does_not_read_the_canvas_mirror(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+
+    await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert svc.canvas_refs.calls == []
+
+
+@pytest.mark.asyncio
+async def test_used_in_is_absent_not_empty_when_it_was_not_asked_for(svc):
+    """ "Nobody looked" and "used nowhere" are different facts. An empty
+    ``used_in`` is a claim, and a caller that skipped the aggregate has no
+    basis for it — the sheet would render "Used nowhere" for an answer that was
+    never computed."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    d = await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert "used_in" not in d
+
+
+@pytest.mark.asyncio
+async def test_asking_for_used_in_still_answers_both_halves(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+
+    d = await svc.get_asset(int(c["id"]), SCOPE, include_used_in=True)
+
+    assert d["used_in"] == {"canvases": [], "storyboards": []}
+    assert svc.canvas_refs.calls == [(c["id"], str(SCOPE))]
+
+
+@pytest.mark.asyncio
+async def test_the_split_out_endpoint_is_unaffected_by_the_flag(svc):
+    """``GET /assets/{id}/canvas-refs`` exists so a caller can ask for usage on
+    its own. It has no flag and never had one."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    rows = await svc.list_canvas_refs(int(c["id"]), SCOPE)
+
+    assert rows == svc.canvas_refs.rows

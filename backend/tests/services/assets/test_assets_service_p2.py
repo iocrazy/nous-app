@@ -37,6 +37,7 @@ from tests.services.assets.test_assets_service import (
     SCOPE,
     USER,
     FakeAssetsRepo,
+    FakeCanvasRefsRepo,
     FakeRelationsRepo,
 )
 
@@ -45,8 +46,15 @@ IN_SCOPE_RESOURCE = "727145299382534146"
 
 @pytest.fixture
 def svc():
+    # ``canvas_refs_repo`` is not optional here even though nothing in this file
+    # reads ``used_in``: ``duplicate`` / ``translate`` / ``regenerate`` all
+    # return through ``get_asset``, which reads the canvas mirror. Without the
+    # fake they would reach the real repository and die on an unset
+    # SUPAVISOR_DATABASE_URL — a DB dependency smuggled into a no-DB suite.
     return AssetsService(
-        assets_repo=FakeAssetsRepo(), relations_repo=FakeRelationsRepo()
+        assets_repo=FakeAssetsRepo(),
+        relations_repo=FakeRelationsRepo(),
+        canvas_refs_repo=FakeCanvasRefsRepo(),
     )
 
 
@@ -568,3 +576,125 @@ async def test_the_whole_copy_happens_inside_one_unit_of_work(svc, monkeypatch):
     assert all(
         a > b for a, b in zip(after, before)
     ), "the asset row AND every relation copy must land inside the transaction"
+
+
+# ── resolve_legacy (P4: pre-P3 canvas cards → the assets they became) ───────
+
+
+async def _migrated(svc, *, name, asset_type, legacy, scope=None, deleted=False):
+    """An asset carrying the migration's provenance stamp."""
+    row = await svc.create_asset(
+        scope if scope is not None else SCOPE,
+        AssetCreate(asset_type=asset_type, name=name),
+        USER,
+    )
+    stored = svc.assets.rows[int(row["id"])]
+    stored["attrs"] = {"legacy_ids": [list(p) for p in legacy]}
+    if deleted:
+        stored["deleted_at"] = "2026-09-01T00:00:00+00:00"
+    return row
+
+
+@pytest.mark.asyncio
+async def test_a_character_card_resolves_through_the_characters_label(svc):
+    row = await _migrated(
+        svc,
+        name="Old Zhang",
+        asset_type="character",
+        legacy=[("project_characters", 12)],
+    )
+    assert await svc.resolve_legacy(SCOPE, "character", 12) == {
+        "asset_id": str(row["id"])
+    }
+
+
+@pytest.mark.asyncio
+async def test_location_and_prop_share_the_lib_entities_label(svc):
+    loc = await _migrated(
+        svc, name="Harbour", asset_type="location", legacy=[("project_lib_entities", 7)]
+    )
+    prop = await _migrated(
+        svc, name="Lantern", asset_type="prop", legacy=[("project_lib_entities", 8)]
+    )
+    assert await svc.resolve_legacy(SCOPE, "location", 7) == {
+        "asset_id": str(loc["id"])
+    }
+    assert await svc.resolve_legacy(SCOPE, "prop", 8) == {"asset_id": str(prop["id"])}
+
+
+@pytest.mark.asyncio
+async def test_a_character_id_does_not_answer_for_a_lib_entity_id(svc):
+    """The two legacy tables numbered their rows independently, so the id alone
+    is ambiguous — the pair is what identifies a row."""
+    await _migrated(
+        svc,
+        name="Old Zhang",
+        asset_type="character",
+        legacy=[("project_characters", 7)],
+    )
+    assert await svc.resolve_legacy(SCOPE, "location", 7) == {"asset_id": None}
+
+
+@pytest.mark.asyncio
+async def test_a_merged_asset_answers_for_every_legacy_row_it_absorbed(svc):
+    """Same-name-same-type rows across projects MERGE into one asset, and every
+    canvas card that pointed at any of them has to land on it."""
+    row = await _migrated(
+        svc,
+        name="Old Zhang",
+        asset_type="character",
+        legacy=[("project_characters", 12), ("project_characters", 44)],
+    )
+    for legacy_id in (12, 44):
+        assert await svc.resolve_legacy(SCOPE, "character", legacy_id) == {
+            "asset_id": str(row["id"])
+        }
+
+
+@pytest.mark.asyncio
+async def test_an_asset_in_another_scope_is_not_visible(svc):
+    """The gate proves membership of the scope asked for; the read must still
+    be limited to it, or a legacy id would resolve to another team's asset."""
+    await _migrated(
+        svc,
+        name="Old Zhang",
+        asset_type="character",
+        legacy=[("project_characters", 12)],
+        scope=SCOPE + 1,
+    )
+    assert await svc.resolve_legacy(SCOPE, "character", 12) == {"asset_id": None}
+
+
+@pytest.mark.asyncio
+async def test_a_soft_deleted_asset_answers_nothing(svc):
+    """Its name is free again and the shelf no longer shows it; pointing a
+    canvas card at it would resurrect a row the user deleted."""
+    await _migrated(
+        svc,
+        name="Old Zhang",
+        asset_type="character",
+        legacy=[("project_characters", 12)],
+        deleted=True,
+    )
+    assert await svc.resolve_legacy(SCOPE, "character", 12) == {"asset_id": None}
+
+
+@pytest.mark.asyncio
+async def test_an_asset_with_no_provenance_never_matches(svc):
+    """An ADOPTED asset (the migration claimed a hand-made row) writes no
+    ``attrs`` at all — a documented, expected miss rather than a bug."""
+    await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="Hand Made"), USER
+    )
+    assert await svc.resolve_legacy(SCOPE, "character", 12) == {"asset_id": None}
+
+
+@pytest.mark.asyncio
+async def test_an_unmappable_kind_raises_instead_of_answering_null(svc):
+    """``null`` means "nothing migrated with that provenance". A kind that
+    never HAD provenance is a different fact, and reporting it as a miss would
+    tell the caller the entity was not migrated when it was never askable."""
+    with pytest.raises(AssetError) as e:
+        await svc.resolve_legacy(SCOPE, "costume", 12)
+    assert e.value.status == 422
+    assert e.value.code == "unknown_legacy_kind"

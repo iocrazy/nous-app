@@ -41,6 +41,7 @@ the personal/unknown project split get their real execution.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from typing import Any, Dict, List
@@ -445,10 +446,10 @@ async def test_reconcile_counts_an_adopted_user_created_asset(orm_dsn, pg, fx):
 
     applied = await _apply(plan, fx["user_id"])
     assert applied["counts"] == {"created": 1, "existing": 1, "project_refs_added": 2}
-    # ADOPTION never writes ``attrs``, so the hand-made asset has no
-    # ``legacy_ids`` to re-derive from — the index has to come from the plan,
-    # or every generation stamped with that character's legacy id would look
-    # unmatched forever.
+    # The index comes from the PLAN, not from ``attrs``. Adoption does stamp
+    # ``attrs.legacy_ids`` now (case 2b), but the plan knows the mapping
+    # BEFORE any write — reading it back out of the column would make the two
+    # later steps depend on this one's write having already landed.
     assert (
         applied["asset_id_by_ref"][
             ("project_characters", next(c["id"] for c in chars if c["name"] == adopted))
@@ -493,6 +494,148 @@ async def test_reconcile_counts_an_adopted_user_created_asset(orm_dsn, pg, fx):
             report["project_refs_present"],
         )
         is None
+    )
+
+
+# ── 2b. adoption stamps the adopted asset's provenance ─────────────────────
+
+
+@_skip
+async def test_adoption_stamps_legacy_ids_so_resolve_legacy_finds_the_asset(
+    orm_dsn, pg, fx
+):
+    """The whole point of the stamp, proven end to end on real Postgres.
+
+    Adoption used to write nothing to ``attrs``, so ``resolve_legacy`` — which
+    matches with JSONB containment on ``attrs.legacy_ids`` — could not find the
+    asset an adopted entity became, and the pre-P3 canvas card pointing at that
+    entity wore the ``Unmigrated`` badge forever. The chain under test is
+    `_apply` → the column → `AssetsRepository.resolve_legacy`, and only a real
+    database can run the middle link: the containment operator, the JSON number
+    type of the id, and the ORM's willingness to flush a reassigned JSONB dict
+    are all server-side or session-side facts a stubbed session cannot see.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+    from app.workflows.backfill_assets_from_project_entities import _apply
+
+    p0, _p1, _p2 = fx["project_ids"]
+    adopted = _uniq("Mu Qing")
+    hand_made_id = int(
+        await pg.fetchval(
+            "INSERT INTO assets (scope_id, asset_type, name, source, attrs, created_by) "
+            "VALUES ($1, 'character', $2, 'manual', $3::jsonb, $4) RETURNING id",
+            fx["team_id"],
+            adopted,
+            # Pre-existing attrs the run must NOT trample: the user's own
+            # `notes`, and a `legacy_ids` that already carries a pair from a
+            # DIFFERENT legacy row — an entity from another project that
+            # merged into this same asset on an earlier run. Replacing the
+            # list instead of merging into it would drop that pair and break
+            # the very lookup the stamp exists to enable, and it is the one
+            # arrangement in which the two implementations differ.
+            '{"notes": "hand written", '
+            '"legacy_ids": [["project_lib_entities", 314159]]}',
+            uuid.UUID(fx["user_id"]),
+        )
+    )
+    legacy_char_id = await _seed_character(pg, p0, adopted)
+
+    chars, ents = await _rows_for(pg, fx["project_ids"])
+    plan = _plan_for(fx, chars, ents)
+    applied = await _apply(plan, fx["user_id"])
+    assert applied["counts"]["existing"] == 1 and applied["counts"]["created"] == 0
+
+    attrs = await pg.fetchval("SELECT attrs FROM assets WHERE id = $1", hand_made_id)
+    attrs = json.loads(attrs) if isinstance(attrs, str) else attrs
+    assert attrs["legacy_ids"] == [
+        ["project_lib_entities", 314159],
+        ["project_characters", legacy_char_id],
+    ], "the earlier run's pair must survive — this is an append, not a replace"
+    # The user's own keys survive, and the run does not pretend it merged.
+    assert attrs["notes"] == "hand written"
+    assert "merged_from" not in attrs
+    # Still theirs: adoption claims the row, it does not rewrite its identity.
+    assert (
+        await pg.fetchval("SELECT source FROM assets WHERE id = $1", hand_made_id)
+        == "manual"
+    )
+
+    # THE POINT: the canvas's lookup now answers, instead of `Unmigrated`.
+    found = await AssetsRepository().resolve_legacy(
+        int(fx["team_id"]), "project_characters", int(legacy_char_id)
+    )
+    assert found == hand_made_id
+    # And the pre-existing pair is still resolvable, which is what "append"
+    # buys over "replace" — a replace passes the assertion above and silently
+    # unmaps every card pointing at the older entity.
+    assert (
+        await AssetsRepository().resolve_legacy(
+            int(fx["team_id"]), "project_lib_entities", 314159
+        )
+        == hand_made_id
+    )
+
+
+@_skip
+async def test_re_running_the_adoption_stamp_changes_nothing(orm_dsn, pg, fx):
+    """A second run adds no duplicate pair and moves no timestamp.
+
+    ⚠️ The ``updated_at`` half is upheld by SQLAlchemy's flush-time equality
+    comparison, so it stays green even if the stamp's own "nothing to add"
+    short circuit is removed (verified by mutation). It is asserted because it
+    is the GUARANTEE — a migration re-run must not look like a user edit — not
+    because it pins that particular line. The discriminating half is the
+    value: a stamp that replaced rather than merged reddens the sibling case
+    above.
+    """
+    from app.workflows.backfill_assets_from_project_entities import _apply
+
+    p0, p1, _p2 = fx["project_ids"]
+    adopted = _uniq("Mu Qing")
+    hand_made_id = int(
+        await pg.fetchval(
+            "INSERT INTO assets (scope_id, asset_type, name, source, created_by) "
+            "VALUES ($1, 'character', $2, 'manual', $3) RETURNING id",
+            fx["team_id"],
+            adopted,
+            uuid.UUID(fx["user_id"]),
+        )
+    )
+    # The SAME character in two projects: the plan folds them into one asset
+    # carrying TWO legacy refs, so this also proves the stamp writes a set and
+    # not just the first pair.
+    a = await _seed_character(pg, p0, adopted)
+    b = await _seed_character(pg, p1, adopted)
+
+    chars, ents = await _rows_for(pg, fx["project_ids"])
+    plan = _plan_for(fx, chars, ents)
+
+    await _apply(plan, fx["user_id"])
+    first = await pg.fetchrow(
+        "SELECT attrs, updated_at FROM assets WHERE id = $1", hand_made_id
+    )
+    first_attrs = (
+        json.loads(first["attrs"])
+        if isinstance(first["attrs"], str)
+        else first["attrs"]
+    )
+    assert sorted(first_attrs["legacy_ids"]) == sorted(
+        [["project_characters", a], ["project_characters", b]]
+    )
+
+    await _apply(plan, fx["user_id"])
+    second = await pg.fetchrow(
+        "SELECT attrs, updated_at FROM assets WHERE id = $1", hand_made_id
+    )
+    second_attrs = (
+        json.loads(second["attrs"])
+        if isinstance(second["attrs"], str)
+        else second["attrs"]
+    )
+    assert second_attrs["legacy_ids"] == first_attrs["legacy_ids"]
+    assert second["updated_at"] == first["updated_at"], (
+        "the second run marked an already-stamped asset dirty; a re-run must "
+        "not look like a user edit"
     )
 
 

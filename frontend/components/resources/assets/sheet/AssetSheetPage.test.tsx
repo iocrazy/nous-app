@@ -89,8 +89,18 @@ vi.mock('../../../../services/projectsService', () => ({
 }));
 
 const createCanvas = vi.fn();
+const listCanvases = vi.fn();
 vi.mock('../../../../features/canvas-core/services/canvasService', () => ({
   createCanvas: (...a: unknown[]) => createCanvas(...a),
+  // Send To Canvas (P4 Task 6) reads the target project's canvases. A mock
+  // that omits an export the component imports is a crash on first access,
+  // not a missing feature — the stub has to grow with the module.
+  listCanvases: (...a: unknown[]) => listCanvases(...a),
+}));
+
+const sendAssetToCanvas = vi.fn();
+vi.mock('../../../../features/canvas-core/services/sendAssetToCanvas', () => ({
+  sendAssetToCanvas: (...a: unknown[]) => sendAssetToCanvas(...a),
 }));
 
 const fetchAssetDetail = vi.fn();
@@ -132,6 +142,7 @@ import {
   CHARACTER_DETAIL,
   COSTUME_DETAIL,
   PRESET_PROMPT_DETAIL,
+  makeCanvasRef,
   makeDetail,
 } from './assetSheetFixtures';
 
@@ -662,35 +673,205 @@ describe('Open in canvas', () => {
     await waitFor(() => expect(createCanvas).toHaveBeenCalledWith('55', expect.anything()));
   });
 
-  it('a costume falls back to a smart canvas', async () => {
+  it('a costume opens a costume canvas, not a generic smart one', async () => {
+    // Renamed from "falls back to a smart canvas" (P4 ruling G). The old name
+    // described a BUG the test had frozen: `canvases_kind_check` has allowed
+    // 'costume' since mig 446, but neither enum carried it, so the sheet's
+    // fallback fired and the kind was silently downgraded on the way out.
     createCanvas.mockResolvedValue({ id: 'c3' });
     const costume = makeDetail({ ...COSTUME_DETAIL, id: COSTUME_DETAIL.id, project_ids: ['55'] });
     await renderSheet(costume, [CHARACTER_DETAIL]);
     fireEvent.click(screen.getByTestId('open-in-canvas'));
     await waitFor(() => expect(createCanvas).toHaveBeenCalled());
-    expect(createCanvas).toHaveBeenCalledWith('55', expect.objectContaining({ kind: 'smart' }));
+    expect(createCanvas).toHaveBeenCalledWith(
+      '55',
+      expect.objectContaining({ kind: 'costume' }),
+    );
+  });
+});
+
+describe('Send To Canvas', () => {
+  it('navigates to the chosen canvas with ?node= so the new card is centred', async () => {
+    // The node id is the whole reason the page appends a query string: the
+    // canvas's own `?node=` latch selects and fits that node. Landing on the
+    // board without it drops the user somewhere they have to search.
+    listCanvases.mockResolvedValue([
+      {
+        id: 'c7',
+        project_id: '55',
+        name: 'Board One',
+        kind: 'smart',
+        viewport_json: { x: 0, y: 0, zoom: 1 },
+        nodes_json: [],
+        connections_json: [],
+        node_ops_json: [],
+        connection_ops_json: [],
+        base_updated_at: '2026-09-02T10:00:00+00:00',
+        created_at: '2026-09-01T00:00:00+00:00',
+        updated_at: '2026-09-02T10:00:00+00:00',
+        created_by: null,
+      },
+    ]);
+    sendAssetToCanvas.mockResolvedValue({
+      ok: true,
+      canvasId: 'c7',
+      nodeId: 'asset-1-abcd',
+    });
+
+    await renderSheet();
+    fireEvent.click(screen.getByTestId('send-to-canvas'));
+    fireEvent.click(await screen.findByTestId('send-asset-project-option'));
+    fireEvent.click(await screen.findByTestId('send-asset-canvas-option'));
+
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/team/42/canvas/c7?node=asset-1-abcd'),
+    );
+    expect(listCanvases).toHaveBeenCalledWith('55');
   });
 });
 
 describe('the deferred surfaces', () => {
-  it('Send To Canvas and Send To Agent are disabled with a reason', async () => {
+  // Send To Canvas USED to be asserted disabled here, beside Send To Agent.
+  // P4 Task 6 shipped it, so the two are no longer the same case: one opens a
+  // picker, the other is still a placeholder. Asserting both halves keeps the
+  // distinction pinned — a regression that re-disabled the canvas action, or
+  // one that quietly enabled the agent action, each fails its own line.
+  it('Send To Canvas is live and Send To Agent still names its phase', async () => {
     await renderSheet();
     const canvas = screen.getByTestId('send-to-canvas');
     const agent = screen.getByTestId('send-to-agent');
-    expect(canvas).toBeDisabled();
-    expect(canvas).toHaveAttribute('title', 'Arrives with P4');
+    expect(canvas).toBeEnabled();
+    expect(canvas).not.toHaveAttribute('title');
     expect(agent).toBeDisabled();
     expect(agent).toHaveAttribute('title', 'Arrives with P5');
   });
 
-  it('Used In lists the projects by name and states the canvas gap', async () => {
+  it('Used In lists the projects by name', async () => {
     await renderSheet();
     await waitFor(() =>
       expect(screen.getByTestId('used-in-project')).toHaveTextContent('Bamboo Sea'),
     );
-    expect(screen.getByTestId('used-in-panel')).toHaveTextContent(
-      'Canvas usage arrives with P4',
+  });
+
+  // ── The canvas half of Used In (P4 Task 8) ──
+  //
+  // This panel carried a standing note — "Canvas usage arrives with P4" —
+  // because `used_in` did not exist. P4 Task 1 shipped it, so the note is gone
+  // and the list is the assertion. The fixtures below are the SERVER's shape
+  // (`list_canvases_for_asset`): string ids, one row per canvas with
+  // `node_ids` aggregated, `kind` carried but not rendered.
+
+  it('ASKS for used_in — the panel is the only reason the aggregate is paid for', async () => {
+    // `used_in` is OPT-IN on `GET /assets/{id}` (it is a five-table aggregate,
+    // and a canvas board fetches one detail per asset card). This page is the
+    // only caller that turns it on, so nothing else in the suite can notice if
+    // the flag is dropped: the panel would simply go blank, and `used_in`
+    // arriving as `undefined` renders as "no canvases" rather than as an
+    // error. Verified by mutation — removing `{ usedIn: true }` reddens this
+    // and nothing else.
+    await renderSheet();
+
+    const own = fetchAssetDetail.mock.calls.find(
+      (c: unknown[]) => c[1] === CHARACTER_DETAIL.id,
     );
+    expect(own, 'the sheet never fetched its own detail').toBeTruthy();
+    expect((own as unknown[])[2]).toEqual({ usedIn: true });
+  });
+
+  it('does NOT ask for used_in on the linked assets it renders as chips', async () => {
+    // Their usage is not on this page, and asking would multiply the aggregate
+    // by the number of links — the N+1 the opt-in exists to prevent.
+    await renderSheet();
+
+    await waitFor(() =>
+      expect(
+        fetchAssetDetail.mock.calls.some((c: unknown[]) => c[1] === COSTUME_DETAIL.id),
+      ).toBe(true),
+    );
+    for (const call of fetchAssetDetail.mock.calls) {
+      if (call[1] === CHARACTER_DETAIL.id) continue;
+      expect(
+        (call[2] as { usedIn?: boolean } | undefined)?.usedIn,
+        `related fetch for ${String(call[1])} paid for used_in`,
+      ).toBeFalsy();
+    }
+  });
+
+  it('Used In lists the canvases, names their project, and counts the cards', async () => {
+    const detail = makeDetail({
+      ...CHARACTER_DETAIL,
+      used_in: {
+        canvases: [
+          makeCanvasRef({
+            canvas_id: '727145299382534900',
+            canvas_name: 'Bamboo Sea Boards',
+            project_id: '55',
+            node_ids: ['asset-1', 'asset-2'],
+            loadout_ids: ['727145299382534401'],
+          }),
+          makeCanvasRef({
+            canvas_id: '727145299382534901',
+            canvas_name: 'Night Raid Study',
+            kind: 'character',
+            project_id: '55',
+            node_ids: ['asset-9'],
+          }),
+        ],
+        storyboards: [],
+      },
+    });
+    await renderSheet(detail);
+
+    const rows = await screen.findAllByTestId('used-in-canvas');
+    expect(rows).toHaveLength(2);
+    // Visibility, not a bare count: the storyboard incident's duplicate nodes
+    // were in the DOM and permanently hidden (CLAUDE.md 前端上线验收).
+    expect(rows[0]).toBeVisible();
+    expect(rows[0]).toHaveTextContent('Bamboo Sea Boards');
+    expect(rows[0]).toHaveAttribute('data-canvas-id', '727145299382534900');
+    // The project chip comes from the page's own projects map, so it reads as
+    // a name rather than a snowflake.
+    expect(within(rows[0]).getByTestId('used-in-canvas-project')).toHaveTextContent(
+      'Bamboo Sea',
+    );
+    // Two cards on one board is ONE row that says two — collapsing to the
+    // canvas name alone would understate what removing the asset there hits.
+    expect(within(rows[0]).getByTestId('used-in-canvas-count')).toHaveTextContent('2 Cards');
+    // …and a board with a single card says nothing rather than "1 Cards".
+    expect(within(rows[1]).queryByTestId('used-in-canvas-count')).toBeNull();
+    expect(screen.queryByTestId('used-in-no-canvases')).toBeNull();
+  });
+
+  it('opening a Used In canvas navigates to its FIRST card', async () => {
+    const detail = makeDetail({
+      ...CHARACTER_DETAIL,
+      used_in: {
+        canvases: [
+          makeCanvasRef({
+            canvas_id: '727145299382534900',
+            node_ids: ['asset-1', 'asset-2'],
+          }),
+        ],
+        storyboards: [],
+      },
+    });
+    await renderSheet(detail);
+    fireEvent.click(await screen.findByTestId('used-in-canvas-open'));
+    // `?node=` is the whole point: the canvas's own latch selects and centres
+    // that card. Without it the user lands on a board and has to hunt.
+    expect(navigate).toHaveBeenCalledWith(
+      resPath('/canvas/727145299382534900?node=asset-1'),
+    );
+  });
+
+  it('an asset on no canvas says so instead of rendering nothing', async () => {
+    // A panel that renders nothing for "none" is indistinguishable from one
+    // whose fetch quietly failed.
+    await renderSheet();
+    expect(await screen.findByTestId('used-in-no-canvases')).toHaveTextContent(
+      'Not On Any Canvas Yet',
+    );
+    expect(screen.queryByTestId('used-in-canvas')).toBeNull();
   });
 
   it('the generation history asks the inbox about THIS asset only', async () => {

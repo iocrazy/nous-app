@@ -143,6 +143,44 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
   await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => visibleNodes.count(), { timeout: 20_000 }).toBeGreaterThan(0);
 
+  // ── 5b. The asset card (P4). An asset-library reference is now a node type
+  // like any other, and it is the P4 surface most exposed to the 2026-08-12
+  // failure mode: it renders from a detail fetch made per card, so a broken
+  // scope or a 500 leaves a card that is in the DOM and shows nothing.
+  //
+  // This board may legitimately have no asset card on it, so the assertion is
+  // a DISJUNCTION — an asset card is visible, or the canvas says it is empty,
+  // or the ordinary nodes above are what this board holds. Which branch was
+  // taken is ANNOTATED rather than swallowed: a step that can only pass is a
+  // step that reports success without checking anything, and the annotation is
+  // what lets a reader of the run see whether an asset card was actually
+  // exercised (CLAUDE.md 验收纪律 — probes must be falsifiable, and one that
+  // cannot fail must at least say so).
+  const assetCard = page.locator('[data-testid="smart-asset-node"]:visible');
+  const emptyCanvas = page.getByText('This canvas is empty');
+  const sawAssetCard = await assetCard
+    .first()
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (sawAssetCard) {
+    await expect(assetCard.first()).toBeVisible();
+  } else {
+    // No asset card here. The board must still be in one of the two states a
+    // working canvas can be in — nodes drawn, or the empty hint shown.
+    const emptyShown = await emptyCanvas
+      .waitFor({ state: 'visible', timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(emptyShown || (await visibleNodes.count()) > 0).toBe(true);
+  }
+  test.info().annotations.push({
+    type: 'p4-asset-card',
+    description: sawAssetCard
+      ? 'an asset card was visible on the episode canvas'
+      : 'no asset card on this board — the P4 card was NOT exercised',
+  });
+
   // ── 6. Shot List tab (view three) — the flat per-shot table. ────────────
   await page.locator('[data-view="shotlist"]').click();
   await expect(page.getByTestId('ep-shotlist-table')).toBeVisible({ timeout: 15_000 });

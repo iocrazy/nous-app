@@ -24,6 +24,10 @@ export type CanvasKind =
   | 'character'
   | 'location'
   | 'prop'
+  // 'costume' (mig 446) has been legal in the DB CHECK since the asset
+  // library's P0 and was the one value neither enum carried — so a costume
+  // asset's "Open In Canvas" silently downgraded to 'smart'. P4 ruling G.
+  | 'costume'
   | 'storyboard';
 
 /** Kinds a NEW canvas may be created with (mirror of backend
@@ -41,14 +45,30 @@ export const isSmartFamily = (kind: CanvasKind | null | undefined): boolean =>
   kind === 'lite' ||
   kind === 'character' ||
   kind === 'location' ||
-  kind === 'prop';
+  kind === 'prop' ||
+  // 'costume' MUST be here, not just in the enum: `CanvasSurface` passes
+  // `nodeTypes` only for the smart family, and a kind outside it renders
+  // every node as React Flow's default — the blank-canvas failure class.
+  kind === 'costume';
 
-/** The library-entity canvas kinds — each seeds its own preset workflow. */
-export type EntityCanvasKind = 'character' | 'location' | 'prop';
+/**
+ * The library-entity canvas kinds — the four an asset can open a board for.
+ *
+ * `costume` belongs here (plan ruling G): `canvasKindFor` returns it, so the
+ * pre-P4 three-way split answered `false` for a costume board while every
+ * other part of the codebase treated the four alike. It was latent rather than
+ * broken only because the entity seeding templates that read this were deleted;
+ * `CanvasPage` now uses it to decide who gets a node bar, which makes it
+ * load-bearing again.
+ */
+export type EntityCanvasKind = 'character' | 'location' | 'prop' | 'costume';
 export const isEntityCanvas = (
   kind: CanvasKind | null | undefined,
 ): kind is EntityCanvasKind =>
-  kind === 'character' || kind === 'location' || kind === 'prop';
+  kind === 'character' ||
+  kind === 'location' ||
+  kind === 'prop' ||
+  kind === 'costume';
 
 export interface CanvasViewport {
   x: number;
@@ -65,6 +85,14 @@ export type CanvasConnectionOp = Record<string, unknown>;
 export interface Canvas {
   id: string;
   project_id: string;
+  /**
+   * The asset this canvas belongs to (`canvases.asset_id`, mig 446), set by
+   * the asset sheet's "Open In Canvas". `CanvasResponse` has declared it since
+   * asset-library P2 Task 1; it was missing here, so the seeding rule that
+   * depends on it (P4 Task 6 — an EMPTY asset-bound canvas gets one card for
+   * that asset) had no typed field to read.
+   */
+  asset_id?: string | null;
   /** Owning episode for a `kind==='storyboard'` row (Task 1, mig 421);
    *  absent/null for every other kind. Snowflake bigint as string. */
   episode_id?: string | null;

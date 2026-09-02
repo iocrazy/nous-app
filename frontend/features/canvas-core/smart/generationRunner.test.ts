@@ -18,7 +18,7 @@ vi.mock('../services/canvasGenerationService', async () => {
   };
 });
 
-import { withGenerationRunner } from './generationRunner';
+import { noAssetInputs, withGenerationRunner } from './generationRunner';
 import type { RunnerContext, RunnerResult } from './runner';
 
 const baseCaller = vi.fn(
@@ -36,7 +36,7 @@ const TEXT_CTX: RunnerContext = {
 
 describe('withGenerationRunner', () => {
   it('passes text prompts through to the base caller', async () => {
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner(TEXT_CTX);
     expect(baseCaller).toHaveBeenCalled();
     expect(result.text).toBe('llm');
@@ -55,7 +55,7 @@ describe('withGenerationRunner', () => {
         metadata: { result_url: '/api/v1/generated-media/2/cover', media_kind: 'image' },
       });
 
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: 'jimeng-cli-image', ratio: '16:9', count: 2 },
@@ -78,18 +78,18 @@ describe('withGenerationRunner', () => {
     expect(baseCaller).not.toHaveBeenCalled();
   });
 
-  it('stamps entity ownership into dispatch params (CC5 asset backlink)', async () => {
+  it('stamps asset provenance into dispatch params (source_asset_id + loadout_id)', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockResolvedValue({
       phase: 'completed',
       metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
     });
 
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', ratio: '3:4', count: 1 },
-      entity_ref: { kind: 'character', id: '123456789' },
+      asset_ref: { asset_id: '123456789', loadout_id: '987654321' },
     });
 
     expect(dispatchGenerations).toHaveBeenCalledWith('9', {
@@ -98,15 +98,63 @@ describe('withGenerationRunner', () => {
       prompt: 'hello',
       model: '',
       count: 1,
-      params: { ratio: '3:4', entity_kind: 'character', entity_id: '123456789' },
+      params: {
+        ratio: '3:4',
+        source_asset_id: '123456789',
+        loadout_id: '987654321',
+      },
     });
+  });
+
+  it('omits loadout_id when the card binds no outfit', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
+    });
+
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
+    await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+      asset_ref: { asset_id: '123456789', loadout_id: null },
+    });
+
+    const params = dispatchGenerations.mock.calls[0][1].params;
+    expect(params).toEqual({ source_asset_id: '123456789' });
+    expect('loadout_id' in params).toBe(false);
+  });
+
+  // NEGATIVE (plan ruling H): the retired stamp must never come back. Its ids
+  // were `_legacy_project_*` rows and its only reader has been gone since P3
+  // Task 6 — writing it again would resume emitting provenance nothing reads,
+  // pointed at tables scheduled for DROP in P6.
+  it('never writes the retired entity_kind / entity_id stamp', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/api/v1/generated-media/1/cover', media_kind: 'image' },
+    });
+
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
+    await runner({
+      ...TEXT_CTX,
+      gen: { kind: 'image', model: '', count: 1 },
+      asset_ref: { asset_id: '123456789', loadout_id: '987654321' },
+      // A legacy-shaped field on the context must not be picked up either.
+      ...({ entity_ref: { kind: 'character', id: '42' } } as Record<string, unknown>),
+    });
+
+    const params = dispatchGenerations.mock.calls[0][1].params;
+    expect(Object.keys(params)).not.toContain('entity_kind');
+    expect(Object.keys(params)).not.toContain('entity_id');
   });
 
   it('reports a failed task in-band', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockResolvedValue({ phase: 'failed', error_msg: 'no credit' });
 
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 1 },
@@ -118,7 +166,7 @@ describe('withGenerationRunner', () => {
 
   it('reports dispatch errors in-band instead of throwing', async () => {
     dispatchGenerations.mockRejectedValue(new Error('HTTP 500'));
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'video', model: '', aspect: '16:9' },
@@ -128,7 +176,7 @@ describe('withGenerationRunner', () => {
   });
 
   it('falls back to the base caller when no canvas is loaded', async () => {
-    const runner = withGenerationRunner(baseCaller, { canvasId: null });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: null });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 1 },
@@ -153,7 +201,7 @@ describe('withGenerationRunner — G4-F3 additions', () => {
       phase: 'completed',
       metadata: { result_url: '/gm/1/cover' },
     });
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     await runner({ ...GEN_CTX, source_url: '/api/v1/generated-media/7/cover' });
     expect(dispatchGenerations).toHaveBeenCalledWith(
       '9',
@@ -170,6 +218,7 @@ describe('withGenerationRunner — G4-F3 additions', () => {
     });
     const phases: string[] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onPhase: (id, phase) => phases.push(`${id}:${phase}`),
     });
@@ -192,7 +241,7 @@ describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
         metadata: { result_url: '/api/v1/generated-media/3/cover' },
       });
 
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 3 },
@@ -215,7 +264,7 @@ describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
       .mockResolvedValueOnce({ phase: 'failed', error_msg: 'no credit' })
       .mockResolvedValueOnce({ phase: 'timeout' });
 
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 2 },
@@ -230,7 +279,7 @@ describe('withGenerationRunner — fan-out partial failure (P0-2)', () => {
       phase: 'completed',
       metadata: { result_url: '/u1' },
     });
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 1 },
@@ -254,6 +303,7 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
     });
     const dispatched: unknown[] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDispatched: (...a) => dispatched.push(a),
     });
@@ -269,6 +319,7 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
     });
     const settled: Array<{ taskId?: string }> = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onItemSettled: (_id, item) => settled.push(item),
     });
@@ -286,6 +337,7 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
       });
     const settled: Array<{ taskId?: string; url: string | null; recoverable?: boolean }> = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onItemSettled: (_id, item) => settled.push(item),
     });
@@ -302,7 +354,7 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
   it('all polls broken → in-band failure that says the tasks are not lost', async () => {
     dispatchGenerations.mockResolvedValue(['t1']);
     pollGeneration.mockRejectedValue(new Error('network down'));
-    const runner = withGenerationRunner(baseCaller, { canvasId: '9' });
+    const runner = withGenerationRunner(baseCaller, { assetInputs: noAssetInputs, canvasId: '9' });
     const result = await runner({
       ...TEXT_CTX,
       gen: { kind: 'image', model: '', count: 1 },
@@ -317,6 +369,7 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
     pollGeneration.mockRejectedValue(new PollStopped('t1'));
     const settled: Array<{ recoverable?: boolean }> = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onItemSettled: (_id, item) => settled.push(item),
     });
@@ -345,6 +398,7 @@ describe('withGenerationRunner — placeholder lifecycle (P0-3)', () => {
     const dispatched: Array<[string, number, string]> = [];
     const settled: Array<{ url: string | null }> = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDispatched: (id, count, kind) => dispatched.push([id, count, kind]),
       onItemSettled: (_id, item) => settled.push(item),
@@ -387,6 +441,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: Array<[string, string[]]> = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (id, knobs) => dropped.push([id, knobs]),
     });
@@ -416,6 +471,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -433,6 +489,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -455,6 +512,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -480,6 +538,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -506,6 +565,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -527,6 +587,7 @@ describe('withGenerationRunner — dropped knobs (P4)', () => {
 
     const dropped: string[][] = [];
     const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
       canvasId: '9',
       onDropped: (_id, knobs) => dropped.push(knobs),
     });
@@ -593,10 +654,19 @@ describe('every generation run site shows the dropped knobs', () => {
       'a file constructs the generation runner but is not in the checked set',
     ).toEqual([...SITES].sort());
     for (const rel of SITES) {
+      const src = stripComments(readFileSync(join(root, rel), 'utf8'));
       expect(
-        stripComments(readFileSync(join(root, rel), 'utf8')),
+        src,
         `${rel} constructs the generation runner without onDropped — its runs would drop knobs silently`,
       ).toMatch(/\bonDropped\s*:/);
+      // `assetInputs` is a REQUIRED dep, so tsc already refuses an omission —
+      // but it accepts `noAssetInputs`, which is the escape hatch tests use.
+      // A production site wiring that would compile, run, and quietly ship no
+      // asset references at all. So the site must name the real resolver.
+      expect(
+        src,
+        `${rel} constructs the generation runner without resolveAssetInputsForRun — upstream asset cards would contribute nothing, and a card with nothing to give looks identical`,
+      ).toMatch(/\bassetInputs\s*:\s*resolveAssetInputsForRun\b/);
     }
   });
 
@@ -640,10 +710,154 @@ describe('every generation run site shows the dropped knobs', () => {
       [...REPORTS_DROPPED_KNOBS, ...Object.keys(NO_PROMPT_NODE_TO_REPORT_ON)].sort(),
     );
     for (const rel of REPORTS_DROPPED_KNOBS) {
+      const src = stripComments(readFileSync(join(root, rel), 'utf8'));
       expect(
-        stripComments(readFileSync(join(root, rel), 'utf8')),
+        src,
         `${rel} polls to terminal and reads result_url but never dropped_knobs — the badge would show a clean run for one that dropped knobs`,
       ).toMatch(/\bdropped_knobs\b/);
+      // BOTH ledgers, at the same terminal read. Keying only on
+      // `dropped_knobs` let a poll site satisfy this guard while never reading
+      // `dropped_refs` — which is the ledger the asset-library bridge fills,
+      // and the one whose absence means "the picture you asked for is not in
+      // there and nothing says so". Orthogonal results, checked separately.
+      expect(
+        src,
+        `${rel} reads dropped_knobs but never dropped_refs — a run that lost a REFERENCE would read as a clean one`,
+      ).toMatch(/\bdropped_refs\b/);
     }
+  });
+});
+
+describe('withGenerationRunner — dropped references (asset-library P4)', () => {
+  // `dropped_refs` rides in the SAME task metadata as `dropped_knobs`, and is
+  // read at the same terminal point for the same reason: a field only one of
+  // the two ledgers consumes is how a run that lost a reference reads as a
+  // clean one. They are reported apart because they are orthogonal — a run
+  // can lose a knob, a reference, or both.
+  const REF_A = { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' };
+  const REF_B = { url: '/api/v1/resources/92/cover', reason: 'no_image_file' };
+
+  it('reports the references the backend could not use', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_knobs: [], dropped_refs: [REF_A] },
+    });
+
+    const calls: Array<[string[], unknown[]]> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([
+      [[], []],
+      [[], [REF_A]],
+    ]);
+  });
+
+  it('unions across the fan-out and dedupes by url+reason', async () => {
+    // One user action, several tasks: a reference lost by any of them was
+    // lost for the run. The same reference lost twice is still one reference.
+    dispatchGenerations.mockResolvedValue(['t1', 't2']);
+    pollGeneration
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/1/cover', dropped_refs: [REF_A] },
+      })
+      .mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover', dropped_refs: [REF_A, REF_B] },
+      });
+
+    const refs: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, _knobs, r) => refs.push(r),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 2 } });
+
+    expect(refs).toEqual([[], [REF_A, REF_B]]);
+  });
+
+  it('a reference drop is an observation even when no knob was dropped', async () => {
+    // The `observed` flag used to be set only by `dropped_knobs`. A backend
+    // that honoured every knob and lost a reference would then be recorded as
+    // "nobody reported", and the badge would never appear.
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover', dropped_refs: [REF_A] },
+    });
+
+    const calls: Array<[string[], unknown[]]> = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, knobs, r) => calls.push([knobs, r]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls[1]).toEqual([[], [REF_A]]);
+  });
+
+  it('stays silent when NOTHING reported either ledger', async () => {
+    // A row that predates both fields, or a batch whose polls all broke. `[]`
+    // here would turn "we never got an answer" into "nothing was dropped".
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: { result_url: '/gm/1/cover' },
+    });
+
+    const calls: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([[[], []]]);
+  });
+
+  it('clears the reference verdict at dispatch too', async () => {
+    // Half a cleared badge is worse than none: the knobs would describe this
+    // run and the references an older one, in the same sentence.
+    dispatchGenerations.mockRejectedValue(new Error('network down'));
+
+    const calls: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, knobs, refs) => calls.push([knobs, refs]),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(calls).toEqual([[[], []]]);
+  });
+
+  it('ignores malformed entries rather than rendering a blank reference', async () => {
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: {
+        result_url: '/gm/1/cover',
+        dropped_refs: [null, 'nope', { reason: 'not_in_scope' }, REF_A],
+      },
+    });
+
+    const refs: unknown[][] = [];
+    const runner = withGenerationRunner(baseCaller, {
+      assetInputs: noAssetInputs,
+      canvasId: '9',
+      onDropped: (_id, _knobs, r) => refs.push(r),
+    });
+    await runner({ ...TEXT_CTX, gen: { kind: 'image', model: 'ark', count: 1 } });
+
+    expect(refs[1]).toEqual([REF_A]);
   });
 });

@@ -11,7 +11,9 @@
  * (it dedupes on insert), so simple suffixing is fine here.
  */
 
+import { primarySlotFileIds, type AssetNodeSeed } from './assetFiles';
 import type {
+  AssetNodeData,
   SmartNode,
   LlmNodeData,
   MediaNode,
@@ -26,9 +28,6 @@ import type {
   SmartNodeType,
   LoopNode,
   LoopNodeData,
-  CharacterNode,
-  CharacterNodeData,
-  LibEntityNodeData,
 } from './types';
 
 interface Position {
@@ -223,43 +222,71 @@ export function createLoopNode(
   };
 }
 
-/** Character canvas: the bible-card source node the preset workflow hangs off. */
-export function createCharacterNode(
-  data: Partial<CharacterNodeData> = {},
-  opts: FactoryOptions = {},
-): CharacterNode {
+// NO `createCharacterNode` / `createLibEntityNode` HERE ANY MORE (P4 Task 6).
+//
+// The `character` / `location` / `prop` node types, their views and their data
+// shapes all still exist — saved canvases hold those cards, and
+// `legacyMigration.ts` rewrites the bound ones into asset cards as each canvas
+// loads. What is gone is the ability to MAKE one: their only callers were the
+// entity-canvas seeding templates, which this task replaced with the
+// asset-bound seed. A live factory for a card the product has retired is an
+// invitation to place a new one that nothing can migrate.
+
+// `AssetNodeSeed` and the file predicates live in `./assetFiles` — one
+// module owns "which files does an asset card reference", so seeding and
+// rendering cannot answer it differently again. Re-exported here because a
+// caller of `createAssetNode` naturally looks for its parameter type
+// alongside it; this is the same declaration, not a second one.
+export type { AssetNodeSeed };
+
+export interface AssetFactoryOptions extends FactoryOptions {
+  /** `asset_loadouts.id` to bind, or null/undefined for none. */
+  loadoutId?: string | null;
+}
+
+/**
+ * Asset-library reference card (P4 Task 4).
+ *
+ * Everything but `asset_id` / `loadout_id` / `selected_file_ids` is a display
+ * SNAPSHOT — see `AssetNodeData`. `removed` is deliberately NOT seeded: its
+ * absence means "not known to be gone", and writing `false` here would put a
+ * claim into `nodes_json` that nothing has checked yet.
+ */
+export function createAssetNode(
+  asset: AssetNodeSeed,
+  opts: AssetFactoryOptions = {},
+): SmartNode<AssetNodeData> {
   const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
   return {
-    id: makeId('character', random),
-    type: 'character',
+    id: makeId('asset', random),
+    type: 'asset',
     position: opts.position ?? DEFAULT_POSITION,
-    data: {
-      character_id: data.character_id ?? null,
-      name: data.name ?? 'New character',
-      role_tag: data.role_tag ?? '',
-      description: data.description ?? '',
-      portrait_url: data.portrait_url ?? null,
-    },
+    data: assetNodeData(asset, opts.loadoutId ?? null),
   };
 }
 
-/** Location/prop canvas: the library-card source node (SP2). */
-export function createLibEntityNode(
-  type: 'location' | 'prop',
-  data: Partial<LibEntityNodeData> = {},
-  opts: FactoryOptions = {},
-): SmartNode<LibEntityNodeData> {
-  const random = opts.randomSuffix ?? DEFAULT_RANDOM_SUFFIX;
+/**
+ * The card's `data`, WITHOUT minting a node id.
+ *
+ * Split out of {@link createAssetNode} for the P4 Task 6 legacy migration,
+ * which replaces a `character`/`location`/`prop` node IN PLACE: the node id,
+ * position and every edge pointing at it have to survive, so only `type` and
+ * `data` change. That path must not build `AssetNodeData` a second time — a
+ * second copy of this object literal is a second thing to forget when the
+ * shape grows (the field names are the backend extractor's contract, see
+ * `AssetNodeData`).
+ */
+export function assetNodeData(
+  asset: AssetNodeSeed,
+  loadoutId: string | null,
+): AssetNodeData {
   return {
-    id: makeId(type, random),
-    type,
-    position: opts.position ?? DEFAULT_POSITION,
-    data: {
-      entity_id: data.entity_id ?? null,
-      name: data.name ?? (type === 'location' ? 'New location' : 'New prop'),
-      badge_tag: data.badge_tag ?? '',
-      description: data.description ?? '',
-      cover_url: data.cover_url ?? null,
-    },
+    asset_id: asset.id,
+    loadout_id: loadoutId,
+    selected_file_ids: primarySlotFileIds(asset, loadoutId),
+    name: asset.name,
+    asset_type: asset.asset_type,
+    cover_file_id: asset.cover_file_id ?? null,
+    readiness_state: asset.readiness?.state === 'ready' ? 'ready' : 'draft',
   };
 }

@@ -10,6 +10,9 @@
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { UserRound } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+import { UnmigratedBadge } from './UnmigratedBadge';
 
 import type { CharacterNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
@@ -23,8 +26,9 @@ const ROLE_TONE: Record<string, string> = {
 };
 
 export function CharacterNodeView({ id, data, selected }: NodeProps) {
-  const { name, role_tag, description, portrait_url } =
+  const { name, role_tag, description, portrait_url, unmigrated } =
     data as unknown as CharacterNodeData;
+  const { t } = useTranslation();
   const patch = useNodeDataPatch(id);
   // Both fields write the canvas document. `readOnly` (not `disabled`):
   // a viewer's whole purpose is reading, and a disabled field can't be
@@ -39,6 +43,7 @@ export function CharacterNodeView({ id, data, selected }: NodeProps) {
     >
       <div className="mh-node-head">
         <div className="mh-node-title">Character</div>
+        {unmigrated && <UnmigratedBadge t={t} />}
         {role_tag && (
           <span
             data-testid="character-role-badge"

@@ -830,3 +830,66 @@ async def test_list_hides_intermediates_unless_asked():
 
     await svc.list(SCOPE, str(SCOPE), include_intermediate=True)
     assert repo.last_filters["include_intermediate"] is True
+
+
+# ── one item by id (P4 T7) ─────────────────────────────────────────────────
+
+
+async def test_get_item_is_the_same_card_the_list_ships():
+    """One row, two reads, one shape.
+
+    Not "both look plausible" — the SAME row through both methods, compared
+    whole. A by-id read that built its own body would be a second wire shape
+    for one row, and the client would have to know which endpoint a card came
+    from before it could render it.
+    """
+    row = make_row()
+    svc, _repo, _p = build(rows=[row])
+
+    listed = (await svc.list(SCOPE, str(SCOPE)))["items"][0]
+    one = await svc.get_item(GEN, SCOPE)
+
+    assert one == listed
+    # And it really is the decorated card, not the raw repo row: the two
+    # derived fields are present and the private columns are gone.
+    assert one["source"]["label"] == "Harbour Board · Canvas"
+    assert one["title"] == "A wide shot of the harbour"
+    assert "file_path" not in one and "params" not in one and "cost_cents" not in one
+
+
+async def test_get_item_resolves_the_canvas_name_like_the_list_does():
+    canvases = FakeCanvases()
+    svc, _repo, _p = build(rows=[make_row()], canvases=canvases)
+
+    await svc.get_item(GEN, SCOPE)
+
+    assert canvases.calls == [[int(CANVAS)]]
+
+
+async def test_get_item_refuses_a_row_in_another_scope():
+    """Same refusal as ``save``/``delete``: an id that exists but is not in
+    this scope must not be readable, and "not there" and "not yours" must be
+    the same answer to a caller who may not learn which."""
+    svc, _repo, _p = build(rows=[make_row(scope_id=str(SCOPE + 1))])
+
+    with pytest.raises(AssetError) as e:
+        await svc.get_item(GEN, SCOPE)
+    assert (e.value.status, e.value.code) == (404, "generation_not_found")
+
+
+async def test_get_item_404s_on_an_unknown_id():
+    svc, _repo, _p = build(rows=[make_row()])
+
+    with pytest.raises(AssetError) as e:
+        await svc.get_item("800000000000000009", SCOPE)
+    assert e.value.status == 404
+
+
+async def test_get_item_reads_a_deleted_row_because_the_actions_on_it_do():
+    """``review_state='deleted'`` hides a row from the LIST, not from the row
+    reads: ``save`` and ``delete`` both resolve it through the same
+    ``gen_repo.get``. A stricter by-id read would mean "you can promote it but
+    you cannot look at it"."""
+    svc, _repo, _p = build(rows=[make_row(review_state="deleted")])
+
+    assert (await svc.get_item(GEN, SCOPE))["review_state"] == "deleted"

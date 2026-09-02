@@ -1,5 +1,11 @@
 # backend/app/services/canvas/asset_refs.py
-"""Extract resource references from a canvas's nodes_json.
+"""Extract RESOURCE references from a canvas's nodes_json.
+
+NAME TRAP: despite the module/function name, this owns ``canvas_resource_refs``
+(``resources`` rows). Asset-library refs (``canvas_asset_refs``) live in the
+sibling ``asset_node_refs.py``. The name predates the asset library and is
+left alone on purpose — renaming it would churn every import for no behaviour
+change; this line is the disambiguation instead.
 
 Pure, DB-free. The source of truth for what canvas_resource_refs should
 contain for a given canvas. Mirrors the smart-node shapes defined in

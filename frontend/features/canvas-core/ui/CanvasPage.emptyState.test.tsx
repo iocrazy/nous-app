@@ -14,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ canvasId: 'c1' }),
   useNavigate: () => vi.fn(),
-  // CanvasPage reads ?name=&characterId= for the character-canvas seeding.
+  // CanvasPage reads `?node=` (the asset sheet's Used In panel deep-links to
+  // one card). The `?name=&characterId=` character-canvas seeding this used to
+  // name was deleted in P4 — the mock is still needed, the old reason is not.
   useSearchParams: () => [new URLSearchParams()],
 }));
 

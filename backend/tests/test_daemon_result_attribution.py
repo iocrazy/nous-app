@@ -252,7 +252,7 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
             "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
         ),
         patch(
-            "app.workflows.canvas_generation._resolve_personal_team_id",
+            "app.workflows.canvas_generation._registration_scope_id",
             new=AsyncMock(return_value=7),
         ),
         patch(
@@ -296,6 +296,10 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
     assert attribution["requested"]["negative"] == "blurry"
     assert "negative" not in attribution["effective"]
     assert attribution["dropped"] == ["negative"]
+    # No asset card fed this run, so the provenance column stays NULL — the
+    # key is always present, because "we did not look" and "there was none"
+    # must not be the same absence.
+    assert attribution["source_asset_id"] is None
     # The whole payload must NOT ride along: it carries ref_urls and the
     # augmented prompt, and this sits in Redis for the ticket's TTL.
     assert set(attribution) == {
@@ -307,6 +311,7 @@ async def test_daemon_branch_hands_the_generation_contract_to_the_ticket():
         "requested",
         "effective",
         "dropped",
+        "source_asset_id",
     }
 
 
@@ -373,3 +378,126 @@ async def test_a_measurer_that_raises_never_takes_the_upload_down_with_it(
     # What we DID know still survives.
     assert origin.params["requested"] == {"ratio": "16:9"}
     assert origin.params["effective"] == {"ratio": "16:9"}
+
+
+@pytest.mark.asyncio
+async def test_the_daemon_ticket_carries_a_verified_source_asset_id():
+    """The daemon branch has to stamp provenance too.
+
+    Its row is written by the upload endpoint, not by
+    ``persist_canvas_generation_step``, so without this the asset sheet's
+    history would list a team's Ark runs and silently omit every run made on
+    the user's own machine — one feature answering differently depending on
+    which provider the run happened to pick.
+
+    Resolved SERVER-SIDE here, against the registration scope, and not echoed
+    from the client: the column is an FK, and an id that resolves to nothing
+    would take the whole upload down.
+    """
+    from app.services.ai.provider_protocols.base import ProviderCapabilities
+    from app.workflows.canvas_generation import generate_canvas_media_step
+
+    captured: dict = {}
+    asked: list[tuple] = []
+
+    async def fake_dispatch(**kw):
+        captured.update(kw)
+        return {"gen_id": "99"}
+
+    async def fake_source_asset(params, scope_id):
+        asked.append((params.get("source_asset_id"), scope_id))
+        return 700000000000000001
+
+    with (
+        patch(
+            "app.workflows.canvas_generation._local_engine",
+            new=AsyncMock(return_value=("codex", "gpt-image-2")),
+        ),
+        patch(
+            "app.services.codex.daemon_dispatch.dispatch_to_daemon", new=fake_dispatch
+        ),
+        patch(
+            "app.workflows.canvas_generation._registration_scope_id",
+            new=AsyncMock(return_value=7),
+        ),
+        patch(
+            "app.workflows.canvas_generation._source_asset_id_for",
+            new=fake_source_asset,
+        ),
+        patch(
+            "app.workflows.canvas_generation._capabilities_for",
+            new=AsyncMock(
+                return_value=ProviderCapabilities(
+                    ratios=frozenset({"16:9"}),
+                    quality=True,
+                    resolution=False,
+                    max_refs=9,
+                    negative=False,
+                    video_modes=frozenset(),
+                    honours_ratio="prompt_hint",
+                )
+            ),
+        ),
+    ):
+        await generate_canvas_media_step(
+            kind="image",
+            prompt="a cat",
+            model="codex-local-image",
+            params={"ratio": "16:9", "source_asset_id": "700000000000000001"},
+            source_url=None,
+            user_id="u1",
+            canvas_id=42,
+            node_id="n1",
+        )
+
+    assert captured["attribution"]["source_asset_id"] == 700000000000000001
+    # Verified in the scope the row is being filed into, not in the runner's.
+    assert asked == [("700000000000000001", 7)]
+    # And the row lands in that same scope — one run, one tenant.
+    assert captured["scope_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_the_upload_endpoint_puts_the_ticket_stamp_in_the_column(
+    fake_redis, client, captured_register
+):
+    """The other half of the same wire: what the ticket carries has to reach
+    ``GenerationOrigin.source_asset_id``, which is the column the inbox filter
+    reads."""
+    from app.api.codex_daemon_router import mint_upload_ticket
+
+    ticket = await mint_upload_ticket(
+        user_id="u1",
+        scope_id=7,
+        job_id="j1",
+        attribution={**ATTRIBUTION, "source_asset_id": 700000000000000001},
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out.png", _png(1536, 864), "image/png")},
+        data={"ticket": ticket},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured_register["origin"].source_asset_id == 700000000000000001
+
+
+@pytest.mark.asyncio
+async def test_an_older_ticket_without_the_stamp_files_a_null_not_a_crash(
+    fake_redis, client, captured_register
+):
+    """Tickets minted before this field existed are still in Redis when the
+    backend restarts. ``None``, never a guess and never a KeyError."""
+    from app.api.codex_daemon_router import mint_upload_ticket
+
+    ticket = await mint_upload_ticket(
+        user_id="u1", scope_id=7, job_id="j1", attribution=ATTRIBUTION
+    )
+    resp = await client.post(
+        "/api/v1/codex-daemon/upload",
+        files={"file": ("out.png", _png(1536, 864), "image/png")},
+        data={"ticket": ticket},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured_register["origin"].source_asset_id is None

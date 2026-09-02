@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import os
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -30,6 +30,7 @@ from app.repositories.assets_repository import (
     _serialize,
     with_derived,
 )
+from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.assets import (
     AssetCreate,
@@ -49,12 +50,15 @@ from app.services.ai.media.image_generation_service import (
 from app.services.ai.media.image_generation_service import (
     ImageGenerationService,
 )
+from app.services.assets.bundle import build_bundle
+from app.services.assets.legacy_refs import LEGACY_KINDS, legacy_table_for_kind
 from app.services.assets.slot_generation import (
     SlotNotGeneratable,
     reference_order,
     slot_prompt,
 )
 from app.services.assets.slots import PRIMARY_SLOT, is_valid_slot, link_allowed
+from app.services.generation.model_capabilities import capabilities_for_model
 from app.services.library.generated_media_service import (
     GenerationOrigin,
     register_generated_media,
@@ -174,6 +178,12 @@ _INTERNAL_DETAIL = "An unexpected error occurred while importing this name"
 # asset_files), which is exactly what a second caller must not inherit.
 _REFERENCE_READ_REASON = "assets-generate-slot: resolve reference media paths"
 
+# The bundle's own audit line. Separate from the one above even though both read
+# the same columns: ``system_reason`` is what the ``system_request_scope`` log
+# shows for a deliberate cross-user read, and sharing a string would make a
+# bundle request indistinguishable from a paid generation in that log.
+_BUNDLE_READ_REASON = "assets-bundle: resolve reference image availability"
+
 # The MIME every generated image is registered under — the same constant the
 # canvas and shot-generate paths use (``_KIND_MIME``/``mime="image/png"``), so
 # all three land the same way in Tier-1.
@@ -252,12 +262,16 @@ class AssetsService:
         assets_repo: Optional[AssetsRepository] = None,
         relations_repo: Optional[AssetRelationsRepository] = None,
         generated_repo: Optional[GeneratedMediaRepository] = None,
+        canvas_refs_repo: Optional[CanvasAssetRefsRepository] = None,
     ):
         self.assets = assets_repo or AssetsRepository()
         self.relations = relations_repo or AssetRelationsRepository()
         # Only ``generate_slot`` uses it (to stamp source_asset_id on the rows
         # it just created); injectable for the same reason as the other two.
         self.generated = generated_repo or GeneratedMediaRepository()
+        # The canvas→asset mirror (P4). Read-only from this side: it is
+        # MAINTAINED by CanvasService on save, never by the asset routes.
+        self.canvas_refs = canvas_refs_repo or CanvasAssetRefsRepository()
 
     # ── helpers ────────────────────────────────────────────────────────────
 
@@ -458,7 +472,54 @@ class AssetsService:
         """
         return await self.assets.count_by_type(int(scope_id))
 
-    async def get_asset(self, asset_id: int, scope_id: int) -> Dict[str, Any]:
+    async def resolve_legacy(
+        self, scope_id: int, kind: str, legacy_id: int
+    ) -> Dict[str, Any]:
+        """``{"asset_id": "<id>" | None}`` — the asset a legacy card points at.
+
+        A canvas saved before P3 still holds ``character`` / ``location`` /
+        ``prop`` cards keyed by ``_legacy_project_*`` row ids, which are NOT
+        ``assets.id``. This is the one-way map from those to the asset the
+        migration produced.
+
+        ``None`` is a real answer (nothing migrated with that provenance — see
+        the repository method), so it rides in a 200 body rather than a 404: a
+        404 would say "your request was wrong", when the request was fine and
+        the answer is "no such asset". An unmappable KIND is the opposite and
+        does raise, because that IS a bad request.
+        """
+        table = legacy_table_for_kind(kind)
+        if table is None:
+            raise AssetError(
+                422,
+                "unknown_legacy_kind",
+                f"Not a legacy entity kind: {kind!r}",
+                {"kinds": list(LEGACY_KINDS)},
+            )
+        found = await self.assets.resolve_legacy(int(scope_id), table, int(legacy_id))
+        return {"asset_id": str(found) if found is not None else None}
+
+    async def get_asset(
+        self, asset_id: int, scope_id: int, *, include_used_in: bool = False
+    ) -> Dict[str, Any]:
+        """One asset with its files, links and loadouts.
+
+        ``used_in`` is OPT-IN and ABSENT unless asked for. It is a five-table
+        aggregate (``canvas_asset_refs`` ⋈ ``canvases`` ⋈ ``projects`` ⋈
+        ``teams``, two ``array_agg(DISTINCT …)`` and a COALESCE scope
+        predicate), and the only caller that renders it is the asset sheet's
+        Used In panel. Every other caller asks this endpoint for the card's
+        face — name, type, cover, readiness, loadouts, files — and one canvas
+        can hold dozens of asset cards, each fetching its own detail on mount.
+        Charging all of them for a panel none of them draws is a fan-out that
+        arrived in the same branch as the aggregate and was never measured
+        against it.
+
+        ABSENT, not empty: an empty ``used_in`` is a claim ("this asset is used
+        nowhere") and a caller that did not ask has no basis for it. The
+        response model declares it ``Optional`` for exactly that reason, and
+        the client keeps the same distinction.
+        """
         row = await self._require(asset_id, scope_id)
         out = (await self._derived([row]))[0]
         files = await self.relations.list_files(int(asset_id))
@@ -468,7 +529,33 @@ class AssetsService:
         out["links"] = [_serialize_link(link) for link in outgoing]
         out["linked_by"] = [_serialize_link(link) for link in incoming]
         out["loadouts"] = [_serialize_loadout(lo) for lo in loadouts]
+        # Where this asset is in use (spec §5.1). Scope-limited: a system
+        # preset is readable from EVERY scope, so an unfiltered read would
+        # answer with other teams' canvas names. ``storyboards`` is a
+        # deliberate empty list — see UsedInResponse.
+        if include_used_in:
+            out["used_in"] = {
+                "canvases": await self.canvas_refs.list_canvases_for_asset(
+                    str(asset_id), str(scope_id)
+                ),
+                "storyboards": [],
+            }
         return out
+
+    async def list_canvas_refs(
+        self, asset_id: int, scope_id: int
+    ) -> List[Dict[str, Any]]:
+        """The ``used_in.canvases`` half on its own (GET /assets/{id}/canvas-refs).
+
+        Goes through ``_require`` so an asset the caller cannot see answers the
+        typed 404 the rest of this router answers, rather than an empty list —
+        "no canvases use it" and "that asset is not yours" are different facts
+        and must not share a response.
+        """
+        await self._require(asset_id, scope_id)
+        return await self.canvas_refs.list_canvases_for_asset(
+            str(asset_id), str(scope_id)
+        )
 
     async def update_asset(
         self, asset_id: int, scope_id: int, payload: AssetUpdate
@@ -1234,10 +1321,10 @@ class AssetsService:
             local_paths.append(str(path))
         return local_paths, skipped
 
-    async def _linked_prompts(
+    async def _linked_asset_rows(
         self, row: Dict[str, Any], scope_id: int, loadout: Optional[Dict[str, Any]]
-    ) -> List[str]:
-        """The ``prompt_positive`` of the costumes/props this run dresses in.
+    ) -> List[Dict[str, Any]]:
+        """The costume/prop asset ROWS this run dresses the subject in.
 
         With a loadout: exactly its ``costume_ids`` then its ``prop_ids``, in
         the stored order — the loadout is a FILTER, so a costume linked to the
@@ -1245,8 +1332,14 @@ class AssetsService:
         one: every ``wears`` then every ``holds`` target, each sorted by id so
         two identical requests compose the same prompt.
 
-        A target outside the caller's scope is skipped (its prompt is not
-        theirs to read), as is one with an empty prompt.
+        A target outside the caller's scope is skipped: its row is not theirs
+        to read.
+
+        Rows rather than prompt strings because two callers now need this
+        traversal and they need different fields off it —
+        ``_linked_prompts`` takes ``prompt_positive``, the bundle also takes
+        ``asset_type`` and ``prompt_negative``. A second traversal is how the
+        two would start disagreeing about which costumes are in the outfit.
         """
         asset_id = int(row["id"])
         if loadout is not None:
@@ -1257,14 +1350,70 @@ class AssetsService:
             target_ids = sorted(
                 await self.relations.link_targets(asset_id, "wears")
             ) + sorted(await self.relations.link_targets(asset_id, "holds"))
-        out: List[str] = []
+        out: List[Dict[str, Any]] = []
         for target_id in target_ids:
             target = await self.assets.get(int(target_id), int(scope_id))
-            if not target:
-                continue
+            if target:
+                out.append(target)
+        return out
+
+    async def _linked_prompts(
+        self, row: Dict[str, Any], scope_id: int, loadout: Optional[Dict[str, Any]]
+    ) -> List[str]:
+        """The ``prompt_positive`` of the costumes/props this run dresses in.
+
+        The non-empty ones only: a linked costume with no prompt contributes
+        nothing to compose, and an empty fragment would just be deduped away.
+        """
+        out: List[str] = []
+        for target in await self._linked_asset_rows(row, scope_id, loadout):
             text = (target.get("prompt_positive") or "").strip()
             if text:
                 out.append(text)
+        return out
+
+    async def _owned_loadout(
+        self, asset_id: int, loadout_id: Optional[Any]
+    ) -> Optional[Dict[str, Any]]:
+        """The loadout row, proven to belong to THIS asset — or None if unasked.
+
+        A loadout id from another character composes a different outfit onto
+        this one, so it is a typed 422 rather than a silently ignored knob.
+        Shared by the slot plan and the bundle so both refuse the same id.
+        """
+        if loadout_id is None:
+            return None
+        owned = {
+            int(lo["id"]): lo
+            for lo in await self.relations.list_loadouts(int(asset_id))
+        }
+        loadout = owned.get(int(loadout_id))
+        if loadout is None:
+            raise AssetError(
+                422, "loadout_mismatch", "Loadout does not belong to this asset"
+            )
+        return loadout
+
+    @staticmethod
+    def _files_by_slot(
+        files: List[Dict[str, Any]], loadout: Optional[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Group the asset's files by slot, honouring the loadout as a filter.
+
+        A loadout-scoped file belongs to ONE outfit. The prompt already treats
+        the loadout as a filter (``_linked_asset_rows``); letting a file pinned
+        to a DIFFERENT loadout become a reference would make one plan describe
+        two outfits — a costume in the picture that the prompt deliberately
+        left out. With no loadout requested, only the unpinned files apply.
+        """
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for f in files:
+            pinned = f.get("loadout_id")
+            if pinned is not None and (
+                loadout is None or int(pinned) != int(loadout["id"])
+            ):
+                continue
+            out.setdefault(f["slot"], []).append(f)
         return out
 
     async def _slot_plan(
@@ -1288,16 +1437,7 @@ class AssetsService:
                 "invalid_slot",
                 f"Slot '{slot}' is not valid for {asset_type}",
             )
-        loadout: Optional[Dict[str, Any]] = None
-        if loadout_id is not None:
-            owned = {
-                int(lo["id"]): lo for lo in await self.relations.list_loadouts(asset_id)
-            }
-            loadout = owned.get(int(loadout_id))
-            if loadout is None:
-                raise AssetError(
-                    422, "loadout_mismatch", "Loadout does not belong to this asset"
-                )
+        loadout = await self._owned_loadout(asset_id, loadout_id)
         try:
             prompt = slot_prompt(
                 row,
@@ -1315,20 +1455,9 @@ class AssetsService:
                 f"The '{slot}' slot of a {asset_type} asset cannot be generated",
             )
 
-        files_by_slot: Dict[str, List[Dict[str, Any]]] = {}
-        for f in await self.relations.list_files(asset_id):
-            pinned = f.get("loadout_id")
-            # A loadout-scoped file belongs to ONE outfit. The prompt already
-            # treats the loadout as a filter (``_linked_prompts``); letting a
-            # file pinned to a DIFFERENT loadout become a reference would make
-            # one plan describe two outfits — a costume in the picture that
-            # the prompt deliberately left out. With no loadout requested,
-            # only the unpinned files apply.
-            if pinned is not None and (
-                loadout is None or int(pinned) != int(loadout["id"])
-            ):
-                continue
-            files_by_slot.setdefault(f["slot"], []).append(f)
+        files_by_slot = self._files_by_slot(
+            await self.relations.list_files(asset_id), loadout
+        )
         refs = reference_order(files_by_slot, asset_type, max_refs=MAX_SLOT_REFERENCES)
         return {
             "positive": prompt["positive"],
@@ -1341,6 +1470,109 @@ class AssetsService:
             # not what runs.
             "model": None,
         }
+
+    # ── bundle delivery protocol (spec §6.3) ───────────────────────────────
+
+    async def get_bundle(
+        self,
+        asset_id: int,
+        scope_id: int,
+        *,
+        model: str,
+        loadout_id: Optional[Any] = None,
+        selected_file_ids: Optional[Sequence[Any]] = None,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """What this asset hands the generator running ``model``.
+
+        ``_require``, not ``_require_writable``: composing a payload writes
+        nothing, and a system preset is exactly the thing a canvas wants to
+        deliver. Same posture as ``preview_generate_slot``.
+
+        The provider ceiling is looked up through the SAME visibility predicate
+        the model picker uses (``capabilities_for_model``), so a bundle can
+        only ever be built for a model the caller could have chosen. A name
+        that is disabled, owner-scoped to someone else, hidden by the caller's
+        Settings, or simply absent is one 422 — ``model_unknown`` — because
+        from the caller's side those are one fact.
+
+        ``selected_file_ids`` is the CALLER'S CHECKLIST, and passing it is what
+        makes the provider ceiling trim the right population. ``None`` means
+        "no checklist" — every file the asset owns is a candidate, which is the
+        asset sheet's question. A canvas card always has a checklist (possibly
+        empty), and handing it over here rather than intersecting the answer
+        afterwards is the difference between "the top N of what you picked" and
+        "the top N of everything, then whichever of those you picked" — the
+        second delivers nothing at all whenever the picks are not a prefix of
+        the priority order. See ``build_bundle``'s ``_restrict_to_selection``.
+
+        ⚠️ ``build_bundle`` accepts a ``user_text`` tail (spec §6.3's "what the
+        person typed on the node"); NO route passes one yet. The canvas node
+        that will is P4 Task 5's, and it composes that text itself — exposing a
+        query parameter for it before there is a caller would be a knob with no
+        behaviour behind it.
+        """
+        row = await self._require(asset_id, scope_id)
+        loadout = await self._owned_loadout(int(asset_id), loadout_id)
+        caps = await capabilities_for_model(str(model), str(user_id))
+        if caps is None:
+            raise AssetError(
+                422,
+                "model_unknown",
+                f"Model '{model}' is not available — pick one from the "
+                "generation model list",
+                {"model": str(model)},
+            )
+        linked = await self._linked_asset_rows(row, int(scope_id), loadout)
+        files_by_slot = self._files_by_slot(
+            await self.relations.list_files(int(asset_id)), loadout
+        )
+        await self._stamp_image_availability(files_by_slot)
+        return build_bundle(
+            row,
+            loadout,
+            linked,
+            files_by_slot,
+            caps,
+            selected_resource_ids=selected_file_ids,
+        )
+
+    async def _stamp_image_availability(
+        self, files_by_slot: Dict[str, List[Dict[str, Any]]]
+    ) -> None:
+        """Mark each file row with whether it has image bytes to send.
+
+        Uses ``_reference_stored_path`` — the SAME ladder ``generate_slot``
+        materializes through — so "this file can be a reference" means the same
+        thing on both paths. In place: ``build_bundle`` reads ``has_image`` off
+        the row and turns a False into a ``no_image_file`` entry in ``dropped``.
+
+        A resource row that is ABSENT (attached, then deleted) is stamped False
+        too, and therefore reported as ``no_image_file`` rather than as its own
+        ``resource_not_found``. Deliberate: this endpoint answers "what can be
+        delivered", and both answers are "no image to deliver". The finer
+        distinction belongs to the RUN, and ``generate_slot`` keeps it —
+        ``skipped_references`` names ``resource_not_found`` separately, because
+        there the user paid for the call that dropped it.
+
+        No scope re-check, unlike ``_materialize_references``: that one hands
+        the file's BYTES to an outside provider, this one returns ids the
+        caller can already read off ``GET /assets/{id}``.
+        """
+        candidates = {
+            int(f["resource_id"]) for rows in files_by_slot.values() for f in rows
+        }
+        if not candidates:
+            return
+        rows = await self.relations.resource_media_rows(
+            sorted(candidates), system_reason=_BUNDLE_READ_REASON
+        )
+        available = {
+            rid for rid in candidates if _reference_stored_path(rows.get(rid) or {})
+        }
+        for slot_rows in files_by_slot.values():
+            for f in slot_rows:
+                f["has_image"] = int(f["resource_id"]) in available
 
     async def preview_generate_slot(
         self,

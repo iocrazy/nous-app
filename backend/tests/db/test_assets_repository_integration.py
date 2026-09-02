@@ -1365,3 +1365,237 @@ async def test_removing_from_the_library_is_not_a_delete(orm_dsn, pg, fx):
 
     back = await service.set_library_membership(asset_id, team, in_library=True)
     assert back["in_library"] is True
+
+
+# ── 21. resolve_legacy: JSONB containment over attrs.legacy_ids ────────────
+
+
+@_skip
+async def test_resolve_legacy_matches_the_pair_and_only_the_pair(orm_dsn, pg, fx):
+    """``attrs @> '{"legacy_ids": [[table, id]]}'`` is the second predicate in
+    this repository that only PostgreSQL can vouch for.
+
+    Three properties SQLAlchemy cannot answer for, all of which would fail
+    silently — as an empty result that reads exactly like "that entity was
+    never migrated":
+
+    * containment reaches INTO the nested pair arrays (a merged asset carries
+      several, and the probe carries one);
+    * the two halves match together, so a ``project_characters`` id does not
+      answer for a ``project_lib_entities`` id of the same number;
+    * the id is a JSON *number*, the way the migration wrote it — ``"12"`` and
+      ``12`` are different JSONB scalars.
+
+    Provenance is written here the way ``backfill_assets_from_project_entities``
+    writes it, INCLUDING the pre-rename table labels (mig 447 renamed the
+    tables; the labels deliberately stayed).
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    merged = await _make_asset(
+        repo,
+        fx,
+        "character",
+        _uniq("Old Zhang"),
+        attrs={
+            "legacy_ids": [["project_characters", 12], ["project_characters", 44]],
+            "merged_from": [["project_characters", 44]],
+            "legacy_cover_url": None,
+        },
+    )
+    harbour = await _make_asset(
+        repo,
+        fx,
+        "location",
+        _uniq("Harbour"),
+        attrs={"legacy_ids": [["project_lib_entities", 12]]},
+    )
+    plain = await _make_asset(repo, fx, "prop", _uniq("Hand Made"))
+
+    team = fx["team_id"]
+    # Every legacy row a merge absorbed resolves to the one asset it became.
+    for legacy_id in (12, 44):
+        assert await repo.resolve_legacy(team, "project_characters", legacy_id) == int(
+            merged["id"]
+        )
+    # Same id, other table → the other asset. This is the pair matching, and it
+    # is the assertion that would fail if the id were compared on its own.
+    assert await repo.resolve_legacy(team, "project_lib_entities", 12) == int(
+        harbour["id"]
+    )
+    # A pair nobody carries, and an asset with no provenance at all (the shape
+    # ADOPTION leaves behind) → None, not an error.
+    assert await repo.resolve_legacy(team, "project_characters", 99) is None
+    assert int(plain["id"]) not in {
+        await repo.resolve_legacy(team, "project_characters", 12),
+        await repo.resolve_legacy(team, "project_lib_entities", 12),
+    }
+
+    # ``merged_from`` repeats the same pairs but is not the identity map — a
+    # probe keyed on the ``legacy_ids`` KEY must not reach it. 44 is in BOTH
+    # here, so the control is an asset carrying it ONLY under merged_from.
+    only_merged = await _make_asset(
+        repo,
+        fx,
+        "prop",
+        _uniq("Merge Record"),
+        attrs={"merged_from": [["project_lib_entities", 77]]},
+    )
+    assert await repo.resolve_legacy(team, "project_lib_entities", 77) is None
+    assert only_merged  # the row exists; it is the KEY that keeps it out
+
+    # A soft-deleted asset stops answering: its name is free again and the
+    # shelf no longer lists it, so pointing a canvas card at it would
+    # resurrect a row the user deleted.
+    assert await repo.soft_delete(int(merged["id"]), team) is True
+    assert await repo.resolve_legacy(team, "project_characters", 12) is None
+
+    # Cross-scope: the same provenance in another team is invisible from here.
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Other Asset Team",
+        uuid.UUID(fx["user_id"]),
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        await repo.create(
+            int(other_team),
+            {
+                "asset_type": "character",
+                "name": _uniq("Old Zhang Elsewhere"),
+                "attrs": {"legacy_ids": [["project_characters", 12]]},
+            },
+            fx["user_id"],
+        )
+        assert await repo.resolve_legacy(team, "project_characters", 12) is None
+        assert (
+            await repo.resolve_legacy(int(other_team), "project_characters", 12)
+            is not None
+        )
+    finally:
+        await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))
+
+
+# ── the provenance column: WRITE joined to READ (P4 Task 7, final wave) ─────
+
+
+@_skip
+async def test_source_asset_stamp_is_found_by_the_inbox_filter(orm_dsn, pg, fx):
+    """`set_source_asset` (the write) and `list_inbox(source_asset_id=...)`
+    (the read) are pinned in different files against different fixtures. This
+    is the one case that joins them on a real database.
+
+    Two things only Postgres can answer here: whether the BIGINT the write
+    binds is the same value the filter compares (the two sides reach the column
+    through the same ORM attribute, but a Snowflake past 2^53 is exactly where
+    "the same attribute" has stopped being enough in this repo before), and
+    whether the partial index's predicate — `WHERE source_asset_id IS NOT NULL`
+    — leaves unstamped rows reachable by every OTHER filter.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    repo = AssetsRepository()
+    asset = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Stamped Subject")},
+        fx["user_id"],
+    )
+    other = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Unstamped Subject")},
+        fx["user_id"],
+    )
+
+    async def _gen(name: str) -> int:
+        return int(
+            await pg.fetchval(
+                "INSERT INTO generated_media "
+                "(scope_id, creator_id, media_kind, file_path, origin_kind) "
+                "VALUES ($1, $2, 'image', $3, 'canvas_generate') RETURNING id",
+                fx["team_id"],
+                uuid.UUID(fx["user_id"]),
+                f"/tmp/{name}.png",
+            )
+        )
+
+    stamped_id = await _gen("stamped")
+    bare_id = await _gen("bare")
+
+    gm = GeneratedMediaRepository()
+    written = await gm.set_source_asset(
+        stamped_id, int(asset["id"]), scope_id=fx["team_id"]
+    )
+    assert written is not None
+    # The wire shape stringifies ids; the comparison is on the VALUE.
+    assert int(written["source_asset_id"]) == int(asset["id"])
+
+    page = await gm.list_inbox(fx["team_id"], source_asset_id=int(asset["id"]))
+    got = {int(r["id"]) for r in page["items"]}
+    assert got == {stamped_id}, "the write is not reachable by the read it exists for"
+
+    # A different asset does not inherit it, and the unstamped row is still
+    # listable without the filter — the partial index hides nothing.
+    empty = await gm.list_inbox(fx["team_id"], source_asset_id=int(other["id"]))
+    assert empty["items"] == []
+    unfiltered = {int(r["id"]) for r in (await gm.list_inbox(fx["team_id"]))["items"]}
+    assert {stamped_id, bare_id} <= unfiltered
+
+
+@_skip
+async def test_the_stamp_refuses_a_row_in_another_scope(orm_dsn, pg, fx):
+    """`scope_id` is optional on `set_source_asset` and every caller passes it.
+    Without the predicate this is an UPDATE by primary key, and a caller handed
+    a user-supplied `gen_id` could stamp a row in someone else's tenant."""
+    from app.repositories.assets_repository import AssetsRepository
+    from app.repositories.generated_media_repository import GeneratedMediaRepository
+
+    repo = AssetsRepository()
+    asset = await repo.create(
+        fx["team_id"],
+        {"asset_type": "character", "name": _uniq("Scoped Subject")},
+        fx["user_id"],
+    )
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Other Stamp Team",
+        uuid.UUID(fx["user_id"]),
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        foreign_id = int(
+            await pg.fetchval(
+                "INSERT INTO generated_media "
+                "(scope_id, creator_id, media_kind, file_path, origin_kind) "
+                "VALUES ($1, $2, 'image', '/tmp/foreign.png', 'canvas_generate') "
+                "RETURNING id",
+                int(other_team),
+                uuid.UUID(fx["user_id"]),
+            )
+        )
+
+        gm = GeneratedMediaRepository()
+        refused = await gm.set_source_asset(
+            foreign_id, int(asset["id"]), scope_id=fx["team_id"]
+        )
+
+        # `None` is the typed failure, and the row is genuinely untouched —
+        # a returning-clause miss with a write behind it would be worse than
+        # no check at all.
+        assert refused is None
+        assert (
+            await pg.fetchval(
+                "SELECT source_asset_id FROM generated_media WHERE id = $1",
+                foreign_id,
+            )
+            is None
+        )
+    finally:
+        await pg.execute(
+            "DELETE FROM generated_media WHERE scope_id = $1", int(other_team)
+        )
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))

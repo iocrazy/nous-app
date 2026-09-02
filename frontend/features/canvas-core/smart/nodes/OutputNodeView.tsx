@@ -6,6 +6,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { NodeDeleteButton } from './NodeDeleteButton';
 import { NodeWidthGrip } from './NodeWidthGrip';
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { getResourceFileUrl } from '../../../../services/resourceService';
 import { getSupabaseClient } from '../../../../supabaseClient';
@@ -41,6 +43,13 @@ import { ensureResourceId } from '../mediaEditBridge';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
+import { SaveAsAssetDialog } from '../../../../components/assets/SaveAsAssetDialog';
+import { useOptionalToast } from '../../../../components/Toast';
+import {
+  fetchGeneratedItem,
+  type GeneratedItem,
+} from '../../../../services/generatedService';
+import { useCanvasScope } from '../canvasScope';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
@@ -254,6 +263,57 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
   const primaryImageUrl =
     preview_url || ((images?.[0] as { url?: string } | undefined)?.url ?? null);
   const canCrop = kind === 'image' && !!primaryImageUrl;
+
+  // ── "As Asset…" (P4 Task 6) ────────────────────────────────────────────
+  //
+  // Promoting an output into the asset library needs the `generated_media`
+  // ROW, not the picture: `SaveAsAssetDialog` takes `GeneratedItem`s, and its
+  // `source_asset_id` prefill — which is what makes "regenerate this
+  // character's sheet" land back on that character — is a column the node has
+  // never held. So the id is resolved here and the row is fetched on demand.
+  //
+  // The id has TWO sources, in this order:
+  //   1. `GeneratedImageRef.id`, which both import endpoints have always sent;
+  //   2. failing that, the durable url itself — `/api/v1/generated-media/{id}/…`
+  //      carries the same id, and `handleUpscale` above already recovers it
+  //      that way, so a node persisted before the field existed is not shut
+  //      out of the library for a reason it cannot see.
+  //
+  // Neither available (a pasted external url, a bare `preview_text`) leaves
+  // the key DISABLED WITH A REASON rather than hidden. Same for a canvas
+  // opened outside a `/team/:teamId` route: `/api/v1/assets` is scoped per
+  // request and an empty `scope_id` is a 403, not an unscoped query.
+  const { t } = useTranslation();
+  const toast = useOptionalToast();
+  const { scopeId } = useCanvasScope();
+  const generationId =
+    (images?.[0] as { id?: string } | undefined)?.id ??
+    (primaryImageUrl ? genIdFromDurableUrl(primaryImageUrl) : null);
+  const [asAssetItem, setAsAssetItem] = useState<GeneratedItem | null>(null);
+  const [asAssetLoading, setAsAssetLoading] = useState(false);
+  const asAssetDisabledReason = !scopeId
+    ? t('canvas.asAsset.noScope', 'Open this canvas from a workspace to save assets')
+    : !generationId
+      ? t('canvas.asAsset.noGeneration', 'This image has no library record to save')
+      : undefined;
+
+  const handleAsAsset = useCallback(() => {
+    if (!scopeId || !generationId || asAssetLoading) return;
+    setAsAssetLoading(true);
+    fetchGeneratedItem(scopeId, generationId)
+      .then((item) => setAsAssetItem(item))
+      .catch((err) => {
+        // Never silent: the user clicked, and "nothing happened" is the one
+        // outcome that teaches them the button is broken.
+        console.error('[OutputNodeView] fetchGeneratedItem failed:', err);
+        toast?.addToast(
+          t('canvas.asAsset.lookupFailed', 'Could not read this generation'),
+          'error',
+        );
+      })
+      .finally(() => setAsAssetLoading(false));
+  }, [scopeId, generationId, asAssetLoading, toast, t]);
+
   // Grid split has no local fallback — every tile is derived
   // server-side, so a persisted source resource is required.
   const canSplit = canCrop && !!resource_id;
@@ -571,6 +631,9 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           onSplit={canSplit ? openGridEditor : undefined}
           onRerun={canRegenerate ? onRegenerate : undefined}
           rerunning={regenerating}
+          onAsAsset={handleAsAsset}
+          asAssetDisabled={asAssetDisabledReason !== undefined || asAssetLoading}
+          asAssetDisabledReason={asAssetDisabledReason}
           readOnly={readOnly}
         />
       )}
@@ -858,6 +921,37 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
           regenerating={regenerating}
         />
       )}
+      {/* PORTALLED TO THE BODY ON PURPOSE. `UiModal` positions itself with
+          `position: fixed` and does not portal — and every ancestor of a node
+          here is CSS-transformed by React Flow, which makes `fixed` resolve
+          against the node's own box instead of the viewport. Rendered in
+          place, the dialog would open as a squashed panel inside a 260px
+          card. Same trap `OutputNodeToolbar`'s header names. */}
+      {asAssetItem &&
+        scopeId &&
+        createPortal(
+          <SaveAsAssetDialog
+            open
+            scopeId={scopeId}
+            items={[asAssetItem]}
+            onClose={() => setAsAssetItem(null)}
+            onDone={(outcome) => {
+              setAsAssetItem(null);
+              // The node itself does NOT change. The picture is still the
+              // canvas's output; what changed is that a library asset now
+              // also points at it. Stamping the card would claim the two are
+              // the same object, and a second promotion into another asset
+              // would then have to overwrite the first.
+              toast?.addToast(
+                t('canvas.asAsset.saved', 'Saved to {{name}}', {
+                  name: outcome.assetName,
+                }),
+                'success',
+              );
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }

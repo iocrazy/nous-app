@@ -1888,7 +1888,6 @@
       "notLoopable": "不循环",
       "sendToCanvas": "发送到画布",
       "sendToAgent": "发送给智能体",
-      "arrivesWithP4": "随 P4 上线",
       "arrivesWithP5": "随 P5 上线",
       "copyLoadoutPrompt": "复制造型提示词",
       "promptCopied": "提示词已复制",
@@ -1908,7 +1907,10 @@
       "assetId": "资产 ID",
       "usedIn": "使用于",
       "noProjects": "还没有关联项目",
-      "canvasUsageLater": "画布使用情况随 P4 上线",
+      "usedInProjects": "项目",
+      "usedInCanvases": "画布",
+      "noCanvases": "还没有出现在任何画布上",
+      "canvasCards": "{{n}} 个卡片",
       "addRole": "添加定位",
       "addDescription": "添加描述",
       "editField": "编辑{{field}}",
@@ -1984,6 +1986,19 @@
       "removeHint": "从资产库货架移走 —— 它仍留在本项目里",
       "removeNamed": "把 {{name}} 移出资产库",
       "removed": "已移出资产库 —— 仍留在本项目"
+    },
+    "sendToCanvas": {
+      "title": "发送到画布",
+      "newCanvas": "新建画布",
+      "noCanvases": "该项目还没有画布",
+      "canvasesUnavailable": "无法加载该项目的画布",
+      "err": {
+        "loadFailed": "无法打开该画布",
+        "readOnly": "你对该画布只有查看权限",
+        "conflict": "有人正在编辑该画布，请重试。",
+        "saveFailed": "无法把卡片添加到该画布",
+        "createFailed": "无法创建画布"
+      }
     }
   },
   "generated": {
@@ -3212,6 +3227,15 @@
     },
     "readOnly": "只读",
     "ignoredKnobs": "已忽略：{{knobs}}",
+    "ignoredRefs": "{{count}} 张参考（{{reason}}）",
+    "refDropReason": {
+      "unknown_shape": "不支持的链接",
+      "not_in_scope": "不在当前空间",
+      "no_image_file": "没有图片文件",
+      "materialize_failed": "读取失败",
+      "scope_unresolved": "空间未知",
+      "unresolved": "无法解析"
+    },
     "knobNotSupported": "该模型不支持此项",
     "saveBadge": {
       "saving": "保存中…",
@@ -3236,7 +3260,8 @@
         "timeline": "时间线",
         "media": "上传",
         "group": "分组",
-        "llm": "LLM"
+        "llm": "LLM",
+        "asset": "素材"
       },
       "desc": {
         "shot": "分镜卡——承载一拍的媒体素材",
@@ -3246,7 +3271,8 @@
         "timeline": "多段成片按序拼接",
         "media": "把图片或视频导入画布",
         "group": "把媒体、提示词、循环收进同一组",
-        "llm": "节点里的对话模型——文本进，文本出"
+        "llm": "节点里的对话模型——文本进，文本出",
+        "asset": "引用角色、场景、道具或提示词"
       }
     },
     "toolbar": {
@@ -3309,6 +3335,74 @@
       "searchPlaceholder": "按文件名搜索…",
       "all": "全部",
       "noResults": "未找到带提示词的素材"
+    },
+    "nodeBar": {
+      "media": "上传",
+      "shot": "分镜",
+      "prompt": "提示词",
+      "llm": "大模型",
+      "image-gen": "图像生成",
+      "video-gen": "视频生成",
+      "loop": "循环",
+      "timeline": "时间线",
+      "output": "输出",
+      "asset": "素材",
+      "project-assets": "项目素材"
+    },
+    "asset": {
+      "title": "素材",
+      "removed": "素材已删除",
+      "loadout": "素材造型",
+      "loadoutNone": "无造型",
+      "references": "参考文件",
+      "noFiles": "暂无参考文件",
+      "useFile": "使用 {{slot}} 参考",
+      "primary": "主槽",
+      "openSheet": "打开详情页",
+      "loading": "加载中…",
+      "loadFailed": "无法加载该素材",
+      "pickerTitle": "添加素材",
+      "searchLabel": "搜索素材",
+      "searchPlaceholder": "搜索素材…",
+      "allTypes": "全部",
+      "noResults": "未找到素材",
+      "listFailed": "无法加载素材库",
+      "pickFailed": "无法打开该素材，请重试。",
+      "refsLimit_one": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsLimit_other": "该模型最多接受 {{count}} 张参考图，其余不会发送。",
+      "refsDropped": "未发送：{{refs}}",
+      "refsDroppedGroup_one": "{{count}} 张（{{reason}}）",
+      "refsDroppedGroup_other": "{{count}} 张（{{reason}}）",
+      "bundleFailed": "上次运行无法读取该素材，它的内容一项都没有发送。",
+      "noModel": "请先在提示词节点选择模型 — 这张卡片没有发送任何内容。",
+      "noScope": "请从工作区打开此画布 — 这张卡片没有发送任何内容。",
+      "dropReason": {
+        "over_limit": "超过模型上限",
+        "no_image_file": "没有图片文件",
+        "provider_no_refs": "该模型不支持参考图"
+      }
+    },
+    "asAsset": {
+      "action": "存为素材…",
+      "noScope": "请从工作区打开画布后再存为素材",
+      "noGeneration": "这张图没有可保存的素材库记录",
+      "lookupFailed": "无法读取这次生成记录",
+      "saved": "已存入 {{name}}"
+    },
+    "projectAssets": {
+      "noProject": "该画布未关联项目",
+      "empty": "该项目还没有素材",
+      "allPresent": "项目素材已全部在画布上",
+      "inserted": "已添加 {{inserted}} 个",
+      "insertedWithSkipped": "已添加 {{inserted}} 个 · {{skipped}} 个已在画布上",
+      "failed": "无法加载项目素材"
+    },
+    "legacyCard": {
+      "unmigrated": "未迁移",
+      "unmigratedHint": "此工作区没有与该卡片对应的素材。请改用素材卡片，才能参与生成。"
+    },
+    "assetSeed": {
+      "failed": "无法加载该画布绑定的素材"
     }
   },
   "modelParams": {

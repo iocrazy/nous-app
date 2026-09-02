@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveEffectiveSourceUrl, resolveEffectiveSourceUrls, resolveSourceUrl, resolveSourceUrls, upstreamPromptText } from './promptInputs';
+import { DURABLE_PREFIXES, resolveEffectiveSourceUrl, resolveEffectiveSourceUrls, resolveSourceUrl, resolveSourceUrls, upstreamPromptText } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';
 
 const NODES: CanvasNode[] = [
@@ -332,6 +332,73 @@ describe('resolveEffectiveSourceUrls (multi-ref, source_ref first)', () => {
     expect(resolveEffectiveSourceUrls(p, [media, p], [conn])).toEqual([
       '/api/v1/generated-media/b.png',
       '/api/v1/generated-media/a.png',
+    ]);
+  });
+});
+
+// The resource-reference bridge (asset-library P4 Task 3).
+//
+// Until the backend could materialize `/api/v1/resources/{id}/(cover|file)`
+// URLs, this filter kept them out on purpose — a url that reached
+// `params.source_urls` and could not be fetched was a picture generated
+// without the reference the user picked, reported as a clean success. The
+// bridge exists now, so the filter admits the second family.
+describe('durable prefixes (which urls can be run inputs)', () => {
+  const promptFrom = (items: Array<{ url: string; kind?: string }>) => {
+    const nodes: CanvasNode[] = [
+      {
+        id: 'm1',
+        type: 'media',
+        position: { x: 0, y: 0 },
+        data: { title: 'Media', items },
+      },
+      { id: 'p9', type: 'prompt', position: { x: 300, y: 0 }, data: { body: 'x' } },
+    ];
+    return resolveSourceUrls('p9', nodes, [conn('m1', 'p9')]);
+  };
+
+  it('accepts BOTH durable families', () => {
+    expect(
+      promptFrom([
+        { url: '/api/v1/generated-media/11/cover', kind: 'image' },
+        { url: '/api/v1/resources/91/cover', kind: 'image' },
+        { url: '/api/v1/resources/92/file', kind: 'image' },
+      ]),
+    ).toEqual([
+      '/api/v1/generated-media/11/cover',
+      '/api/v1/resources/91/cover',
+      '/api/v1/resources/92/file',
+    ]);
+  });
+
+  it('still refuses everything else', () => {
+    // Absolute urls included: `getResourceCoverUrl` builds one and it is a
+    // VISUAL fallback, deliberately inert as a run input (loadPromptAsset).
+    // Admitting it here would silently change that contract.
+    expect(
+      promptFrom([
+        { url: 'https://external.example.com/x.png', kind: 'image' },
+        { url: 'https://api.nous.ink/api/v1/resources/91/cover', kind: 'image' },
+        { url: 'blob:http://localhost/abc', kind: 'image' },
+        { url: '/api/v1/media/91/audio', kind: 'image' },
+        { url: '/resources/91/cover', kind: 'image' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('keeps excluding video items from the image chain', () => {
+    expect(
+      promptFrom([
+        { url: '/api/v1/resources/91/file', kind: 'video' },
+        { url: '/api/v1/resources/92/cover', kind: 'image' },
+      ]),
+    ).toEqual(['/api/v1/resources/92/cover']);
+  });
+
+  it('exports the prefix list so a third family cannot be added in one place only', () => {
+    expect([...DURABLE_PREFIXES]).toEqual([
+      '/api/v1/generated-media/',
+      '/api/v1/resources/',
     ]);
   });
 });

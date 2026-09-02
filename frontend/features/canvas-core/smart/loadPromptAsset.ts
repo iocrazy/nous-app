@@ -11,7 +11,7 @@
  * The media node's `items[0].url` is caller-supplied (`mediaUrl`) rather
  * than derived here: when the caller has minted a durable
  * /api/v1/generated-media/ URL (via importResourceAsCanvasMedia) that URL
- * makes the node a real i2i/i2v source (promptInputs.ts's DURABLE_PREFIX
+ * makes the node a real i2i/i2v source (promptInputs.ts's DURABLE_PREFIXES
  * accepts it). When minting fails, the caller falls back to the resource
  * cover URL instead — that fallback is visual-only (not a matching prefix,
  * so it's inert as a run input), but keeps the picked asset visible on
