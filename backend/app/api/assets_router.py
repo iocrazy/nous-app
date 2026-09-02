@@ -61,6 +61,7 @@ from app.schemas.assets import (
     PromptTranslateRequest,
     RemovedResponse,
     UnlinkedResponse,
+    UsedInCanvasRef,
     within_int64,
 )
 from app.services.assets.assets_service import AssetError, AssetsService
@@ -443,6 +444,32 @@ async def get_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
     try:
         sid = await _gate(scope_id, auth)
         return _ok(await _service().get_asset(asset_id, sid))
+    except AssetError as e:
+        return _err(e)
+
+
+@router.get(
+    "/assets/{asset_id}/canvas-refs",
+    response_model=Envelope[List[UsedInCanvasRef]],
+    responses=_ERRORS,
+)
+async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """Canvases in THIS scope that reference the asset (P4 reverse lookup).
+
+    The same rows ``GET /assets/{id}`` carries as ``used_in.canvases``, split
+    out so the sheet can refresh usage without re-fetching the whole detail.
+
+    Scope-limited, not merely gated: ``_gate`` proves the caller belongs to
+    ``scope_id``, and the repository then filters to canvases whose project
+    resolves to that same scope. Cross-scope canvases are therefore ABSENT
+    from the list rather than a 404 — the 404 belongs to the asset (raised by
+    the service's ``_require``), and the sibling
+    ``GET /resources/{id}/canvas-refs`` draws the same line: refuse on the
+    subject, filter the list.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().list_canvas_refs(asset_id, sid))
     except AssetError as e:
         return _err(e)
 

@@ -68,7 +68,16 @@ def asset_row(**over):
 
 
 def detail_row(**over):
-    row = asset_row(files=[], links=[], linked_by=[], loadouts=[])
+    # ``used_in`` rides along because ``response_model`` DROPS undeclared keys
+    # and DEFAULTS missing ones — a fixture without it would answer 200 with an
+    # empty ``used_in`` whether or not the route still emits it.
+    row = asset_row(
+        files=[],
+        links=[],
+        linked_by=[],
+        loadouts=[],
+        used_in={"canvases": [], "storyboards": []},
+    )
     row.update(over)
     return row
 

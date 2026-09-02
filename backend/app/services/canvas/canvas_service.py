@@ -14,9 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.canvas_repository import CanvasRepository
 from app.schemas.canvas import CanvasCreate, CanvasUpdate
+from app.services.canvas.asset_node_refs import extract_asset_node_refs
 from app.services.canvas.asset_refs import extract_asset_refs
 
 
@@ -36,9 +38,11 @@ class CanvasService:
         self,
         repository: Optional[CanvasRepository] = None,
         refs_repository: Optional[CanvasRefsRepository] = None,
+        asset_refs_repository: Optional[CanvasAssetRefsRepository] = None,
     ) -> None:
         self.repo = repository or CanvasRepository()
         self.refs_repo = refs_repository or CanvasRefsRepository()
+        self.asset_refs_repo = asset_refs_repository or CanvasAssetRefsRepository()
 
     # ------------------------------------------------------------------
     # Reads
@@ -160,14 +164,41 @@ class CanvasService:
         return updated
 
     async def _sync_refs(self, canvas_id: str, nodes_json: Any) -> None:
-        """Recompute canvas_resource_refs from nodes_json. Non-fatal:
-        the refs table is rebuildable, so a failure here must never break
-        the canvas save the user just performed."""
+        """Recompute BOTH derived ref mirrors from nodes_json.
+
+        Non-fatal, and independently so. Each mirror gets its OWN
+        try/except: both tables are rebuildable from ``nodes_json`` (see the
+        two backfill scripts), so a failure must never break the canvas save
+        the user just performed — and a failure in one must not skip the
+        other. Sharing one ``try`` would have made the asset mirror silently
+        conditional on the resource mirror succeeding, which is the
+        "one flag's reporting nested inside another's branch" shape CLAUDE.md's
+        defensive-patterns section forbids.
+
+        ``except Exception`` + ``logger.error`` — contained AND recorded, not
+        ``except: pass``.
+        """
         try:
             refs = extract_asset_refs(nodes_json)
             await self.refs_repo.replace_for_canvas(canvas_id, refs)
-        except Exception as e:  # noqa: BLE001 — deliberately swallow
-            logger.warning(f"canvas {canvas_id} refs sync failed (non-fatal): {e}")
+        except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
+            logger.error(
+                f"canvas {canvas_id} resource-refs sync failed (non-fatal): {e}"
+            )
+
+        try:
+            asset_refs, skipped = extract_asset_node_refs(nodes_json)
+            if skipped:
+                # A node that names an asset we cannot read is a REPORTED
+                # drop, never a silent one: the ref is gone from the mirror
+                # and only this line says so.
+                logger.warning(
+                    f"canvas {canvas_id}: {skipped} asset node(s) skipped "
+                    "(asset_id absent or not a snowflake)"
+                )
+            await self.asset_refs_repo.replace_for_canvas(canvas_id, asset_refs)
+        except Exception as e:  # noqa: BLE001 — contained, logged, non-fatal
+            logger.error(f"canvas {canvas_id} asset-refs sync failed (non-fatal): {e}")
 
     async def soft_delete(self, canvas_id: str) -> bool:
         return await self.repo.soft_delete(canvas_id)

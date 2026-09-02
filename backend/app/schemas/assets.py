@@ -280,11 +280,41 @@ class LoadoutResponse(BaseModel):
     created_at: datetime
 
 
+class UsedInCanvasRef(BaseModel):
+    """One canvas that references this asset (P4).
+
+    ``node_ids`` is a LIST because a canvas may place the same asset on several
+    nodes; collapsing to a count would lose the ability to jump to one. Ids are
+    strings for the usual snowflake-precision reason.
+    """
+
+    canvas_id: str
+    canvas_name: str
+    kind: str
+    project_id: str
+    node_ids: List[str] = Field(default_factory=list)
+    loadout_ids: List[str] = Field(default_factory=list)
+
+
+class UsedInResponse(BaseModel):
+    """Where an asset is in use (spec §5.1 ``used_in``).
+
+    ``storyboards`` is declared and always EMPTY today — the storyboard side has
+    no ref mirror yet (a later phase). It is here rather than absent so the
+    client renders "no storyboard usage" instead of branching on a missing key,
+    and so the day it starts filling nothing on the wire has to change shape.
+    """
+
+    canvases: List[UsedInCanvasRef] = Field(default_factory=list)
+    storyboards: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class AssetDetailResponse(AssetResponse):
     files: List[AssetFileResponse] = Field(default_factory=list)
     links: List[AssetLinkResponse] = Field(default_factory=list)  # outgoing
     linked_by: List[AssetLinkResponse] = Field(default_factory=list)  # incoming
     loadouts: List[LoadoutResponse] = Field(default_factory=list)
+    used_in: UsedInResponse = Field(default_factory=UsedInResponse)
 
 
 class AttachFileRequest(BaseModel):

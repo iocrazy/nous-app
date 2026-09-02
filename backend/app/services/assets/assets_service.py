@@ -30,6 +30,7 @@ from app.repositories.assets_repository import (
     _serialize,
     with_derived,
 )
+from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.schemas.assets import (
     AssetCreate,
@@ -252,12 +253,16 @@ class AssetsService:
         assets_repo: Optional[AssetsRepository] = None,
         relations_repo: Optional[AssetRelationsRepository] = None,
         generated_repo: Optional[GeneratedMediaRepository] = None,
+        canvas_refs_repo: Optional[CanvasAssetRefsRepository] = None,
     ):
         self.assets = assets_repo or AssetsRepository()
         self.relations = relations_repo or AssetRelationsRepository()
         # Only ``generate_slot`` uses it (to stamp source_asset_id on the rows
         # it just created); injectable for the same reason as the other two.
         self.generated = generated_repo or GeneratedMediaRepository()
+        # The canvas→asset mirror (P4). Read-only from this side: it is
+        # MAINTAINED by CanvasService on save, never by the asset routes.
+        self.canvas_refs = canvas_refs_repo or CanvasAssetRefsRepository()
 
     # ── helpers ────────────────────────────────────────────────────────────
 
@@ -468,7 +473,32 @@ class AssetsService:
         out["links"] = [_serialize_link(link) for link in outgoing]
         out["linked_by"] = [_serialize_link(link) for link in incoming]
         out["loadouts"] = [_serialize_loadout(lo) for lo in loadouts]
+        # Where this asset is in use (spec §5.1). Scope-limited: a system
+        # preset is readable from EVERY scope, so an unfiltered read would
+        # answer with other teams' canvas names. ``storyboards`` is a
+        # deliberate empty list — see UsedInResponse.
+        out["used_in"] = {
+            "canvases": await self.canvas_refs.list_canvases_for_asset(
+                str(asset_id), str(scope_id)
+            ),
+            "storyboards": [],
+        }
         return out
+
+    async def list_canvas_refs(
+        self, asset_id: int, scope_id: int
+    ) -> List[Dict[str, Any]]:
+        """The ``used_in.canvases`` half on its own (GET /assets/{id}/canvas-refs).
+
+        Goes through ``_require`` so an asset the caller cannot see answers the
+        typed 404 the rest of this router answers, rather than an empty list —
+        "no canvases use it" and "that asset is not yours" are different facts
+        and must not share a response.
+        """
+        await self._require(asset_id, scope_id)
+        return await self.canvas_refs.list_canvases_for_asset(
+            str(asset_id), str(scope_id)
+        )
 
     async def update_asset(
         self, asset_id: int, scope_id: int, payload: AssetUpdate

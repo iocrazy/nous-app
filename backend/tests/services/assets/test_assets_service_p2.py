@@ -37,6 +37,7 @@ from tests.services.assets.test_assets_service import (
     SCOPE,
     USER,
     FakeAssetsRepo,
+    FakeCanvasRefsRepo,
     FakeRelationsRepo,
 )
 
@@ -45,8 +46,15 @@ IN_SCOPE_RESOURCE = "727145299382534146"
 
 @pytest.fixture
 def svc():
+    # ``canvas_refs_repo`` is not optional here even though nothing in this file
+    # reads ``used_in``: ``duplicate`` / ``translate`` / ``regenerate`` all
+    # return through ``get_asset``, which reads the canvas mirror. Without the
+    # fake they would reach the real repository and die on an unset
+    # SUPAVISOR_DATABASE_URL — a DB dependency smuggled into a no-DB suite.
     return AssetsService(
-        assets_repo=FakeAssetsRepo(), relations_repo=FakeRelationsRepo()
+        assets_repo=FakeAssetsRepo(),
+        relations_repo=FakeRelationsRepo(),
+        canvas_refs_repo=FakeCanvasRefsRepo(),
     )
 
 

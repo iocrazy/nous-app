@@ -56,6 +56,7 @@ on:
       - 'backend/tests/db/test_schema_drift.py'
       - 'backend/tests/db/test_assets_repository_integration.py'
       - 'backend/tests/db/test_assets_migration_integration.py'
+      - 'backend/tests/db/test_canvas_asset_refs_integration.py'
       - 'backend/app/workflows/backfill_assets_from_project_entities.py'
       # The migration workflow IMPORTS `_NOT_MARKABLE` and
       # `_resources_with_asset_files_stmt` from this module on purpose (two
@@ -66,7 +67,15 @@ on:
       - 'backend/app/workflows/backfill_generated_inbox.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
+      - 'backend/app/repositories/canvas_asset_refs_repository.py'
       - 'backend/app/services/assets/**'
+      # The canvas→asset mirror is written by CanvasService on save and rebuilt
+      # by the backfill; both are exercised by the E2 case below, so a change to
+      # either has to reach this chain — the ON CONFLICT arm and the
+      # array_agg(DISTINCT) can only be settled by a real Postgres.
+      - 'backend/app/services/canvas/asset_node_refs.py'
+      - 'backend/app/services/canvas/canvas_service.py'
+      - 'backend/scripts/backfill_canvas_asset_refs.py'
       - '.github/workflows/schema-drift.yml'
   push:
     branches: [master]
@@ -280,6 +289,24 @@ jobs:
           # indexes free/hold names, that ON CONFLICT finds the real index, or
           # that a raise inside unit_of_work() rolls the whole batch back.
           uv run pytest tests/db/test_assets_repository_integration.py -v
+
+      - name: Exercise the canvas→asset ref mirror against the built schema (mig 445)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # The ONLY place CanvasAssetRefsRepository's ORM statements execute.
+          # Three properties are invisible to a stubbed session: that
+          # ON CONFLICT (canvas_id, asset_id, node_id) DO UPDATE SET loadout_id
+          # finds the real PK and actually refreshes a re-saved node's loadout
+          # (DO NOTHING would keep the stale one and still report success),
+          # that array_agg(DISTINCT ...) really dedupes (two nodes sharing one
+          # loadout must contribute that id once), and that the scope filter's
+          # COALESCE resolves a personal project through a real LEFT JOIN on
+          # teams — a canvas invisible to its own owner would read as "this
+          # asset is used nowhere".
+          uv run pytest tests/db/test_canvas_asset_refs_integration.py -v
 
       - name: Exercise the project-library → assets migration (mig 445/446)
         working-directory: backend

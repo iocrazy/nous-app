@@ -29,6 +29,7 @@ from app.core.scope_guards import (
 )
 from app.repositories.asset_relations_repository import AssetRelationsRepository
 from app.repositories.assets_repository import AssetsRepository
+from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.canvas_repository import CanvasRepository
 from app.repositories.episode_repository import get_episode_repository
 from app.schemas.canvas import (
@@ -567,6 +568,27 @@ async def get_canvas(
     if row is None:
         raise HTTPException(status_code=404, detail="canvas not found")
     return {"success": True, "data": _to_response(row, can_edit=access.can_write)}
+
+
+@router.get("/canvases/{canvas_id}/asset-refs")
+async def canvas_asset_refs(
+    auth: AuthDep,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Asset-library refs this canvas holds (P4 forward lookup).
+
+    Derived from ``nodes_json`` on every save (``CanvasService._sync_refs``),
+    so it answers "which assets does this canvas use" without the caller
+    parsing the node graph itself.
+
+    ``_gate_canvas_read``, not the write gate: this is a pure read, and the
+    sibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by
+    mistake for months (fixed 2026-08-12), locking viewers out of a read they
+    were entitled to. Same envelope shape as that sibling.
+    """
+    await _gate_canvas_read(canvas_id, auth)
+    items = await CanvasAssetRefsRepository().list_for_canvas(canvas_id)
+    return {"success": True, "data": items, "count": len(items)}
 
 
 @router.put("/canvases/{canvas_id}")

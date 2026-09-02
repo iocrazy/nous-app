@@ -402,3 +402,63 @@ def test_a_client_cannot_set_membership_at_creation():
     assert "in_library" not in AssetCreate.model_fields
     made = AssetCreate(asset_type="character", name="Sang Yao", in_library=False)
     assert not hasattr(made, "in_library")
+# ── P4: used_in — the canvas mirror the detail response carries ────────────
+
+
+def test_asset_detail_response_declares_every_key_get_asset_emits():
+    """The ORM-column pin above covers the asset ROW; this covers the four
+    relation keys and ``used_in`` that ``get_asset`` bolts on afterwards.
+
+    Same silent-drop hazard, different source: these are not columns of any
+    table, so ``Assets.__table__.columns`` cannot see them. ``used_in`` was the
+    fifth such key and the one most likely to be forgotten — nothing fails when
+    a response model omits a key, the field simply stops reaching the client.
+    """
+    from app.schemas.assets import UsedInResponse
+
+    derived_detail_keys = {"files", "links", "linked_by", "loadouts", "used_in"}
+    assert derived_detail_keys <= set(AssetDetailResponse.model_fields)
+    assert (
+        AssetDetailResponse.model_fields["used_in"].annotation is UsedInResponse
+    ), "used_in must be the typed model, not a bare dict passed through unvalidated"
+
+
+def test_used_in_defaults_to_both_halves_present_and_empty():
+    """A missing half must read as "nothing here", not as an absent key: the
+    sheet branches on ``used_in.canvases.length``, and ``undefined.length``
+    throws where ``[].length`` renders an empty panel."""
+    from app.schemas.assets import UsedInResponse
+
+    assert UsedInResponse().model_dump() == {"canvases": [], "storyboards": []}
+
+
+def test_used_in_canvas_ref_keeps_every_field_the_repository_emits():
+    """``CanvasAssetRefsRepository.list_canvases_for_asset`` returns these six
+    keys; anything the model does not declare vanishes on the way out."""
+    from app.schemas.assets import UsedInCanvasRef
+
+    emitted = {
+        "canvas_id",
+        "canvas_name",
+        "kind",
+        "project_id",
+        "node_ids",
+        "loadout_ids",
+    }
+    assert emitted <= set(UsedInCanvasRef.model_fields)
+
+
+def test_used_in_canvas_ref_node_ids_is_a_list_not_a_count():
+    """A count would be enough to render "used in 2 places" and useless for the
+    click that jumps to one of them — the list is the feature."""
+    from app.schemas.assets import UsedInCanvasRef
+
+    ref = UsedInCanvasRef(
+        canvas_id="1",
+        canvas_name="Looks",
+        kind="smart",
+        project_id="2",
+        node_ids=["a", "b"],
+        loadout_ids=[],
+    )
+    assert ref.node_ids == ["a", "b"]

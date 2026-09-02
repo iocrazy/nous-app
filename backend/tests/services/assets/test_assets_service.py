@@ -377,10 +377,31 @@ class FakeRelationsRepo:
         return [p for (x, p) in self.refs if x == a]
 
 
+class FakeCanvasRefsRepo:
+    """The canvas→asset mirror, from the asset side (READ only — it is
+    maintained by CanvasService on canvas save, never by these routes).
+
+    ``calls`` records the scope the service handed down: that argument is the
+    whole safety story of ``used_in`` (a system preset is readable from every
+    scope, so an unscoped read would name other teams' canvases), and a fake
+    that ignored it would let the filter be dropped without a test noticing.
+    """
+
+    def __init__(self):
+        self.rows: list[dict] = []
+        self.calls: list[tuple[str, str | None]] = []
+
+    async def list_canvases_for_asset(self, asset_id, scope_id=None):
+        self.calls.append((str(asset_id), None if scope_id is None else str(scope_id)))
+        return list(self.rows)
+
+
 @pytest.fixture
 def svc():
     return AssetsService(
-        assets_repo=FakeAssetsRepo(), relations_repo=FakeRelationsRepo()
+        assets_repo=FakeAssetsRepo(),
+        relations_repo=FakeRelationsRepo(),
+        canvas_refs_repo=FakeCanvasRefsRepo(),
     )
 
 
@@ -1263,3 +1284,66 @@ async def test_race_409_still_carries_a_real_id_when_it_has_one(svc, uow_spy):
             SCOPE, AssetCreate(asset_type="location", name="Bamboo Grove"), USER
         )
     assert ei.value.extra["existing_asset_id"] == "4242"
+
+
+# ── P4: used_in — the canvas mirror, scope-limited ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_detail_carries_used_in_with_both_halves(svc):
+    """``used_in.storyboards`` is present and empty on purpose (no storyboard
+    mirror yet). Absent and empty are different answers: the sheet renders "no
+    usage" for the second and throws on the first."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [
+        {
+            "canvas_id": "5001",
+            "canvas_name": "Looks",
+            "kind": "smart",
+            "project_id": "9000",
+            "node_ids": ["asset-1"],
+            "loadout_ids": [],
+        }
+    ]
+
+    d = await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert d["used_in"]["canvases"] == svc.canvas_refs.rows
+    assert d["used_in"]["storyboards"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_detail_scopes_the_used_in_read_to_the_caller(svc):
+    """A system preset is readable from EVERY scope, so an unscoped read here
+    would answer with other teams' canvas names on a row anyone can fetch."""
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    await svc.get_asset(int(c["id"]), SCOPE)
+    assert svc.canvas_refs.calls == [(c["id"], str(SCOPE))]
+
+
+@pytest.mark.asyncio
+async def test_list_canvas_refs_404s_instead_of_answering_an_empty_list(svc):
+    """ "Not yours" must not be reported as "unused" — the caller cannot tell
+    those apart from a 200 with `[]`, and would render an empty usage panel for
+    an asset they have no access to."""
+    with pytest.raises(AssetError) as ei:
+        await svc.list_canvas_refs(999, SCOPE)
+    assert ei.value.status == 404 and ei.value.code == "asset_not_found"
+    assert svc.canvas_refs.calls == []  # never reached the mirror
+
+
+@pytest.mark.asyncio
+async def test_list_canvas_refs_returns_the_same_rows_used_in_carries(svc):
+    c = await svc.create_asset(
+        SCOPE, AssetCreate(asset_type="character", name="C"), USER
+    )
+    svc.canvas_refs.rows = [{"canvas_id": "5001", "node_ids": ["asset-1"]}]
+
+    rows = await svc.list_canvas_refs(int(c["id"]), SCOPE)
+    detail = await svc.get_asset(int(c["id"]), SCOPE)
+
+    assert rows == detail["used_in"]["canvases"]

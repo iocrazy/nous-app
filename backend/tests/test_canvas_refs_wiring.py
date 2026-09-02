@@ -97,3 +97,157 @@ async def test_refs_failure_does_not_break_save(monkeypatch):
     upd = CanvasUpdate(base_updated_at=FROZEN, nodes_json=[])
     result = await svc.update_with_lock("5001", upd)  # must not raise
     assert result["id"] == "5001"
+
+
+# ── P4: canvas_asset_refs is the SECOND mirror, maintained independently ────
+
+
+class FakeAssetRefsRepo:
+    def __init__(self) -> None:
+        self.calls: List[tuple[str, List[Dict[str, Any]]]] = []
+
+    async def replace_for_canvas(self, canvas_id: str, refs) -> None:
+        self.calls.append((canvas_id, refs))
+
+
+_ASSET_A = "727145299382534145"
+_LOADOUT = "727145299382534200"
+
+
+def _asset_node(node_id: str, asset_id: str, loadout_id=None) -> Dict[str, Any]:
+    return {
+        "id": node_id,
+        "type": "asset",
+        "data": {"asset_id": asset_id, "loadout_id": loadout_id},
+    }
+
+
+@pytest.mark.asyncio
+async def test_save_replaces_asset_refs_too():
+    asset_refs = FakeAssetRefsRepo()
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=FakeRefsRepo(),
+        asset_refs_repository=asset_refs,
+    )
+    await svc.update_with_lock(
+        "5001",
+        CanvasUpdate(
+            base_updated_at=FROZEN,
+            nodes_json=[
+                _asset_node("asset-1", _ASSET_A, _LOADOUT),
+                {"id": "out-1", "type": "output", "data": {"resource_id": "222"}},
+            ],
+        ),
+    )
+    assert asset_refs.calls == [
+        (
+            "5001",
+            [
+                {
+                    "asset_id": int(_ASSET_A),
+                    "node_id": "asset-1",
+                    "loadout_id": int(_LOADOUT),
+                }
+            ],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_save_without_nodes_json_touches_neither_mirror():
+    asset_refs = FakeAssetRefsRepo()
+    refs = FakeRefsRepo()
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs,
+        asset_refs_repository=asset_refs,
+    )
+    await svc.update_with_lock(
+        "5001", CanvasUpdate(base_updated_at=FROZEN, name="renamed")
+    )
+    assert refs.calls == [] and asset_refs.calls == []
+
+
+@pytest.mark.asyncio
+async def test_asset_refs_failure_does_not_break_save_or_skip_resource_refs():
+    """Each mirror owns its own try/except.
+
+    Sharing one would make the SECOND write silently conditional on the first
+    succeeding — the "one result's reporting nested inside another's branch"
+    shape CLAUDE.md's defensive-patterns section forbids. Both directions are
+    asserted below, and neither may cost the user their save.
+    """
+
+    class Boom:
+        async def replace_for_canvas(self, *a, **k):
+            raise RuntimeError("db down")
+
+    refs = FakeRefsRepo()
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=refs,
+        asset_refs_repository=Boom(),
+    )
+    result = await svc.update_with_lock(
+        "5001",
+        CanvasUpdate(base_updated_at=FROZEN, nodes_json=[_asset_node("a", _ASSET_A)]),
+    )
+    assert result["id"] == "5001"  # the save still returned
+    assert len(refs.calls) == 1  # …and the OTHER mirror still ran
+
+
+@pytest.mark.asyncio
+async def test_resource_refs_failure_does_not_skip_asset_refs():
+    """The reverse direction — the asset mirror must not be collateral damage
+    when the resource mirror is the one that fails."""
+
+    class Boom:
+        async def replace_for_canvas(self, *a, **k):
+            raise RuntimeError("db down")
+
+    asset_refs = FakeAssetRefsRepo()
+    svc = CanvasService(
+        repository=FakeRepo(),
+        refs_repository=Boom(),
+        asset_refs_repository=asset_refs,
+    )
+    result = await svc.update_with_lock(
+        "5001",
+        CanvasUpdate(base_updated_at=FROZEN, nodes_json=[_asset_node("a", _ASSET_A)]),
+    )
+    assert result["id"] == "5001"
+    assert len(asset_refs.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_unreadable_asset_node_is_logged_not_silently_dropped():
+    """A node whose asset_id is not a snowflake yields no row. The only thing
+    that can say so is this log line — without it the ref is simply absent,
+    which is indistinguishable from a canvas that never had the node."""
+    from loguru import logger as loguru_logger
+
+    seen: List[str] = []
+    handler_id = loguru_logger.add(lambda m: seen.append(str(m)), level="WARNING")
+    try:
+        asset_refs = FakeAssetRefsRepo()
+        svc = CanvasService(
+            repository=FakeRepo(),
+            refs_repository=FakeRefsRepo(),
+            asset_refs_repository=asset_refs,
+        )
+        await svc.update_with_lock(
+            "5001",
+            CanvasUpdate(
+                base_updated_at=FROZEN,
+                nodes_json=[_asset_node("bad", "not-a-snowflake")],
+            ),
+        )
+    finally:
+        loguru_logger.remove(handler_id)
+
+    assert asset_refs.calls == [("5001", [])]
+    assert any("1 asset node(s) skipped" in line for line in seen), (
+        "the skipped count must be reported; a dropped ref that nothing logs "
+        f"is a silent no-op. lines={seen}"
+    )
