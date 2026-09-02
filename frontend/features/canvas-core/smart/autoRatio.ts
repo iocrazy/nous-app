@@ -10,6 +10,7 @@
 // wired input can change after the fact, and a value frozen at creation time
 // would quietly stop matching.
 
+import { mediaSrc } from './mediaUrl';
 import { RATIO_LABELS } from './nodes/GenFooterControls';
 
 /** The sentinel meaning "follow the source image". */
@@ -77,6 +78,10 @@ export function measureRatio(url: string): Promise<string | null> {
     // Measuring needs no pixel access, so no CORS handshake is required here.
     img.onload = () => finish(nearestRatio(img.naturalWidth, img.naturalHeight));
     img.onerror = () => finish(null);
-    img.src = url;
+    // Durable generated-media urls are relative; a bare relative src is
+    // served by the Pages origin, not the API, so it errors and 'auto'
+    // silently resolves to nothing. Preview tier is right here — a 1024px
+    // downscale keeps the aspect and nearestRatio only snaps to presets.
+    img.src = mediaSrc(url);
   });
 }

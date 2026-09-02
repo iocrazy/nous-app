@@ -8,7 +8,9 @@
 // concrete ratio at dispatch. The video side already ships the same idea as
 // IC's 自适应; this brings images in line.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
 import { MEASURE_TIMEOUT_MS, isAutoRatio, measureRatio, nearestRatio } from './autoRatio';
 
@@ -81,5 +83,55 @@ describe('measureRatio — never hangs the dispatch', () => {
     await vi.advanceTimersByTimeAsync(MEASURE_TIMEOUT_MS + 50);
     await expect(pending).resolves.toBeNull();
     vi.useRealTimers();
+  });
+});
+
+describe('measureRatio — loads the URL the browser can actually reach', () => {
+  // Durable generated-media urls are RELATIVE by construction. In production
+  // the app is served from Cloudflare Pages while the API lives on another
+  // origin, and `public/_redirects`' SPA fallback swallows `/api/*` and hands
+  // back index.html — so a relative src fires `onerror`, measureRatio resolves
+  // null, and 'auto' never resolves to anything. The measurement has to go
+  // through the same helper every canvas <img> src does.
+  const seen: string[] = [];
+  const RealImage = globalThis.Image;
+
+  afterEach(() => {
+    seen.length = 0;
+    globalThis.Image = RealImage;
+  });
+
+  function stubImage() {
+    class StubImage {
+      naturalWidth = 1920;
+      naturalHeight = 1080;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(value: string) {
+        seen.push(value);
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    globalThis.Image = StubImage as unknown as typeof Image;
+  }
+
+  it('absolutises a relative /cover url onto the API origin', async () => {
+    stubImage();
+    await measureRatio('/api/v1/generated-media/1/cover');
+    expect(seen).toEqual(['https://api.test/api/v1/generated-media/1/cover?v=2']);
+  });
+
+  it('measures the preview tier, not the original', async () => {
+    // A 1024px downscale preserves aspect and nearestRatio snaps to a preset,
+    // so the preview costs nothing here and saves the full download.
+    stubImage();
+    await expect(measureRatio('/api/v1/generated-media/7/cover')).resolves.toBe('16:9');
+    expect(seen[0]).not.toContain('full=1');
+  });
+
+  it('leaves a url that is already absolute alone', async () => {
+    stubImage();
+    await measureRatio('https://cdn.example/photo.png');
+    expect(seen).toEqual(['https://cdn.example/photo.png']);
   });
 });
