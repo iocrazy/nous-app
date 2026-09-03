@@ -111,6 +111,47 @@ def test_usage_note_is_absent_when_the_turn_has_no_assets():
     assert "primary_resource_id" not in out
 
 
+@pytest.mark.unit
+def test_no_resource_fetch_instructions_when_nothing_is_fetchable():
+    """An assets-only turn whose assets have no primary must not describe a
+    tool that is not there.
+
+    ``ai_library_chat_service`` registers ResourceFetch on RESOURCE refs, so a
+    turn carrying only ``prompt``-type assets (no file slot at all) gets no
+    tool — and the six mode lines would advertise video/doc/pdf/audio reads
+    when the page holds none of those and no tool exists to attempt them.
+    """
+    out = render_available_resources(
+        None,
+        [_asset(asset_type="prompt", primary_resource_id=None, has_image=False)],
+    )
+
+    assert "<asset " in out  # the entry itself still renders
+    assert "ResourceFetch" not in out
+    assert "mode for video" not in out
+
+
+@pytest.mark.unit
+def test_resource_fetch_instructions_return_once_anything_is_fetchable():
+    """The positive control for the gate above: one fetchable id anywhere —
+    a plain resource, or an asset with a primary — brings the block back.
+
+    Without this pair the gate could be stuck off and only the negative test
+    would pass.
+    """
+    from_resource = render_available_resources(
+        [_doc()],
+        [_asset(asset_type="prompt", primary_resource_id=None, has_image=False)],
+    )
+    assert "Use the ResourceFetch tool" in from_resource
+    # ...but the asset-specific line stays out: no asset here has a primary.
+    assert "primary_resource_id, mode=image" not in from_resource
+
+    from_asset = render_available_resources(None, [_asset()])
+    assert "Use the ResourceFetch tool" in from_asset
+    assert "primary_resource_id, mode=image" in from_asset
+
+
 # ── ordering: the picture must be on the page before the asset names it ──
 
 

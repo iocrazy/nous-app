@@ -1473,6 +1473,11 @@ class AILibraryChatService:
         # First attachment position per asset id, so a failure points at the
         # chip the user actually sees. Same normalization the resolver used —
         # `coerce_asset_id` is shared rather than re-implemented.
+        #
+        # FIRST, not every: attaching one asset twice yields ONE ref (the
+        # resolver dedupes by id) and therefore ONE failure, reported against
+        # the earlier chip — matching how the resolver reports its own. Two
+        # entries for one asset would read as two separate problems.
         first_index: dict = {}
         for idx, att in enumerate(attachments):
             if not isinstance(att, dict) or att.get("kind") != "asset_ref":

@@ -113,7 +113,7 @@ Use the ResourceFetch tool to load any of these on demand:
 
 - **每条 `<resource … />`** 约 30-60 token。
 - **每条 `<asset …>…</asset>`** = 属性约 25-40 token + 一致性提示词。提示词是这里唯一无自然上限的输入（资产自身提示词 + loadout 的 `prompt_extra` + 每个链接的服装 / 道具 / 场景的提示词拼起来），所以在 `app/services/assets/chat_ref.py` 里**硬截断到 `MAX_CONSISTENCY_PROMPT_CHARS = 600` 字符**。⚠️ `" [truncated]"` 标记是**追加在上限之外**的，被截断的条目正文是 **612** 字符而不是 600——按常量本身算预算会每条少算 12 字符。600 字符在纯 ASCII 下约 150 token，全中文时可以接近 600 token，估上限要按后者。
-- **单条有界，总量无界。** 上面两个上限只管住「每一条多大」；**服务端不限制条数**——`ChatMessageRequest.attachments` 是没有 `max_length` 的 list，后端也没有任何计数检查，实际条数完全由客户端发多少决定。所以正确的说法是 `总量 = 客户端发的条数 × 单条上限`，而不是「有上限」。已记进下面的 Known Limitations。
+- **单条有界，总量无界。** 上面两个上限只管住「每一条多大」；**引用型附件（`resource_ref` / `asset_ref`）的条数服务端不限制**——`ChatMessageRequest.attachments` 是没有 `max_length` 的 list。链路上**唯一**存在的条数上限是 `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN = 8`，但它只作用于 **binary 桶**（`image` / `video` / `pdf` / `audio`），而分流处按 kind 已把两种引用摘走，所以它**管不到这一块**。⚠️ 那个 8 还是**静默截断**：第 9 条起直接丢弃且不产出任何 `attachment_failures` 条目（既有缺口，非 P5 引入）。所以这一块正确的说法是 `总量 = 客户端发的引用条数 × 单条上限`，而不是「有上限」。已记进下面的 Known Limitations。
 
 **资源正文与资产主图都不在这里**——这一块只是目录，正文/图片要模型主动调 `ResourceFetch` 才进上下文。没有 @-mention 也没有资产时整块返回空字符串，这样无 mention 的轮次系统消息缓存键不变。
 
@@ -128,7 +128,8 @@ Use the ResourceFetch tool to load any of these on demand:
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
-- **附件条数没有服务端上限**。`ChatMessageRequest.attachments`（`app/schemas/ai_library_chat.py`）是没有 `max_length` 的 list，链路上也没有计数检查，所以 `<available_resources>` 这一块的总大小只受客户端约束。今天不构成事故是因为唯一的写方是我们自己的 composer UI；一个直接打 API 的调用方可以塞进任意多条，把系统消息撑到 provider 上限。要封顶就得在 schema 上加，别指望前端。
+- **引用型附件的条数没有服务端上限**。`ChatMessageRequest.attachments`（`app/schemas/ai_library_chat.py`）是没有 `max_length` 的 list，而链路上唯一的条数上限 `MAX_ATTACHMENTS_PER_TURN = 8` 只作用于 binary 桶（分流处已按 kind 把 `resource_ref` / `asset_ref` 摘走），所以 `<available_resources>` 这一块的总大小只受客户端约束。今天不构成事故是因为唯一的写方是我们自己的 composer UI；一个直接打 API 的调用方可以塞进任意多条，把系统消息撑到 provider 上限。要封顶就得在 schema 上加，别指望前端。
+- **binary 附件超过 8 条时被静默截断**（`chat_attachment_resolver.py` 的 `capped = requests[:MAX_ATTACHMENTS_PER_TURN]`）。第 9 条起既不解析也**不产出 `attachment_failures` 条目**，只写一条 warning 日志——用户贴了 12 张图，其中 4 张从未到达模型而界面上没有任何提示。与「触发路径必须类型化失败回显」相悖，是 P5 之前就存在的缺口，记在这里以免被读成引用路径的行为。
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **资产的主图可能「有」却「取不到」，此时条目被降级渲染**。`has_image` 由解析器用**系统作用域**读 `resources` 算出（资产的文件行是经资产可读的，不是经调用者的 team 成员关系），而 `ResourceFetch` 只认本轮可访问集合——两者会不一致，最典型的是系统预设资产，它的文件落在用户不属于的 scope 里。`ai_library_chat_service._merge_asset_primaries` 在这种情况下把条目改写成 `has_image="false"` 且**省掉 `primary_resource_id`**（即上面那条「没有图可取」的形状），并向用户回一条 `asset_no_primary_image`。宁可少给一张图，也不给模型一个用了就失败的 id。
 - **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 把 reason 词表钉死在四个值，其中 `asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得先给词表加第五个值。

@@ -176,6 +176,36 @@ class AttachmentRequest(BaseModel):
         "(the only value v1 clients send) means the asset's default loadout.",
     )
 
+    @field_validator("resource_id", "asset_id", "loadout_id", mode="before")
+    @classmethod
+    def _coerce_ref_id_str(cls, v: Any) -> Any:
+        """Accept a Snowflake sent as a JSON number.
+
+        All three are BIGINT Snowflakes modelled as ``str`` because a JS number
+        loses the low bits above 2^53. Our own clients send strings — the assets
+        and resources routers ``str()`` every id on the way out — but pydantic
+        v2's lax mode does NOT coerce int→str, so a hand-built client, a script,
+        or any future caller that forgets would 422 the ENTIRE ChatRequest with
+        `string_type`. That is the same failure this model avoids for ``kind``
+        by leaving it a free string: a whole-request rejection says nothing
+        about which attachment was wrong, where a coerced id resolves normally
+        and a genuinely bad one comes back as a per-attachment typed failure.
+
+        Deliberately narrow. ``bool`` is an ``int`` subclass and would become
+        ``"True"``; a float would become ``"7001.0"``. Neither is an id, so both
+        fall through to pydantic and are rejected. This is also why the file's
+        model-wide ``_COERCE_IDS`` config is not used here — it would coerce
+        every str field on the model, silently turning ``kind: 5`` into the
+        string ``"5"``.
+
+        Downstream, ``asset_ref_resolver.coerce_asset_id`` normalizes again for
+        callers that never cross this boundary (internal invocations, tests).
+        Both must agree, which is why neither one is allowed to be the only one.
+        """
+        if isinstance(v, int) and not isinstance(v, bool):
+            return str(v)
+        return v
+
 
 class ScriptContextRequest(BaseModel):
     """§5.3：随消息携带的剧本选区 handle。文本折叠仍在 content 里（展示/

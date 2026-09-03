@@ -744,6 +744,15 @@ def render_available_resources(
         body = escape_frame_body(a.consistency_prompt)
         lines.append(f"  <asset {' '.join(asset_attrs)}>{body}</asset>")
     lines.append("</available_resources>")
+    # Only describe ResourceFetch when this turn actually has something to
+    # fetch. The chat service registers the tool on RESOURCE refs, so an
+    # assets-only turn (every asset a `prompt` type, or none with a readable
+    # primary) has no tool at all — printing six lines of video/doc/pdf modes
+    # there tells the model about a tool it does not have, and about kinds
+    # nothing on the page even is.
+    fetchable_assets = [a for a in (assets or []) if a.primary_resource_id]
+    if not refs and not fetchable_assets:
+        return "\n".join(lines)
     lines.append("")
     lines.append("Use the ResourceFetch tool to load any of these on demand:")
     lines.append("  ResourceFetch(resource_id, mode?, args?)")
@@ -761,10 +770,12 @@ def render_available_resources(
     lines.append("  - mode for pdf: excerpt (default) | page (args.page)")
     lines.append("  - mode for image: omit (returns image part)")
     lines.append("  - mode for audio: transcript (default)")
-    if assets:
+    if fetchable_assets:
         # The <asset> body is the consistency text; the picture is NOT inlined.
         # Without this line the model has an id attribute and no stated way to
         # turn it into an image, which reads as "the asset has no picture".
+        # Gated on an asset that HAS a primary: when none does, the sentence
+        # explains how to use an attribute that appears nowhere on the page.
         lines.append(
             "  - an <asset> entry carries its consistency prompt as the body; "
             "fetch its picture with ResourceFetch(primary_resource_id, "

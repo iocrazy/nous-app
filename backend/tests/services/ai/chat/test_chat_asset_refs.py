@@ -460,6 +460,38 @@ async def test_prompt_asset_renders_without_registering_resource_fetch():
         t.get("function", {}).get("name") for t in (captured["composed"].tools or [])
     ]
     assert "ResourceFetch" not in tool_names
+    # ...and the prompt says so too. Registering no tool while still printing
+    # its usage block would describe a tool the model does not have.
+    assert "ResourceFetch" not in sysmsg
+
+
+@pytest.mark.asyncio
+async def test_one_asset_attached_twice_reports_one_failure_at_the_first_index():
+    """Duplicate mentions of one asset resolve, render and FAIL once.
+
+    The resolver dedupes by asset id and reports against the first mention's
+    index; `_merge_asset_primaries` records `first_index` the same way. So the
+    second chip never lights up — deliberate, because the two chips name one
+    asset with one outcome, and two identical banner entries would read as two
+    separate problems. Pinned here because "the second chip stays quiet" is
+    invisible in the code and would otherwise look like a dropped failure.
+    """
+    attachments = [
+        {"kind": "asset_ref", "asset_id": ASSET_ID},
+        {"kind": "asset_ref", "asset_id": ASSET_ID},
+    ]
+
+    result, captured, _ = await _run_turn(
+        attachments=attachments,
+        # One ref back for two attachments: what the real resolver returns.
+        asset_result=([_asset_ref()], []),
+        meta={},  # primary unreadable → one asset_no_primary_image
+    )
+
+    assert _system_message(captured).count("<asset ") == 1
+    assert result["attachment_failures"] == [
+        {"index": 0, "kind": "asset_ref", "reason": "asset_no_primary_image"}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -689,10 +721,60 @@ def test_attachment_request_accepts_asset_ref_fields():
     assert req.asset_id == ASSET_ID
     assert req.loadout_id is None
 
-    # Snowflakes may arrive as JSON numbers from a hand-built client; the
-    # schema coerces rather than rejecting (see _COERCE_IDS on the id models —
-    # here the field is plain str, so pydantic's str coercion is what applies).
+
+def test_ref_ids_sent_as_json_numbers_are_coerced_to_strings():
+    """A Snowflake sent as a JSON number must resolve, not 422 the whole request.
+
+    Pydantic v2's lax mode does NOT coerce int→str, so without the explicit
+    `mode="before"` validator `{"asset_id": 7001}` raises `string_type` at the
+    HTTP boundary and takes the ENTIRE ChatRequest down with it — the same
+    reason-free rejection the model avoids for `kind` by leaving it free. It
+    would also make Task 1's `coerce_asset_id` numeric branch unreachable from
+    HTTP.
+
+    Both shapes are exercised for real: previously this asserted
+    `isinstance(str, str)` on a value that was already `"7001"`, which is true
+    for every possible implementation and therefore tested nothing.
+
+    Mutation check: delete `_coerce_ref_id_str` from `AttachmentRequest` and
+    the int half of this test goes red with `string_type`.
+    """
+    from app.schemas.ai_library_chat import AttachmentRequest
+
     numeric = AttachmentRequest.model_validate(
-        {"kind": "asset_ref", "asset_id": ASSET_ID}
+        {"kind": "asset_ref", "asset_id": 7001, "loadout_id": 5001}
     )
-    assert isinstance(numeric.asset_id, str)
+    assert numeric.asset_id == "7001"
+    assert numeric.loadout_id == "5001"
+
+    # resource_ref ids go through the same validator, so the two reference
+    # kinds cannot drift into disagreeing about what a wire id may look like.
+    numeric_resource = AttachmentRequest.model_validate(
+        {"kind": "resource_ref", "resource_id": 9001}
+    )
+    assert numeric_resource.resource_id == "9001"
+
+    # Strings pass through untouched — coercion must not reformat a real id.
+    plain = AttachmentRequest.model_validate({"kind": "asset_ref", "asset_id": "7001"})
+    assert plain.asset_id == "7001"
+
+
+def test_ref_id_coercion_stays_narrow():
+    """Only `int` is an id shape. `bool` is an int subclass that would become
+    `"True"`, and a float would become `"7001.0"` — neither is a Snowflake, so
+    both must still be rejected rather than silently normalized into garbage.
+
+    This is also why the model does not simply adopt the file's `_COERCE_IDS`
+    config: that coerces every str field, which would turn a nonsense
+    `kind: 5` into the string `"5"` and let it reach the binary path.
+    """
+    from pydantic import ValidationError
+
+    from app.schemas.ai_library_chat import AttachmentRequest
+
+    for bad in (True, 7001.0):
+        with pytest.raises(ValidationError):
+            AttachmentRequest.model_validate({"kind": "asset_ref", "asset_id": bad})
+
+    with pytest.raises(ValidationError):
+        AttachmentRequest.model_validate({"kind": 5})
