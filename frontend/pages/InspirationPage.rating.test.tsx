@@ -123,6 +123,51 @@ describe('InspirationPage star rating', () => {
     await waitFor(() => expect(filledCount()).toBe(5));
   });
 
+  // ── interaction with the rating filter (chip added this cycle) ──────────
+  // Rating became a LIST PREDICATE, so re-rating a note can make it stop
+  // matching the active filter. `getByLabelText('Rating')` still resolves to
+  // the CARD's star group — the chip carries "Rating" as text, not as an
+  // aria-label — so `stars()` keeps working with the chip on screen.
+  const filterToAtLeast4 = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /^Rating/ }));
+    const menu = await screen.findByRole('menu', { name: 'Rating filter' });
+    fireEvent.click(within(menu).getByRole('button', { name: '≥4' }));
+    await waitFor(() =>
+      expect(listNotes).toHaveBeenLastCalledWith(
+        expect.objectContaining({ min_rating: 4 }),
+        expect.anything(),
+        undefined,
+      ),
+    );
+  };
+
+  it('drops the card when a re-rate puts the note below the active floor', async () => {
+    await renderWithNote({ ...NOTE, rating: 5 });
+    await filterToAtLeast4();
+    expect(screen.getByText('an idea')).toBeTruthy();
+
+    updateNote.mockResolvedValue({ ...NOTE, rating: 2 });
+    fireEvent.click(stars()[1]); // 5 -> 2, no longer >= 4
+
+    // Leaving it on screen would make the "≥4★" list show a 2-star card —
+    // the filter visibly lying until the next unrelated refetch.
+    await waitFor(() => expect(screen.queryByText('an idea')).toBeNull());
+  });
+
+  // Control for the above: the drop must be conditional, not "any re-rate
+  // removes the card". Without this, always-filter passes the test above.
+  it('keeps the card when the re-rated note still clears the floor', async () => {
+    await renderWithNote({ ...NOTE, rating: 5 });
+    await filterToAtLeast4();
+
+    updateNote.mockResolvedValue({ ...NOTE, rating: 4 });
+    fireEvent.click(stars()[3]); // 5 -> 4, still >= 4
+
+    await waitFor(() => expect(updateNote).toHaveBeenCalledWith('1', { rating: 4 }));
+    await waitFor(() => expect(filledCount()).toBe(4));
+    expect(screen.getByText('an idea')).toBeTruthy();
+  });
+
   it('rolls the stars back and toasts when the PATCH fails', async () => {
     await renderWithNote({ ...NOTE, rating: 3 });
     updateNote.mockRejectedValue(new Error('boom'));

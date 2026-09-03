@@ -303,7 +303,21 @@ export const InspirationPage: React.FC = () => {
     try {
       const updated = await updateNote(note.id, { rating: value });
       if (seq !== ratingSeq.current[note.id]) return; // superseded; discard
-      setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+      // The rating is a LIST PREDICATE now (the Rating chip filters on it), so
+      // a note rated below the active floor has to leave the list — otherwise
+      // a "≥4★" list keeps showing the card the user just dropped to 2 stars,
+      // which reads as the filter lying. Dropped locally rather than via
+      // setRefreshKey so pages already pulled by loadMore survive, and only on
+      // the CONFIRMED value — the catch below reverts by id and cannot
+      // re-insert a card that is already gone.
+      // `minRating === 0` needs no special case: ratings are 0-5, so `>= 0`
+      // already keeps everything.
+      const stillMatches = (updated.rating ?? 0) >= minRating;
+      setNotes((prev) =>
+        stillMatches
+          ? prev.map((n) => (n.id === note.id ? updated : n))
+          : prev.filter((n) => n.id !== note.id),
+      );
     } catch (err) {
       if (seq === ratingSeq.current[note.id]) {
         setNotes((prev) => prev.map((n) => (n.id === note.id ? note : n)));
@@ -433,7 +447,7 @@ export const InspirationPage: React.FC = () => {
             )}
             <FilterChip
               chipId="rating"
-              label={t('resources.filter.rating', 'Rating')}
+              label={t('inspiration.rating', 'Rating')}
               activeSummary={minRating > 0 ? `≥${minRating}★` : null}
               isActive={minRating > 0}
               isOpen={ratingChipOpen}

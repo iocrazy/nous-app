@@ -43,6 +43,10 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
           <button
             key={value}
             type="button"
+            // The row's only content is a "≥" glyph plus N star SVGs, so
+            // without this every option announces as bare "≥" — and tests can
+            // only address them by position.
+            aria-label={`≥${value}`}
             onClick={() => onChange(value)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
               active ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : inactiveRow
