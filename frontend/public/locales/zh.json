@@ -3280,7 +3280,11 @@
       "kindImage": "图片",
       "kindVideo": "视频",
       "kindDoc": "文档",
-      "readOnlyConsequence": "仅供浏览 · 该画布为只读"
+      "readOnlyConsequence": "仅供浏览 · 该画布为只读",
+      "dropPlace": "放到画布",
+      "dropAddReference": "加为参考图",
+      "dropInsertMention": "插入为提及",
+      "dropAppend": "追加到这张卡片"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",

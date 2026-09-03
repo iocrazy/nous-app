@@ -30,6 +30,7 @@ import type { GeneratedImageRef, PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
 import { addReferences } from './addReferences';
+import { writeLibraryDrag } from './dropLibraryItems';
 import { LibraryGrid, type LibraryKindChip } from './LibraryGrid';
 import {
   useLibrarySearch,
@@ -383,6 +384,26 @@ export function LibraryMediaPage({
         primaryAction={readOnly ? undefined : inTargetMode ? referenceAction : placeAction}
         secondaryAction={!readOnly && inTargetMode ? placeAction : undefined}
         onItemActivate={(item) => (inTargetMode ? doAddRefs([item]) : doPlace([item]))}
+        onItemDragStart={
+          // A viewer gets no drag at all: every landing a drop resolves into
+          // writes, and `draggable` is set from this prop being present, so
+          // withdrawing it is what keeps a read-only session from starting a
+          // gesture it could only refuse at the end.
+          readOnly
+            ? undefined
+            : (item, e) => {
+                // Drag the SELECTION when the grabbed cell is part of it, else
+                // just that cell. Dragging one item out of a five-item
+                // selection and getting five is the behaviour every file
+                // manager has.
+                const chosen = selectedItems(selection, current.items);
+                const dragging = chosen.some((i) => libraryKey(i) === libraryKey(item))
+                  ? chosen
+                  : [item];
+                writeLibraryDrag(e.dataTransfer, dragging);
+                e.dataTransfer.effectAllowed = 'copy';
+              }
+        }
         emptyLabel={t('canvas.library.empty', 'Nothing Here Yet')}
         targetRowHeight={96}
       />

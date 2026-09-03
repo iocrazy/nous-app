@@ -3280,7 +3280,11 @@
       "kindImage": "Image",
       "kindVideo": "Video",
       "kindDoc": "Doc",
-      "readOnlyConsequence": "Browse only · this canvas is read-only"
+      "readOnlyConsequence": "Browse only · this canvas is read-only",
+      "dropPlace": "Place on Canvas",
+      "dropAddReference": "Add as Reference",
+      "dropInsertMention": "Insert as Mention",
+      "dropAppend": "Add to This Card"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
