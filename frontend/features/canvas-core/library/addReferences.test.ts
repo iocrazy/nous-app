@@ -185,6 +185,44 @@ describe('resolveReferenceRefs', () => {
     ).rejects.toMatchObject({ reason: 'not_an_image' });
   });
 
+  // ── `allowVideo` — the PLACEMENT caller, not the reference caller ──────
+  //
+  // A media card can hold a video; a reference cannot. So the refusal above
+  // is right for `addReferences` and wrong for `placeLibraryItems`, and the
+  // difference is the CALLER's, not the item's. Opting in per call keeps one
+  // resolver — the url families the backend's bridge accepts are written
+  // once — instead of a second copy of those templates in the placement path.
+  it('a video generation resolves to a VIDEO ref when the caller allows it', async () => {
+    expect(
+      await resolveReferenceRefs({ ...GENERATED, kind: 'video' }, SCOPE, { allowVideo: true }),
+    ).toEqual([{ url: '/api/v1/generated-media/800000000000000001/file', kind: 'video' }]);
+    expect(importResourceAsCanvasMedia).not.toHaveBeenCalled();
+  });
+
+  it('a video upload is minted, and keeps the kind the MINT reports', async () => {
+    // The kind comes back from the import, not from the list row: the row
+    // says what the library thinks it is, the mint says what was stored.
+    importResourceAsCanvasMedia.mockResolvedValue({
+      url: '/api/v1/generated-media/770000000000000002/file',
+      kind: 'video',
+      id: '770000000000000002',
+    });
+    expect(
+      await resolveReferenceRefs({ ...UPLOAD, kind: 'video' }, SCOPE, { allowVideo: true }),
+    ).toEqual([{ url: '/api/v1/generated-media/770000000000000002/file', kind: 'video' }]);
+  });
+
+  it('audio and doc uploads stay refused even with video allowed', async () => {
+    // `allowVideo` widens the gate by exactly one kind. A media card cannot
+    // hold a PDF, so letting one through would trade a typed refusal for a
+    // card that renders nothing.
+    for (const kind of ['audio', 'doc', 'pdf']) {
+      await expect(
+        resolveReferenceRefs({ ...UPLOAD, kind }, SCOPE, { allowVideo: true }),
+      ).rejects.toMatchObject({ reason: 'not_an_image' });
+    }
+  });
+
   it('an asset with no primary-slot file is refused, not added empty', async () => {
     fetchAssetDetail.mockResolvedValue({ ...ASSET_DETAIL, files: [] });
     await expect(resolveReferenceRefs(ASSET, SCOPE)).rejects.toMatchObject({
@@ -243,6 +281,15 @@ describe('addReferences', () => {
     expect(refs().map((r) => r.url)).toEqual([
       '/api/v1/generated-media/800000000000000001/file',
       '/api/v1/generated-media/770000000000000001/file',
+    ]);
+  });
+
+  it('never allows video — a reference is an image, whatever the placer accepts', async () => {
+    seed();
+    const r = await addReferences('p1', [{ ...GENERATED, kind: 'video' }], SCOPE);
+    expect(r.added).toBe(0);
+    expect(r.failed).toEqual([
+      { item: { ...GENERATED, kind: 'video' }, reason: 'not_an_image' },
     ]);
   });
 

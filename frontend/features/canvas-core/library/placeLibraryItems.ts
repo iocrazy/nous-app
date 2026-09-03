@@ -10,11 +10,10 @@
 // one number cannot tell them apart, which is the silent no-op this repo keeps
 // re-learning.
 //
-// KNOWN LIMIT: media rows go through `resolveReferenceRefs`, which is the
-// REFERENCE resolver — it refuses a video with `not_an_image`. So placing a
-// generated video reports a typed failure rather than a video card. That is
-// loud rather than silent, and the fix belongs in the resolver (whose url
-// templates would otherwise get a second copy here), not in this file.
+// Media rows go through `resolveReferenceRefs` with `allowVideo` ON. That is
+// the one axis where a CARD and a REFERENCE differ: a card can hold a video,
+// a reference cannot. Audio, doc and pdf uploads are still a typed refusal —
+// a media card renders none of them.
 
 import { fetchAssetDetail, type AssetRow } from '../../../services/assetsService';
 import { layoutAssetLanes, buildProjectAssetNodes } from '../smart/assetPlacement';
@@ -80,7 +79,7 @@ export async function placeLibraryItems(
   const refs: Array<{ url: string; kind: 'image' | 'video' }> = [];
   for (const item of mediaItems) {
     try {
-      const resolved = await resolveReferenceRefs(item, scopeId);
+      const resolved = await resolveReferenceRefs(item, scopeId, { allowVideo: true });
       for (const r of resolved) refs.push({ url: r.url, kind: r.kind === 'video' ? 'video' : 'image' });
     } catch (err) {
       console.error('[placeLibraryItems] could not resolve', item, err);

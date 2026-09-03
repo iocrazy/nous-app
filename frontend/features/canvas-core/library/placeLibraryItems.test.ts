@@ -37,6 +37,9 @@ const GENERATED: LibraryItem = {
 const UPLOAD: LibraryItem = {
   store: 'uploads', id: '655000000000000001', title: 'harbour.png', thumbUrl: '', kind: 'image',
 };
+const GENERATED_VIDEO: LibraryItem = {
+  store: 'generated', id: '800000000000000002', title: 'A dolly in', thumbUrl: '', kind: 'video',
+};
 
 const DETAIL = {
   id: ASSET_ID, scope_id: SCOPE, asset_type: 'character' as const, subtype: null,
@@ -101,6 +104,37 @@ describe('placeLibraryItems', () => {
       '/api/v1/generated-media/770000000000000001/file',
       '/api/v1/generated-media/800000000000000001/file',
     ]);
+  });
+
+  it('a generated VIDEO lands in the card as a video, not refused as a picture', async () => {
+    // A media card can hold a video; a reference cannot. Before this, Place on
+    // Canvas answered a typed `not_an_image` for every video in the library —
+    // loud, but wrong, and it made half the Generated shelf unplaceable.
+    const r = await placeLibraryItems([GENERATED_VIDEO], SCOPE, { x: 0, y: 0 });
+    expect(r).toMatchObject({ inserted: 1, failed: [] });
+    const media = nodes().find((n) => n.type === 'media')!;
+    expect(media.data.items).toEqual([
+      { url: '/api/v1/generated-media/800000000000000002/file', kind: 'video' },
+    ]);
+    // One video, so the card is a Video rather than the plural Group.
+    expect(media.data.title).toBe('Video');
+  });
+
+  it('an audio upload is still refused — a media card renders none of them', async () => {
+    const r = await placeLibraryItems([{ ...UPLOAD, kind: 'audio' }], SCOPE, { x: 0, y: 0 });
+    expect(r.inserted).toBe(0);
+    expect(r.failed).toEqual([{ item: { ...UPLOAD, kind: 'audio' }, reason: 'not_an_image' }]);
+  });
+
+  it('the media card is CENTRED on the drop point, not hung off it', async () => {
+    // The caller hands in the point the user is looking at; a card placed with
+    // its top-left there sits half a card off to one side.
+    await placeLibraryItems([GENERATED], SCOPE, { x: 1000, y: 600 });
+    const media = nodes().find((n) => n.type === 'media') as unknown as {
+      position: { x: number; y: number };
+    };
+    expect(media.position.x).toBe(1000 - 240 / 2);
+    expect(media.position.y).toBe(600 - 60);
   });
 
   it('mixed stores produce both an asset lane and a media card, in one write', async () => {

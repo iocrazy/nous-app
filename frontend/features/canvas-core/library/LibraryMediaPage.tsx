@@ -23,10 +23,12 @@ import { useTranslation } from 'react-i18next';
 import { useOptionalToast } from '../../../components/Toast';
 import type { AssetType } from '../../../services/assetsService';
 import { useCanvasScope } from '../smart/canvasScope';
+import { useCanvasReadOnly } from '../smart/nodes/useCanvasReadOnly';
 import { useModelCapabilities } from '../smart/nodes/useModelCapabilities';
 import { MAX_REFERENCE_IMAGES } from '../smart/refOrder';
 import type { GeneratedImageRef, PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { screenToWorld } from '../utils/viewport';
 import { addReferences } from './addReferences';
 import { LibraryGrid, type LibraryKindChip } from './LibraryGrid';
 import {
@@ -101,6 +103,11 @@ export function LibraryMediaPage({
   const { scopeId } = useCanvasScope();
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const projectId = useCanvasCoreStore((s) => s.projectId);
+  // A viewer gets the shelf and nothing that writes. `L` is view-only and
+  // stays live in a read-only session, so the panel MOUNTS there — and a
+  // panel that offered Place on Canvas would hand a viewer a button whose
+  // write `markDirty` silently swallows.
+  const readOnly = useCanvasReadOnly();
 
   const open = useLibraryStore((s) => s.open);
   const mediaStore = useLibraryStore((s) => s.mediaStore);
@@ -119,7 +126,8 @@ export function LibraryMediaPage({
   // Falling back to 0 would disable the button on the day the endpoint hiccups.
   const max = caps?.max_refs ?? MAX_REFERENCE_IMAGES;
   const used = ((targetData?.manual_refs ?? []) as GeneratedImageRef[]).length;
-  const inTargetMode = target !== null && target.kind === 'prompt' && targetData !== null;
+  const inTargetMode =
+    !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
   const atLimit = inTargetMode && used >= max;
 
   const result = useLibrarySearch(query, {
@@ -145,9 +153,20 @@ export function LibraryMediaPage({
   // ── Place on canvas ─────────────────────────────────────────────────────
   const doPlace = useCallback(
     (picked: LibraryItem[]) => {
-      if (busy || picked.length === 0) return;
+      if (readOnly || busy || picked.length === 0) return;
       setBusy(true);
-      void placeLibraryItems(picked, scopeId, null)
+      // The world point under the SCREEN centre — what the user is looking
+      // at. `null` would mean "lay them out in project lanes", which puts a
+      // card to the right of everything already on the board; the surface
+      // culls off-viewport nodes, so that answer is a toast and a blank
+      // screen. The guard is defensive: the store types `viewport` as always
+      // present, and a canvas row with no `viewport_json` still resolves to
+      // the identity one.
+      const vp = useCanvasCoreStore.getState().viewport;
+      const centre = vp
+        ? screenToWorld({ x: window.innerWidth / 2, y: window.innerHeight / 2 }, vp)
+        : null;
+      void placeLibraryItems(picked, scopeId, centre)
         .then((r) => {
           if (r.failed.length > 0) {
             toast?.addToast(
@@ -182,7 +201,7 @@ export function LibraryMediaPage({
         })
         .finally(() => setBusy(false));
     },
-    [busy, scopeId, setSelection, t, toast],
+    [busy, readOnly, scopeId, setSelection, t, toast],
   );
 
   // ── Add as references ───────────────────────────────────────────────────
@@ -191,7 +210,7 @@ export function LibraryMediaPage({
   // enforced here rather than on the button's `disabled` prop alone.
   const doAddRefs = useCallback(
     (picked: LibraryItem[]) => {
-      if (busy || atLimit || !target || picked.length === 0) return;
+      if (readOnly || busy || atLimit || !target || picked.length === 0) return;
       setBusy(true);
       // The ceiling is handed DOWN rather than applied here: one asset
       // resolves to one ref per primary-slot file, so a sliced pick list would
@@ -234,7 +253,7 @@ export function LibraryMediaPage({
         })
         .finally(() => setBusy(false));
     },
-    [atLimit, busy, max, scopeId, setSelection, t, target, toast],
+    [atLimit, busy, max, readOnly, scopeId, setSelection, t, target, toast],
   );
 
   const kinds: LibraryKindChip[] | undefined =
@@ -256,7 +275,9 @@ export function LibraryMediaPage({
         : [];
   const activeScope = mediaStore === 'assets' ? assetScope : generatedScope;
 
-  const consequence = inTargetMode
+  const consequence = readOnly
+    ? t('canvas.library.readOnlyConsequence', 'Browse only · this canvas is read-only')
+    : inTargetMode
     ? t('canvas.library.targetConsequence', {
         title: target.title,
         model: model || t('canvas.library.noModel', 'No Model Yet'),
@@ -359,8 +380,8 @@ export function LibraryMediaPage({
               })
             : null
         }
-        primaryAction={inTargetMode ? referenceAction : placeAction}
-        secondaryAction={inTargetMode ? placeAction : undefined}
+        primaryAction={readOnly ? undefined : inTargetMode ? referenceAction : placeAction}
+        secondaryAction={!readOnly && inTargetMode ? placeAction : undefined}
         onItemActivate={(item) => (inTargetMode ? doAddRefs([item]) : doPlace([item]))}
         emptyLabel={t('canvas.library.empty', 'Nothing Here Yet')}
         targetRowHeight={96}

@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
 import { useOptionalToast } from '../../../components/Toast';
+import { useCanvasReadOnly } from '../smart/nodes/useCanvasReadOnly';
 import type { PromptNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { chipClass, type Label } from './libraryChrome';
@@ -42,6 +43,11 @@ export function LibraryPanel(): React.ReactElement | null {
   const { t } = useTranslation();
   const toast = useOptionalToast();
   const nodes = useCanvasCoreStore((s) => s.nodes);
+  // The panel mounts for a viewer too — `L` is view-only. What a viewer must
+  // not get is the target bar: nothing in a read-only session can arm a
+  // target, and a bar promising to add references would be a promise the
+  // media page refuses to keep.
+  const readOnly = useCanvasReadOnly();
 
   const open = useLibraryStore((s) => s.open);
   const page = useLibraryStore((s) => s.page);
@@ -95,7 +101,8 @@ export function LibraryPanel(): React.ReactElement | null {
 
   if (!open) return null;
 
-  const inTargetMode = target !== null && target.kind === 'prompt' && targetData !== null;
+  const inTargetMode =
+    !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
 
   return (
     <div

@@ -25,6 +25,19 @@ import type { LibraryItem } from './librarySearch';
 
 export type AddReferenceFailure = 'mint_failed' | 'no_image_file' | 'not_an_image';
 
+export interface ResolveRefsOptions {
+  /**
+   * Let a VIDEO through instead of refusing it.
+   *
+   * OFF by default, and the default is the load-bearing half: a reference is
+   * an image, always — `addReferences` never passes this. `placeLibraryItems`
+   * does, because a media CARD can hold a video. The gate widens by exactly
+   * one kind: audio, doc and pdf uploads stay a typed `not_an_image` refusal,
+   * since a media card renders none of them.
+   */
+  allowVideo?: boolean;
+}
+
 export interface AddReferencesOptions {
   /**
    * Ceiling on the node's TOTAL `manual_refs`, checked against the live node
@@ -56,6 +69,10 @@ class ReferenceError_ extends Error {
 /**
  * The durable refs one library item contributes.
  *
+ * `opts.allowVideo` is the ONE axis a caller may widen — see
+ * {@link ResolveRefsOptions}. Everything else about the resolution is the
+ * same for a reference and for a card, which is why there is one resolver.
+ *
  * An asset contributes SEVERAL — its primary-slot files — which is why this
  * answers a list rather than a single ref. `/api/v1/resources/{id}/cover` and
  * `/api/v1/generated-media/{id}/file` are the two url families the backend's
@@ -66,13 +83,22 @@ class ReferenceError_ extends Error {
 export async function resolveReferenceRefs(
   item: LibraryItem,
   scopeId: string,
+  opts?: ResolveRefsOptions,
 ): Promise<GeneratedImageRef[]> {
+  const videoOk = opts?.allowVideo === true;
   if (item.store === 'generated') {
-    if (item.kind === 'video') throw new ReferenceError_('not_an_image');
+    if (item.kind === 'video') {
+      if (!videoOk) throw new ReferenceError_('not_an_image');
+      return [{ url: `/api/v1/generated-media/${item.id}/file`, kind: 'video' }];
+    }
     return [{ url: `/api/v1/generated-media/${item.id}/file`, kind: 'image' }];
   }
   if (item.store === 'uploads') {
-    if (item.kind !== 'image') throw new ReferenceError_('not_an_image');
+    if (item.kind !== 'image' && !(videoOk && item.kind === 'video')) {
+      throw new ReferenceError_('not_an_image');
+    }
+    // The kind comes back from the MINT, not from the list row: the row says
+    // what the library thinks it is, the mint says what was actually stored.
     const minted = await importResourceAsCanvasMedia(item.id);
     return [{ url: minted.url, kind: minted.kind }];
   }

@@ -313,9 +313,28 @@ describe('LibraryPanel', () => {
     const [items, scopeId, position] = placeLibraryItems.mock.calls[0];
     expect((items as Array<{ id: string }>)[0].id).toBe(UPLOAD_ROW.id);
     expect(scopeId).toBe(SCOPE);
-    // No drop point: the button places into the lanes, not under a cursor.
-    expect(position).toBeNull();
+    // The world point under the viewport CENTRE, not null: `null` means "lay
+    // them out in project lanes", which puts a card to the right of
+    // everything already on the board — and the surface culls off-viewport
+    // nodes, so the user would get a toast and an empty screen.
+    expect(position).toEqual({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     await waitFor(() => expect(useLibraryStore.getState().selection).toEqual([]));
+  });
+
+  it('the drop point follows the viewport, not the window', async () => {
+    // Panned and zoomed, the centre of the SCREEN is a different point in the
+    // world — which is the whole reason this goes through `screenToWorld`.
+    act(() => {
+      useCanvasCoreStore.setState({ viewport: { x: 100, y: 40, zoom: 2 } });
+    });
+    await openOnUploads();
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+    fireEvent.click(screen.getByTestId('library-primary'));
+    await waitFor(() => expect(placeLibraryItems).toHaveBeenCalledTimes(1));
+    expect(placeLibraryItems.mock.calls[0][2]).toEqual({
+      x: (window.innerWidth / 2 - 100) / 2,
+      y: (window.innerHeight / 2 - 40) / 2,
+    });
   });
 
   it('placing nothing because it is all already here still says so', async () => {
@@ -375,6 +394,38 @@ describe('LibraryPanel', () => {
     expect(String(addToast.mock.calls[0][0])).toContain('could not be added');
     // The selection SURVIVES a failure: clearing it would look like success.
     expect(useLibraryStore.getState().selection).toHaveLength(1);
+  });
+
+  it('a read-only canvas gets the shelf, and nothing that writes to the board', async () => {
+    // `L` is view-only and fires in a read-only session, so the panel MUST
+    // mount there — a key that toggles a store nobody renders is a silent
+    // no-op. What must not survive is anything that would write: the board is
+    // not the viewer's to change, and `markDirty` would swallow the attempt.
+    act(() => { useCanvasCoreStore.setState({ readOnly: true }); });
+    await openOnUploads();
+    expect(screen.getByTestId('library-grid')).toBeTruthy();
+    expect(screen.queryByTestId('library-primary')).toBeNull();
+    expect(screen.queryByTestId('library-secondary')).toBeNull();
+    expect(screen.getByTestId('library-consequence').textContent).toContain('read-only');
+  });
+
+  it('read-only says so in the consequence line rather than leaving it blank', async () => {
+    act(() => { useCanvasCoreStore.setState({ readOnly: true }); });
+    await openOnUploads();
+    // A shelf with no buttons and no explanation reads as broken.
+    expect(screen.getByTestId('library-consequence').textContent).toContain('Browse only');
+  });
+
+  it('read-only hides the target bar, even if a target somehow survived', () => {
+    seedNodes([promptNode()]);
+    act(() => {
+      useCanvasCoreStore.setState({ readOnly: true });
+      useLibraryStore.getState().openPanel({
+        target: { nodeId: 'p1', kind: 'prompt', title: 'Harbour at dusk' },
+      });
+    });
+    renderPanel();
+    expect(screen.queryByTestId('library-target')).toBeNull();
   });
 
   it('the Prompts page is the one line P3 will replace', () => {

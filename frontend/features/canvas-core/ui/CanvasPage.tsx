@@ -836,7 +836,9 @@ export function CanvasView({
       {(kind === 'smart' || isEntityCanvas(kind)) && !readOnly && (
         <TopNodeBar surfaceRef={surfaceRef} />
       )}
-      {isSmartFamily(kind) && !readOnly && <LibraryPanel />}
+      {/* No `!readOnly` gate, unlike its neighbours: `L` fires for a viewer, so
+          gating this makes that key a silent no-op — see LibraryMediaPage. */}
+      {isSmartFamily(kind) && <LibraryPanel />}
       {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && !readOnly && (
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />
