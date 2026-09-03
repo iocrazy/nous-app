@@ -143,7 +143,7 @@ export async function fetchLibraryAssets(
   // `library: 'all'` — EXPLICIT, and the explicitness is the point. The
   // server's default is `in` (library members only), which hides script
   // imports and every asset the P4 legacy-card migration created — exactly the
-  // population a canvas points at. Same reasoning as AssetPickerDialog.
+  // population a canvas points at. The mention palette chooses the same.
   if (opts.assetScope === 'this-project' && opts.projectId) {
     const rows = await listAssets(opts.scopeId, {
       q,

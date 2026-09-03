@@ -154,6 +154,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
               />
             </div>
           <button
+            data-testid="workspace-canvas-card"
             onClick={() => navigate(editorPath(String(canvas.id)))}
             className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
           >

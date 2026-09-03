@@ -2,7 +2,7 @@
 //
 // en/zh parity for the asset smart node's namespace.
 //
-// Every `t()` call in the node and its picker passes an English default, so a
+// Every `t()` call in the asset node passes an English default, so a
 // key missing from en.json renders correctly and reports nothing — and a key
 // missing from zh.json falls back to English for zh users only, which nobody
 // on an English machine ever sees. Reading both locale files is the only way
@@ -27,10 +27,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const LOCALES = path.resolve(__dirname, '../../../../public/locales');
-const SOURCES = [
-  path.join(__dirname, 'AssetNodeView.tsx'),
-  path.join(__dirname, 'AssetPickerDialog.tsx'),
-];
+const SOURCES = [path.join(__dirname, 'AssetNodeView.tsx')];
 
 function load(lang: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(LOCALES, `${lang}.json`), 'utf8'));
@@ -47,7 +44,7 @@ function at(tree: Record<string, unknown>, key: string): unknown {
 }
 
 /**
- * Every `canvas.asset.*` key the two components ask for by a LITERAL.
+ * Every `canvas.asset.*` key the node asks for by a LITERAL.
  *
  * `dropReason.${reason}` is built at runtime from a backend code and so has no
  * literal to find — it is enumerated from the contract instead, below.

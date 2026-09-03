@@ -208,7 +208,7 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
      * exactly the assets a canvas points at, so a user whose card resolves to a
      * migrated asset would see it on the board and be unable to `@` it. The
      * toggle lets someone narrow to the shelf on purpose; it never narrows on
-     * their behalf. (Same reasoning as `AssetPickerDialog`.)
+     * their behalf. (`librarySearch` makes the same call for the panel.)
      */
     const [inLibraryOnly, setInLibraryOnly] = useState(false);
 

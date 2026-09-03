@@ -101,10 +101,10 @@ const HAS_LIBRARY = /\blibrary\b/i;
  *  already-listed file, which is precisely how the first version of this
  *  guard would have missed the five renames. Each entry says what it labels.
  *
- *  Every entry below still has at least one live mount. Task 7 deleted
- *  `LibraryReferencePopover.tsx`, which held one of the two `Search Library…`
- *  mounts; `LibraryMediaPage.tsx` took over that string and the mention
- *  palette still carries the other. An entry that DID go dead would be
+ *  Every entry below still has at least one live mount. Task 7 deleted the
+ *  add-reference popover, which held one of the two `Search Library…` mounts;
+ *  `LibraryMediaPage.tsx` took over that string and the mention palette still
+ *  carries the other. An entry that DID go dead would be
  *  harmless here, not a failure — the canary two cases below is what keeps
  *  the whole set from quietly emptying out. */
 const ALLOWED_DEFAULTS = new Set([

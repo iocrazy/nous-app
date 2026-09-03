@@ -10,7 +10,7 @@
 // target it resolved, so there is still exactly one place that decides whether
 // a target is live.
 //
-// TARGET MODE carries the deleted `LibraryReferencePopover`'s contract intact:
+// TARGET MODE carries the deleted add-reference popover's contract intact:
 // the ceiling comes from the target node's own model, it is handed DOWN to
 // `addReferences` (one asset expands to several refs, so slicing the pick list
 // would bound picks rather than refs), and every outcome — failed,
