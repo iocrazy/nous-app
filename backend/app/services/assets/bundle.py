@@ -85,7 +85,7 @@ _LINKED_PROMPT_ORDER = ("costume", "prop", "location")
 DroppedReference = Dict[str, str]
 
 
-def _linked_positive_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]:
+def linked_positive_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]:
     """``prompt_positive`` of the linked assets, costumes/props before location.
 
     ⚠️ **No link relation produces a location today.** ``LINK_RULES`` allows
@@ -252,7 +252,7 @@ def build_bundle(
     happens before the ranking rather than after it.
     """
     asset_type = str(asset_row.get("asset_type") or "")
-    linked_positive = _linked_positive_texts(linked_assets)
+    linked_positive = linked_positive_texts(linked_assets)
 
     positive = ", ".join(
         dedupe_fragments(
@@ -298,4 +298,8 @@ def build_bundle(
     }
 
 
-__all__ = ["build_bundle"]
+# ``linked_positive_texts`` is PUBLIC because a second surface composes from
+# the same rows: ``assets/chat_ref.py`` reuses it so an asset delivered to a
+# generator and the same asset mentioned in chat cannot start disagreeing
+# about the order its costumes/props/location are described in.
+__all__ = ["build_bundle", "linked_positive_texts"]

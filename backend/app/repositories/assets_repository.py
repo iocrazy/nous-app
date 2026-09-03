@@ -19,7 +19,13 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import in_unit_of_work, read_scope, write_scope
-from app.models import AssetFiles, AssetLoadouts, AssetProjectRefs, Assets
+from app.models import (
+    AssetFiles,
+    AssetLoadouts,
+    AssetProjectRefs,
+    Assets,
+    TeamMembers,
+)
 from app.models.assets import ASSET_TYPES
 from app.services.assets.slots import readiness
 
@@ -248,6 +254,107 @@ class AssetsRepository:
         async with read_scope() as session:
             obj = (await session.execute(stmt)).scalar_one_or_none()
         return _row_dict(obj) if obj else None
+
+    # ── membership-wide access (no scope_id) ───────────────────────────────
+
+    def _accessible_stmt(
+        self,
+        user_id: str,
+        *,
+        asset_ids: Optional[List[Any]] = None,
+        q: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        library: Optional[str] = None,
+        limit: Optional[int] = None,
+        include_deleted: bool = False,
+    ):
+        """The SELECT behind :meth:`list_accessible`, split out so it can be
+        compiled and asserted without a database (the same reason
+        :meth:`_list_stmt` is).
+
+        The visibility predicate is written ONCE, here, and is the same
+        expression :meth:`get` carries with a single ``scope_id`` substituted by
+        the membership subquery — see :meth:`list_accessible` for why that
+        equivalence matters and where it is pinned.
+        """
+        membership = select(TeamMembers.team_id).where(TeamMembers.user_id == user_id)
+        stmt = select(Assets).where(
+            or_(Assets.scope_id.in_(membership), Assets.is_system_preset.is_(True))
+        )
+        if not include_deleted:
+            stmt = stmt.where(Assets.deleted_at.is_(None))
+        if asset_ids is not None:
+            stmt = stmt.where(Assets.id.in_([int(a) for a in asset_ids]))
+        if asset_type:
+            stmt = stmt.where(Assets.asset_type == asset_type)
+        if library is not None:
+            membership_pred = _library_predicate(library)
+            if membership_pred is not None:
+                stmt = stmt.where(membership_pred)
+        if q:
+            like = f"%{_like_escape(q.strip())}%"
+            stmt = stmt.where(
+                or_(
+                    Assets.name.ilike(like, escape="\\"),
+                    Assets.description.ilike(like, escape="\\"),
+                )
+            )
+        stmt = stmt.order_by(*_order_by("recent"))
+        if limit is not None:
+            stmt = stmt.limit(max(1, min(int(limit), 200)))
+        return stmt
+
+    async def list_accessible(
+        self,
+        user_id: str,
+        *,
+        asset_ids: Optional[List[Any]] = None,
+        q: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        library: Optional[str] = None,
+        limit: Optional[int] = None,
+        include_deleted: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Every asset the USER can read, across every team they belong to.
+
+        The scope-less sibling of :meth:`list`. Two callers need it and neither
+        has a ``scope_id`` to pass: a chat turn (an @-mentioned asset arrives
+        with no workspace context — the floating chat window outlives any one
+        route) and ``GET /assets/search`` behind it. Ruling B of the P5 plan.
+
+        Visibility is ``scope_id ∈ the user's teams OR is_system_preset``, which
+        is exactly :meth:`get`'s ``scope_id == :one_scope OR is_system_preset``
+        unioned over the caller's teams. That equivalence is the whole safety
+        argument — a chat must not be able to read an asset the router's
+        ``_gate`` would refuse, nor miss one it would allow — so it is pinned
+        behaviourally by ``test_asset_ref_resolver.py``'s ruling-B guard rather
+        than left as a comment.
+
+        ``include_deleted=True`` keeps the SAME visibility predicate and drops
+        only the ``deleted_at IS NULL`` filter. It exists so a caller can tell
+        "you cannot see this" from "this was deleted" without writing a second
+        membership query that could drift from this one; it is never the shelf's
+        answer, and no listing endpoint passes it.
+
+        ``library=None`` means "no membership filter" (both shelf and project
+        assets). That differs from :meth:`_list_stmt`, whose ``"in"`` default is
+        deliberate — the shelf's question has a right answer, an id lookup's
+        does not.
+
+        Returns NATIVE rows (int ids), like every other read here.
+        """
+        stmt = self._accessible_stmt(
+            user_id,
+            asset_ids=asset_ids,
+            q=q,
+            asset_type=asset_type,
+            library=library,
+            limit=limit,
+            include_deleted=include_deleted,
+        )
+        async with read_scope() as session:
+            objs = (await session.execute(stmt)).scalars().all()
+        return [_row_dict(o) for o in objs]
 
     def _list_stmt(
         self,

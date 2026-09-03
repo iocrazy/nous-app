@@ -54,6 +54,7 @@ from app.services.assets.bundle import build_bundle
 from app.services.assets.legacy_refs import LEGACY_KINDS, legacy_table_for_kind
 from app.services.assets.slot_generation import (
     SlotNotGeneratable,
+    files_by_slot,
     reference_order,
     slot_prompt,
 )
@@ -1400,21 +1401,12 @@ class AssetsService:
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Group the asset's files by slot, honouring the loadout as a filter.
 
-        A loadout-scoped file belongs to ONE outfit. The prompt already treats
-        the loadout as a filter (``_linked_asset_rows``); letting a file pinned
-        to a DIFFERENT loadout become a reference would make one plan describe
-        two outfits — a costume in the picture that the prompt deliberately
-        left out. With no loadout requested, only the unpinned files apply.
+        Thin alias over ``slot_generation.files_by_slot``, which owns the rule
+        (a chat asset reference is the third caller and must pick the same
+        primary image this service does). Kept as a method because the callers
+        inside this class read better for it.
         """
-        out: Dict[str, List[Dict[str, Any]]] = {}
-        for f in files:
-            pinned = f.get("loadout_id")
-            if pinned is not None and (
-                loadout is None or int(pinned) != int(loadout["id"])
-            ):
-                continue
-            out.setdefault(f["slot"], []).append(f)
-        return out
+        return files_by_slot(files, loadout)
 
     async def _slot_plan(
         self,
