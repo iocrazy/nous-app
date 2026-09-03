@@ -10,6 +10,11 @@
 //
 // Every failure is TYPED and returned. A pick that quietly adds nothing is the
 // silent no-op this repo keeps re-learning — the caller renders `failed`.
+//
+// The ceiling is enforced HERE and counted in REFS, not picks: one asset can
+// resolve to several refs, so a caller that slices its own pick list cannot
+// bound what actually lands. `maxRefs` is checked against the live node before
+// every patch, and the tail it refuses is reported as `clamped`.
 
 import { fetchAssetDetail } from '../../../services/assetsService';
 import { primarySlotFileIds } from '../smart/assetFiles';
@@ -20,10 +25,21 @@ import type { LibraryItem } from './librarySearch';
 
 export type AddReferenceFailure = 'mint_failed' | 'no_image_file' | 'not_an_image';
 
+export interface AddReferencesOptions {
+  /**
+   * Ceiling on the node's TOTAL `manual_refs`, checked against the live node
+   * before each patch. Omitted means no ceiling — which is what the three-arg
+   * callers get.
+   */
+  maxRefs?: number;
+}
+
 export interface AddReferencesResult {
   added: number;
   /** Already on the node, deduped by url. */
   skipped: number;
+  /** Resolved fine, but did not fit under `maxRefs`. Never silent. */
+  clamped: number;
   /** Typed, never silent — one entry per item we could not turn into a ref. */
   failed: Array<{ item: LibraryItem; reason: AddReferenceFailure }>;
 }
@@ -77,8 +93,9 @@ export async function addReferences(
   nodeId: string,
   items: readonly LibraryItem[],
   scopeId: string,
+  opts?: AddReferencesOptions,
 ): Promise<AddReferencesResult> {
-  const out: AddReferencesResult = { added: 0, skipped: 0, failed: [] };
+  const out: AddReferencesResult = { added: 0, skipped: 0, clamped: 0, failed: [] };
   for (const item of items) {
     let resolved: GeneratedImageRef[];
     try {
@@ -101,9 +118,21 @@ export async function addReferences(
     const have = new Set(current.map((r) => r.url));
     const fresh = resolved.filter((r) => !have.has(r.url));
     out.skipped += resolved.length - fresh.length;
-    if (fresh.length === 0) continue;
-    store.patchNode(nodeId, { data: { manual_refs: [...current, ...fresh] } });
-    out.added += fresh.length;
+    // Room is measured against the LIVE node and recomputed per item, and it
+    // is measured AFTER the dedupe — so an already-referenced pick occupies no
+    // slot and cannot push a legitimate one out.
+    let take = fresh;
+    if (typeof opts?.maxRefs === 'number') {
+      const room = Math.max(0, opts.maxRefs - current.length);
+      take = fresh.slice(0, room);
+      out.clamped += fresh.length - take.length;
+    }
+    // `continue`, not `break`: a later item may still be a duplicate or a
+    // failure, and the caller's message is only honest if every item is
+    // accounted for.
+    if (take.length === 0) continue;
+    store.patchNode(nodeId, { data: { manual_refs: [...current, ...take] } });
+    out.added += take.length;
   }
   return out;
 }

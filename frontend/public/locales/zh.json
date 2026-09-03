@@ -3242,8 +3242,8 @@
       "someFailed_other": "有 {{count}} 项无法添加为参考图",
       "alreadyReferenced_one": "有 {{count}} 项已在该节点上",
       "alreadyReferenced_other": "有 {{count}} 项已在该节点上",
-      "quotaClamped_one": "有 {{count}} 项未添加 · 参考图额度已满",
-      "quotaClamped_other": "有 {{count}} 项未添加 · 参考图额度已满"
+      "quotaClamped_one": "有 {{count}} 张参考图未添加 · 额度已满",
+      "quotaClamped_other": "有 {{count}} 张参考图未添加 · 额度已满"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",

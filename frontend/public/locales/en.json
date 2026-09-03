@@ -3242,8 +3242,8 @@
       "someFailed_other": "{{count}} could not be added as references",
       "alreadyReferenced_one": "{{count}} already on this node",
       "alreadyReferenced_other": "{{count}} already on this node",
-      "quotaClamped_one": "{{count}} not added · reference quota reached",
-      "quotaClamped_other": "{{count}} not added · reference quota reached"
+      "quotaClamped_one": "{{count}} reference not added · quota reached",
+      "quotaClamped_other": "{{count}} references not added · quota reached"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",

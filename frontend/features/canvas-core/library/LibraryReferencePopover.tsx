@@ -97,14 +97,13 @@ export function LibraryReferencePopover({
       if (busy) return;
       setBusy(true);
       setNotice(null);
-      // Trim the pick to what the model will actually accept. Sending more
-      // than `max_refs` does not add them — the backend drops the tail and
-      // says so in `dropped_refs` after the run, which is far too late for
-      // anyone to act on. Refusing here, out loud, is the whole point.
-      const budget = Math.max(0, max - used);
-      const take = items.slice(0, budget);
-      const cut = items.length - take.length;
-      void addReferences(nodeId, take, scopeId)
+      // The ceiling is handed DOWN rather than applied here. Slicing the pick
+      // list would bound picks, not refs, and one asset resolves to one ref
+      // per primary-slot file — so a single asset could carry the node past
+      // `max_refs` with nothing refused and nothing said. Past the ceiling the
+      // backend drops the tail and reports it as `dropped_refs` after the run,
+      // which is far too late for anyone to act on.
+      void addReferences(nodeId, items, scopeId, { maxRefs: max })
         .then((r) => {
           if (r.failed.length > 0) {
             // A pick that adds nothing must SAY so. A silent no-op is not
@@ -128,11 +127,11 @@ export function LibraryReferencePopover({
             );
             return;
           }
-          if (cut > 0) {
+          if (r.clamped > 0) {
             setNotice(
               t('canvas.library.quotaClamped', {
-                count: cut,
-                defaultValue: '{{count}} not added · reference quota reached',
+                count: r.clamped,
+                defaultValue: '{{count}} references not added · quota reached',
               }),
             );
             return;
@@ -142,7 +141,7 @@ export function LibraryReferencePopover({
         })
         .finally(() => setBusy(false));
     },
-    [atLimit, busy, max, used, nodeId, scopeId, t, onClose],
+    [atLimit, busy, max, nodeId, scopeId, t, onClose],
   );
 
   return createPortal(

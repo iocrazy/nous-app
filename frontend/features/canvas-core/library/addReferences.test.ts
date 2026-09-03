@@ -197,7 +197,7 @@ describe('addReferences', () => {
   it('appends every resolved ref to the node, in pick order', async () => {
     seed();
     const result = await addReferences('p1', [GENERATED, ASSET], SCOPE);
-    expect(result).toEqual({ added: 3, skipped: 0, failed: [] });
+    expect(result).toEqual({ added: 3, skipped: 0, clamped: 0, failed: [] });
     expect(refs().map((r) => r.url)).toEqual([
       '/api/v1/generated-media/800000000000000001/file',
       '/api/v1/resources/600000000000000001/cover',
@@ -208,7 +208,7 @@ describe('addReferences', () => {
   it('a url already on the node is skipped, not duplicated', async () => {
     seed([{ url: '/api/v1/generated-media/800000000000000001/file', kind: 'image' }]);
     const result = await addReferences('p1', [GENERATED], SCOPE);
-    expect(result).toEqual({ added: 0, skipped: 1, failed: [] });
+    expect(result).toEqual({ added: 0, skipped: 1, clamped: 0, failed: [] });
     expect(refs()).toHaveLength(1);
   });
 
@@ -219,6 +219,37 @@ describe('addReferences', () => {
     expect(result.added).toBe(1);
     expect(result.failed).toEqual([{ item: ASSET, reason: 'mint_failed' }]);
     expect(refs()).toHaveLength(1);
+  });
+
+  it('the ceiling counts REFS, not picks — one asset can exceed it on its own', async () => {
+    seed();
+    // The asset resolves to two refs. An item-level clamp would see one pick,
+    // let it through whole, and land both — which is the whole reason the
+    // ceiling lives in here rather than in the caller's slice.
+    const result = await addReferences('p1', [ASSET], SCOPE, { maxRefs: 1 });
+    expect(result).toEqual({ added: 1, skipped: 0, clamped: 1, failed: [] });
+    expect(refs().map((r) => r.url)).toEqual([
+      '/api/v1/resources/600000000000000001/cover',
+    ]);
+  });
+
+  it('a duplicate occupies no room, so a later legitimate pick still fits', async () => {
+    // One slot free of two. The first pick is already on the node, so it must
+    // not spend that slot — otherwise the second is refused and the user is
+    // told only about the duplicate.
+    seed([{ url: '/api/v1/generated-media/800000000000000001/file', kind: 'image' }]);
+    const result = await addReferences('p1', [GENERATED, UPLOAD], SCOPE, { maxRefs: 2 });
+    expect(result).toEqual({ added: 1, skipped: 1, clamped: 0, failed: [] });
+    expect(refs().map((r) => r.url)).toEqual([
+      '/api/v1/generated-media/800000000000000001/file',
+      '/api/v1/generated-media/770000000000000001/file',
+    ]);
+  });
+
+  it('no ceiling is passed by the three-arg callers, and none is applied', async () => {
+    seed();
+    const result = await addReferences('p1', [ASSET], SCOPE);
+    expect(result).toEqual({ added: 2, skipped: 0, clamped: 0, failed: [] });
   });
 
   it('reads the LIVE node after each await, so a concurrent edit is not clobbered', async () => {

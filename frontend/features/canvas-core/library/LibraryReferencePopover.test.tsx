@@ -26,6 +26,7 @@ vi.mock('react-i18next', () => ({
 const importResourceAsCanvasMedia = vi.fn();
 const searchResources = vi.fn();
 const searchAssets = vi.fn();
+const fetchAssetDetail = vi.fn();
 const fetchGenerated = vi.fn();
 const listGenerationCapabilities = vi.fn();
 
@@ -39,6 +40,7 @@ vi.mock('../smart/mediaImport', async (importOriginal) => ({
 vi.mock('../../../services/assetsService', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   searchAssets: (...a: unknown[]) => searchAssets(...a),
+  fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
 }));
 vi.mock('../../../services/generatedService', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -69,11 +71,67 @@ const UPLOAD_ROW = {
   summary_status: null,
 };
 
-const SECOND_UPLOAD_ROW = {
-  ...UPLOAD_ROW,
-  id: '655000000000000002',
-  name: 'harbour-dawn.png',
-  thumbnail_url: '/api/v1/resources/655000000000000002/cover',
+/** `GET /assets?q=` row — the shape `assetToLibraryItem` reads. */
+const ASSET_ROW = {
+  id: '727145299382534300',
+  name: 'Cole Bannon',
+  asset_type: 'character' as const,
+  cover_file_id: '600000000000000001',
+  readiness: { state: 'ready' as const, missing: [] },
+};
+
+/** `GET /assets/{id}` — TWO files in the primary slot, so this one pick is
+ *  two refs. `sheet` is a character's primary slot on both sides of the
+ *  mirror; see the note in addReferences.test.ts. */
+const ASSET_DETAIL = {
+  ...ASSET_ROW,
+  scope_id: SCOPE,
+  subtype: null,
+  role_tag: 'lead',
+  description: '',
+  attrs: {},
+  prompt_positive: null,
+  prompt_negative: null,
+  prompt_positive_zh: null,
+  prompt_negative_zh: null,
+  platform_params: {},
+  source: 'manual',
+  duplicated_from: null,
+  is_system_preset: false,
+  in_library: true,
+  tags: {},
+  sort_order: 0,
+  created_by: null,
+  created_at: '2026-09-01T00:00:00Z',
+  updated_at: '2026-09-01T00:00:00Z',
+  file_counts_by_slot: { sheet: 2 },
+  project_ids: [],
+  loadout_count: 0,
+  files: [
+    {
+      asset_id: ASSET_ROW.id,
+      resource_id: '600000000000000001',
+      slot: 'sheet',
+      loadout_id: null,
+      sort_order: 0,
+      note: null,
+      attached_by: null,
+      attached_at: '2026-09-01T00:00:00Z',
+    },
+    {
+      asset_id: ASSET_ROW.id,
+      resource_id: '600000000000000002',
+      slot: 'sheet',
+      loadout_id: null,
+      sort_order: 1,
+      note: null,
+      attached_by: null,
+      attached_at: '2026-09-01T00:00:00Z',
+    },
+  ],
+  links: [],
+  linked_by: [],
+  loadouts: [],
 };
 
 /** The node's `manual_refs`, straight from the store. */
@@ -163,6 +221,7 @@ beforeEach(() => {
     next_cursor: null,
   });
   searchAssets.mockReset().mockResolvedValue([]);
+  fetchAssetDetail.mockReset().mockResolvedValue(ASSET_DETAIL);
   fetchGenerated.mockReset().mockResolvedValue({ items: [], next_cursor: null });
   listGenerationCapabilities.mockReset().mockResolvedValue({
     'doubao-seedream': {
@@ -281,31 +340,30 @@ describe('LibraryReferencePopover', () => {
     expect(note).not.toContain('not added');
   });
 
-  it('a multi-pick is clamped to the remaining budget and says what it cut', async () => {
-    searchResources.mockResolvedValue({
-      results: [UPLOAD_ROW, SECOND_UPLOAD_ROW],
-      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
-      next_cursor: null,
-    });
+  it('ONE asset is several refs, and the ceiling bounds refs rather than picks', async () => {
+    searchAssets.mockResolvedValue([ASSET_ROW]);
     seed([
       { url: '/api/v1/generated-media/1/file', kind: 'image' },
       { url: '/api/v1/generated-media/2/file', kind: 'image' },
     ]);
     renderPopover();
-    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(2));
-    const cells = screen.getAllByTestId('library-cell');
-    fireEvent.click(cells[0]);
-    fireEvent.click(cells[1], { metaKey: true });
+    fireEvent.click(screen.getByTestId('library-segment-assets'));
+    await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(1));
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
     fireEvent.click(screen.getByTestId('library-primary'));
-    // 2 used of 3, so exactly one of the two picks fits. The other must be
-    // REFUSED here — past the ceiling the backend drops it and only reports
-    // `dropped_refs` after the run.
+    // 2 used of 3 and this single pick carries two files. Counting PICKS would
+    // see one, wave it through whole, and land both — 4 refs against a ceiling
+    // of 3, with nothing refused and nothing said.
     await waitFor(() =>
       expect(screen.getByTestId('library-note').textContent).toContain(
-        '1 not added',
+        '1 references not added',
       ),
     );
-    expect(refs()).toHaveLength(3);
+    expect(refs().map((r) => r.url)).toEqual([
+      '/api/v1/generated-media/1/file',
+      '/api/v1/generated-media/2/file',
+      '/api/v1/resources/600000000000000001/cover',
+    ]);
     expect(screen.getByTestId('reference-picker')).toBeInTheDocument();
   });
 
