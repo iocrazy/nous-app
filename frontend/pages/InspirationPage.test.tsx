@@ -301,6 +301,88 @@ describe('InspirationPage', () => {
     expect(screen.getByRole('dialog', { name: 'Edit note' })).toBeTruthy();
   });
 
+  it('scrolls its own body instead of pushing Save out of the viewport', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    // jsdom has no layout, so this is a structural pin rather than a real
+    // overflow measurement: the modal sits in a `fixed inset-0` centering
+    // container that does NOT scroll, and attachments (video is max-h-64)
+    // now live inside it — without these two classes a note with a couple of
+    // videos puts Save and the lower attachments' remove buttons off-screen
+    // with no way to reach them by mouse.
+    expect(modal.className).toContain('max-h-[85vh]');
+    expect(modal.className).toContain('overflow-y-auto');
+  });
+
+  it('Escape closes the edit modal without saving', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    fireEvent.change(within(modal).getByRole('textbox'), { target: { value: 'discarded' } });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(updateNote).not.toHaveBeenCalled();
+  });
+
+  it('Escape with the image lightbox open closes only the lightbox', async () => {
+    const withImage = {
+      ...NOTE,
+      attachments: [{ id: 'a1', mime: 'image/png', size_bytes: 10, original_name: 'pic.png' }],
+    };
+    listNotes.mockResolvedValue([withImage]);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+
+    // Both the modal and the lightbox listen for Escape on window, and the
+    // lightbox (z-100) stacks above the modal (z-50). One press must not
+    // collapse both layers.
+    fireEvent.click(within(modal).getByLabelText('View pic.png'));
+    expect(await screen.findByRole('dialog', { name: 'pic.png' })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'pic.png' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Edit note' })).toBeTruthy();
+
+    // The next press, with nothing above it, does close the modal.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('moves focus into the modal on open and returns it on close', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const trigger = screen.getByLabelText('Note actions');
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText('Edit'));
+
+    const modal = await screen.findByRole('dialog', { name: 'Edit note' });
+    // aria-modal="true" tells assistive tech the rest of the page is inert.
+    // Leaving focus behind on the page makes that a false claim.
+    expect(modal.contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(within(modal).getByLabelText('Cancel edit'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('pulls Tab back inside the modal instead of letting it reach the page behind', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+
+    // Park focus on something behind the modal, then Tab.
+    const outside = screen.getByLabelText('Note actions');
+    outside.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+
+    expect(modal.contains(document.activeElement)).toBe(true);
+  });
+
   it('clicking the same category chip twice clears the filter', async () => {
     getHotspots.mockResolvedValue([
       { id: '1', title: 'Food topic', tags: [], category: 'food', heat: 90 },

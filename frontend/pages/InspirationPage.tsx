@@ -103,6 +103,8 @@ export const InspirationPage: React.FC = () => {
   // given note is the only response allowed to apply/revert its content_md.
   const toggleSeq = useRef<Record<string, number>>({});
   const ratingSeq = useRef<Record<string, number>>({});
+  // The edit modal's own element — focus target and Tab-trap boundary.
+  const editDialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(queryInput.trim()), 300);
@@ -297,6 +299,53 @@ export const InspirationPage: React.FC = () => {
   };
 
   const startEdit = (note: InspirationNote) => setEditing(note);
+
+  /**
+   * Modal keyboard + focus behaviour. `aria-modal="true"` tells assistive tech
+   * that everything outside the dialog is inert right now — leaving focus on
+   * the page behind would make that a false claim, so this moves focus in,
+   * keeps Tab inside, hands focus back on close, and closes on Escape.
+   */
+  useEffect(() => {
+    if (!editing) return;
+    const dialog = editDialogRef.current;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    dialog?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // The attachment lightbox stacks above this modal (z-100 vs z-50) and
+        // listens for Escape on window too, so a single press reaches BOTH
+        // handlers. Whoever is on top wins: while the lightbox is mounted we
+        // do nothing and let it close itself.
+        if (document.querySelector('[data-lightbox="attachment"]')) return;
+        setEditing(null);
+        return;
+      }
+      if (e.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]',
+        ),
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const outside = !dialog.contains(active);
+      if (e.shiftKey ? outside || active === first : outside || active === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      // Only if it survived the modal — the "Edit" menu item that opened this
+      // usually did not.
+      if (restoreTo && document.contains(restoreTo)) restoreTo.focus();
+    };
+  }, [editing]);
 
   /**
    * The edit modal's Composer calls this LAST, after it has applied its own
@@ -531,11 +580,19 @@ export const InspirationPage: React.FC = () => {
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          {/* max-h + overflow are load-bearing now that attachments render
+              INSIDE the modal: the wrapper above is `fixed inset-0` and does
+              not scroll, so without these a note with a couple of videos
+              (AttachmentView renders them at max-h-64) pushes Save and the
+              lower remove buttons out of the viewport, unreachable by mouse.
+              tabIndex={-1} makes the dialog itself a focus target on open. */}
           <div
+            ref={editDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="inspiration-edit-title"
-            className="w-full max-w-xl rounded-xl bg-island p-4"
+            tabIndex={-1}
+            className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-xl bg-island p-4"
           >
             <div className="mb-2 flex items-center justify-between">
               <h4 id="inspiration-edit-title" className="text-sm font-semibold text-content">

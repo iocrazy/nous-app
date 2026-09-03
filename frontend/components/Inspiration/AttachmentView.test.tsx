@@ -115,4 +115,13 @@ describe('AttachmentView', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+  it('marks the lightbox so a host modal can yield Escape to it', () => {
+    render(<AttachmentView attachments={[att('1', 'image/png', 'pic.png')]} />);
+    fireEvent.click(screen.getByRole('img').closest('button')!);
+    // Cross-component contract: the lightbox stacks ABOVE any modal that
+    // embeds this view, and both listen for Escape on window. The host reads
+    // this attribute to decide the topmost layer wins. Renaming/removing it
+    // silently gives one Escape press two effects.
+    expect(document.querySelector('[data-lightbox="attachment"]')).not.toBeNull();
+  });
 });

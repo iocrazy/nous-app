@@ -58,6 +58,11 @@ const ImageLightbox: React.FC<{
 
   return (
     <div
+      // Read by any modal that embeds AttachmentView (the note editor does):
+      // this layer stacks above it and both listen for Escape on window, so
+      // the host yields the key while this attribute is in the DOM. See
+      // InspirationPage's edit-modal key handler.
+      data-lightbox="attachment"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"

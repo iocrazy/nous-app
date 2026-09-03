@@ -103,6 +103,10 @@ export const Composer: React.FC<Props> = (props) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [text, setText] = useState(prefill?.content ?? '');
+  // ⚠️ Never cleared on a successful create — the quick-capture parent relies
+  // on remounting this component (`key={prefillNonce}`) to reset it. If you
+  // remove that key, saving two notes in a row will carry the first note's
+  // hotspot reference onto the second. Clear it here before doing that.
   const [ref, setRef] = useState(prefill?.refHotspot ?? null);
   // Seeded once from `existingAttachments`, same initial-value semantics as
   // `prefill` — the modal remounts (keyed by note id) for each note it edits.

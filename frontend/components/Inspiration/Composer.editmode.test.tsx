@@ -120,7 +120,7 @@ describe('Composer edit mode', () => {
   });
 
   it('offers no rating stars — the card owns the rating', () => {
-    render(
+    const { container } = render(
       <Composer
         tagSuggestions={[]}
         noteId="7"
@@ -130,7 +130,11 @@ describe('Composer edit mode', () => {
     );
     // Two writers for one value would need a "who wins" story; NoteCard's
     // stars already have one (seq guard + 5 tests), so the modal has none.
-    expect(screen.queryByLabelText('New note rating')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'New note rating' })).toBeNull();
+    // Count the stars themselves too: asserting only on the labelled wrapper
+    // would stay green if someone rendered RatingStars WITHOUT that wrapper,
+    // which is the same bug with the evidence removed.
+    expect(container.querySelectorAll('.lucide-star')).toHaveLength(0);
   });
 
   it('shows the reference read-only: the PATCH body has no ref_hotspot field', () => {
