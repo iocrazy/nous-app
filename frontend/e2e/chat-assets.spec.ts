@@ -55,27 +55,61 @@ const SHEET_URL = `/team/${SCOPE_ID}/resources/assets/item/${READY.id}`;
 const AGENT_SLUG = 'analyze';
 const SESSION_ID = 'sess-e2e-assets';
 
-/** What the panel reloads after a turn. The PERSISTED attachment shape, which
- *  the store's whitelist has already narrowed — a bubble built from the
- *  OUTGOING payload would pass here and render blank in production. */
-function persistedTurn(text: string) {
-  return {
-    id: 'msg-1',
-    session_id: SESSION_ID,
-    role: 'user',
-    content: text,
-    attachments: [
-      {
-        kind: 'asset_ref',
-        asset_id: READY.id,
-        loadout_id: null,
-        name: READY.name,
-        mime: '',
-      },
-    ],
-    created_at: '2026-09-03T00:00:00+00:00',
-  };
+/**
+ * What the panel reloads after a turn — BOTH rows, exactly as the backend
+ * persists them.
+ *
+ * The assistant row is not decoration. `handleSend` refetches the whole
+ * history when the stream ends and REPLACES the streamed bubble with what the
+ * server says; a history holding only the user turn therefore erases the reply
+ * the user just watched arrive. That made the "no banner" case fail whenever
+ * the reload beat the assertion, and it was failing on the half of the test
+ * that only sets the scene — so the negative control was proving nothing.
+ *
+ * Shapes are `MessageOut` (`schemas/ai_library_chat.py:78-101`): ids are
+ * STRINGS, and `attachments` is None for assistant rows — the schema comment
+ * says so in as many words, so a fixture that gave the assistant an empty array
+ * would be a shape the backend cannot produce.
+ */
+function persistedTurns(text: string, reply: string) {
+  return [
+    {
+      id: '727145299382500001',
+      session_id: SESSION_ID,
+      role: 'user',
+      content: text,
+      // The persisted attachment shape, already narrowed by the store's
+      // `_DISPLAY_ATTACHMENT_KEYS` whitelist — a bubble built from the
+      // OUTGOING payload would pass here and render blank in production.
+      attachments: [
+        {
+          kind: 'asset_ref',
+          asset_id: READY.id,
+          loadout_id: null,
+          name: READY.name,
+          mime: '',
+        },
+      ],
+      prompt_tokens: null,
+      completion_tokens: null,
+      created_at: '2026-09-03T00:00:00+00:00',
+    },
+    {
+      id: '727145299382500002',
+      session_id: SESSION_ID,
+      role: 'assistant',
+      content: reply,
+      attachments: null,
+      prompt_tokens: 120,
+      completion_tokens: 3,
+      created_at: '2026-09-03T00:00:01+00:00',
+    },
+  ];
 }
+
+/** The one line the stubbed model "says". Asserted after the history reload,
+ *  so it has to survive that reload. */
+const REPLY = 'Noted.';
 
 interface ChatState {
   /** Every `/chat-stream` POST body, in order. */
@@ -202,7 +236,7 @@ async function stubAll(page: Page): Promise<ChatState> {
   await page.route(`**/api/v1/ai-library/sessions/${SESSION_ID}/chat-stream`, (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     state.sent.push(body);
-    state.messages = [persistedTurn(String(body.content ?? ''))];
+    state.messages = persistedTurns(String(body.content ?? ''), REPLY);
     const done = JSON.stringify(
       state.failures.length > 0 ? { attachment_failures: state.failures } : {},
     );
@@ -210,7 +244,7 @@ async function stubAll(page: Page): Promise<ChatState> {
       status: 200,
       contentType: 'text/event-stream',
       body:
-        'event: delta\ndata: {"text":"Noted."}\n\n' +
+        `event: delta\ndata: ${JSON.stringify({ text: REPLY })}\n\n` +
         `event: done\ndata: ${done}\n\n`,
     });
   });
@@ -315,14 +349,19 @@ test('@ → Assets tab lists what the membership-wide search returned', async ({
   await expect(options.first()).toBeVisible();
   await expect(options.first()).toContainText(READY.name);
 
-  // No `scope_id`: a chat window outlives any one workspace route, so the
-  // server authorizes by membership instead (ruling B/G). A picker that sent
-  // one would be answering an authorization question it does not own.
-  await expect.poll(() => state.searches.length).toBeGreaterThan(0);
-  const last = state.searches[state.searches.length - 1];
-  expect(last).toContain('q=sang');
-  expect(last).toContain('library=all');
-  expect(last).not.toContain('scope_id');
+  // Poll for the request carrying the SETTLED query rather than reading
+  // whichever one is last at this instant: the box debounces, so "the most
+  // recent request" and "the request for what the user typed" are not the same
+  // thing until it has caught up.
+  await expect
+    .poll(() => state.searches.find((line) => line.includes('q=sang')) ?? null)
+    .not.toBeNull();
+  const search = state.searches.find((line) => line.includes('q=sang')) as string;
+  expect(search).toContain('library=all');
+  // No `scope_id` on ANY of them: a chat window outlives any one workspace
+  // route, so the server authorizes by membership instead (ruling B/G). A
+  // picker that sent one would be answering a question it does not own.
+  for (const line of state.searches) expect(line).not.toContain('scope_id');
 });
 
 test('picking from the Assets tab stages the asset and deletes the @query', async ({ page }) => {
@@ -359,8 +398,8 @@ test('the type chips narrow the Assets tab to one kind', async ({ page }) => {
   await page.locator('[data-testid="mention-type-chip"][data-type="location"]').click();
 
   await expect
-    .poll(() => state.searches[state.searches.length - 1])
-    .toContain('type=location');
+    .poll(() => state.searches.some((line) => line.includes('type=location')))
+    .toBe(true);
   await expect(page.getByTestId('mention-asset-option')).toHaveCount(1);
   await expect(page.getByTestId('mention-asset-option').first()).toContainText(LOCATION.name);
 });
@@ -379,6 +418,7 @@ test('a typed attachment failure names the reason, not just a count', async ({ p
   await panel.locator('[contenteditable="true"]').fill('keep her consistent');
   await panel.getByTitle('Send message').click();
 
+  await expect(panel.getByText('123 tokens')).toBeVisible();
   const reason = panel.getByTestId('attachment-failure-reason');
   await expect(reason).toBeVisible();
   await expect(reason).toHaveAttribute('data-reason', 'asset_no_primary_image');
@@ -400,6 +440,11 @@ test('a clean turn shows no failure banner at all', async ({ page }) => {
   await panel.locator('[contenteditable="true"]').fill('keep her consistent');
   await panel.getByTitle('Send message').click();
 
-  await expect(panel.getByText('Noted.')).toBeVisible();
+  // Wait for the HISTORY RELOAD, not just for the streamed delta: `handleSend`
+  // refetches when the stream ends and replaces the streamed bubble with the
+  // server's rows, and only the persisted assistant row carries a token count.
+  // Asserting before that lands would let a reload that erased the reply pass.
+  await expect(panel.getByText('123 tokens')).toBeVisible();
+  await expect(panel.getByText(REPLY)).toBeVisible();
   await expect(panel.getByTestId('attachment-failure-reason')).toHaveCount(0);
 });

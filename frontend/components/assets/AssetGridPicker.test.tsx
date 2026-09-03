@@ -27,6 +27,7 @@ vi.mock('react-i18next', () => ({
 import {
   AssetGridPicker,
   type AssetGridPickerHandle,
+  type AssetGridPickerProps,
   type AssetGridQuery,
   type AssetGridRow,
 } from './AssetGridPicker';
@@ -76,7 +77,7 @@ function spyFetch(rows: (params: AssetGridQuery) => AssetGridRow[]) {
 
 function renderGrid(
   fetchImpl: Fetch,
-  props: Partial<React.ComponentProps<typeof AssetGridPicker>> = {},
+  props: Partial<AssetGridPickerProps<AssetGridRow>> = {},
 ) {
   const ref = React.createRef<AssetGridPickerHandle>();
   const onPick = vi.fn();
@@ -277,7 +278,7 @@ describe('AssetGridPicker — superseded requests', () => {
     // query's — the classic last-to-arrive-wins race, which looks to the user
     // like the search box lagging one character behind.
     let releaseFirst: (rows: AssetGridRow[]) => void = () => {};
-    const fetchImpl = vi.fn((params: AssetGridQuery) => {
+    const fetchImpl = vi.fn((params: AssetGridQuery, _signal: AbortSignal) => {
       if (params.q === undefined) {
         return new Promise<AssetGridRow[]>((resolve) => {
           releaseFirst = resolve;
@@ -287,6 +288,7 @@ describe('AssetGridPicker — superseded requests', () => {
     });
     const { view } = renderGrid(fetchImpl);
     await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    const firstSignal = fetchImpl.mock.calls[0][1];
 
     view.rerender(
       <AssetGridPicker
@@ -299,6 +301,10 @@ describe('AssetGridPicker — superseded requests', () => {
     );
     const options = await screen.findAllByTestId('mention-asset-option');
     expect(options[0]).toHaveTextContent('Back Alley');
+    // The first request really was cancelled before its promise settled —
+    // otherwise this case would be proving nothing but that promises resolve
+    // in order.
+    expect(firstSignal.aborted).toBe(true);
 
     releaseFirst([AVA]);
     await new Promise((r) => setTimeout(r, 0));
@@ -318,6 +324,159 @@ describe('AssetGridPicker — superseded requests', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByTestId('mention-assets-error')).toBeNull();
+  });
+});
+
+describe('AssetGridPicker — a hidden tab', () => {
+  it('asks nothing and draws nothing while inactive', async () => {
+    const fetchImpl = spyFetch(() => [AVA]);
+    renderGrid(fetchImpl, { active: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('mention-assets-body')).toBeNull();
+    expect(screen.queryByTestId('mention-type-chip')).toBeNull();
+  });
+
+  it('aborts an in-flight search on the way out', async () => {
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn((_p: AssetGridQuery, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<AssetGridRow[]>(() => {});
+    });
+    const { view } = renderGrid(fetchImpl);
+    await waitFor(() => expect(signals).toHaveLength(1));
+
+    view.rerender(
+      <AssetGridPicker
+        active={false}
+        query=""
+        labels={LABELS}
+        fetch={fetchImpl}
+        onPick={vi.fn()}
+        debounceMs={0}
+      />,
+    );
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it('keeps the type chip the user picked across a trip away and back', async () => {
+    // The whole reason this component is mounted-but-inactive rather than
+    // unmounted. Unmounting resets the chip and the search box, and a user who
+    // narrowed to Locations, glanced at the other tab and came back would find
+    // their filter silently undone.
+    const fetchImpl = spyFetch(() => [AVA]);
+    const { view } = renderGrid(fetchImpl, { libraryToggle: true });
+    await screen.findAllByTestId('mention-asset-option');
+
+    fireEvent.click(
+      screen
+        .getAllByTestId('mention-type-chip')
+        .find((el) => el.getAttribute('data-type') === 'location')!,
+    );
+    await waitFor(() =>
+      expect(fetchImpl).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'location' }),
+        expect.anything(),
+      ),
+    );
+
+    const away = (
+      <AssetGridPicker
+        active={false}
+        query=""
+        labels={LABELS}
+        fetch={fetchImpl}
+        onPick={vi.fn()}
+        debounceMs={0}
+        libraryToggle
+      />
+    );
+    view.rerender(away);
+    view.rerender(
+      <AssetGridPicker
+        active
+        query=""
+        labels={LABELS}
+        fetch={fetchImpl}
+        onPick={vi.fn()}
+        debounceMs={0}
+        libraryToggle
+      />,
+    );
+
+    await screen.findAllByTestId('mention-asset-option');
+    expect(
+      screen
+        .getAllByTestId('mention-type-chip')
+        .find((el) => el.getAttribute('data-type') === 'location')!
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(fetchImpl.mock.calls[fetchImpl.mock.calls.length - 1][0].type).toBe('location');
+  });
+});
+
+describe('AssetGridPicker — the debounce settling', () => {
+  it('never asks for a query the box has already moved past', async () => {
+    // Without this the grid fires once for the stale query the moment any
+    // other dependency changes (a tab opening, a chip pressed), and the user's
+    // actual query only lands on the follow-up. Two requests, one of them for
+    // something nobody asked about — and the endpoint costs four round trips.
+    const fetchImpl = spyFetch(() => [AVA]);
+    const { view } = renderGrid(fetchImpl, { active: false, debounceMs: 50 });
+
+    view.rerender(
+      <AssetGridPicker
+        active={false}
+        query="ava"
+        labels={LABELS}
+        fetch={fetchImpl}
+        onPick={vi.fn()}
+        debounceMs={50}
+      />,
+    );
+    // Activate BEFORE the debounce has caught up — the flip is what used to
+    // let the empty query through.
+    view.rerender(
+      <AssetGridPicker
+        active
+        query="ava"
+        labels={LABELS}
+        fetch={fetchImpl}
+        onPick={vi.fn()}
+        debounceMs={50}
+      />,
+    );
+
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    expect(fetchImpl.mock.calls.every((c) => c[0].q === 'ava')).toBe(true);
+  });
+});
+
+describe('AssetGridPicker — reporting the count', () => {
+  it('says nothing until an answer arrives', async () => {
+    // A host told "0" before anything was asked badges "Assets 0", which reads
+    // as "your library is empty" — a claim no request supports.
+    const onCountChange = vi.fn();
+    let release: (rows: AssetGridRow[]) => void = () => {};
+    renderGrid(
+      () =>
+        new Promise<AssetGridRow[]>((resolve) => {
+          release = resolve;
+        }),
+      { onCountChange },
+    );
+    await screen.findByTestId('mention-assets-loading');
+    expect(onCountChange).not.toHaveBeenCalled();
+
+    release([AVA, ALLEY]);
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(2));
+  });
+
+  it('reports zero for an answer that really is empty', async () => {
+    const onCountChange = vi.fn();
+    renderGrid(async () => [], { onCountChange });
+    await screen.findByTestId('mention-assets-empty');
+    expect(onCountChange).toHaveBeenCalledWith(0);
   });
 });
 

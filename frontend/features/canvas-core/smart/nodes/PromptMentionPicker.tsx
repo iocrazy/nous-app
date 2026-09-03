@@ -63,9 +63,6 @@
  * The strings stay HERE because `promptMentionI18n.test.ts` reads the used-key
  * list out of this source: a `t()` call that moved into the shared component
  * would look, to that guard, like a key nothing asks for any more.
- *
- * The Assets grid owns its own search box, so the `search` above is shared by
- * the other three groups only.
  */
 
 import {
@@ -490,23 +487,36 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
           ))}
         </div>
 
-        {tab === 'assets' && (
-          <AssetGridPicker
-            ref={assetsRef}
-            query={query}
-            labels={assetLabels}
-            fetch={fetchAssets}
-            fetchKey={scopeId}
-            onPick={(row) => onPickAsset(row as AssetSummary)}
-            onCountChange={setAssetCount}
-            searchBox
-            libraryToggle
-            unavailable={!scopeId}
-            theme="canvas"
-            limit={LIMIT}
-            debounceMs={DEBOUNCE_MS}
-          />
-        )}
+        {/* Rendered unconditionally and told whether it is the visible group.
+            Mounted-but-inactive keeps the type chip and the in-library toggle
+            alive across a trip to another group, while an inactive grid still
+            asks nothing and aborts anything in flight.
+
+            `searchValue` makes the box CONTROLLED, which is what keeps #2102's
+            one-term-per-palette promise: the same `search` feeds the Input
+            filter and the Uploads/Generated grid's box, so an internal box
+            here would have been a second search term for the same popover. */}
+        <AssetGridPicker
+          ref={assetsRef}
+          active={tab === 'assets'}
+          query={query}
+          searchValue={search}
+          onSearchChange={(value) => {
+            setSearch(value);
+            setRawActive(0);
+          }}
+          labels={assetLabels}
+          fetch={fetchAssets}
+          fetchKey={scopeId}
+          onPick={onPickAsset}
+          onCountChange={setAssetCount}
+          searchBox
+          libraryToggle
+          unavailable={!scopeId}
+          theme="canvas"
+          limit={LIMIT}
+          debounceMs={DEBOUNCE_MS}
+        />
 
         {(tab === 'uploads' || tab === 'generated') && (
           <LibraryGrid

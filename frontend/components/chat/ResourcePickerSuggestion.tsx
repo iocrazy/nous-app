@@ -43,10 +43,16 @@ function _relative(iso: string): string {
 export interface AssetsTabProps {
   active: boolean;
   onActivate: () => void;
-  /** Rows the grid is showing. Painted on the tab and in the counts row; the
-   *  grid reports it through `onCountChange` rather than the parent deriving
-   *  it, so the number is what came back and not what was asked for. */
-  count: number;
+  /**
+   * Rows the grid is showing, or `null` while nobody has asked yet.
+   *
+   * The null is load-bearing: an unvisited tab reading "Assets 0" states that
+   * the user's library is empty, which is a claim no request has been made to
+   * support. The grid reports this through `onCountChange` when an ANSWER
+   * arrives, rather than the parent deriving it — so the number is what came
+   * back, not what was asked for.
+   */
+  count: number | null;
   onCountChange: (count: number) => void;
   onSelect: (row: AssetGridRow) => void;
   fetch: (params: AssetGridQuery, signal: AbortSignal) => Promise<AssetGridRow[]>;
@@ -171,31 +177,33 @@ export function ResourcePickerSuggestion({
             }`}
           >
             <Shapes size={11} />
-            {t('chat.mentionPicker.assets', 'Assets')}{' '}
-            <span className="opacity-60">{assets.count}</span>
+            {t('chat.mentionPicker.assets', 'Assets')}
+            {assets.count !== null && (
+              <span className="opacity-60">{assets.count}</span>
+            )}
           </button>
         )}
       </div>
 
-      {assets ? (
-        // Mounted only while its tab is active, exactly like the canvas's:
-        // the grid searches on mount, and a hidden tab that kept polling would
+      {assets && (
+        // Rendered unconditionally and told whether its tab is showing:
+        // inactive means it draws nothing and asks nothing, while keeping the
+        // type chip the user picked. A hidden tab that kept polling would
         // spend four round trips per keystroke on a list nobody is reading.
-        assetsActive ? (
-          <AssetGridPicker
-            ref={assets.pickerRef}
-            query={query}
-            labels={ASSET_LABELS(t)}
-            fetch={assets.fetch}
-            onPick={assets.onSelect}
-            onCountChange={assets.onCountChange}
-            searchBox={false}
-            theme="chat"
-            limit={ASSET_SEARCH_LIMIT}
-            debounceMs={ASSET_DEBOUNCE_MS}
-          />
-        ) : null
-      ) : null}
+        <AssetGridPicker
+          ref={assets.pickerRef}
+          active={assetsActive}
+          query={query}
+          labels={ASSET_LABELS(t)}
+          fetch={assets.fetch}
+          onPick={assets.onSelect}
+          onCountChange={assets.onCountChange}
+          searchBox={false}
+          theme="chat"
+          limit={ASSET_SEARCH_LIMIT}
+          debounceMs={ASSET_DEBOUNCE_MS}
+        />
+      )}
 
       {assetsActive ? null : items.length === 0 ? (
         <div className="px-3 py-6 text-center text-[12px] text-ink-500">
@@ -266,10 +274,12 @@ export function ResourcePickerSuggestion({
       <div className="px-2 py-1 text-[10px] text-ink-500 border-t border-ink-800 flex justify-between">
         <span data-testid="resource-picker-count">
           {assetsActive
-            ? t('chat.mentionPicker.assetsCount', {
-              count: assets?.count ?? 0,
-              defaultValue: `${assets?.count ?? 0} assets`,
-            })
+            ? assets?.count !== null &&
+              assets !== undefined &&
+              t('chat.mentionPicker.assetsCount', {
+                count: assets.count as number,
+                defaultValue: `${assets.count} assets`,
+              })
             : items.length > 0 && `${items.length} of ${counts.all}`}
         </span>
         <span>{t('chat.mentionPicker.hintKbd')}</span>

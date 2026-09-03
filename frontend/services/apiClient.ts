@@ -17,6 +17,7 @@ import { getSupabaseAccessToken } from '../supabaseClient';
 import {
   getApiUrl,
   getFallbackApiUrl,
+  isCallerAbort,
   reportApiNetworkFailure,
 } from '../utils/apiConfig';
 
@@ -145,6 +146,10 @@ export async function apiFetch(
   try {
     response = await fetch(url, { ...rest, headers, body });
   } catch (err) {
+    // The caller cancelled. Rethrow untouched: counting it would spend the
+    // failover budget on our own decision, and the retry below would re-issue
+    // the very request the caller just asked us to stop.
+    if (isCallerAbort(err)) throw err;
     // Network-level failure (the cn direct link flapping — 2026-08-26).
     // Report it; if that flipped us onto the fallback base, retry THIS
     // request there immediately instead of failing the user's click.

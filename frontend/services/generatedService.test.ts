@@ -23,7 +23,13 @@ import {
   saveGenerationAsAsset,
 } from './generatedService';
 
-vi.mock('../utils/apiConfig', () => ({
+// Spread the real module rather than replacing it with two exports: a
+// whole-module factory silently drops every export it does not list, so the
+// day `apiEnvelope` started importing one more of them (`isCallerAbort`) the
+// helper became `undefined` and threw INSIDE the catch — turning "reports a
+// network failure" red for a reason that had nothing to do with failover.
+vi.mock('../utils/apiConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/apiConfig')>()),
   getApiUrl: () => 'https://api.test',
   reportApiNetworkFailure: vi.fn(),
 }));

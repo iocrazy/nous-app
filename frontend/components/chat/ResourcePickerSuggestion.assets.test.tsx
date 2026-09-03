@@ -100,6 +100,26 @@ describe('the Assets tab is opt-in', () => {
     expect(screen.getByTestId('resource-picker-tab-assets')).toHaveTextContent('7');
   });
 
+  it('badges no number at all before anybody has asked', () => {
+    // `count: null` is "nobody asked", and it must not render as 0 — an
+    // unvisited tab reading "Assets 0" states that the library is empty, which
+    // is a claim no request supports.
+    renderPicker(makeAssets({ count: null }));
+    expect(screen.getByTestId('resource-picker-tab-assets').textContent?.trim()).toBe(
+      'Assets',
+    );
+  });
+
+  it('asks nothing until its tab is opened', async () => {
+    // The grid is mounted from the start (so the type chip survives a switch)
+    // but must stay silent: `GET /assets/search` costs four round trips.
+    const fetch = vi.fn(async () => [AVA]);
+    renderPicker(makeAssets({ fetch }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('mention-asset-option')).toBeNull();
+  });
+
   it('asks the parent to activate it rather than deciding for itself', () => {
     const onActivate = vi.fn();
     renderPicker(makeAssets({ onActivate }));
@@ -138,6 +158,12 @@ describe('when the Assets tab is active', () => {
     const footer = screen.getByTestId('resource-picker-count');
     expect(footer.textContent).toContain('3');
     expect(footer.textContent).not.toContain('of 1');
+  });
+
+  it('leaves the footer blank while the first search is still out', async () => {
+    renderPicker(makeAssets({ active: true, count: null }));
+    await screen.findAllByTestId('mention-asset-option');
+    expect(screen.getByTestId('resource-picker-count').textContent?.trim()).toBe('');
   });
 
   it('keeps the typed query when the tab is switched on', async () => {

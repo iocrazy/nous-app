@@ -6,7 +6,7 @@
 // one place, so /assets and /generated cannot drift into reporting the same
 // refusal two different ways.
 
-import { reportApiNetworkFailure } from '../utils/apiConfig';
+import { isCallerAbort, reportApiNetworkFailure } from '../utils/apiConfig';
 
 /**
  * A typed refusal from /assets or /generated.
@@ -107,6 +107,13 @@ export async function envelopeFetch<T>(url: string, init?: RequestInit): Promise
   try {
     res = await fetch(url, init);
   } catch (err) {
+    // The caller cancelled — a superseded search, an unmount. Rethrow it
+    // UNTOUCHED and count nothing: it is not evidence about the origin, and
+    // two of them would otherwise exhaust the failover budget and move every
+    // subsequent request in the app onto the fallback base. Rethrowing the
+    // raw AbortError (rather than a `GeneratedApiError`) is what lets a caller
+    // tell its own cancel apart from a dead server.
+    if (isCallerAbort(err)) throw err;
     console.error('[apiEnvelope] request never reached the server:', url, err);
     // Feed the dual-channel failover. `reportApiNetworkFailure` counts ONLY
     // fetch-level failures (two consecutive ones flip the app to the

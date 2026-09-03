@@ -425,7 +425,9 @@ export function AIChatPanel({
   // seventh `activeKind` value — the two axes answer to different searches and
   // a shared enum would make every read re-derive which one it is holding.
   const [mentionAssetsTab, setMentionAssetsTab] = useState(false);
-  const [mentionAssetCount, setMentionAssetCount] = useState(0);
+  // `null` until the grid answers: an unvisited Assets tab must not badge a
+  // "0" the user reads as "my library is empty".
+  const [mentionAssetCount, setMentionAssetCount] = useState<number | null>(null);
   const mentionAssetPickerRef = useRef<AssetGridPickerHandle | null>(null);
   const { data: mentionSearchData, loading: mentionLoading } = useResourceSearch(
     mentionQuery,
@@ -450,6 +452,9 @@ export function AIChatPanel({
   const closeMentionPicker = useCallback(() => {
     setMentionPickerOpen(false);
     setMentionAssetsTab(false);
+    // The next `@` opens a fresh session; a count carried over from the last
+    // one would badge a number for a search this session never ran.
+    setMentionAssetCount(null);
   }, []);
 
   // Item 1: close picker on Escape or click-outside

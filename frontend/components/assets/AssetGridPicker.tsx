@@ -40,6 +40,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type ForwardedRef,
+  type ReactElement,
+  type Ref,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, Loader2, Search } from 'lucide-react';
@@ -169,23 +172,48 @@ const THEMES: Record<Theme, Record<string, string>> = {
   },
 };
 
-interface Props {
+export interface AssetGridPickerProps<R extends AssetGridRow = AssetGridRow> {
   /** The host's live `@query`. Seeds the search box when there is one, and IS
    *  the query when there is not. */
   query: string;
+  /**
+   * Controlled search text. When given, the HOST owns the box.
+   *
+   * The canvas palette shares ONE search term across its four groups — the
+   * same string filters the input images and drives the Uploads/Generated
+   * grid's box — so the term has to live above this component or the popover
+   * would carry two of them. Left undefined (chat's case) the box owns its own
+   * text and seeds it from `query`.
+   */
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   labels: AssetGridLabels;
   /** Transport. Read through a ref, so an inline arrow at the call site does
    *  not restart the search on every parent render; declare what invalidates
    *  it with `fetchKey`. */
-  fetch: (params: AssetGridQuery, signal: AbortSignal) => Promise<AssetGridRow[]>;
+  fetch: (params: AssetGridQuery, signal: AbortSignal) => Promise<R[]>;
   /** Anything outside this component that changes what `fetch` would answer
    *  (the canvas's scope id). Changing it refetches. */
   fetchKey?: string;
-  onPick: (row: AssetGridRow) => void;
-  /** How many rows are showing, after the display cap. The host's footer
-   *  reports it; a host that derived it from its own state would report the
-   *  number it asked for rather than the number it got. */
+  onPick: (row: R) => void;
+  /**
+   * How many rows are showing, after the display cap.
+   *
+   * Fired when an ANSWER arrives, never from a render effect. A host told "0"
+   * before anything was asked would paint "Assets 0", which reads as "your
+   * library is empty" rather than "nobody has asked yet".
+   */
   onCountChange?: (count: number) => void;
+  /**
+   * Is this grid the host's visible tab?
+   *
+   * `false` renders nothing and asks nothing (an in-flight request is aborted
+   * on the way out), but the component STAYS MOUNTED — so a search the user
+   * refined by hand, and the type chip they picked, survive a trip to the
+   * host's other tab and back. Unmounting instead resets both, which is the
+   * one thing switching tabs must not silently take away.
+   */
+  active?: boolean;
   /** Render the search box. Off for chat, where the `@` text IS the query and
    *  a second box would be two places to type one thing. */
   searchBox?: boolean;
@@ -203,357 +231,403 @@ interface Props {
   debounceMs?: number;
 }
 
-export const AssetGridPicker = forwardRef<AssetGridPickerHandle, Props>(
-  function AssetGridPicker(
-    {
-      query,
-      labels,
-      fetch,
-      fetchKey = '',
-      onPick,
-      onCountChange,
-      searchBox = true,
-      libraryToggle = false,
-      unavailable = false,
-      theme = 'canvas',
-      limit = 60,
-      debounceMs = DEFAULT_DEBOUNCE_MS,
+/**
+ * Generic over the ROW, so a host handing in a narrower transport gets its own
+ * type back out of `onPick`.
+ *
+ * `AssetGridRow` leaves `readiness` / `scope_id` optional because the narrow
+ * dialog view can omit them; `AssetSummary` does not. Pinning the component to
+ * the loose row would force every canvas pick through an unchecked
+ * `as AssetSummary` — a cast sitting exactly where the two row shapes are the
+ * only thing that could ever diverge.
+ */
+function AssetGridPickerInner<R extends AssetGridRow>(
+  {
+    query,
+    searchValue,
+    onSearchChange,
+    labels,
+    fetch,
+    fetchKey = '',
+    onPick,
+    onCountChange,
+    active = true,
+    searchBox = true,
+    libraryToggle = false,
+    unavailable = false,
+    theme = 'canvas',
+    limit = 60,
+    debounceMs = DEFAULT_DEBOUNCE_MS,
+  }: AssetGridPickerProps<R>,
+  ref: ForwardedRef<AssetGridPickerHandle>,
+): ReactElement | null {
+  const { t } = useTranslation();
+  const c = THEMES[theme];
+
+  // The type names and the readiness word are the SAME question in both
+  // hosts and already live in a shared namespace, so they stay here rather
+  // than being routed through `labels` — which carries only the strings the
+  // two hosts genuinely word differently.
+  const typeLabel = (type: AssetType): string => t(typeSingularKey(type), type);
+
+  // The search box is the single source of the query. The host's `@query`
+  // seeds it during RENDER rather than in an effect: an effect that mirrors
+  // a prop into state re-runs after the user has already typed here and
+  // swallows the edit (the useEffect-prop-seed trap). Comparing against the
+  // previous PROP value means typing in the box never triggers a resync.
+  const controlled = searchValue !== undefined;
+  const [ownSearch, setOwnSearch] = useState(query);
+  const lastQueryRef = useRef(query);
+  // Only when UNCONTROLLED: a controlled host already seeds its own state from
+  // the same `@query`, and reseeding here as well would be two writers for one
+  // value.
+  if (!controlled && query !== lastQueryRef.current) {
+    lastQueryRef.current = query;
+    setOwnSearch(query);
+  }
+  const search = controlled ? searchValue : ownSearch;
+  const setSearch = useCallback(
+    (value: string) => {
+      if (onSearchChange) onSearchChange(value);
+      else setOwnSearch(value);
     },
-    ref,
-  ) {
-    const { t } = useTranslation();
-    const c = THEMES[theme];
+    [onSearchChange],
+  );
 
-    // The type names and the readiness word are the SAME question in both
-    // hosts and already live in a shared namespace, so they stay here rather
-    // than being routed through `labels` — which carries only the strings the
-    // two hosts genuinely word differently.
-    const typeLabel = (type: AssetType): string => t(typeSingularKey(type), type);
+  const [debounced, setDebounced] = useState(search);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(search), debounceMs);
+    return () => clearTimeout(timer);
+  }, [search, debounceMs]);
 
-    // The search box is the single source of the query. The host's `@query`
-    // seeds it during RENDER rather than in an effect: an effect that mirrors
-    // a prop into state re-runs after the user has already typed here and
-    // swallows the edit (the useEffect-prop-seed trap). Comparing against the
-    // previous PROP value means typing in the box never triggers a resync.
-    const [search, setSearch] = useState(query);
-    const lastQueryRef = useRef(query);
-    if (query !== lastQueryRef.current) {
-      lastQueryRef.current = query;
-      setSearch(query);
-    }
+  const [type, setType] = useState<AssetType | null>(null);
+  /**
+   * `all` by default, and the default is the decision.
+   *
+   * The server's shelf default is `in` — library members only — which hides
+   * script imports and every asset the P4 legacy-card migration created.
+   * Those are exactly the assets a canvas points at and a writer names, so
+   * narrowing on the user's behalf would make an asset they can see be one
+   * they cannot mention. The toggle lets someone narrow on purpose.
+   */
+  const [inLibraryOnly, setInLibraryOnly] = useState(false);
 
-    const [debounced, setDebounced] = useState(search);
-    useEffect(() => {
-      const timer = setTimeout(() => setDebounced(search), debounceMs);
-      return () => clearTimeout(timer);
-    }, [search, debounceMs]);
+  const [rows, setRows] = useState<R[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState(false);
+  const [preview, setPreview] = useState<{ ids: string[]; index: number } | null>(
+    null,
+  );
 
-    const [type, setType] = useState<AssetType | null>(null);
-    /**
-     * `all` by default, and the default is the decision.
-     *
-     * The server's shelf default is `in` — library members only — which hides
-     * script imports and every asset the P4 legacy-card migration created.
-     * Those are exactly the assets a canvas points at and a writer names, so
-     * narrowing on the user's behalf would make an asset they can see be one
-     * they cannot mention. The toggle lets someone narrow on purpose.
-     */
-    const [inLibraryOnly, setInLibraryOnly] = useState(false);
+  const fetchRef = useRef(fetch);
+  fetchRef.current = fetch;
 
-    const [rows, setRows] = useState<AssetGridRow[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [listError, setListError] = useState(false);
-    const [preview, setPreview] = useState<{ ids: string[]; index: number } | null>(
-      null,
-    );
+  const onCountChangeRef = useRef(onCountChange);
+  onCountChangeRef.current = onCountChange;
 
-    const fetchRef = useRef(fetch);
-    fetchRef.current = fetch;
+  useEffect(() => {
+    // A hidden tab that kept polling would spend four round trips per
+    // keystroke on a list nobody is reading. The STATE stays; only the asking
+    // stops, and switching back re-asks.
+    if (!active || unavailable) return undefined;
+    // The debounce has not caught up with what the box says yet, so the only
+    // request we could make now is for a query the user has already moved past.
+    // Skipping is not the same as waiting: the dependency change ran the
+    // previous cleanup first, so an in-flight request for the older query is
+    // already aborted, and nothing is in flight while the user is typing.
+    if (debounced !== search) return undefined;
+    // AbortController rather than a `cancelled` flag: the flag only stops a
+    // stale response from being APPLIED, while this also stops it being
+    // waited for. The search endpoint costs four round trips per call, so a
+    // four-character query would otherwise leave three of them in flight.
+    const controller = new AbortController();
+    setLoading(true);
+    setListError(false);
+    fetchRef
+      .current(
+        {
+          q: debounced.trim() || undefined,
+          type,
+          library: inLibraryOnly ? 'in' : 'all',
+          limit,
+        },
+        controller.signal,
+      )
+      .then((found) => {
+        if (controller.signal.aborted) return;
+        setRows(found);
+        setLoading(false);
+        onCountChangeRef.current?.(found.slice(0, ASSET_GRID_LIMIT).length);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        // An abort raised by a transport that honours the signal is not a
+        // failure — reporting it would paint "could not load the library"
+        // over a search the user themselves superseded.
+        if (err instanceof Error && err.name === 'AbortError') return;
+        console.error('[AssetGridPicker] asset search failed:', err);
+        setListError(true);
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [active, unavailable, debounced, search, type, inLibraryOnly, fetchKey, limit]);
 
-    useEffect(() => {
-      if (unavailable) return undefined;
-      // AbortController rather than a `cancelled` flag: the flag only stops a
-      // stale response from being APPLIED, while this also stops it being
-      // waited for. The search endpoint costs four round trips per call, so a
-      // four-character query would otherwise leave three of them in flight.
-      const controller = new AbortController();
-      setLoading(true);
-      setListError(false);
-      fetchRef
-        .current(
-          {
-            q: debounced.trim() || undefined,
-            type,
-            library: inLibraryOnly ? 'in' : 'all',
-            limit,
-          },
-          controller.signal,
-        )
-        .then((found) => {
-          if (controller.signal.aborted) return;
-          setRows(found);
-          setLoading(false);
-        })
-        .catch((err: unknown) => {
-          if (controller.signal.aborted) return;
-          // An abort raised by a transport that honours the signal is not a
-          // failure — reporting it would paint "could not load the library"
-          // over a search the user themselves superseded.
-          if (err instanceof Error && err.name === 'AbortError') return;
-          console.error('[AssetGridPicker] asset search failed:', err);
-          setListError(true);
-          setLoading(false);
-        });
-      return () => controller.abort();
-    }, [unavailable, debounced, type, inLibraryOnly, fetchKey, limit]);
+  const items = useMemo(() => rows.slice(0, ASSET_GRID_LIMIT), [rows]);
+  const count = items.length;
 
-    const items = useMemo(() => rows.slice(0, ASSET_GRID_LIMIT), [rows]);
-    const count = items.length;
+  // Clamped rather than stored blindly: the list shrinks under the user as
+  // the search narrows, and an index past the end would make Enter do
+  // nothing with no way to tell why.
+  const [rawActive, setRawActive] = useState(0);
+  const activeIndex = count === 0 ? 0 : Math.min(rawActive, count - 1);
 
-    const onCountChangeRef = useRef(onCountChange);
-    onCountChangeRef.current = onCountChange;
-    useEffect(() => {
-      onCountChangeRef.current?.(count);
-    }, [count]);
+  const move = useCallback(
+    (delta: number) => {
+      setRawActive((i) => {
+        if (count === 0) return 0;
+        const from = Math.min(i, count - 1);
+        return (from + delta + count) % count;
+      });
+    },
+    [count],
+  );
 
-    // Clamped rather than stored blindly: the list shrinks under the user as
-    // the search narrows, and an index past the end would make Enter do
-    // nothing with no way to tell why.
-    const [rawActive, setRawActive] = useState(0);
-    const active = count === 0 ? 0 : Math.min(rawActive, count - 1);
+  // Read the pick handler through a ref so `commitActive` — and therefore
+  // the handle the host holds — does not change identity on every render.
+  const pickRef = useRef(onPick);
+  pickRef.current = onPick;
 
-    const move = useCallback(
-      (delta: number) => {
-        setRawActive((i) => {
-          if (count === 0) return 0;
-          const from = Math.min(i, count - 1);
-          return (from + delta + count) % count;
-        });
-      },
-      [count],
-    );
+  const commitActive = useCallback((): boolean => {
+    const row = items[activeIndex];
+    if (!row) return false;
+    pickRef.current(row);
+    return true;
+  }, [items, activeIndex]);
 
-    // Read the pick handler through a ref so `commitActive` — and therefore
-    // the handle the host holds — does not change identity on every render.
-    const pickRef = useRef(onPick);
-    pickRef.current = onPick;
+  useImperativeHandle(ref, () => ({ move, commitActive }), [move, commitActive]);
 
-    const commitActive = useCallback((): boolean => {
-      const row = items[active];
-      if (!row) return false;
-      pickRef.current(row);
-      return true;
-    }, [items, active]);
+  const typeChips = useMemo(() => [null, ...ASSET_TYPES] as const, []);
 
-    useImperativeHandle(ref, () => ({ move, commitActive }), [move, commitActive]);
+  // Every hook above has run — the state they hold is exactly what survives a
+  // trip to the host's other tab. Only the OUTPUT is withheld.
+  if (!active) return null;
 
-    const typeChips = useMemo(() => [null, ...ASSET_TYPES] as const, []);
+  const pill = (on: boolean): string =>
+    `${c.interactive} rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+      on ? c.pillOn : c.pillOff
+    }`;
 
-    const pill = (on: boolean): string =>
-      `${c.interactive} rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        on ? c.pillOn : c.pillOff
-      }`;
-
-    return (
-      <>
-        {(searchBox || libraryToggle) && (
-          <div
-            className={`flex items-center gap-1.5 ${c.bar}`}
-            // Keep focus on the host's editor: a bare <button> takes it on
-            // mousedown, and the `@query` tracker lives on that editor — so a
-            // chip click would silently end the mention session. The canvas
-            // popover prevents this at its root; the chat one does not, and
-            // the search input below re-claims focus explicitly.
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {libraryToggle && (
-              <>
-                {/* One library per canvas — the route's team segment IS the
-                    scope, so there is nothing to choose between and a select
-                    with a single option would be a control that does nothing. */}
-                <span className={`shrink-0 ${c.barLabel}`}>{labels.libraryLabel}</span>
-                <button
-                  type="button"
-                  data-testid="mention-library-toggle"
-                  aria-pressed={inLibraryOnly}
-                  onClick={() => setInLibraryOnly((v) => !v)}
-                  className={pill(inLibraryOnly)}
-                >
-                  {labels.inLibraryOnly}
-                </button>
-              </>
-            )}
-            {searchBox && (
-              <span className="ml-auto flex min-w-0 flex-1 items-center gap-1">
-                <Search size={12} className={`shrink-0 ${c.icon}`} />
-                <input
-                  data-testid="mention-search"
-                  aria-label={labels.searchLabel}
-                  placeholder={labels.searchPlaceholder}
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setRawActive(0);
-                  }}
-                  // The host's editor owns focus (see the header note), so this
-                  // box is for the mouse path. mousedown is prevented on the
-                  // popover, so give it focus explicitly when it is clicked.
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.currentTarget.focus();
-                  }}
-                  className={`${c.interactive} min-w-0 flex-1 ${c.input}`}
-                />
-              </span>
-            )}
-          </div>
-        )}
-
+  return (
+    <>
+      {(searchBox || libraryToggle) && (
         <div
-          className={`flex flex-wrap gap-1 ${c.bar}`}
+          className={`flex items-center gap-1.5 ${c.bar}`}
+          // Keep focus on the host's editor: a bare <button> takes it on
+          // mousedown, and the `@query` tracker lives on that editor — so a
+          // chip click would silently end the mention session. The canvas
+          // popover prevents this at its root; the chat one does not, and
+          // the search input below re-claims focus explicitly.
           onMouseDown={(e) => e.preventDefault()}
         >
-          {typeChips.map((chip) => (
-            <button
-              key={chip ?? '__all'}
-              type="button"
-              data-testid="mention-type-chip"
-              data-type={chip ?? 'all'}
-              aria-pressed={type === chip}
-              onClick={() => {
-                setType(chip);
-                setRawActive(0);
-              }}
-              className={pill(type === chip)}
-            >
-              {chip === null ? labels.allTypes : typeLabel(chip)}
-            </button>
-          ))}
-        </div>
-
-        <div className={c.body} data-testid="mention-assets-body">
-          {unavailable ? (
-            <p data-testid="mention-assets-error" className={c.error}>
-              {labels.unavailable}
-            </p>
-          ) : listError ? (
-            <p data-testid="mention-assets-error" className={c.error}>
-              {labels.error}
-            </p>
-          ) : loading ? (
-            <p
-              data-testid="mention-assets-loading"
-              className={`flex items-center gap-1.5 ${c.note}`}
-            >
-              <Loader2 size={11} className="animate-spin" />
-              {labels.loading}
-            </p>
-          ) : items.length === 0 ? (
-            <p data-testid="mention-assets-empty" className={c.note}>
-              {labels.empty}
-            </p>
-          ) : (
-            <div className="grid grid-cols-4 gap-1.5">
-              {items.map((row, i) => {
-                const Icon = ASSET_TYPE_ICON[row.asset_type] ?? ASSET_TYPE_ICON.prop;
-                return (
-                  // `group` belongs HERE, on the wrapper — Tailwind compiles
-                  // `group-hover:` to `.group:hover .group-hover\:…`, so with
-                  // the class on the sibling pick button instead, the preview
-                  // key had no `.group` ancestor and its reveal rule never
-                  // matched.
-                  <div
-                    key={row.id}
-                    className="group relative flex flex-col items-center gap-0.5"
-                  >
-                    <button
-                      type="button"
-                      data-testid="mention-asset-option"
-                      data-asset-id={row.id}
-                      data-active={i === active ? 'true' : 'false'}
-                      title={`${row.name} · ${typeLabel(row.asset_type)}${
-                        row.readiness?.state === 'draft'
-                          ? ` · ${t('assets.readiness.draft', 'Draft')}`
-                          : ''
-                      }`}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        onPick(row);
-                      }}
-                      className={`${c.interactive} flex w-full flex-col items-center gap-0.5`}
-                    >
-                      <span
-                        className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border ${c.tileIcon} ${
-                          i === active ? c.tileOn : c.tileOff
-                        }`}
-                      >
-                        {row.cover_file_id ? (
-                          <img
-                            // `getResourceCoverUrl` already returns an ABSOLUTE
-                            // url against the API origin, so there is nothing
-                            // for `mediaSrc` to absolutize here — a bare
-                            // relative src is the thing that 404s when the app
-                            // and the API are different hosts, and this is not
-                            // one.
-                            src={getResourceCoverUrl(row.cover_file_id)}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <Icon size={16} />
-                        )}
-                      </span>
-                      <span className={`max-w-full truncate ${c.caption}`}>
-                        {row.name}
-                      </span>
-                    </button>
-                    {row.cover_file_id && (
-                      <button
-                        type="button"
-                        data-testid="mention-asset-preview"
-                        data-asset-id={row.id}
-                        aria-label={labels.preview}
-                        title={labels.preview}
-                        onMouseDown={(e) => {
-                          // Preview must not also insert: stop the pick
-                          // button's handler from seeing this press.
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const withCovers = items.filter((a) => a.cover_file_id);
-                          setPreview({
-                            ids: withCovers.map((a) => String(a.cover_file_id)),
-                            index: Math.max(
-                              0,
-                              withCovers.findIndex((a) => a.id === row.id),
-                            ),
-                          });
-                        }}
-                        // Revealed by hovering the TILE, not by finding the
-                        // key. `focus:` keeps it reachable without a pointer.
-                        className={`${c.interactive} absolute right-0 top-0 rounded-bl-md rounded-tr-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100 focus:opacity-100 ${c.previewKey}`}
-                      >
-                        <Eye size={10} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          {libraryToggle && (
+            <>
+              {/* One library per canvas — the route's team segment IS the
+                  scope, so there is nothing to choose between and a select
+                  with a single option would be a control that does nothing. */}
+              <span className={`shrink-0 ${c.barLabel}`}>{labels.libraryLabel}</span>
+              <button
+                type="button"
+                data-testid="mention-library-toggle"
+                aria-pressed={inLibraryOnly}
+                onClick={() => setInLibraryOnly((v) => !v)}
+                className={pill(inLibraryOnly)}
+              >
+                {labels.inLibraryOnly}
+              </button>
+            </>
+          )}
+          {searchBox && (
+            <span className="ml-auto flex min-w-0 flex-1 items-center gap-1">
+              <Search size={12} className={`shrink-0 ${c.icon}`} />
+              <input
+                data-testid="mention-search"
+                aria-label={labels.searchLabel}
+                placeholder={labels.searchPlaceholder}
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setRawActive(0);
+                }}
+                // The host's editor owns focus (see the header note), so this
+                // box is for the mouse path. mousedown is prevented on the
+                // popover, so give it focus explicitly when it is clicked.
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.currentTarget.focus();
+                }}
+                className={`${c.interactive} min-w-0 flex-1 ${c.input}`}
+              />
+            </span>
           )}
         </div>
+      )}
 
-        {preview && (
-          <PinLightbox
-            resourceIds={preview.ids}
-            index={preview.index}
-            slotLabel={labels.previewGroup}
-            onIndexChange={(next) => setPreview({ ...preview, index: next })}
-            onClose={() => setPreview(null)}
-          />
+      <div
+        className={`flex flex-wrap gap-1 ${c.bar}`}
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        {typeChips.map((chip) => (
+          <button
+            key={chip ?? '__all'}
+            type="button"
+            data-testid="mention-type-chip"
+            data-type={chip ?? 'all'}
+            aria-pressed={type === chip}
+            onClick={() => {
+              setType(chip);
+              setRawActive(0);
+            }}
+            className={pill(type === chip)}
+          >
+            {chip === null ? labels.allTypes : typeLabel(chip)}
+          </button>
+        ))}
+      </div>
+
+      <div className={c.body} data-testid="mention-assets-body">
+        {unavailable ? (
+          <p data-testid="mention-assets-error" className={c.error}>
+            {labels.unavailable}
+          </p>
+        ) : listError ? (
+          <p data-testid="mention-assets-error" className={c.error}>
+            {labels.error}
+          </p>
+        ) : loading ? (
+          <p
+            data-testid="mention-assets-loading"
+            className={`flex items-center gap-1.5 ${c.note}`}
+          >
+            <Loader2 size={11} className="animate-spin" />
+            {labels.loading}
+          </p>
+        ) : items.length === 0 ? (
+          <p data-testid="mention-assets-empty" className={c.note}>
+            {labels.empty}
+          </p>
+        ) : (
+          <div className="grid grid-cols-4 gap-1.5">
+            {items.map((row, i) => {
+              const Icon = ASSET_TYPE_ICON[row.asset_type] ?? ASSET_TYPE_ICON.prop;
+              return (
+                // `group` belongs HERE, on the wrapper — Tailwind compiles
+                // `group-hover:` to `.group:hover .group-hover\:…`, so with
+                // the class on the sibling pick button instead, the preview
+                // key had no `.group` ancestor and its reveal rule never
+                // matched.
+                <div
+                  key={row.id}
+                  className="group relative flex flex-col items-center gap-0.5"
+                >
+                  <button
+                    type="button"
+                    data-testid="mention-asset-option"
+                    data-asset-id={row.id}
+                    data-active={i === activeIndex ? 'true' : 'false'}
+                    title={`${row.name} · ${typeLabel(row.asset_type)}${
+                      row.readiness?.state === 'draft'
+                        ? ` · ${t('assets.readiness.draft', 'Draft')}`
+                        : ''
+                    }`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onPick(row);
+                    }}
+                    className={`${c.interactive} flex w-full flex-col items-center gap-0.5`}
+                  >
+                    <span
+                      className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border ${c.tileIcon} ${
+                        i === activeIndex ? c.tileOn : c.tileOff
+                      }`}
+                    >
+                      {row.cover_file_id ? (
+                        <img
+                          // `getResourceCoverUrl` already returns an ABSOLUTE
+                          // url against the API origin, so there is nothing
+                          // for `mediaSrc` to absolutize here — a bare
+                          // relative src is the thing that 404s when the app
+                          // and the API are different hosts, and this is not
+                          // one.
+                          src={getResourceCoverUrl(row.cover_file_id)}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Icon size={16} />
+                      )}
+                    </span>
+                    <span className={`max-w-full truncate ${c.caption}`}>
+                      {row.name}
+                    </span>
+                  </button>
+                  {row.cover_file_id && (
+                    <button
+                      type="button"
+                      data-testid="mention-asset-preview"
+                      data-asset-id={row.id}
+                      aria-label={labels.preview}
+                      title={labels.preview}
+                      onMouseDown={(e) => {
+                        // Preview must not also insert: stop the pick
+                        // button's handler from seeing this press.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const withCovers = items.filter((a) => a.cover_file_id);
+                        setPreview({
+                          ids: withCovers.map((a) => String(a.cover_file_id)),
+                          index: Math.max(
+                            0,
+                            withCovers.findIndex((a) => a.id === row.id),
+                          ),
+                        });
+                      }}
+                      // Revealed by hovering the TILE, not by finding the
+                      // key. `focus:` keeps it reachable without a pointer.
+                      className={`${c.interactive} absolute right-0 top-0 rounded-bl-md rounded-tr-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100 focus:opacity-100 ${c.previewKey}`}
+                    >
+                      <Eye size={10} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
-      </>
-    );
-  },
-);
+      </div>
+
+      {preview && (
+        <PinLightbox
+          resourceIds={preview.ids}
+          index={preview.index}
+          slotLabel={labels.previewGroup}
+          onIndexChange={(next) => setPreview({ ...preview, index: next })}
+          onClose={() => setPreview(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * `forwardRef` erases type parameters, so the cast is what gives the generic
+ * back at the call site. The signature below is the one callers see, and it is
+ * checked against the implementation by `forwardRef(AssetGridPickerInner)`
+ * having to accept it.
+ */
+export const AssetGridPicker = forwardRef(AssetGridPickerInner) as <
+  R extends AssetGridRow,
+>(
+  props: AssetGridPickerProps<R> & { ref?: Ref<AssetGridPickerHandle> },
+) => ReactElement | null;
 
 export default AssetGridPicker;
