@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const createNote = vi.fn();
 const uploadAttachment = vi.fn();
 vi.mock('../../services/inspirationService', () => ({
   createNote: (...a: unknown[]) => createNote(...a),
   uploadAttachment: (...a: unknown[]) => uploadAttachment(...a),
+  // Composer's edit path also imports deleteAttachment, and the
+  // AttachmentView it renders there imports attachmentUrlWithToken —
+  // stubbed so this factory covers Composer's whole import surface, not
+  // just the calls these create-mode tests happen to reach.
+  deleteAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback: string) => fallback }),
@@ -128,5 +134,47 @@ describe('Composer', () => {
       ),
     );
     expect(screen.queryByText('p.png')).toBeNull();
+  });
+  // ── bottom row: real rating in, fake "Private" out ───────────────────────
+
+  it('picking a rating sends it in the SAME createNote call', async () => {
+    createNote.mockResolvedValue({ id: '1', attachments: [], tags: [] });
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'rated idea' } });
+    // RatingStars renders 5 icon-only buttons; the wrapper carries the label.
+    const stars = within(screen.getByLabelText('New note rating')).getAllByRole('button');
+    fireEvent.click(stars[3]); // 4 stars
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() =>
+      expect(createNote).toHaveBeenCalledWith('rated idea', undefined, 4),
+    );
+  });
+
+  it('an untouched rating is omitted entirely — 0 is already the DB default', async () => {
+    createNote.mockResolvedValue({ id: '1', attachments: [], tags: [] });
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'plain idea' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(createNote).toHaveBeenCalled());
+    // Exactly two args, not three-with-0: nothing in the request says "the
+    // user rated this note zero" when the user never touched the stars.
+    expect(createNote.mock.calls[0]).toEqual(['plain idea', undefined]);
+  });
+
+  it('exposes the rating group to the accessibility tree, not just to the DOM', () => {
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    // A bare <div aria-label> is role=generic, where ARIA PROHIBITS naming —
+    // screen readers drop the label entirely while getByLabelText (which reads
+    // the DOM attribute) still finds it. Querying by ROLE is what makes this
+    // assertion mean "a real user can tell these stars apart from the card's".
+    expect(screen.getByRole('group', { name: 'New note rating' })).toBeTruthy();
+  });
+
+  it('has no decorative "Private" control', () => {
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    // It used to be a <span> with a chevron and no onClick, over a schema that
+    // has no visibility column at all — a control that promised a choice
+    // nothing could make. Removed rather than wired up.
+    expect(screen.queryByText('Private')).toBeNull();
   });
 });

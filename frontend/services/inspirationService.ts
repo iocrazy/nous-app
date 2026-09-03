@@ -196,7 +196,15 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
     method: 'DELETE',
     headers: await getAuthHeaders(),
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  if (!resp.ok) {
+    // Read `detail` like deleteNote above: the backend distinguishes 404
+    // "attachment not found" from 502 "attachment deletion failed", and the
+    // Composer puts this message straight into a user-facing toast. The
+    // no-body fallback is `{}` (not deleteNote's 'Delete failed' string) so a
+    // bodyless response degrades to the status code, which says more.
+    const e = await resp.json().catch(() => ({}) as { detail?: string });
+    throw new Error(e.detail || `HTTP ${resp.status}`);
+  }
 }
 
 /**

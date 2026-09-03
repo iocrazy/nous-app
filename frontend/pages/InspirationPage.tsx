@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { Link2, Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
-import { NoteEditor } from '../components/Inspiration/NoteEditor';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
 import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
 import { TagsPanel } from '../components/Inspiration/TagsPanel';
@@ -75,7 +74,6 @@ export const InspirationPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [editing, setEditing] = useState<InspirationNote | null>(null);
-  const [editText, setEditText] = useState('');
   const [tab, setTab] = useState<'notes' | 'hotspots'>('notes');
   const [prefill, setPrefill] = useState<{ content: string; refHotspot: RefHotspot } | null>(null);
   const [prefillNonce, setPrefillNonce] = useState(0);
@@ -105,6 +103,8 @@ export const InspirationPage: React.FC = () => {
   // given note is the only response allowed to apply/revert its content_md.
   const toggleSeq = useRef<Record<string, number>>({});
   const ratingSeq = useRef<Record<string, number>>({});
+  // The edit modal's own element — focus target and Tab-trap boundary.
+  const editDialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQ(queryInput.trim()), 300);
@@ -298,21 +298,98 @@ export const InspirationPage: React.FC = () => {
     }
   };
 
-  const startEdit = (note: InspirationNote) => {
-    setEditing(note);
-    setEditText(note.content_md);
+  const startEdit = (note: InspirationNote) => setEditing(note);
+
+  /**
+   * Modal keyboard + focus behaviour. `aria-modal="true"` tells assistive tech
+   * that everything outside the dialog is inert right now — leaving focus on
+   * the page behind would make that a false claim, so this moves focus in,
+   * keeps Tab inside, hands focus back on close, and closes on Escape.
+   */
+  useEffect(() => {
+    if (!editing) return;
+    const dialog = editDialogRef.current;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    dialog?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // The attachment lightbox stacks above this modal (z-100 vs z-50) and
+      // listens on window too, so a keypress reaches BOTH handlers. Whoever is
+      // on top wins: while the lightbox is mounted this modal keeps its hands
+      // off — Escape closes the lightbox, not us, and Tab must not yank focus
+      // out of the layer above and down into the editor underneath it.
+      //
+      // ⚠️ This relies on the lightbox being a bare conditional render with no
+      // exit animation (AttachmentView: `{lightbox && <ImageLightbox/>}`), so
+      // it leaves the DOM immediately. Give it a leave transition and this
+      // guard starts swallowing Escape for the duration of that animation —
+      // the modal would feel like it ignores the key.
+      if (document.querySelector('[data-lightbox="attachment"]')) return;
+      if (e.key === 'Escape') {
+        setEditing(null);
+        return;
+      }
+      if (e.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]',
+        ),
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const outside = !dialog.contains(active);
+      // `active === dialog` matters for the very first Shift+Tab: focus starts
+      // on the dialog container itself (tabIndex={-1}), which is neither
+      // "outside" nor the first focusable — without this it walks backwards
+      // straight out of the modal.
+      if (
+        e.shiftKey
+          ? outside || active === first || active === dialog
+          : outside || active === last
+      ) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      // Only if it survived the modal — the "Edit" menu item that opened this
+      // usually did not.
+      if (restoreTo && document.contains(restoreTo)) restoreTo.focus();
+    };
+  }, [editing]);
+
+  /**
+   * The edit modal's Composer calls this LAST, after it has applied its own
+   * attachment adds/removals — so `updated.attachments` is already the
+   * post-save list and can be stored verbatim.
+   *
+   * Deliberately does NOT catch: the Composer stays mounted, toasts the
+   * reason and keeps the user's text. Swallowing the error here would close
+   * nothing, report nothing, and look like a successful save.
+   */
+  const saveEdit = async (id: string, content: string): Promise<InspirationNote> => {
+    const updated = await updateNote(id, { content_md: content });
+    setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    setEditing(null);
+    setRefreshKey((k) => k + 1);
+    return updated;
   };
 
-  const saveEdit = async () => {
-    if (!editing) return;
-    try {
-      const updated = await updateNote(editing.id, { content_md: editText });
-      setNotes((prev) => prev.map((n) => (n.id === editing.id ? updated : n)));
-      setEditing(null);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      addToast((err as Error).message, 'error');
-    }
+  // Symmetric with onAttachmentUploaded: a deletion that already landed on
+  // the server must leave the card immediately, even if a later step of the
+  // same save fails and the modal stays open.
+  const onAttachmentDeleted = (noteId: string, attachmentId: string) => {
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === noteId
+          ? { ...n, attachments: n.attachments.filter((a) => a.id !== attachmentId) }
+          : n,
+      ),
+    );
   };
 
   return (
@@ -518,25 +595,53 @@ export const InspirationPage: React.FC = () => {
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-xl rounded-xl bg-island p-4">
-            <h4 className="mb-2 text-sm font-semibold text-content">
-              {t('inspiration.editNote', 'Edit note')}
-            </h4>
-            <NoteEditor
-              value={editText}
-              onChange={setEditText}
-              minRows={6}
-              onSubmit={() => void saveEdit()}
-              tagSuggestions={tagSuggestions}
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <button onClick={() => setEditing(null)} className="rounded-lg bg-island-2 px-4 py-1.5 text-xs text-content-2">
-                {t('inspiration.cancel', 'Cancel')}
-              </button>
-              <button onClick={() => void saveEdit()} className="rounded-lg bg-indigo-500 px-4 py-1.5 text-xs font-semibold text-white">
-                {t('inspiration.save', 'Save')}
+          {/* max-h + overflow are load-bearing now that attachments render
+              INSIDE the modal: the wrapper above is `fixed inset-0` and does
+              not scroll, so without these a note with a couple of videos
+              (AttachmentView renders them at max-h-64) pushes Save and the
+              lower remove buttons out of the viewport, unreachable by mouse.
+              tabIndex={-1} makes the dialog itself a focus target on open. */}
+          <div
+            ref={editDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="inspiration-edit-title"
+            tabIndex={-1}
+            className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-xl bg-island p-4"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <h4 id="inspiration-edit-title" className="text-sm font-semibold text-content">
+                {t('inspiration.editNote', 'Edit note')}
+              </h4>
+              <button
+                aria-label="Cancel edit"
+                title={t('inspiration.cancel', 'Cancel')}
+                onClick={() => setEditing(null)}
+                className="rounded p-1 text-content-3 hover:bg-island-2 hover:text-content"
+              >
+                <X size={15} />
               </button>
             </div>
+            {/* Same component as quick capture — one editor, one toolbar, one
+                attachment pipeline. `key` makes each note a fresh mount, which
+                is what lets prefill / existingAttachments stay initial-value
+                props instead of becoming controlled state. No autoFocus: the
+                caret would land at the document START (NoteEditor's documented
+                behaviour), so typing would insert before the existing text. */}
+            <Composer
+              key={editing.id}
+              noteId={editing.id}
+              prefill={{
+                content: editing.content_md,
+                refHotspot: editing.ref_hotspot ?? undefined,
+              }}
+              existingAttachments={editing.attachments}
+              tagSuggestions={tagSuggestions}
+              submitLabel={t('inspiration.saveChanges', 'Save Changes')}
+              onSubmit={(content) => saveEdit(editing.id, content)}
+              onAttachmentUploaded={onAttachmentUploaded}
+              onAttachmentDeleted={onAttachmentDeleted}
+            />
           </div>
         </div>
       )}

@@ -4706,6 +4706,7 @@
     "title": "灵感库",
     "placeholder": "记录灵感… 正文打 #标签，粘贴图片或拖入任意文件",
     "save": "保存",
+    "saveChanges": "保存修改",
     "saving": "保存中…",
     "activity": "活跃度",
     "tags": "标签",
@@ -4713,6 +4714,8 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "rating": "评分",
+    "ratingNewNote": "新笔记评分",
+    "removeFailed": "移除失败: {{name}}",
     "delete": "删除",
     "deleteConfirm": "删除这条笔记？",
     "editNote": "编辑笔记",
@@ -4787,8 +4790,6 @@
     "insertCode": "插入代码块",
     "attachFile": "添加附件",
     "insertLink": "插入链接",
-    "private": "私密",
-    "privateHint": "笔记仅自己可见",
     "backToThisMonth": "回到本月"
   },
   "editor": {

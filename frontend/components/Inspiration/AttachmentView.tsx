@@ -58,6 +58,11 @@ const ImageLightbox: React.FC<{
 
   return (
     <div
+      // Read by any modal that embeds AttachmentView (the note editor does):
+      // this layer stacks above it and both listen for Escape on window, so
+      // the host yields the key while this attribute is in the DOM. See
+      // InspirationPage's edit-modal key handler.
+      data-lightbox="attachment"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
@@ -91,9 +96,46 @@ const ImageLightbox: React.FC<{
   );
 };
 
-export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
-  attachments,
-}) => {
+
+/**
+ * Optional remove affordance (edit mode). When `onDelete` is undefined this
+ * renders its child verbatim — no wrapper element, no extra DOM — so the
+ * read-only consumer (NoteCard) keeps byte-identical markup. Only when a
+ * caller opts in does the child get wrapped in a positioned container
+ * carrying the "x" button.
+ *
+ * The button lives OUTSIDE the child (a sibling, not a descendant): images
+ * render as a lightbox-opening <button>, and nesting a button inside a button
+ * is invalid HTML that would also fire both handlers on one click.
+ */
+const Removable: React.FC<{
+  attachment: NoteAttachment;
+  onDelete?: (a: NoteAttachment) => void;
+  block?: boolean;
+  children: React.ReactNode;
+}> = ({ attachment, onDelete, block, children }) => {
+  if (!onDelete) return <>{children}</>;
+  return (
+    <span className={`relative ${block ? 'block' : 'inline-block'}`}>
+      {children}
+      <button
+        type="button"
+        aria-label={`Remove ${attachment.original_name}`}
+        onClick={() => onDelete(attachment)}
+        className="absolute -right-1.5 -top-1.5 rounded-full border border-line bg-island p-0.5 text-content-3 shadow-sm hover:text-danger"
+      >
+        <X size={11} />
+      </button>
+    </span>
+  );
+};
+
+export const AttachmentView: React.FC<{
+  attachments: NoteAttachment[];
+  /** Edit mode: render a per-attachment remove button that hands the whole
+   *  attachment back. Omitted → read-only rendering (the NoteCard default). */
+  onDelete?: (attachment: NoteAttachment) => void;
+}> = ({ attachments, onDelete }) => {
   const { mediaToken } = useAuth();
   const urls = useAttachmentUrls(attachments, mediaToken ?? undefined);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(
@@ -116,22 +158,23 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {images.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className="block cursor-zoom-in"
-              aria-label={`View ${a.original_name}`}
-              onClick={() =>
-                setLightbox({ src: urls[a.id] ?? '', alt: a.original_name })
-              }
-            >
-              <img
-                src={urls[a.id] ?? ''}
-                alt={a.original_name}
-                loading="lazy"
-                className="h-24 w-32 rounded-lg object-cover bg-island-2"
-              />
-            </button>
+            <Removable key={a.id} attachment={a} onDelete={onDelete}>
+              <button
+                type="button"
+                className="block cursor-zoom-in"
+                aria-label={`View ${a.original_name}`}
+                onClick={() =>
+                  setLightbox({ src: urls[a.id] ?? '', alt: a.original_name })
+                }
+              >
+                <img
+                  src={urls[a.id] ?? ''}
+                  alt={a.original_name}
+                  loading="lazy"
+                  className="h-24 w-32 rounded-lg object-cover bg-island-2"
+                />
+              </button>
+            </Removable>
           ))}
         </div>
       )}
@@ -143,34 +186,38 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
         />
       )}
       {videos.map((a) => (
-        <video
-          key={a.id}
-          src={urls[a.id] ?? ''}
-          controls
-          preload="metadata"
-          className="max-h-64 rounded-lg bg-island-2"
-        />
+        <Removable key={a.id} attachment={a} onDelete={onDelete} block>
+          <video
+            src={urls[a.id] ?? ''}
+            controls
+            preload="metadata"
+            className="max-h-64 rounded-lg bg-island-2"
+          />
+        </Removable>
       ))}
       {audios.map((a) => (
-        <audio key={a.id} src={urls[a.id] ?? ''} controls className="h-9 w-full max-w-xs" />
+        <Removable key={a.id} attachment={a} onDelete={onDelete} block>
+          <audio src={urls[a.id] ?? ''} controls className="h-9 w-full max-w-xs" />
+        </Removable>
       ))}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {files.map((a) => (
-            <a
-              key={a.id}
-              href={urls[a.id] ?? ''}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5 text-xs text-content-2 hover:bg-line"
-            >
-              <FileText size={14} className="text-content-3" />
-              <span className="max-w-[180px] truncate">{a.original_name}</span>
-              <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent-text)]">
-                {extOf(a.original_name)}
-              </span>
-              <span className="text-content-3">{formatSize(a.size_bytes)}</span>
-            </a>
+            <Removable key={a.id} attachment={a} onDelete={onDelete}>
+              <a
+                href={urls[a.id] ?? ''}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5 text-xs text-content-2 hover:bg-line"
+              >
+                <FileText size={14} className="text-content-3" />
+                <span className="max-w-[180px] truncate">{a.original_name}</span>
+                <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent-text)]">
+                  {extOf(a.original_name)}
+                </span>
+                <span className="text-content-3">{formatSize(a.size_bytes)}</span>
+              </a>
+            </Removable>
           ))}
         </div>
       )}

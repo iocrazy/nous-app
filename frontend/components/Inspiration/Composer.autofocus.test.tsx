@@ -5,6 +5,12 @@ const createNote = vi.fn();
 vi.mock('../../services/inspirationService', () => ({
   createNote: (...a: unknown[]) => createNote(...a),
   uploadAttachment: vi.fn(),
+  // Composer's edit path also imports deleteAttachment, and the
+  // AttachmentView it renders there imports attachmentUrlWithToken —
+  // stubbed so this factory covers Composer's whole import surface, not
+  // just the calls these create-mode tests happen to reach.
+  deleteAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (_k: string, f: string) => f }) }));
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));

@@ -23,6 +23,7 @@ vi.mock('../services/inspirationService', () => ({
   updateNote: (...a: unknown[]) => updateNote(...a),
   createNote: vi.fn(),
   uploadAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
   attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 vi.mock('../contexts/AuthContext', () => ({
@@ -61,6 +62,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// The quick-capture composer now carries stars of its own; they are labelled
+// "New note rating" precisely so this stays an unambiguous handle on the
+// CARD's rating rather than a positional "the second one".
 const stars = () => within(screen.getByLabelText('Rating')).getAllByRole('button');
 
 /** How many stars render as filled. RatingStars marks the filled ones with
