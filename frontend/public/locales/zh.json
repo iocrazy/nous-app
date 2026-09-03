@@ -3218,6 +3218,17 @@
     "export": "导出画布"
   },
   "canvas": {
+    "library": {
+      "searchLabel": "搜索素材库",
+      "loading": "加载中…",
+      "loadFailed": "无法加载该库",
+      "retry": "重试",
+      "notReady": "未就绪",
+      "selected_one": "已选 {{count}} 项",
+      "selected_other": "已选 {{count}} 项",
+      "files_one": "{{count}} 个文件",
+      "files_other": "{{count}} 个文件"
+    },
     "addImage": "+ 添加图片",
     "generate": "生成",
     "generateAll": "全部生成",

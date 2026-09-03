@@ -3218,6 +3218,17 @@
     "export": "Export canvas"
   },
   "canvas": {
+    "library": {
+      "searchLabel": "Search Library",
+      "loading": "Loading…",
+      "loadFailed": "Could not load this library",
+      "retry": "Retry",
+      "notReady": "Not Ready",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files"
+    },
     "addImage": "+ Add Image",
     "generate": "Generate",
     "generateAll": "Generate All",
