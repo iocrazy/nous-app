@@ -3667,7 +3667,15 @@
       "noResults": "No resources match \"{{q}}\"",
       "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel",
       "statusProcessing": "Processing…",
-      "statusUnprocessed": "Not processed yet"
+      "statusUnprocessed": "Not processed yet",
+      "assets": "Assets",
+      "assetsAllTypes": "All",
+      "assetsLoading": "Loading…",
+      "assetsEmpty": "No assets found",
+      "assetsError": "Could not load the asset library",
+      "assetsPreview": "Preview",
+      "assetsCount_one": "{{count}} asset",
+      "assetsCount_other": "{{count}} assets"
     },
     "sidebarTitle": "Channels",
     "newChannel": "New channel",

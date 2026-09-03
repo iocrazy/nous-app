@@ -1,9 +1,15 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Image, Video, Music, LayoutGrid } from 'lucide-react';
+import { FileText, Image, Video, Music, LayoutGrid, Shapes } from 'lucide-react';
 import type { ResourceSearchResult, ResourceSearchResponse } from '../../types';
 import { resourceProcessingState } from './resourceStatus';
 import { ResourceThumb } from './ResourceThumb';
+import {
+  AssetGridPicker,
+  type AssetGridPickerHandle,
+  type AssetGridQuery,
+  type AssetGridRow,
+} from '../assets/AssetGridPicker';
 
 function _formatSize(n: number | null): string {
   if (!n) return '';
@@ -22,6 +28,57 @@ function _relative(iso: string): string {
   return `${Math.floor(days / 30)}mo ago`;
 }
 
+/**
+ * The Assets tab (P5).
+ *
+ * OPTIONAL as a whole, and that is the point: `CanvasMentionPicker` renders
+ * this same popover as a positioning shell and has its own asset grid one
+ * level up. A required prop would have made every existing caller declare a
+ * tab it does not want.
+ *
+ * The parent owns `active` for the same reason it owns `activeKind`: it is the
+ * parent that routes the arrow keys, and a tab this component kept to itself
+ * would leave the keyboard aimed at whichever list the parent guessed.
+ */
+export interface AssetsTabProps {
+  active: boolean;
+  onActivate: () => void;
+  /** Rows the grid is showing. Painted on the tab and in the counts row; the
+   *  grid reports it through `onCountChange` rather than the parent deriving
+   *  it, so the number is what came back and not what was asked for. */
+  count: number;
+  onCountChange: (count: number) => void;
+  onSelect: (row: AssetGridRow) => void;
+  fetch: (params: AssetGridQuery, signal: AbortSignal) => Promise<AssetGridRow[]>;
+  /** Handle for the parent's ↑↓/Enter routing. */
+  pickerRef?: React.Ref<AssetGridPickerHandle>;
+}
+
+/** The dropdown asks for at most this many rows; the grid caps what it draws
+ *  at `ASSET_GRID_LIMIT`. 24 is the router's own default. */
+const ASSET_SEARCH_LIMIT = 24;
+
+/**
+ * Shorter than the canvas's 300ms because the query here IS the `@` text, so
+ * every keystroke is a new search rather than an occasional one — and the
+ * endpoint costs four round trips per call, which is what the abort in
+ * `AssetGridPicker` is there for.
+ */
+const ASSET_DEBOUNCE_MS = 200;
+
+/** The Assets tab's copy. Its own `chat.mentionPicker.assets*` keys rather
+ *  than the canvas's `canvas.mention.*`: the two pickers sit in different
+ *  products and a shared string would tie their wording together for no
+ *  reason. */
+const ASSET_LABELS = (t: (key: string, def?: string) => string) => ({
+  allTypes: t('chat.mentionPicker.assetsAllTypes', 'All'),
+  loading: t('chat.mentionPicker.assetsLoading', 'Loading…'),
+  empty: t('chat.mentionPicker.assetsEmpty', 'No assets found'),
+  error: t('chat.mentionPicker.assetsError', 'Could not load the asset library'),
+  preview: t('chat.mentionPicker.assetsPreview', 'Preview'),
+  previewGroup: t('chat.mentionPicker.assets', 'Assets'),
+});
+
 interface Props {
   items: ResourceSearchResult[];
   query: string;
@@ -31,6 +88,8 @@ interface Props {
   onKindChange: (kind: Props['activeKind']) => void;
   onSelect: (item: ResourceSearchResult) => void;
   activeIndex?: number;
+  /** Omit to render the resource tabs alone. */
+  assets?: AssetsTabProps;
 }
 
 export function ResourcePickerSuggestion({
@@ -42,8 +101,10 @@ export function ResourcePickerSuggestion({
   onKindChange,
   onSelect,
   activeIndex = 0,
+  assets,
 }: Props): React.ReactElement {
   const { t } = useTranslation();
+  const assetsActive = Boolean(assets?.active);
 
   const tabs: {
     key: Props['activeKind'];
@@ -83,7 +144,7 @@ export function ResourcePickerSuggestion({
             data-kind={tab.key || 'all'}
             onClick={() => onKindChange(tab.key)}
             className={`text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
-              activeKind === tab.key
+              !assetsActive && activeKind === tab.key
                 ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-400 hover:text-ink-200'
             }`}
@@ -92,9 +153,51 @@ export function ResourcePickerSuggestion({
             {tab.label} <span className="opacity-60">{tab.count}</span>
           </button>
         ))}
+        {/* Assets last, after Doc: the five before it slice ONE population —
+            files in the library — by kind, and this one is a different
+            population entirely (library entities: a character, a location, a
+            prompt). Dropping it among the kinds would read as a sixth file
+            type. */}
+        {assets && (
+          <button
+            data-kind="assets"
+            data-testid="resource-picker-tab-assets"
+            aria-pressed={assetsActive}
+            onClick={assets.onActivate}
+            className={`text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+              assetsActive
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                : 'text-ink-400 hover:text-ink-200'
+            }`}
+          >
+            <Shapes size={11} />
+            {t('chat.mentionPicker.assets', 'Assets')}{' '}
+            <span className="opacity-60">{assets.count}</span>
+          </button>
+        )}
       </div>
 
-      {items.length === 0 ? (
+      {assets ? (
+        // Mounted only while its tab is active, exactly like the canvas's:
+        // the grid searches on mount, and a hidden tab that kept polling would
+        // spend four round trips per keystroke on a list nobody is reading.
+        assetsActive ? (
+          <AssetGridPicker
+            ref={assets.pickerRef}
+            query={query}
+            labels={ASSET_LABELS(t)}
+            fetch={assets.fetch}
+            onPick={assets.onSelect}
+            onCountChange={assets.onCountChange}
+            searchBox={false}
+            theme="chat"
+            limit={ASSET_SEARCH_LIMIT}
+            debounceMs={ASSET_DEBOUNCE_MS}
+          />
+        ) : null
+      ) : null}
+
+      {assetsActive ? null : items.length === 0 ? (
         <div className="px-3 py-6 text-center text-[12px] text-ink-500">
           {loading ? '…' : t('chat.mentionPicker.noResults', { q: query })}
         </div>
@@ -161,7 +264,14 @@ export function ResourcePickerSuggestion({
       )}
 
       <div className="px-2 py-1 text-[10px] text-ink-500 border-t border-ink-800 flex justify-between">
-        <span>{items.length > 0 && `${items.length} of ${counts.all}`}</span>
+        <span data-testid="resource-picker-count">
+          {assetsActive
+            ? t('chat.mentionPicker.assetsCount', {
+              count: assets?.count ?? 0,
+              defaultValue: `${assets?.count ?? 0} assets`,
+            })
+            : items.length > 0 && `${items.length} of ${counts.all}`}
+        </span>
         <span>{t('chat.mentionPicker.hintKbd')}</span>
       </div>
     </div>

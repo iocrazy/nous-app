@@ -179,6 +179,47 @@ export async function searchAssets(
 }
 
 /**
+ * The CHAT `@` picker's asset search — every team the caller belongs to, plus
+ * the system presets, in one call.
+ *
+ * Deliberately NOT {@link searchAssets} with a scope: a chat window outlives
+ * any one workspace route, so there is no `scope_id` to send. The backend
+ * (`GET /assets/search`) authorizes by MEMBERSHIP instead, through the same
+ * `AssetsRepository.list_accessible` predicate the chat's asset-ref resolver
+ * reads — a picker that offered an asset the resolver then refused would be a
+ * dead entry with no error anywhere.
+ *
+ * `signal` is not optional decoration. The endpoint does four round trips per
+ * call (rows, then readiness/slot/project aggregates), so a picker that types
+ * four characters must be able to cancel the first three; without it the last
+ * response to arrive wins, which is not necessarily the last one asked for.
+ *
+ * `library` defaults to the SERVER's `all` here rather than the shelf's `in`:
+ * "which asset did I mean" legitimately includes a character a script imported.
+ */
+export async function searchAssetsAccessible(
+  q: string,
+  opts: {
+    type?: AssetType;
+    library?: AssetLibraryFilter;
+    limit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<AssetRow[]> {
+  const qs = new URLSearchParams();
+  if (q.trim()) qs.set('q', q.trim());
+  if (opts.type) qs.set('type', opts.type);
+  if (opts.library) qs.set('library', opts.library);
+  if (opts.limit !== undefined) qs.set('limit', String(opts.limit));
+  const suffix = qs.toString();
+  const data = await envelopeFetch<unknown>(
+    `${BASE()}/search${suffix ? `?${suffix}` : ''}`,
+    { headers: await getAuthHeaders(), signal: opts.signal },
+  );
+  return Array.isArray(data) ? (data as AssetRow[]) : [];
+}
+
+/**
  * Create an asset. A name+type collision inside the scope throws
  * {@link GeneratedApiError} with `code === 'asset_exists'` and
  * `extra.existing_asset_id` — the caller can offer "use the existing one"

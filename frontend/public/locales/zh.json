@@ -3667,7 +3667,15 @@
       "noResults": "没有匹配 \"{{q}}\" 的资源",
       "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消",
       "statusProcessing": "处理中…",
-      "statusUnprocessed": "尚未处理"
+      "statusUnprocessed": "尚未处理",
+      "assets": "资产库",
+      "assetsAllTypes": "全部",
+      "assetsLoading": "加载中…",
+      "assetsEmpty": "没有找到资产",
+      "assetsError": "无法加载资产库",
+      "assetsPreview": "预览",
+      "assetsCount_one": "{{count}} 个资产",
+      "assetsCount_other": "{{count}} 个资产"
     },
     "sidebarTitle": "频道",
     "newChannel": "新建频道",

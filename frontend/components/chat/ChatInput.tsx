@@ -49,6 +49,19 @@ export interface ChatInputProps {
   /** Expose the editor instance so the parent can call insertResourceRef. */
   editorRef?: React.MutableRefObject<Editor | null>;
   /**
+   * Give the open picker first refusal on ↑ / ↓ / Enter.
+   *
+   * The editor keeps focus for the whole mention session — the popover is a
+   * sibling, and a focusable list would take the caret out of the sentence the
+   * user is mid-way through. So the keys arrive HERE and are offered onwards;
+   * returning true means the picker consumed the key.
+   *
+   * Enter is offered BEFORE send, and the boolean is what makes that safe: a
+   * picker with nothing highlighted declines, and the keystroke goes on to
+   * send the message exactly as it did before there was a picker.
+   */
+  onMentionKey?: (key: 'ArrowUp' | 'ArrowDown' | 'Enter') => boolean;
+  /**
    * True when the composer is holding attachments that do NOT live in the
    * editor doc — staged files and staged library resources both.
    *
@@ -84,6 +97,7 @@ export function ChatInput({
   placeholder,
   onPaste,
   onMentionRequest,
+  onMentionKey,
   editorRef,
   hasAttachments = false,
 }: ChatInputProps): React.ReactElement {
@@ -94,6 +108,8 @@ export function ChatInput({
   const onSendRef = useRef(onSend);
   const disabledRef = useRef(disabled);
   const hasAttachmentsRef = useRef(hasAttachments);
+  const onMentionKeyRef = useRef(onMentionKey);
+  useEffect(() => { onMentionKeyRef.current = onMentionKey; }, [onMentionKey]);
   useEffect(() => { onSendRef.current = onSend; }, [onSend]);
   useEffect(() => { disabledRef.current = disabled; }, [disabled]);
   useEffect(() => { hasAttachmentsRef.current = hasAttachments; }, [hasAttachments]);
@@ -136,8 +152,23 @@ export function ChatInput({
           }, 0);
           return false; // don't prevent insertion
         }
+        // The open picker gets ↑ / ↓ first. Nothing else in a one-paragraph
+        // composer needs them, and a picker that is not open declines.
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          if (onMentionKeyRef.current?.(event.key)) {
+            event.preventDefault();
+            return true;
+          }
+        }
         // Enter (without Shift) → send
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+          // …unless the picker has a highlighted row, in which case Enter
+          // means "insert that one". It declines when it has nothing, so an
+          // empty result list still sends.
+          if (onMentionKeyRef.current?.('Enter')) {
+            event.preventDefault();
+            return true;
+          }
           event.preventDefault();
           if (disabledRef.current) return true;
           const currentEditor = view.dom.closest('[data-tiptap-editor]')
