@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from app.models.assets import ASSET_TYPES
+from app.services.ai.provider_protocols.base import ProviderCapabilities
+from app.services.assets.bundle import build_bundle
 from app.services.assets.chat_ref import (
     MAX_CONSISTENCY_PROMPT_CHARS,
+    NON_IMAGE_PRIMARY_TYPES,
     TRUNCATION_MARKER,
     build_chat_ref,
     expects_primary_image,
@@ -93,9 +97,63 @@ def test_with_the_primary_slot_empty_the_next_priority_slot_supplies_the_image()
     assert ref.primary_resource_id == "7"
 
 
-def test_a_file_the_caller_stamped_as_imageless_reports_has_image_false():
+def test_a_file_the_caller_stamped_as_imageless_is_not_offered_as_the_primary():
+    """It is narrowed out before ranking, exactly as ``build_bundle`` does — so
+    the answer is "no picture", not "here is one you cannot fetch"."""
     ref = build_chat_ref(_asset(), None, [], {"sheet": [_file(4, has_image=False)]})
-    assert ref.primary_resource_id == "4"
+    assert ref.primary_resource_id is None
+    assert ref.has_image is False
+
+
+def test_an_imageless_file_in_a_higher_slot_does_not_hide_a_usable_one():
+    """The canvas and the chat must name the SAME file as the asset's picture.
+
+    ``build_bundle`` narrows to the files with image bytes BEFORE ranking. Doing
+    it the other way round (rank, then check the winner) reports "no image" for
+    an asset that has one, and hands the model an id whose bytes cannot be
+    fetched. Mutation: drop the ``partition_files_by_image`` call in
+    ``_pick_primary`` and this goes red on ``primary_resource_id``.
+    """
+    files = {
+        "sheet": [_file(100, has_image=False)],
+        "stills": [_file(200, slot="stills", has_image=True)],
+    }
+    ref = build_chat_ref(_asset(), None, [], files)
+    assert ref.primary_resource_id == "200"
+    assert ref.has_image is True
+
+
+def test_the_primary_pick_agrees_with_build_bundle_on_the_same_slot_map():
+    """The module docstring's parity claim, asserted against the real
+    ``build_bundle`` rather than restated in prose."""
+    files = {
+        "sheet": [_file(100, has_image=False)],
+        "stills": [_file(200, slot="stills", has_image=True)],
+        "expressions": [_file(300, slot="expressions", has_image=True)],
+    }
+    caps = ProviderCapabilities(
+        ratios=frozenset({"1:1"}),
+        quality=False,
+        resolution=False,
+        max_refs=1,
+        negative=False,
+        video_modes=frozenset(),
+        honours_ratio="none",
+    )
+    bundle = build_bundle(_asset(), None, [], files, caps)
+    ref = build_chat_ref(_asset(), None, [], files)
+    assert bundle["reference_resource_ids"] == [ref.primary_resource_id]
+
+
+def test_every_file_being_imageless_still_reports_no_image():
+    """The negative control for the filter: narrowing to nothing must answer
+    "no picture", not fall back to an unusable row."""
+    files = {
+        "sheet": [_file(100, has_image=False)],
+        "stills": [_file(200, slot="stills", has_image=False)],
+    }
+    ref = build_chat_ref(_asset(), None, [], files)
+    assert ref.primary_resource_id is None
     assert ref.has_image is False
 
 
@@ -207,8 +265,10 @@ def test_an_audio_asset_gives_its_primary_resource_but_declares_no_image():
         ),
         None,
         [],
-        {"primary": [_file(42, slot="primary")]},
+        {"primary": [_file(42, slot="primary", has_image=False)]},
     )
+    # Stamped False (it is audio), and still published: filtering the audio
+    # branch would erase the very id ruling E requires it to hand over.
     assert ref.primary_resource_id == "42"
     assert ref.has_image is False
     assert ref.consistency_prompt == "hoarse, mid-forties, a smoker's rasp"
@@ -222,6 +282,20 @@ def test_neither_branch_is_reported_as_a_missing_primary_image():
 @pytest.mark.parametrize("kind", ["character", "location", "prop", "costume"])
 def test_the_image_types_do_expect_a_primary_image(kind):
     assert expects_primary_image(kind) is True
+
+
+def test_every_asset_type_is_classified():
+    """A seventh asset type must land on one side or the other, deliberately.
+
+    The image side is DERIVED from ``PRIMARY_SLOT``, so a new type defaults to
+    the side where a missing picture is reported. This pins that neither set can
+    silently fall out of step with ``ASSET_TYPES`` — which is how a type would
+    stop raising ``asset_no_primary_image`` forever with no signal anywhere.
+    """
+    image_side = {t for t in ASSET_TYPES if expects_primary_image(t)}
+    assert image_side | NON_IMAGE_PRIMARY_TYPES == set(ASSET_TYPES)
+    assert not (image_side & NON_IMAGE_PRIMARY_TYPES)
+    assert NON_IMAGE_PRIMARY_TYPES <= set(ASSET_TYPES)
 
 
 def test_an_image_type_does_not_borrow_the_description_the_way_audio_does():

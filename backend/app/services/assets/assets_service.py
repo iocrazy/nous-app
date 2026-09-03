@@ -1447,10 +1447,10 @@ class AssetsService:
                 f"The '{slot}' slot of a {asset_type} asset cannot be generated",
             )
 
-        files_by_slot = self._files_by_slot(
+        slot_map = self._files_by_slot(
             await self.relations.list_files(asset_id), loadout
         )
-        refs = reference_order(files_by_slot, asset_type, max_refs=MAX_SLOT_REFERENCES)
+        refs = reference_order(slot_map, asset_type, max_refs=MAX_SLOT_REFERENCES)
         return {
             "positive": prompt["positive"],
             "negative": prompt["negative"],
@@ -1516,21 +1516,21 @@ class AssetsService:
                 {"model": str(model)},
             )
         linked = await self._linked_asset_rows(row, int(scope_id), loadout)
-        files_by_slot = self._files_by_slot(
+        slot_map = self._files_by_slot(
             await self.relations.list_files(int(asset_id)), loadout
         )
-        await self._stamp_image_availability(files_by_slot)
+        await self._stamp_image_availability(slot_map)
         return build_bundle(
             row,
             loadout,
             linked,
-            files_by_slot,
+            slot_map,
             caps,
             selected_resource_ids=selected_file_ids,
         )
 
     async def _stamp_image_availability(
-        self, files_by_slot: Dict[str, List[Dict[str, Any]]]
+        self, slot_map: Dict[str, List[Dict[str, Any]]]
     ) -> None:
         """Mark each file row with whether it has image bytes to send.
 
@@ -1551,9 +1551,7 @@ class AssetsService:
         the file's BYTES to an outside provider, this one returns ids the
         caller can already read off ``GET /assets/{id}``.
         """
-        candidates = {
-            int(f["resource_id"]) for rows in files_by_slot.values() for f in rows
-        }
+        candidates = {int(f["resource_id"]) for rows in slot_map.values() for f in rows}
         if not candidates:
             return
         rows = await self.relations.resource_media_rows(
@@ -1562,7 +1560,7 @@ class AssetsService:
         available = {
             rid for rid in candidates if _reference_stored_path(rows.get(rid) or {})
         }
-        for slot_rows in files_by_slot.values():
+        for slot_rows in slot_map.values():
             for f in slot_rows:
                 f["has_image"] = int(f["resource_id"]) in available
 

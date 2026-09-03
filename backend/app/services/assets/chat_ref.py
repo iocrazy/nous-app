@@ -18,10 +18,14 @@ Why not just call ``build_bundle`` (recon §4.4):
   (ruling D), as is the ``user_text`` tail — the user's own words are already
   the chat message.
 
-What IS shared is every rule that could drift: :func:`reference_order` picks the
-primary (so "the primary image" means the same thing as it does on the canvas),
-:func:`dedupe_fragments` and :func:`linked_positive_texts` compose the text (so
-the same asset does not describe itself two ways on two surfaces).
+What IS shared is every rule that could drift: :func:`partition_files_by_image`
+then :func:`reference_order` pick the primary, in that order and with the same
+``has_image`` convention ``build_bundle`` uses, so "the primary image" means
+the same thing here as it does on the canvas; :func:`dedupe_fragments` and
+:func:`linked_positive_texts` compose the text, so the same asset does not
+describe itself two ways on two surfaces. The ONE deliberate departure is the
+``audio`` branch, which skips the image filter because its primary file is
+audio by definition (ruling E) — spelled out in :func:`_pick_primary`.
 
 Model Experience
 ----------------
@@ -45,8 +49,9 @@ call.
 consistency prompt. That prompt is the only unbounded input (an asset's own
 prompt, its loadout's extra note, and every linked costume/prop/location's
 prompt, concatenated), so it is hard-capped at
-:data:`MAX_CONSISTENCY_PROMPT_CHARS` characters with a visible ``[truncated]``
-marker rather than left to grow with the number of links. Total growth is
+:data:`MAX_CONSISTENCY_PROMPT_CHARS` characters rather than left to grow with
+the number of links. The visible ``[truncated]`` marker is APPENDED BEYOND that
+cap, so a truncated entry's body is 612 characters, not 600. Total growth is
 therefore bounded by (number of asset attachments in the turn) × that cap; the
 number of attachments is bounded by the composer's staged-attachment list.
 
@@ -73,7 +78,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
-from app.services.assets.bundle import linked_positive_texts
+from app.services.assets.bundle import linked_positive_texts, partition_files_by_image
 from app.services.assets.slot_generation import dedupe_fragments, reference_order
 from app.services.assets.slots import PRIMARY_SLOT
 
@@ -84,14 +89,26 @@ from app.services.assets.slots import PRIMARY_SLOT
 # is MARKED — a silently shortened prompt reads to the model as the whole
 # description, which is exactly the failure "the asset looks wrong and nothing
 # says why".
+#
+# ⚠️ The marker is APPENDED BEYOND the cap, not carved out of it: a truncated
+# prompt is 612 characters (600 + len(" [truncated]")). Sizing a token budget
+# off the constant alone undercounts by 12 characters per truncated entry.
 MAX_CONSISTENCY_PROMPT_CHARS = 600
 TRUNCATION_MARKER = " [truncated]"
 
-# Types whose primary slot holds an IMAGE. ``prompt`` has no file slot at all
-# and ``audio``'s primary slot holds audio bytes, so neither can produce a
-# picture — ruling E requires both to say so explicitly rather than be folded
-# into "this asset has no image", which reads identically to a broken lookup.
-_IMAGE_PRIMARY_TYPES = frozenset({"character", "location", "prop", "costume"})
+# ``prompt`` has no file slot at all and ``audio``'s primary slot holds audio
+# bytes, so neither can produce a picture — ruling E requires both to say so
+# explicitly rather than be folded into "this asset has no image", which reads
+# identically to a broken lookup.
+#
+# The image side is DERIVED, not listed: a seventh asset type added to
+# ``PRIMARY_SLOT`` lands on the image side by default, where a missing picture
+# is reported. A hand-written subtraction would silently classify it as
+# image-less and it would never raise ``asset_no_primary_image`` again, with no
+# signal anywhere. ``test_every_asset_type_is_classified`` refuses to let either
+# set fall out of step with ``ASSET_TYPES``.
+NON_IMAGE_PRIMARY_TYPES = frozenset({"prompt", "audio"})
+_IMAGE_PRIMARY_TYPES = frozenset(PRIMARY_SLOT) - NON_IMAGE_PRIMARY_TYPES
 
 
 @dataclass(frozen=True)
@@ -132,7 +149,10 @@ def _truncate(text: str) -> str:
 
 
 def _pick_primary(
-    files_by_slot: Dict[str, List[Dict[str, Any]]], asset_type: str
+    files_by_slot: Dict[str, List[Dict[str, Any]]],
+    asset_type: str,
+    *,
+    require_image: bool,
 ) -> tuple[Optional[str], bool]:
     """``(primary_resource_id, has_image)`` for one asset's file map.
 
@@ -143,18 +163,29 @@ def _pick_primary(
     the canvas and the chat would start disagreeing about which image IS the
     asset.
 
-    ``has_image`` is read off the picked row, where the caller stamped it from
-    the ``resources`` rows (the same ``_reference_stored_path`` ladder
-    ``AssetsService._stamp_image_availability`` uses). Following ``bundle``'s
-    convention, only an explicit ``False`` disqualifies: an ABSENT key means "the
-    caller did not look it up", and treating that as "no image" would make every
-    asset silently image-less for any future caller that skips the stamping step.
+    ``require_image=True`` (every type whose primary slot holds a picture) runs
+    the candidates through ``partition_files_by_image`` FIRST — the same
+    narrowing ``build_bundle`` applies before it ranks. Order matters and the
+    two orders give different answers: rank-then-check reports "no image" for an
+    asset whose top-priority slot holds a bytes-less row while a usable picture
+    waits one slot down, and hands the model the id it cannot fetch. Only an
+    explicit ``has_image=False`` disqualifies (bundle's convention) — an absent
+    key means "the caller did not look it up" and stays a candidate, so a future
+    caller that skips the stamping step does not lose every reference.
+
+    ``require_image=False`` is the ``audio`` branch and deliberately skips that
+    filter: an audio asset's primary slot holds audio bytes, so its file is
+    stamped ``has_image=False`` and filtering would erase the very
+    ``primary_resource_id`` ruling E requires it to publish.
     """
-    ordered = reference_order(files_by_slot, asset_type, max_refs=1)
+    candidates = (
+        partition_files_by_image(files_by_slot)[0] if require_image else files_by_slot
+    )
+    ordered = reference_order(candidates, asset_type, max_refs=1)
     if not ordered:
         return None, False
     primary = ordered[0]
-    for rows in files_by_slot.values():
+    for rows in candidates.values():
         for row in rows or []:
             if int(row["resource_id"]) == primary:
                 return str(primary), row.get("has_image") is not False
@@ -217,7 +248,9 @@ def build_chat_ref(
             str((loadout_row or {}).get("prompt_extra") or ""),
             *linked_positive_texts(linked_assets),
         ]
-        primary_resource_id, has_image = _pick_primary(files_by_slot, asset_type)
+        primary_resource_id, has_image = _pick_primary(
+            files_by_slot, asset_type, require_image=expects_primary_image(asset_type)
+        )
         if asset_type == "audio":
             # A primary resource, and deliberately not an image: the model must
             # not spend a ResourceFetch(mode=image) on a .wav.
@@ -239,6 +272,7 @@ def build_chat_ref(
 
 __all__ = [
     "MAX_CONSISTENCY_PROMPT_CHARS",
+    "NON_IMAGE_PRIMARY_TYPES",
     "TRUNCATION_MARKER",
     "ChatAssetRef",
     "build_chat_ref",

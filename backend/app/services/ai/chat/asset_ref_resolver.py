@@ -213,6 +213,13 @@ async def resolve_asset_refs(
 ) -> Tuple[List[ChatAssetRef], List[AssetRefFailure]]:
     """Return ``(refs_for_prompt, typed_failures)`` for the turn's asset refs.
 
+    ``refs_for_prompt`` is a list of :class:`ChatAssetRef` DATACLASSES, not
+    dicts (the P5 plan's Task 1 line said ``list[dict]``; the ruling is that the
+    dataclass wins, because the field names are a contract three tasks share and
+    a dict lets a typo become a missing attribute at render time). Callers read
+    attributes — ``ref.primary_resource_id`` — and reach for
+    ``dataclasses.asdict`` only where a mapping is genuinely required.
+
     Only dicts whose ``kind`` is exactly ``"asset_ref"`` are considered;
     everything else is ignored (and still counted, so failure indices stay
     aligned with the caller's list). A repeated ``asset_id`` resolves once —
@@ -291,6 +298,13 @@ async def resolve_asset_refs(
 
     # Everything each surviving asset needs, gathered before the single batched
     # ``resources`` read that stamps ``has_image`` across all of them.
+    #
+    # ⚠️ Cost: FOUR round trips per asset (loadouts, files, and the two
+    # ``link_targets`` traversals), against one batched ``resources`` read for
+    # the whole turn. Left per-asset deliberately — batching them needs three
+    # new multi-asset repository methods, and a turn carries a handful of
+    # attachments at most (the composer's staged list bounds it). Revisit if a
+    # caller ever resolves asset refs in bulk.
     staged: List[Tuple[str, Dict[str, Any], Optional[Dict], List[Dict], Dict]] = []
     for asset_id in order:
         row = by_id.get(asset_id)

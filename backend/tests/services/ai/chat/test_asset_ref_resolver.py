@@ -23,7 +23,10 @@ from app.repositories.asset_relations_repository import AssetRelationsRepository
 from app.repositories.assets_repository import AssetsRepository
 from app.services.ai.chat.asset_ref_resolver import resolve_asset_refs
 
-pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+# ``asyncio_mode = "auto"`` (pyproject) already collects the async tests here,
+# so the module carries only the unit marker: an explicit ``asyncio`` mark would
+# also land on the two SYNC tests at the bottom and warn on every run.
+pytestmark = [pytest.mark.unit]
 
 USER = "11111111-1111-1111-1111-111111111111"
 OTHER_USER = "22222222-2222-2222-2222-222222222222"
@@ -634,6 +637,41 @@ async def test_no_files_means_no_scoped_resources_read_at_all(db, scope_calls):
     assert scope_calls == []
 
 
+async def test_a_bytes_less_file_in_a_higher_slot_does_not_hide_a_usable_one(db):
+    """End to end through the real stamping step: the asset HAS a picture, so it
+    must be the one delivered — no ``asset_no_primary_image`` banner, and an id
+    the model can actually fetch."""
+    db["assets"].append(_asset_row(431))
+    db["asset_files"].extend(
+        [
+            {
+                "asset_id": 431,
+                "resource_id": 4310,
+                "slot": "sheet",
+                "sort_order": 0,
+                "loadout_id": None,
+            },
+            {
+                "asset_id": 431,
+                "resource_id": 4311,
+                "slot": "stills",
+                "sort_order": 0,
+                "loadout_id": None,
+            },
+        ]
+    )
+    db["resources"].extend(
+        [
+            _resource_row(4310, mime="application/pdf", file_path="docs/4310.pdf"),
+            _resource_row(4311),
+        ]
+    )
+    refs, failures = await resolve_asset_refs([_att("431")], user_id=USER)
+    assert refs[0].primary_resource_id == "4311"
+    assert refs[0].has_image is True
+    assert failures == []
+
+
 async def test_a_file_with_no_image_bytes_reports_no_primary_image(db):
     db["assets"].append(_asset_row(43))
     db["asset_files"].append(
@@ -649,6 +687,7 @@ async def test_a_file_with_no_image_bytes_reports_no_primary_image(db):
         _resource_row(4300, mime="application/pdf", file_path="docs/4300.pdf")
     )
     refs, failures = await resolve_asset_refs([_att("43")], user_id=USER)
+    assert refs[0].primary_resource_id is None
     assert refs[0].has_image is False
     assert [f.reason for f in failures] == ["asset_no_primary_image"]
 
