@@ -31,6 +31,24 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Run a menu action, handing focus back to the trigger FIRST.
+   *
+   * Standard dropdown behaviour, and load-bearing for the edit modal: the
+   * item you click lives inside `{menuOpen && …}`, so the same click that
+   * runs the action also unmounts the element the browser had just focused —
+   * and `document.activeElement` falls back to `<body>`. Anything that reads
+   * activeElement afterwards to remember "where focus came from" (the modal's
+   * focus-restore effect does exactly that) would capture body and restore to
+   * nothing. jsdom hides this: its fireEvent.click never moves focus at all.
+   */
+  const runMenuAction = (action: () => void) => {
+    setMenuOpen(false);
+    triggerRef.current?.focus();
+    action();
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -58,6 +76,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
         )}
         <div className="relative ml-auto" ref={menuRef}>
           <button
+            ref={triggerRef}
             aria-label="Note actions"
             onClick={() => setMenuOpen((v) => !v)}
             className="rounded p-1 text-content-3 hover:bg-island-2 hover:text-content-2"
@@ -66,13 +85,13 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
           </button>
           {menuOpen && (
             <div className="absolute right-0 z-10 mt-1 w-32 rounded-lg border border-line bg-island-2 py-1 text-xs text-content-2 shadow-lg">
-              <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => { setMenuOpen(false); onEdit(note); }}>
+              <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onEdit(note))}>
                 {t('inspiration.edit', 'Edit')}
               </button>
-              <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => { setMenuOpen(false); onTogglePin(note); }}>
+              <button className="block w-full px-3 py-1.5 text-left hover:bg-line" onClick={() => runMenuAction(() => onTogglePin(note))}>
                 {note.pinned ? t('inspiration.unpin', 'Unpin') : t('inspiration.pin', 'Pin')}
               </button>
-              <button className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-line" onClick={() => { setMenuOpen(false); onDelete(note); }}>
+              <button className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-line" onClick={() => runMenuAction(() => onDelete(note))}>
                 {t('inspiration.delete', 'Delete')}
               </button>
             </div>

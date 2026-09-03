@@ -84,4 +84,16 @@ describe('NoteCard', () => {
     fireEvent.click(screen.getByText('Delete'));
     expect(onDelete).toHaveBeenCalled();
   });
+  it('hands focus back to the trigger when a menu item runs', () => {
+    // Standard dropdown behaviour, and load-bearing for the edit modal: the
+    // menu item that opens it is unmounted by its own click, so whatever
+    // reads document.activeElement afterwards would otherwise find <body>.
+    render(
+      <NoteCard note={note()} onEdit={vi.fn()} onTogglePin={vi.fn()} onDelete={vi.fn()} onTagClick={vi.fn()} />,
+    );
+    const trigger = screen.getByLabelText('Note actions');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByText('Edit'));
+    expect(document.activeElement).toBe(trigger);
+  });
 });

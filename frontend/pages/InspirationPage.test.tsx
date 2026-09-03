@@ -356,7 +356,12 @@ describe('InspirationPage', () => {
     render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findByText(noteBody('first idea #hooks'));
     const trigger = screen.getByLabelText('Note actions');
-    trigger.focus();
+    // NOT calling trigger.focus() here on purpose. jsdom's fireEvent.click
+    // does not move focus, so hand-placing it would build a timeline that
+    // never happens in a browser: there, mousedown focuses the "Edit" menu
+    // ITEM, the same click unmounts the menu, and activeElement resets to
+    // <body> — which this effect would then dutifully "restore" to, a no-op.
+    // Walking the real path is what makes the restore assertion falsifiable.
     fireEvent.click(trigger);
     fireEvent.click(screen.getByText('Edit'));
 
@@ -381,6 +386,53 @@ describe('InspirationPage', () => {
     fireEvent.keyDown(window, { key: 'Tab' });
 
     expect(modal.contains(document.activeElement)).toBe(true);
+  });
+
+  it('leaves Tab alone while the lightbox is on top', async () => {
+    const withImage = {
+      ...NOTE,
+      attachments: [{ id: 'a1', mime: 'image/png', size_bytes: 10, original_name: 'pic.png' }],
+    };
+    listNotes.mockResolvedValue([withImage]);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    fireEvent.click(within(modal).getByLabelText('View pic.png'));
+    await screen.findByRole('dialog', { name: 'pic.png' });
+
+    const outside = screen.getByLabelText('Note actions');
+    outside.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+
+    // The lightbox is the modal layer right now. Yanking focus down into the
+    // editor underneath it is the same bug as closing the wrong layer on
+    // Escape — the guard has to cover BOTH keys, not just Escape.
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('Shift+Tab from the freshly-opened dialog wraps to the last control', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    // Focus starts on the dialog container itself (tabIndex={-1}), which is
+    // neither "outside" nor the first focusable — the gap Shift+Tab escaped
+    // through before.
+    expect(document.activeElement).toBe(modal);
+
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+
+    expect(document.activeElement).toBe(within(modal).getByText('Save Changes'));
+  });
+
+  it('Tab from the last control wraps to the first', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    (within(modal).getByText('Save Changes') as HTMLElement).focus();
+
+    fireEvent.keyDown(window, { key: 'Tab' });
+
+    expect(document.activeElement).toBe(within(modal).getByLabelText('Cancel edit'));
   });
 
   it('clicking the same category chip twice clears the filter', async () => {

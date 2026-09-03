@@ -313,12 +313,19 @@ export const InspirationPage: React.FC = () => {
     dialog?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // The attachment lightbox stacks above this modal (z-100 vs z-50) and
+      // listens on window too, so a keypress reaches BOTH handlers. Whoever is
+      // on top wins: while the lightbox is mounted this modal keeps its hands
+      // off — Escape closes the lightbox, not us, and Tab must not yank focus
+      // out of the layer above and down into the editor underneath it.
+      //
+      // ⚠️ This relies on the lightbox being a bare conditional render with no
+      // exit animation (AttachmentView: `{lightbox && <ImageLightbox/>}`), so
+      // it leaves the DOM immediately. Give it a leave transition and this
+      // guard starts swallowing Escape for the duration of that animation —
+      // the modal would feel like it ignores the key.
+      if (document.querySelector('[data-lightbox="attachment"]')) return;
       if (e.key === 'Escape') {
-        // The attachment lightbox stacks above this modal (z-100 vs z-50) and
-        // listens for Escape on window too, so a single press reaches BOTH
-        // handlers. Whoever is on top wins: while the lightbox is mounted we
-        // do nothing and let it close itself.
-        if (document.querySelector('[data-lightbox="attachment"]')) return;
         setEditing(null);
         return;
       }
@@ -333,7 +340,15 @@ export const InspirationPage: React.FC = () => {
       const last = focusable[focusable.length - 1];
       const active = document.activeElement;
       const outside = !dialog.contains(active);
-      if (e.shiftKey ? outside || active === first : outside || active === last) {
+      // `active === dialog` matters for the very first Shift+Tab: focus starts
+      // on the dialog container itself (tabIndex={-1}), which is neither
+      // "outside" nor the first focusable — without this it walks backwards
+      // straight out of the modal.
+      if (
+        e.shiftKey
+          ? outside || active === first || active === dialog
+          : outside || active === last
+      ) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
       }
