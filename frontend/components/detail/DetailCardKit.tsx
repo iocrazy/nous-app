@@ -367,7 +367,20 @@ export function RatingStars({
     <div className="flex items-center gap-0.5">
       {[1, 2, 3, 4, 5].map((star) => (
         <button key={star} className="p-0 transition-colors" onClick={() => onChange(star === value ? 0 : star)}>
-          <Star size={size} className={(value || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-ink-600'} />
+          {/* Empty star uses `content-3`, NOT `ink-600`: K1's palette remap
+              inverted the `ink` ramp in the light theme (`--ink-600` is
+              #52525b dark but #D9D4C8 light), so the old class painted
+              near-white stars on warm paper — 1.43:1 against the #FCFBF8
+              card, i.e. invisible, which is why note ratings looked absent
+              entirely. `content-3` resolves through `var(--content-3)` so it
+              follows the theme: 3.43:1 light / 3.83:1 dark.
+              The filled star KEEPS `amber-400` on purpose — K1 already
+              remapped that hue to ochre (#CEAC78) so it is semantically
+              right, and unlike `warn` it has a generated `fill-` utility
+              (verified against the deployed stylesheet: `.fill-warn` does
+              not exist, and `.text-warn` compiles to a hardcoded #fcd34d
+              that does not follow the theme). */}
+          <Star size={size} className={(value || 0) >= star ? 'text-amber-400 fill-amber-400' : 'text-content-3'} />
         </button>
       ))}
     </div>
