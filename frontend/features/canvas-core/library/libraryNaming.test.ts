@@ -73,6 +73,22 @@ const COMMENT_OPENER = /^\/[*/]/;
  *  true. */
 const T_DEFAULT = /\bt\(\s*'[^']*'\s*,\s*'([^']*)'/g;
 
+/** The LABEL-TUPLE form — `['canvas.library.scopeAllLibrary', 'All Library']`
+ *  in a lookup table, resolved later as `t(key, english)`.
+ *
+ *  This is a THIRD blind spot, and the panel opened it. `canvas.library.*`
+ *  keys must be single-quoted literals for `libraryI18n.test.ts` to see them,
+ *  so a component with a chip row per store keeps its keys in a const map —
+ *  which moves the English default out of `t()`'s literal form and straight
+ *  past `T_DEFAULT` above. Every segment, scope and kind chip in the panel is
+ *  written this way, and `All Library` is one of them: without this pattern,
+ *  naming a second thing Library from a lookup table leaves the suite green.
+ *
+ *  Scanned across the whole tree it matches 37 pairs, of which exactly one
+ *  carries the word — so it costs nothing and the `HAS_LIBRARY` filter below
+ *  does the rest. */
+const LABEL_TUPLE = /\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g;
+
 const HAS_LIBRARY = /\blibrary\b/i;
 
 /** The exact English defaults that genuinely name THE media library — the
@@ -85,11 +101,12 @@ const HAS_LIBRARY = /\blibrary\b/i;
  *  already-listed file, which is precisely how the first version of this
  *  guard would have missed the five renames. Each entry says what it labels.
  *
- *  Every entry below still has at least one live mount after Tasks 7/10:
- *  `Search Library…` and `Could not load the asset library` each appear
- *  twice, and only one mount of each (`LibraryReferencePopover.tsx`,
- *  `AssetPickerDialog.tsx`) is deleted there. So none of these goes dead —
- *  but an entry that did would be harmless, not a failure. */
+ *  Every entry below still has at least one live mount. Task 7 deleted
+ *  `LibraryReferencePopover.tsx`, which held one of the two `Search Library…`
+ *  mounts; `LibraryMediaPage.tsx` took over that string and the mention
+ *  palette still carries the other. An entry that DID go dead would be
+ *  harmless here, not a failure — the canary two cases below is what keeps
+ *  the whole set from quietly emptying out. */
 const ALLOWED_DEFAULTS = new Set([
   // Section label over the mention palette's Assets tab — one library per
   // canvas, so it names the media library rather than choosing between any.
@@ -109,9 +126,12 @@ const ALLOWED_DEFAULTS = new Set([
   'Could not load the asset library',
   // OutputNodeView: this image has no generated-media record to save from.
   'This image has no library record to save',
+  // The panel's asset-scope chip: the whole media library, as opposed to
+  // just what this project links. Names THE library, not a choice of one.
+  'All Library',
 ]);
 
-/** Both patterns, over one file. */
+/** All three patterns, over one file. */
 function scan(file: string): { offenders: string[]; defaults: string[] } {
   const src = fs.readFileSync(file, 'utf8');
   const rel = path.relative(ROOT, file);
@@ -126,11 +146,13 @@ function scan(file: string): { offenders: string[]; defaults: string[] } {
     }
   }
 
-  for (const m of src.matchAll(T_DEFAULT)) {
-    const text = m[1];
-    if (!HAS_LIBRARY.test(text)) continue;
-    defaults.push(`${rel}: ${text}`);
-    if (!ALLOWED_DEFAULTS.has(text)) offenders.push(`${rel}: t() default ${text}`);
+  for (const pattern of [T_DEFAULT, LABEL_TUPLE]) {
+    for (const m of src.matchAll(pattern)) {
+      const text = m[1];
+      if (!HAS_LIBRARY.test(text)) continue;
+      defaults.push(`${rel}: ${text}`);
+      if (!ALLOWED_DEFAULTS.has(text)) offenders.push(`${rel}: t() default ${text}`);
+    }
   }
 
   return { offenders, defaults };
@@ -144,6 +166,15 @@ describe('the word Library on the canvas', () => {
   it('the t() default pattern matches real code — an empty scan would too', () => {
     const found = tsFiles(ROOT).flatMap((f) => scan(f).defaults);
     expect(found.length).toBeGreaterThan(4);
+  });
+
+  it('the label-tuple pattern matches real code — the same canary, one level down', () => {
+    // Without this, a typo in LABEL_TUPLE would silently stop scanning the
+    // const maps every chip row in the panel is built from.
+    const pairs = tsFiles(ROOT).flatMap((f) => [
+      ...fs.readFileSync(f, 'utf8').matchAll(/\[\s*'[^']*'\s*,\s*'([^']*)'\s*\]/g),
+    ]);
+    expect(pairs.length).toBeGreaterThan(20);
   });
 
   it('names exactly one thing: the panel and its chip', () => {

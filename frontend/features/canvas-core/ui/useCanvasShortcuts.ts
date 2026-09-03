@@ -11,6 +11,7 @@
  *   Cmd/Ctrl + V              → paste from in-memory clipboard
  *   Cmd/Ctrl + D              → duplicate selected nodes in place (G6)
  *   Delete / Backspace        → delete selected nodes
+ *   L                         → open / close the Library panel
  *
  * Bound at window scope while the hook is mounted. Skipped when the
  * keystroke originates inside an editable text field so node-rename
@@ -63,6 +64,9 @@ interface UseCanvasShortcutsOptions {
   /** Called on `?` (Shift+/) outside an editable element — opens the
    *  keyboard-shortcut help panel. */
   onOpenHelp?: () => void;
+  /** Called on `L` outside an editable element — opens or closes the Library
+   *  panel. View-only, so it stays live in a read-only session. */
+  onToggleLibrary?: () => void;
 }
 
 export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
@@ -73,9 +77,11 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
   // re-subscribing (avoids adding onOpenPalette to the effect dep array).
   const onOpenPaletteRef = useRef(options.onOpenPalette);
   const onOpenHelpRef = useRef(options.onOpenHelp);
+  const onToggleLibraryRef = useRef(options.onToggleLibrary);
   useEffect(() => {
     onOpenPaletteRef.current = options.onOpenPalette;
     onOpenHelpRef.current = options.onOpenHelp;
+    onToggleLibraryRef.current = options.onToggleLibrary;
   });
 
   useEffect(() => {
@@ -229,6 +235,13 @@ export function useCanvasShortcuts(options: UseCanvasShortcutsOptions = {}) {
             .map((n) => idOf(n))
             .filter((v): v is string => v !== null),
         );
+        return;
+      }
+      if ((key === 'l' || key === 'L') && !meta && !event.shiftKey) {
+        // Bare key, like `z` and `x`. View-only — a read-only session can open
+        // the library, it just cannot place anything from it.
+        event.preventDefault();
+        onToggleLibraryRef.current?.();
         return;
       }
       if ((key === 'z' || key === 'Z') && !meta && !event.shiftKey) {

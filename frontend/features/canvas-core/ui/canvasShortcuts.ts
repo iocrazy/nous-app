@@ -54,6 +54,7 @@ export const CANVAS_SHORTCUT_GROUPS: ShortcutGroup[] = [
     entries: [
       { keys: ['mod', 'K'], label: 'Command palette' },
       { keys: ['X'], label: 'Knife (cut edges)' },
+      { keys: ['L'], label: 'Library panel' },
       { keys: ['?'], label: 'This help' },
     ],
   },

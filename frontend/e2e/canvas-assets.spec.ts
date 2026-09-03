@@ -366,13 +366,26 @@ test('an asset card wired into a prompt puts its references and its prompt into 
   await page.goto(`/team/${SCOPE_ID}/canvas/${canvasId}`);
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
 
-  // Insert: the node bar's Asset chip opens the library picker, and picking a
-  // row fetches that asset's DETAIL before creating the card (the file
-  // checklist is seeded from it).
-  await page.getByTestId('top-node-chip-asset').click();
-  const row = page.getByTestId('asset-picker-row');
-  await expect(row).toBeVisible();
-  await row.click();
+  // Insert: the node bar's Library chip opens the panel on Assets, and Place
+  // on Canvas fetches the picked asset's DETAIL before creating the card —
+  // the file checklist is seeded from it, and the LIST row carries only a
+  // tally (`file_counts_by_slot`), so a card seeded from it would reference
+  // nothing while looking like it worked.
+  await page.getByTestId('top-node-chip-library').click();
+  const cell = page.getByTestId('library-cell').first();
+  await expect(cell).toBeVisible();
+  await cell.click();
+  await page.getByTestId('library-primary').click();
+  // Close it before touching the board: the panel is an island pinned to the
+  // right edge, and a card placed under it is a card this test could not drag.
+  await page.getByTestId('library-close').click();
+  await expect(page.getByTestId('library-panel')).toHaveCount(0);
+  // Place on Canvas lays cards out in LANES to the right of what is already
+  // there, which can put a fresh card past the right edge — and the surface
+  // runs `onlyRenderVisibleElements`, so an off-viewport node is not merely
+  // off-screen, it is not in the DOM at all. Fit the view the way a user
+  // would rather than asserting against a node the app never rendered.
+  await page.getByRole('button', { name: 'Fit View' }).click();
 
   const card = page.getByTestId('smart-asset-node');
   await expect(card).toBeVisible();
@@ -384,18 +397,24 @@ test('an asset card wired into a prompt puts its references and its prompt into 
   const stills = page.getByTestId(`asset-node-file-${STILLS_FILE}`);
   await expect(stills).not.toBeChecked();
 
-  // The chip drops the card at the viewport CENTRE, which puts its checklist
-  // under the composer island pinned to the bottom of the screen. Move it into
-  // the clear band between the two islands with an ordinary drag rather than
-  // forcing the click: the overlap is real, and `force` would assert against a
-  // control the user could not have reached
+  // Place on Canvas drops the card into the next free lane, so where it lands
+  // depends on what is already on the board — and Fit View then rescales
+  // everything. Move it into the clear band with an ordinary drag rather than
+  // forcing the click: the overlap with the surrounding islands is real, and
+  // `force` would assert against a control the user could not have reached
   // (`reference-playwright-unstable-may-be-no-frames` — never degrade to force
   // to get past a genuine hit-test failure).
+  //
+  // The destination is measured off the PANE rather than written as fixed
+  // screen coordinates: the sidebar, the node bar and the composer island all
+  // eat into the window, and a hard-coded point silently drifts under one of
+  // them the moment any of those change width.
+  const pane = (await page.locator('.react-flow__pane').boundingBox())!;
   const cardNode = page.locator('.react-flow__node').filter({ has: card });
   const dropped = (await cardNode.boundingBox())!;
   await page.mouse.move(dropped.x + dropped.width / 2, dropped.y + 12);
   await page.mouse.down();
-  await page.mouse.move(260, 230, { steps: 8 });
+  await page.mouse.move(pane.x + 140, pane.y + 120, { steps: 8 });
   await page.mouse.up();
 
   // Tick the stills, so the run below proves the CHECKLIST is what decides —

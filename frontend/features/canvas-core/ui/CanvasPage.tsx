@@ -28,6 +28,8 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import type { ReactFlowInstance } from '@xyflow/react';
 
+import { LibraryPanel } from '../library/LibraryPanel';
+import { useLibraryStore } from '../library/libraryStore';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasScope } from '../smart/canvasScope';
@@ -191,6 +193,7 @@ export function CanvasView({
     readOnly,
     onOpenPalette: () => setPaletteOpen(true),
     onOpenHelp: () => setHelpOpen(true),
+    onToggleLibrary: () => useLibraryStore.getState().toggle(),
   });
 
   // Phase 6a — cross-tab / cross-user realtime invalidation.
@@ -833,6 +836,7 @@ export function CanvasView({
       {(kind === 'smart' || isEntityCanvas(kind)) && !readOnly && (
         <TopNodeBar surfaceRef={surfaceRef} />
       )}
+      {isSmartFamily(kind) && !readOnly && <LibraryPanel />}
       {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && !readOnly && (
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />

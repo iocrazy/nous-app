@@ -1,8 +1,13 @@
 // features/canvas-core/canvasAssetEntryI18n.test.ts
 //
-// en/zh parity for the four namespaces P4 Task 6's canvas entry points added:
-// `canvas.asAsset.*`, `canvas.projectAssets.*`, `canvas.legacyCard.*` and
-// `canvas.assetSeed.*`.
+// en/zh parity for the namespaces P4 Task 6's canvas entry points added:
+// `canvas.asAsset.*`, `canvas.legacyCard.*` and `canvas.assetSeed.*`.
+//
+// `canvas.projectAssets.*` was a fourth until the Library panel landed: the
+// Project Assets chip that spoke those six lines is gone, and taking a whole
+// project shelf is now a scope plus Select All inside the panel. The keys went
+// with the code — the "nothing asks for it" case below is what would have
+// caught them being left behind.
 //
 // Every `t()` call in these files passes an English default, so a key missing
 // from en.json still renders correctly and reports nothing — and a key missing
@@ -30,7 +35,7 @@ const SOURCES = [
   path.join(__dirname, 'ui/CanvasPage.tsx'),
 ];
 
-const NAMESPACES = ['asAsset', 'projectAssets', 'legacyCard', 'assetSeed'] as const;
+const NAMESPACES = ['asAsset', 'legacyCard', 'assetSeed'] as const;
 
 function load(lang: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(LOCALES, `${lang}.json`), 'utf8'));
@@ -61,7 +66,10 @@ const zh = load('zh');
 
 describe('canvas asset-entry i18n', () => {
   it('found the keys at all — an empty list would pass every case below', () => {
-    expect(usedKeys.length).toBeGreaterThan(8);
+    // Was 8 while `canvas.projectAssets.*` was still one of the namespaces.
+    // The floor is a canary against a broken scan, not a budget, so it moves
+    // down with the namespace list rather than pinning a count nobody owns.
+    expect(usedKeys.length).toBeGreaterThan(4);
   });
 
   it.each(usedKeys)('%s is translated in both locales', (key) => {
@@ -127,13 +135,11 @@ describe('canvas asset-entry i18n', () => {
     expect(copied).toEqual([]);
   });
 
-  it('the count toasts keep their interpolation placeholders in zh', () => {
-    // "Added {{inserted}}" translated without the placeholder renders a
-    // sentence with no number in it — a report that reports nothing.
+  it('the named toasts keep their interpolation placeholders in zh', () => {
+    // "Saved to {{name}}" translated without the placeholder renders a
+    // sentence naming nothing — a report that reports nothing.
     const placeholders: Record<string, string[]> = {
       'canvas.asAsset.saved': ['name'],
-      'canvas.projectAssets.inserted': ['inserted'],
-      'canvas.projectAssets.insertedWithSkipped': ['inserted', 'skipped'],
     };
     for (const [key, names] of Object.entries(placeholders)) {
       for (const lang of [en, zh]) {

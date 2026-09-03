@@ -12,7 +12,7 @@
 // width of 0 and return NO rows — the grid would render zero cells whatever
 // the data said. The ResizeObserver / getBoundingClientRect stubs below are
 // what let the REAL layout path run, exactly as `library/LibraryGrid.test.tsx`
-// and `library/LibraryReferencePopover.test.tsx` do.
+// and `library/LibraryPanel.test.tsx` do.
 
 import { createRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';

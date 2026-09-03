@@ -33,7 +33,7 @@ import {
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import { addReferences } from '../../library/addReferences';
-import { LibraryReferencePopover } from '../../library/LibraryReferencePopover';
+import { useLibraryStore } from '../../library/libraryStore';
 import type { PromptImageRef } from './promptImageRefs';
 import {
   PromptMentionPicker,
@@ -292,7 +292,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const chainTail = useIsChainTail(id);
   const chainRunning = useChainRunStore((s) => s.runningTail === id);
   const requestChainStop = useChainRunStore((s) => s.requestStop);
-  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  // The card's heading is the literal "Prompt", so the body's first line is
+  // what a user would call this one — that is what the target bar names.
+  const openLibraryForRefs = useCallback(() => {
+    const title = (body ?? '').split('\n')[0].slice(0, 40) || 'Prompt';
+    const target = { nodeId: id, kind: 'prompt' as const, title };
+    useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads', focusSearch: true, target });
+  }, [id, body]);
   const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
   const manualUrlSet = new Set(manualRefs.map((r) => r.url));
   const removeManualRef = useCallback(
@@ -747,7 +753,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
-                onClick={() => setRefPickerOpen((v) => !v)}
+                onClick={openLibraryForRefs}
                 disabled={stripEntries.length >= MAX_REFERENCE_IMAGES}
                 title={
                   stripEntries.length >= MAX_REFERENCE_IMAGES
@@ -768,20 +774,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               data-testid="add-reference"
               aria-label="Add reference image"
               title="Add reference image"
-              onClick={() => setRefPickerOpen((v) => !v)}
+              onClick={openLibraryForRefs}
               className="nodrag flex h-6 items-center gap-1 rounded border border-dashed border-canvas-line px-2 text-[10px] text-canvas-muted hover:text-canvas-text"
             >
               <ImagePlus size={12} />
               Add reference
             </button>
           </div>
-        )}
-        {refPickerOpen && (
-          <LibraryReferencePopover
-            nodeId={id}
-            model={gen?.model ?? null}
-            onClose={() => setRefPickerOpen(false)}
-          />
         )}
         {/* The resizer now lives on this wrapper. A <textarea> had one for
             free; a contenteditable does not, and IC's promptH (a body height

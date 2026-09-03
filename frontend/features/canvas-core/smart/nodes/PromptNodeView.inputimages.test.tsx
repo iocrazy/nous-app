@@ -14,6 +14,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useLibraryStore } from '../../library/libraryStore';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import type { CanvasNode } from '../../types';
 import { PromptNodeView } from './PromptNodeView';
@@ -45,9 +46,9 @@ vi.mock('../../services/canvasGenerationService', async (importOriginal) => ({
   listGenerationCapabilities: () => listGenerationCapabilities(),
 }));
 
-// The reference popover renders the real LibraryGrid, which asks the
-// virtualizer for a container width and observes it. jsdom has neither, and
-// without the stubs the observer is missing and the run stops being pristine.
+// The @-picker renders the real LibraryGrid, which asks the virtualizer for a
+// container width and observes it. jsdom has neither, and without the stubs
+// the observer is missing and the run stops being pristine.
 class ObserverStub {
   observe(): void {}
   unobserve(): void {}
@@ -131,6 +132,8 @@ function promptData(): { source_ref?: string; body: string } {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  useLibraryStore.setState(useLibraryStore.getInitialState(), true);
   global.ResizeObserver = ObserverStub as unknown as typeof ResizeObserver;
   global.IntersectionObserver = ObserverStub as unknown as typeof IntersectionObserver;
   searchResources.mockReset().mockResolvedValue({
@@ -274,12 +277,13 @@ describe('manual references (⑨C)', () => {
     expect(refs).toEqual([]);
   });
 
-  it('Add reference key opens a picker that can be SEARCHED', () => {
+  it('Add reference opens the Library panel targeting this node', () => {
+    // The node no longer carries a picker of its own. There is ONE media
+    // surface on the canvas, and this button aims it at this card.
     seed(false);
     renderPrompt();
     fireEvent.click(screen.getByTestId('add-reference'));
-    expect(screen.getByTestId('reference-picker')).toBeInTheDocument();
-    // The whole point of the replacement: the old popover had no input at all.
-    expect(screen.getByTestId('library-search')).toBeInTheDocument();
+    expect(useLibraryStore.getState().open).toBe(true);
+    expect(useLibraryStore.getState().target).toMatchObject({ nodeId: 'p1', kind: 'prompt' });
   });
 });
