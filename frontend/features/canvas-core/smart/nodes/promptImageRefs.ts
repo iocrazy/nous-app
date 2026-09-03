@@ -10,6 +10,7 @@ import type { JSONContent } from '@tiptap/core';
 
 import {
   assetMentionToken,
+  splitMentionSegments,
   type MentionedAsset,
 } from '../mentionedAssets';
 
@@ -72,6 +73,123 @@ export function docToPromptText(doc: JSONContent): string {
     blocks.push(line);
   }
   return blocks.join('\n');
+}
+
+/** A `@alias` occurrence only counts as a whole token when the character after
+ *  it is not a word character. Aliases are minted as `Image N`, so without this
+ *  `@Image 1` would happily match the first eight characters of `@Image 10`
+ *  and repoint the reference at a different picture. */
+const WORD_CHAR = /\w/;
+
+/**
+ * Build a prompt document from the PERSISTED form: the plain-text body plus the
+ * separately-stored chip lists. The inverse of `docToPromptText`.
+ *
+ * ─ Why the chips have to be SPLICED, not appended ───────────────────────────
+ *
+ * `image_refs` records no position — `docToPromptText` flattened each chip to
+ * the literal `@alias` and the text is the only place that offset survives. So
+ * a chip is restored by consuming the token that stands for it, in `image_refs`
+ * order, each chip taking the first occurrence no earlier chip has claimed.
+ * Appending instead leaves the literal `@Image 1` mid-sentence AND drops a
+ * duplicate chip after the last word: reopening a canvas visibly rewrote the
+ * user's prompt (the bug this function exists to prevent).
+ *
+ * A chip whose token is nowhere in the body is still appended. It is a real
+ * reference image, and silently dropping it would remove a picture from the
+ * run — the failure mode `collectImageRefs` guards against at the other end.
+ *
+ * Blocks are recovered by splitting on '\n', which is what `docToPromptText`
+ * joins them with; seeding one paragraph would lose every paragraph break.
+ *
+ * An asset token whose asset is not in `assets` stays LITERAL TEXT rather than
+ * becoming a nameless chip. That keeps the round trip lossless — the token is
+ * still in the projected text, so nothing is destroyed by a name table that
+ * happened to arrive late — and it matches what the run does with the same
+ * token (`renderMentionText` drops what it cannot name).
+ */
+export function seedPromptDoc(
+  value: string,
+  chips: readonly PromptImageRef[],
+  assets: Map<string, MentionedAsset>,
+): JSONContent {
+  // Segments carrying their offset in `value`, so a claim made in one segment
+  // can be compared against a claim made in another.
+  let at = 0;
+  const spans = splitMentionSegments(value).map((seg) => {
+    const start = at;
+    at += seg.kind === 'text' ? seg.text.length : assetMentionToken(seg.assetId).length;
+    return { seg, start, end: at };
+  });
+
+  // Which `@alias` occurrence each chip takes. Searched only inside TEXT runs:
+  // an asset token is opaque storage and must never be carved up by an alias
+  // that happens to appear inside it.
+  const claims: { start: number; end: number; chip: PromptImageRef }[] = [];
+  const trailing: PromptImageRef[] = [];
+  for (const chip of chips) {
+    // An empty alias projects to a bare '@', which would match any mention the
+    // user typed. Such a chip is appended rather than guessed at.
+    if (!chip.alias) {
+      trailing.push(chip);
+      continue;
+    }
+    const token = `@${chip.alias}`;
+    let placed = false;
+    for (const span of spans) {
+      if (span.seg.kind !== 'text') continue;
+      const text = span.seg.text;
+      for (let i = text.indexOf(token); i >= 0; i = text.indexOf(token, i + 1)) {
+        const start = span.start + i;
+        const end = start + token.length;
+        const after = value[end];
+        if (after !== undefined && WORD_CHAR.test(after)) continue;
+        if (claims.some((c) => start < c.end && c.start < end)) continue;
+        claims.push({ start, end, chip });
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+    if (!placed) trailing.push(chip);
+  }
+  claims.sort((a, b) => a.start - b.start);
+
+  const blocks: JSONContent[][] = [[]];
+  const pushNode = (node: JSONContent) => blocks[blocks.length - 1].push(node);
+  /** Text may span a paragraph break; each '\n' opens a new block. */
+  const pushText = (text: string) => {
+    const lines = text.split('\n');
+    for (const [i, line] of lines.entries()) {
+      if (i > 0) blocks.push([]);
+      if (line) pushNode({ type: 'text', text: line });
+    }
+  };
+
+  let claimIdx = 0;
+  for (const span of spans) {
+    if (span.seg.kind === 'asset') {
+      const known = assets.get(span.seg.assetId);
+      if (known) pushNode({ type: PROMPT_ASSET_REF, attrs: { ...known } });
+      else pushText(assetMentionToken(span.seg.assetId));
+      continue;
+    }
+    let cursor = span.start;
+    while (claimIdx < claims.length && claims[claimIdx].start < span.end) {
+      const claim = claims[claimIdx];
+      pushText(value.slice(cursor, claim.start));
+      pushNode({ type: PROMPT_IMAGE_REF, attrs: { ...claim.chip } });
+      cursor = claim.end;
+      claimIdx += 1;
+    }
+    pushText(value.slice(cursor, span.end));
+  }
+  for (const chip of trailing) pushNode({ type: PROMPT_IMAGE_REF, attrs: { ...chip } });
+
+  return {
+    type: 'doc',
+    content: blocks.map((content) => ({ type: 'paragraph', content })),
+  };
 }
 
 /** Matches '@' plus the word characters after it, at the end of the string. */

@@ -30,7 +30,7 @@ import Text from '@tiptap/extension-text';
 
 import { PromptAssetChipNode } from './PromptAssetChipNode';
 import { PromptImageChipNode } from './PromptImageChipNode';
-import { splitMentionSegments, type MentionedAsset } from '../mentionedAssets';
+import { type MentionedAsset } from '../mentionedAssets';
 import {
   PROMPT_ASSET_REF,
   PROMPT_IMAGE_REF,
@@ -38,6 +38,7 @@ import {
   collectImageRefs,
   docToPromptText,
   mentionQueryFromText,
+  seedPromptDoc,
   type PromptImageRef,
 } from './promptImageRefs';
 
@@ -103,37 +104,6 @@ function mentionQueryBeforeCaret(ed: { view: { state: EditorState } }): string |
   const { state } = ed.view;
   const from = state.selection.from;
   return mentionQueryFromText(state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\n'));
-}
-
-/**
- * Build the initial doc: the plain text with its asset tokens re-hydrated into
- * chips, then any restored image chips.
- *
- * A token whose asset is not in `assets` stays LITERAL TEXT rather than
- * becoming a nameless chip. That keeps the round trip lossless — the token is
- * still in the projected text, so nothing is destroyed by a name table that
- * happened to arrive late — and it matches what the run does with the same
- * token (`renderMentionText` drops what it cannot name).
- */
-function seedDoc(
-  value: string,
-  chips: PromptImageRef[],
-  assets: Map<string, MentionedAsset>,
-): JSONContent {
-  const content: JSONContent[] = [];
-  for (const seg of splitMentionSegments(value)) {
-    if (seg.kind === 'text') {
-      if (seg.text) content.push({ type: 'text', text: seg.text });
-      continue;
-    }
-    const known = assets.get(seg.assetId);
-    if (known) content.push({ type: PROMPT_ASSET_REF, attrs: { ...known } });
-    else content.push({ type: 'text', text: `@[asset:${seg.assetId}]` });
-  }
-  for (const chip of chips) {
-    content.push({ type: PROMPT_IMAGE_REF, attrs: { ...chip } });
-  }
-  return { type: 'doc', content: [{ type: 'paragraph', content }] };
 }
 
 export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
@@ -221,7 +191,7 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
         PromptImageChipNode,
         PromptAssetChipNode,
       ],
-      content: seedDoc(value, initialChips, assetIndexRef.current),
+      content: seedPromptDoc(value, initialChips, assetIndexRef.current),
       editable: !readOnly,
       editorProps: {
         attributes: {
@@ -325,7 +295,7 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
       if (composingRef.current) return;
       if (value === lastEmittedRef.current) return;
       if (value === docToPromptText(editor.getJSON())) return;
-      editor.commands.setContent(seedDoc(value, [], assetIndexRef.current), {
+      editor.commands.setContent(seedPromptDoc(value, [], assetIndexRef.current), {
         emitUpdate: false,
       });
       lastEmittedRef.current = value;

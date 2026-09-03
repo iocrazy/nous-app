@@ -108,6 +108,38 @@ describe('PromptBodyEditor', () => {
     expect(el.textContent).toContain('a locked prompt');
   });
 
+  it('reopens a saved body with the chip back where the user put it', async () => {
+    // Reopening a canvas re-mounts this editor from what was persisted: the
+    // plain-text body (chips already flattened to `@alias`) plus `image_refs`.
+    // Before the fix the alias stayed as literal text and the chip was
+    // appended, so `@Image 1 扩图` came back as `@Image 1 扩图 [chip]`.
+    const onChange = vi.fn();
+    render(
+      <PromptBodyEditor
+        value="@Image 1 扩图，旁边放老虎"
+        onChange={onChange}
+        initialChips={[{ ...CHIP, alias: 'Image 1' }]}
+      />,
+    );
+    await screen.findByTestId('prompt-image-chip');
+    const el = screen.getByTestId('prompt-body-editor');
+
+    // One chip, and the literal token is no longer sitting in the prose.
+    expect(screen.getAllByTestId('prompt-image-chip')).toHaveLength(1);
+    expect(el.textContent).not.toContain('@Image 1');
+
+    // The chip leads the line, exactly as it was saved.
+    const chip = screen.getByTestId('prompt-image-chip');
+    const para = el.querySelector('p')!;
+    expect(para.firstElementChild?.contains(chip)).toBe(true);
+
+    // And the text the parent gets back is unchanged — a reopen must not
+    // rewrite the user's prompt.
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith('@Image 1 扩图，旁边放老虎'),
+    );
+  });
+
   it('accepts a chip inserted through the imperative handle', async () => {
     const ref = createRef<PromptBodyEditorHandle>();
     render(<PromptBodyEditor ref={ref} value="" onChange={() => {}} />);
