@@ -123,6 +123,7 @@ async def list_notes(
     date: Optional[str] = None,
     tag: Optional[str] = None,
     q: Optional[str] = None,
+    min_rating: Optional[int] = Query(None, ge=0, le=5),
     limit: int = 50,
     before_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
@@ -134,6 +135,7 @@ async def list_notes(
         date=date,
         tag=tag,
         q=q,
+        min_rating=min_rating,
         limit=limit,
         before_id=before_id,
     )

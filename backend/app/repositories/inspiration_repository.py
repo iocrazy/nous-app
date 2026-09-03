@@ -122,6 +122,7 @@ class InspirationNotesRepository:
         date: Optional[str] = None,
         tag: Optional[str] = None,
         q: Optional[str] = None,
+        min_rating: Optional[int] = None,
         limit: int = 50,
         before_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
@@ -137,6 +138,11 @@ class InspirationNotesRepository:
                 stmt = stmt.where(InspirationNotes.tags.contains([tag]))
             if q:
                 stmt = stmt.where(InspirationNotes.content_md.ilike(f"%{q}%"))
+            # `0` means "any rating", not "rating >= 0" — both would return the
+            # same rows today, but only the former stays correct if ratings
+            # ever go negative or become nullable.
+            if min_rating:
+                stmt = stmt.where(InspirationNotes.rating >= min_rating)
             if before_id:
                 stmt = stmt.where(InspirationNotes.id < _bigint(before_id))
             stmt = stmt.order_by(InspirationNotes.id.desc()).limit(limit)

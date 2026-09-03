@@ -104,12 +104,14 @@ class NotesService:
         q: Optional[str],
         limit: int,
         before_id: Optional[str],
+        min_rating: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         rows = await self._notes.list(
             user_id,
             date=date,
             tag=tag,
             q=q,
+            min_rating=min_rating,
             limit=limit,
             before_id=before_id,
         )

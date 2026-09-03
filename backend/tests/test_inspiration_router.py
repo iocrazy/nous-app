@@ -39,6 +39,45 @@ async def test_list_limit_out_of_range_400():
 
 
 @pytest.mark.asyncio
+async def test_list_threads_min_rating_to_service():
+    svc = AsyncMock()
+    svc.list_notes.return_value = []
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await list_notes(
+            date=None,
+            tag=None,
+            q=None,
+            min_rating=4,
+            limit=50,
+            before_id=None,
+            current_user=USER,
+        )
+    assert svc.list_notes.await_args.kwargs["min_rating"] == 4
+
+
+def test_min_rating_accepts_explicit_zero():
+    """0 is a legal value (= no filter), not an error.
+
+    `ge=1` would turn an external client's explicit `min_rating=0` — the
+    dropdown's own "Any rating" value — into a 422, contradicting the
+    "0 means no filter" contract the other three layers implement. The
+    tests above all call the endpoint function directly, which bypasses
+    FastAPI's validation entirely, so nothing else pins this bound.
+
+    Constraints live in the Query object's pydantic-v2 `metadata`, not as
+    attributes. If this parameter ever moves to `Annotated[..., Query(...)]`
+    the default becomes a plain None and this lookup fails loudly.
+    """
+    import inspect
+
+    import annotated_types
+
+    q = inspect.signature(list_notes).parameters["min_rating"].default
+    lower = next(m for m in q.metadata if isinstance(m, annotated_types.Ge))
+    assert lower.ge == 0
+
+
+@pytest.mark.asyncio
 async def test_create_returns_service_row():
     svc = AsyncMock()
     svc.create_note.return_value = {

@@ -106,6 +106,16 @@ async def test_list_folds_attachments_per_note():
 
 
 @pytest.mark.asyncio
+async def test_list_threads_min_rating_to_repo():
+    svc = _service()
+    svc._notes.list.return_value = []
+    await svc.list_notes(
+        "u1", date=None, tag=None, q=None, min_rating=4, limit=50, before_id=None
+    )
+    assert svc._notes.list.await_args.kwargs["min_rating"] == 4
+
+
+@pytest.mark.asyncio
 async def test_delete_missing_raises_not_found():
     svc = _service()
     svc._notes.get_by_id.return_value = None
