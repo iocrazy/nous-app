@@ -20,6 +20,7 @@ import { rerunPrompt } from '../regenerate';
 import {
   useIsChainTail,
   useNodeInputUrls,
+  useUpstreamAssetRefCount,
   useUpstreamPromptText,
 } from './useGraphDerived';
 import { MAX_REFERENCE_IMAGES, reorderRefs } from '../refOrder';
@@ -33,13 +34,23 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import type { PromptImageRef } from './promptImageRefs';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
+import {
+  PromptMentionPicker,
+  type PromptMentionPickerHandle,
+} from './PromptMentionPicker';
+import { useCanvasScope } from '../canvasScope';
+import type { MentionedAsset } from '../mentionedAssets';
+import { useModelCapabilities } from './useModelCapabilities';
+import { fetchAssetDetail, type AssetSummary } from '../../../../services/assetsService';
+import { primarySlotFileIds } from '../assetFiles';
+import { promptStripEntries } from '../promptStrip';
+import { ASSET_TYPE_ICON } from '../../../../components/resources/assets/assetTypeMeta';
 import { GenFooterControls } from './GenFooterControls';
 import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
 import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
-import type { ResourceSearchResult } from '../../../../types';
 import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
@@ -70,6 +81,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     last_dropped,         // knobs the backend ignored on the last run (P4)
     last_dropped_refs,    // references it could not use on that run (P4 assets)
+    mentioned_assets = [], // assets named in the body with @ (inline chips)
+    last_mention_dropped,  // what a mentioned asset's bundle would not send
+    last_mention_error = null, // that bundle request itself failed
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const { t } = useTranslation();
@@ -79,9 +93,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // only joined here, at the one place a user reads them. References are
   // grouped by reason rather than listed per-url: the badge is a summary, and
   // the urls are in the tooltip.
+  // BOTH reference ledgers, joined only here. `last_dropped_refs` is what the
+  // BACKEND could not use on the run; `last_mention_dropped` is what the bundle
+  // endpoint refused to send for an @-mentioned asset at dispatch. Different
+  // authorities, same question for the user ("which picture is missing"), so
+  // they share one badge — and both are rewritten by every run, so neither can
+  // describe an older one.
   const droppedRefs: DroppedRef[] = useMemo(
-    () => (Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
-    [last_dropped_refs],
+    () => [
+      ...(Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
+      ...(Array.isArray(last_mention_dropped) ? last_mention_dropped : []),
+    ],
+    [last_dropped_refs, last_mention_dropped],
   );
   const ignoredParts: string[] = useMemo(() => {
     const refCounts = droppedRefs.reduce<Map<string, number>>((acc, ref) => {
@@ -161,25 +184,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       ? formatElapsed(finalElapsed)
       : null;
 
-  // ── @-mention handler ────────────────────────────────────────────────────
-  // Builds a PromptResourceRef from the picked SearchResult and appends it
-  // to resource_refs (deduplicated by resource_id).
-  const handleSelectRef = useCallback(
-    (item: ResourceSearchResult) => {
-      const ref: PromptResourceRef = {
-        resource_id: item.id,
-        name: item.name,
-        kind: item.kind,
-        mime: item.mime ?? '',
-        scope: item.scope,
-      };
-      const current = resource_refs as PromptResourceRef[];
-      if (current.some((r) => r.resource_id === ref.resource_id)) return;
-      patch({ resource_refs: [...current, ref] });
-    },
-    [resource_refs, patch],
-  );
-
   // ── IME-safe draft mirror (2026-08-18 incident) ─────────────────────────
   // The textarea renders a LOCAL draft, not the store body: patching the
   // store on every keystroke round-trips through React Flow asynchronously,
@@ -205,20 +209,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     [patch],
   );
 
-  const mention = useCanvasMentionPicker({
-    value: draft,
-    onValueChange: pushBody,
-    onSelectRef: handleSelectRef,
-  });
-
-  const handleBodyChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setDraft(e.target.value);
-      if (composingRef.current) return;
-      mention.handleChange(e);
-    },
-    [mention.handleChange],
-  );
+  const mention = useCanvasMentionPicker();
 
   // ── Image chips in the body ──────────────────────────────────────────────
   const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
@@ -228,6 +219,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const seededChips = useRef<PromptImageRef[]>(
     (image_refs ?? []) as PromptImageRef[],
   ).current;
+  // The name table the editor re-hydrates `@[asset:id]` tokens with. Seeded
+  // once for the same reason the image chips are: from then on the document
+  // owns the list, and the editor keeps accumulating names it has seen.
+  const seededAssetChips = useRef<MentionedAsset[]>(
+    (mentioned_assets ?? []) as MentionedAsset[],
+  ).current;
   // The document is the chip list; node data mirrors it so a reload can
   // rebuild them (body is plain text and cannot carry them).
   const handleImageRefsChange = useCallback(
@@ -236,7 +233,28 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch],
   );
-  // While the picker is open, Escape and arrows belong to it, not the text.
+  // Same rule for asset mentions, and it is what makes "delete the chip,
+  // delete the reference" true without any extra bookkeeping: the document is
+  // re-collected on every change, so a removed chip prunes the entry here and
+  // the run stops bundling that asset.
+  const handleAssetRefsChange = useCallback(
+    (assets: MentionedAsset[]) => {
+      patch({ mentioned_assets: assets });
+    },
+    [patch],
+  );
+  // From this node's OWN data — no graph read, so the strip needs no `s.nodes`
+  // subscription for the half that belongs to this card. Memoised because the
+  // `?? []` fallback would otherwise mint a fresh array every render and defeat
+  // the strip's own memo on a node that has no mentions.
+  const mentionedAssets = useMemo(
+    () => (mentioned_assets ?? []) as MentionedAsset[],
+    [mentioned_assets],
+  );
+  // While the picker is open, Escape, the arrows and Enter belong to it, not
+  // the text. The picker never takes focus (the editor must keep it, or its
+  // blur closes the popover), so its keys arrive here and are forwarded.
+  const mentionPickerRef = useRef<PromptMentionPickerHandle | null>(null);
   const handleBodyKeyDown = useCallback(
     (event: KeyboardEvent): boolean => {
       if (!mention.pickerOpen) return false;
@@ -245,26 +263,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         return true;
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        mention.moveActive(event.key === 'ArrowDown' ? 1 : -1);
+        mentionPickerRef.current?.move(event.key === 'ArrowDown' ? 1 : -1);
         return true;
+      }
+      if (event.key === 'Enter') {
+        // Only swallow Enter when there was something to insert. An empty
+        // result list must let the keystroke reach the text, or the box looks
+        // frozen while the popover happens to be open.
+        return mentionPickerRef.current?.commitActive() ?? false;
       }
       return false;
     },
     [mention],
   );
-  const handleCompositionStart = useCallback(() => {
-    composingRef.current = true;
-  }, []);
-  const handleCompositionEnd = useCallback(
-    (e: React.CompositionEvent<HTMLTextAreaElement>) => {
-      composingRef.current = false;
-      mention.handleChange({
-        target: e.currentTarget,
-      } as unknown as React.ChangeEvent<HTMLTextAreaElement>);
-    },
-    [mention.handleChange],
-  );
-
   // Wired input images (IC parity ⑤ — Infinite's 「N 输入图」row + the
   // @-picker's 输入图 tab). Recomputed from the live graph so absorbing /
   // rewiring upstream nodes updates the row immediately.
@@ -346,29 +357,98 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch, sourceRef],
   );
-  // IC rule: the picker opens on the Input tab when inputs exist, else
-  // falls to the asset library; reset each time the picker opens.
-  const [mentionTab, setMentionTab] = useState<'input' | 'library'>('library');
+  // The whole-library resource search now serves ONE affordance: the input
+  // row's "Add reference image" picker. The `@` picker no longer opens it —
+  // it asks the ASSET library instead (PromptMentionPicker), which is the
+  // question someone typing `@` in a prompt is actually asking.
+  //
+  // Always '' because that picker has no search box of its own; it shows the
+  // default listing and filters by kind.
+  const { data: searchData, loading: searchLoading } = useResourceSearch('', activeKind);
 
-  // Search for resources whenever the picker is open (debounced inside the hook).
-  // Pass '' when picker is closed so cached data is reused on next open.
-  const { data: searchData, loading: searchLoading } = useResourceSearch(
-    mention.pickerOpen ? mention.query : '',
-    activeKind,
+  // Scope for the asset calls the mention picker makes. '' when the canvas URL
+  // has no team segment — the picker says so rather than sending a request
+  // that is a 403 by construction.
+  const { scopeId } = useCanvasScope();
+
+  // The provider's reference ceiling, for greying the inputs past it. null =
+  // unknown (loading / no model / old backend), which renders FULL support.
+  const caps = useModelCapabilities(gen?.model ?? null);
+  const maxRefs = caps?.max_refs ?? null;
+
+  // The strip, in the order the run delivers — mentions (asset references)
+  // first, then the wired images, with the connected asset cards' references
+  // counted ahead of both. `promptStrip.ts` owns the arithmetic AND the cases
+  // where it refuses to answer; this component only draws what it returns.
+  //
+  // Both graph-derived inputs come through SELECTOR HOOKS, never `s.nodes`:
+  // this card must not re-render when an unrelated node is dragged, which is
+  // what `CanvasSurface.rerender.test.tsx` pins. `inputUrls` is shallow-stable
+  // and the card contribution is a number, so a drag changes neither.
+  const assetRefsAhead = useUpstreamAssetRefCount(id, maxRefs);
+  const stripEntries = useMemo(
+    () =>
+      promptStripEntries({
+        mentions: mentionedAssets,
+        inputUrls,
+        assetRefsAhead,
+        maxRefs,
+      }),
+    [mentionedAssets, inputUrls, assetRefsAhead, maxRefs],
   );
 
-  // Keep keyboard-wrap bound tight: update the hook's itemCountRef whenever
-  // results change. Uses a ref internally so this never triggers re-renders.
-  useEffect(() => {
-    mention.setItemCount(searchData.results.length);
-  }, [searchData.results.length, mention.setItemCount]);
+  /** The `@Image N` candidates: every durable input this node already has.
+   *  Numbered by their position among the WIRED images, which is what the
+   *  `@Image N` alias has always meant — not the delivery position, which
+   *  moves as assets are added and would rewrite chips already in the text. */
+  const mentionImages = useMemo(
+    () => inputUrls.map((url, i) => ({ url, label: `Image ${i + 1}` })),
+    [inputUrls],
+  );
 
-  useEffect(() => {
-    if (mention.pickerOpen) {
-      setMentionTab(inputUrls.length > 0 ? 'input' : 'library');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on open only
-  }, [mention.pickerOpen]);
+  const handleMentionImage = useCallback(
+    (image: { url: string; label: string }) => {
+      bodyEditorRef.current?.insertImage({
+        url: image.url,
+        alias: image.label,
+        kind: 'image',
+      });
+      patch({ source_ref: image.url });
+      mention.closePicker();
+    },
+    [patch, mention],
+  );
+
+  const handleMentionAsset = useCallback(
+    async (asset: AssetSummary) => {
+      // Close FIRST: the detail fetch below is an interactive gap, and leaving
+      // the rows up would let a second click start a second insert.
+      mention.closePicker();
+      // The asset's primary-slot files, for the reference strip only. The RUN
+      // fetches this again at dispatch (a stale snapshot would deliver the
+      // wrong files); what it buys here is that one mention's span on the
+      // strip is a known number instead of a guess.
+      //
+      // A failure does NOT block the mention — the chip is fully functional
+      // without it and the run re-asks. It is logged, and the strip renders
+      // the mention as "span unknown" rather than inventing a count.
+      let refIds: string[] | undefined;
+      try {
+        const detail = await fetchAssetDetail(scopeId, asset.id);
+        refIds = primarySlotFileIds(detail, null);
+      } catch (err) {
+        console.error('[PromptNodeView] mention detail fetch failed:', err);
+      }
+      bodyEditorRef.current?.insertAsset({
+        asset_id: asset.id,
+        name: asset.name,
+        asset_type: asset.asset_type,
+        cover_file_id: asset.cover_file_id,
+        ...(refIds ? { ref_resource_ids: refIds } : {}),
+      });
+    },
+    [mention, scopeId],
+  );
 
   // ── Library picker handler ───────────────────────────────────────────────
   // Applies the pure-function result: patch this node's body/negative_body,
@@ -538,72 +618,166 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </div>
           </div>
         )}
-        {inputUrls.length > 0 && (
+        {stripEntries.length > 0 && (
           <div
             data-testid="prompt-input-row"
             className="mb-1.5 flex flex-wrap items-center gap-1.5"
           >
-            {inputUrls.map((url, i) => (
-              <span key={url} className="relative inline-flex">
-                <button
-                  type="button"
-                  data-testid="prompt-input-thumb"
-                  title={sourceRef === url ? 'Selected as source' : 'Use as source'}
-                  onClick={() => toggleSourceRef(url)}
-                  draggable={!readOnly && manualUrlSet.has(url)}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/x-nous-ref', url);
-                    e.dataTransfer.effectAllowed = 'move';
-                  }}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes('application/x-nous-ref'))
-                      e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    const from = e.dataTransfer.getData('application/x-nous-ref');
-                    if (!from || from === url) return;
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const before = e.clientX < rect.left + rect.width / 2;
-                    reorderManualRefs(from, url, before);
-                  }}
-                  disabled={readOnly}
-                  className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
-                    sourceRef === url
-                      ? 'border-canvas-strong ring-1 ring-canvas-strong'
-                      : 'border-canvas-line/60'
-                  }`}
-                >
-                  <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
-                  {/* IC 图N corner badge */}
-                  <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
-                </button>
-                {/* Manual refs are removable (IC input-thumb-remove). */}
-                {!readOnly && manualUrlSet.has(url) && (
+            {/* DELIVERY ORDER, not drawing convenience: `generationRunner`
+                builds `[...asset references, ...wired images]`, so mentions
+                come FIRST here and the position badges count the wired asset
+                cards' references ahead of both. The strip is a claim about
+                which references survive the provider's ceiling — saying it
+                backwards is the confidently-wrong badge this repo has paid
+                for before. `promptStrip.ts` owns the arithmetic and the
+                cases where it declines to answer. */}
+            {stripEntries.map((entry) =>
+              entry.kind === 'mention' ? (
+                (() => {
+                  const asset = entry.asset;
+                  const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
+                  return (
+                    <span
+                      key={`mention-${asset.asset_id}`}
+                      data-testid="prompt-mention-thumb"
+                      data-asset-id={asset.asset_id}
+                      data-position={entry.position ?? ''}
+                      data-ref-count={entry.refCount ?? ''}
+                      data-beyond-limit={entry.beyondLimit ? 'true' : 'false'}
+                      title={
+                        entry.beyondLimit
+                          ? t('canvas.asset.refsLimit', {
+                              count: maxRefs ?? 0,
+                              defaultValue:
+                                'This model takes fewer reference images. The rest are not sent.',
+                            })
+                          : entry.refCount === null
+                            ? t('canvas.mention.spanUnknown', {
+                                name: asset.name,
+                                defaultValue:
+                                  '{{name}} — how many reference images it adds is not known yet',
+                              })
+                            : t('canvas.mention.spanKnown', {
+                                name: asset.name,
+                                // Pluralised: `spanKnown_one` / `spanKnown_other`
+                                // in both locales. A single form would read
+                                // "1 reference images".
+                                count: entry.refCount,
+                                defaultValue_one: '{{name}} — {{count}} reference image',
+                                defaultValue_other: '{{name}} — {{count}} reference images',
+                                // The un-suffixed fallback too: it is what a
+                                // resolver with no plural rules lands on, and
+                                // leaving it out shows the raw key there.
+                                defaultValue: '{{name}} — {{count}} reference images',
+                              })
+                      }
+                      className={`relative inline-flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded border border-canvas-line/60 text-canvas-muted ${
+                        entry.beyondLimit ? 'opacity-40' : ''
+                      }`}
+                    >
+                      {asset.cover_file_id ? (
+                        <img
+                          src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
+                          alt={asset.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Icon size={11} />
+                      )}
+                      {/* No badge when the position is unknown: a number would
+                          be a claim about the request that nothing supports. */}
+                      {entry.position !== null && (
+                        <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
+                          {entry.position}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()
+              ) : (
+                <span key={`input-${entry.url}`} className="relative inline-flex">
                   <button
                     type="button"
-                    data-testid="remove-reference"
-                    aria-label="Remove reference"
-                    onClick={() => removeManualRef(url)}
-                    className="nodrag absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-canvas-strong text-[8px] font-bold text-canvas-card"
+                    data-testid="prompt-input-thumb"
+                    data-position={entry.position ?? ''}
+                    data-beyond-limit={entry.beyondLimit ? 'true' : 'false'}
+                    title={sourceRef === entry.url ? 'Selected as source' : 'Use as source'}
+                    onClick={() => toggleSourceRef(entry.url)}
+                    draggable={!readOnly && manualUrlSet.has(entry.url)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/x-nous-ref', entry.url);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      if (e.dataTransfer.types.includes('application/x-nous-ref'))
+                        e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      const from = e.dataTransfer.getData('application/x-nous-ref');
+                      if (!from || from === entry.url) return;
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const before = e.clientX < rect.left + rect.width / 2;
+                      reorderManualRefs(from, entry.url, before);
+                    }}
+                    disabled={readOnly}
+                    className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                      sourceRef === entry.url
+                        ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                        : 'border-canvas-line/60'
+                    } ${entry.beyondLimit ? 'opacity-40' : ''}`}
                   >
-                    ×
+                    <img
+                      src={mediaSrc(entry.url)}
+                      alt={entry.position !== null ? `Input ${entry.position}` : 'Input'}
+                      className="h-full w-full object-cover"
+                    />
+                    {/* IC 图N corner badge */}
+                    {entry.position !== null && (
+                      <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
+                        {entry.position}
+                      </span>
+                    )}
                   </button>
+                  {/* Manual refs are removable (IC input-thumb-remove). */}
+                  {!readOnly && manualUrlSet.has(entry.url) && (
+                    <button
+                      type="button"
+                      data-testid="remove-reference"
+                      aria-label="Remove reference"
+                      onClick={() => removeManualRef(entry.url)}
+                      className="nodrag absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-canvas-strong text-[8px] font-bold text-canvas-card"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ),
+            )}
+            <span className="text-[10px] font-semibold text-canvas-muted">
+              {stripEntries.length} inputs
+            </span>
+            {last_mention_error && (
+              <span
+                data-testid="mention-bundle-error"
+                title={last_mention_error}
+                className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
+              >
+                {t(
+                  'canvas.mention.bundleFailed',
+                  'A mentioned asset could not be read on the last run',
                 )}
               </span>
-            ))}
-            <span className="text-[10px] font-semibold text-canvas-muted">
-              {inputUrls.length} inputs
-            </span>
+            )}
             {!readOnly && (
               <button
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
                 onClick={() => setRefPickerOpen((v) => !v)}
-                disabled={inputUrls.length >= MAX_REFERENCE_IMAGES}
+                disabled={stripEntries.length >= MAX_REFERENCE_IMAGES}
                 title={
-                  inputUrls.length >= MAX_REFERENCE_IMAGES
+                  stripEntries.length >= MAX_REFERENCE_IMAGES
                     ? `Reference limit reached (${MAX_REFERENCE_IMAGES})`
                     : 'Add reference image'
                 }
@@ -614,7 +788,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             )}
           </div>
         )}
-        {inputUrls.length === 0 && gen && !readOnly && (
+        {stripEntries.length === 0 && gen && !readOnly && (
           <div className="mb-1.5 flex items-center">
             <button
               type="button"
@@ -692,6 +866,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             value={draft}
             onChange={pushBody}
             onRefsChange={handleImageRefsChange}
+            onAssetRefsChange={handleAssetRefsChange}
+            knownAssets={seededAssetChips}
             onAtTyped={mention.openPicker}
             onMentionQueryChange={mention.setMentionQuery}
             onKeyDown={handleBodyKeyDown}
@@ -701,79 +877,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         </div>
 
         {mention.pickerOpen && (
-          <div
-            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {/* IC's mention-source-tabs: 输入图 / 资产库. */}
-            <div className="mb-1 flex items-center gap-1">
-              <button
-                type="button"
-                data-testid="mention-tab-input"
-                disabled={inputUrls.length === 0}
-                onClick={() => setMentionTab('input')}
-                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-                  mentionTab === 'input'
-                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                Input images
-              </button>
-              <button
-                type="button"
-                data-testid="mention-tab-library"
-                onClick={() => setMentionTab('library')}
-                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                  mentionTab === 'library'
-                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                Library
-              </button>
-            </div>
-            {mentionTab === 'input' ? (
-              <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-canvas-line bg-canvas-card p-2">
-                {inputUrls.slice(0, 36).map((url, i) => (
-                  <button
-                    key={url}
-                    type="button"
-                    data-testid="mention-input-option"
-                    onMouseDown={(e) => {
-                      // mousedown, not click: the editor must keep focus or
-                      // its blur closes this popover first.
-                      e.preventDefault();
-                      bodyEditorRef.current?.insertImage({
-                        url,
-                        alias: `Image ${i + 1}`,
-                        kind: 'image',
-                      });
-                      patch({ source_ref: url });
-                      mention.closePicker();
-                    }}
-                    className="nodrag flex flex-col items-center gap-0.5"
-                  >
-                    <span className="h-12 w-12 overflow-hidden rounded-md border border-canvas-line/60">
-                      <img src={mediaSrc(url)} alt={`Image ${i + 1}`} className="h-full w-full object-cover" />
-                    </span>
-                    <span className="text-[9px] text-canvas-muted">Image {i + 1}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <CanvasMentionPicker
-                items={searchData.results}
-                query={mention.query}
-                loading={searchLoading}
-                counts={searchData.counts}
-                activeKind={activeKind}
-                onKindChange={setActiveKind}
-                onSelect={mention.handleSelect}
-                activeIndex={mention.activeIndex}
-              />
-            )}
-          </div>
+          <PromptMentionPicker
+            ref={mentionPickerRef}
+            scopeId={scopeId}
+            inputImages={mentionImages}
+            onPickImage={handleMentionImage}
+            onPickAsset={handleMentionAsset}
+            query={mention.query}
+          />
         )}
 
         {/* Fixed full-screen modal — no relative positioning needed. */}

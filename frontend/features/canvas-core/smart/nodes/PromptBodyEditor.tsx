@@ -28,9 +28,13 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Placeholder from '@tiptap/extension-placeholder';
 import Text from '@tiptap/extension-text';
 
+import { PromptAssetChipNode } from './PromptAssetChipNode';
 import { PromptImageChipNode } from './PromptImageChipNode';
+import { splitMentionSegments, type MentionedAsset } from '../mentionedAssets';
 import {
+  PROMPT_ASSET_REF,
   PROMPT_IMAGE_REF,
+  collectAssetRefs,
   collectImageRefs,
   docToPromptText,
   mentionQueryFromText,
@@ -40,6 +44,8 @@ import {
 export interface PromptBodyEditorHandle {
   /** Insert an image chip at the caret, replacing a pending `@query` token. */
   insertImage: (image: PromptImageRef) => void;
+  /** Insert an asset chip at the caret, replacing a pending `@query` token. */
+  insertAsset: (asset: MentionedAsset) => void;
   /** Insert plain text at the caret, replacing a pending `@query` token. */
   insertText: (text: string) => void;
   focus: () => void;
@@ -51,6 +57,10 @@ interface Props {
   onChange: (text: string) => void;
   /** Fires whenever the set of image chips in the document changes. */
   onRefsChange?: (refs: PromptImageRef[]) => void;
+  /** Fires whenever the set of ASSET chips in the document changes. Separate
+   *  callback, not a merged one: the two lists mean different things and land
+   *  in different node-data fields. */
+  onAssetRefsChange?: (assets: MentionedAsset[]) => void;
   /** Fires when the user types `@`, so the caller can open the picker. */
   onAtTyped?: () => void;
   /**
@@ -70,6 +80,16 @@ interface Props {
   placeholder?: string;
   /** Chips to seed the document with on mount (restored from persistence). */
   initialChips?: PromptImageRef[];
+  /**
+   * Known asset mentions, used to turn `@[asset:id]` tokens in `value` back
+   * into chips — on mount AND on any later external re-seed.
+   *
+   * This is a NAME TABLE, not a position list: where each chip goes is decided
+   * by where its token sits in the text, so a reload restores the chip exactly
+   * where the user put it. (Image chips have no such token and are therefore
+   * appended, which is why they cannot survive an external re-seed.)
+   */
+  knownAssets?: MentionedAsset[];
   /** Distinguishes the two places this editor renders (node vs attached panel). */
   testId?: string;
   /** Accessible name. Each host has its own — do not collapse them into one:
@@ -85,10 +105,31 @@ function mentionQueryBeforeCaret(ed: { view: { state: EditorState } }): string |
   return mentionQueryFromText(state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\n'));
 }
 
-/** Build the initial doc: the plain text, then any restored chips. */
-function seedDoc(value: string, chips: PromptImageRef[]): JSONContent {
+/**
+ * Build the initial doc: the plain text with its asset tokens re-hydrated into
+ * chips, then any restored image chips.
+ *
+ * A token whose asset is not in `assets` stays LITERAL TEXT rather than
+ * becoming a nameless chip. That keeps the round trip lossless — the token is
+ * still in the projected text, so nothing is destroyed by a name table that
+ * happened to arrive late — and it matches what the run does with the same
+ * token (`renderMentionText` drops what it cannot name).
+ */
+function seedDoc(
+  value: string,
+  chips: PromptImageRef[],
+  assets: Map<string, MentionedAsset>,
+): JSONContent {
   const content: JSONContent[] = [];
-  if (value) content.push({ type: 'text', text: value });
+  for (const seg of splitMentionSegments(value)) {
+    if (seg.kind === 'text') {
+      if (seg.text) content.push({ type: 'text', text: seg.text });
+      continue;
+    }
+    const known = assets.get(seg.assetId);
+    if (known) content.push({ type: PROMPT_ASSET_REF, attrs: { ...known } });
+    else content.push({ type: 'text', text: `@[asset:${seg.assetId}]` });
+  }
   for (const chip of chips) {
     content.push({ type: PROMPT_IMAGE_REF, attrs: { ...chip } });
   }
@@ -101,12 +142,14 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
       value,
       onChange,
       onRefsChange,
+      onAssetRefsChange,
       onAtTyped,
       onMentionQueryChange,
       onKeyDown,
       readOnly = false,
       placeholder = 'What should the model generate? Type @ to reference an asset',
       initialChips = [],
+      knownAssets = [],
       testId = 'prompt-body-editor',
       ariaLabel = 'Prompt body',
     },
@@ -119,16 +162,46 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
     const lastEmittedRef = useRef(value);
     // Callbacks change identity every render; read them through a ref so the
     // editor is created once rather than torn down and rebuilt.
-    const cbRef = useRef({ onChange, onRefsChange, onAtTyped, onMentionQueryChange, onKeyDown });
-    cbRef.current = { onChange, onRefsChange, onAtTyped, onMentionQueryChange, onKeyDown };
+    const cbRef = useRef({
+      onChange,
+      onRefsChange,
+      onAssetRefsChange,
+      onAtTyped,
+      onMentionQueryChange,
+      onKeyDown,
+    });
+    cbRef.current = {
+      onChange,
+      onRefsChange,
+      onAssetRefsChange,
+      onAtTyped,
+      onMentionQueryChange,
+      onKeyDown,
+    };
+
+    /**
+     * Every asset name this editor has ever seen, id → snapshot.
+     *
+     * Accumulated rather than replaced: a re-seed happens with whatever
+     * `value` the parent last pushed, and the parent's `knownAssets` prop may
+     * lag one render behind a chip the user just inserted. Forgetting a name
+     * would turn that chip back into a raw token in front of the user.
+     */
+    const assetIndexRef = useRef(
+      new Map<string, MentionedAsset>(knownAssets.map((a) => [a.asset_id, a])),
+    );
+    for (const a of knownAssets) assetIndexRef.current.set(a.asset_id, a);
 
     /** Publish the document outward: text, chips, live mention query. */
     const emit = useCallback((ed: { getJSON: () => JSONContent; view: { state: EditorState } }) => {
       const json = ed.getJSON();
       const text = docToPromptText(json);
       lastEmittedRef.current = text;
+      const assets = collectAssetRefs(json);
+      for (const a of assets) assetIndexRef.current.set(a.asset_id, a);
       cbRef.current.onChange(text);
       cbRef.current.onRefsChange?.(collectImageRefs(json));
+      cbRef.current.onAssetRefsChange?.(assets);
       cbRef.current.onMentionQueryChange?.(mentionQueryBeforeCaret(ed));
     }, []);
     // The composition listener is bound once; reach `emit` through a ref so
@@ -146,8 +219,9 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
         Text,
         Placeholder.configure({ placeholder }),
         PromptImageChipNode,
+        PromptAssetChipNode,
       ],
-      content: seedDoc(value, initialChips),
+      content: seedDoc(value, initialChips, assetIndexRef.current),
       editable: !readOnly,
       editorProps: {
         attributes: {
@@ -251,7 +325,9 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
       if (composingRef.current) return;
       if (value === lastEmittedRef.current) return;
       if (value === docToPromptText(editor.getJSON())) return;
-      editor.commands.setContent(seedDoc(value, []), { emitUpdate: false });
+      editor.commands.setContent(seedDoc(value, [], assetIndexRef.current), {
+        emitUpdate: false,
+      });
       lastEmittedRef.current = value;
     }, [value, editor]);
 
@@ -288,6 +364,19 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
       [insertAtMention],
     );
 
+    const insertAsset = useCallback(
+      (asset: MentionedAsset) => {
+        // Remember the name BEFORE the chip exists: `insertContent` triggers an
+        // update, whose re-seed guard reads this index.
+        assetIndexRef.current.set(asset.asset_id, asset);
+        insertAtMention([
+          { type: PROMPT_ASSET_REF, attrs: { ...asset } },
+          { type: 'text', text: ' ' },
+        ]);
+      },
+      [insertAtMention],
+    );
+
     const insertText = useCallback(
       (text: string) => {
         insertAtMention([{ type: 'text', text }]);
@@ -297,8 +386,13 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
 
     useImperativeHandle(
       ref,
-      () => ({ insertImage, insertText, focus: () => editor?.commands.focus() }),
-      [insertImage, insertText, editor],
+      () => ({
+        insertImage,
+        insertAsset,
+        insertText,
+        focus: () => editor?.commands.focus(),
+      }),
+      [insertImage, insertAsset, insertText, editor],
     );
 
     return <EditorContent editor={editor} />;

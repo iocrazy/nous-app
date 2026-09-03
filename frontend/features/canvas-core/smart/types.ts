@@ -14,6 +14,7 @@
 import type { AssetType } from '../../../components/assets/assetSlots';
 import type { DroppedReference } from '../../../services/assetsService';
 import type { CropRegion } from '../editor/types';
+import type { MentionedAsset } from './mentionedAssets';
 import type { CanvasNode } from '../types';
 
 /**
@@ -210,6 +211,37 @@ export interface PromptNodeData {
    *  durable generated-media items picked from the library via the
    *  input-row's add key. Appended after wired inputs in the i2i chain. */
   manual_refs?: GeneratedImageRef[];
+  /**
+   * Assets named in the body with `@`, snapshot per mention.
+   *
+   * DERIVED from the document, not a parallel list: each entry corresponds to
+   * one `@[asset:<id>]` token in `body` and to one chip in the editor, so
+   * deleting the chip deletes the entry (`collectAssetRefs` on every change).
+   * It is persisted for the same reason `image_refs` is — `body` is plain text
+   * and carries only the id, and the name/type/cover are needed to redraw the
+   * chip and the input-strip thumbnail without a fetch per node.
+   *
+   * At run time these are bundled exactly like an upstream `asset` card, AFTER
+   * the wired cards. See `mentionedAssets.ts`.
+   */
+  mentioned_assets?: MentionedAsset[];
+  /**
+   * References an @-MENTIONED asset's bundle would not send on the last run.
+   *
+   * A third ledger beside `last_dropped` / `last_dropped_refs`, and separate
+   * for the same reason those two are separate from each other: it is a
+   * different question with a different authority. The other two come from the
+   * backend's run metadata; this one comes from the bundle endpoint at
+   * dispatch. A wired asset card reports this on the card — a mention has no
+   * card, so it reports here, on the prompt that named it.
+   *
+   * Rewritten by every run including the clean one, so it always describes the
+   * run the badge sits next to.
+   */
+  last_mention_dropped?: DroppedRef[];
+  /** The mention bundle request itself failed — NOT the same as "nothing was
+   *  dropped". Null/absent means the last run had nothing to report. */
+  last_mention_error?: string | null;
 }
 
 /** Image/video generation settings on a prompt node. */

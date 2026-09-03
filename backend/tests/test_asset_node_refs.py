@@ -193,3 +193,155 @@ def test_malformed_nodes_json_never_raises(junk):
     refs, skipped = extract_asset_node_refs(junk)
     assert refs == []
     assert isinstance(skipped, int) and skipped >= 0
+
+
+# ─── Prompt-node @ mentions ─────────────────────────────────────────────────
+#
+# A mention creates NO node — the chip in the prompt text is the reference — so
+# without this branch an asset used on a canvas only through `@` reported as
+# used by zero canvases, in `used_in.canvases` and in both reverse-lookup
+# endpoints, with nothing anywhere saying so.
+
+
+def test_prompt_mentions_become_refs_on_the_prompt_node():
+    nodes = [
+        {
+            "id": "p1",
+            "type": "prompt",
+            "data": {
+                "body": f"a shot of @[asset:{_A}] at dusk",
+                "mentioned_assets": [
+                    {"asset_id": _A, "name": "Ava", "asset_type": "character"},
+                    {"asset_id": _B, "name": "Back Alley", "asset_type": "location"},
+                ],
+            },
+        }
+    ]
+    refs, skipped = extract_asset_node_refs(nodes)
+    # Attributed to the PROMPT node, in body order, with no loadout — a mention
+    # has no card to choose an outfit on.
+    assert refs == [
+        {"asset_id": int(_A), "node_id": "p1", "loadout_id": None},
+        {"asset_id": int(_B), "node_id": "p1", "loadout_id": None},
+    ]
+    assert skipped == 0
+
+
+def test_a_prompt_with_no_mentions_is_not_a_skip():
+    """The ordinary prompt. Counting it would make ``skipped`` fire on every
+    canvas and train the reader to ignore the log line — the same reason shot
+    and output nodes are not counted."""
+    for data in (
+        {"body": "plain"},
+        {"body": "plain", "mentioned_assets": []},
+        {"body": "plain", "mentioned_assets": None},
+        {"body": "plain", "mentioned_assets": "not-a-list"},
+        "not-a-dict",
+        None,
+    ):
+        assert extract_asset_node_refs(
+            [{"id": "p1", "type": "prompt", "data": data}]
+        ) == (
+            [],
+            0,
+        ), data
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"asset_id": "abc"},
+        {"asset_id": None},
+        {"asset_id": True},
+        {"asset_id": 1.0},
+        {"asset_id": str(2**63)},
+        {"asset_id": "²"},
+        {"asset_id": "١٢٣"},
+        {"name": "Ava"},
+        "not-a-dict",
+        None,
+        7,
+    ],
+)
+def test_unreadable_mention_is_skipped_and_counted(entry):
+    """It DECLARED a binding and could not express it — that is the case
+    ``skipped`` exists to report, and a silent drop is the no-op CLAUDE.md
+    forbids."""
+    refs, skipped = extract_asset_node_refs(
+        [{"id": "p1", "type": "prompt", "data": {"mentioned_assets": [entry]}}]
+    )
+    assert refs == []
+    assert skipped == 1
+
+
+def test_a_bad_mention_does_not_cost_the_good_one_beside_it():
+    refs, skipped = extract_asset_node_refs(
+        [
+            {
+                "id": "p1",
+                "type": "prompt",
+                "data": {"mentioned_assets": [{"asset_id": "abc"}, {"asset_id": _A}]},
+            }
+        ]
+    )
+    assert refs == [{"asset_id": int(_A), "node_id": "p1", "loadout_id": None}]
+    assert skipped == 1
+
+
+def test_the_same_asset_mentioned_twice_is_one_ref():
+    """Two chips for one asset are one delivery, and (canvas_id, asset_id,
+    node_id) is the PK — writing it twice makes Postgres reject the whole
+    canvas's ON CONFLICT batch."""
+    refs, skipped = extract_asset_node_refs(
+        [
+            {
+                "id": "p1",
+                "type": "prompt",
+                "data": {
+                    "mentioned_assets": [
+                        {"asset_id": _A, "name": "Ava"},
+                        {"asset_id": _A, "name": "Ava again"},
+                    ]
+                },
+            }
+        ]
+    )
+    assert refs == [{"asset_id": int(_A), "node_id": "p1", "loadout_id": None}]
+    assert skipped == 0
+
+
+def test_a_card_and_a_mention_of_the_same_asset_are_two_refs():
+    """Different node ids, so different rows — and both are real bindings the
+    reverse lookup has to be able to name."""
+    nodes = [
+        {"id": "a1", "type": "asset", "data": {"asset_id": _A, "loadout_id": _LO}},
+        {
+            "id": "p1",
+            "type": "prompt",
+            "data": {"mentioned_assets": [{"asset_id": _A}]},
+        },
+    ]
+    refs, skipped = extract_asset_node_refs(nodes)
+    assert refs == [
+        {"asset_id": int(_A), "node_id": "a1", "loadout_id": int(_LO)},
+        {"asset_id": int(_A), "node_id": "p1", "loadout_id": None},
+    ]
+    assert skipped == 0
+
+
+def test_a_prompt_nodes_own_asset_id_is_still_ignored():
+    """``mentioned_assets`` is the only asset binding a prompt node declares.
+    Reading a differently-named field would invent refs — and the pre-existing
+    case above pins that a bare ``data.asset_id`` on a prompt yields nothing."""
+    refs, skipped = extract_asset_node_refs(
+        [{"id": "p1", "type": "prompt", "data": {"asset_id": _A}}]
+    )
+    assert refs == []
+    assert skipped == 0
+
+
+def test_a_prompt_node_without_an_id_falls_back_to_its_index():
+    refs, _ = extract_asset_node_refs(
+        [{"type": "prompt", "data": {"mentioned_assets": [{"asset_id": _A}]}}]
+    )
+    assert refs[0]["node_id"] == "node_0"

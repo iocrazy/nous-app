@@ -29,6 +29,7 @@
 // `_ENTITY_KIND_TO_LEGACY_TABLE` in `backfill_assets_from_project_entities`), so
 // rows written before this change stay comparable with what it writes now.
 
+import { mentionedAssetsOf } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';
 import type { AssetNodeData } from './types';
 
@@ -58,7 +59,25 @@ function assetRefOf(node: CanvasNode): AssetRef | null {
   };
 }
 
-/** Nearest bound asset card feeding (transitively) into `promptId`, or null. */
+/**
+ * Which asset a prompt's output belongs to.
+ *
+ * PRECEDENCE, and the order is the ruling:
+ *   1. the nearest bound asset CARD wired upstream (BFS, so a character two
+ *      hops up beats a location five hops up);
+ *   2. failing that, the FIRST asset @-mentioned in the prompt body.
+ *
+ * A wired card is a deliberate structural statement about what this branch of
+ * the board is producing; a mention is a reference typed inside a sentence,
+ * and a prompt may name several. So a card wins whenever there is one, and the
+ * mention answer is the fallback that keeps a card-less prompt from producing
+ * media with no provenance at all. "First" rather than "only": the body's own
+ * order is the only ranking a mention list has, and picking any other entry
+ * would be arbitrary.
+ *
+ * A mention binds no loadout — there is no card to choose one on — so
+ * `loadout_id` is null on that path.
+ */
 export function resolveAssetRef(
   promptId: string,
   nodes: CanvasNode[],
@@ -89,5 +108,6 @@ export function resolveAssetRef(
     }
     frontier = next;
   }
-  return null;
+  const mentioned = mentionedAssetsOf(promptId, nodes)[0];
+  return mentioned ? { asset_id: mentioned.asset_id, loadout_id: null } : null;
 }

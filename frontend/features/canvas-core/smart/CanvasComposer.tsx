@@ -45,6 +45,7 @@ import {
   settleGenerationSlot,
 } from './genSlots';
 import { resolveAssetRef } from './assetRef';
+import { promptBodyForRun } from './mentionedAssets';
 import { buildPromptAssetLoad } from './loadPromptAsset';
 import { importResourceAsCanvasMedia } from './mediaImport';
 import {
@@ -368,7 +369,7 @@ export function CanvasComposer({
           if (!data) return null;
           return {
             promptId: id,
-            body: data.body,
+            body: promptBodyForRun(data),
             provider_slug: data.provider_slug,
             agent_id: data.agent_id,
             gen: data.gen ?? null,

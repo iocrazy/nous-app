@@ -3234,7 +3234,9 @@
       "no_image_file": "没有图片文件",
       "materialize_failed": "读取失败",
       "scope_unresolved": "空间未知",
-      "unresolved": "无法解析"
+      "unresolved": "无法解析",
+      "over_limit": "超出模型上限",
+      "provider_no_refs": "该模型不接受参考图"
     },
     "knobNotSupported": "该模型不支持此项",
     "saveBadge": {
@@ -3403,6 +3405,28 @@
     },
     "assetSeed": {
       "failed": "无法加载该画布绑定的素材"
+    },
+    "mention": {
+      "tabInput": "输入图",
+      "tabAssets": "资产库",
+      "library": "库",
+      "inLibraryOnly": "仅已入库",
+      "searchLabel": "搜索资产",
+      "searchPlaceholder": "搜索资产…",
+      "allTypes": "全部",
+      "noInputs": "该节点没有输入图",
+      "noResults": "没有找到资产",
+      "noScope": "请从工作区打开画布后再浏览资产",
+      "loadFailed": "无法加载资产库",
+      "loading": "加载中…",
+      "preview": "预览",
+      "count_one": "{{count}} 项结果",
+      "count_other": "{{count}} 项结果",
+      "hint": "↑↓ 选择 · ↵ 插入 · Esc 关闭",
+      "bundleFailed": "上次运行未能读取被 @ 提到的资产",
+      "spanKnown_one": "{{name}} —— {{count}} 张参考图",
+      "spanKnown_other": "{{name}} —— {{count}} 张参考图",
+      "spanUnknown": "{{name}} —— 还不知道它会带几张参考图"
     }
   },
   "modelParams": {

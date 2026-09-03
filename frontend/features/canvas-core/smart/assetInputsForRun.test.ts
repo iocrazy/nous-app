@@ -8,8 +8,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchBundle = vi.fn();
+// `fetchAssetDetail` rides along because the composition now also serves
+// @-MENTIONED assets, which have no card to read a checklist off and so fetch
+// the asset's primary-slot files instead. A mock missing it is not a silent
+// gap — the named import throws at module load, which is how this arrived.
+const fetchAssetDetail = vi.fn();
 vi.mock('../../../services/assetsService', () => ({
   fetchBundle: (...a: unknown[]) => fetchBundle(...a),
+  fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
 }));
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
@@ -56,6 +62,7 @@ function seed() {
 
 beforeEach(() => {
   fetchBundle.mockReset();
+  fetchAssetDetail.mockReset();
   vi.spyOn(console, 'error').mockImplementation(() => {});
   window.history.pushState({}, '', `/team/${SCOPE}/canvas/9`);
   seed();
@@ -160,5 +167,95 @@ describe('resolveAssetInputsForRun', () => {
     useCanvasCoreStore.setState({ connections: [] } as never);
     await resolveAssetInputsForRun('p1', 'codex');
     expect(fetchBundle).not.toHaveBeenCalled();
+  });
+});
+
+describe('a MENTIONED asset reports on the prompt, not on a card', () => {
+  const AVA = {
+    asset_id: '727145299382534201',
+    name: 'Ava',
+    asset_type: 'character',
+    cover_file_id: null,
+  };
+
+  const promptData = () =>
+    (useCanvasCoreStore.getState().nodes.find((n) => (n as { id: string }).id === 'p1') as {
+      data: Record<string, unknown>;
+    }).data;
+
+  function seedMention(): void {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      canvasId: '9',
+      loadStatus: 'ready',
+      nodes: [
+        {
+          id: 'p1',
+          type: 'prompt',
+          position: { x: 0, y: 0 },
+          data: { body: 'x', mentioned_assets: [AVA] },
+        },
+      ],
+      connections: [],
+    } as never);
+  }
+
+  it('writes what the bundle would not send onto the PROMPT, as reference urls', async () => {
+    seedMention();
+    fetchAssetDetail.mockResolvedValue({
+      id: AVA.asset_id,
+      asset_type: 'character',
+      files: [
+        {
+          asset_id: AVA.asset_id,
+          resource_id: '10',
+          slot: 'sheet',
+          loadout_id: null,
+          sort_order: 0,
+          note: null,
+          attached_by: null,
+          attached_at: '2026-09-01T00:00:00Z',
+        },
+      ],
+      loadouts: [],
+      links: [],
+      linked_by: [],
+    });
+    fetchBundle.mockResolvedValue({
+      prompt: { positive: '', negative: '' },
+      reference_resource_ids: [],
+      dropped: [{ resource_id: '10', reason: 'provider_no_refs' }],
+      max_refs: 0,
+    });
+
+    await resolveAssetInputsForRun('p1', 'ark');
+
+    // Reference URLs, not raw ids: the prompt node's badge speaks the same
+    // vocabulary for both ledgers it joins.
+    expect(promptData().last_mention_dropped).toEqual([
+      { url: '/api/v1/resources/10/cover', reason: 'provider_no_refs' },
+    ]);
+    expect(promptData().last_mention_error).toBeNull();
+  });
+
+  it('records a failed mention bundle rather than swallowing it', async () => {
+    seedMention();
+    fetchAssetDetail.mockRejectedValue(new Error('asset gone'));
+    await resolveAssetInputsForRun('p1', 'codex');
+    expect(promptData().last_mention_error).toBe('asset gone');
+  });
+
+  it('CLEARS the previous run’s mention verdict, even when there are none left', async () => {
+    seedMention();
+    fetchAssetDetail.mockRejectedValue(new Error('asset gone'));
+    await resolveAssetInputsForRun('p1', 'codex');
+    expect(promptData().last_mention_error).toBe('asset gone');
+
+    // The user deletes the chip; the next run must not still show the badge.
+    useCanvasCoreStore.getState().patchNode('p1', { data: { mentioned_assets: [] } });
+    await resolveAssetInputsForRun('p1', 'codex');
+    expect(promptData().last_mention_error).toBeNull();
+    expect(promptData().last_mention_dropped).toEqual([]);
   });
 });

@@ -17,10 +17,13 @@
 // cheap first pass, never the last word.
 
 import {
+  fetchAssetDetail,
   fetchBundle,
   type AssetBundle,
   type DroppedReference,
 } from '../../../services/assetsService';
+import { primarySlotFileIds } from './assetFiles';
+import type { MentionedAsset } from './mentionedAssets';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { type GraphIndex, graphIndexFor } from './graphIndex';
 import type {
@@ -29,6 +32,7 @@ import type {
   GroupNodeData,
   MediaNodeData,
   OutputNodeData,
+  PromptNodeData,
 } from './types';
 
 export const DURABLE_PREFIXES = [
@@ -216,10 +220,16 @@ export function resolveEffectiveSourceUrls(
 // depends on the model — the same card bundles nine references for codex and
 // none for ark — and the model is a knob the user changes between runs.
 
-/** One asset card's contribution, plus what went wrong asking for it. */
+/** One asset's contribution, plus what went wrong asking for it. */
 export interface AssetInputContribution {
-  /** The asset NODE's id, so a report lands on the card that caused it. */
-  nodeId: string;
+  /** The asset NODE's id, so a report lands on the card that caused it.
+   *  `null` for an @-MENTIONED asset: there is no card, and the report goes to
+   *  the prompt node instead. Two shapes for one field beats a second parallel
+   *  list, because every consumer of this list must handle both anyway. */
+  nodeId: string | null;
+  /** Where this contribution came from. Explicit rather than derived from
+   *  `nodeId === null`, so a reader does not have to know that convention. */
+  source: 'node' | 'mention';
   assetId: string;
   /** Reference URLs, bundle order, already intersected with the selection. */
   urls: string[];
@@ -263,11 +273,20 @@ export function upstreamAssetNodes(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
 ): Array<{ nodeId: string; data: AssetNodeData }> {
-  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  return upstreamAssetNodesFromIndex(promptId, graphIndexFor(nodes, connections));
+}
+
+/** {@link upstreamAssetNodes} against a prebuilt {@link GraphIndex} — the form
+ *  a node view subscribes through, so it never has to read `s.nodes` itself
+ *  (see `useGraphDerived.ts` for why that rule exists). */
+export function upstreamAssetNodesFromIndex(
+  promptId: string,
+  index: GraphIndex,
+): Array<{ nodeId: string; data: AssetNodeData }> {
+  const { byId } = index;
   const seen = new Set<string>();
   const out: Array<{ nodeId: string; data: AssetNodeData }> = [];
-  for (const c of connections) {
-    if (String(asObj(c).target) !== promptId) continue;
+  for (const c of index.incoming.get(promptId) ?? []) {
     const nodeId = String(asObj(c).source);
     if (seen.has(nodeId)) continue;
     seen.add(nodeId);
@@ -284,7 +303,37 @@ export function upstreamAssetNodes(
 }
 
 /**
- * Compose what the upstream asset cards hand this prompt's run.
+ * The assets this prompt @-MENTIONS, in the order the body names them.
+ *
+ * Read off the prompt node itself rather than the graph: a mention creates no
+ * node, which is the whole point of the ruling — the chip in the text IS the
+ * reference. Deduped by asset id, because two chips for the same asset are one
+ * delivery and bundling it twice would spend the provider's reference ceiling
+ * on a duplicate.
+ */
+export function mentionedAssetsOf(
+  promptId: string,
+  nodes: CanvasNode[],
+): MentionedAsset[] {
+  const node = nodes.find((n) => String(asObj(n).id) === promptId);
+  if (!node) return [];
+  const list = ((asObj(node).data ?? {}) as PromptNodeData).mentioned_assets;
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: MentionedAsset[] = [];
+  for (const m of list) {
+    const id = String(m?.asset_id ?? '');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(m);
+  }
+  return out;
+}
+
+
+/**
+ * Compose what the upstream asset cards AND the body's @-mentions hand this
+ * prompt's run.
  *
  * `scopeId` is required and must be non-empty: `/api/v1/assets` is scoped per
  * request and an empty `scope_id` is a 403 `not_a_member`, not an unscoped
@@ -307,63 +356,111 @@ export async function resolveAssetInputs(
   promptId: string,
   nodes: CanvasNode[],
   connections: CanvasConnection[],
-  opts: { model: string; scopeId: string; fetch?: typeof fetchBundle },
+  opts: {
+    model: string;
+    scopeId: string;
+    fetch?: typeof fetchBundle;
+    fetchDetail?: typeof fetchAssetDetail;
+  },
 ): Promise<ComposedAssetInputs> {
   const cards = upstreamAssetNodes(promptId, nodes, connections);
-  if (cards.length === 0) return EMPTY_ASSET_INPUTS;
+  const mentions = mentionedAssetsOf(promptId, nodes);
+  if (cards.length === 0 && mentions.length === 0) return EMPTY_ASSET_INPUTS;
 
   const call = opts.fetch ?? fetchBundle;
-  const contributions = await Promise.all(
-    cards.map(async ({ nodeId, data }): Promise<AssetInputContribution> => {
-      const base: AssetInputContribution = {
-        nodeId,
-        assetId: String(data.asset_id),
-        urls: [],
-        positive: '',
-        negative: '',
-        dropped: [],
-        error: null,
-      };
-      if (!opts.scopeId) {
-        return { ...base, error: 'no_scope' };
-      }
-      if (!opts.model) {
-        return { ...base, error: 'no_model' };
-      }
-      let bundle: AssetBundle;
-      try {
-        bundle = await call(opts.scopeId, String(data.asset_id), {
-          model: opts.model,
+  const detail = opts.fetchDetail ?? fetchAssetDetail;
+
+  /** One asset → one contribution. Shared by cards and mentions so the two can
+   *  never diverge on preconditions, error handling or the taken-as-given rule
+   *  below; they differ only in what seeds `selectedFileIds`. */
+  const bundleOne = async (
+    base: AssetInputContribution,
+    seed: () => Promise<{ loadoutId?: string; selectedFileIds: readonly string[] }>,
+  ): Promise<AssetInputContribution> => {
+    if (!opts.scopeId) return { ...base, error: 'no_scope' };
+    if (!opts.model) return { ...base, error: 'no_model' };
+    let bundle: AssetBundle;
+    try {
+      const { loadoutId, selectedFileIds } = await seed();
+      bundle = await call(opts.scopeId, base.assetId, {
+        model: opts.model,
+        loadoutId,
+        // The checklist goes TO the endpoint, which trims the provider's
+        // ceiling within it. See the note below the call.
+        selectedFileIds,
+      });
+    } catch (err) {
+      console.error('[resolveAssetInputs] bundle fetch failed:', err);
+      return { ...base, error: err instanceof Error ? err.message : String(err) };
+    }
+    // TAKEN AS GIVEN — no intersection here, deliberately.
+    //
+    // The endpoint was handed the selection and trimmed within it, so its
+    // answer already IS "the top max_refs of what was ticked", in the
+    // provider-aware priority order (primary slot first, tail-dropped).
+    // Re-filtering it against the same selection would be a no-op at best;
+    // what this code used to do was the reverse — the endpoint trimmed over
+    // ALL the asset's files and this line intersected afterwards, which is
+    // `top_N(all) ∩ selection` and delivers NOTHING whenever the picks are
+    // not a prefix of the priority order. Reordering by tick order would be
+    // its own bug: the provider reads the first reference as the lead one.
+    const ids = bundle.reference_resource_ids;
+    return {
+      ...base,
+      urls: ids.map(assetReferenceUrl),
+      positive: (bundle.prompt?.positive ?? '').trim(),
+      negative: (bundle.prompt?.negative ?? '').trim(),
+      dropped: Array.isArray(bundle.dropped) ? bundle.dropped : [],
+    };
+  };
+
+  const contributions = await Promise.all([
+    ...cards.map(({ nodeId, data }) =>
+      bundleOne(
+        {
+          nodeId,
+          source: 'node',
+          assetId: String(data.asset_id),
+          urls: [],
+          positive: '',
+          negative: '',
+          dropped: [],
+          error: null,
+        },
+        async () => ({
           loadoutId: data.loadout_id ?? undefined,
-          // The card's checklist goes TO the endpoint, which trims the
-          // provider's ceiling within it. See the note below the call.
           selectedFileIds: data.selected_file_ids ?? [],
-        });
-      } catch (err) {
-        console.error('[resolveAssetInputs] bundle fetch failed:', err);
-        return { ...base, error: err instanceof Error ? err.message : String(err) };
-      }
-      // TAKEN AS GIVEN — no intersection here, deliberately.
-      //
-      // The endpoint was handed the selection and trimmed within it, so its
-      // answer already IS "the top max_refs of what this card ticked", in the
-      // provider-aware priority order (primary slot first, tail-dropped).
-      // Re-filtering it against the same selection would be a no-op at best;
-      // what this code used to do was the reverse — the endpoint trimmed over
-      // ALL the asset's files and this line intersected afterwards, which is
-      // `top_N(all) ∩ selection` and delivers NOTHING whenever the picks are
-      // not a prefix of the priority order. Reordering by tick order would be
-      // its own bug: the provider reads the first reference as the lead one.
-      const ids = bundle.reference_resource_ids;
-      return {
-        ...base,
-        urls: ids.map(assetReferenceUrl),
-        positive: (bundle.prompt?.positive ?? '').trim(),
-        negative: (bundle.prompt?.negative ?? '').trim(),
-        dropped: Array.isArray(bundle.dropped) ? bundle.dropped : [],
-      };
-    }),
-  );
+        }),
+      ),
+    ),
+    // Mentions ride AFTER the wired cards, always. Both ceilings that trim
+    // references trim from the tail, so the order is what decides which
+    // reference survives — and a card the user physically wired to this prompt
+    // is a stronger statement of intent than a name typed mid-sentence.
+    ...mentions.map((m) =>
+      bundleOne(
+        {
+          nodeId: null,
+          source: 'mention',
+          assetId: m.asset_id,
+          urls: [],
+          positive: '',
+          negative: '',
+          dropped: [],
+          error: null,
+        },
+        async () => {
+          // A mention carries no checklist — there is no card to tick boxes
+          // on — so it means "this asset, generically": the PRIMARY slot's
+          // files, with no loadout bound. Same predicate a freshly placed card
+          // seeds itself with (`assetFiles.ts`), so an @-mention and a dragged
+          // card of the same asset deliver the same references.
+          const row = await detail(opts.scopeId, m.asset_id);
+          return { selectedFileIds: primarySlotFileIds(row, null) };
+        },
+      ),
+    ),
+  ]);
 
   const urls: string[] = [];
   const seenUrl = new Set<string>();
