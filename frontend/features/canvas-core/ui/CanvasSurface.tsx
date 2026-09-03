@@ -171,11 +171,15 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   );
   const { scopeId } = useCanvasScope();
   const runDrop = useLibraryDrop(scopeId);
-  // Empty pane only: a drop on a node was answered by that node, and ⌥ means nothing where there is no document to mention into.
+  // Empty pane only — a drop that landed on a node was answered by that node
+  // and never propagated here. `alt` is the engine's, and it means nothing on
+  // the blank pane: there is no document to mention into.
   const onLibraryDrop = useCallback(
     (dt: DataTransfer, flowPosition: { x: number; y: number }) => {
       const items = readLibraryDrag(dt);
-      if (!items) return; // A FOREIGN drag, not a failure — nothing of ours ran, so there is nothing to report.
+      // A FOREIGN drag, not a failure: nothing of ours ran, so there is
+      // nothing to report. A drop that DID run and failed now speaks.
+      if (!items) return;
       void runDrop(items, { kind: 'canvas', position: flowPosition });
     },
     [runDrop],

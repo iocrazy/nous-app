@@ -79,7 +79,10 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   // file drop) — they POST an import AND patch the node. Thumbnails and
   // the lightbox are pure viewing and stay.
   const readOnly = useCanvasReadOnly();
-  const runDrop = useLibraryDrop(useCanvasScope().scopeId); // The scope is only for the `assets` store, which a card takes too; the hook also speaks the outcome.
+  // The scope is only for the `assets` store — which a media card takes too.
+  const { scopeId } = useCanvasScope();
+  // Runs a library drop on this card AND speaks its outcome.
+  const runDrop = useLibraryDrop(scopeId);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {

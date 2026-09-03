@@ -503,8 +503,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
       onDragOver={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; e.preventDefault(); setDropHint(e.altKey ? 'mention' : 'reference'); }}
       onDragLeave={() => setDropHint(null)}
-      onDrop={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; // Not ours — a file or url drag falls through to the pane's own handler.
-        e.preventDefault(); e.stopPropagation(); setDropHint(null); const items = readLibraryDrag(e.dataTransfer) ?? [];
+      onDrop={(e) => {
+        // Not ours — a file or url drag falls through to the pane's own handler.
+        if (readOnly || !hasLibraryDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropHint(null);
+        const items = readLibraryDrag(e.dataTransfer) ?? [];
         if (e.altKey) { for (const it of items) bodyEditorRef.current?.insertText(`@${it.title} `); return; } // ⌥ = MENTION, an edit to the prompt DOCUMENT: only this component holds the editor handle, so `dropLibraryItems` routes it and the insert happens here. Plain text for now — chips are P3's.
         void runDrop(items, { kind: 'prompt', nodeId: id, mention: false });
       }}
