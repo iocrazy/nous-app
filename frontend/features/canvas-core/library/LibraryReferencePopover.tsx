@@ -60,7 +60,9 @@ export function LibraryReferencePopover({
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<LibraryItemKey[]>([]);
   const [busy, setBusy] = useState(false);
-  const [failedNote, setFailedNote] = useState<string | null>(null);
+  // Every outcome that must not close the popover writes here: a typed
+  // failure, an all-duplicate pick, and a pick trimmed by the ceiling.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const used = useMemo(() => {
     const data = (nodes.find((n) => (n as { id?: unknown }).id === nodeId) as
@@ -84,20 +86,53 @@ export function LibraryReferencePopover({
   });
   const current = result[store];
 
+  // EVERY path into an add goes through here — the primary button, a double
+  // click and the grid's Enter fallback all call it — so the ceiling has to be
+  // enforced here rather than on the button's `disabled` prop. `LibraryGrid`
+  // routes Enter to `onItemActivate` precisely WHEN the primary is disabled,
+  // so a gate that lives only on the button is a gate the keyboard walks past.
   const commit = useCallback(
     (items: LibraryItem[]) => {
+      if (atLimit) return;
       if (busy) return;
       setBusy(true);
-      setFailedNote(null);
-      void addReferences(nodeId, items, scopeId)
+      setNotice(null);
+      // Trim the pick to what the model will actually accept. Sending more
+      // than `max_refs` does not add them — the backend drops the tail and
+      // says so in `dropped_refs` after the run, which is far too late for
+      // anyone to act on. Refusing here, out loud, is the whole point.
+      const budget = Math.max(0, max - used);
+      const take = items.slice(0, budget);
+      const cut = items.length - take.length;
+      void addReferences(nodeId, take, scopeId)
         .then((r) => {
           if (r.failed.length > 0) {
             // A pick that adds nothing must SAY so. A silent no-op is not
             // acceptable — it is the defect class this repo keeps re-learning.
-            setFailedNote(
+            setNotice(
               t('canvas.library.someFailed', {
                 count: r.failed.length,
                 defaultValue: '{{count}} could not be added as references',
+              }),
+            );
+            return;
+          }
+          if (r.added === 0 && r.skipped > 0) {
+            // Nothing changed, and the grid draws no "already referenced"
+            // marker — so closing here would look exactly like success.
+            setNotice(
+              t('canvas.library.alreadyReferenced', {
+                count: r.skipped,
+                defaultValue: '{{count}} already on this node',
+              }),
+            );
+            return;
+          }
+          if (cut > 0) {
+            setNotice(
+              t('canvas.library.quotaClamped', {
+                count: cut,
+                defaultValue: '{{count}} not added · reference quota reached',
               }),
             );
             return;
@@ -107,14 +142,13 @@ export function LibraryReferencePopover({
         })
         .finally(() => setBusy(false));
     },
-    [busy, nodeId, scopeId, t, onClose],
+    [atLimit, busy, max, used, nodeId, scopeId, t, onClose],
   );
 
   return createPortal(
     <div
       data-testid="reference-picker"
       className="mh-pop-in fixed left-1/2 top-24 z-[60] flex h-[26rem] w-[30rem] max-w-[92vw] -translate-x-1/2 flex-col rounded-xl border border-canvas-line bg-canvas-card shadow-xl"
-      onMouseDown={(e) => e.preventDefault()}
     >
       <div className="flex gap-1 border-b border-canvas-line p-1.5">
         {SEGMENTS.map((s) => (
@@ -123,7 +157,13 @@ export function LibraryReferencePopover({
             type="button"
             data-testid={`library-segment-${s}`}
             aria-pressed={store === s}
-            onClick={() => setStore(s)}
+            onClick={() => {
+              setStore(s);
+              // Keys are `store:id`, so a key kept across this switch resolves
+              // against nothing in the new segment: it would be counted by the
+              // button's label and then silently dropped at send time.
+              setSelection([]);
+            }}
             className={`nodrag rounded-full border px-2 py-0.5 text-[11px] ${
               store === s
                 ? 'border-[var(--accent-border)] text-[var(--accent-text)]'
@@ -152,7 +192,7 @@ export function LibraryReferencePopover({
           defaultValue: 'Reference images · sent to {{model}} · {{used}} / {{max}} used',
         })}
         note={
-          failedNote ??
+          notice ??
           (atLimit
             ? t('canvas.library.quotaFull', {
                 used,
