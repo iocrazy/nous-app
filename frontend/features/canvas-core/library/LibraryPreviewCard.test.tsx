@@ -101,20 +101,33 @@ const ASSET_DETAIL = {
   created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z',
   readiness: { state: 'ready' as const, missing: [] },
-  file_counts_by_slot: { sheet: 2, worn: 1, stills: 1 },
+  file_counts_by_slot: { sheet: 4 },
   project_ids: [],
   loadout_count: 0,
-  // DECLARATION order (`worn` last), which is not delivery order — the row
-  // assertions below are what turn that gap into a check.
+  // Four files in the PRIMARY slot, which is the population a pick really
+  // delivers (`primarySlotFileIds`) — so spec §4 item 7's "4 files, 3 sent" is
+  // a statement about this asset rather than about its whole attachment list.
+  files: [
+    file('600000000000000001', 'sheet', 0),
+    file('600000000000000002', 'sheet', 1),
+    file('600000000000000003', 'sheet', 2),
+    file('600000000000000004', 'sheet', 3),
+  ],
+  links: [],
+  linked_by: [],
+  loadouts: [],
+};
+
+/** The same asset with two of its files in slots a pick leaves behind. */
+const MIXED_DETAIL = {
+  ...ASSET_DETAIL,
+  file_counts_by_slot: { sheet: 2, stills: 1, worn: 1 },
   files: [
     file('600000000000000001', 'sheet', 0),
     file('600000000000000002', 'sheet', 1),
     file('600000000000000004', 'stills', 0),
     file('600000000000000003', 'worn', 0),
   ],
-  links: [],
-  linked_by: [],
-  loadouts: [],
 };
 
 /** The hovered cell, in viewport coordinates. */
@@ -199,14 +212,43 @@ describe('LibraryPreviewCard', () => {
       'true',
       'false',
     ]);
-    // Delivery order, so the Cut really is the tail.
+    // Every row is the primary slot, because that is what a pick sends.
     expect(rows.map((r) => r.getAttribute('data-slot'))).toEqual([
       'sheet',
       'sheet',
-      'worn',
-      'stills',
+      'sheet',
+      'sheet',
     ]);
     expect(fetchAssetDetail).toHaveBeenCalledWith(SCOPE, ASSET.id);
+  });
+
+  it('says what a pick leaves behind, so a short table is not a silent one', async () => {
+    fetchAssetDetail.mockResolvedValue(MIXED_DETAIL);
+    render(
+      <LibraryPreviewCard item={ASSET} anchor={rectAt(200, 120)} model={MODEL} scopeId={SCOPE} />,
+    );
+    await settle();
+
+    // Two rows, not four: `worn` and `stills` are not what a pick delivers.
+    const rows = await waitFor(() => {
+      const found = screen.getAllByTestId('library-preview-row');
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(rows.map((r) => r.getAttribute('data-sends'))).toEqual(['true', 'true']);
+    expect(await screen.findByTestId('library-preview-other-slots')).toHaveTextContent(
+      '2 files in other slots are not sent by default',
+    );
+  });
+
+  it('stays quiet about other slots when there are none', async () => {
+    render(
+      <LibraryPreviewCard item={ASSET} anchor={rectAt(200, 120)} model={MODEL} scopeId={SCOPE} />,
+    );
+    await settle();
+
+    await waitFor(() => expect(screen.getAllByTestId('library-preview-row')).toHaveLength(4));
+    expect(screen.queryByTestId('library-preview-other-slots')).toBeNull();
   });
 
   it('names the model and the ceiling, so the trim is attributable', async () => {

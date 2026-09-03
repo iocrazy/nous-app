@@ -25,14 +25,10 @@ import { useTranslation } from 'react-i18next';
 import { ImageOff } from 'lucide-react';
 
 import { slotLabelKey } from '../../../components/resources/assets/assetTypeMeta';
-import {
-  fetchAssetDetail,
-  type AssetRowDetail,
-  type AssetType,
-} from '../../../services/assetsService';
+import { fetchAssetDetail, type AssetRowDetail } from '../../../services/assetsService';
 import { useModelCapabilities } from '../smart/nodes/useModelCapabilities';
 import type { LibraryItem } from './librarySearch';
-import { referenceCut } from './referenceCut';
+import { otherSlotCount, referenceCut } from './referenceCut';
 
 /** How long the pointer must rest on a cell before the card opens. */
 export const PREVIEW_DELAY_MS = 400;
@@ -103,7 +99,12 @@ export function LibraryPreviewCard({
 
   if (!open) return null;
 
-  const rows = detail ? referenceCut(detail.files, item.kind as AssetType, null, maxRefs) : [];
+  // The detail row itself, not a hand-narrowed copy of it: `referenceCut` asks
+  // `primarySlotFileIds` the same question with the same argument the two real
+  // delivery paths ask it with, and `null` is the loadout both of them pass —
+  // the panel has no loadout to bind.
+  const rows = detail ? referenceCut(detail, null, maxRefs) : [];
+  const others = detail ? otherSlotCount(detail, null) : 0;
 
   const flip = anchor.right + CARD_WIDTH > window.innerWidth;
   const left = flip ? anchor.left - CARD_WIDTH - GAP : anchor.right + GAP;
@@ -181,6 +182,15 @@ export function LibraryPreviewCard({
             </li>
           ))}
         </ul>
+      )}
+
+      {others > 0 && (
+        <p data-testid="library-preview-other-slots" className="mt-1 text-[10px] text-canvas-muted">
+          {t('canvas.library.previewOtherSlots', {
+            count: others,
+            defaultValue: '{{count}} files in other slots are not sent by default',
+          })}
+        </p>
       )}
 
       {note !== null && (

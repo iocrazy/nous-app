@@ -3289,7 +3289,9 @@
       "previewCut": "Cut · max {{max}}",
       "modelNote": "On {{model}}, {{max}} references are sent.",
       "previewFailed": "Could not load this asset",
-      "previewNoModel": "Pick a target node to see which files are sent."
+      "previewNoModel": "Pick a target node to see which files are sent.",
+      "previewOtherSlots_one": "{{count}} file in other slots is not sent by default",
+      "previewOtherSlots_other": "{{count}} files in other slots are not sent by default"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
