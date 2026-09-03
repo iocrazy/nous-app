@@ -165,10 +165,3 @@ export function promptStripEntries(
 
   return entries;
 }
-
-/** The wired-image urls on the strip, in strip order — what `source_ref`
- *  toggling and the manual-ref remove/reorder keys operate on. */
-export function stripInputUrls(entries: StripEntry[]): string[] {
-  return entries.filter((e): e is Extract<StripEntry, { kind: 'input' }> => e.kind === 'input')
-    .map((e) => e.url);
-}

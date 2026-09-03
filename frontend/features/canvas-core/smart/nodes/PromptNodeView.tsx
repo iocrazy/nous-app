@@ -644,7 +644,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                               })
                             : t('canvas.mention.spanKnown', {
                                 name: asset.name,
+                                // Pluralised: `spanKnown_one` / `spanKnown_other`
+                                // in both locales. A single form would read
+                                // "1 reference images".
                                 count: entry.refCount,
+                                defaultValue_one: '{{name}} — {{count}} reference image',
+                                defaultValue_other: '{{name}} — {{count}} reference images',
+                                // The un-suffixed fallback too: it is what a
+                                // resolver with no plural rules lands on, and
+                                // leaving it out shows the raw key there.
                                 defaultValue: '{{name}} — {{count}} reference images',
                               })
                       }

@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import type { MentionedAsset } from './mentionedAssets';
-import { promptStripEntries, stripInputUrls } from './promptStrip';
+import { promptStripEntries } from './promptStrip';
 
 const GM = (n: string) => `/api/v1/generated-media/${n}/cover`;
 const RES = (n: string) => `/api/v1/resources/${n}/cover`;
@@ -75,10 +75,10 @@ describe('order — mentions lead, wired images follow', () => {
 
   it('keeps the wired images in their own resolved order', () => {
     const nodes = [prompt(), mediaNode('m1', [GM('1'), GM('2')])];
-    expect(stripInputUrls(promptStripEntries('p1', nodes, [edge('m1', 'p1')], null))).toEqual([
-      GM('1'),
-      GM('2'),
-    ]);
+    const urls = promptStripEntries('p1', nodes, [edge('m1', 'p1')], null)
+      .filter((e) => e.kind === 'input')
+      .map((e) => (e as Extract<typeof e, { kind: 'input' }>).url);
+    expect(urls).toEqual([GM('1'), GM('2')]);
   });
 
   it('is empty for a prompt with nothing feeding it', () => {

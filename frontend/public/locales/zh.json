@@ -3424,7 +3424,8 @@
       "count_other": "{{count}} 项结果",
       "hint": "↑↓ 选择 · ↵ 插入 · Esc 关闭",
       "bundleFailed": "上次运行未能读取被 @ 提到的资产",
-      "spanKnown": "{{name}} —— {{count}} 张参考图",
+      "spanKnown_one": "{{name}} —— {{count}} 张参考图",
+      "spanKnown_other": "{{name}} —— {{count}} 张参考图",
       "spanUnknown": "{{name}} —— 还不知道它会带几张参考图"
     }
   },
