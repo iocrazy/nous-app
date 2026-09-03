@@ -130,4 +130,6 @@ Use the ResourceFetch tool to load any of these on demand:
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
 - **附件条数没有服务端上限**。`ChatMessageRequest.attachments`（`app/schemas/ai_library_chat.py`）是没有 `max_length` 的 list，链路上也没有计数检查，所以 `<available_resources>` 这一块的总大小只受客户端约束。今天不构成事故是因为唯一的写方是我们自己的 composer UI；一个直接打 API 的调用方可以塞进任意多条，把系统消息撑到 provider 上限。要封顶就得在 schema 上加，别指望前端。
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
+- **资产的主图可能「有」却「取不到」，此时条目被降级渲染**。`has_image` 由解析器用**系统作用域**读 `resources` 算出（资产的文件行是经资产可读的，不是经调用者的 team 成员关系），而 `ResourceFetch` 只认本轮可访问集合——两者会不一致，最典型的是系统预设资产，它的文件落在用户不属于的 scope 里。`ai_library_chat_service._merge_asset_primaries` 在这种情况下把条目改写成 `has_image="false"` 且**省掉 `primary_resource_id`**（即上面那条「没有图可取」的形状），并向用户回一条 `asset_no_primary_image`。宁可少给一张图，也不给模型一个用了就失败的 id。
+- **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 把 reason 词表钉死在四个值，其中 `asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得先给词表加第五个值。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。

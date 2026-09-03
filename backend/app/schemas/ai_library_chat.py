@@ -116,9 +116,21 @@ class AttachmentRequest(BaseModel):
     to multimodal Attachment[] (image / video frames / PDF pages) before
     composing the user message."""
 
-    kind: str = Field(..., description="image | video | pdf")
+    kind: str = Field(..., description="image | video | pdf | resource_ref | asset_ref")
     """Source format. video → frames extracted via Q2; pdf → pages
-    rendered via Q3; image → passed through as-is."""
+    rendered via Q3; image → passed through as-is.
+
+    Two kinds carry no bytes and name a library row instead: ``resource_ref``
+    resolves ``resource_id`` through ``resource_ref_resolver`` (S4), and
+    ``asset_ref`` resolves ``asset_id`` (+ optional ``loadout_id``) through
+    ``asset_ref_resolver`` (P5). Both are listed in ``<available_resources>``
+    and loaded only if the model calls ``ResourceFetch``.
+
+    The field stays a free string rather than an enum: unknown kinds fall
+    through to the binary path, which reports ``unsupported attachment kind``
+    as a typed failure the user sees. Narrowing it to a Literal would turn the
+    same input into a 422 from FastAPI with no per-attachment reason.
+    """
 
     url: Optional[str] = Field(
         default=None,
@@ -151,6 +163,17 @@ class AttachmentRequest(BaseModel):
     scope: Optional[dict] = Field(
         default=None,
         description="Frontend scope hint only — backend re-checks access.",
+    )
+
+    # P5: @-reference asset fields (kind='asset_ref')
+    asset_id: Optional[str] = Field(
+        default=None,
+        description="assets.id Snowflake for kind='asset_ref'.",
+    )
+    loadout_id: Optional[str] = Field(
+        default=None,
+        description="Optional asset_loadouts.id for kind='asset_ref'. Null "
+        "(the only value v1 clients send) means the asset's default loadout.",
     )
 
 

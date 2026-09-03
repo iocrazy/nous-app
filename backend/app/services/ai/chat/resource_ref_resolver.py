@@ -133,6 +133,27 @@ async def _fetch_accessible_meta(
     return metas
 
 
+async def fetch_resource_meta(
+    user_id: str, resource_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """``{id: meta}`` for the resources ``user_id`` can read — the public seam.
+
+    Same call ``resolve_resource_refs`` makes, exposed for the P5 asset path:
+    an ``<asset>`` entry points at its primary image with
+    ``primary_resource_id``, and that image has to reach the model as an
+    ordinary ``<resource … />`` line (ruling F). Building that dict by hand
+    from the asset's own rows would produce a SECOND opinion about a
+    resource's name, mime, scope label and AI status — the drift this repo has
+    paid for elsewhere. It also re-checks accessibility: an id absent from the
+    result is one the caller must not advertise.
+
+    A thin wrapper rather than a rename because ``_fetch_accessible_meta`` is
+    monkeypatched by name in four existing test modules; going through it at
+    call time keeps those patches effective.
+    """
+    return await _fetch_accessible_meta(user_id, resource_ids)
+
+
 async def resolve_resource_refs(
     attachments: list[dict] | None, *, user_id: str
 ) -> tuple[list[dict], list[str]]:
@@ -187,5 +208,6 @@ async def resolve_resource_refs(
 
 
 __all__ = [
+    "fetch_resource_meta",
     "resolve_resource_refs",
 ]

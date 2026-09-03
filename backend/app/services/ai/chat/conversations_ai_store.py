@@ -87,7 +87,19 @@ _META_DECORATION_KEYS = ("agent_id", "prompt_tokens", "completion_tokens")
 # Deliberately excludes `data_url`: the vision pipeline resolves bytes from the
 # request separately, and inlining them here would bloat every history read.
 # See ConversationsAiStore.display_attachments for the shared reducer.
-_DISPLAY_ATTACHMENT_KEYS = ("kind", "resource_id", "mime", "alt_text", "name")
+# `asset_id` / `loadout_id` (P5) join the list for the same reason
+# `resource_id` is on it: an `asset_ref` bubble re-rendered from history has
+# nothing to point at without them, and the reference kinds carry no bytes to
+# fall back on — the chip would degrade to a bare name with no link.
+_DISPLAY_ATTACHMENT_KEYS = (
+    "kind",
+    "resource_id",
+    "asset_id",
+    "loadout_id",
+    "mime",
+    "alt_text",
+    "name",
+)
 
 
 def _bigint(v: Any) -> int:

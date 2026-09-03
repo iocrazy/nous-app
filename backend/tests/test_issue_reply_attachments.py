@@ -53,8 +53,15 @@ def test_issue_message_post_attachments_serializable_as_dicts():
     )
     raw = [a.model_dump() for a in p.attachments]
     # S4 PR #361 added optional resource_id/name/scope fields to
-    # AttachmentRequest for the @-reference path. They default to None
-    # when an image-kind attachment is built.
+    # AttachmentRequest for the @-reference path; P5 added asset_id/loadout_id
+    # for the asset-reference path. All default to None when an image-kind
+    # attachment is built.
+    #
+    # ⚠️ The two asset keys exist on THIS wire without being honoured on it:
+    # the issue reply path shares `AttachmentRequest` but does not run the
+    # asset resolver (P5 ruling H — chat only this round). An issue reply that
+    # sent `kind='asset_ref'` would fall through to the binary path and come
+    # back as a typed "unsupported attachment kind" failure, not a silent drop.
     assert raw == [
         {
             "kind": "image",
@@ -65,5 +72,7 @@ def test_issue_message_post_attachments_serializable_as_dicts():
             "resource_id": None,
             "name": None,
             "scope": None,
+            "asset_id": None,
+            "loadout_id": None,
         }
     ]

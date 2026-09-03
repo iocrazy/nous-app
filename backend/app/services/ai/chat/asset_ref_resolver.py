@@ -82,7 +82,7 @@ class AssetRefFailure:
     reason: AssetRefFailureReason
 
 
-def _coerce_asset_id(value: Any) -> Optional[str]:
+def coerce_asset_id(value: Any) -> Optional[str]:
     """The attachment's ``asset_id`` as a decimal string, or None if unusable.
 
     The wire carries these as STRINGS (``assets`` router ``str()``s every
@@ -91,6 +91,11 @@ def _coerce_asset_id(value: Any) -> Optional[str]:
     number, and ``"123" != 123`` would silently make that asset unresolvable.
     Normalizing here rather than at each comparison is the fix for the class of
     bug the storyboard canvas paid for once (CLAUDE.md 边界 mock).
+
+    Public because the chat service has to map a :class:`ChatAssetRef` back to
+    the attachment that asked for it (to report a failure against the right
+    chip), and doing that with a second, slightly different normalization is
+    how the two would disagree about which attachment an asset came from.
     """
     if value is None or isinstance(value, bool):
         return None
@@ -257,7 +262,7 @@ async def resolve_asset_refs(
     for idx, att in enumerate(attachments):
         if not isinstance(att, dict) or att.get("kind") != "asset_ref":
             continue
-        asset_id = _coerce_asset_id(att.get("asset_id"))
+        asset_id = coerce_asset_id(att.get("asset_id"))
         if asset_id is None:
             bad_indices.append(idx)
             logger.info(
@@ -271,7 +276,7 @@ async def resolve_asset_refs(
         order.append(asset_id)
         # Same normalization as the asset id, and for the same reason: the
         # loadout Snowflake rides the wire as a string but need not.
-        requested_loadout[asset_id] = _coerce_asset_id(att.get("loadout_id"))
+        requested_loadout[asset_id] = coerce_asset_id(att.get("loadout_id"))
 
     failures: List[AssetRefFailure] = [
         AssetRefFailure(index=i, reason="asset_not_accessible") for i in bad_indices
@@ -302,9 +307,12 @@ async def resolve_asset_refs(
     # ⚠️ Cost: FOUR round trips per asset (loadouts, files, and the two
     # ``link_targets`` traversals), against one batched ``resources`` read for
     # the whole turn. Left per-asset deliberately — batching them needs three
-    # new multi-asset repository methods, and a turn carries a handful of
-    # attachments at most (the composer's staged list bounds it). Revisit if a
-    # caller ever resolves asset refs in bulk.
+    # new multi-asset repository methods, and our own composer UI stages a
+    # handful of attachments at most. ⚠️ That is a client habit, not a
+    # guarantee: nothing server-side caps the attachment count (see
+    # ``app/services/ai/prompts/README.md`` Known Limitations), so a caller
+    # hitting the API directly makes this loop as long as it likes. Revisit
+    # when either that cap lands or a caller resolves asset refs in bulk.
     staged: List[Tuple[str, Dict[str, Any], Optional[Dict], List[Dict], Dict]] = []
     for asset_id in order:
         row = by_id.get(asset_id)
@@ -362,5 +370,6 @@ async def resolve_asset_refs(
 __all__ = [
     "AssetRefFailure",
     "AssetRefFailureReason",
+    "coerce_asset_id",
     "resolve_asset_refs",
 ]

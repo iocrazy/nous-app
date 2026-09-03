@@ -52,8 +52,13 @@ prompt, concatenated), so it is hard-capped at
 :data:`MAX_CONSISTENCY_PROMPT_CHARS` characters rather than left to grow with
 the number of links. The visible ``[truncated]`` marker is APPENDED BEYOND that
 cap, so a truncated entry's body is 612 characters, not 600. Total growth is
-therefore bounded by (number of asset attachments in the turn) × that cap; the
-number of attachments is bounded by the composer's staged-attachment list.
+therefore (number of asset attachments in the turn) × that cap — and the first
+factor has NO server-side ceiling: ``ChatMessageRequest.attachments`` is a list
+with no ``max_length`` and nothing downstream counts it, so the total is bounded
+only by what the client chooses to send. Today the only writer is our own
+composer UI; a caller hitting the API directly can make this block arbitrarily
+large. See the matching entry in ``app/services/ai/prompts/README.md``'s Known
+Limitations.
 
 **KV Cache effect.** These entries ride in ``<available_resources>``, which is
 appended AFTER the system message's cache boundary (see
