@@ -67,7 +67,7 @@ describe('WorkflowLibraryPicker', () => {
     const pop = screen.getByTestId('workflow-library-picker');
     expect(pop.parentElement).toBe(document.body);
     expect(pop.style.position).toBe('fixed');
-    expect(screen.getByRole('dialog', { name: 'Workflow Library' })).toBe(pop);
+    expect(screen.getByRole('dialog', { name: 'Workflows' })).toBe(pop);
   });
 
   it('Escape closes the picker', () => {

@@ -168,7 +168,7 @@ describe('CanvasComposer — library glue (②-4)', () => {
     );
     seed([]);
     render(<CanvasComposer teamId="team-1" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Workflows' }));
     fireEvent.click(await screen.findByText('wf-a.json'));
     await waitFor(() => {
       expect(fetchWorkflowText).toHaveBeenCalledWith('88');
@@ -180,6 +180,6 @@ describe('CanvasComposer — library glue (②-4)', () => {
     seed([]);
     render(<CanvasComposer />);
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Library' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Workflows' })).toBeNull();
   });
 });

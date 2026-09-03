@@ -540,7 +540,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
             onClick={() => setLibraryOpen(true)}
-            aria-label="Load from library"
+            aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
             data-testid="prompt-library-button"
             disabled={readOnly}
           >

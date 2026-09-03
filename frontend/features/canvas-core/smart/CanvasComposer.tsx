@@ -15,6 +15,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { arrangeSelected } from './arrangeNodes';
@@ -126,6 +127,7 @@ export function CanvasComposer({
   runner: runnerOverride,
   teamId,
 }: CanvasComposerOptions = {}) {
+  const { t } = useTranslation();
   // Settled viewport — see the note in `TopNodeBar`: new nodes are placed by
   // a discrete click at rest, and this component renders outside React Flow's
   // provider, so the store is both correct and the only option.
@@ -663,7 +665,7 @@ export function CanvasComposer({
             {savingToLibrary ? 'Saving…' : 'Save'}
           </ComposerButton>
           <ComposerButton ref={libraryButtonRef} onClick={() => setLibraryOpen((v) => !v)}>
-            Library
+            {t('canvas.library.workflows', 'Workflows')}
           </ComposerButton>
         </>
       )}

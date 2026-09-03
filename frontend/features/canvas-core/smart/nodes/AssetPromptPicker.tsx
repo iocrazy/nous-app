@@ -1,5 +1,5 @@
 /**
- * Prompt Library picker for the canvas — browse resources that carry a
+ * Prompt Templates picker for the canvas — browse resources that carry a
  * generation prompt, search/filter them, and pick one to seed a Prompt
  * node (spec 2026-07-26-asset-prompt-management, Phase 2 Task 2).
  *
@@ -117,7 +117,7 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
       >
         <div className="flex items-center justify-between px-3 py-2 border-b border-ink-800 shrink-0">
           <h3 className="text-[13px] font-semibold text-ink-100">
-            {t('canvas.assetPromptPicker.title', 'Prompt Library')}
+            {t('canvas.library.promptTemplates', 'Prompt Templates')}
           </h3>
           <div className="flex items-center gap-2">
             <div className="flex rounded-full border border-ink-700 overflow-hidden text-[10px]">

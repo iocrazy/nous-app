@@ -24,6 +24,7 @@
 import { FileJson, Loader2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 import { useResourceSearch } from '../../../hooks/useResourceSearch';
 
@@ -41,6 +42,7 @@ export function WorkflowLibraryPicker({
   onPick: (resourceId: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('workflow');
   const { data, loading } = useResourceSearch(query, 'doc', teamId);
   const rows = data.results.filter((r) =>
@@ -128,12 +130,12 @@ export function WorkflowLibraryPicker({
       ref={ref}
       data-testid="workflow-library-picker"
       role="dialog"
-      aria-label="Workflow Library"
+      aria-label={t('canvas.library.workflows', 'Workflows')}
       className="mh-pop-in canvas-island z-50 w-80 p-2"
       style={{ position: 'fixed', top: 0, left: 0 }}
     >
       <div className="mb-1.5 flex items-center justify-between px-1">
-        <span className="mh-node-title">Workflow Library</span>
+        <span className="mh-node-title">{t('canvas.library.workflows', 'Workflows')}</span>
         <button aria-label="Close" onClick={onClose} className="text-canvas-muted hover:text-canvas-text">
           <X size={13} />
         </button>
@@ -153,7 +155,7 @@ export function WorkflowLibraryPicker({
         )}
         {!loading && rows.length === 0 && (
           <div className="px-2 py-3 text-center text-xs text-canvas-muted">
-            No workflow files in the library yet — use Save first.
+            No workflow files saved yet — use Save first.
           </div>
         )}
         {rows.map((r) => (

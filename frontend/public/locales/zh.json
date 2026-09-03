@@ -3246,7 +3246,9 @@
       "mentionConsequence": "提及资产会在运行时发送它的参考文件；提及图片会把它加为参考图；纯文本仍然是文本。",
       "mentionAddsReference": "选中一张会把它加为该节点的参考图",
       "noCanvas": "从工作区打开这个画布，才能看到它的生成结果",
-      "quotaClamped_other": "有 {{count}} 张参考图未添加 · 额度已满"
+      "quotaClamped_other": "有 {{count}} 张参考图未添加 · 额度已满",
+      "workflows": "工作流",
+      "promptTemplates": "提示词模板"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",
@@ -3363,7 +3365,6 @@
     "loopImageWillOutput": "将输出 {{n}} 张",
     "loopImageEmpty": "把图片或图片组连接到左侧输入口",
     "assetPromptPicker": {
-      "title": "提示词库",
       "searchPlaceholder": "按文件名搜索…",
       "all": "全部",
       "noResults": "未找到带提示词的素材"

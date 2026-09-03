@@ -3246,7 +3246,9 @@
       "mentionConsequence": "Mentioning an asset sends its reference files at run. Mentioning an image adds it as a reference. Plain text stays text.",
       "mentionAddsReference": "Picking one adds it as a reference on this node",
       "noCanvas": "Open this canvas from a workspace to see its generations",
-      "quotaClamped_other": "{{count}} references not added · quota reached"
+      "quotaClamped_other": "{{count}} references not added · quota reached",
+      "workflows": "Workflows",
+      "promptTemplates": "Prompt Templates"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
@@ -3363,7 +3365,6 @@
     "loopImageWillOutput": "Will output {{n}} image(s)",
     "loopImageEmpty": "Connect an image or image group to the left port",
     "assetPromptPicker": {
-      "title": "Prompt Library",
       "searchPlaceholder": "Search by filename…",
       "all": "All",
       "noResults": "No prompt assets found"

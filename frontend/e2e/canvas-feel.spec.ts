@@ -277,7 +277,7 @@ test('workflow Save → Library import round trip (②-4)', async ({ page }) => 
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Saved to library');
 
-  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click();
   // Scope to the picker: the save notice carries the same filename text and
   // sits on the same anchor — an unscoped getByText can hit the toast and
   // "import" nothing (how this test shipped red).
