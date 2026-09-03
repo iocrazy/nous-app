@@ -10,6 +10,12 @@ const uploadAttachment = vi.fn();
 vi.mock('../../services/inspirationService', () => ({
   createNote: (...a: unknown[]) => createNote(...a),
   uploadAttachment: (...a: unknown[]) => uploadAttachment(...a),
+  // Composer's edit path also imports deleteAttachment, and the
+  // AttachmentView it renders there imports attachmentUrlWithToken —
+  // stubbed so this factory covers Composer's whole import surface, not
+  // just the calls these create-mode tests happen to reach.
+  deleteAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, f: string) => f }),
@@ -50,6 +56,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'first idea' }}
         onSubmit={onSubmit}
       />,
@@ -67,6 +74,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'first idea' }}
         onSubmit={onSubmit}
       />,
@@ -85,6 +93,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'x' }}
         onSubmit={vi.fn()}
         submitLabel="Save Changes"
@@ -100,6 +109,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'first idea' }}
         onSubmit={onSubmit}
       />,
@@ -118,6 +128,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'x' }}
         onSubmit={vi.fn()}
       />,
@@ -132,6 +143,7 @@ describe('Composer edit mode', () => {
       <Composer
         onCreated={vi.fn()}
         tagSuggestions={[]}
+        noteId="7"
         prefill={{ content: 'x', refHotspot: REF }}
         onSubmit={vi.fn()}
       />,

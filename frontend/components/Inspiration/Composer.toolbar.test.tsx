@@ -5,6 +5,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 vi.mock('../../services/inspirationService', () => ({
   createNote: vi.fn(),
   uploadAttachment: vi.fn(),
+  // Composer's edit path also imports deleteAttachment, and the
+  // AttachmentView it renders there imports attachmentUrlWithToken —
+  // stubbed so this factory covers Composer's whole import surface, not
+  // just the calls these create-mode tests happen to reach.
+  deleteAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, f: string) => f }),

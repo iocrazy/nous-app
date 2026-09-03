@@ -4689,6 +4689,7 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "rating": "评分",
+    "removeFailed": "移除失败: {{name}}",
     "delete": "删除",
     "deleteConfirm": "删除这条笔记？",
     "editNote": "编辑笔记",

@@ -7,15 +7,17 @@ import { Hash, Link as LinkIcon, Paperclip, Send, SquareCode, X } from 'lucide-r
 import { useToast } from '../Toast';
 import {
   createNote,
+  deleteAttachment,
   uploadAttachment,
   type InspirationNote,
   type NoteAttachment,
   type RefHotspot,
 } from '../../services/inspirationService';
 import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
+import { AttachmentView } from './AttachmentView';
 import { RatingStars } from '../detail/DetailCardKit';
 
-interface Props {
+interface BaseProps {
   onCreated: (note: InspirationNote) => void;
   /** Called when a retried upload finally succeeds, so the page can merge the
    * new attachment into the (already-created) note's card. */
@@ -27,6 +29,22 @@ interface Props {
    * remounts (keyed by prefillNonce) on every new prefill, so this only
    * needs to run once per mount, not react to later changes. */
   autoFocus?: boolean;
+}
+
+/** Quick-capture: the note does not exist yet, so none of the edit-only
+ *  props can be meaningfully supplied. Spelling them out as `undefined`
+ *  (rather than omitting them) is what makes the union discriminable — and
+ *  what makes `submitLabel` without `onSubmit` a compile error instead of a
+ *  silently ignored prop. */
+interface CreateMode {
+  onSubmit?: undefined;
+  submitLabel?: undefined;
+  noteId?: undefined;
+  existingAttachments?: undefined;
+  onAttachmentDeleted?: undefined;
+}
+
+interface EditMode {
   /**
    * EDIT MODE switch. When given, Save routes here instead of `createNote`,
    * and nothing is cleared afterwards — the parent owns closing its modal,
@@ -35,38 +53,69 @@ interface Props {
    *
    * Absent → the quick-capture (new note) behaviour, byte-for-byte unchanged.
    */
-  onSubmit?: (content: string, refHotspot?: RefHotspot) => Promise<InspirationNote>;
+  onSubmit: (content: string, refHotspot?: RefHotspot) => Promise<InspirationNote>;
   /** Submit button label. Defaults to "Save". */
   submitLabel?: string;
+  /** REQUIRED in edit mode: uploads and deletes must name the row they act
+   *  on, and there is no id to discover — the note already exists. Making it
+   *  part of the union is what removes the "edit mode but no id" branch
+   *  entirely instead of guarding it at runtime. */
+  noteId: string;
+  /** The note's already-stored attachments, rendered with remove buttons. */
+  existingAttachments?: NoteAttachment[];
+  /** Called per attachment actually deleted server-side, so the card behind
+   *  the modal drops it immediately — symmetric with onAttachmentUploaded.
+   *  Matters when a later step of the same Save fails: the deletion already
+   *  happened and the parent must not keep showing the file. */
+  onAttachmentDeleted?: (noteId: string, attachmentId: string) => void;
 }
 
-/** A staged file, tagged with the note it failed to attach to (if any) so a
- * Retry can target the right note without re-creating it. */
-interface StagedFile {
-  key: string;
-  file: File;
-  noteId?: string;
-}
+type Props = (BaseProps & CreateMode) | (BaseProps & EditMode);
 
-export const Composer: React.FC<Props> = ({
-  onCreated,
-  onAttachmentUploaded,
-  tagSuggestions,
-  prefill,
-  autoFocus,
-  onSubmit,
-  submitLabel,
-}) => {
+/**
+ * One staged row per attachment the composer is responsible for.
+ *
+ * - `existing` — already stored server-side (edit mode only). Removing one
+ *   takes it out of this list and parks it in `removed`; the DELETE fires at
+ *   Save, never on click, because deletion is irreversible and Cancel must
+ *   mean cancel.
+ * - `pending` — a picked/pasted/dropped File not yet uploaded, tagged with
+ *   the note it failed to attach to (if any) so Retry can target the right
+ *   note without re-creating it.
+ */
+type StagedItem =
+  | { kind: 'existing'; key: string; attachment: NoteAttachment }
+  | { kind: 'pending'; key: string; file: File; noteId?: string };
+
+type PendingItem = Extract<StagedItem, { kind: 'pending' }>;
+
+export const Composer: React.FC<Props> = (props) => {
+  // Base props are destructured; the MODE props stay on `props` on purpose —
+  // destructuring a discriminated union loses the correlation, and reading
+  // `props.noteId` inside an `if (props.onSubmit)` branch is what lets the
+  // compiler know the id is there.
+  const { onCreated, onAttachmentUploaded, tagSuggestions, prefill, autoFocus } = props;
+  const submitLabel = props.submitLabel;
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [text, setText] = useState(prefill?.content ?? '');
   const [ref, setRef] = useState(prefill?.refHotspot ?? null);
-  const [staged, setStaged] = useState<StagedFile[]>([]);
+  // Seeded once from `existingAttachments`, same initial-value semantics as
+  // `prefill` — the modal remounts (keyed by note id) for each note it edits.
+  const [staged, setStaged] = useState<StagedItem[]>(() =>
+    (props.existingAttachments ?? []).map((attachment) => ({
+      kind: 'existing' as const,
+      key: `e${attachment.id}`,
+      attachment,
+    })),
+  );
+  /** Removals the user has staged but Save has not applied yet. */
+  const [removed, setRemoved] = useState<NoteAttachment[]>([]);
   const [rating, setRating] = useState(0);
   const [saving, setSaving] = useState(false);
   // One boolean, derived — every edit-only / create-only branch below reads
   // this so the two modes can never drift apart.
-  const isEdit = !!onSubmit;
+  const isEdit = !!props.onSubmit;
   const editorRef = useRef<NoteEditorHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const nextKey = useRef(0);
@@ -74,17 +123,96 @@ export const Composer: React.FC<Props> = ({
   const stageFiles = useCallback((files: FileList | File[]) => {
     setStaged((prev) => [
       ...prev,
-      ...Array.from(files).map((file) => ({ key: `f${nextKey.current++}`, file })),
+      ...Array.from(files).map((file) => ({
+        kind: 'pending' as const,
+        key: `f${nextKey.current++}`,
+        file,
+      })),
     ]);
   }, []);
+
+  // Named distinctly from the `existingAttachments` PROP: that one is the
+  // seed, this one is the live list after any staged removals.
+  const storedAttachments = staged.flatMap((i) =>
+    i.kind === 'existing' ? [i.attachment] : [],
+  );
+  const pending = staged.filter((i): i is PendingItem => i.kind === 'pending');
+
+  /** Stage a removal: drop it from the visible list, park it for Save. */
+  const removeExisting = (attachment: NoteAttachment) => {
+    setStaged((prev) =>
+      prev.filter((i) => !(i.kind === 'existing' && i.attachment.id === attachment.id)),
+    );
+    setRemoved((prev) => [...prev, attachment]);
+  };
+
+  const uploadFailedMsg = (name: string, err: unknown) =>
+    t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name }) +
+    `: ${(err as Error).message}`;
+
+  /**
+   * Edit mode Save. Order is load-bearing:
+   *   uploads → removals → content PATCH.
+   * The PATCH response carries the note's attachment list, so it has to run
+   * LAST or the parent would store a list that predates this very save.
+   *
+   * Any failure ABORTS the rest and leaves the modal open. Closing on a
+   * failed upload would take the only copy of the file with it, leaving a
+   * transient toast as the sole trace; every failure here is typed and
+   * user-visible, never a silent no-op.
+   *
+   * Returns false when it aborted.
+   */
+  const applyAttachmentChanges = async (noteId: string): Promise<boolean> => {
+    for (const item of pending) {
+      try {
+        const attachment = await uploadAttachment(noteId, item.file);
+        setStaged((prev) => prev.filter((x) => x.key !== item.key));
+        onAttachmentUploaded?.(noteId, attachment);
+      } catch (err) {
+        addToast(uploadFailedMsg(item.file.name, err), 'error');
+        // Tag it so the Retry action appears, same as the create path.
+        setStaged((prev) =>
+          prev.map((x) => (x.key === item.key && x.kind === 'pending' ? { ...x, noteId } : x)),
+        );
+        return false;
+      }
+    }
+    for (const attachment of removed) {
+      try {
+        await deleteAttachment(attachment.id);
+        // Drop it from the pending-removal set as soon as it lands, so a
+        // failure of a LATER step can't make the next Save re-issue a DELETE
+        // for a row that is already gone (404 → permanently unsaveable modal).
+        setRemoved((prev) => prev.filter((x) => x.id !== attachment.id));
+        props.onAttachmentDeleted?.(noteId, attachment.id);
+      } catch (err) {
+        addToast(
+          t('inspiration.removeFailed', 'Remove failed: {{name}}', {
+            name: attachment.original_name,
+          }) + `: ${(err as Error).message}`,
+          'error',
+        );
+        // Put it back: the UI must not claim a removal the server refused.
+        setRemoved((prev) => prev.filter((x) => x.id !== attachment.id));
+        setStaged((prev) => [
+          ...prev,
+          { kind: 'existing', key: `e${attachment.id}`, attachment },
+        ]);
+        return false;
+      }
+    }
+    return true;
+  };
 
   const submit = async () => {
     const content = text.trim();
     if (!content || saving) return;
     setSaving(true);
     try {
-      if (onSubmit) {
-        await onSubmit(content, ref ?? undefined);
+      if (props.onSubmit) {
+        if (!(await applyAttachmentChanges(props.noteId))) return;
+        await props.onSubmit(content, ref ?? undefined);
         // Deliberately no clearing/reset: see the `onSubmit` prop doc.
         return;
       }
@@ -96,16 +224,13 @@ export const Composer: React.FC<Props> = ({
         ? await createNote(content, ref ?? undefined, rating)
         : await createNote(content, ref ?? undefined);
       const uploaded: NoteAttachment[] = [];
-      const failed: StagedFile[] = [];
-      for (const item of staged) {
+      const failed: StagedItem[] = [];
+      // Create mode has no `existing` rows, so `pending` is the whole list.
+      for (const item of pending) {
         try {
           uploaded.push(await uploadAttachment(note.id, item.file));
         } catch (err) {
-          addToast(
-            t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name: item.file.name }) +
-              `: ${(err as Error).message}`,
-            'error',
-          );
+          addToast(uploadFailedMsg(item.file.name, err), 'error');
           // Keep the file staged (tagged with the note it belongs to) rather
           // than dropping it — the note was already created, so the user
           // only needs to retry the attachment, not the whole note.
@@ -123,18 +248,14 @@ export const Composer: React.FC<Props> = ({
     }
   };
 
-  const retryUpload = async (item: StagedFile) => {
+  const retryUpload = async (item: PendingItem) => {
     if (!item.noteId) return;
     try {
       const attachment = await uploadAttachment(item.noteId, item.file);
       setStaged((prev) => prev.filter((s) => s.key !== item.key));
       onAttachmentUploaded?.(item.noteId, attachment);
     } catch (err) {
-      addToast(
-        t('inspiration.uploadFailed', 'Upload failed: {{name}}', { name: item.file.name }) +
-          `: ${(err as Error).message}`,
-        'error',
-      );
+      addToast(uploadFailedMsg(item.file.name, err), 'error');
     }
   };
 
@@ -220,9 +341,18 @@ export const Composer: React.FC<Props> = ({
         />
       </div>
 
-      {staged.length > 0 && (
+      {/* Already-stored files (edit mode). Rendered only when non-empty — not
+          merely a tidiness choice: AttachmentView reads the auth context for
+          its media token, so mounting it in the quick-capture box (which has
+          nothing to show) would drag that dependency into every create-mode
+          consumer for no benefit. */}
+      {storedAttachments.length > 0 && (
+        <AttachmentView attachments={storedAttachments} onDelete={removeExisting} />
+      )}
+
+      {pending.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-2">
-          {staged.map((item) => (
+          {pending.map((item) => (
             <span
               key={item.key}
               className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-content-2 ${
