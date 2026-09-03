@@ -13,18 +13,33 @@
 // mention" and "replaces the body" are three different outcomes behind
 // identically-shaped grids, and an optional prop is one a caller forgets.
 //
+// Gestures: a click replaces the selection, cmd/ctrl toggles one, shift takes
+// the inclusive range from the anchor, and a DOUBLE CLICK SELECTS THAT ITEM
+// AND THEN ACTIVATES IT — normal file-manager behaviour. The browser delivers
+// click, click, dblclick, so the pick genuinely runs first; a contract saying
+// "double click leaves the selection untouched" would be true only of a
+// synthetic `dblclick` dispatched with no preceding click.
+//
 // Layout reuses PR #2092's two item-agnostic pieces (`computeJustifiedRows`
-// via `useJustifiedVirtualizer`). WARNING: When the scroll container has no
-// measured height — jsdom, and the first frame of a panel that has not laid
-// out yet — the virtualizer reports ZERO virtual rows. Rendering the full row
-// list in that case is what keeps the grid from painting blank; the lists here
-// are capped at 60 rows by `useLibrarySearch`, so the fallback is cheap.
+// via `useJustifiedVirtualizer`), positioned the way `components/ResourceGrid`
+// positions the same hook: the row container carries the virtualizer's TOTAL
+// size and each row is absolutely placed at its own offset, so the scrollbar
+// spans the whole list instead of just the current window. `measureElement`
+// then corrects the shared `estimateSize`, which budgets ~44px of card chrome
+// this grid does not render.
+//
+// WARNING: When the scroll container has no measured height — jsdom, and the
+// first frame of a panel that has not laid out yet — the virtualizer reports
+// ZERO virtual rows. Rendering the full row list in that case is what keeps
+// the grid from painting blank; `useLibrarySearch` caps a store at 60 items,
+// roughly 15 rows, so the fallback is cheap.
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCw, Search } from 'lucide-react';
 
 import { useJustifiedVirtualizer } from '../../../hooks/useJustifiedVirtualizer';
+import type { JustifiedRow } from '../../../utils/justifiedLayout';
 import { useMeasuredAspectRatios } from '../../../hooks/useMeasuredAspectRatios';
 import { LibraryCell } from './LibraryCell';
 import type { LibraryItem } from './librarySearch';
@@ -107,6 +122,7 @@ export function LibraryGrid({
   className = '',
 }: LibraryGridProps): React.ReactElement {
   const { t } = useTranslation();
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<number | null>(null);
   const [active, setActive] = useState(0);
@@ -123,10 +139,22 @@ export function LibraryGrid({
     gap: GAP,
   });
   const virtual = rowVirtualizer.getVirtualItems();
-  const visibleRows = virtual.length > 0 ? virtual.map((v) => v.index) : rows.map((_, i) => i);
 
   const chosen = useMemo(() => selectedItems(selection, items), [selection, items]);
   const selectedSet = useMemo(() => new Set(selection), [selection]);
+
+  // A narrowing query can leave the keyboard cursor past the end of the list,
+  // where it matches no cell and every arrow press appears to do nothing.
+  useEffect(() => {
+    if (active > items.length - 1) setActive(Math.max(0, items.length - 1));
+  }, [items.length, active]);
+
+  // Optional call: jsdom implements no scrolling at all.
+  useEffect(() => {
+    rootRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({
+      block: 'nearest',
+    });
+  }, [active]);
 
   const pick = useCallback(
     (index: number, e: React.MouseEvent) => {
@@ -144,6 +172,19 @@ export function LibraryGrid({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // The search box lives inside this root, so every keystroke typed into it
+      // bubbles here. Moving the caret and submitting a query are the input's
+      // keys, not the grid's — taking them would make the field unusable.
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         setActive((i) =>
@@ -164,9 +205,34 @@ export function LibraryGrid({
     [items, active, chosen, primaryAction, onItemActivate],
   );
 
+  // One cell block, both branches. `active`/`selected` are read here rather
+  // than passed down a level so the two row layouts stay pure positioning.
+  const renderCells = (row: JustifiedRow) =>
+    items.slice(row.start, row.end).map((item, offset) => {
+      const index = row.start + offset;
+      return (
+        <LibraryCell
+          key={libraryKey(item)}
+          item={item}
+          width={aspectRatios[index] * row.height}
+          height={row.height}
+          selected={selectedSet.has(libraryKey(item))}
+          active={index === active}
+          onPick={(e) => pick(index, e)}
+          onActivate={() => onItemActivate?.(item)}
+          onMeasure={(a) => report(libraryKey(item), a)}
+          onHoverStart={(rect) => onItemHover?.(item, rect)}
+          onHoverEnd={() => onItemHover?.(null)}
+          onDragStart={onItemDragStart ? (e) => onItemDragStart(item, e) : undefined}
+        />
+      );
+    });
+
   return (
     <div
+      ref={rootRef}
       data-testid={testId}
+      tabIndex={0}
       onKeyDown={onKeyDown}
       className={`nodrag nowheel nopan flex min-h-0 flex-col ${className}`}
     >
@@ -236,36 +302,48 @@ export function LibraryGrid({
             {emptyLabel}
           </div>
         ) : (
-          <div ref={containerRef} className="flex flex-col" style={{ gap: GAP }}>
-            {visibleRows.map((rowIndex) => {
-              const row = rows[rowIndex];
-              if (!row) return null;
-              return (
-                <div key={rowIndex} className="flex" style={{ gap: GAP, height: row.height }}>
-                  {items.slice(row.start, row.end).map((item, offset) => {
-                    const index = row.start + offset;
-                    return (
-                      <LibraryCell
-                        key={libraryKey(item)}
-                        item={item}
-                        width={aspectRatios[index] * row.height}
-                        height={row.height}
-                        selected={selectedSet.has(libraryKey(item))}
-                        active={index === active}
-                        onPick={(e) => pick(index, e)}
-                        onActivate={() => onItemActivate?.(item)}
-                        onMeasure={(a) => report(libraryKey(item), a)}
-                        onHoverStart={(rect) => onItemHover?.(item, rect)}
-                        onHoverEnd={() => onItemHover?.(null)}
-                        onDragStart={
-                          onItemDragStart ? (e) => onItemDragStart(item, e) : undefined
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
+          <div ref={containerRef}>
+            {virtual.length > 0 ? (
+              // Windowed. The container owns the FULL list height and each row
+              // sits at its own offset, so the scrollbar reaches every row
+              // rather than only the window currently mounted.
+              <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+                {virtual.map((virtualRow) => {
+                  const row = rows[virtualRow.index];
+                  if (!row) return null;
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualRow.start}px)`,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: GAP,
+                        paddingBottom: GAP,
+                      }}
+                    >
+                      {renderCells(row)}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              // No measured height yet, so the virtualizer has nothing to
+              // window over. Render the whole partition instead of nothing.
+              <div className="flex flex-col" style={{ gap: GAP }}>
+                {rows.map((row, rowIndex) => (
+                  <div key={rowIndex} className="flex" style={{ gap: GAP, height: row.height }}>
+                    {renderCells(row)}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -72,8 +72,18 @@ export function LibraryCell({
       style={{ width, height }}
       className={`nodrag nowheel nopan group relative shrink-0 overflow-hidden rounded-md border text-left transition-colors ${
         selected
-          ? 'border-[var(--accent-border)] ring-1 ring-[var(--accent-border)]'
+          ? 'border-[var(--accent-border)]'
           : 'border-canvas-line hover:border-[var(--accent-border)]'
+      } ${
+        // Two states, two channels: the BORDER says "picked", the RING says
+        // "the keyboard cursor is here". They are mutually exclusive as rings
+        // because two ring utilities on one element would race on stylesheet
+        // order rather than on class order.
+        active
+          ? 'ring-2 ring-[var(--accent-text)] ring-offset-1'
+          : selected
+            ? 'ring-1 ring-[var(--accent-border)]'
+            : ''
       }`}
     >
       {item.thumbUrl ? (

@@ -177,12 +177,17 @@ describe('LibraryGrid', () => {
     ]);
   });
 
-  it('double click activates one item without changing the selection', () => {
+  // A browser delivers click, click, dblclick — so the pick DOES run, and the
+  // sequence below is what a real double click looks like. Asserting on a bare
+  // `doubleClick` would pin a rule no user can ever produce.
+  it('double click selects that item and then activates it', () => {
     const onItemActivate = vi.fn();
     const { onSelectionChange } = renderGrid({ onItemActivate });
-    fireEvent.doubleClick(screen.getAllByTestId('library-cell')[2]);
+    const cell = screen.getAllByTestId('library-cell')[2];
+    fireEvent.click(cell);
+    fireEvent.doubleClick(cell);
     expect(onItemActivate).toHaveBeenCalledWith(expect.objectContaining({ title: 'Charlie' }));
-    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onSelectionChange).toHaveBeenLastCalledWith([libraryKey(items[2])]);
   });
 
   it('arrow keys move the active cell and Enter runs the primary action', () => {
@@ -194,7 +199,10 @@ describe('LibraryGrid', () => {
     const root = screen.getByTestId('library-grid');
     fireEvent.keyDown(root, { key: 'ArrowRight' });
     fireEvent.keyDown(root, { key: 'ArrowRight' });
-    expect(screen.getAllByTestId('library-cell')[2]).toHaveAttribute('data-active', 'true');
+    const activeCell = screen.getAllByTestId('library-cell')[2];
+    expect(activeCell).toHaveAttribute('data-active', 'true');
+    // The attribute alone would be an invisible cursor.
+    expect(activeCell).toHaveClass('ring-2', 'ring-[var(--accent-text)]');
     fireEvent.keyDown(root, { key: 'Enter' });
     expect(primary).toHaveBeenCalled();
   });
@@ -204,6 +212,19 @@ describe('LibraryGrid', () => {
     renderGrid({ onQueryChange });
     fireEvent.change(screen.getByTestId('library-search'), { target: { value: 'harbour' } });
     expect(onQueryChange).toHaveBeenCalledWith('harbour');
+  });
+
+  it('the search box keeps its own arrow keys and its own Enter', () => {
+    const primary = vi.fn();
+    renderGrid({
+      selection: [libraryKey(items[0])],
+      primaryAction: { label: 'Add 1 Reference', onClick: primary },
+    });
+    const search = screen.getByTestId('library-search');
+    fireEvent.keyDown(search, { key: 'ArrowRight' });
+    expect(screen.getAllByTestId('library-cell')[0]).toHaveAttribute('data-active', 'true');
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(primary).not.toHaveBeenCalled();
   });
 
   it('an error shows a retry instead of an empty shelf', () => {
