@@ -225,6 +225,31 @@ describe('PromptMentionPicker library groups', () => {
     );
   });
 
+  it('a real DOUBLE click commits once, not three times', async () => {
+    // A browser double-click dispatches `click`, `click`, `dblclick`. All three
+    // reach a commit now that a single click picks — the first two through the
+    // grid's selection change, the third through `onItemActivate` — and
+    // nothing closes the popover in between: the close happens in the CALLER,
+    // after the round trip. For a generated image the extras dedupe by url;
+    // for an UPLOAD every resolve mints a fresh `generated_media` row with a
+    // fresh url, so dedupe cannot fire and one gesture spent three reference
+    // slots and left two orphan inbox rows.
+    //
+    // The pick is left PENDING on purpose: that is the window the burst lands
+    // in, and a promise that had already settled would not test the guard.
+    onPickLibraryImage.mockImplementation(() => new Promise(() => {}));
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    await waitFor(() => expect(screen.getAllByTestId('library-cell')).toHaveLength(1));
+
+    const cell = screen.getAllByTestId('library-cell')[0];
+    fireEvent.click(cell);
+    fireEvent.click(cell);
+    fireEvent.doubleClick(cell);
+
+    expect(onPickLibraryImage).toHaveBeenCalledTimes(1);
+  });
+
   it('Tab walks the groups and wraps', () => {
     renderPicker([{ url: '/api/v1/generated-media/1/file', label: 'Image 1' }]);
     const root = screen.getByTestId('prompt-mention-picker');

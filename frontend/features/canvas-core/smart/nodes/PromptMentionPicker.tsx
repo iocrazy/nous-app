@@ -300,12 +300,33 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
     const pickRef = useRef({ onPickImage, onPickAsset, onPickLibraryImage });
     pickRef.current = { onPickImage, onPickAsset, onPickLibraryImage };
 
+    /**
+     * Keys with a pick still in flight.
+     *
+     * A real double-click dispatches `click`, `click`, `dblclick` — and all
+     * three now reach a commit (the first two through the grid's selection
+     * change, the third through `onItemActivate`). Nothing closes the popover
+     * in between: the close happens in the CALLER, after `addReferences`
+     * resolves, long after the burst is over. For a generated image the extra
+     * adds dedupe by url; for an UPLOAD each resolve mints a fresh
+     * `generated_media` row with a fresh url, so dedupe cannot fire and one
+     * double-click spent three reference slots and left two orphan inbox rows.
+     *
+     * Keyed rather than a single boolean: a deliberate pick of a DIFFERENT row
+     * while the first is in flight is a real second pick, and dropping it
+     * would trade one silent defect for another.
+     */
+    const inFlightRef = useRef(new Set<string>());
+
     // Both library pick paths — the grid's double click and the editor's Enter —
     // go through here, so the failure echo cannot exist on one and not the
     // other. A caller that answers a result gets a typed reason on screen; a
     // caller that answers nothing keeps the old assume-it-landed behaviour.
     const pickLibrary = useCallback(
       (row: LibraryItem) => {
+        const key = libraryKey(row);
+        if (inFlightRef.current.has(key)) return;
+        inFlightRef.current.add(key);
         setNotice(null);
         void Promise.resolve(pickRef.current.onPickLibraryImage(row))
           .then((r) => {
@@ -348,6 +369,11 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
                 defaultValue: '{{count}} could not be added as references',
               }),
             );
+          })
+          // Released only once the round trip is over — the whole point is
+          // that the burst of clicks lands INSIDE that window.
+          .finally(() => {
+            inFlightRef.current.delete(key);
           });
       },
       [t],

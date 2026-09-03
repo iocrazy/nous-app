@@ -51,26 +51,38 @@ export function describeDropOutcome(
   t: TFunction,
 ): DropMessage | null {
   if (outcome.failed > 0) {
-    // The empty pane is a PLACEMENT, not a reference: an audio upload dropped
-    // there could never have become a reference, so saying it "could not be
-    // added as a reference" describes an attempt that was never made. The
-    // click path has said `placeFailed` there all along — this is the same
-    // split the `alreadyOnCanvas` branch below already makes.
-    return target.kind === 'canvas'
-      ? {
-          text: t('canvas.library.placeFailed', {
-            count: outcome.failed,
-            defaultValue: '{{count}} could not be placed',
-          }),
-          tone: 'error',
-        }
-      : {
-          text: t('canvas.library.someFailed', {
-            count: outcome.failed,
-            defaultValue: '{{count}} could not be added as references',
-          }),
-          tone: 'error',
-        };
+    // Three landings, three things that were attempted. Naming the wrong one
+    // describes a step that never ran: the empty pane is a PLACEMENT (an audio
+    // upload dropped there could never have become a reference), `⌥` over a
+    // prompt is a MENTION, and everything else is a reference. The click path
+    // has said `placeFailed` on the pane all along — this is the same split
+    // the `alreadyOnCanvas` branch below already makes, with the mention case
+    // added because this feature created that landing.
+    if (target.kind === 'canvas') {
+      return {
+        text: t('canvas.library.placeFailed', {
+          count: outcome.failed,
+          defaultValue: '{{count}} could not be placed',
+        }),
+        tone: 'error',
+      };
+    }
+    if (target.kind === 'prompt' && target.mention) {
+      return {
+        text: t('canvas.library.mentionFailed', {
+          count: outcome.failed,
+          defaultValue: '{{count}} could not be inserted as a mention',
+        }),
+        tone: 'error',
+      };
+    }
+    return {
+      text: t('canvas.library.someFailed', {
+        count: outcome.failed,
+        defaultValue: '{{count}} could not be added as references',
+      }),
+      tone: 'error',
+    };
   }
   if (outcome.placed + outcome.referenced === 0 && outcome.skipped > 0) {
     // Nothing moved and nothing is marked, so silence here looks exactly like

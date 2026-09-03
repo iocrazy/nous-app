@@ -18,12 +18,9 @@
 //      so a five-item drop left ONE mention; a body carrying an email address
 //      before the caret lost everything from the `@` onward.
 //
-// Chips are immune to (1) and to the multi-item half of (2): a chip is a leaf
-// node, so the next insert's 80-character scan reads it as a leaf separator
-// rather than as an `@`. The single remaining `insertAtMention` behaviour —
-// the FIRST insert consuming a literal `@` the user typed earlier — is the
-// editor handle's contract, shared with the `@` picker, and is not this
-// module's to change.
+// Chips fix (1) outright. (2) is fixed by passing `{ consumeMention: false }`
+// on every insert from this path: the deletion is the `@` picker's contract,
+// not a universal one, and a drop has no pending query for it to consume.
 //
 // Every refusal is TYPED and returned, and the caller says it out loud. This
 // path is a user action that triggers work, so a silent no-op is the defect
@@ -44,9 +41,19 @@ import type { LibraryItem } from './librarySearch';
 /** Exactly the two inserters this needs, so the helper can be pinned without
  *  an editor. `PromptBodyEditorHandle` satisfies it structurally. */
 export interface MentionInserters {
-  insertImage: (image: PromptImageRef) => void;
-  insertAsset: (asset: MentionedAsset) => void;
+  insertImage: (image: PromptImageRef, opts?: { consumeMention?: boolean }) => void;
+  insertAsset: (asset: MentionedAsset, opts?: { consumeMention?: boolean }) => void;
 }
+
+/**
+ * A drop has NO pending `@query`, so the editor must not delete anything.
+ *
+ * The default consumes back to the last literal `@` within 80 characters of
+ * the caret — right for the `@` picker, and destructive here: a body ending
+ * `contact me at foo@bar.com` lost `@bar.com`, and with a second literal `@`
+ * in that window the next insert took the previous chip with it.
+ */
+const AT_CARET = { consumeMention: false } as const;
 
 export interface MentionLibraryResult {
   /** Chips actually written into the document. An asset contributes one; an
@@ -91,7 +98,7 @@ export async function mentionLibraryItems(
         // ABSENT means NOT ASKED — the strip renders that differently from an
         // empty list, so a failed fetch must not become `[]` here.
         ...(refIds ? { ref_resource_ids: refIds } : {}),
-      });
+      }, AT_CARET);
       out.mentioned += 1;
       continue;
     }
@@ -109,7 +116,7 @@ export async function mentionLibraryItems(
       continue;
     }
     for (const ref of refs) {
-      handle.insertImage({ url: ref.url, alias: item.title, kind: ref.kind });
+      handle.insertImage({ url: ref.url, alias: item.title, kind: ref.kind }, AT_CARET);
       out.mentioned += 1;
     }
   }

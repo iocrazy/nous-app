@@ -3292,7 +3292,9 @@
       "previewNoModel": "Pick a target node to see which files are sent.",
       "previewOtherSlots_one": "{{count}} file in other slots is not sent by default",
       "previewOtherSlots_other": "{{count}} files in other slots are not sent by default",
-      "noProject": "This canvas has no project"
+      "noProject": "This canvas has no project",
+      "mentionFailed_one": "{{count}} could not be inserted as a mention",
+      "mentionFailed_other": "{{count}} could not be inserted as mentions"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",

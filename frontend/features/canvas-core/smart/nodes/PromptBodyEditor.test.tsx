@@ -149,6 +149,65 @@ describe('PromptBodyEditor', () => {
     const chip = await screen.findByTestId('prompt-image-chip');
     expect(chip).toHaveTextContent('hero.png');
   });
+
+  // The insert's `@`-consuming step is the `@` PICKER's contract — the user
+  // typed `@que`, so the chip must replace that token. It is implemented as
+  // "delete from the last literal `@` within 80 characters back to the
+  // caret", which cannot tell a pending query from prose. A caller with no
+  // pending query (the ⌥ library drop) must be able to opt out, or it eats
+  // whatever the user happened to write.
+  it('the DEFAULT still consumes a pending @query — the picker depends on it', async () => {
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+    // Typed through the handle so the caret ends up AFTER the text, which is
+    // where a person's caret is when they pick from the picker.
+    ref.current?.insertText('a wide shot @que');
+
+    ref.current?.insertImage(CHIP);
+
+    await screen.findByTestId('prompt-image-chip');
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith('a wide shot @hero.png '),
+    );
+  });
+
+  it('consumeMention:false leaves an @ in the prose alone', async () => {
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+    ref.current?.insertText('contact me at foo@bar.com');
+
+    ref.current?.insertImage(CHIP, { consumeMention: false });
+
+    await screen.findByTestId('prompt-image-chip');
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith('contact me at foo@bar.com@hero.png '),
+    );
+  });
+
+  it('consumeMention:false survives a SECOND @ in range — chip one is not eaten', async () => {
+    // The narrow multi-item case: with two literal `@` inside the 80-character
+    // window, the default deleted back past the first chip. Two drops in a row
+    // must leave both chips standing.
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+    ref.current?.insertText('a@b and c@d');
+
+    ref.current?.insertImage(CHIP, { consumeMention: false });
+    ref.current?.insertImage({ ...CHIP, url: '/api/v1/generated-media/6/cover', alias: 'two.png' }, {
+      consumeMention: false,
+    });
+
+    await waitFor(() => expect(screen.getAllByTestId('prompt-image-chip')).toHaveLength(2));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith('a@b and c@d@hero.png @two.png '),
+    );
+  });
 });
 
 // The 2026-08-18 incident contract, verified at the component that now owns

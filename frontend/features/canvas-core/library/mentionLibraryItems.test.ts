@@ -124,14 +124,18 @@ describe('mentionLibraryItems', () => {
     const r = await mentionLibraryItems([ASSET], SCOPE, h.inserters);
 
     expect(h.insertAsset).toHaveBeenCalledTimes(1);
-    expect(h.insertAsset).toHaveBeenCalledWith({
-      asset_id: ASSET.id,
-      name: 'Cole Bannon',
-      asset_type: 'character',
-      // Neither of these is on a `LibraryItem`; both come from the detail.
-      cover_file_id: '600000000000000001',
-      ref_resource_ids: ['600000000000000001', '600000000000000002'],
-    });
+    expect(h.insertAsset).toHaveBeenCalledWith(
+      {
+        asset_id: ASSET.id,
+        name: 'Cole Bannon',
+        asset_type: 'character',
+        // Neither of these is on a `LibraryItem`; both come from the detail.
+        cover_file_id: '600000000000000001',
+        ref_resource_ids: ['600000000000000001', '600000000000000002'],
+      },
+      // A drop has no pending `@query`, so the editor must delete nothing.
+      { consumeMention: false },
+    );
     expect(h.insertImage).not.toHaveBeenCalled();
     expect(r).toEqual({ mentioned: 1, failed: [] });
   });
@@ -146,6 +150,11 @@ describe('mentionLibraryItems', () => {
       // backend's reference bridge accepts.
       { url: '/api/v1/generated-media/770000000000000001/file', alias: 'harbour.png', kind: 'image' },
       { url: '/api/v1/generated-media/800000000000000001/file', alias: 'A wide shot', kind: 'image' },
+    ]);
+    // EVERY insert opts out of the deletion, not just the first.
+    expect(h.insertImage.mock.calls.map((c) => c[1])).toEqual([
+      { consumeMention: false },
+      { consumeMention: false },
     ]);
     expect(r.mentioned).toBe(2);
     expect(r.failed).toEqual([]);
@@ -183,12 +192,10 @@ describe('mentionLibraryItems', () => {
     const h = handle();
     const r = await mentionLibraryItems([ASSET], SCOPE, h.inserters);
 
-    expect(h.insertAsset).toHaveBeenCalledWith({
-      asset_id: ASSET.id,
-      name: 'Cole Bannon',
-      asset_type: 'character',
-      cover_file_id: null,
-    });
+    expect(h.insertAsset).toHaveBeenCalledWith(
+      { asset_id: ASSET.id, name: 'Cole Bannon', asset_type: 'character', cover_file_id: null },
+      { consumeMention: false },
+    );
     expect(h.insertAsset.mock.calls[0][0]).not.toHaveProperty('ref_resource_ids');
     expect(r.mentioned).toBe(1);
   });

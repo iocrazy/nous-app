@@ -35,6 +35,7 @@ import type { LibraryItem } from './librarySearch';
 
 const CANVAS: LibraryDropTarget = { kind: 'canvas', position: { x: 0, y: 0 } };
 const PROMPT: LibraryDropTarget = { kind: 'prompt', nodeId: 'p1', mention: false };
+const MENTION: LibraryDropTarget = { kind: 'prompt', nodeId: 'p1', mention: true };
 const MEDIA: LibraryDropTarget = { kind: 'media', nodeId: 'm1' };
 
 const ITEMS: LibraryItem[] = [
@@ -78,6 +79,20 @@ describe('describeDropOutcome', () => {
     // The two node landings keep the reference wording, which is true there.
     expect(describeDropOutcome(outcome({ failed: 2 }), MEDIA, t)).toEqual({
       text: '2 could not be added as references',
+      tone: 'error',
+    });
+  });
+
+  it('the ⌥ MENTION landing says so — nothing was attempted as a reference', () => {
+    // Same wrongness the pane landing was raised for, on the landing this
+    // feature created: dropping a video with ⌥ never tried to add a reference.
+    expect(describeDropOutcome(outcome({ failed: 1 }), MENTION, t)).toEqual({
+      text: '1 could not be inserted as a mention',
+      tone: 'error',
+    });
+    // And the modifier is what splits them — same node, same failure.
+    expect(describeDropOutcome(outcome({ failed: 1 }), PROMPT, t)).toEqual({
+      text: '1 could not be added as references',
       tone: 'error',
     });
   });

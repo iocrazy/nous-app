@@ -3292,7 +3292,9 @@
       "previewNoModel": "先指向一个目标节点，才能知道哪些文件会被发送。",
       "previewOtherSlots_one": "另有 {{count}} 个文件在其他槽位，默认不发送",
       "previewOtherSlots_other": "另有 {{count}} 个文件在其他槽位，默认不发送",
-      "noProject": "该画布没有关联项目"
+      "noProject": "该画布没有关联项目",
+      "mentionFailed_one": "有 {{count}} 项无法插入为提及",
+      "mentionFailed_other": "有 {{count}} 项无法插入为提及"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",
