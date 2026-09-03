@@ -89,9 +89,8 @@ describe('canvasCoreStore — can_edit on load', () => {
 
     // Every channel that would normally schedule or force a save.
     useStore.getState().setNodes([{ id: 'shot-1', position: { x: 0, y: 0 } }]);
-    useStore.getState().setViewport({ x: 5, y: 5, zoom: 1 });
     useStore.getState().patchNode('shot-1', { data: { run_status: 'running' } });
-    useStore.getState().flushViewportDirty();
+    useStore.getState().setViewportSettled({ x: 7, y: 7, zoom: 1.25 });
     await vi.advanceTimersByTimeAsync(5000);
     await useStore.getState().flushSave();
 
@@ -225,9 +224,8 @@ describe('canvasCoreStore — read-only latch on 403', () => {
 
     // Every mutation channel that normally re-arms the debounce.
     useStore.getState().setNodes([{ id: 'shot-1', position: { x: 10, y: 10 } }]);
-    useStore.getState().setViewport({ x: 5, y: 5, zoom: 1 });
     useStore.getState().patchNode('shot-1', { data: { run_status: 'running' } });
-    useStore.getState().flushViewportDirty();
+    useStore.getState().setViewportSettled({ x: 7, y: 7, zoom: 1.25 });
     await vi.advanceTimersByTimeAsync(5000);
 
     // …and the direct, non-debounced path (surface unmount / route leave).

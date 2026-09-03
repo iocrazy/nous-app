@@ -13,6 +13,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Loader2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import { downloadBlob, downloadName } from '../downloadMedia';
 import { downloadCanvasAssetsZip } from '../../services/canvasGenerationService';
@@ -28,6 +29,7 @@ import {
   arrangeGroupChildren,
   gridColsFor,
   groupPreviewItems,
+  groupPreviewSources,
   groupSummary,
   ungroupNode,
 } from '../grouping';
@@ -36,6 +38,7 @@ import type { GeneratedImageRef, GroupNodeData } from '../types';
 import type { CanvasNode } from '../../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { GroupNodeToolbar } from './GroupNodeToolbar';
+import { useNodeReveal } from './useNodeReveal';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
@@ -46,10 +49,12 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   const { label, items, uploading } = data as unknown as GroupNodeData;
   const patch = useNodeDataPatch(id);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
-  const storeNodes = useCanvasCoreStore((s) => s.nodes);
-  const summary = useMemo(
-    () => groupSummary(storeNodes as never, id),
-    [storeNodes, id],
+  // Per-node selectors, never a subscription to `s.nodes` (Wave 1+2 Task 4):
+  // that array is replaced on every drag frame, so subscribing to it
+  // re-rendered this card whenever ANY node moved. `groupSummary` returns
+  // three counts — `useShallow` holds the previous object while they match.
+  const summary = useCanvasCoreStore(
+    useShallow((s) => groupSummary(s.nodes as never, id)),
   );
   const memberCount = useCanvasCoreStore(
     (s) =>
@@ -127,9 +132,20 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   );
 
   // Whole-group preview (IC): grid items + member images, deduped.
+  // Subscribe to the contributing node REFERENCES, then derive outside the
+  // selector. Zustand runs selectors on every `set`, so deriving inside one
+  // put a full walk + a fresh LightboxItem per image on every drag frame,
+  // per group card — sixty times a second on the critical path of the
+  // gesture this work exists to smooth. A tick replaces only the node that
+  // moved, so `useShallow` over the sources holds and the memo below never
+  // re-runs. (Selecting the derived list directly cannot work: its elements
+  // are fresh objects, so no equality would ever hold.)
+  const previewSources = useCanvasCoreStore(
+    useShallow((s) => groupPreviewSources(s.nodes as never, id)),
+  );
   const imageItems: LightboxItem[] = useMemo(
-    () => groupPreviewItems(storeNodes as never, id),
-    [storeNodes, id],
+    () => groupPreviewItems(previewSources as never, id) as LightboxItem[],
+    [previewSources, id],
   );
 
   const onArrange = useCallback(() => {
@@ -197,6 +213,10 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
   // Adaptive column count (IC smartGroupThumbLayout): min 2, max 4, √n.
   const cols = gridColsFor(shown.length + pending);
 
+  // Mount the floating toolbar only while the card is hovered / focused
+  // (fluency T5) — see useNodeReveal.
+  const { revealed, revealHandlers } = useNodeReveal();
+
   return (
     <div
       data-testid="smart-group-node"
@@ -205,6 +225,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
       className={`group mh-group-node relative flex h-full w-full flex-col rounded-[var(--canvas-r-node)] border p-3 ${
         selected ? 'mh-node-selected border-canvas-line-strong' : 'border-canvas-line'
       } ${dragOver ? 'ring-2 ring-indigo-500/50' : ''}`}
+      {...revealHandlers}
       onDragOver={(e) => {
         // No drag-over highlight in a read-only session: a ring that
         // promises a drop we then refuse is the same lie as a lit button.
@@ -239,6 +260,7 @@ export function GroupNodeView({ id, data, selected }: NodeProps) {
         onUngroup={onUngroup}
         readOnly={readOnly}
         pinned={Boolean(selected)}
+        hovered={revealed}
       />
       <input
         className="nodrag mb-1.5 w-32 shrink-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.12em] text-canvas-muted outline-none placeholder:text-canvas-muted/60 focus:text-canvas-text read-only:opacity-80 read-only:cursor-default"

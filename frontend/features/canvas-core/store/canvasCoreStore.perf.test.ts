@@ -13,14 +13,21 @@
  *             `setNodesDragTick()` updates positions without touching the
  *             history timer; `setNodes()` on drag-end starts the timer
  *             exactly once.
+ *     Task 6: the same treatment for the SAVE debounce — a tick no longer
+ *             marks dirty either, so drag end is the single arming point
+ *             for both. Contract pinned in canvasCoreStore.autosave.test.ts.
  *
- *   Fix 2 — Viewport markDirty throttle
+ *   Fix 2 — Viewport writes per gesture
  *     Before: every `onMove` tick called `markDirty()`, bumping `revision`
  *             and resetting the 500ms save-debounce timer O(pan_ticks)
  *             times per frame.
- *     After : `setViewportOnMove()` updates the viewport without
- *             touching revision; `flushViewportDirty()` (called at RAF
- *             frequency from CanvasSurface) bumps revision ≤1 per frame.
+ *     Then  : `setViewportOnMove()` + a RAF `flushViewportDirty()` cut that
+ *             to ≤1 revision bump per animation frame — still O(frames).
+ *     Now   : React Flow owns the transform (uncontrolled), so a pan frame
+ *             reaches the store zero times; `setViewportSettled()` writes
+ *             once when the gesture ends. The per-frame API is gone —
+ *             its replacement contract lives in canvasCoreStore.viewport.test.ts
+ *             and the surface wiring in CanvasSurface.viewport.test.tsx.
  *
  * IMPORTANT: no live FPS numbers are captured here. See
  * docs/superpowers/perf/2026-06-14-canvas-baseline.md for the methodology
@@ -163,7 +170,13 @@ describe('Fix 1: drag-tick history churn', () => {
     expect(afterUndo.position).toEqual({ x: 0, y: 0 });
   });
 
-  it('setNodesDragTick marks dirty so positions ARE saved after debounce', async () => {
+  it('dragged positions ARE saved — armed by drag end, not by the ticks', async () => {
+    // This test used to assert that a TICK marked dirty. Canvas fluency
+    // Task 6 moved that to drag end (a drag is one edit, not one per
+    // frame); the property it was really defending — the positions the
+    // drag moved through do get persisted — is unchanged and still pinned
+    // here. The arming contract itself lives in
+    // canvasCoreStore.autosave.test.ts.
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({
       ...stubs,
@@ -174,11 +187,16 @@ describe('Fix 1: drag-tick history churn', () => {
 
     useStore.getState().noteDragStart();
     useStore.getState().setNodesDragTick([
-      { id: 'a', position: { x: 99, y: 77 } },
+      { id: 'a', position: { x: 50, y: 40 } },
     ]);
 
-    // Save hasn't fired yet (debounce not expired).
+    // Mid-drag: nothing armed, so the debounce elapsing saves nothing.
+    await vi.advanceTimersByTimeAsync(200);
     expect(stubs.saveImpl).not.toHaveBeenCalled();
+
+    // Drag end.
+    useStore.getState().setNodes([{ id: 'a', position: { x: 99, y: 77 } }]);
+    expect(stubs.saveImpl).not.toHaveBeenCalled(); // debounce not expired
 
     await vi.advanceTimersByTimeAsync(200);
 
@@ -241,58 +259,35 @@ describe('Fix 1: drag-tick history churn', () => {
 });
 
 // ================================================================
-// Fix 2 — Viewport markDirty throttle
+// Fix 2 — Viewport writes per gesture
 // ================================================================
 
-describe('Fix 2: viewport markDirty throttle', () => {
-  it('N setViewportOnMove calls update viewport but do NOT bump revision', async () => {
+describe('Fix 2: one viewport write per gesture', () => {
+  it('a settled pan bumps revision exactly once', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
 
     const initialRevision = useStore.getState().revision;
+    useStore.getState().setViewportSettled({ x: 45, y: 0, zoom: 1 });
 
-    for (let i = 0; i < 10; i++) {
-      useStore.getState().setViewportOnMove({ x: i * 5, y: 0, zoom: 1 });
-    }
-
-    // Viewport IS updated to the latest value.
     expect(useStore.getState().viewport.x).toBe(45);
-    // Revision NOT bumped — no markDirty was called.
-    expect(useStore.getState().revision).toBe(initialRevision);
-  });
-
-  it('flushViewportDirty bumps revision exactly once regardless of prior tick count', async () => {
-    const stubs = makeStubs();
-    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
-    await useStore.getState().loadCanvas('4242');
-
-    const initialRevision = useStore.getState().revision;
-
-    // 10 viewport ticks + 1 RAF flush.
-    for (let i = 0; i < 10; i++) {
-      useStore.getState().setViewportOnMove({ x: i * 5, y: 0, zoom: 1 });
-    }
-    useStore.getState().flushViewportDirty();
-
     expect(useStore.getState().revision).toBe(initialRevision + 1);
   });
 
-  it('viewport persists after flushViewportDirty + debounce', async () => {
+  it('viewport persists after a settle + debounce', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 100 });
     await useStore.getState().loadCanvas('4242');
 
-    useStore.getState().setViewportOnMove({ x: 111, y: 222, zoom: 1.5 });
-    useStore.getState().flushViewportDirty();
-
+    useStore.getState().setViewportSettled({ x: 111, y: 222, zoom: 1.5 });
     await vi.advanceTimersByTimeAsync(100);
 
     expect(stubs.saveImpl).toHaveBeenCalledTimes(1);
     expect(stubs.calls[0].viewport_json).toMatchObject({ x: 111, y: 222 });
   });
 
-  it('viewport changes via setViewportOnMove do NOT create history entries', async () => {
+  it('viewport changes do NOT create history entries', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({
       ...stubs,
@@ -302,45 +297,21 @@ describe('Fix 2: viewport markDirty throttle', () => {
     await useStore.getState().loadCanvas('4242');
 
     for (let i = 0; i < 20; i++) {
-      useStore.getState().setViewportOnMove({ x: i * 10, y: 0, zoom: 1 });
+      useStore.getState().setViewportSettled({ x: i * 10, y: 0, zoom: 1 });
     }
-    useStore.getState().flushViewportDirty();
     await vi.advanceTimersByTimeAsync(200);
 
     expect(useStore.getState().historyPast).toHaveLength(0);
     expect(useStore.getState().canUndo()).toBe(false);
   });
 
-  it('programmatic setViewport (pan/zoom actions) still bumps revision immediately', async () => {
-    // Verify the existing controlled-viewport path (panViewportBy, zoomViewportAround,
-    // undo/redo) is not affected by Fix 2.
+  it('a settled viewport bumps revision immediately — the debounce is on the SAVE, not the write', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
 
     const revBefore = useStore.getState().revision;
-    useStore.getState().setViewport({ x: 5, y: 10, zoom: 2 });
+    useStore.getState().setViewportSettled({ x: 5, y: 10, zoom: 2 });
     expect(useStore.getState().revision).toBe(revBefore + 1);
-  });
-
-  it('flushViewportDirty without prior setViewportOnMove still schedules a save of existing data', async () => {
-    // Edge case: calling flushViewportDirty with no preceding setViewportOnMove.
-    // It should still mark dirty and trigger a save.
-    const stubs = makeStubs();
-    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 100 });
-    await useStore.getState().loadCanvas('4242');
-
-    // Set some data first so there's something to save.
-    useStore.getState().setNodes([{ id: 'x' }]);
-    await vi.advanceTimersByTimeAsync(100); // first save
-    stubs.saveImpl.mockClear();
-    stubs.calls.length = 0;
-
-    // Now call flushViewportDirty without a setViewportOnMove.
-    useStore.getState().flushViewportDirty();
-    await vi.advanceTimersByTimeAsync(100);
-
-    // A save was triggered.
-    expect(stubs.saveImpl).toHaveBeenCalledTimes(1);
   });
 });

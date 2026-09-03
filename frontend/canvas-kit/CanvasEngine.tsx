@@ -70,6 +70,15 @@ const SNAP_GRID: [number, number] = [8, 8];
 /** Stable empty-guides object so clearing never allocates a new render key. */
 const NO_GUIDES: AlignmentGuides = {};
 
+/**
+ * Set on <body> for the duration of a drag or a pan/zoom. Deliberately on
+ * <body> and not on the engine's own container: the frosted chrome this
+ * downshifts (`.canvas-island` toolbars, palettes, menus) is portalled or
+ * positioned outside the engine subtree, so a container-scoped class would
+ * reach only half of it. Exported so consumers can assert on it.
+ */
+export const INTERACTING_CLASS = 'mh-canvas-interacting';
+
 /** Alignment snap tolerance, in SCREEN pixels (divided by zoom at use). */
 const GUIDE_TOLERANCE_SCREEN_PX = 5;
 /** Node box used for guide math before React Flow has measured a node (flow px). */
@@ -162,8 +171,14 @@ export interface CanvasEngineProps {
   edges: Edge[];
   /** Selected node ids — drives the default (selection-tinted) MiniMap colour. */
   selectedIds?: string[];
-  /** Controlled viewport; omit for an uncontrolled surface (e.g. with fitView). */
-  viewport?: Viewport;
+  /**
+   * Initial viewport, read ONCE at mount. React Flow owns the transform from
+   * there — a pan frame never round-trips through React state, which is the
+   * whole point (canvas fluency Wave 1, Task 3). To move the viewport later,
+   * grab the instance via `onInit` and call its own `setViewport`/`fitView`;
+   * re-rendering with a different `defaultViewport` does nothing by design.
+   */
+  defaultViewport?: Viewport;
   /** Fit the graph into view on mount. */
   fitView?: boolean;
   /**
@@ -223,9 +238,26 @@ export interface CanvasEngineProps {
    */
   onNodeDragStop?: (node: AnyNode, ctx: NodeDragStopContext) => void;
   /** Multi-selection box-drag settled — the dragged nodes (guides already cleared). */
+  /** A multi-node selection started moving. Optional: the engine wires the
+   *  React Flow handler either way, because the interaction downshift below
+   *  is the engine's own business, not something a consumer opts into. */
+  onSelectionDragStart?: (nodes: AnyNode[]) => void;
   onSelectionDragStop?: (nodes: AnyNode[]) => void;
-  /** Viewport moved (caller owns any dirty-coalescing). */
+  /**
+   * Viewport moved — fires on EVERY frame of a pan/zoom. Almost no caller
+   * wants this: persisting from here means N writes per gesture. Prefer
+   * `onMoveEnd`, which fires once when the gesture settles.
+   */
   onMove?: (viewport: Viewport) => void;
+  /** Pan/zoom gesture started. */
+  onMoveStart?: (viewport: Viewport) => void;
+  /**
+   * Pan/zoom gesture settled — the one place a caller should persist the
+   * viewport from. Also fires for PROGRAMMATIC moves (`setViewport`,
+   * `fitView`), so a caller that treats it as "the user edited this" must
+   * check whether the value actually changed.
+   */
+  onMoveEnd?: (viewport: Viewport) => void;
   /** Selection changed — node ids in React Flow's selection order. */
   onSelectionChange?: (ids: string[]) => void;
   /** Double-click on a node (scene mode opens the chapter; others may ignore). */
@@ -303,7 +335,7 @@ export function CanvasEngine({
   nodes,
   edges,
   selectedIds,
-  viewport,
+  defaultViewport,
   fitView = false,
   minZoom,
   maxZoom,
@@ -314,8 +346,11 @@ export function CanvasEngine({
   onNodeDragStart,
   onNodesSnap,
   onNodeDragStop,
+  onSelectionDragStart,
   onSelectionDragStop,
   onMove,
+  onMoveStart,
+  onMoveEnd,
   onSelectionChange,
   onNodeDoubleClick,
   onSelectAll = NOOP,
@@ -379,12 +414,112 @@ export function CanvasEngine({
   // Hovered snap-connect target (drives the `mh-snap-target` highlight).
   const [snapTargetId, setSnapTargetId] = useState<string | null>(null);
 
+  // ---------------------------------------------------------------------
+  // Interaction downshift (canvas fluency Wave 2, Task 5).
+  //
+  // While a gesture is live the engine puts `mh-canvas-interacting` on
+  // <body>; `index.css` keys off it to drop backdrop blur, card shadow and
+  // transitions on node cards. None of that is perceivable mid-gesture, and
+  // a blur is the most expensive thing a compositor can be asked to redo on
+  // every frame for every card on screen.
+  //
+  // TWO INDEPENDENT FLAGS, not one: a node drag can begin inside a live
+  // viewport move (and vice versa), so ending one gesture must not clear the
+  // class while the other is still running. Exactly two — solo node drags
+  // and multi-node SELECTION drags share `draggingRef`, since they are
+  // mutually exclusive (React Flow dispatches one pair or the other, never
+  // both) and a third flag would only add another way to leak one ON.
+  // Flags rather than a counter
+  // because React Flow's move callbacks are not guaranteed to pair up —
+  // `onMoveEnd` also fires for PROGRAMMATIC moves (`fitView`, `setViewport`)
+  // with no matching start, and a counter would go negative or, worse, clear
+  // a live drag.
+  const draggingRef = useRef(false);
+  const movingRef = useRef(false);
+  const syncInteracting = useCallback(() => {
+    document.body.classList.toggle(
+      INTERACTING_CLASS,
+      draggingRef.current || movingRef.current,
+    );
+  }, []);
+  // Which node the live drag is moving — read by the abort watchdog below.
+  const draggingNodeIdRef = useRef<string | null>(null);
+  // Detaches the abort watchdog; non-null exactly while a drag is live.
+  const detachDragWatchRef = useRef<(() => void) | null>(null);
+
+  // React Flow does NOT always close a drag it opened. Its `end` handler
+  // returns before dispatching `onNodeDragStop` whenever `abortDrag` is set
+  // (@xyflow/system/dist/esm/index.js:2262-2267), which happens on a second
+  // touch landing mid-drag and on the dragged node vanishing from
+  // `nodeLookup`. The latter is a keystroke away: the Delete/Backspace
+  // binding in features/canvas-core/ui/useCanvasShortcuts.ts is a
+  // window-level listener that fires happily while a drag is held.
+  //
+  // An unpaired START is the dangerous direction — it pins the class ON, and
+  // nothing would ever take it off, so the whole app stays flat for the rest
+  // of the session. The two flags are idempotent under unpaired ENDS but
+  // cannot help here, so a drag carries its own watchdog: the pointer being
+  // released ends the drag whether or not React Flow says so.
+  const endDrag = useCallback(() => {
+    detachDragWatchRef.current?.();
+    detachDragWatchRef.current = null;
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    draggingNodeIdRef.current = null;
+    syncInteracting();
+  }, [syncInteracting]);
+
+  const beginDrag = useCallback(
+    (nodeId: string | null) => {
+      draggingRef.current = true;
+      draggingNodeIdRef.current = nodeId;
+      syncInteracting();
+      detachDragWatchRef.current?.();
+      const onRelease = () => endDrag();
+      // `pointerup`/`pointercancel`, not `mouseup`: d3-drag (which React Flow
+      // uses) registers a capture-phase `mouseup` on the window and calls
+      // stopImmediatePropagation, so a mouseup listener here would never run.
+      // It does not touch pointer events. In a normal drag these arrive just
+      // before React Flow's drag-stop, and clearing twice is a no-op.
+      document.addEventListener('pointerup', onRelease);
+      document.addEventListener('pointercancel', onRelease);
+      detachDragWatchRef.current = () => {
+        document.removeEventListener('pointerup', onRelease);
+        document.removeEventListener('pointercancel', onRelease);
+      };
+    },
+    [endDrag, syncInteracting],
+  );
+
+  // Second half of the abort cover: Delete pressed mid-drag should restore the
+  // canvas immediately, not make the user release the mouse first.
+  useEffect(() => {
+    const id = draggingNodeIdRef.current;
+    if (id != null && !nodes.some((n) => n.id === id)) endDrag();
+  }, [nodes, endDrag]);
+
+  // A drag interrupted by navigation must not leave the WHOLE app blur-less:
+  // the class lives on <body>, so it outlives this component unless we clear
+  // it ourselves. Detach before clearing, so a late release is silent.
+  useEffect(
+    () => () => {
+      detachDragWatchRef.current?.();
+      detachDragWatchRef.current = null;
+      draggingRef.current = false;
+      draggingNodeIdRef.current = null;
+      movingRef.current = false;
+      document.body.classList.remove(INTERACTING_CLASS);
+    },
+    [],
+  );
+
   const handleNodeDragStart = useCallback(
     (_evt: unknown, node?: AnyNode) => {
+      beginDrag(node?.id ?? null);
       dragStartPosRef.current = node ? { ...node.position } : null;
       onNodeDragStart?.();
     },
-    [onNodeDragStart],
+    [onNodeDragStart, beginDrag],
   );
 
   // Snap-connect hit test (Infinite parity): Alt held, solo drag, probe point
@@ -433,9 +568,9 @@ export function CanvasEngine({
   // tolerance by the live zoom — otherwise a fixed flow px value snaps too
   // eagerly when zoomed in and never snaps when zoomed out.
   const guideTolerance = useCallback(() => {
-    const zoom = instanceRef.current?.getViewport?.().zoom ?? viewport?.zoom ?? 1;
+    const zoom = instanceRef.current?.getViewport?.().zoom ?? defaultViewport?.zoom ?? 1;
     return GUIDE_TOLERANCE_SCREEN_PX / (zoom > 0 ? zoom : 1);
-  }, [viewport]);
+  }, [defaultViewport]);
 
   // While a single node drags, match its edges against the others and draw the
   // alignment guides. The snap itself is applied once on drop so the node never
@@ -453,6 +588,9 @@ export function CanvasEngine({
 
   const handleNodeDragStop = useCallback(
     (evt: unknown, node: AnyNode) => {
+      // First, before any early return below: the gesture is over whichever
+      // branch this drop takes.
+      endDrag();
       setGuides(NO_GUIDES);
       setSnapTargetId(null);
       // Snap-connect drop: the caller creates the edge and restores the node's
@@ -503,15 +641,41 @@ export function CanvasEngine({
       // Full path (scene): hand the caller everything to persist as it sees fit.
       onNodeDragStop?.(node, { isGroupDrop, snappedPosition, nodes: rfNodesRef.current });
     },
-    [toRect, onNodesSnap, onNodeDragStop, guideTolerance, snapConnectTarget, onSnapConnect],
+    [
+      toRect,
+      onNodesSnap,
+      onNodeDragStop,
+      guideTolerance,
+      snapConnectTarget,
+      onSnapConnect,
+      endDrag,
+    ],
+  );
+
+  // Moving a MULTI-node selection is its own React Flow event pair: XYDrag
+  // dispatches `onSelectionDrag*` instead of `onNodeDrag*` when the drag has
+  // no single node behind it. It is also the most expensive gesture on the
+  // canvas — every selected card repainting its blur every frame — so it
+  // rides the SAME drag flag and the SAME pointer watchdog as a solo drag
+  // rather than getting a third flag nothing would take down.
+  const handleSelectionDragStart = useCallback(
+    (_evt: unknown, dragged: AnyNode[]) => {
+      // The vanish watchdog needs an id to watch. Any node in the selection
+      // will do: Delete mid-drag takes the whole selection, so the first one
+      // disappearing is the signal.
+      beginDrag(dragged[0]?.id ?? null);
+      onSelectionDragStart?.(dragged);
+    },
+    [beginDrag, onSelectionDragStart],
   );
 
   const handleSelectionDragStop = useCallback(
     (_evt: unknown, dragged: AnyNode[]) => {
+      endDrag();
       setGuides(NO_GUIDES);
       onSelectionDragStop?.(dragged);
     },
-    [onSelectionDragStop],
+    [endDrag, onSelectionDragStop],
   );
 
   // Adopt the shared canvas-kit keyboard layer for fit-view (f) and zoom (+/-).
@@ -546,6 +710,29 @@ export function CanvasEngine({
       onMove?.(nextViewport);
     },
     [onMove],
+  );
+
+  // ALWAYS wired, unlike `onMove` above: these fire once per gesture, not
+  // once per frame, and the engine itself needs them for the interaction
+  // downshift — a surface that does not persist its viewport still wants
+  // its cards to stop blurring while it pans. The consumer callback is
+  // composed with, never replaced.
+  const handleMoveStart = useCallback(
+    (_event: unknown, nextViewport: Viewport) => {
+      movingRef.current = true;
+      syncInteracting();
+      onMoveStart?.(nextViewport);
+    },
+    [onMoveStart, syncInteracting],
+  );
+
+  const handleMoveEnd = useCallback(
+    (_event: unknown, nextViewport: Viewport) => {
+      movingRef.current = false;
+      syncInteracting();
+      onMoveEnd?.(nextViewport);
+    },
+    [onMoveEnd, syncInteracting],
   );
 
   const handleSelectionChange = useCallback(
@@ -763,7 +950,8 @@ export function CanvasEngine({
         onNodeDragStart={handleNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={handleNodeDragStop}
-        onSelectionDragStop={onSelectionDragStop ? handleSelectionDragStop : undefined}
+        onSelectionDragStart={handleSelectionDragStart}
+        onSelectionDragStop={handleSelectionDragStop}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgesChange={onEdgesChange}
         nodesDraggable={nodesDraggable}
@@ -771,10 +959,12 @@ export function CanvasEngine({
         onConnect={allowConnect ? onConnect : undefined}
         onConnectStart={allowDragCreate ? dragToCreate.onConnectStart : undefined}
         onConnectEnd={allowDragCreate ? dragToCreate.onConnectEnd : undefined}
-        onMove={handleMove}
+        onMove={onMove ? handleMove : undefined}
+        onMoveStart={handleMoveStart}
+        onMoveEnd={handleMoveEnd}
         onSelectionChange={handleSelectionChange}
         isValidConnection={allowConnect ? isValidConnection : undefined}
-        viewport={viewport}
+        defaultViewport={defaultViewport}
         fitView={fitView}
         minZoom={minZoom}
         maxZoom={maxZoom}
@@ -797,6 +987,15 @@ export function CanvasEngine({
         // IC parity: the middle button pans from anywhere (left keeps its
         // pane-drag default).
         panOnDrag={[0, 1]}
+        // Trackpad convention shared by Figma / Miro / Infinite Canvas: two
+        // fingers PAN, pinch ZOOMS. Browsers report a trackpad pinch as a
+        // ctrl+wheel event, and React Flow routes that through `zoomOnPinch`
+        // — so `zoomOnScroll={false}` costs no zoom gesture, it only stops a
+        // plain scroll from zooming. A mouse wheel pans vertically here, the
+        // same as it does in those apps.
+        panOnScroll
+        zoomOnScroll={false}
+        zoomOnPinch
         onReconnect={onReconnect ? (oldEdge, next) => onReconnect(oldEdge, next) : undefined}
       >
         {/* 24px dot lattice per Infinite-Canvas (`radial-gradient … 24px`)

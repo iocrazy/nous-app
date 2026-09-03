@@ -5,7 +5,7 @@
 // on cross-origin URLs (the API host differs from the app origin), so a
 // plain anchor would navigate away instead of saving.
 
-import { mediaSrc } from './mediaUrl';
+import { fullResSrc } from './mediaUrl';
 
 export interface DownloadableItem {
   url: string;
@@ -38,7 +38,9 @@ export async function downloadUrl(
   item: DownloadableItem,
   fallbackIndex: number,
 ): Promise<void> {
-  const res = await fetch(mediaSrc(item.url));
+  // Full resolution: this hands the user a file. Saving the 1024px preview
+  // under the original's filename would be a silent quality downgrade.
+  const res = await fetch(fullResSrc(item.url));
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const blob = await res.blob();
   const href = URL.createObjectURL(blob);

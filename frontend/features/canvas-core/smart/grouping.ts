@@ -557,6 +557,28 @@ export function groupSummary(
 
 /** Every image in the group — grid items first, then member images in node
  *  order, deduped by url (IC's cross-member group preview sequence). */
+/**
+ * The nodes {@link groupPreviewItems} actually reads: the group itself plus
+ * its direct children, returned as the EXISTING references.
+ *
+ * A view subscribes to this (with `useShallow`) instead of to the derived
+ * item list. A mid-drag tick replaces only the node that moved, so every
+ * reference here is unchanged and the shallow compare holds — the derivation
+ * is then skipped entirely rather than recomputed and thrown away. Selecting
+ * the derived list directly cannot do that: its elements are fresh objects on
+ * every call, so neither reference nor shallow equality would ever hold.
+ */
+export function groupPreviewSources(
+  nodes: CanvasNode[],
+  groupId: string,
+): CanvasNode[] {
+  const out: CanvasNode[] = [];
+  const group = nodes.find((n) => String(asObj(n).id) === groupId);
+  if (group) out.push(group);
+  for (const n of nodes) if (asObj(n).parentId === groupId) out.push(n);
+  return out;
+}
+
 export function groupPreviewItems(
   nodes: CanvasNode[],
   groupId: string,

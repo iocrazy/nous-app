@@ -26,7 +26,7 @@ import {
   useState,
 } from 'react';
 
-import { mediaSrc } from '../smart/mediaUrl';
+import { fullResPath, fullResSrc } from '../smart/mediaUrl';
 import { apiFetch } from '../../../services/apiClient';
 
 /** Fetch the base image as a decodable bitmap, or null when it cannot be had.
@@ -36,8 +36,8 @@ async function fetchBaseBitmap(src: string): Promise<HTMLImageElement | null> {
   const attempt = async (): Promise<Blob | null> => {
     try {
       const res = src.startsWith('/api/')
-        ? await apiFetch(src, { method: 'GET' })
-        : await fetch(mediaSrc(src), { mode: 'cors' });
+        ? await apiFetch(fullResPath(src), { method: 'GET' })
+        : await fetch(fullResSrc(src), { mode: 'cors' });
       if (!res.ok) return null;
       return await res.blob();
     } catch (err) {
@@ -388,7 +388,7 @@ export const PaintCanvas = forwardRef<
     <div className="relative inline-block max-h-full max-w-full select-none">
       <img
         ref={imgRef}
-        src={mediaSrc(src)}
+        src={fullResSrc(src)}
         alt={alt}
         draggable={false}
         className="pointer-events-none block max-h-[62vh] max-w-full object-contain"

@@ -146,7 +146,11 @@ function renderCase(c: NodeCase, readOnly: boolean) {
   const View = SMART_NODE_TYPES[c.type] as ComponentType<Record<string, unknown>>;
   render(
     <Wrap>
-      <View {...baseProps} id="n1" type={c.type} data={c.data} />
+      {/* Selected, because that is how a user reaches the floating toolbar:
+          since fluency T5 the bar is mounted only while the card is pinned
+          (selected) or hovered, so an unselected render has no toolbar to
+          make assertions about. */}
+      <View {...baseProps} selected id="n1" type={c.type} data={c.data} />
     </Wrap>,
   );
 }

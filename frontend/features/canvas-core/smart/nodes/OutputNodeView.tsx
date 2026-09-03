@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react';
 
+import { cssAspectRatio, cssAspectRatioOrNull } from '../aspectRatio';
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
@@ -50,6 +51,7 @@ import {
   type GeneratedItem,
 } from '../../../../services/generatedService';
 import { useCanvasScope } from '../canvasScope';
+import { useNodeReveal } from './useNodeReveal';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
@@ -94,7 +96,33 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     gen_pending = 0,
     gen_failed = 0,
     gen_recover = [],
+    gen_ratio,
   } = data as unknown as OutputNodeData;
+  // The box a cell reserves before anything loads, so a result landing
+  // changes no layout (Task 7). `gen_ratio` is plain node data, which keeps
+  // this stable under the memo wrapper in nodes/registry.ts.
+  //
+  // Reserving a box only earns its keep when a placeholder and the thing that
+  // replaces it must resolve to ONE element — otherwise it is a guess imposed
+  // on media that knows its own shape. So the square fallback is gated on
+  // there being something pending to agree with, in BOTH branches.
+  //
+  // Without that gate the ratio-less nodes get letterboxed permanently:
+  // history archives, extend/outpaint results (whose whole point is a CHANGED
+  // aspect), upscale tiles, timeline films, loop outputs and entity templates
+  // all arrive with no ratio and never regenerate. The history archive is the
+  // most visible — it accumulates, so it reaches the multi-image GRID branch
+  // after two runs, and it renders the same images as the live slot directly
+  // above it. Those size themselves, as they always did.
+  const gridAspect =
+    gen_pending > 0 ? cssAspectRatio(gen_ratio) : cssAspectRatioOrNull(gen_ratio) ?? undefined;
+  const soloAspect = cssAspectRatioOrNull(gen_ratio) ?? undefined;
+  // `h-full` only alongside a box. Filling a container that has no height of
+  // its own is how the un-boxed branches would collapse instead of falling
+  // back to the media's own size, which is the whole point of not boxing
+  // them — so the two always travel together.
+  const gridFill = gridAspect ? 'h-full ' : '';
+  const soloFill = soloAspect ? 'h-full ' : '';
   const patchData = useNodeDataPatch(id);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
@@ -577,10 +605,15 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
     [resource_id, id],
   );
 
+  // Mount the floating toolbar only while the card is hovered / focused
+  // (fluency T5) — see useNodeReveal.
+  const { revealed, revealHandlers } = useNodeReveal();
+
   return (
     <div
       data-testid="smart-output-node"
       className={`group mh-node relative border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
+      {...revealHandlers}
       style={{
         // Width lives in node DATA (persisted), never in RF's measured
         // width — reading props.width created a measurement feedback loop
@@ -620,6 +653,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
         <OutputNodeToolbar
           items={lightboxItems}
           pinned={selected}
+          hovered={revealed}
           onPreview={() => openLightbox(0)}
           onCrop={canCrop ? openEditor : undefined}
           onExpand={canSplit ? openOutpaintEditor : undefined}
@@ -685,11 +719,20 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
              dispatched; each finished item replaces a cell as it arrives. */
           <div className="grid grid-cols-2 gap-1" data-testid="output-images-grid">
             {(images ?? []).map((img, i) => (
-              <div key={`${img.url}-${i}`} className="group/cell relative">
+              <div
+                key={`${img.url}-${i}`}
+                data-testid="output-cell"
+                className="group/cell relative"
+                style={{ aspectRatio: gridAspect }}
+              >
                 <img
                   src={mediaSrc(img.url)}
                   alt={img.name || `Generated ${i + 1}`}
                   draggable={false}
+                  // Off-screen nodes on a big canvas must not each cost a
+                  // fetch + a main-thread decode the moment they mount.
+                  loading="lazy"
+                  decoding="async"
                   onDoubleClick={(e) => {
                     // IC: dblclick edits THIS image (a mask can be repainted);
                     // single click keeps the lightbox via the body handler.
@@ -701,7 +744,7 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
                     setEditingUrl(img.url);
                     setEditorMode('preview');
                   }}
-                  className="block w-full cursor-zoom-in rounded object-contain"
+                  className={`block ${gridFill}w-full cursor-zoom-in rounded object-contain`}
                 />
                 {/* IC 图四: each grid item (e.g. a generated mask) can be
                     removed on its own. */}
@@ -724,37 +767,61 @@ export function OutputNodeView({ id, data, selected }: NodeProps) {
               </div>
             ))}
             {Array.from({ length: gen_pending }, (_, i) => (
+              // The shimmer sits INSIDE the reserved box rather than being
+              // the box, so the wrapper an image later occupies and the
+              // wrapper a placeholder occupies are the same element type
+              // with the same style — nothing to reflow at the swap.
               <div
                 key={`pending-${i}`}
-                data-testid="output-pending-cell"
-                aria-label="Generating"
-                className="mh-loading-cell aspect-square w-full rounded"
-              />
+                data-testid="output-cell"
+                className="w-full"
+                style={{ aspectRatio: gridAspect }}
+              >
+                <div
+                  data-testid="output-pending-cell"
+                  aria-label="Generating"
+                  className="mh-loading-cell h-full w-full rounded"
+                />
+              </div>
             ))}
           </div>
         ) : kind === 'image' && (preview_url || images?.[0]?.url) ? (
-          <img
-            src={mediaSrc(preview_url || images?.[0]?.url)}
-            alt={preview_text || 'Output preview'}
-            draggable={false}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (!readOnly) setEditorMode('preview');
-              else openLightbox(0);
-            }}
-            className="block w-full cursor-zoom-in rounded object-contain"
-          />
+          <div
+            data-testid="output-cell"
+            className="w-full"
+            style={{ aspectRatio: soloAspect }}
+          >
+            <img
+              src={mediaSrc(preview_url || images?.[0]?.url)}
+              alt={preview_text || 'Output preview'}
+              draggable={false}
+              loading="lazy"
+              decoding="async"
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (!readOnly) setEditorMode('preview');
+                else openLightbox(0);
+              }}
+              className={`block ${soloFill}w-full cursor-zoom-in rounded object-contain`}
+            />
+          </div>
         ) : kind === 'video' && (preview_url || images?.[0]?.url) ? (
           /* Clickable inline preview — the lightbox owns playback controls
              (G7 review #2: video slots previously rendered nothing). */
-          <video
-            data-testid="output-video-preview"
-            src={mediaSrc(preview_url || images?.[0]?.url)}
-            muted
-            preload="metadata"
-            onDoubleClick={() => openLightbox(0)}
-            className="block w-full cursor-zoom-in rounded"
-          />
+          <div
+            data-testid="output-cell"
+            className="w-full"
+            style={{ aspectRatio: soloAspect }}
+          >
+            <video
+              data-testid="output-video-preview"
+              src={mediaSrc(preview_url || images?.[0]?.url)}
+              muted
+              preload="metadata"
+              onDoubleClick={() => openLightbox(0)}
+              className={`block ${soloFill}w-full cursor-zoom-in rounded object-contain`}
+            />
+          </div>
         ) : preview_text ? (
           <div className="line-clamp-4 whitespace-pre-wrap text-sm text-canvas-text">
             {preview_text}

@@ -8,7 +8,7 @@
 // a Regenerate hook. Controlled + presentational — the node owns which item
 // is open; regeneration/state lives in smart/regenerate.ts.
 
-import { mediaSrc } from '../mediaUrl';
+import { fullResSrc, mediaSrc } from '../mediaUrl';
 import {
   ChevronLeft,
   ChevronRight,
@@ -576,7 +576,7 @@ export function OutputLightbox({
             <video
               ref={videoRef}
               data-testid="lightbox-video"
-              src={mediaSrc(current.url)}
+              src={fullResSrc(current.url)}
               controls
               // No autoplay (Infinite parity): frame scrubbing and playback
               // are mutually exclusive; the node's inline <video> already
@@ -599,7 +599,7 @@ export function OutputLightbox({
                 }
               >
                 <PanoramaViewer
-                  src={mediaSrc(current.url)}
+                  src={fullResSrc(current.url)}
                   exportName={`${(current?.name ?? 'panorama').replace(/\.[^./]+$/, '')}-view.png`}
                   onExport={
                     onFrameExported
@@ -620,14 +620,14 @@ export function OutputLightbox({
                   source sits underneath, letterboxed if aspects differ. */}
               <img
                 data-testid="compare-original"
-                src={mediaSrc(compareUrl)}
+                src={fullResSrc(compareUrl)}
                 alt="Compare source"
                 draggable={false}
                 className="absolute inset-0 block h-full w-full object-contain"
               />
               <img
                 data-testid="compare-result"
-                src={mediaSrc(current.url)}
+                src={fullResSrc(current.url)}
                 alt="Current version"
                 draggable={false}
                 className="relative block max-h-[80vh] max-w-full"
@@ -680,6 +680,8 @@ export function OutputLightbox({
                           : 'border-canvas-line hover:border-canvas-text'
                       }`}
                     >
+                      {/* 36px picker — preview tier on purpose; only the
+                          two large compare panes take the original. */}
                       <img
                         src={mediaSrc(s.url)}
                         alt={s.name || `Source ${i + 1}`}
@@ -718,7 +720,7 @@ export function OutputLightbox({
                 <img
                   key={`${current.url}#${retryNonce}`}
                   data-testid="lightbox-image"
-                  src={mediaSrc(current.url)}
+                  src={fullResSrc(current.url)}
                   alt={current.name || 'Output'}
                   draggable={false}
                   className={`block max-h-[80vh] max-w-full object-contain ${

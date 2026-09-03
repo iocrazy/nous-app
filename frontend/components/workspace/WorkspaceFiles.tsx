@@ -25,6 +25,7 @@ import {
   fetchProjectRenders,
   uploadFile,
 } from '../../services/projectsService';
+import { fullResSrc, mediaSrc } from '../../features/canvas-core/smart/mediaUrl';
 import { getApiUrl } from '../../utils/apiConfig';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { FileInfoPanel } from '../FileInfoPanel';
@@ -49,6 +50,11 @@ function isMediaFile(f: ProjectFile): boolean {
   return f.file_type === 'video' || f.file_type === 'image';
 }
 
+/** The render's bare endpoint — never handed to the DOM directly. `/cover`
+ *  has had two tiers since the canvas-fluency preview work, so every consumer
+ *  has to say which one it wants: `mediaSrc` for a thumbnail, `fullResSrc`
+ *  for the file the user asked to open. `/stream` is single-tier and passes
+ *  through both helpers untouched. */
 function renderUrl(r: RenderItem): string {
   const path = r.media_kind === 'video' ? 'stream' : 'cover';
   return `${getApiUrl()}/api/v1/generated-media/${r.id}/${path}`;
@@ -329,7 +335,7 @@ export function WorkspaceFiles({
             <a
               key={`render-${r.id}`}
               data-testid={`ws-files-item-render-${r.id}`}
-              href={renderUrl(r)}
+              href={fullResSrc(renderUrl(r))}
               target="_blank"
               rel="noreferrer"
               title={t('projects.workspace.files.render')}
@@ -337,7 +343,7 @@ export function WorkspaceFiles({
             >
               {r.media_kind === 'image' ? (
                 <img
-                  src={renderUrl(r)}
+                  src={mediaSrc(renderUrl(r))}
                   alt=""
                   className="h-12 w-full rounded-lg object-cover mb-2 bg-ink-800/60"
                 />

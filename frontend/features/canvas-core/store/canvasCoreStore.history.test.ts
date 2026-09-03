@@ -143,9 +143,9 @@ describe('history capture', () => {
       historyDebounceMs: 100,
     });
     await useStore.getState().loadCanvas('4242');
-    useStore.getState().setViewport({ x: 10, y: 10, zoom: 2 });
-    useStore.getState().panViewportBy(5, 5);
-    useStore.getState().zoomViewportAround({ x: 0, y: 0 }, 1.5);
+    useStore.getState().setViewportSettled({ x: 10, y: 10, zoom: 2 });
+    useStore.getState().setViewportSettled({ x: 15, y: 15, zoom: 2 });
+    useStore.getState().setViewportSettled({ x: 15, y: 15, zoom: 1.5 });
     await vi.advanceTimersByTimeAsync(500);
     expect(useStore.getState().historyPast).toEqual([]);
     expect(useStore.getState().canUndo()).toBe(false);

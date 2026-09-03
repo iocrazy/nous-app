@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { UnifiedImageEditor } from './UnifiedImageEditor';
 
-vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => u }));
+vi.mock('../smart/mediaUrl', () => ({
+  mediaSrc: (u: string) => u,
+  fullResSrc: (u: string) => u,
+  fullResPath: (u: string) => u,
+}));
 
 describe('UnifiedImageEditor IC chrome', () => {
   it('renders a download button pointing at the image source', () => {

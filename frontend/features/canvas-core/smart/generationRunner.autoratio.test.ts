@@ -114,3 +114,58 @@ describe('auto ratio at dispatch', () => {
     ]);
   });
 });
+
+// ── The resolved ratio has to reach the output slot (Task 7 fix round 1) ────
+// The slot reserves each cell's box from the ratio it was told about. If it
+// is told the prompt's raw value it reserves a SQUARE for the default image
+// run — `'auto'` is what the picker shows, and an unset value counts as auto
+// too — while the generation itself comes back at the source's shape. Zero
+// jump would then be achieved by reserving the wrong space. So the value the
+// dispatch actually sent is what `onDispatched` must carry.
+
+const dispatchedRatioArg = async (ctx: RunnerContext): Promise<unknown> => {
+  const seen: unknown[][] = [];
+  await withGenerationRunner(async () => ({ ok: true, text: '', error: null }), {
+    canvasId: 'c1',
+    // No asset inputs in play: the resolver contract (assets P4) is always
+    // called, so it must answer with the empty composition, not be absent.
+    assetInputs: async () => ({ reference_urls: [], prompt_prefix: '', negative: '', contributions: [] }),
+    onDispatched: (...a: unknown[]) => seen.push(a),
+  })(ctx);
+  return seen[0]?.[4];
+};
+
+describe('onDispatched carries the ratio the run was dispatched with', () => {
+  it('reports the MEASURED ratio when the prompt says auto', async () => {
+    measureRatio.mockResolvedValue('16:9');
+    expect(await dispatchedRatioArg(baseCtx())).toBe('16:9');
+  });
+
+  it('reports the measured ratio when the prompt leaves it unset', async () => {
+    // Unset is auto (autoRatio.isAutoRatio) — the same default path.
+    measureRatio.mockResolvedValue('3:4');
+    const ctx = baseCtx({ gen: { kind: 'image', model: 'm', count: 1 } } as never);
+    expect(await dispatchedRatioArg(ctx)).toBe('3:4');
+  });
+
+  it('reports the ratio the user picked, unchanged', async () => {
+    const ctx = baseCtx({
+      gen: { kind: 'image', model: 'm', ratio: '1:1', count: 1 },
+    } as never);
+    expect(await dispatchedRatioArg(ctx)).toBe('1:1');
+  });
+
+  it('reports null when the dispatch sent no ratio at all', async () => {
+    // Nothing was measurable, so nothing is known — the slot must fall back
+    // rather than be handed a guess dressed up as the request.
+    measureRatio.mockResolvedValue(null);
+    expect(await dispatchedRatioArg(baseCtx())).toBeNull();
+  });
+
+  it("reports a video run's aspect", async () => {
+    const ctx = baseCtx({
+      gen: { kind: 'video', model: 'm', aspect: '9:16' },
+    } as never);
+    expect(await dispatchedRatioArg(ctx)).toBe('9:16');
+  });
+});

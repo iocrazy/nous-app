@@ -11,7 +11,7 @@
 import { mediaSrc } from '../mediaUrl';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Plus, X } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { RunStatusBadge } from './RunStatusBadge';
@@ -31,12 +31,11 @@ import {
 import { startTimelineRun, useTimelineRunStore } from '../timelineRun';
 import { runSegmentClip } from '../clipRun';
 import { activeSegmentAt, ensureSegment, playableClips, segmentStarts, setSegmentRef, updateSegment as updateSeg2 } from '../timeline';
-import { resolveSourceUrls } from '../promptInputs';
 import { downloadUrl } from '../downloadMedia';
-import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
+import { useNodeInputUrls } from './useGraphDerived';
 import { UiSelect } from '../../../../components/ui';
 
 /** Movement below this many px stays a click (select-to-edit). */
@@ -65,12 +64,10 @@ export function TimelineNodeView({ id, data, selected }: NodeProps) {
   const [playheadS, setPlayheadS] = useState(0);
   const clips = playableClips(segments);
   const [clipError, setClipError] = useState<string | null>(null);
-  const storeNodes = useCanvasCoreStore((st) => st.nodes);
-  const storeConnections = useCanvasCoreStore((st) => st.connections);
-  const upstreamImages = useMemo(
-    () => resolveSourceUrls(id, storeNodes as never, storeConnections as never),
-    [id, storeNodes, storeConnections],
-  );
+  // Per-node selector, never a subscription to `s.nodes` (Wave 1+2 Task 4):
+  // that array is replaced on every drag frame, so subscribing to it
+  // re-rendered this card whenever ANY node moved.
+  const upstreamImages = useNodeInputUrls(id);
   const generateClip = (segId: string) => {
     setClipError(null);
     setClipRunning(segId);

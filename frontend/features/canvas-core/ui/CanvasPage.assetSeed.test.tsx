@@ -62,7 +62,7 @@ vi.mock('../../../services/assetsService', async (importOriginal) => {
 vi.mock('./CanvasSurface', () => ({
   CanvasSurface: ({ onInit }: { onInit?: (instance: unknown) => void }) => {
     React.useEffect(() => {
-      onInit?.({ fitView: vi.fn() });
+      onInit?.({ fitView: vi.fn(), setViewport: vi.fn() });
     }, [onInit]);
     return <div data-testid="canvas-surface" />;
   },

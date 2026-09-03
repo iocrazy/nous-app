@@ -315,6 +315,14 @@ export interface OutputNodeData {
   gen_pending?: number;
   /** Items of the current batch that failed (P0-3) — surfaced as a chip. */
   gen_failed?: number;
+  /** The ratio the owning prompt ASKED for ('16:9', 'auto', …), copied onto
+   *  the slot at dispatch (genSlots.beginGenerationSlot) and rewritten on
+   *  every re-run. Read by the node view to reserve each cell's box before
+   *  any bytes decode — zero layout jump, canvas fluency Task 7. It is the
+   *  REQUEST, not a measurement of the result: a provider that ignores the
+   *  ratio still letterboxes inside this box rather than reflowing the card.
+   *  Null/absent = unknown, which the view renders square. */
+  gen_ratio?: string | null;
   /** Task ids whose POLL broke but whose backend task is still alive
    *  (P1-13) — rendered as a "task not lost" recover overlay with a
    *  Check Result re-query. */

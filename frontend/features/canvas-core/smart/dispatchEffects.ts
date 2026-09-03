@@ -33,7 +33,11 @@ export function onGenerationDispatched(
   // runner emits, and `persistPendingGenTasks` accepts nothing wider.
   kind: 'image' | 'video',
   taskIds: string[],
+  /** The aspect the dispatch actually sent, already auto-resolved. The slot
+   *  sizes its cells from this; `null` (nothing was knowable) leaves it to
+   *  fall back to the prompt's own value. */
+  ratio: string | null = null,
 ): void {
-  beginGenerationSlot(promptId, count, kind);
+  beginGenerationSlot(promptId, count, kind, ratio);
   persistPendingGenTasks(promptId, taskIds, kind);
 }

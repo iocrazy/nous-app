@@ -3,11 +3,13 @@
 // (IC bakes locally too). jsdom has no 2D canvas, so these stay thin and
 // untested at the unit level; the shape/scale MATH lives in callers' tests.
 
-import { mediaSrc } from '../smart/mediaUrl';
+import { fullResSrc } from '../smart/mediaUrl';
 import type { PaintShape } from './PaintTool';
 
 async function loadBitmap(src: string): Promise<ImageBitmap> {
-  const response = await fetch(mediaSrc(src));
+  // Full resolution: the bake REPLACES the image, and the canvas is sized
+  // from these bitmap dimensions.
+  const response = await fetch(fullResSrc(src));
   if (!response.ok) throw new Error(`bake: fetch failed for ${src}`);
   return createImageBitmap(await response.blob());
 }

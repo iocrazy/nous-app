@@ -582,6 +582,56 @@ export function CanvasView({
     setRfReady(true);
   }, []);
 
+  // Store viewport → React Flow transform. THE single owner of that
+  // direction (canvas fluency Wave 1, Task 3 评审修复轮1).
+  //
+  // React Flow runs UNCONTROLLED — `CanvasSurface` seeds `defaultViewport`
+  // once and React Flow owns the transform after that, which is what makes a
+  // pan land on the same frame as the gesture. The price is that a viewport
+  // the STORE writes moves nothing by itself. Four writes need bridging, and
+  // the store marks all four with one `viewportEpoch` bump:
+  //
+  //   * the initial load (the row arrives AFTER the surface mounts, so the
+  //     seed React Flow got was the identity viewport);
+  //   * a canvas switch — `CanvasView` is NOT remounted when `:canvasId`
+  //     changes, it re-renders with a new prop;
+  //   * a realtime rebase (`applyRemoteUpdate`);
+  //   * a conflict resolve (`resolveConflictWithServer`).
+  //
+  // Everything acted on is read LIVE from `getState()`. The subscribed
+  // `viewportEpoch` is only the trigger. The first version of this effect read
+  // a render-time `loadStatus` and got it wrong in the one case it was written
+  // for: on a switch the loader effect flips the store to `'loading'`
+  // synchronously, but an effect in the same commit still closes over
+  // `'ready'` — React does not re-render between effects — so it latched the
+  // NEW canvas id while applying the OLD canvas's viewport, and the re-run
+  // after the new row landed returned early. Same-commit staleness is why the
+  // `canvasId` check compares against the STORE's id (the `:275` idiom), not
+  // against anything captured at render.
+  //
+  // The `onMoveEnd` this triggers reports the value just applied, which
+  // `CanvasSurface`'s no-change guard drops — otherwise opening a canvas
+  // would dirty it and schedule a save of the row just loaded.
+  //
+  // `rfReady` is in the deps for the not-yet-initialised case: a bump that
+  // arrives before React Flow's `onInit` finds no instance, changes no
+  // latch, and is applied by the re-run when the instance shows up.
+  //
+  // Declared BEFORE the heal effect below so that on a canvas whose saved
+  // viewport frames nothing, the restore applies first and the heal's
+  // `fitView` is what the user actually ends up looking at.
+  const viewportEpoch = useCanvasCoreStore((s) => s.viewportEpoch);
+  const viewportEpochAppliedRef = useRef(0);
+  useEffect(() => {
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    const state = useCanvasCoreStore.getState();
+    if (state.viewportEpoch === viewportEpochAppliedRef.current) return;
+    if (state.canvasId !== canvasId) return;
+    viewportEpochAppliedRef.current = state.viewportEpoch;
+    void instance.setViewport(state.viewport);
+  }, [viewportEpoch, canvasId, rfReady]);
+
   // Empty-viewport self-heal (2026-08-12 production incident, canvas
   // 337610660408263): that row's saved `viewport_json`
   // ({x:181.47,y:106.68,zoom:0.514}) frames world x≈-352..2138 while all six
@@ -596,9 +646,10 @@ export function CanvasView({
   // VISUAL correction — going through the store would route it into the
   // viewport dirty channel (`setViewport` → `markDirty`) and persist a
   // viewport the user never chose. `instance.fitView()` moves React Flow's
-  // own transform; the store's `viewport` follows via `onMove` →
-  // `setViewportOnMove`, which by design does NOT bump revision (only the
-  // RAF `flushViewportDirty` does, and no user gesture fired here).
+  // own transform directly; the store learns the healed viewport through
+  // `onMoveEnd` → `setViewportSettled` like any other settled move, so the
+  // fit does get persisted — what it must never do is go through the store
+  // FIRST and repaint from there.
   //
   // One shot per canvas id, and only once nodes exist: a storyboard canvas
   // whose shot nodes arrive from the Task 4 reconcile a tick after load gets

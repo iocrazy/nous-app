@@ -203,7 +203,12 @@ describe('canConnectSmart — asset rules', () => {
 
 describe('registry + width table', () => {
   it('the asset type has a renderer', () => {
-    expect(SMART_NODE_TYPES.asset).toBeTypeOf('function');
+    // Every registry entry is `memo(View)` (canvas fluency Task 4), and a
+    // memo component is an object carrying the render function under
+    // `type`, not a bare function.
+    const entry = SMART_NODE_TYPES.asset as unknown as { $$typeof: symbol; type: unknown };
+    expect(entry.$$typeof).toBe(Symbol.for('react.memo'));
+    expect(entry.type).toBeTypeOf('function');
   });
 
   it('every registered type has a default width', () => {

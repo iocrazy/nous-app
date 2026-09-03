@@ -308,7 +308,10 @@ describe('withGenerationRunner — recover semantics (P1-13)', () => {
       onDispatched: (...a) => dispatched.push(a),
     });
     await runner(GEN2);
-    expect(dispatched).toEqual([['p1', 2, 'image', ['t1', 't2']]]);
+    // The trailing null is the ratio the dispatch sent: GEN2 has no ratio
+    // and no source to follow, so nothing was knowable and the slot is left
+    // to fall back rather than be handed a guess.
+    expect(dispatched).toEqual([['p1', 2, 'image', ['t1', 't2'], null]]);
   });
 
   it('onItemSettled carries each task id', async () => {

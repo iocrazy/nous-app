@@ -52,7 +52,9 @@ const baseProps = {
   draggable: true,
   selectable: true,
   deletable: true,
-  selected: false,
+    // Selected: since fluency T5 the floating toolbar is mounted only while
+  // the card is pinned (selected) or hovered, and these cases drive it.
+  selected: true,
   dragging: false,
   isConnectable: true,
   positionAbsoluteX: 0,

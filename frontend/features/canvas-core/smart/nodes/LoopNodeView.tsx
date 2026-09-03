@@ -9,9 +9,8 @@ import { LOOP_MODE_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { clampBatchSize, clampRoundStart, clampRounds } from '../loopVars';
 import { startLoopRun } from '../loopRun';
 import { useLoopRunStore } from '../loopRunStore';
-import { resolveSourceUrls } from '../promptInputs';
-import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
+import { useNodeInputUrls } from './useGraphDerived';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
 export function LoopNodeView({ id, data, selected }: NodeProps) {
@@ -38,9 +37,11 @@ export function LoopNodeView({ id, data, selected }: NodeProps) {
   // Upstream durable images feeding this loop (IC preview + "will output N").
   // Selectors stay unconditional so the hook order never depends on
   // imageInput — the resolved list is simply unused when the toggle is off.
-  const nodes = useCanvasCoreStore((s) => s.nodes);
-  const connections = useCanvasCoreStore((s) => s.connections);
-  const upstreamImages = imageInput ? resolveSourceUrls(String(id), nodes, connections) : [];
+  // Per-node selector, never a subscription to `s.nodes` (Wave 1+2 Task 4):
+  // that array is replaced on every drag frame, so subscribing to it
+  // re-rendered this card whenever ANY node moved.
+  const wiredImages = useNodeInputUrls(String(id));
+  const upstreamImages = imageInput ? wiredImages : [];
 
   const patchPrompt = (index: number, value: string) =>
     patch({ prompts: safePrompts.map((p, i) => (i === index ? value : p)) });

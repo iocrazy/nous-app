@@ -42,7 +42,9 @@ const props = () =>
   ({
     id: 'o1',
     data: (useCanvasCoreStore.getState().nodes[0] as { data: unknown }).data,
-    selected: false,
+      // Selected: since fluency T5 the floating toolbar is mounted only while
+  // the card is pinned (selected) or hovered, and these cases drive it.
+  selected: true,
   }) as unknown as Parameters<typeof OutputNodeView>[0];
 
 describe('OutputNodeView width + promote', () => {

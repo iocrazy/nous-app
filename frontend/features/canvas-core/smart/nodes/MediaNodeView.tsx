@@ -27,6 +27,7 @@ import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { AttachedComposerPanel } from './AttachedComposerPanel';
 import { OutputNodeToolbar } from './OutputNodeToolbar';
+import { useNodeReveal } from './useNodeReveal';
 import { MediaItemEditor } from './MediaItemEditor';
 import type { EditorMode } from '../../editor/UnifiedImageEditor';
 import { createMediaNodeFromFiles } from '../dropCreate';
@@ -144,12 +145,17 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
     setEditState({ item: target, mode });
   };
 
+  // Mount the floating toolbar only while the card is hovered / focused
+  // (fluency T5) — see useNodeReveal.
+  const { revealed, revealHandlers } = useNodeReveal();
+
   return (
     <div
       data-testid="smart-media-node"
       className={`group relative mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
         dragOver ? 'ring-2 ring-indigo-500/50' : ''
       }`}
+      {...revealHandlers}
       style={{
         // Width lives in node DATA (persisted), never in RF's measured
         // width — reading props.width created a measurement feedback loop
@@ -176,6 +182,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         <OutputNodeToolbar
           items={(items ?? []).map((it) => ({ url: it.url, name: it.name }))}
           pinned={Boolean(selected)}
+          hovered={revealed}
           onPreview={() =>
             setLightbox({
               kind: (items ?? [])[0]?.kind === 'video' ? 'video' : 'image',

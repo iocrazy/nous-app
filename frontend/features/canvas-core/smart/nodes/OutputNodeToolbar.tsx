@@ -66,6 +66,17 @@ export interface OutputNodeToolbarProps {
   readOnly?: boolean;
   /** Pin visible (the node is selected); otherwise hover reveals. */
   pinned?: boolean;
+  /**
+   * Pointer is over the node card, or focus is somewhere inside it (fluency
+   * Wave 2, Task 5). Unpinned and unhovered the bar is NOT RENDERED — it used
+   * to sit in the DOM at `opacity-0`, and a hidden frosted island still costs
+   * the compositor a backdrop blur + shadow on every card on every frame of
+   * every drag and pan.
+   *
+   * REQUIRED, not optional: a caller that forgot it would render nothing at
+   * all, silently and forever. That has to be a type error, not a no-op.
+   */
+  hovered: boolean;
 }
 
 export function OutputNodeToolbar({
@@ -86,10 +97,15 @@ export function OutputNodeToolbar({
   asAssetDisabledReason,
   readOnly,
   pinned,
+  hovered,
 }: OutputNodeToolbarProps) {
   const { t } = useTranslation();
   const [downloadError, setDownloadError] = useState(false);
   if (items.length === 0) return null;
+  // Mount gate (T5). The opacity classes below still do the FADE, so the
+  // reveal keeps its 150ms ease instead of popping — they just no longer
+  // carry the job of hiding it.
+  if (!pinned && !hovered) return null;
 
   const onDownload = () => {
     setDownloadError(false);
@@ -107,7 +123,14 @@ export function OutputNodeToolbar({
     <div
       data-testid="output-node-toolbar"
       className={`canvas-island absolute -top-10 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-xl px-1.5 py-1 transition-opacity duration-150 ${
-        pinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        // `hovered` belongs here as much as in the mount gate above:
+        // `group-hover` is the CSS :hover, which is NOT the node view's
+        // focus-within state. Gating on `pinned` alone meant a bar revealed
+        // by KEYBOARD focus mounted at opacity-0 — a focused control the
+        // user cannot see. The false branch is currently unreachable (the
+        // gate returns null first) and is kept as the CSS-only fallback in
+        // case that gate is ever relaxed.
+        pinned || hovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
       }`}
     >
       <ToolbarButton label="Preview" onClick={onPreview}>

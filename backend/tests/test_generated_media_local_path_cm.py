@@ -181,3 +181,38 @@ async def test_object_store_get_stream_failure_yields_none(monkeypatch):
         "/api/v1/generated-media/9/stream", media_kind="image"
     ) as path:
         assert path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "suffix",
+    ["", "?v=2", "?v=2&full=1", "#frag"],
+)
+async def test_query_string_does_not_defeat_the_url_match(
+    monkeypatch, tmp_path, suffix
+):
+    """The front end mints `/cover?v=2` (cache bust) and `?v=2&full=1`.
+
+    A `$`-anchored pattern cannot match either, and the miss is a silent
+    `yield None` — the exact shape that once degraded i2v to text2video.
+    `mediaUrl.COVER_RE` on the front end already uses the `(?=$|[?#])`
+    lookahead; both sides of the contract have to agree.
+    """
+    monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
+    rel = "teams/9/generations/2026/07/28/abc/media.png"
+    abs_path = tmp_path / rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(b"IMG")
+
+    _patch_repo(monkeypatch, {"id": 5, "media_kind": "image", "file_path": rel})
+
+    async with gm_svc.generated_media_local_path(
+        f"/api/v1/generated-media/5/cover{suffix}", media_kind="image"
+    ) as path:
+        assert path == str(abs_path.resolve())
+
+
+def test_serving_url_pattern_still_refuses_a_longer_segment():
+    """The lookahead must not turn `/coverage` into a match."""
+    assert gm_svc.GENERATED_MEDIA_URL_RE.search("/generated-media/5/coverage") is None
+    assert gm_svc.GENERATED_MEDIA_URL_RE.search("/generated-media/5/cover-x") is None

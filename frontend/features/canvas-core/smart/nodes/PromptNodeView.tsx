@@ -14,10 +14,14 @@ import { useTextModels } from './useTextModels';
 import { useAgents } from './useAgents';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
-import { isChainTail, startChainRun, useChainRunStore } from '../chainRun';
+import { startChainRun, useChainRunStore } from '../chainRun';
 import { splitPromptItems } from '../promptSplit';
 import { rerunPrompt } from '../regenerate';
-import { resolveSourceUrls, upstreamPromptText } from '../promptInputs';
+import {
+  useIsChainTail,
+  useNodeInputUrls,
+  useUpstreamPromptText,
+} from './useGraphDerived';
 import { MAX_REFERENCE_IMAGES, reorderRefs } from '../refOrder';
 import { RunStatusBadge } from './RunStatusBadge';
 import {
@@ -264,38 +268,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Wired input images (IC parity ⑤ — Infinite's 「N 输入图」row + the
   // @-picker's 输入图 tab). Recomputed from the live graph so absorbing /
   // rewiring upstream nodes updates the row immediately.
-  const storeNodes = useCanvasCoreStore((s) => s.nodes);
-  const storeConnections = useCanvasCoreStore((s) => s.connections);
-  const storeNodes2 = useCanvasCoreStore((s) => s.nodes);
+  //
+  // These three are SELECTORS over the store, never a subscription to
+  // `s.nodes` itself (Wave 1+2 Task 4): a drag tick swaps that array every
+  // frame, so subscribing to it re-rendered every prompt card ~60×/s over
+  // positions belonging to other nodes. Each hook's output is stable while
+  // THIS card's inputs are — see `useGraphDerived.ts`.
+  const inputUrls = useNodeInputUrls(id);
+  const upstreamText = useUpstreamPromptText(id);
   // IC 一键运行 (canRunSmartCascade): only the cascade tail carries the
   // Run-chain button.
-  const chainTail = useMemo(
-    () => isChainTail(id, storeNodes2, storeConnections),
-    [id, storeNodes2, storeConnections],
-  );
+  const chainTail = useIsChainTail(id);
   const chainRunning = useChainRunStore((s) => s.runningTail === id);
   const requestChainStop = useChainRunStore((s) => s.requestStop);
-  const inputUrls = useMemo(
-    () =>
-      resolveSourceUrls(
-        id,
-        storeNodes as CanvasNode[],
-        storeConnections as CanvasConnection[],
-      ),
-    [id, storeNodes, storeConnections],
-  );
-  // Read source_ref from the store (not props): patches land there first,
-  // so the toggle highlight is correct even before React Flow re-renders
-  // the node with fresh data.
-  const upstreamText = useMemo(
-    () =>
-      upstreamPromptText(
-        id,
-        storeNodes as CanvasNode[],
-        storeConnections as CanvasConnection[],
-      ),
-    [id, storeNodes, storeConnections],
-  );
   const [refPickerOpen, setRefPickerOpen] = useState(false);
   const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
   const manualUrlSet = new Set(manualRefs.map((r) => r.url));
@@ -346,6 +331,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [id, patch],
   );
+  // Read source_ref from the store (not props): patches land there first,
+  // so the toggle highlight is correct even before React Flow re-renders
+  // the node with fresh data.
   const sourceRef = useCanvasCoreStore(
     (s) =>
       ((s.nodes.find((n) => (n as { id?: unknown }).id === id) as

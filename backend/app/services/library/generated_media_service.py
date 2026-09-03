@@ -503,7 +503,14 @@ __all__ = [
 # Matches the same-origin serving endpoints (/cover image, /stream video,
 # /file auth-gated) so an already-generated asset can seed a new generation
 # (e.g. image2video) from its real file instead of a re-download.
-GENERATED_MEDIA_URL_RE = re.compile(r"/generated-media/(\d+)/(?:cover|stream|file)$")
+#
+# The lookahead, not `$`: the front end mints `/cover?v=2` (preview cache bust)
+# and `/cover?v=2&full=1` (original tier), and a miss here is a silent
+# `yield None` that degrades i2v to text2video with no log. `mediaUrl.COVER_RE`
+# on the front end uses the same `(?=$|[?#])` — both sides of one contract.
+GENERATED_MEDIA_URL_RE = re.compile(
+    r"/generated-media/(\d+)/(?:cover|stream|file)(?=$|[?#])"
+)
 
 
 @asynccontextmanager

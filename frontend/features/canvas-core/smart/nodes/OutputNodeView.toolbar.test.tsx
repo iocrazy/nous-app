@@ -73,6 +73,8 @@ function renderNode(selected = true, data: Record<string, unknown> = {}) {
   );
 }
 
+const bar = () => screen.getByTestId('output-node-toolbar');
+
 describe('OutputNodeView floating toolbar (P2-3)', () => {
   it('mounts the toolbar on media nodes; text nodes get none', () => {
     renderNode();
@@ -82,13 +84,61 @@ describe('OutputNodeView floating toolbar (P2-3)', () => {
     expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
   });
 
-  it('pins visible while selected (hover reveal handles the rest)', () => {
+  it('pins mounted while selected; unselected the bar is not in the DOM', () => {
     renderNode(true);
-    const bar = screen.getByTestId('output-node-toolbar');
-    expect(bar.className).toContain('opacity-100');
+    expect(screen.getByTestId('output-node-toolbar')).toBeTruthy();
     cleanup();
+    // Fluency T5: unselected + no pointer over the card means the frosted
+    // island is not rendered at all, not merely faded to opacity-0.
     renderNode(false);
-    expect(screen.getByTestId('output-node-toolbar').className).toContain('opacity-0');
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('hovering the card mounts the bar, leaving it unmounts it again', () => {
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    expect(bar().classList.contains('opacity-100')).toBe(true);
+    fireEvent.mouseLeave(card);
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('keeps the bar mounted while focus is inside the card', () => {
+    // Keyboard reachability: once a hover has revealed the bar and focus has
+    // moved into it, moving the mouse away must NOT yank the focused control
+    // out of the document.
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    const preview = screen
+      .getByTestId('output-node-toolbar')
+      .querySelector('button[aria-label="Preview"]')!;
+    fireEvent.focus(preview);
+    fireEvent.mouseLeave(card);
+    // Mounted AND visible. `group-hover` is the CSS :hover, which the pointer
+    // has just left — so a bar kept alive by focus alone would compute to
+    // opacity-0: a focused control the keyboard user cannot see.
+    expect(bar().classList.contains('opacity-100')).toBe(true);
+    expect(bar().classList.contains('opacity-0')).toBe(false);
+    fireEvent.blur(preview);
+    expect(screen.queryByTestId('output-node-toolbar')).toBeNull();
+  });
+
+  it('survives tabbing from one toolbar button to the next', () => {
+    // `focusout` fires BEFORE the matching `focusin`. A blur handler that
+    // does not look at `relatedTarget` unmounts the bar in that gap, so the
+    // button the keyboard user was tabbing TO never exists to receive focus.
+    renderNode(false);
+    const card = screen.getByTestId('smart-output-node');
+    fireEvent.mouseEnter(card);
+    const preview = bar().querySelector('button[aria-label="Preview"]')!;
+    const download = bar().querySelector('button[aria-label="Download"]')!;
+    fireEvent.focus(preview);
+    fireEvent.mouseLeave(card);
+    // Focus leaves Preview, but it is heading for Download — inside the card.
+    fireEvent.blur(preview, { relatedTarget: download });
+    expect(bar().classList.contains('opacity-100')).toBe(true);
+    expect(bar().classList.contains('opacity-0')).toBe(false);
   });
 
   it('Preview opens the lightbox immediately — no 250ms delay', () => {
@@ -118,6 +168,7 @@ describe('IC editing keys on the toolbar (⑥)', () => {
         onMask={() => {}}
         onSplit={() => {}}
         pinned
+        hovered={false}
       />,
     );
     for (const label of ['Preview', 'Crop', 'Expand', 'Mask', 'Split', 'Download']) {

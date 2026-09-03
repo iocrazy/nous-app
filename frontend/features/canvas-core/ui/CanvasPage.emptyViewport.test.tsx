@@ -36,10 +36,13 @@ vi.mock('react-i18next', () => ({
 }));
 
 const fitView = vi.fn();
+// The real engine exposes this too — `CanvasView` calls it to restore the
+// persisted viewport on open and on canvas switch (uncontrolled since Task 3).
+const setViewport = vi.fn();
 vi.mock('./CanvasSurface', () => ({
   CanvasSurface: ({ onInit }: { onInit?: (instance: unknown) => void }) => {
     React.useEffect(() => {
-      onInit?.({ fitView });
+      onInit?.({ fitView, setViewport });
     }, [onInit]);
     return <div data-testid="canvas-surface" />;
   },
@@ -281,8 +284,11 @@ describe('CanvasView — empty-viewport self-heal', () => {
     await waitFor(() => expect(fitView).toHaveBeenCalledTimes(1));
 
     const s = useCanvasCoreStore.getState();
-    // `fitView()` moves React Flow's own transform; the store learns about it
-    // through `onMove` → `setViewportOnMove`, which never bumps revision.
+    // `fitView()` moves React Flow's own transform directly — the heal never
+    // writes the store, so nothing here is dirtied by the heal ITSELF. (In the
+    // browser the resulting move settles and is persisted like any other; the
+    // rule this pins is that the heal does not route through the store to
+    // repaint, which is what would make it a document edit.)
     expect(s.revision).toBe(revisionBefore);
     expect(s.saveStatus).toBe('idle');
     // The persisted viewport is untouched by the heal itself.

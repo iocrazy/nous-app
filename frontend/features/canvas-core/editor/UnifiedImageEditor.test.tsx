@@ -12,6 +12,24 @@ afterEach(cleanup);
 
 const SRC = '/api/v1/generated-media/1/cover';
 
+describe('UnifiedImageEditor — resolution tier', () => {
+  // The editor is where pixels are inspected and edited: crop regions, mask
+  // strokes and outpaint padding are all expressed against the image's
+  // NATURAL size, so working off the 1024px preview would ship the backend
+  // coordinates for the wrong picture. This suite does not stub mediaUrl.
+  it('the preview image and the download link both ask for the original', () => {
+    render(
+      <UnifiedImageEditor open src={SRC} onClose={() => {}} onCropCommit={() => {}} />,
+    );
+    const download = screen.getByTestId('editor-download') as HTMLAnchorElement;
+    expect(download.getAttribute('href')).toMatch(/[?&]full=1$/);
+    // The modal renders into a portal, so query the document, not `container`.
+    const img = document.querySelector('img') as HTMLImageElement;
+    expect(img).toBeTruthy();
+    expect(img.getAttribute('src')).toMatch(/[?&]full=1$/);
+  });
+});
+
 describe('UnifiedImageEditor', () => {
   it('shows only tabs whose commit channel exists', () => {
     render(

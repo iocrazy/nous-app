@@ -107,7 +107,9 @@ describe('CanvasSurface — read-only React Flow props', () => {
     seed(true);
     render(<CanvasSurface />);
 
-    expect(typeof capturedProps.onMove).toBe('function');
+    // Since Task 3 the viewport reaches the store only when a gesture
+    // settles; there is no per-frame `onMove` channel to keep alive.
+    expect(typeof capturedProps.onMoveEnd).toBe('function');
     expect(typeof capturedProps.onSelectionChange).toBe('function');
     expect(typeof capturedProps.onNodesChange).toBe('function');
     // `paneCreateMenu` is off in read-only, which hands double-click back

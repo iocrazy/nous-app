@@ -9,11 +9,16 @@
  *   - `loadCanvas(id)`  — pull the row
  *   - `applyNodeChanges(...)` / `applyConnectionChanges(...)` (TBD in a
  *     follow-up React Flow integration PR)
- *   - `setViewport`          — programmatic pan/zoom (bumps revision immediately)
- *   - `setViewportOnMove`    — RAF-throttled path for onMove (no revision bump per tick)
- *   - `flushViewportDirty`   — called at RAF frequency to batch viewport dirty signals
+ *   - `setViewportSettled`   — the pan/zoom gesture ended here; write + dirty
+ *                              once, and NO epoch bump (it is already on
+ *                              screen). The ONLY viewport writer a gesture
+ *                              uses; there are no programmatic ones left —
+ *                              a caller that wants to MOVE the canvas drives
+ *                              React Flow's instance directly (`zoomPreview`,
+ *                              `CanvasPage`'s overview fly-in)
  *   - `noteDragStart()`      — captures pre-drag history base without starting timer
- *   - `setNodesDragTick()`   — mid-drag position update (no history timer reset)
+ *   - `setNodesDragTick()`   — mid-drag position update (no history timer,
+ *                              no dirty — drag end owns both)
  *   - `markDirty()`          — schedules a debounced save
  *   - `flushSave()`          — explicit save (e.g. on blur / route leave)
  *
@@ -38,12 +43,7 @@ import type {
 } from '../types';
 import { healStaleGenSlots } from '../smart/healGenSlots';
 import { CONFLICT_SAVE_ERROR, readErrorStatus } from '../utils/saveFailure';
-import {
-  IDENTITY_VIEWPORT,
-  clampZoom,
-  panByScreenDelta,
-  zoomAroundScreenAnchor,
-} from '../utils/viewport';
+import { IDENTITY_VIEWPORT, clampZoom } from '../utils/viewport';
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_HISTORY_DEBOUNCE_MS = 250;
@@ -199,6 +199,28 @@ interface CanvasState {
    */
   mountEpoch: number;
 
+  /**
+   * Bumped by every viewport the STORE writes itself — the load, a canvas
+   * switch, a realtime rebase, a conflict resolve, `reset()`. NOT bumped by
+   * `setViewportSettled`, which carries a viewport that came FROM the canvas
+   * and is therefore already on screen.
+   *
+   * The invariant is "every store-side `viewport:` write bumps the epoch in
+   * the SAME set literal", and it is enforced by a source scan in
+   * `canvasCoreStore.viewport.test.ts` — a convention with no enforcement
+   * erodes the moment someone adds a writer.
+   *
+   * The reason this exists (Task 3 评审修复轮1): React Flow runs uncontrolled,
+   * so a store write no longer moves anything — only an imperative
+   * `setViewport` on React Flow's own instance does, and the store cannot
+   * reach that instance. This counter is how a store-side write says "the
+   * canvas needs moving"; `CanvasPage` owns the single effect that answers it.
+   * Without it the store and the visible transform silently diverge, and the
+   * two placement readers (`TopNodeBar`, `CanvasComposer`) map screen
+   * coordinates through a viewport nobody is looking at.
+   */
+  viewportEpoch: number;
+
   // ---- Document ----
   viewport: CanvasViewport;
   nodes: CanvasNode[];
@@ -266,9 +288,6 @@ interface CanvasState {
   loadCanvas(canvasId: string): Promise<void>;
 
   // ---- Mutations (mark dirty) ----
-  setViewport(viewport: CanvasViewport): void;
-  panViewportBy(dx: number, dy: number): void;
-  zoomViewportAround(anchor: { x: number; y: number }, nextZoom: number): void;
   setNodes(nodes: CanvasNode[]): void;
   setConnections(connections: CanvasConnection[]): void;
   /** Patch a single node's `data` (or top-level fields) in place. Used
@@ -310,11 +329,11 @@ interface CanvasState {
   noteDragStart(): void;
 
   /**
-   * Update node positions during a mid-drag tick.  Stores the new nodes
-   * array and marks the document dirty for eventual persistence, but does
-   * NOT touch the history-debounce timer.  The timer is started by the
-   * drag-end `setNodes` call so each drag produces exactly one history
-   * entry regardless of how many ticks it spans.
+   * Update node positions during a mid-drag tick. Stores the new nodes
+   * array and NOTHING else: no history-debounce timer, and (canvas fluency
+   * Task 6) no dirty/revision bump either. The drag-end `setNodes` call
+   * does both, so each drag produces exactly one history entry and one
+   * armed save regardless of how many ticks it spans.
    */
   setNodesDragTick(nodes: CanvasNode[]): void;
 
@@ -335,23 +354,17 @@ interface CanvasState {
   flushHistory(): void;
 
   /**
-   * Update the viewport during an `onMove` tick without bumping `revision`
-   * or scheduling a save.  Callers must pair this with `flushViewportDirty`
-   * (called at RAF frequency) to coalesce N per-tick revision bumps into
-   * at most one per animation frame.
+   * A pan/zoom gesture settled at this viewport — write it and mark dirty,
+   * exactly once. This is the ONLY viewport channel the canvas surface has:
+   * React Flow owns the transform mid-gesture (uncontrolled, seeded from
+   * `defaultViewport`), so the frames in between never reach the store.
    *
-   * Programmatic viewport changes (panViewportBy, zoomViewportAround, etc.)
-   * continue to use `setViewport` which bumps revision immediately.
+   * Replaces the `setViewportOnMove` + RAF `flushViewportDirty` pair, which
+   * existed only to make a per-frame controlled-mode React state write
+   * survivable. Nothing writes per frame any more, so nothing needs
+   * coalescing.
    */
-  setViewportOnMove(viewport: CanvasViewport): void;
-
-  /**
-   * Bump `revision` and schedule a debounced save.  Intended to be called
-   * at RAF frequency from `CanvasSurface.onMove` rather than on every
-   * wheel/pan tick, reducing save-debounce timer-reset churn from
-   * O(pan_ticks) to O(1) per animation frame.
-   */
-  flushViewportDirty(): void;
+  setViewportSettled(viewport: CanvasViewport): void;
 
   // ---- Selection ----
   setSelection(ids: string[]): void;
@@ -404,11 +417,29 @@ export function createCanvasCoreStore(
    *  when the debounced commit fires. Lets a user undo back to the state
    *  BEFORE the edit, not to a mid-burst intermediate. */
   let pendingHistoryBase: HistorySnapshot | null = null;
+  /** True while `setNodesDragTick` has written positions that no `markDirty`
+   *  has claimed yet (canvas fluency Task 6 — ticks no longer mark dirty).
+   *  A drag that ends normally clears this via the drag-end `setNodes`.
+   *
+   *  INVARIANT: while this is true the document holds unsaved local work that
+   *  `revision` does not account for, so EVERY reader of "is the document
+   *  dirty?" must consult it too. Two consumers today:
+   *    - `flushSave()` — a drag still HELD when the surface unmounts never
+   *      gets its drag-end `setNodes`, and `doSave`'s
+   *      `persistedRevision >= revision` guard would drop the move.
+   *    - `applyRemoteUpdate()` guard 3 — a realtime row arriving mid-drag
+   *      must raise a conflict, not rebase the canvas under the pointer.
+   *  A third reader added later belongs on this list. */
+  let unclaimedDragTick = false;
   /** Backing counter for `mountEpoch` (Task 5 评审修复轮1) — a plain closure
    *  variable rather than reading-then-incrementing store state, so every
    *  `loadCanvas()` call gets a strictly unique value even if called
    *  reentrantly before a previous `set()` has been observed. */
   let mountEpochCounter = 0;
+  /** Backing counter for `viewportEpoch` — same reasoning as `mountEpoch`'s:
+   *  a closure variable, so two writes in one tick get distinct values even
+   *  before either `set()` has been observed. */
+  let viewportEpochCounter = 0;
 
   const useStore = create<CanvasState>((set, get) => {
     /**
@@ -441,6 +472,11 @@ export function createCanvasCoreStore(
         episodeId: row.episode_id ?? null,
         assetId: row.asset_id ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
+        // A server row's viewport is a STORE-side write, on all three paths
+        // that reach here (`loadCanvas`, `applyRemoteUpdate`'s rebase,
+        // `resolveConflictWithServer`). Announce it so `CanvasPage` moves the
+        // real transform to match — see `viewportEpoch`.
+        viewportEpoch: (viewportEpochCounter += 1),
         // Sanitize on load: interaction paths (alignment snap, group
         // membership) historically persisted RF-internal size snapshots
         // (measured/width/height) into rows — stale ones clamp a node's
@@ -480,9 +516,14 @@ export function createCanvasCoreStore(
         historyFuture: [],
       });
       pendingHistoryBase = null;
+      unclaimedDragTick = false;
     }
 
     function markDirty(): void {
+      // Whatever the outcome below, any drag positions sitting in `nodes`
+      // are now accounted for — either by the bump this call makes, or by a
+      // read-only session that will never save anything at all.
+      unclaimedDragTick = false;
       // Read-only session: no revision bump, no debounce re-arm. Bailing out
       // BEFORE the bump also keeps `revision === persistedRevision`, so an
       // incoming realtime row rebases cleanly instead of raising a conflict
@@ -685,6 +726,7 @@ export function createCanvasCoreStore(
       loadStatus: 'idle',
       loadError: null,
       mountEpoch: 0,
+      viewportEpoch: 0,
       viewport: IDENTITY_VIEWPORT,
       nodes: [],
       connections: [],
@@ -708,6 +750,12 @@ export function createCanvasCoreStore(
         if (historyTimer) clearTimeout(historyTimer);
         historyTimer = null;
         pendingHistoryBase = null;
+        // Closure state, so the `set({...})` below cannot reach it. Leaving
+        // it set hands "there are unclaimed drag positions in `nodes`" to a
+        // store that is no longer holding a canvas — and leaving mid-drag is
+        // both the gesture the flag exists for and the thing that calls
+        // `reset()`, so the two meet in practice.
+        unclaimedDragTick = false;
         set({
           canvasId: null,
           kind: null,
@@ -718,6 +766,7 @@ export function createCanvasCoreStore(
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,
+          viewportEpoch: (viewportEpochCounter += 1),
           nodes: [],
           connections: [],
           nodeOps: [],
@@ -751,24 +800,6 @@ export function createCanvasCoreStore(
           const message = err instanceof Error ? err.message : String(err);
           set({ loadStatus: 'error', loadError: message });
         }
-      },
-
-      setViewport(viewport: CanvasViewport) {
-        set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
-        markDirty();
-      },
-
-      panViewportBy(dx, dy) {
-        set({ viewport: panByScreenDelta(get().viewport, dx, dy) });
-        markDirty();
-      },
-
-      zoomViewportAround(anchor, nextZoom) {
-        const clamped = clampZoom(nextZoom);
-        set({
-          viewport: zoomAroundScreenAnchor(get().viewport, anchor, clamped),
-        });
-        markDirty();
       },
 
       setNodes(nodes) {
@@ -936,6 +967,12 @@ export function createCanvasCoreStore(
       },
 
       async flushSave() {
+        // A drag still HELD when this runs (route leave / surface unmount
+        // mid-pointer-down) never got its drag-end `setNodes`, so its
+        // positions are in `nodes` with no revision bump behind them and
+        // `doSave` would early-return on `persistedRevision >= revision`.
+        // Claim them now — this is the one path that runs on unmount.
+        if (unclaimedDragTick) markDirty();
         if (debounceTimer) {
           clearTimeout(debounceTimer);
           debounceTimer = null;
@@ -967,11 +1004,25 @@ export function createCanvasCoreStore(
       },
 
       setNodesDragTick(nodes: CanvasNode[]) {
-        // Mid-drag: update positions, schedule save — but do NOT touch the
-        // history timer.  The pre-drag base was captured by noteDragStart();
-        // the drag-end setNodes() call will start the 250ms commit timer.
+        // Mid-drag: update positions ONLY. No history timer, and — since
+        // canvas fluency Task 6 — no `markDirty()` either.
+        //
+        // A drag is one edit, not one edit per frame. The drag-end
+        // `setNodes()` call marks dirty with the FINAL positions and starts
+        // the 250ms history commit, so a per-tick dirty bought nothing: it
+        // only bumped `revision` ~120 times per two-second drag, re-armed
+        // the 500ms save debounce on every frame, and flickered the save
+        // badge while the user was still holding the mouse. React Flow
+        // always closes a drag with a `dragging: false` position change
+        // (@xyflow/system XYDrag `end`, including its abort branch), which
+        // the surface routes to `setNodes` — so there is no drag that ends
+        // without one.
+        //
+        // `flushSave()` (route leave / surface unmount) still carries these
+        // positions — that is what `unclaimedDragTick` is for, since a drag
+        // interrupted by an unmount never reaches its drag-end `setNodes`.
+        unclaimedDragTick = true;
         set({ nodes });
-        markDirty();
       },
 
       setNodesTransient(nodes: CanvasNode[]) {
@@ -985,15 +1036,17 @@ export function createCanvasCoreStore(
         flushPendingHistory();
       },
 
-      setViewportOnMove(viewport: CanvasViewport) {
-        // Update viewport for controlled-mode React Flow rendering without
-        // bumping revision.  Callers (CanvasSurface.onMove via RAF) call
-        // flushViewportDirty() at most once per animation frame.
-        set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
-      },
-
-      flushViewportDirty() {
-        // Called at RAF frequency — bumps revision and schedules a save.
+      setViewportSettled(viewport: CanvasViewport) {
+        // One gesture, one write, one dirty signal. No history entry —
+        // panning is navigation, not a document edit (markDirty does not
+        // touch history).
+        set({
+          // viewportEpoch: intentionally NOT bumped — this value came FROM
+          // React Flow and is already on screen; announcing it would push it
+          // straight back and fight the user mid-gesture. The source scan in
+          // canvasCoreStore.viewport.test.ts reads this marker.
+          viewport: { ...viewport, zoom: clampZoom(viewport.zoom) },
+        });
         markDirty();
       },
 
@@ -1008,7 +1061,15 @@ export function createCanvasCoreStore(
         if (row.base_updated_at <= s.baseUpdatedAt) return;
 
         // Guard 3: local dirty edits exist — surface as conflict, never clobber.
-        if (s.revision > s.persistedRevision) {
+        //
+        // `unclaimedDragTick` is the second term because a drag in flight no
+        // longer moves `revision` (Task 6). Without it the rebase below runs
+        // UNDER THE USER'S POINTER: `applyServerRow` replaces `nodes`, bumps
+        // `viewportEpoch` (which `CanvasPage` answers by calling React Flow's
+        // own `setViewport` mid-gesture) and clears the history stacks along
+        // with the pre-drag base `noteDragStart()` just captured. A live drag
+        // is unsaved local work, exactly as it was before Task 6.
+        if (s.revision > s.persistedRevision || unclaimedDragTick) {
           set({ conflict: row });
           return;
         }

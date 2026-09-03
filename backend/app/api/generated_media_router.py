@@ -4,7 +4,7 @@ Routes (all under prefix /generated-media, registered in app/api/__init__.py):
   GET  /generated-media                → {data: {items, next_cursor}}
   POST /generated-media/import         → {data: {id, url, media_kind, mime}}
   GET  /generated-media/{id}           → {data: row}   (404 if not in scope)
-  GET  /generated-media/{id}/cover     → FileResponse  (image, no auth — <img>)
+  GET  /generated-media/{id}/cover     → Response      (image preview; ?full=1 = original, no auth — <img>)
   GET  /generated-media/{id}/stream    → FileResponse  (video, no auth — <video>)
   GET  /generated-media/{id}/file      → FileResponse  (404 if row/file missing)
   DELETE /generated-media/{id}         → {data: {deleted: bool}}
@@ -31,6 +31,7 @@ from app.services.library.generated_roles import (
     UPSCALE_RESULT,
     normalize_role,
 )
+from app.services.library.media_preview import ensure_preview
 from app.services.library.media_serving import (
     filesystem_response,
     range_stream_response,
@@ -111,21 +112,35 @@ async def list_generations(
 
 
 @router.get("/{gen_id}/cover")
-async def get_generation_cover(gen_id: int):
-    """Serve a thumbnail/preview for a generated-media item (no auth required).
+async def get_generation_cover(gen_id: int, full: int = 0):
+    """Serve a generated image (no auth required).
 
-    Thumbnails are world-readable-by-id (same posture as GET /resources/{id}/cover).
-    Use this URL in browser <img> tags — no Bearer header needed.
-    Keep GET /{gen_id}/file for auth-gated full-resolution downloads.
+    Default: the PREVIEW tier — 1024px longest edge, WebP, derived from the
+    original by key convention and generated on first request. This is what a
+    canvas node should paint; it used to be handed the full-size original
+    (1.3 MB PNGs, ~75 MB of decoded bitmap on a 24-node board).
+
+    ``?full=1``: the original bytes, for the lightbox and the editor.
+
+    Both branches are world-readable-by-id (same posture as GET
+    /resources/{id}/cover) — ``?full=1`` does not widen anything, it only makes
+    explicit what /cover already served. Use these URLs in browser <img> tags,
+    no Bearer header needed; GET /{gen_id}/file stays the auth-gated download.
+
+    If the preview cannot be produced for any reason, the original is served
+    instead — never an error.
     """
     row = await GeneratedMediaRepository().get_by_id(gen_id)
     if not row:
         raise HTTPException(status_code=404, detail="not found")
     if row.get("media_kind") != "image":
         raise HTTPException(status_code=404, detail="no cover")
-    return await _serve_media_row(
-        row, headers={"Cache-Control": "public, max-age=604800, immutable"}
-    )
+    headers = {"Cache-Control": "public, max-age=604800, immutable"}
+    if not full:
+        preview = await ensure_preview(row)
+        if preview is not None:
+            return Response(content=preview, media_type="image/webp", headers=headers)
+    return await _serve_media_row(row, headers=headers)
 
 
 @router.get("/{gen_id}/stream")

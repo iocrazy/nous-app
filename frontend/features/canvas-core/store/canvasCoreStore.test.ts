@@ -111,47 +111,24 @@ describe('canvasCoreStore — load', () => {
 });
 
 describe('canvasCoreStore — mutations bump revision', () => {
-  it('setViewport / setNodes / setConnections each bump revision', async () => {
+  it('setViewportSettled / setNodes / setConnections each bump revision', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
     expect(useStore.getState().revision).toBe(0);
 
-    useStore.getState().setViewport({ x: 10, y: 20, zoom: 1.5 });
+    useStore.getState().setViewportSettled({ x: 10, y: 20, zoom: 1.5 });
     useStore.getState().setNodes([{ id: 'n1' }]);
     useStore.getState().setConnections([{ id: 'e1' }]);
 
     expect(useStore.getState().revision).toBe(3);
   });
 
-  it('panViewportBy is purely additive', async () => {
-    const stubs = makeStubs();
-    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
-    await useStore.getState().loadCanvas('4242');
-    useStore.getState().setViewport({ x: 0, y: 0, zoom: 2 });
-    useStore.getState().panViewportBy(5, -3);
-    expect(useStore.getState().viewport).toMatchObject({ x: 5, y: -3, zoom: 2 });
-  });
-
-  it('zoomViewportAround keeps the world point under the anchor fixed', async () => {
-    const stubs = makeStubs();
-    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
-    await useStore.getState().loadCanvas('4242');
-    useStore.getState().zoomViewportAround({ x: 100, y: 100 }, 2);
-    const vp = useStore.getState().viewport;
-    // world point that was at (100, 100) before: (100, 100) (identity);
-    // after zoom=2 around (100,100), screen of (100,100) world = vp.x + 200
-    // → that should still equal 100 → vp.x = -100
-    expect(vp.zoom).toBe(2);
-    expect(vp.x).toBeCloseTo(-100, 9);
-    expect(vp.y).toBeCloseTo(-100, 9);
-  });
-
   it('clamps zoom to MIN/MAX', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 9999 });
     await useStore.getState().loadCanvas('4242');
-    useStore.getState().zoomViewportAround({ x: 0, y: 0 }, 1000);
+    useStore.getState().setViewportSettled({ x: 0, y: 0, zoom: 1000 });
     expect(useStore.getState().viewport.zoom).toBe(8);
   });
 });

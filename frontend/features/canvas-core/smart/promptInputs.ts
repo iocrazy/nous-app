@@ -22,6 +22,7 @@ import {
   type DroppedReference,
 } from '../../../services/assetsService';
 import type { CanvasConnection, CanvasNode } from '../types';
+import { type GraphIndex, graphIndexFor } from './graphIndex';
 import type {
   AssetNodeData,
   GeneratedImageRef,
@@ -80,11 +81,20 @@ export function resolveSourceUrls(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
 ): string[] {
-  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  return resolveSourceUrlsFromIndex(promptId, graphIndexFor(nodes, connections));
+}
+
+/** {@link resolveSourceUrls} against a prebuilt {@link GraphIndex} — the
+ *  form the node views subscribe through, so P prompt cards share one index
+ *  instead of each building `new Map(nodes)` per render. */
+export function resolveSourceUrlsFromIndex(
+  promptId: string,
+  index: GraphIndex,
+): string[] {
+  const { byId } = index;
   const seen = new Set<string>();
   const urls: string[] = [];
-  for (const c of connections) {
-    if (String(c.target) !== promptId) continue;
+  for (const c of index.incoming.get(promptId) ?? []) {
     const upstream = byId.get(String(c.source));
     if (!upstream) continue;
     for (const url of durableImagesOf(upstream)) {
@@ -145,11 +155,17 @@ export function upstreamPromptText(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
 ): string {
-  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  return upstreamPromptTextFromIndex(promptId, graphIndexFor(nodes, connections));
+}
+
+/** {@link upstreamPromptText} against a prebuilt {@link GraphIndex}. */
+export function upstreamPromptTextFromIndex(
+  promptId: string,
+  index: GraphIndex,
+): string {
   const parts: string[] = [];
-  for (const c of connections) {
-    if (String(c.target) !== promptId) continue;
-    const upstream = byId.get(String(c.source));
+  for (const c of index.incoming.get(promptId) ?? []) {
+    const upstream = index.byId.get(String(c.source));
     if (!upstream) continue;
     const type = asObj(upstream).type;
     if (type !== 'prompt' && type !== 'llm') continue;

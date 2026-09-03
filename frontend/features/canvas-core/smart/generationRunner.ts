@@ -32,12 +32,21 @@ export interface GenerationRunnerDeps {
   shouldStop?: (promptId: string) => boolean;
   /** Placeholder lifecycle (P0-3): fired right after dispatch with the
    *  fan-out size — the caller shows N shimmer cells. taskIds (P1-13) let
-   *  the caller persist the in-flight batch for reload resume. */
+   *  the caller persist the in-flight batch for reload resume.
+   *
+   *  `ratio` is the aspect the dispatch ACTUALLY sent, which is not the
+   *  prompt's own value on the default image path: `'auto'` and an unset
+   *  value both mean "follow the source", and only this side has measured
+   *  it. The caller sizes the output slot's cells from it, so handing over
+   *  the unresolved value would reserve a square box for a 16:9 result.
+   *  `null` means the dispatch sent no ratio at all — nothing was
+   *  measurable — and the caller should fall back rather than guess. */
   onDispatched?: (
     promptId: string,
     count: number,
     kind: 'image' | 'video',
     taskIds: string[],
+    ratio: string | null,
   ) => void;
   /** First-done-first-shown (P0-3): fired as EACH task completes with a
    *  url — the caller replaces one shimmer cell. Errors fire with url=null;
@@ -240,7 +249,18 @@ export function withGenerationRunner(
         ),
       );
       const taskIds = taskIdBatches.flat();
-      deps.onDispatched?.(ctx.promptId, taskIds.length, gen.kind, taskIds);
+      // Read off `params`, not off `gen`: this is the request as sent, after
+      // auto-resolution. Image runs carry it as `ratio`, video runs as
+      // `aspect`; either is absent when nothing was knowable.
+      const dispatchedRatio =
+        (params.ratio as string | undefined) ?? (params.aspect as string | undefined) ?? null;
+      deps.onDispatched?.(
+        ctx.promptId,
+        taskIds.length,
+        gen.kind,
+        taskIds,
+        dispatchedRatio,
+      );
 
       // Fold N tasks' phases into one prompt-level signal: queued while
       // EVERYTHING is still in line, running once anything starts.

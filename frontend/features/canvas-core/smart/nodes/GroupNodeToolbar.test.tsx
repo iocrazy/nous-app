@@ -25,6 +25,7 @@ function renderBar(over: Partial<Parameters<typeof GroupNodeToolbar>[0]> = {}) {
       imageCount={3}
       memberCount={2}
       pinned
+      hovered={false}
       {...handlers}
       {...over}
     />,
@@ -70,5 +71,31 @@ describe('GroupNodeToolbar', () => {
     expect(screen.getByRole('button', { name: 'Ungroup' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
+  });
+});
+
+describe('GroupNodeToolbar — mounted only when it can be used (fluency T5)', () => {
+  // Same downshift as the output bar: a frosted island that is merely
+  // faded out still repaints on every frame of a drag or a pan.
+  it('is absent from the DOM until hovered or pinned', () => {
+    renderBar({ pinned: false, hovered: false });
+    expect(screen.queryByTestId('group-node-toolbar')).toBeNull();
+    cleanup();
+    renderBar({ pinned: false, hovered: true });
+    expect(screen.getByTestId('group-node-toolbar')).toBeInTheDocument();
+  });
+
+  it('mounts while pinned even with no pointer over the node', () => {
+    renderBar({ pinned: true, hovered: false });
+    expect(screen.getByTestId('group-node-toolbar')).toBeInTheDocument();
+  });
+
+  it('is VISIBLE when hover revealed it, not merely mounted at opacity-0', () => {
+    // The mount gate and the opacity class must agree: `group-hover` is the
+    // CSS :hover, not the hook's focus-within state.
+    renderBar({ pinned: false, hovered: true });
+    const bar = screen.getByTestId('group-node-toolbar');
+    expect(bar.classList.contains('opacity-100')).toBe(true);
+    expect(bar.classList.contains('opacity-0')).toBe(false);
   });
 });

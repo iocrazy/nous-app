@@ -18,7 +18,11 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../smart/mediaUrl', () => ({ mediaSrc: (u: string) => u }));
+vi.mock('../smart/mediaUrl', () => ({
+  mediaSrc: (u: string) => u,
+  fullResSrc: (u: string) => u,
+  fullResPath: (u: string) => u,
+}));
 
 let exportResult: { blob: Blob | null; baseIncluded: boolean } = {
   blob: null,
