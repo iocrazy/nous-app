@@ -57,6 +57,38 @@ describe('WorkspaceCanvas', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/team/t1/canvas/c1');
   });
 
+  it('each card carries its own kind, so a caller can pick by kind not by position', async () => {
+    // The list is unfiltered and ordered newest-edited first
+    // (`canvas_repository.list_for_project`), so it mixes kinds — the
+    // episode's system storyboard canvas included, and that one sorts first
+    // here. `e2e-prod/walkthrough.spec.ts` picks a smart-family card out of
+    // this list by `data-canvas-kind`; taking whichever card sorted first
+    // would open a canvas the Library panel does not mount on and turn a
+    // healthy build red.
+    mockService.listCanvases.mockResolvedValue([
+      { id: 'c0', name: 'Episode Board', kind: 'storyboard', updated_at: '2026-07-03T00:00:00Z' },
+      ...CANVASES,
+    ]);
+    render(<WorkspaceCanvas projectId="p1" teamId="t1" />);
+    await screen.findByText('Hero Canvas');
+
+    // Each card's own kind, in list order — not merely "the attribute exists".
+    const cards = screen.getAllByTestId('workspace-canvas-card');
+    expect(cards.map((el) => el.getAttribute('data-canvas-kind'))).toEqual([
+      'storyboard',
+      'smart',
+      'character',
+    ]);
+    // And the kind-filtered selector shape the walkthrough uses skips the
+    // storyboard board while keeping both smart-family ones.
+    expect(
+      document.querySelectorAll(
+        '[data-testid="workspace-canvas-card"][data-canvas-kind="smart"], ' +
+          '[data-testid="workspace-canvas-card"][data-canvas-kind="character"]',
+      ).length,
+    ).toBe(2);
+  });
+
   it('falls back to the bare canvas route without a teamId', async () => {
     mockService.listCanvases.mockResolvedValue(CANVASES);
     render(<WorkspaceCanvas projectId="p1" />);

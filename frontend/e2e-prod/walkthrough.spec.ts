@@ -188,28 +188,45 @@ test('prod walkthrough: login → overview → storyboard → canvas → library
   // goes to a real smart canvas through the workspace's own Canvas module,
   // the same two clicks a user makes.
   //
+  // The card is chosen BY KIND, never by position. That module's list is
+  // unfiltered and ordered newest-edited first
+  // (`canvas_repository.list_for_project`), and the episode's system
+  // storyboard canvas is project-scoped and therefore in it — so `.first()`
+  // would open a canvas the panel does not mount on whenever that canvas
+  // happened to be touched last, and a healthy build would go red for a
+  // reason that has nothing to do with the Library. A gate whose red does not
+  // mean a regression is a gate people learn to wave through.
+  //
   // Opened with the `L` shortcut rather than the top-bar chip on purpose: the
   // chip is Standard-canvas-and-entity-board chrome, while `L` is wired for
-  // the whole smart family, so this passes whichever kind the first card
-  // happens to be. It is also §4.2's own entry point.
+  // the whole smart family, so this passes whichever of the six kinds below
+  // the card turns out to be. It is also §4.2's own entry point.
   //
   // Read-only throughout: open the panel, switch segment, type in the search
   // box, close it. Nothing is placed and nothing is saved.
   //
-  // DISJUNCTION + annotation, the same shape as 5b: a project with no canvas
-  // yet is a legitimate state, and asserting a card would turn "nothing
-  // sketched here" into a red deploy. Either a card is there and the panel
-  // gets exercised, or the module says the list is empty — a blank surface,
-  // the failure this walkthrough exists for, is neither.
+  // DISJUNCTION + annotation, the same shape as 5b: a project with no
+  // smart-family canvas is a legitimate state, and asserting a card would
+  // turn "nothing sketched here" into a red deploy. Either such a card is
+  // there and the panel gets exercised, or the module mounted and showed what
+  // it has — a blank surface, the failure this walkthrough exists for, is
+  // neither.
   await page.getByTestId('ws-module-canvas').click();
-  const canvasCards = page.locator('[data-testid="workspace-canvas-card"]:visible');
-  const sawCanvasCard = await canvasCards
+  // Exactly the kinds `isSmartFamily` accepts (features/canvas-core/types.ts).
+  // A kind added there without being added here costs coverage, not a red run.
+  const SMART_FAMILY_KINDS = ['smart', 'lite', 'character', 'location', 'prop', 'costume'];
+  const smartCards = page.locator(
+    SMART_FAMILY_KINDS.map(
+      (k) => `[data-testid="workspace-canvas-card"][data-canvas-kind="${k}"]:visible`,
+    ).join(', '),
+  );
+  const sawCanvasCard = await smartCards
     .first()
     .waitFor({ state: 'visible', timeout: 15_000 })
     .then(() => true)
     .catch(() => false);
   if (sawCanvasCard) {
-    await canvasCards.first().click();
+    await smartCards.first().click();
     await expect(page.locator('.react-flow').first()).toBeVisible({ timeout: 20_000 });
     // `useCanvasShortcuts` listens on window, so no click into the surface is
     // needed — and a pane click would change the selection on someone's real
@@ -226,13 +243,22 @@ test('prod walkthrough: login → overview → storyboard → canvas → library
     await page.getByTestId('library-close').click();
     await expect(page.getByTestId('library-panel')).toBeHidden();
   } else {
-    await expect(page.getByTestId('workspace-canvas-empty')).toBeVisible();
+    // No smart-family card. The module must still have MOUNTED, which is two
+    // legitimate states: it says the list is empty, or it drew cards and none
+    // of them is a kind the panel mounts on. A blank surface is neither.
+    const anyCard = page.locator('[data-testid="workspace-canvas-card"]:visible');
+    const emptyShown = await page
+      .getByTestId('workspace-canvas-empty')
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(emptyShown || (await anyCard.count()) > 0).toBe(true);
   }
   test.info().annotations.push({
     type: 'library-panel',
     description: sawCanvasCard
-      ? 'the Library panel opened on a smart canvas and its search box responded'
-      : 'this project has no canvas — the Library panel was NOT exercised',
+      ? 'the Library panel opened on a smart-family canvas and its search box responded'
+      : 'no smart-family canvas in this project — the Library panel was NOT exercised',
   });
 
   // Back to the storyboard module for the remaining episode steps.
