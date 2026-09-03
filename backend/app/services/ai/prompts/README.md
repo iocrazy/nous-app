@@ -103,6 +103,8 @@ Use the ResourceFetch tool to load any of these on demand:
 
 **所有属性值都过 `escape_frame_attr`，`<asset>` 的正文过 `escape_frame_body`**（`name` 是用户可自由改的，一致性提示词整段都是用户写的）；见 `../../../boundary/frame_markers.py`。
 
+⚠️ **`escape_frame_body` 只中和 `OWNED_FRAMES` 里那些框的闭合标记，别的标签一律原样保留**——用户散文里的 `</div>`、`</think>`、`<b>` 都会照原样到达模型。这是**约定的契约不是疏漏**：只有我们自己的框才赋予「这是系统说的」那层权威，把每个尖括号都转义掉会毁掉合法引用标签的文字，换不来任何安全收益。
+
 ⚠️ **`asset` 刻意不在 `OWNED_FRAMES` 里**（P5 裁决 A，spec §6.5 已按此修订）：它是我们拥有的框**内部的元素**，不是框。用户提示词里出现字面 `</asset>` 只会截断它自己那一条，后面的文字仍在 `<available_resources>` 内，拿不到 harness 权威；反过来把它登记成框，会把提示词里每一次合法提到该词都糟蹋掉。`tests/services/ai/prompts/test_frame_escape_wiring.py` 的 `ignore` 名单记着这条理由。
 
 #### Token effect
@@ -111,7 +113,7 @@ Use the ResourceFetch tool to load any of these on demand:
 
 - **每条 `<resource … />`** 约 30-60 token。
 - **每条 `<asset …>…</asset>`** = 属性约 25-40 token + 一致性提示词。提示词是这里唯一无自然上限的输入（资产自身提示词 + loadout 的 `prompt_extra` + 每个链接的服装 / 道具 / 场景的提示词拼起来），所以在 `app/services/assets/chat_ref.py` 里**硬截断到 `MAX_CONSISTENCY_PROMPT_CHARS = 600` 字符**。⚠️ `" [truncated]"` 标记是**追加在上限之外**的，被截断的条目正文是 **612** 字符而不是 600——按常量本身算预算会每条少算 12 字符。600 字符在纯 ASCII 下约 150 token，全中文时可以接近 600 token，估上限要按后者。
-- **总量上界 = 本轮附件条数 × 上述单条上限**，而附件条数由 composer 的暂存附件列表封顶——不随资产链接数增长。
+- **单条有界，总量无界。** 上面两个上限只管住「每一条多大」；**服务端不限制条数**——`ChatMessageRequest.attachments` 是没有 `max_length` 的 list，后端也没有任何计数检查，实际条数完全由客户端发多少决定。所以正确的说法是 `总量 = 客户端发的条数 × 单条上限`，而不是「有上限」。已记进下面的 Known Limitations。
 
 **资源正文与资产主图都不在这里**——这一块只是目录，正文/图片要模型主动调 `ResourceFetch` 才进上下文。没有 @-mention 也没有资产时整块返回空字符串，这样无 mention 的轮次系统消息缓存键不变。
 
@@ -126,5 +128,6 @@ Use the ResourceFetch tool to load any of these on demand:
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
+- **附件条数没有服务端上限**。`ChatMessageRequest.attachments`（`app/schemas/ai_library_chat.py`）是没有 `max_length` 的 list，链路上也没有计数检查，所以 `<available_resources>` 这一块的总大小只受客户端约束。今天不构成事故是因为唯一的写方是我们自己的 composer UI；一个直接打 API 的调用方可以塞进任意多条，把系统消息撑到 provider 上限。要封顶就得在 schema 上加，别指望前端。
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。
