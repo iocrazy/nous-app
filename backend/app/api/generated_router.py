@@ -82,6 +82,7 @@ async def list_generated(
     state: StateQuery = "unreviewed",
     origin_kind: OriginKindQuery = [],
     project_id: OptSnowflakeQuery = None,
+    canvas_id: OptSnowflakeQuery = None,
     media_kind: Optional[str] = Query(None, max_length=40),
     model: Optional[str] = Query(None, max_length=200),
     since: Optional[datetime.datetime] = Query(None),
@@ -108,6 +109,10 @@ async def list_generated(
             # ``[]`` would be an empty IN () at the repo, not "no filter".
             origin_kinds=origin_kind or None,
             project_id=int(project_id) if project_id else None,
+            # "This canvas", the Library panel's Generated default. Validated as
+            # a snowflake like every other id query param, and resolved server
+            # side: filtering a keyset page client-side under-fills it.
+            canvas_id=int(canvas_id) if canvas_id else None,
             media_kind=media_kind,
             model=model,
             since=since,

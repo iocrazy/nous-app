@@ -140,6 +140,10 @@ export interface GeneratedListOptions {
   state?: GeneratedFilterState;
   originKinds?: string[];
   projectId?: string;
+  /** Only this canvas's generations. Resolved server-side against
+   *  `generated_media.canvas_id` — NOT client-side: under keyset pagination a
+   *  client filter silently under-fills every page. */
+  canvasId?: string;
   mediaKind?: string;
   model?: string;
   /** ISO 8601 instant; the router parses it as a datetime. */
@@ -221,6 +225,7 @@ export async function fetchGenerated(
   const qs = query(scopeId, {
     state: opts.state,
     project_id: opts.projectId,
+    canvas_id: opts.canvasId,
     media_kind: opts.mediaKind,
     model: opts.model,
     since: opts.since,

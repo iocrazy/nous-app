@@ -655,3 +655,31 @@ def test_the_literal_counts_route_is_registered_before_the_dynamic_get():
     ]
     gets = [p for p, m in paths if m == ["GET"]]
     assert gets.index("/generated/counts") < gets.index("/generated/{gen_id}")
+
+
+@pytest.mark.asyncio
+async def test_canvas_id_is_cast_to_int_and_passed_through(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(
+            f"/api/v1/generated?scope_id={SCOPE}&canvas_id=900000000000000001"
+        )
+    assert r.status_code == 200, r.text
+    f = _filters(app)
+    assert f["canvas_id"] == 900000000000000001
+    assert isinstance(f["canvas_id"], int)
+
+
+@pytest.mark.asyncio
+async def test_canvas_id_absent_passes_none(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}")
+    assert r.status_code == 200, r.text
+    assert _filters(app)["canvas_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_canvas_id_rejects_a_non_snowflake(app):
+    """A bad id is a 422, never a scope-wide page wearing a canvas's name."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&canvas_id=not-an-id")
+    assert r.status_code == 422, r.text
