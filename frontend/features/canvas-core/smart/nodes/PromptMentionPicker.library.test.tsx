@@ -19,7 +19,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string, d?: unknown) => (typeof d === 'string' ? d : k) }),
+  useTranslation: () => ({
+    t: (k: string, d?: unknown) =>
+      typeof d === 'string'
+        ? d
+        : typeof d === 'object' && d !== null && 'defaultValue' in (d as object)
+          ? String((d as { defaultValue: string }).defaultValue).replace(
+              /\{\{count\}\}/g,
+              String((d as { count?: number }).count ?? ''),
+            )
+          : k,
+  }),
 }));
 
 const searchAssets = vi.fn();
@@ -57,6 +67,20 @@ const UPLOAD_ROW = {
   thumbnail_url: '/api/v1/resources/655000000000000001/cover',
   transcript_status: null,
   summary_status: null,
+};
+const UPLOAD_ROW_2 = {
+  ...{
+    id: '655000000000000002',
+    name: 'harbour-dawn.png',
+    kind: 'image' as const,
+    mime: 'image/png',
+    size: 1,
+    scope: { type: 'team' as const, id: SCOPE },
+    updated_at: '2026-09-01T10:11:13Z',
+    thumbnail_url: '/api/v1/resources/655000000000000002/cover',
+    transcript_status: null,
+    summary_status: null,
+  },
 };
 const GENERATED_ROW = {
   id: '800000000000000001',
@@ -218,6 +242,56 @@ describe('PromptMentionPicker library groups', () => {
     expect(screen.getByTestId('mention-tab-input')).toHaveAttribute('aria-pressed', 'true');
     act(() => ref.current?.cycleTab());
     expect(screen.getByTestId('mention-tab-assets')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  // The ring the user sees and the row Enter commits have to be the SAME cell.
+  // The grid owns its own cursor and the editor's arrows drive the picker's,
+  // so without a controlled `activeIndex` those two walk apart silently.
+  it('the arrow keys move the ring the editor will commit from', async () => {
+    searchResources.mockResolvedValue({
+      results: [UPLOAD_ROW, UPLOAD_ROW_2],
+      counts: { all: 2, video: 0, image: 2, doc: 0, audio: 0, pdf: 0 },
+      next_cursor: null,
+    });
+    const ref = createRef<PromptMentionPickerHandle>();
+    render(
+      <PromptMentionPicker
+        ref={ref}
+        scopeId={SCOPE}
+        canvasId={CANVAS}
+        inputImages={[]}
+        onPickImage={vi.fn()}
+        onPickAsset={vi.fn()}
+        onPickLibraryImage={onPickLibraryImage}
+        query=""
+      />,
+    );
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    await waitFor(() => expect(screen.getAllByTestId('library-cell')).toHaveLength(2));
+
+    act(() => ref.current?.move(1));
+    expect(screen.getAllByTestId('library-cell')[1]).toHaveAttribute('data-active', 'true');
+    expect(screen.getAllByTestId('library-cell')[0]).not.toHaveAttribute('data-active');
+    act(() => {
+      ref.current?.commitActive();
+    });
+    expect(onPickLibraryImage).toHaveBeenCalledWith(
+      expect.objectContaining({ store: 'uploads', id: '655000000000000002' }),
+    );
+  });
+
+  // A pick that changes nothing must SAY so. `addReferences` answers a typed
+  // result and the caller hands it back; swallowing it is the silent no-op the
+  // repo keeps re-learning.
+  it('a pick that adds nothing says why instead of just closing', async () => {
+    onPickLibraryImage.mockResolvedValue({ added: 0, skipped: 1, failed: [], clamped: 0 });
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    await waitFor(() => expect(screen.getAllByTestId('library-cell')).toHaveLength(1));
+    fireEvent.doubleClick(screen.getAllByTestId('library-cell')[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId('mention-notice').textContent).toBe('1 already on this node'),
+    );
   });
 
   it('with no canvas id the Generated group says so instead of listing the scope', async () => {

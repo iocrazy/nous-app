@@ -87,6 +87,17 @@ export interface LibraryGridProps {
   note?: string | null;
   primaryAction?: LibraryGridAction;
   secondaryAction?: LibraryGridAction;
+  /**
+   * Controlled keyboard cursor. Omit it and the grid keeps its own, driven by
+   * its Left/Right handler — right for a caller whose grid HAS focus.
+   *
+   * The `@` palette does not: the body editor keeps focus the whole time the
+   * popover is open (every pick is bound to `mousedown` with `preventDefault`),
+   * so the arrows reach the editor and are forwarded to the picker's cursor.
+   * Two cursors then walk apart — the ring on cell 0 while Enter commits row 3.
+   * Passing the cursor in is what keeps the ring and the commit on one cell.
+   */
+  activeIndex?: number;
   onItemActivate?: (item: LibraryItem) => void;
   onItemHover?: (item: LibraryItem | null, rect?: DOMRect) => void;
   onItemDragStart?: (item: LibraryItem, e: React.DragEvent) => void;
@@ -114,6 +125,7 @@ export function LibraryGrid({
   note = null,
   primaryAction,
   secondaryAction,
+  activeIndex,
   onItemActivate,
   onItemHover,
   onItemDragStart,
@@ -126,6 +138,11 @@ export function LibraryGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<number | null>(null);
   const [active, setActive] = useState(0);
+
+  // Rendering follows the prop when there is one. `setActive` stays live either
+  // way, so an uncontrolled caller is untouched and a controlled one whose own
+  // handler still fires does not desync what is drawn from what it was told.
+  const cursor = activeIndex ?? active;
 
   const { measured, report } = useMeasuredAspectRatios();
   const aspectRatios = useMemo(
@@ -154,7 +171,7 @@ export function LibraryGrid({
     rootRef.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({
       block: 'nearest',
     });
-  }, [active]);
+  }, [cursor]);
 
   const pick = useCallback(
     (index: number, e: React.MouseEvent) => {
@@ -217,7 +234,7 @@ export function LibraryGrid({
           width={aspectRatios[index] * row.height}
           height={row.height}
           selected={selectedSet.has(libraryKey(item))}
-          active={index === active}
+          active={index === cursor}
           onPick={(e) => pick(index, e)}
           onActivate={() => onItemActivate?.(item)}
           onMeasure={(a) => report(libraryKey(item), a)}

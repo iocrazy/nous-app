@@ -67,6 +67,7 @@ import {
   type AssetSummary,
 } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
+import type { AddReferencesResult } from '../../library/addReferences';
 import { LibraryGrid } from '../../library/LibraryGrid';
 import { useLibrarySearch, type LibraryItem } from '../../library/librarySearch';
 import { mediaSrc } from '../mediaUrl';
@@ -105,8 +106,20 @@ interface Props {
   inputImages: MentionInputImage[];
   onPickImage: (image: MentionInputImage, index: number) => void;
   onPickAsset: (asset: AssetSummary) => void;
-  /** A library picture: it becomes a REFERENCE on the node, not a body chip. */
-  onPickLibraryImage: (item: LibraryItem) => void;
+  /**
+   * A library picture: it becomes a REFERENCE on the node, not a body chip.
+   *
+   * Answering the typed `AddReferencesResult` is what lets this picker say why
+   * a pick changed nothing. A caller that returns void gets the old behaviour —
+   * the pick is assumed to have landed — which is only honest for a caller that
+   * cannot fail.
+   *
+   * The caller also owns the model's reference ceiling: one item can resolve to
+   * SEVERAL refs (an asset contributes one per primary-slot file), so bounding
+   * picks here would not bound refs. Past the ceiling the backend drops the
+   * tail and reports it as `dropped_refs` only after the run.
+   */
+  onPickLibraryImage: (item: LibraryItem) => void | Promise<AddReferencesResult>;
   /** The live `@query` the editor reports, which seeds the search box. */
   query: string;
   /** Canvas id for the `Generated · this canvas` group. null disables that
@@ -205,6 +218,8 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
     const [preview, setPreview] = useState<{ ids: string[]; index: number } | null>(
       null,
     );
+    /** Why the last library pick changed nothing. null while nothing is wrong. */
+    const [notice, setNotice] = useState<string | null>(null);
 
     useEffect(() => {
       if (tab !== 'assets') return undefined;
@@ -284,6 +299,59 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
     const pickRef = useRef({ onPickImage, onPickAsset, onPickLibraryImage });
     pickRef.current = { onPickImage, onPickAsset, onPickLibraryImage };
 
+    // Both library pick paths — the grid's double click and the editor's Enter —
+    // go through here, so the failure echo cannot exist on one and not the
+    // other. A caller that answers a result gets a typed reason on screen; a
+    // caller that answers nothing keeps the old assume-it-landed behaviour.
+    const pickLibrary = useCallback(
+      (row: LibraryItem) => {
+        setNotice(null);
+        void Promise.resolve(pickRef.current.onPickLibraryImage(row))
+          .then((r) => {
+            if (!r || r.added > 0) return;
+            if (r.failed.length > 0) {
+              setNotice(
+                t('canvas.library.someFailed', {
+                  count: r.failed.length,
+                  defaultValue: '{{count}} could not be added as references',
+                }),
+              );
+              return;
+            }
+            if (r.clamped > 0) {
+              setNotice(
+                t('canvas.library.quotaClamped', {
+                  count: r.clamped,
+                  defaultValue: '{{count}} references not added · quota reached',
+                }),
+              );
+              return;
+            }
+            if (r.skipped > 0) {
+              setNotice(
+                t('canvas.library.alreadyReferenced', {
+                  count: r.skipped,
+                  defaultValue: '{{count}} already on this node',
+                }),
+              );
+            }
+          })
+          // A caller that rejects outright is still a pick that added nothing.
+          // Contained and LOGGED, not swallowed — an unhandled rejection here
+          // would leave the popover looking exactly like success.
+          .catch((err: unknown) => {
+            console.error('[PromptMentionPicker] library pick failed:', err);
+            setNotice(
+              t('canvas.library.someFailed', {
+                count: 1,
+                defaultValue: '{{count}} could not be added as references',
+              }),
+            );
+          });
+      },
+      [t],
+    );
+
     const commitActive = useCallback((): boolean => {
       if (tab === 'input') {
         const image = images[active];
@@ -299,13 +367,14 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
       }
       const row = libraryRows[active];
       if (!row) return false;
-      pickRef.current.onPickLibraryImage(row);
+      pickLibrary(row);
       return true;
-    }, [tab, active, images, assets, libraryRows, inputImages]);
+    }, [tab, active, images, assets, libraryRows, inputImages, pickLibrary]);
 
     const switchTab = useCallback((next: Tab) => {
       setTab(next);
       setRawActive(0);
+      setNotice(null);
     }, []);
 
     // ONE implementation behind both `⇥` paths — the root's own handler (for a
@@ -314,6 +383,7 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
     const cycleTab = useCallback(() => {
       setTab((cur) => MENTION_TABS[(MENTION_TABS.indexOf(cur) + 1) % MENTION_TABS.length]);
       setRawActive(0);
+      setNotice(null);
     }, []);
 
     useImperativeHandle(
@@ -437,7 +507,7 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
           </>
         )}
 
-        {tab === 'uploads' || tab === 'generated' ? (
+        {(tab === 'uploads' || tab === 'generated') && (
           <LibraryGrid
             testId="mention-library-grid"
             className="max-h-[15rem] min-h-0 flex-1"
@@ -454,7 +524,8 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
               'canvas.library.mentionAddsReference',
               'Picking one adds it as a reference on this node',
             )}
-            onItemActivate={(item) => pickRef.current.onPickLibraryImage(item)}
+            activeIndex={active}
+            onItemActivate={pickLibrary}
             emptyLabel={
               tab === 'generated' && !canvasId
                 ? t(
@@ -465,7 +536,15 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
             }
             targetRowHeight={84}
           />
-        ) : (
+        )}
+
+        {(tab === 'uploads' || tab === 'generated') && notice && (
+          <p data-testid="mention-notice" className="px-2 pb-1 text-[10px] text-warn">
+            {notice}
+          </p>
+        )}
+
+        {(tab === 'input' || tab === 'assets') && (
           <div className="max-h-[15rem] min-h-0 flex-1 overflow-y-auto p-2">
             {tab === 'input' ? (
               images.length === 0 ? (

@@ -845,10 +845,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             inputImages={mentionImages}
             onPickImage={handleMentionImage}
             onPickAsset={handleMentionAsset}
-            onPickLibraryImage={(item) => {
-              mention.closePicker();
-              void addReferences(id, [item], scopeId);
-            }}
+            onPickLibraryImage={(item) =>
+              // Ceiling handed down; close only once something actually landed.
+              addReferences(id, [item], scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES }).then(
+                (r) => { if (r.added > 0) mention.closePicker(); return r; },
+              )
+            }
             query={mention.query}
             canvasId={canvasId}
           />

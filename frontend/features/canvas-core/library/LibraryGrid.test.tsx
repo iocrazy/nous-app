@@ -235,6 +235,19 @@ describe('LibraryGrid', () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
+  // The `@` palette drives its cells from the EDITOR's arrow keys, not from
+  // this grid's own handler — the editor keeps focus while the popover is open,
+  // so the grid never sees the keystroke. Without a controlled cursor the ring
+  // sits on cell 0 while Enter commits some other row.
+  it('a controlled activeIndex is what the ring follows', () => {
+    renderGrid({ activeIndex: 2 });
+    const cells = screen.getAllByTestId('library-cell');
+    expect(cells[2]).toHaveAttribute('data-active', 'true');
+    expect(cells[2].className).toContain('ring-2');
+    // The cell omits the attribute entirely when it is not the cursor.
+    expect(cells[0]).not.toHaveAttribute('data-active');
+  });
+
   it('a draft asset is visible and labelled, not hidden', () => {
     renderGrid({
       items: [{ store: 'assets', id: '727145299382534300', title: 'Cole Bannon', thumbUrl: '', kind: 'character', ready: false }],
