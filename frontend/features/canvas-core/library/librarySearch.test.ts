@@ -132,6 +132,11 @@ describe('normalisers', () => {
     expect(item.id).toBe('800000000000000001');
     expect(item.kind).toBe('image');
     expect(item.thumbUrl).toContain('/api/v1/generated-media/800000000000000001/cover');
+    // Through the canvas preview tier, not the raw endpoint. Without this the
+    // `toContain` above passes even if `mediaSrc` were dropped, and the
+    // thumbnail would quietly serve the pre-W1 full original out of the
+    // seven-day immutable cache.
+    expect(item.thumbUrl).toContain('v=2');
   });
 });
 
@@ -157,6 +162,18 @@ describe('useLibrarySearch', () => {
       canvasId: CANVAS,
       state: 'all',
     }));
+  });
+
+  it('a store reads as pending during the debounce window, not as empty', () => {
+    const { result } = renderHook(() => useLibrarySearch('harbour', OPTS));
+    // Nothing has advanced the clock, so the request has not gone out yet.
+    // What the shelf must NOT be told here is "loaded, and there is nothing" —
+    // an empty list with `loading` false is indistinguishable from a library
+    // that genuinely holds nothing, and that is what the user would read.
+    expect(result.current.assets.items).toEqual([]);
+    expect(result.current.assets.loading).toBe(true);
+    expect(result.current.uploads.loading).toBe(true);
+    expect(result.current.generated.loading).toBe(true);
   });
 
   it('one store failing leaves the other two with their rows', async () => {

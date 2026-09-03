@@ -16,7 +16,7 @@
 // limitation, stated rather than papered over: the alternative is a backend
 // search parameter, which is a separate change.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   listAssets,
@@ -28,6 +28,7 @@ import { fetchGenerated, type GeneratedItem } from '../../../services/generatedS
 import { getResourceCoverUrl } from '../../../services/resourceService';
 import { searchResources } from '../../../services/resourceSearchService';
 import type { ResourceSearchResult } from '../../../types';
+import { mediaSrc } from '../smart/mediaUrl';
 
 const DEBOUNCE_MS = 300;
 const LIMIT = 60;
@@ -114,7 +115,14 @@ export function generatedToLibraryItem(row: GeneratedItem): LibraryItem {
     store: 'generated',
     id: row.id,
     title: row.title,
-    thumbUrl: generatedMediaCoverUrl(row.id),
+    // Through `mediaSrc`, never raw: the cover endpoint serves a 1024px preview
+    // now, but browsers still hold the OLD response (the full original) under a
+    // seven-day immutable cache, so a preview consumer has to ask a URL that
+    // cache has never seen. `mediaSrc` stamps the `v=2` that does it, and is
+    // idempotent, so composing it with an already-resolved src stays safe.
+    // Assets and uploads need no equivalent: `/resources/{id}/cover` is
+    // single-tier.
+    thumbUrl: mediaSrc(generatedMediaCoverUrl(row.id)),
     kind: row.media_kind,
     ready: true,
   };
@@ -222,9 +230,15 @@ function useOneStore(
     // cancelled — the request still costs a round trip, but a late answer can
     // never overwrite a newer one.
     const ctrl = new AbortController();
+    // Pending starts NOW, not when the timer fires. Announcing it only inside
+    // the callback leaves a store reporting `{items: [], loading: false}` for
+    // the whole debounce window — which a shelf renders as "there is nothing
+    // here", the one thing that is not known yet. Clearing the error here too
+    // keeps the triple honest: a store cannot be pending and still be showing
+    // the reason its previous attempt failed.
+    setLoading(true);
+    setError(null);
     const timer = setTimeout(() => {
-      setLoading(true);
-      setError(null);
       const run =
         store === 'assets'
           ? fetchLibraryAssets(query, opts)
@@ -238,7 +252,7 @@ function useOneStore(
           setLoading(false);
         })
         .catch((err: unknown) => {
-          if (cancelled || (err as { name?: string }).name === 'AbortError') return;
+          if (cancelled || (err as { name?: string } | null)?.name === 'AbortError') return;
           console.error(`[useLibrarySearch] ${store} failed:`, err);
           setItems(EMPTY);
           setError(err instanceof Error ? err : new Error(String(err)));
@@ -272,8 +286,8 @@ export function useLibrarySearch(
   const uploads = useOneStore('uploads', stores.includes('uploads'), query, opts, uploadKey);
   const generated = useOneStore('generated', stores.includes('generated'), query, opts, generatedKey);
 
-  return useMemo(
-    () => ({ assets, uploads, generated }),
-    [assets, uploads, generated],
-  );
+  // A plain object on purpose. Each `useOneStore` returns a fresh literal every
+  // render, so a `useMemo` over the three could never hit — it would only cost a
+  // deps comparison while reading as a stability guarantee it does not provide.
+  return { assets, uploads, generated };
 }
