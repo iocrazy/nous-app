@@ -62,7 +62,7 @@ function seed(): void {
 
 beforeEach(() => {
   seed();
-  addReferences.mockReset().mockResolvedValue({ added: 2, skipped: 0, failed: [] });
+  addReferences.mockReset().mockResolvedValue({ added: 2, skipped: 0, clamped: 0, failed: [] });
   placeLibraryItems.mockReset().mockResolvedValue({
     nodeIds: ['n1'], inserted: 2, skipped: 0, failed: [],
   });
@@ -148,14 +148,37 @@ describe('dropLibraryItems', () => {
       's',
     );
     expect(urls()).toEqual(['/api/v1/generated-media/800000000000000001/file']);
-    expect(second).toMatchObject({ handled: true, placed: 0 });
+    // `placed: 0, skipped: 1` — the two together are what let a caller say "it
+    // was already here" instead of staying silent, which on a board that did
+    // not change looks exactly like success.
+    expect(second).toMatchObject({ handled: true, placed: 0, skipped: 1, clamped: 0 });
     expect(placeLibraryItems).not.toHaveBeenCalled();
+  });
+
+  // Every landing has to carry the whole answer up. The outcome used to map
+  // two of each service's four numbers, so even a caller that READ it could not
+  // tell "2 were already there" from "2 exceeded the model's ceiling".
+  it('forwards the underlying skipped / clamped counts rather than flattening them', async () => {
+    addReferences.mockResolvedValue({ added: 1, skipped: 2, clamped: 3, failed: [] });
+    expect(
+      await dropLibraryItems(ITEMS, { kind: 'prompt', nodeId: 'p1', mention: false }, 's'),
+    ).toMatchObject({ referenced: 1, skipped: 2, clamped: 3, failed: 0 });
+
+    placeLibraryItems.mockResolvedValue({ nodeIds: [], inserted: 0, skipped: 4, failed: [] });
+    expect(
+      await dropLibraryItems(ITEMS, { kind: 'canvas', position: { x: 0, y: 0 } }, 's'),
+    ).toMatchObject({ placed: 0, skipped: 4, clamped: 0 });
   });
 
   it('an empty item list is not handled, so the caller does not claim it did something', async () => {
     expect(await dropLibraryItems([], { kind: 'canvas', position: { x: 0, y: 0 } }, 's')).toMatchObject({
       handled: false,
     });
+  });
+
+  it('the shared empty outcome is frozen, so one caller cannot corrupt the next', async () => {
+    const first = await dropLibraryItems([], { kind: 'canvas', position: { x: 0, y: 0 } }, 's');
+    expect(Object.isFrozen(first)).toBe(true);
   });
 
   // The node-level handler is the only caller that knows the target model's

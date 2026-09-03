@@ -33,7 +33,8 @@ import {
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import { addReferences } from '../../library/addReferences';
-import { dropConsequenceKey, dropLibraryItems, hasLibraryDrag, readLibraryDrag, type LibraryDropTarget } from '../../library/dropLibraryItems';
+import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
+import { useLibraryDrop } from '../../library/useLibraryDrop';
 import { useLibraryStore } from '../../library/libraryStore';
 import type { PromptImageRef } from './promptImageRefs';
 import {
@@ -209,7 +210,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
   // ── Image chips in the body ──────────────────────────────────────────────
   const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
-  const [dropHint, setDropHint] = useState<LibraryDropTarget | null>(null); // A panel drag hovering this node, and what it will become — the hint below says it before the drop resolves.
+  const [dropHint, setDropHint] = useState<'mention' | 'reference' | null>(null); // PRIMITIVE on purpose: `dragover` fires at pointer-move rate, and a fresh object would fail React's bail-out and re-render this whole node every frame.
   /** Body height when a press on the resize grip started — see the resizer. */
   const pressHeightRef = useRef<number | null>(null);
   // Seeded once: the document owns the chips from then on.
@@ -356,6 +357,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // unknown (loading / no model / old backend), which renders FULL support.
   const caps = useModelCapabilities(gen?.model ?? null);
   const maxRefs = caps?.max_refs ?? null;
+  const runDrop = useLibraryDrop(scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES }); // Runs a library drop on this node AND speaks its outcome — the drop path had been discarding it.
 
   // The strip, in the order the run delivers — mentions (asset references)
   // first, then the wired images, with the connected asset cards' references
@@ -499,17 +501,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       data-testid="smart-prompt-node"
       className={`group relative mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
-      onDragOver={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; e.preventDefault(); setDropHint({ kind: 'prompt', nodeId: id, mention: e.altKey }); }}
+      onDragOver={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; e.preventDefault(); setDropHint(e.altKey ? 'mention' : 'reference'); }}
       onDragLeave={() => setDropHint(null)}
-      onDrop={(e) => {
-        if (readOnly || !hasLibraryDrag(e.dataTransfer)) return;
-        e.preventDefault(); e.stopPropagation(); setDropHint(null);
-        const items = readLibraryDrag(e.dataTransfer) ?? [];
+      onDrop={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; // Not ours — a file or url drag falls through to the pane's own handler.
+        e.preventDefault(); e.stopPropagation(); setDropHint(null); const items = readLibraryDrag(e.dataTransfer) ?? [];
         if (e.altKey) { for (const it of items) bodyEditorRef.current?.insertText(`@${it.title} `); return; } // ⌥ = MENTION, an edit to the prompt DOCUMENT: only this component holds the editor handle, so `dropLibraryItems` routes it and the insert happens here. Plain text for now — chips are P3's.
-        void dropLibraryItems(items, { kind: 'prompt', nodeId: id, mention: false }, scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES });
+        void runDrop(items, { kind: 'prompt', nodeId: id, mention: false });
       }}
     >
-      {dropHint && <span data-testid="prompt-drop-hint" className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-[inherit] border-2 border-[var(--accent-border)] bg-[var(--accent-soft)] pt-1 text-[10px] font-medium text-[var(--accent-text)]">{t(dropConsequenceKey(dropHint))}</span>}
+      {dropHint && <span data-testid="prompt-drop-hint" className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-[inherit] border-2 border-[var(--accent-border)] bg-[var(--accent-soft)] pt-1 text-[10px] font-medium text-[var(--accent-text)]">{t(dropConsequenceKey({ kind: 'prompt', nodeId: id, mention: dropHint === 'mention' }))}</span>}
       <Handle
         type="target"
         position={Position.Left}

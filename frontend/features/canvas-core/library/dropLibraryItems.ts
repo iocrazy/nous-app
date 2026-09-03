@@ -74,6 +74,14 @@ export interface LibraryDropOutcome {
   referenced: number;
   mentioned: number;
   failed: number;
+  /** Resolved fine, but was already where it was dropped. NOT a failure, and
+   *  not a success either — a drop that skipped everything changes nothing on
+   *  screen, so a caller that cannot see this number has no way to tell it
+   *  apart from one that worked. */
+  skipped: number;
+  /** Resolved fine, refused by the target model's reference ceiling. Only the
+   *  prompt landing can produce it. */
+  clamped: number;
 }
 
 export interface DropLibraryOptions {
@@ -85,9 +93,11 @@ export interface DropLibraryOptions {
   maxRefs?: number;
 }
 
-const NOTHING: LibraryDropOutcome = {
-  handled: false, placed: 0, referenced: 0, mentioned: 0, failed: 0,
-};
+// Frozen: it is handed OUT, and a caller that mutated the result would corrupt
+// every later empty drop.
+const NOTHING: LibraryDropOutcome = Object.freeze({
+  handled: false, placed: 0, referenced: 0, mentioned: 0, failed: 0, skipped: 0, clamped: 0,
+});
 
 /** The label a hovered node shows, so a drop never resolves into a surprise. */
 export function dropConsequenceKey(target: LibraryDropTarget): string {
@@ -110,7 +120,10 @@ export async function dropLibraryItems(
 
   if (target.kind === 'canvas') {
     const r = await placeLibraryItems(items, scopeId, target.position);
-    return { handled: true, placed: r.inserted, referenced: 0, mentioned: 0, failed: r.failed.length };
+    return {
+      handled: true, placed: r.inserted, referenced: 0, mentioned: 0,
+      failed: r.failed.length, skipped: r.skipped, clamped: 0,
+    };
   }
 
   if (target.kind === 'prompt') {
@@ -118,7 +131,7 @@ export async function dropLibraryItems(
     // only the node holds the editor handle that can make it. This function
     // reports the routing decision and lets the node do the insert.
     if (target.mention) {
-      return { handled: true, placed: 0, referenced: 0, mentioned: 0, failed: 0 };
+      return { ...NOTHING, handled: true };
     }
     // Forwarded only when the caller supplied one: `addReferences` reads a
     // MISSING options object as "no ceiling", and passing `undefined`
@@ -127,7 +140,10 @@ export async function dropLibraryItems(
       opts?.maxRefs === undefined
         ? await addReferences(target.nodeId, items, scopeId)
         : await addReferences(target.nodeId, items, scopeId, { maxRefs: opts.maxRefs });
-    return { handled: true, placed: 0, referenced: r.added, mentioned: 0, failed: r.failed.length };
+    return {
+      handled: true, placed: 0, referenced: r.added, mentioned: 0,
+      failed: r.failed.length, skipped: r.skipped, clamped: r.clamped,
+    };
   }
 
   // media — append to that card, exactly as a file drop on it would.
@@ -154,5 +170,9 @@ export async function dropLibraryItems(
   if (fresh.length > 0) {
     store.patchNode(target.nodeId, { data: { items: [...current, ...fresh] } });
   }
-  return { handled: true, placed: fresh.length, referenced: 0, mentioned: 0, failed };
+  return {
+    handled: true, placed: fresh.length, referenced: 0, mentioned: 0, failed,
+    // Everything the dedupe above took away: the card already held it.
+    skipped: refs.length - fresh.length, clamped: 0,
+  };
 }

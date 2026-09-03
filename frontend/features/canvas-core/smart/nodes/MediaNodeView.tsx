@@ -31,7 +31,8 @@ import { useNodeReveal } from './useNodeReveal';
 import { MediaItemEditor } from './MediaItemEditor';
 import type { EditorMode } from '../../editor/UnifiedImageEditor';
 import { createMediaNodeFromFiles } from '../dropCreate';
-import { dropLibraryItems, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
+import { hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
+import { useLibraryDrop } from '../../library/useLibraryDrop';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useCanvasScope } from '../canvasScope';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
@@ -78,7 +79,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   // file drop) — they POST an import AND patch the node. Thumbnails and
   // the lightbox are pure viewing and stay.
   const readOnly = useCanvasReadOnly();
-  const { scopeId } = useCanvasScope(); // Only the `assets` store needs it, and a card takes those too.
+  const runDrop = useLibraryDrop(useCanvasScope().scopeId); // The scope is only for the `assets` store, which a card takes too; the hook also speaks the outcome.
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -176,7 +177,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         if (readOnly) return;
         if (hasLibraryDrag(e.dataTransfer)) { // A library drag carries no `files`, so it has to be answered BEFORE the guard below, which would refuse it as an empty drop.
           e.preventDefault(); e.stopPropagation(); setDragOver(false);
-          void dropLibraryItems(readLibraryDrag(e.dataTransfer) ?? [], { kind: 'media', nodeId: id }, scopeId);
+          void runDrop(readLibraryDrag(e.dataTransfer) ?? [], { kind: 'media', nodeId: id });
           return;
         }
         if (!e.dataTransfer.files?.length) return;

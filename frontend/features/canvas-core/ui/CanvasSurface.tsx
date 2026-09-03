@@ -47,7 +47,8 @@ import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knif
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
 import { useCanvasScope } from '../smart/canvasScope';
-import { dropLibraryItems, readLibraryDrag } from '../library/dropLibraryItems';
+import { readLibraryDrag } from '../library/dropLibraryItems';
+import { useLibraryDrop } from '../library/useLibraryDrop';
 import { extractDropUrls, fetchUrlAsFile } from '../smart/dropUrl';
 import { setPointerWorld } from './pointerWorld';
 import { setRfInstance } from './rfInstance';
@@ -169,16 +170,15 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
     [],
   );
   const { scopeId } = useCanvasScope();
-  // Empty pane only — a drop that landed on a node was answered by that node
-  // and never propagated here. `alt` is the engine's, and it means nothing on
-  // the blank pane: there is no document to mention into.
+  const runDrop = useLibraryDrop(scopeId);
+  // Empty pane only: a drop on a node was answered by that node, and ⌥ means nothing where there is no document to mention into.
   const onLibraryDrop = useCallback(
     (dt: DataTransfer, flowPosition: { x: number; y: number }) => {
       const items = readLibraryDrag(dt);
-      if (!items) return;
-      void dropLibraryItems(items, { kind: 'canvas', position: flowPosition }, scopeId);
+      if (!items) return; // A FOREIGN drag, not a failure — nothing of ours ran, so there is nothing to report.
+      void runDrop(items, { kind: 'canvas', position: flowPosition });
     },
-    [scopeId],
+    [runDrop],
   );
   // Infinite parity: pasting files appends to the selected media node, else
   // creates one at the viewport center. Node-clipboard paste (mod+V keydown)

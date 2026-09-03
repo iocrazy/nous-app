@@ -13,6 +13,9 @@
  * `instanceRef` stays null (the drop point then falls back to client coords,
  * which is what the assertions below read).
  *
+ * `dropLibraryItems` is mocked at ITS module boundary, so `useLibraryDrop` —
+ * the hook the surface now calls — runs for real on top of it.
+ *
  * `fakeDataTransfer` is the REAL `DataTransfer` interface — a `types` list of
  * MIME strings plus `getData` by key — copied from `dropLibraryItems.test.ts`
  * rather than exported out of it. Anything looser would test a shape the
@@ -97,8 +100,11 @@ function dispatchDrag(el: Element, type: 'drop' | 'dragover', dt: DataTransfer, 
 }
 
 beforeEach(() => {
+  // The REAL outcome shape — `useLibraryDrop` reads `skipped` / `clamped` to
+  // decide what to say, and a mock missing them would exercise a ladder no
+  // real drop can produce.
   dropLibraryItems.mockReset().mockResolvedValue({
-    handled: true, placed: 1, referenced: 0, mentioned: 0, failed: 0,
+    handled: true, placed: 1, referenced: 0, mentioned: 0, failed: 0, skipped: 0, clamped: 0,
   });
 });
 
