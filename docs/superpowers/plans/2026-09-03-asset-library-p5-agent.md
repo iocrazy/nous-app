@@ -76,7 +76,7 @@
 
 ### Task 5: 前端 — `pendingAsset` 通道 + Send To Agent 接活
 
-**Files:** Modify `frontend/stores/globalChatStore.ts`（+test）、`frontend/hooks/useComposerResourceAttach.ts`（或新 `useComposerAssetAttach.ts`）、`frontend/components/chat/stagedResources.ts`（`StagedAssetRef` + `toAssetAttachment` 五字段：`kind:'asset_ref'` / `asset_id` / `loadout_id` / `name` / `asset_type`）、`frontend/components/AIChatPanel.tsx`（暂存行渲染 asset chip；`allAttachments` 合并）、`frontend/components/chat/AIChatBubble.tsx:237`（`asset_ref` 分支）、`frontend/components/chat/AttachmentFailureBanner.tsx`（reason 文案 i18n）、`frontend/components/resources/assets/sheet/SheetSidebar.tsx:124-135`（去 disabled）、资产卡右键/菜单入口（`AssetCard` 的动作菜单）；Create `frontend/utils/sendAssetToAgent.ts`；Test 各对应 `.test.tsx`。
+**Files:** Modify `frontend/stores/globalChatStore.ts`（+test）、`frontend/hooks/useComposerResourceAttach.ts`（或新 `useComposerAssetAttach.ts`）、`frontend/components/chat/stagedResources.ts`（`StagedAssetRef` + `toAssetAttachment` wire 形状（与后端 `AttachmentRequest` 一致，无 `asset_type`）：`{kind:'asset_ref', asset_id, loadout_id:null, name, mime:'', url:''}`）、`frontend/components/AIChatPanel.tsx`（暂存行渲染 asset chip；`allAttachments` 合并）、`frontend/components/chat/AIChatBubble.tsx:237`（`asset_ref` 分支）、`frontend/components/chat/AttachmentFailureBanner.tsx`（reason 文案 i18n）、`frontend/components/resources/assets/sheet/SheetSidebar.tsx:124-135`（去 disabled）、资产卡右键/菜单入口（`AssetCard` 的动作菜单）；Create `frontend/utils/sendAssetToAgent.ts`；Test 各对应 `.test.tsx`。
 
 - `pendingAsset {assetId, loadoutId:null, name, assetType, coverFileId, scopeId, nonce}`；`sendAssetToChat` / `consumePendingAsset`；不持久化、不清兄弟通道（扩 `globalChatStore.test.ts`）。
 - `sendAssetToAgent(asset, {addToast, t})` 共享 helper（裁决 I：不跑 `ensureResourceProcessed`），sheet 侧栏与资产卡菜单都调它（测试各一）。
