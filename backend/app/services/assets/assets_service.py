@@ -458,6 +458,48 @@ class AssetsService:
             out.sort(key=lambda r: 0 if r["readiness"]["state"] == "draft" else 1)
         return out
 
+    async def search_accessible_assets(
+        self,
+        user_id: str,
+        *,
+        q: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        library: str = "all",
+        limit: int = 24,
+    ) -> List[Dict[str, Any]]:
+        """Every asset the USER can read, across every team they belong to —
+        the chat @-picker's shelf.
+
+        The scope-less sibling of :meth:`list_assets`, and the ONLY difference
+        that matters is where visibility comes from: this one has no
+        ``scope_id`` to gate on, because a chat turn has no workspace. Ruling B
+        of the P5 plan puts that predicate in exactly one place —
+        ``AssetsRepository.list_accessible`` — which the chat resolver reads
+        through too, so the picker cannot offer an asset the resolver would
+        then refuse to attach.
+
+        ``include_deleted`` is deliberately NOT a parameter here. The
+        repository has it so a caller can tell "deleted" from "not yours"
+        when it already holds an id; a SEARCH answering with soft-deleted rows
+        would put them back on a shelf the user emptied.
+
+        The rows are derived and serialized by the SAME pipeline the shelf
+        uses (:meth:`_derived`), so the card the picker renders is the card
+        ``GET /assets`` renders — one serializer, not two that drift.
+
+        ``readiness`` is not a filter here (the shelf has one): the picker's
+        question is "which asset did I mean", and a draft character is still
+        the one the user meant.
+        """
+        rows = await self.assets.list_accessible(
+            str(user_id),
+            q=q,
+            asset_type=asset_type,
+            library=library,
+            limit=int(limit),
+        )
+        return await self._derived(rows)
+
     async def count_by_type(self, scope_id: int) -> Dict[str, int]:
         """Per-type tallies for one scope — the sidebar's six badges.
 

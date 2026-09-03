@@ -1599,3 +1599,223 @@ async def test_the_stamp_refuses_a_row_in_another_scope(orm_dsn, pg, fx):
             "DELETE FROM generated_media WHERE scope_id = $1", int(other_team)
         )
         await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))
+
+
+async def _ensure_member(pg, user_id: str, team_id: int) -> None:
+    """Make ``user_id`` a member of ``team_id``, and PROVE the row is there.
+
+    ``teams_add_owner_trigger`` already inserts the owner's membership, so a
+    bare INSERT is a unique violation rather than setup. The assertion is the
+    point: without a ``team_members`` row the visibility predicate answers
+    "you see nothing", which would make every negative assertion below pass
+    for the wrong reason.
+    """
+    await pg.execute(
+        "INSERT INTO team_members (user_id, team_id, role) VALUES ($1, $2, 'owner') "
+        "ON CONFLICT DO NOTHING",
+        uuid.UUID(str(user_id)),
+        int(team_id),
+    )
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM team_members WHERE user_id = $1 AND team_id = $2",
+            uuid.UUID(str(user_id)),
+            int(team_id),
+        )
+    ) == 1
+
+
+# ── 23. list_accessible: ruling B's predicate, executed by PostgreSQL ────────
+#
+# ``list_accessible`` (P5 ruling B) is the ONE query behind both the chat's
+# asset-ref resolver and ``GET /assets/search``. Everything above it is proved
+# without a server: the compiled-SQL pins in
+# tests/services/assets/test_assets_repository_sql.py show what is emitted, and
+# the clause interpreter in tests/services/ai/chat/test_asset_ref_resolver.py
+# and tests/api/test_assets_search_router.py evaluates the same statement in
+# memory. None of that executes anything.
+#
+# Two claims in it are the server's alone. The membership subquery binds a
+# ``str`` user id against ``team_members.user_id``, a UUID column — whether the
+# driver accepts that is a driver fact, not a SQLAlchemy one, and it is the
+# whole authorization arm. And the ``q`` filter's ``ESCAPE '\'`` is a claim
+# about how PostgreSQL reads a LIKE pattern: unescaped, a search for ``a_b``
+# also matches ``axb`` and a search for ``%`` matches everything — a filter
+# that silently WIDENS, which reads as "search is broken" rather than as an
+# error.
+
+
+@_skip
+async def test_list_accessible_is_membership_or_preset_and_hides_deleted(
+    orm_dsn, pg, fx
+):
+    """Ruling B, case by case, against the real server.
+
+    An outsider with their own team and their own asset is set up on purpose:
+    the negative case must be a row somebody really can see, not an absent one
+    — a predicate that matched nothing would pass an "it is not in my results"
+    assertion for the wrong reason. So the same query is asked twice, once as
+    each user, and each must see exactly their own side plus the preset.
+    """
+    from app.db.session import write_scope
+    from app.models import Assets
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team, uid = fx["team_id"], fx["user_id"]
+
+    # The predicate joins through ``team_members``, so the case states that
+    # precondition rather than assuming it. ``teams_add_owner_trigger`` already
+    # seeds the owner's row, hence ON CONFLICT — the assertion after it is what
+    # makes the setup falsifiable if that trigger ever stops firing.
+    await _ensure_member(pg, uid, team)
+
+    mine = await _make_asset(repo, fx, "character", _uniq("Mine"))
+    erased = await _make_asset(repo, fx, "character", _uniq("Erased"))
+    assert await repo.soft_delete(int(erased["id"]), team) is True
+
+    async with write_scope() as session:
+        obj = Assets(
+            scope_id=None,
+            asset_type="prompt",
+            name=_uniq("Preset Accessible"),
+            is_system_preset=True,
+            source="system_preset",
+            prompt_positive="cinematic lighting, 35mm",
+            created_by=uid,
+        )
+        session.add(obj)
+        await session.flush()
+        preset_id = int(obj.id)
+
+    other_uid = uuid.uuid4()
+    await pg.execute("INSERT INTO auth.users (id) VALUES ($1)", other_uid)
+    other_team = await pg.fetchval(
+        "INSERT INTO teams (name, owner_id, invite_code) VALUES ($1, $2, $3) "
+        "RETURNING id",
+        "Outsider Team",
+        other_uid,
+        uuid.uuid4().hex[:16],
+    )
+    try:
+        await _ensure_member(pg, str(other_uid), int(other_team))
+        theirs_id = int(
+            (
+                await repo.create(
+                    int(other_team),
+                    {"asset_type": "character", "name": _uniq("Theirs")},
+                    str(other_uid),
+                )
+            )["id"]
+        )
+
+        mine_ids = {int(r["id"]) for r in await repo.list_accessible(uid)}
+        assert int(mine["id"]) in mine_ids
+        assert preset_id in mine_ids, "the is_system_preset arm did not fire"
+        assert theirs_id not in mine_ids, "another team's asset leaked"
+        assert int(erased["id"]) not in mine_ids
+
+        # The mirror image, so "not in my results" cannot be the whole story.
+        their_ids = {int(r["id"]) for r in await repo.list_accessible(str(other_uid))}
+        assert theirs_id in their_ids
+        assert preset_id in their_ids
+        assert int(mine["id"]) not in their_ids
+
+        # include_deleted relaxes ONLY the soft-delete filter. If it also
+        # widened membership, this probe would answer about somebody else's
+        # asset.
+        with_deleted = {
+            int(r["id"]) for r in await repo.list_accessible(uid, include_deleted=True)
+        }
+        assert int(erased["id"]) in with_deleted
+        assert theirs_id not in with_deleted
+
+        # asset_ids narrows without relaxing anything: an id the caller cannot
+        # see stays invisible even when they name it.
+        named = {
+            int(r["id"])
+            for r in await repo.list_accessible(
+                uid, asset_ids=[int(mine["id"]), theirs_id, preset_id]
+            )
+        }
+        assert named == {int(mine["id"]), preset_id}
+    finally:
+        await pg.execute("DELETE FROM assets WHERE scope_id = $1", int(other_team))
+        await pg.execute("DELETE FROM teams WHERE id = $1", int(other_team))
+        await pg.execute("DELETE FROM auth.users WHERE id = $1", other_uid)
+
+
+@_skip
+async def test_list_accessible_filters_match_literally_and_partition(orm_dsn, pg, fx):
+    """``q`` / ``asset_type`` / ``library`` / ``limit`` on the accessible set.
+
+    ``q`` is the one with a silent failure mode: unescaped, ``a_b`` matches
+    ``axb`` and ``%`` matches every row the caller can see — the picker would
+    look like it was filtering and would not be. The other three are asserted
+    as a PARTITION (``in`` and ``out`` complements, their union reachable
+    without a library filter), because a predicate that quietly matched
+    nothing passes any single-sided check.
+    """
+    from app.repositories.assets_repository import AssetsRepository
+
+    repo = AssetsRepository()
+    team, uid = fx["team_id"], fx["user_id"]
+    tag = uuid.uuid4().hex[:12]
+
+    await _ensure_member(pg, uid, team)
+
+    literal = await _make_asset(repo, fx, "prop", f"a_b {tag}")
+    decoy = await _make_asset(repo, fx, "prop", f"axb {tag}")
+    percent = await _make_asset(repo, fx, "prop", f"100% {tag}")
+    character = await _make_asset(repo, fx, "character", f"Cast a_b {tag}")
+    outside = await repo.create(
+        team,
+        {
+            "asset_type": "location",
+            "name": f"Imported Grove {tag}",
+            "source": "script_import",
+            "in_library": False,
+        },
+        uid,
+    )
+    ours = {int(r["id"]) for r in (literal, decoy, percent, character, outside)}
+
+    async def _ids(**kw):
+        rows = await repo.list_accessible(uid, **kw)
+        return {int(r["id"]) for r in rows}
+
+    # ``_`` is a single-character wildcard unless escaped: without the escape
+    # ``axb`` (and the character row) come back too.
+    hit = await _ids(q=f"a_b {tag}")
+    assert int(literal["id"]) in hit
+    assert int(decoy["id"]) not in hit, "'_' still matched any character"
+
+    pct = await _ids(q="100%")
+    assert int(percent["id"]) in pct
+    assert int(literal["id"]) not in pct and int(decoy["id"]) not in pct
+
+    # A lone ``%`` used to be a filter that filters nothing — the widest
+    # failure shape. Escaped, it searches for a literal percent sign.
+    lone = await _ids(q="%")
+    assert int(percent["id"]) in lone
+    assert not (ours - {int(percent["id"])}) & lone, "'%' was still match-everything"
+
+    # Ordinary text still matches (a pattern of literal backslashes would match
+    # nothing), and the ILIKE is still case-insensitive.
+    assert await _ids(q=f"AXB {tag}") & ours == {int(decoy["id"])}
+
+    typed = await _ids(asset_type="character")
+    assert int(character["id"]) in typed
+    assert not (typed & {int(literal["id"]), int(percent["id"])})
+
+    in_lib = await _ids(library="in") & ours
+    out_lib = await _ids(library="out") & ours
+    both = await _ids(library="all") & ours
+    assert out_lib == {int(outside["id"])}
+    assert in_lib | out_lib == both == ours
+    assert not (in_lib & out_lib), "in/out are not complements"
+    # ``library=None`` (the default) means no predicate at all, which must
+    # reach the same rows as an explicit ``all``.
+    assert await _ids() & ours == ours
+
+    assert len(await repo.list_accessible(uid, limit=1)) == 1
