@@ -53,7 +53,7 @@ from app.core.deps import get_auth
 from app.models import Assets, TeamMembers
 from app.models.assets import ASSET_TYPES
 from app.repositories.assets_repository import AssetsRepository
-from app.schemas.assets import AssetResponse
+from app.schemas.assets import AssetResponse, Envelope
 
 # The generic clause interpreter from the ruling-B guard. Imported so both
 # suites judge the SAME production statement with the SAME evaluator.
@@ -137,10 +137,13 @@ def db() -> Dict[str, List[Dict[str, Any]]]:
             ),
             asset_row(DELETED, scope_id=TEAM_A, name="Erased", deleted_at=NOW),
         ],
+        # Real ``uuid.UUID`` objects — the column is ``uuid`` and the
+        # repository normalises the bound value, so a string-keyed fixture
+        # would compare two things the server never compares.
         "team_members": [
-            {"user_id": USER, "team_id": TEAM_A},
-            {"user_id": USER, "team_id": TEAM_B},
-            {"user_id": OTHER_USER, "team_id": TEAM_OUT},
+            {"user_id": uuid.UUID(USER), "team_id": TEAM_A},
+            {"user_id": uuid.UUID(USER), "team_id": TEAM_B},
+            {"user_id": uuid.UUID(OTHER_USER), "team_id": TEAM_OUT},
         ],
     }
 
@@ -240,16 +243,44 @@ async def test_ids_ride_as_strings_not_json_numbers(app):
     assert preset["scope_id"] is None
 
 
-async def test_the_card_is_the_same_card_the_shelf_sends(app):
-    """One serializer, not two. The picker and the shelf render the same asset,
-    so a key present on one list and missing from the other is a bug the
-    frontend discovers as an undefined."""
-    r = await _search(app)
-    card = r.json()["data"][0]
+def _route(app, path: str, method: str = "GET"):
+    return next(
+        r
+        for r in app.routes
+        if getattr(r, "path", None) == path and method in getattr(r, "methods", ())
+    )
+
+
+def test_the_search_card_is_the_shelf_card_MODEL(app):
+    """One model, not two that happen to agree today.
+
+    Reading the serialized body and comparing its keys to
+    ``AssetResponse.model_fields`` proves nothing: FastAPI built that body FROM
+    that model, so the check passes whatever the model says — including after
+    someone forks a narrower ``AssetSearchResponse`` for this route and the
+    picker quietly starts rendering a different card than the shelf. The claim
+    worth pinning is that both routes answer with the SAME declared model.
+    """
+    search = _route(app, "/api/v1/assets/search")
+    shelf = _route(app, "/api/v1/assets")
+
+    assert search.response_model is shelf.response_model
+
+    meta = search.response_model.__pydantic_generic_metadata__
+    assert meta["origin"] is Envelope
+    assert meta["args"] == (List[AssetResponse],)
+    # The two the picker specifically needs (P5 ruling G), named so dropping
+    # either from the shared model fails HERE and not in a component test.
+    assert {"scope_id", "cover_file_id"} <= set(AssetResponse.model_fields)
+
+
+async def test_the_service_really_emits_the_declared_card(app):
+    """The model says what the wire MAY carry; this says what it DID. A field
+    the service stopped emitting would still validate (both are optional) and
+    reach the picker as an undefined."""
+    card = (await _search(app)).json()["data"][0]
     assert set(card) == set(AssetResponse.model_fields)
-    # The two the picker specifically needs (P5 ruling G) — named so removing
-    # either fails HERE rather than in a component test.
-    assert "scope_id" in card and "cover_file_id" in card
+    assert card["readiness"]["state"] in ("ready", "draft")
 
 
 async def test_success_wears_the_envelope(app):

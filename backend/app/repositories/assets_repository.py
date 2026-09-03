@@ -12,7 +12,8 @@ trips, not O(n). Read methods return NATIVE rows (int ids) because
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, List, Optional
+import uuid
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy import update as sa_update
@@ -55,6 +56,30 @@ def _like_escape(text: str) -> str:
     pattern characters.
     """
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _coerce_user_id(user_id: Union[str, uuid.UUID]) -> uuid.UUID:
+    """The caller's id as a real ``uuid.UUID``, for binding against
+    ``team_members.user_id``.
+
+    Callers hand this down as a ``str`` (it arrives from a JWT), and the column
+    is ``uuid``. asyncpg happens to accept a string there — but that is the
+    DRIVER being lenient, not a contract: it is the whole authorization arm of
+    ``list_accessible``, and "it works because the driver coerces it" is the
+    kind of dependency that changes under you on a version bump, with no test
+    naming it.
+
+    A malformed id RAISES rather than binding something Postgres will reject
+    later. Reaching this is a programming error — the router's id comes from
+    the authenticated session — so the honest answer is a loud one at the point
+    where the value is wrong, not a driver error from three frames down.
+    """
+    if isinstance(user_id, uuid.UUID):
+        return user_id
+    try:
+        return uuid.UUID(str(user_id))
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError(f"not a valid user id (expected a UUID): {user_id!r}")
 
 
 def _row_dict(obj: Assets) -> Dict[str, Any]:
@@ -259,7 +284,7 @@ class AssetsRepository:
 
     def _accessible_stmt(
         self,
-        user_id: str,
+        user_id: Union[str, uuid.UUID],
         *,
         asset_ids: Optional[List[Any]] = None,
         q: Optional[str] = None,
@@ -277,7 +302,9 @@ class AssetsRepository:
         the membership subquery — see :meth:`list_accessible` for why that
         equivalence matters and where it is pinned.
         """
-        membership = select(TeamMembers.team_id).where(TeamMembers.user_id == user_id)
+        membership = select(TeamMembers.team_id).where(
+            TeamMembers.user_id == _coerce_user_id(user_id)
+        )
         stmt = select(Assets).where(
             or_(Assets.scope_id.in_(membership), Assets.is_system_preset.is_(True))
         )
@@ -306,7 +333,7 @@ class AssetsRepository:
 
     async def list_accessible(
         self,
-        user_id: str,
+        user_id: Union[str, uuid.UUID],
         *,
         asset_ids: Optional[List[Any]] = None,
         q: Optional[str] = None,

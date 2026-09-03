@@ -15,10 +15,16 @@ file does that.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.repositories.assets_repository import AssetsRepository, _like_escape
+from app.repositories.assets_repository import (
+    AssetsRepository,
+    _coerce_user_id,
+    _like_escape,
+)
 
 SCOPE = 727145299382534200
 
@@ -380,3 +386,45 @@ def test_no_limit_by_default_and_a_clamped_one_when_asked():
     assert "LIMIT" not in _acc_sql()
     stmt = AssetsRepository()._accessible_stmt(USER, limit=9999)
     assert stmt._limit == 200
+
+
+# ── the caller id is normalised before it is bound ──────────────────────────
+#
+# ``team_members.user_id`` is a ``uuid`` column and every caller hands the id
+# down as a ``str`` (it comes off a JWT). asyncpg accepts a string there, so
+# the membership arm worked for reasons nothing in the codebase asserted — a
+# driver leniency, not a contract. These pin the normalisation instead.
+
+
+def _acc_bind_values(user_id):
+    stmt = AssetsRepository()._accessible_stmt(user_id)
+    return list(stmt.compile(dialect=postgresql.dialect()).params.values())
+
+
+def test_a_string_user_id_is_bound_as_a_uuid_not_as_text():
+    values = _acc_bind_values(USER)
+    assert uuid.UUID(USER) in values
+    assert USER not in values, "the raw string reached the bind parameter"
+
+
+def test_a_uuid_user_id_is_passed_through_unchanged():
+    """Both shapes must produce the SAME bind, or the two call sites (chat
+    resolver, search endpoint) could differ on whether a row is visible."""
+    assert _acc_bind_values(uuid.UUID(USER)) == _acc_bind_values(USER)
+
+
+@pytest.mark.parametrize("bad", ["", "not-a-uuid", "12345", None, 7])
+def test_a_malformed_user_id_raises_where_it_is_wrong(bad):
+    """Loudly, at the boundary. Binding it anyway defers the failure to a
+    driver error three frames down, and the honest name for the condition
+    ("this is not a user id") is lost by then."""
+    with pytest.raises(ValueError, match="not a valid user id"):
+        _coerce_user_id(bad)
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", None])
+def test_the_statement_builder_refuses_a_malformed_user_id_too(bad):
+    """The raise must be reachable through the method callers actually use —
+    a helper that validates and a builder that skips it would be no guard."""
+    with pytest.raises(ValueError, match="not a valid user id"):
+        AssetsRepository()._accessible_stmt(bad)

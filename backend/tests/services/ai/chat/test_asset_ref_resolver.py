@@ -227,10 +227,15 @@ def _resource_row(rid, mime="image/png", file_path=None):
 def db():
     return {
         "assets": [],
+        # ``user_id`` holds real ``uuid.UUID`` objects, not the strings the
+        # callers pass: the column is ``uuid``, asyncpg returns UUIDs from it,
+        # and the repository now normalises the bound value to match. A fixture
+        # keyed by strings would make the comparison pass here and mean nothing
+        # about the server (CLAUDE.md 边界 mock 必须用真实形状).
         "team_members": [
-            {"user_id": USER, "team_id": TEAM_A},
-            {"user_id": USER, "team_id": TEAM_B},
-            {"user_id": OTHER_USER, "team_id": TEAM_OUT},
+            {"user_id": uuid.UUID(USER), "team_id": TEAM_A},
+            {"user_id": uuid.UUID(USER), "team_id": TEAM_B},
+            {"user_id": uuid.UUID(OTHER_USER), "team_id": TEAM_OUT},
         ],
         "resources": [],
         "asset_files": [],
