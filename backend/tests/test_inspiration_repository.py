@@ -167,6 +167,47 @@ async def test_list_applies_keyset_and_filters(monkeypatch):
     assert datetime.date(2026, 7, 7) in params.values()
 
 
+@pytest.mark.asyncio
+async def test_list_applies_min_rating_floor(monkeypatch):
+    """min_rating=4 must reach SQL as `rating >= 4`."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession(_ScalarResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+
+    await InspirationNotesRepository().list("u1", min_rating=4)
+
+    stmt = session.statements[0]
+    # Scoped to the WHERE clause: `select(InspirationNotes)` puts the rating
+    # COLUMN in every statement's select list, so a whole-statement match
+    # would pass even with no filter applied.
+    assert "inspiration_notes.rating >=" in str(stmt.whereclause)
+    assert 4 in stmt.compile().params.values()
+
+
+@pytest.mark.asyncio
+async def test_list_omits_rating_clause_when_min_rating_is_zero(monkeypatch):
+    """0 means "no rating filter", NOT "rating >= 0".
+
+    Both render the same rows today, so a wrong implementation is invisible
+    by inspection — pin the absence of the clause instead. `None` (param not
+    sent at all) must behave identically.
+    """
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession(_ScalarResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+
+    await InspirationNotesRepository().list("u1", min_rating=0)
+    await InspirationNotesRepository().list("u1", min_rating=None)
+
+    assert len(session.statements) == 2
+    for stmt in session.statements:
+        assert "rating" not in str(stmt.whereclause)
+
+
 # ── get_by_id / soft_delete ────────────────────────────────────────────────
 
 

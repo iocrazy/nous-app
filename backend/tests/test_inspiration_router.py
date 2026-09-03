@@ -39,6 +39,23 @@ async def test_list_limit_out_of_range_400():
 
 
 @pytest.mark.asyncio
+async def test_list_threads_min_rating_to_service():
+    svc = AsyncMock()
+    svc.list_notes.return_value = []
+    with patch("app.api.inspiration_router.get_notes_service", return_value=svc):
+        await list_notes(
+            date=None,
+            tag=None,
+            q=None,
+            min_rating=4,
+            limit=50,
+            before_id=None,
+            current_user=USER,
+        )
+    assert svc.list_notes.await_args.kwargs["min_rating"] == 4
+
+
+@pytest.mark.asyncio
 async def test_create_returns_service_row():
     svc = AsyncMock()
     svc.create_note.return_value = {
