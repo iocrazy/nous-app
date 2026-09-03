@@ -151,7 +151,7 @@ describe('CanvasComposer — library glue (②-4)', () => {
         expect.objectContaining({ kind: 'smart' }),
         'team-1',
       );
-      expect(screen.getByRole('status').textContent).toMatch(/Saved to library/);
+      expect(screen.getByRole('status').textContent).toMatch(/Saved as workflow/);
     });
   });
 

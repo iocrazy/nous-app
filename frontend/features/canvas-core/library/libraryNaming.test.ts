@@ -58,22 +58,96 @@ const USER_TEXT =
 // begins with a comment marker.
 const COMMENT_OPENER = /^\/[*/]/;
 
+/** i18n defaults — the `t('some.key', 'English default')` form. USER_TEXT is
+ *  structurally blind to these: its capture excludes quotes, so it dies at
+ *  the key's opening quote. That blind spot is the whole ballgame here,
+ *  because every label this task renamed IS a t() default — without this
+ *  second pattern, putting `'Workflow Library'` back as the default at
+ *  `smart/WorkflowLibraryPicker.tsx` leaves the suite green.
+ *
+ *  Only the two-string form is scanned. The `t(key, { defaultValue: … })`
+ *  object form does exist in this tree (LibraryGrid, AssetNodeView,
+ *  PromptMentionPicker, …), but no `defaultValue` string in canvas-core
+ *  carries the word `library` — checked across the tree — so a branch for it
+ *  would be reach with nothing behind it. Add one the day that stops being
+ *  true. */
+const T_DEFAULT = /\bt\(\s*'[^']*'\s*,\s*'([^']*)'/g;
+
+const HAS_LIBRARY = /\blibrary\b/i;
+
+/** The exact English defaults that genuinely name THE media library — the
+ *  one thing the canvas is allowed to call Library. A default naming any
+ *  OTHER library (a workflow store, a prompt-template store) does not belong
+ *  here; it belongs in the rename table.
+ *
+ *  Allowlisted by exact string rather than by file on purpose: a file
+ *  allowlist would wave through a NEW offender that happens to land in an
+ *  already-listed file, which is precisely how the first version of this
+ *  guard would have missed the five renames. Each entry says what it labels.
+ *
+ *  Every entry below still has at least one live mount after Tasks 7/10:
+ *  `Search Library…` and `Could not load the asset library` each appear
+ *  twice, and only one mount of each (`LibraryReferencePopover.tsx`,
+ *  `AssetPickerDialog.tsx`) is deleted there. So none of these goes dead —
+ *  but an entry that did would be harmless, not a failure. */
+const ALLOWED_DEFAULTS = new Set([
+  // Section label over the mention palette's Assets tab — one library per
+  // canvas, so it names the media library rather than choosing between any.
+  'Library',
+  // Mention-palette pill restricting results to what is in that library.
+  'In Library Only',
+  // Search box of the media library (reference popover + mention palette).
+  'Search Library…',
+  // LibraryGrid's own search input, whose aria-label drops the ellipsis —
+  // a ninth site, and a seventh distinct string, that the hand-built list
+  // this allowlist started from did not have. The scan found it.
+  'Search Library',
+  // LibraryGrid's error state, for the media library it is rendering.
+  'Could not load this library',
+  // Assets-tab and asset-picker error state — the asset store OF that same
+  // library (the picker mount is transitional; the palette mount stays).
+  'Could not load the asset library',
+  // OutputNodeView: this image has no generated-media record to save from.
+  'This image has no library record to save',
+]);
+
+/** Both patterns, over one file. */
+function scan(file: string): { offenders: string[]; defaults: string[] } {
+  const src = fs.readFileSync(file, 'utf8');
+  const rel = path.relative(ROOT, file);
+  const offenders: string[] = [];
+  const defaults: string[] = [];
+
+  if (!ALLOWED.has(file)) {
+    for (const m of src.matchAll(USER_TEXT)) {
+      const text = m[1].trim();
+      if (COMMENT_OPENER.test(text)) continue;
+      offenders.push(`${rel}: ${text}`);
+    }
+  }
+
+  for (const m of src.matchAll(T_DEFAULT)) {
+    const text = m[1];
+    if (!HAS_LIBRARY.test(text)) continue;
+    defaults.push(`${rel}: ${text}`);
+    if (!ALLOWED_DEFAULTS.has(text)) offenders.push(`${rel}: t() default ${text}`);
+  }
+
+  return { offenders, defaults };
+}
+
 describe('the word Library on the canvas', () => {
   it('found files at all — an empty scan would pass every case below', () => {
     expect(tsFiles(ROOT).length).toBeGreaterThan(40);
   });
 
+  it('the t() default pattern matches real code — an empty scan would too', () => {
+    const found = tsFiles(ROOT).flatMap((f) => scan(f).defaults);
+    expect(found.length).toBeGreaterThan(4);
+  });
+
   it('names exactly one thing: the panel and its chip', () => {
-    const offenders: string[] = [];
-    for (const file of tsFiles(ROOT)) {
-      if (ALLOWED.has(file)) continue;
-      const src = fs.readFileSync(file, 'utf8');
-      for (const m of src.matchAll(USER_TEXT)) {
-        const text = m[1].trim();
-        if (COMMENT_OPENER.test(text)) continue;
-        offenders.push(`${path.relative(ROOT, file)}: ${text}`);
-      }
-    }
+    const offenders = tsFiles(ROOT).flatMap((f) => scan(f).offenders);
     expect(offenders).toEqual([]);
   });
 });

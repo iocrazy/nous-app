@@ -275,7 +275,7 @@ test('workflow Save → Library import round trip (②-4)', async ({ page }) => 
   await page.locator('.react-flow').click({ position: { x: 30, y: 200 } });
   await page.keyboard.press('ControlOrMeta+a');
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('status')).toContainText('Saved to library');
+  await expect(page.getByRole('status')).toContainText('Saved as workflow');
 
   await page.getByRole('button', { name: 'Workflows', exact: true }).click();
   // Scope to the picker: the save notice carries the same filename text and

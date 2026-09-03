@@ -593,10 +593,10 @@ export function CanvasComposer({
     try {
       const payload = serializeWorkflow('smart', selected, connections);
       const resource = await saveWorkflowToLibrary(payload, teamId);
-      setLibraryNotice(`Saved to library: ${String((resource as { filename?: string }).filename ?? 'workflow')}`);
+      setLibraryNotice(`Saved as workflow: ${String((resource as { filename?: string }).filename ?? 'workflow')}`);
     } catch (err) {
       console.error('[CanvasComposer] save workflow to library failed:', err);
-      setWorkflowError('Failed to save workflow to the library');
+      setWorkflowError('Could not save this workflow');
     } finally {
       setSavingToLibrary(false);
     }
