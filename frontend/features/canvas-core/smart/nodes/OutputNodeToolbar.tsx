@@ -10,6 +10,7 @@
 import {
   Crop,
   Download,
+  Boxes,
   Expand,
   Eye,
   Grid3x3,
@@ -20,6 +21,7 @@ import {
   Copy,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { downloadUrl, type DownloadableItem } from '../downloadMedia';
 
@@ -43,6 +45,21 @@ export interface OutputNodeToolbarProps {
   /** Absent → no source prompt → the Rerun key is hidden. */
   onRerun?: () => void;
   rerunning?: boolean;
+  /**
+   * "As Asset…" (P4 Task 6) — promote this output into the asset library.
+   *
+   * ALWAYS RENDERED WHEN SUPPLIED, EVEN WHEN IT CANNOT RUN. An output whose
+   * image predates the `GeneratedImageRef.id` field has no `generated_media`
+   * row to promote, and a canvas opened outside a `/team/:teamId` route has no
+   * asset scope to promote into — both are real, and in both the honest UI is
+   * a disabled key whose tooltip says which. Hiding it instead would leave the
+   * user comparing two output nodes and unable to tell why one offers the
+   * action and the other does not.
+   */
+  onAsAsset?: () => void;
+  asAssetDisabled?: boolean;
+  /** Replaces the tooltip while disabled — the REASON, not the label. */
+  asAssetDisabledReason?: string;
   /** Read-only session: Rerun is disabled (it dispatches a generation and
    *  writes the result back). Preview and Download are pure reads and stay
    *  available — withholding them would take away viewing, not writing. */
@@ -75,10 +92,14 @@ export function OutputNodeToolbar({
   onDuplicate,
   onRerun,
   rerunning,
+  onAsAsset,
+  asAssetDisabled,
+  asAssetDisabledReason,
   readOnly,
   pinned,
   hovered,
 }: OutputNodeToolbarProps) {
+  const { t } = useTranslation();
   const [downloadError, setDownloadError] = useState(false);
   if (items.length === 0) return null;
   // Mount gate (T5). The opacity classes below still do the FADE, so the
@@ -154,6 +175,28 @@ export function OutputNodeToolbar({
           <Copy size={13} />
         </ToolbarButton>
       )}
+      {onAsAsset && (
+        <ToolbarButton
+          label={t('canvas.asAsset.action', 'As Asset…')}
+          onClick={onAsAsset}
+          disabled={readOnly || asAssetDisabled}
+          // Both disabled paths say WHY. `asAssetDisabled` covers "not an
+          // image" and "no workspace in the URL"; read-only is the third, and
+          // leaving it with only the button's own label made a greyed key look
+          // like an omission rather than a permission.
+          title={
+            asAssetDisabled
+              ? asAssetDisabledReason
+              : readOnly
+                // Reuses the canvas's existing read-only label rather than
+                // minting a fourth way to say the same thing.
+                ? t('canvas.readOnly', 'Read-only')
+                : undefined
+          }
+        >
+          <Boxes size={13} />
+        </ToolbarButton>
+      )}
       <ToolbarButton
         label="Download"
         onClick={onDownload}
@@ -180,18 +223,22 @@ function ToolbarButton({
   children,
   disabled,
   tone,
+  title,
 }: {
   label: string;
   onClick: () => void;
   children: React.ReactNode;
   disabled?: boolean;
   tone?: 'error';
+  /** Overrides the tooltip. The accessible NAME stays `label` either way, so a
+   *  reason never replaces the thing the key is called. */
+  title?: string;
 }) {
   return (
     <button
       type="button"
       aria-label={label}
-      title={tone === 'error' ? `${label} failed — try again` : label}
+      title={title ?? (tone === 'error' ? `${label} failed — try again` : label)}
       onClick={onClick}
       disabled={disabled}
       className={`nodrag flex h-6 items-center gap-1 rounded-lg px-1.5 text-[10px] font-semibold transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 ${

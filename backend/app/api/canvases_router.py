@@ -29,6 +29,7 @@ from app.core.scope_guards import (
 )
 from app.repositories.asset_relations_repository import AssetRelationsRepository
 from app.repositories.assets_repository import AssetsRepository
+from app.repositories.canvas_asset_refs_repository import CanvasAssetRefsRepository
 from app.repositories.canvas_repository import CanvasRepository
 from app.repositories.episode_repository import get_episode_repository
 from app.schemas.canvas import (
@@ -233,19 +234,17 @@ async def _visible_generation_rows(
     told to hide. Two hand-rolled copies of "list, filter by Settings, keep
     image/video" is exactly the "two predicates that must agree" shape that
     drifts silently, so both endpoints call this and neither re-derives it.
-    """
-    from app.repositories import mediahub_model_repository as _repo_mod
-    from app.services.ai.platform_model_visibility import (
-        filter_platform_models_for_user,
-    )
 
-    rows = await _repo_mod.get_mediahub_model_repository().list_enabled(
-        viewer_user_id=user_id, include_actual_provider=include_actual_provider
+    The implementation moved to ``services/generation/model_capabilities.py``
+    when the asset library's bundle endpoint became the third consumer — same
+    rule, one more caller. This thin wrapper stays because both routes below
+    and their tests name it.
+    """
+    from app.services.generation.model_capabilities import visible_generation_rows
+
+    return await visible_generation_rows(
+        user_id, include_actual_provider=include_actual_provider
     )
-    # The user's Settings → platform-model card (master switch + per-model
-    # blacklist) applies here too; the picker must show what Settings shows.
-    rows = await filter_platform_models_for_user(user_id, rows)
-    return [r for r in rows if r.get("type") in ("image", "video")]
 
 
 @router.get("/canvases/generation-models")
@@ -567,6 +566,27 @@ async def get_canvas(
     if row is None:
         raise HTTPException(status_code=404, detail="canvas not found")
     return {"success": True, "data": _to_response(row, can_edit=access.can_write)}
+
+
+@router.get("/canvases/{canvas_id}/asset-refs")
+async def canvas_asset_refs(
+    auth: AuthDep,
+    canvas_id: str = Path(..., description="Snowflake canvas ID"),
+) -> dict:
+    """Asset-library refs this canvas holds (P4 forward lookup).
+
+    Derived from ``nodes_json`` on every save (``CanvasService._sync_refs``),
+    so it answers "which assets does this canvas use" without the caller
+    parsing the node graph itself.
+
+    ``_gate_canvas_read``, not the write gate: this is a pure read, and the
+    sibling ``GET /canvases/{id}/assets`` was shipped with the WRITE guard by
+    mistake for months (fixed 2026-08-12), locking viewers out of a read they
+    were entitled to. Same envelope shape as that sibling.
+    """
+    await _gate_canvas_read(canvas_id, auth)
+    items = await CanvasAssetRefsRepository().list_for_canvas(canvas_id)
+    return {"success": True, "data": items, "count": len(items)}
 
 
 @router.put("/canvases/{canvas_id}")

@@ -7,7 +7,7 @@ import { NodeDeleteButton } from './NodeDeleteButton';
 import { ImagePlus, Library, Play, Split, Square, Zap } from 'lucide-react';
 
 import type { CanvasConnection, CanvasNode } from '../../types';
-import type { GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
+import type { DroppedRef, GeneratedImageRef, PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
 import { useTextModels } from './useTextModels';
@@ -69,9 +69,52 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     image_refs = [],      // inline image chips in the body (IC's mention tokens)
     negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     last_dropped,         // knobs the backend ignored on the last run (P4)
+    last_dropped_refs,    // references it could not use on that run (P4 assets)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const { t } = useTranslation();
+  // The "Ignored" badge carries BOTH ledgers the last run reported: knobs the
+  // provider could not honour, and references it could not use. They are
+  // orthogonal (a run can lose either or both), so they are stored apart and
+  // only joined here, at the one place a user reads them. References are
+  // grouped by reason rather than listed per-url: the badge is a summary, and
+  // the urls are in the tooltip.
+  const droppedRefs: DroppedRef[] = useMemo(
+    () => (Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
+    [last_dropped_refs],
+  );
+  const ignoredParts: string[] = useMemo(() => {
+    const refCounts = droppedRefs.reduce<Map<string, number>>((acc, ref) => {
+      const reason = String(ref?.reason || 'unresolved');
+      return acc.set(reason, (acc.get(reason) ?? 0) + 1);
+    }, new Map());
+    return [
+      ...(Array.isArray(last_dropped) ? last_dropped : []),
+      ...[...refCounts.entries()].map(([reason, count]) =>
+        t('canvas.ignoredRefs', {
+          count,
+          // An unrecognised code still renders as itself: a badge that omits a
+          // reference because nobody wrote its label is the silent drop again.
+          reason: t(`canvas.refDropReason.${reason}`, reason),
+        }),
+      ),
+    ];
+  }, [droppedRefs, last_dropped, t]);
+  // BOTH halves of the tooltip, always — not one or the other.
+  //
+  // It used to pick the URL list when any reference was dropped and the knob
+  // sentence otherwise, so a run that lost a knob AND a reference showed only
+  // the URLs and "why was quality ignored" became unreachable. The badge joins
+  // two orthogonal ledgers; its tooltip has to as well, or the badge says
+  // "Ignored: quality, 1 reference" and can only explain one of them.
+  const ignoredTitle = useMemo(() => {
+    const lines: string[] = [];
+    if (Array.isArray(last_dropped) && last_dropped.length > 0) {
+      lines.push(t('canvas.knobNotSupported'));
+    }
+    lines.push(...droppedRefs.map((r) => `${r.url} — ${r.reason}`));
+    return lines.join('\n');
+  }, [droppedRefs, last_dropped, t]);
   const patch = useNodeDataPatch(id);
   // Read-only: every control on this node writes — the body/negative text,
   // the kind/model/agent/ratio/count pickers, the @-ref chips' remove
@@ -468,13 +511,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               the pre-run half of the same loop is the footer's stranded
               ratio mark. Absent/empty says nothing: silence here means the
               request was honoured, so it may never be a default. */}
-          {Array.isArray(last_dropped) && last_dropped.length > 0 && (
+          {ignoredParts.length > 0 && (
             <span
               data-testid="dropped-knobs-badge"
-              title={t('canvas.knobNotSupported')}
+              title={ignoredTitle}
               className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
             >
-              {t('canvas.ignoredKnobs', { knobs: last_dropped.join(', ') })}
+              {t('canvas.ignoredKnobs', { knobs: ignoredParts.join(', ') })}
             </span>
           )}
         </div>

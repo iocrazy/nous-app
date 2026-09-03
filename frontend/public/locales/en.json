@@ -1888,7 +1888,6 @@
       "notLoopable": "Not Loopable",
       "sendToCanvas": "Send To Canvas",
       "sendToAgent": "Send To Agent",
-      "arrivesWithP4": "Arrives with P4",
       "arrivesWithP5": "Arrives with P5",
       "copyLoadoutPrompt": "Copy Loadout Prompt",
       "promptCopied": "Prompt Copied",
@@ -1908,7 +1907,10 @@
       "assetId": "Asset ID",
       "usedIn": "Used In",
       "noProjects": "No Projects Yet",
-      "canvasUsageLater": "Canvas usage arrives with P4",
+      "usedInProjects": "Projects",
+      "usedInCanvases": "Canvases",
+      "noCanvases": "Not On Any Canvas Yet",
+      "canvasCards": "{{n}} Cards",
       "addRole": "Add A Role",
       "addDescription": "Add A Description",
       "editField": "Edit {{field}}",
@@ -1984,6 +1986,19 @@
       "removeHint": "Takes it off your library shelf — it stays in this project",
       "removeNamed": "Remove {{name}} From Your Library",
       "removed": "Removed From Your Library — Still In This Project"
+    },
+    "sendToCanvas": {
+      "title": "Send To Canvas",
+      "newCanvas": "New Canvas",
+      "noCanvases": "This Project Has No Canvases Yet",
+      "canvasesUnavailable": "Could not load the canvases here",
+      "err": {
+        "loadFailed": "Could not open that canvas",
+        "readOnly": "You can only read that canvas",
+        "conflict": "Someone else is editing that canvas. Try again.",
+        "saveFailed": "Could not add the card to that canvas",
+        "createFailed": "Could not create the canvas"
+      }
     }
   },
   "generated": {
@@ -3212,6 +3227,15 @@
     },
     "readOnly": "Read-only",
     "ignoredKnobs": "Ignored: {{knobs}}",
+    "ignoredRefs": "{{count}} reference(s) ({{reason}})",
+    "refDropReason": {
+      "unknown_shape": "unsupported link",
+      "not_in_scope": "out of scope",
+      "no_image_file": "no image file",
+      "materialize_failed": "unreadable",
+      "scope_unresolved": "scope unknown",
+      "unresolved": "unresolved"
+    },
     "knobNotSupported": "Not supported by this model",
     "saveBadge": {
       "saving": "Saving…",
@@ -3236,7 +3260,8 @@
         "timeline": "Timeline",
         "media": "Upload",
         "group": "Group",
-        "llm": "LLM"
+        "llm": "LLM",
+        "asset": "Asset"
       },
       "desc": {
         "shot": "Shot card — media for one storyboard beat",
@@ -3246,7 +3271,8 @@
         "timeline": "Multi-segment film, stitched in order",
         "media": "Import images or video onto the canvas",
         "group": "Collect media, prompts and loops together",
-        "llm": "Chat model in a node — text in, text out"
+        "llm": "Chat model in a node — text in, text out",
+        "asset": "Reference a character, location, prop or prompt"
       }
     },
     "toolbar": {
@@ -3309,6 +3335,74 @@
       "searchPlaceholder": "Search by filename…",
       "all": "All",
       "noResults": "No prompt assets found"
+    },
+    "nodeBar": {
+      "media": "Upload",
+      "shot": "Shot",
+      "prompt": "Prompt",
+      "llm": "LLM",
+      "image-gen": "Image Gen",
+      "video-gen": "Video Gen",
+      "loop": "Loop",
+      "timeline": "Timeline",
+      "output": "Output",
+      "asset": "Asset",
+      "project-assets": "Project Assets"
+    },
+    "asset": {
+      "title": "Asset",
+      "removed": "Asset Removed",
+      "loadout": "Asset loadout",
+      "loadoutNone": "No loadout",
+      "references": "Reference Files",
+      "noFiles": "No reference files",
+      "useFile": "Use {{slot}} reference",
+      "primary": "Primary",
+      "openSheet": "Open Sheet",
+      "loading": "Loading…",
+      "loadFailed": "Could not load this asset",
+      "pickerTitle": "Add Asset",
+      "searchLabel": "Search assets",
+      "searchPlaceholder": "Search assets…",
+      "allTypes": "All",
+      "noResults": "No assets found",
+      "listFailed": "Could not load the asset library",
+      "pickFailed": "Could not open that asset. Try again.",
+      "refsLimit_one": "This model takes {{count}} reference image. The rest are not sent.",
+      "refsLimit_other": "This model takes {{count}} reference images. The rest are not sent.",
+      "refsDropped": "Not sent: {{refs}}",
+      "refsDroppedGroup_one": "{{count}} ({{reason}})",
+      "refsDroppedGroup_other": "{{count}} ({{reason}})",
+      "bundleFailed": "The last run could not read this asset. Nothing from it was sent.",
+      "noModel": "Pick a model on the prompt — nothing was sent from this card.",
+      "noScope": "Open this canvas from a workspace — nothing was sent from this card.",
+      "dropReason": {
+        "over_limit": "over the model's limit",
+        "no_image_file": "no image file",
+        "provider_no_refs": "model takes no references"
+      }
+    },
+    "asAsset": {
+      "action": "As Asset…",
+      "noScope": "Open this canvas from a workspace to save assets",
+      "noGeneration": "This image has no library record to save",
+      "lookupFailed": "Could not read this generation",
+      "saved": "Saved to {{name}}"
+    },
+    "projectAssets": {
+      "noProject": "This canvas has no project",
+      "empty": "This project has no assets yet",
+      "allPresent": "Every project asset is already here",
+      "inserted": "Added {{inserted}}",
+      "insertedWithSkipped": "Added {{inserted}} · {{skipped}} already here",
+      "failed": "Could not load the project assets"
+    },
+    "legacyCard": {
+      "unmigrated": "Unmigrated",
+      "unmigratedHint": "No asset in this workspace matches this card. Replace it with an asset card to use it in generations."
+    },
+    "assetSeed": {
+      "failed": "Could not load this canvas asset"
     }
   },
   "modelParams": {

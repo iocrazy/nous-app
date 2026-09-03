@@ -18,6 +18,7 @@ import type {
   AssetRow,
   AssetRowDetail,
   AssetType,
+  UsedInCanvasRef,
 } from '../../../../services/assetsService';
 
 const SCOPE = '727145299382534200';
@@ -95,16 +96,39 @@ export function makeLoadout(
   };
 }
 
+/**
+ * One `used_in.canvases` row, exactly as `list_canvases_for_asset` serialises
+ * it: every id a STRING (the repository casts them to text in SQL), and
+ * `node_ids` / `loadout_ids` aggregated per canvas rather than per node.
+ */
+export function makeCanvasRef(
+  overrides: Partial<UsedInCanvasRef> & { canvas_id: string },
+): UsedInCanvasRef {
+  return {
+    canvas_name: 'Bamboo Sea Boards',
+    kind: 'smart',
+    project_id: '55',
+    node_ids: ['asset-1'],
+    loadout_ids: [],
+    ...overrides,
+  };
+}
+
 export function makeDetail(
   overrides: Partial<AssetRowDetail> & { id: string },
 ): AssetRowDetail {
-  const { files, links, linked_by, loadouts, ...row } = overrides;
+  const { files, links, linked_by, loadouts, used_in, ...row } = overrides;
   return {
     ...makeRow(row as Partial<AssetRow> & { id: string }),
     files: files ?? [],
     links: links ?? [],
     linked_by: linked_by ?? [],
     loadouts: loadouts ?? [],
+    // Both lists are ALWAYS on the wire (`UsedInResponse` has a
+    // `default_factory`), so the default here is two empty arrays rather than
+    // an absent key — a fixture that omitted it would let a component that
+    // crashes on the real shape pass.
+    used_in: used_in ?? { canvases: [], storyboards: [] },
   };
 }
 

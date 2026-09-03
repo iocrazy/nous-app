@@ -135,6 +135,29 @@ async def counts(auth: AuthDep, scope_id: ScopeIdQuery):
     return _ok(CountsResponse.model_validate(out).model_dump(mode="json"))
 
 
+# ⚠️ ORDER IS LOAD-BEARING: this dynamic GET is registered AFTER ``/counts``.
+# Above it, the literal "counts" would be captured as ``gen_id`` — an ``int``
+# path param — and the tab counters would answer 422 about an id nobody sent.
+# Pinned by ``test_generated_router.py::test_counts_is_not_captured_as_a_gen_id``.
+
+
+@router.get("/{gen_id}")
+async def get_generated(gen_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """One inbox card by id — the same wire shape ``GET /generated`` lists.
+
+    Same scope rule as the list: membership of ``scope_id`` (``_gate``), then a
+    row read that carries the scope as a predicate. A row in another scope is a
+    typed 404, never an empty body — "not yours" and "not there" are the same
+    answer to a caller who may not learn which.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        row = await _service().get_item(gen_id, sid)
+    except AssetError as e:
+        return _err(e)
+    return _ok(GeneratedItem.model_validate(row).model_dump(mode="json"))
+
+
 @router.post("/batch")
 async def batch(payload: BatchRequest, auth: AuthDep, scope_id: ScopeIdQuery):
     """Declared BEFORE ``/{gen_id}/...`` so the literal paths win the match."""

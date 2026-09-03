@@ -190,6 +190,38 @@ class GeneratedInboxService:
             "next_cursor": page.get("next_cursor"),
         }
 
+    async def get_item(self, gen_id: int | str, scope_id: int) -> dict[str, Any]:
+        """One card by id, in the EXACT shape :meth:`list` ships.
+
+        Same ``_decorate`` — therefore the same ``source``/``title`` derivation
+        and the same ``GeneratedItem`` projection — because a by-id read that
+        built its own body would be a second wire shape for one row, and the
+        client would have to know which endpoint it came from. Pinned by
+        ``tests/services/library/test_generated_inbox_service.py``.
+
+        Refuses with the same 404 the other single-row paths use when the row is
+        not in this scope. Note this reads the row through
+        ``GeneratedMediaRepository.get``, which does NOT filter ``review_state``
+        — a row the user deleted from the inbox is still resolvable here, as it
+        already is for :meth:`save` and :meth:`delete`. Making the by-id read
+        stricter than the actions available on the same row would mean "you can
+        promote it but you cannot look at it".
+
+        It applies no ``include_intermediate`` filter either, for the same
+        reason and one more. ``generated_roles`` marks machine-made rows
+        (``canvas_upload`` and friends) intermediate so :meth:`list` can keep
+        them off the landing tab; a caller who NAMES a row has already got past
+        the browsing problem that filter solves, and hiding it here would 404 a
+        row whose id the client is holding. The two knobs are therefore
+        deliberately absent rather than defaulted — this method answers "give
+        me THAT row", and neither ``review_state`` nor intermediacy changes
+        which row that is.
+        """
+        row = await self.gen_repo.get(int(gen_id), int(scope_id))
+        if row is None:
+            raise self._not_in_scope()
+        return (await self._decorate([row], str(scope_id)))[0]
+
     async def counts(self, scope_id: int) -> dict[str, int]:
         """Tab counters. ``deleted`` is dropped — there is no deleted tab, and
         a count for a tab that does not exist invites a UI that reads it."""

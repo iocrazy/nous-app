@@ -151,8 +151,8 @@ async def test_persist_local_image_returns_durable_cover_url():
             new=AsyncMock(return_value={"id": 55}),
         ) as register,
         patch(
-            "app.workflows.canvas_generation._resolve_personal_team_id",
-            new=AsyncMock(return_value="7"),
+            "app.workflows.canvas_generation._registration_scope_id",
+            new=AsyncMock(return_value=7),
         ),
     ):
         out = await persist_canvas_generation_step(
@@ -188,8 +188,8 @@ async def test_persist_remote_video_uses_source_url_and_stream():
             new=AsyncMock(return_value={"id": 8}),
         ) as register,
         patch(
-            "app.workflows.canvas_generation._resolve_personal_team_id",
-            new=AsyncMock(return_value="7"),
+            "app.workflows.canvas_generation._registration_scope_id",
+            new=AsyncMock(return_value=7),
         ),
     ):
         out = await persist_canvas_generation_step(
@@ -1354,12 +1354,14 @@ def _real_png(width: int, height: int, tmp_path) -> str:
 
 
 def _persist_patches(register):
-    """The two seams every persist test needs: the store and the team lookup."""
+    """The two seams every persist test needs: the store, and the scope the
+    product is registered into (canvas → project → team, or the runner's
+    personal team as the fallback — resolved by ``_registration_scope_id``)."""
     return (
         patch("app.workflows.canvas_generation.register_generated_media", new=register),
         patch(
-            "app.workflows.canvas_generation._resolve_personal_team_id",
-            new=AsyncMock(return_value="7"),
+            "app.workflows.canvas_generation._registration_scope_id",
+            new=AsyncMock(return_value=7),
         ),
     )
 

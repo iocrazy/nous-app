@@ -230,3 +230,80 @@ def test_the_membership_predicate_composes_with_the_other_filters():
     assert "public.assets.asset_type = " in sql
     assert "jsonb_path_exists" in sql
     assert "asset_project_refs" in sql
+
+
+# ── resolve_legacy (the pre-P3 canvas card → asset map) ────────────────────
+
+
+def _legacy_stmt(table: str = "project_characters", legacy_id: int = 12):
+    return AssetsRepository()._resolve_legacy_stmt(SCOPE, table, legacy_id)
+
+
+def _legacy_sql(**kw) -> str:
+    return str(_legacy_stmt(**kw).compile(dialect=postgresql.dialect()))
+
+
+def test_resolve_legacy_uses_jsonb_containment():
+    """``@>``, not an unnest or a text LIKE. ``legacy_ids`` is a LIST of
+    ``[table, id]`` pairs (a merged asset carries several), and containment is
+    the operator that answers "is this pair among them" without knowing how
+    many there are."""
+    assert "public.assets.attrs @> " in _legacy_sql()
+
+
+def _containment_param() -> dict:
+    """The ONE bound value that carries the ``attrs @> ...`` payload.
+
+    Selected by SHAPE, not by position. These two tests used to read
+    ``list(params.values())[1]``, which depends on the scope predicate being
+    bound first — so dropping the scope filter turned them red for a reason
+    that has nothing to do with what they claim to test, and they would have
+    misreported which property broke. (The scope predicate has its own test.)
+    """
+    params = _legacy_stmt().compile(dialect=postgresql.dialect()).params
+    matches = [v for v in params.values() if isinstance(v, dict) and "legacy_ids" in v]
+    assert len(matches) == 1, f"expected exactly one containment payload: {params}"
+    return matches[0]
+
+
+def test_the_pair_rides_as_one_bound_jsonb_value():
+    """Both halves in ONE parameter — an id compared on its own would let
+    ``project_characters`` 7 answer for ``project_lib_entities`` 7, which is a
+    different entity in a different table."""
+    assert _containment_param() == {"legacy_ids": [["project_characters", 12]]}
+
+
+def test_the_legacy_id_is_a_json_number_not_a_string():
+    """The migration wrote ``int(entity_id)``. ``"12"`` and ``12`` are
+    different JSONB scalars, so a stringified id matches NOTHING — and an empty
+    result here reads exactly like "that entity was never migrated"."""
+    pair = _containment_param()
+    assert pair["legacy_ids"][0][1] == 12
+    assert not isinstance(pair["legacy_ids"][0][1], str)
+
+
+def test_the_table_label_is_bound_never_interpolated():
+    sql = _legacy_sql(table="x'; DROP TABLE assets; --")
+    assert "DROP TABLE" not in sql
+
+
+def test_resolve_legacy_is_scoped_and_hides_deleted_rows():
+    sql = _legacy_sql()
+    assert "public.assets.scope_id = " in sql
+    assert str(SCOPE) not in sql
+    assert "public.assets.deleted_at IS NULL" in sql
+
+
+def test_resolve_legacy_does_not_union_system_presets():
+    """``get`` unions ``is_system_preset`` into every scope; this must not. A
+    preset has no legacy row behind it, so widening the read could only add
+    rows that can never match."""
+    assert "is_system_preset" not in _legacy_sql()
+
+
+def test_resolve_legacy_is_deterministic():
+    """``LIMIT 1`` without an ORDER BY is a coin flip, and nothing in the
+    schema forbids two assets carrying the same legacy pair."""
+    sql = _legacy_sql()
+    assert "ORDER BY public.assets.id ASC" in sql
+    assert "LIMIT" in sql

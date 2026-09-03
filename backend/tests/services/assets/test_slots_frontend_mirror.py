@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from app.services.assets.slot_generation import _slot_priority
 from app.services.assets.slots import (
     _AUDIO_SUBTYPE_FOR_RELATION,
     LINK_RULES,
@@ -183,3 +184,61 @@ def test_the_parser_would_notice_a_changed_value():
     parsed = _parse_ts_object(_object_literal(mutated, "SLOTS"))
     assert parsed == {"character": ["sheet", "WRONG"]}
     assert {k: tuple(v) for k, v in parsed.items()} != SLOTS
+
+
+# ── the reference-priority half (P4 Task 5, fix round 1) ───────────────────
+#
+# `_slot_priority` is NOT `SLOTS`: it hoists `worn` and `stills` ahead of the
+# declaration order (spec §6.3), so for `character` the two disagree —
+# declaration puts `worn` LAST, priority puts it second.
+#
+# The canvas asset card ranks its reference checklist by this order to decide
+# which rows the provider's `max_refs` will trim, and the bundle endpoint walks
+# `reference_order`, which walks `_slot_priority`. Ranking by the DECLARATION
+# order instead (what the card did before this fix) dimmed a file that was in
+# fact sent while leaving un-dimmed the one that was dropped — the pre-run hint
+# and the post-run badge answering the same question differently.
+#
+# Mirrored as a literal on the TS side rather than recomputed there, so this
+# parse can pin it row for row.
+
+
+def test_reference_priority_matches_including_order(mirror_source):
+    """Order IS the contract here — it decides which references survive the cap.
+
+    Compared against `_slot_priority`'s output, not against a second hand-copy
+    of the rule: the hoist is an algorithm on the Python side and a table on the
+    TS side, and only the computed values can say the two agree.
+    """
+    ts = _parse_ts_object(_object_literal(mirror_source, "REFERENCE_SLOT_PRIORITY"))
+    assert set(ts) == set(SLOTS), "the mirror covers a different set of types"
+    for asset_type in SLOTS:
+        assert ts[asset_type] == _slot_priority(asset_type), (
+            f"{asset_type}: the card would rank its references "
+            f"{ts[asset_type]} while the bundle sends "
+            f"{_slot_priority(asset_type)}"
+        )
+
+
+def test_the_priority_really_differs_from_the_declaration_order():
+    """A control for the test above: if `_slot_priority` ever collapsed into
+    `SLOTS`, the mirror check would keep passing while the property it exists
+    to protect had quietly stopped existing.
+    """
+    declaration = [*SLOTS["character"], UNSORTED]
+    assert _slot_priority("character") != declaration, (
+        "the reference priority no longer hoists worn/stills — if that is "
+        "deliberate, this mirror is now redundant and should be removed, not "
+        "left as a check of nothing"
+    )
+
+
+def test_the_parser_would_notice_a_changed_priority_row():
+    """Guard on the guard, same posture as the SLOTS one above."""
+    mutated = (
+        "export const REFERENCE_SLOT_PRIORITY: X = {\n"
+        "  character: ['sheet', 'WRONG'],\n};"
+    )
+    parsed = _parse_ts_object(_object_literal(mutated, "REFERENCE_SLOT_PRIORITY"))
+    assert parsed == {"character": ["sheet", "WRONG"]}
+    assert parsed["character"] != _slot_priority("character")

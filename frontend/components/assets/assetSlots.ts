@@ -45,6 +45,48 @@ export const SLOTS: Record<AssetType, readonly string[]> = {
 export const UNSORTED = 'unsorted';
 
 /**
+ * type → the order references are DELIVERED in: primary → `worn` → `stills` →
+ * the type's remaining slots in table order → `unsorted`.
+ *
+ * NOT the same as {@link slotsFor}. `worn` and `stills` are hoisted ahead of
+ * the declaration order because they carry the two things a generation most
+ * needs to stay consistent with — what the subject is wearing, and how it reads
+ * on camera (spec §6.3). For `character` the two orders genuinely differ:
+ * `slotsFor` puts `worn` LAST, this puts it second.
+ *
+ * `worn` / `stills` appear in EVERY row, including types that declare neither
+ * (`location`, `prompt`). That is faithful, not a copy error: `_slot_priority`
+ * inserts them unconditionally, and it is inert — no file can be in a slot its
+ * type does not accept (`is_valid_slot`), so those entries never match a row.
+ * Trimming them here would make this table stop equalling the one it mirrors.
+ *
+ * MIRROR OF `backend/app/services/assets/slot_generation.py::_slot_priority`,
+ * which is what `reference_order` walks and therefore what the bundle endpoint
+ * trims from the tail of. Written out as a literal rather than recomputed from
+ * the tables above so the backend can pin it by reading this file:
+ * `test_slots_frontend_mirror.py` compares every row against `_slot_priority`
+ * for that type. A card that ranks its references any other way tells the user
+ * a different story than the run does — the pre-run hint dimming one file while
+ * the post-run badge names another.
+ */
+export const REFERENCE_SLOT_PRIORITY: Record<AssetType, readonly string[]> = {
+  character: ['sheet', 'worn', 'stills', 'expressions', 'extras', 'unsorted'],
+  location: ['establishing', 'worn', 'stills', 'keyframes', 'details', 'layout', 'unsorted'],
+  prop: ['turnaround', 'worn', 'stills', 'in_scene', 'details', 'unsorted'],
+  costume: ['flat', 'worn', 'stills', 'details', 'unsorted'],
+  prompt: ['worn', 'stills', 'examples', 'unsorted'],
+  audio: ['primary', 'worn', 'stills', 'variants', 'unsorted'],
+};
+
+/**
+ * The delivery order for `type`, as a fresh array — the table above is module
+ * state and a caller sorting or splicing the result must not edit it.
+ */
+export function referenceSlotPriority(type: AssetType): string[] {
+  return [...REFERENCE_SLOT_PRIORITY[type]];
+}
+
+/**
  * Every slot a picker may offer for `type`, in render order: the named slots
  * followed by `unsorted`. Returns a fresh array — the tables above are module
  * state, and a caller sorting or splicing the result must not edit them.

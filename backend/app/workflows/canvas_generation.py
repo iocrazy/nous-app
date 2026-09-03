@@ -109,8 +109,349 @@ def _absolute_media_url(url: str) -> str:
         return url
     from app.core.config import settings
 
-    base = str(getattr(settings, "PUBLIC_API_BASE", "") or "https://api.nous.ink")
+    # The fallback is imported, not spelled again: ``_own_hosts`` has to
+    # RECOGNISE what this function MINTS, and two copies of the default host is
+    # exactly how a URL we made ourselves ends up classified as foreign.
+    from app.services.library.generated_media_service import (
+        _DEFAULT_PUBLIC_API_BASE,
+    )
+
+    base = str(getattr(settings, "PUBLIC_API_BASE", "") or _DEFAULT_PUBLIC_API_BASE)
     return f"{base.rstrip('/')}{url}"
+
+
+# ---------------------------------------------------------------------------
+# Reference resolution (asset-library P4 — the resource bridge)
+# ---------------------------------------------------------------------------
+#
+# ``eff.refs`` now carries TWO durable shapes: ``/api/v1/generated-media/{id}/…``
+# (an earlier generation) and ``/api/v1/resources/{id}/(cover|file)`` (a library
+# file an asset node contributed). Both are resolved here, through ONE
+# classifier, so a branch cannot accidentally understand one shape and not the
+# other.
+#
+# Every reference that does not resolve is REPORTED in ``dropped_refs`` beside
+# ``dropped_knobs``. Before this, an unresolvable ref left no trace anywhere:
+# not in the picture, not in the record, not on the node — the "选了也生成了但
+# 图里没有" failure this repo has already filed once.
+#
+# The reason vocabulary (machine-readable; the UI labels them):
+#   unknown_shape     — not a durable reference URL we serve (foreign host too)
+#   not_in_scope      — the resource row is not in this generation's scope
+#   no_image_file     — no materializable image bytes behind the row
+#   materialize_failed— bytes exist, reading them failed
+#   scope_unresolved  — the generation's scope could not be derived at all (no
+#                       project row behind the canvas, and no personal team for
+#                       the runner to fall back to)
+#   unresolved        — the generated-media bridge yielded nothing and does not
+#                       report which of missing-row / wrong-kind / unreadable
+#                       applied (it answers Optional[str] by design, and three
+#                       other callers depend on that)
+
+
+async def _canvas_project_scope_id(canvas_id: int) -> Optional[int]:
+    """The asset scope of the canvas's project — its team, or the OWNER's
+    personal team when ``projects.team_id`` is NULL. None when unresolvable.
+
+    Same rule ``assets_router._project_scope_id`` applies, and deliberately the
+    OWNER's team rather than the runner's: a project guard admits collaborators
+    via ``project_members``, and resolving the CALLER's personal team for one of
+    them would aim the reference check at a scope the file was never in — the
+    references would all come back ``not_in_scope`` while the picture sat in the
+    project everybody is looking at.
+
+    ``Canvases.deleted_at`` is deliberately NOT filtered, unlike the reverse
+    lookups in ``canvas_asset_refs_repository`` (which answer "where is this
+    asset used" and must not list deleted boards). This answers "what scope is
+    this RUNNING generation in", and a run dispatched seconds before someone
+    deleted the canvas still has to resolve — refusing it would turn a delete
+    into a batch of ``scope_unresolved`` references on work already in flight.
+    Deleting a canvas revokes no access to the project's files, so nothing is
+    widened by allowing it.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Canvases, Projects
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Projects.owner_id, Projects.team_id)
+                .select_from(Canvases)
+                .join(Projects, Projects.id == Canvases.project_id)
+                .where(Canvases.id == int(canvas_id))
+            )
+        ).first()
+    if row is None:
+        return None
+    owner_id, team_id = row
+    if team_id is not None:
+        return int(team_id)
+    if owner_id is None:
+        return None
+    return int(await _resolve_personal_team_id(str(owner_id)))
+
+
+# Why the most recent scope resolution failed, keyed by the pair that asked.
+#
+# Bounded by construction: written only on the exception path, and the entry is
+# consumed (popped) by ``_registration_scope_id``. A reference-path failure that
+# nobody consumes leaves at most one entry per (canvas, user) seen since the
+# process started — an internal diagnostic, never read for control flow.
+_LAST_SCOPE_ERROR: Dict[tuple[Optional[int], Optional[str]], str] = {}
+
+
+async def _generation_scope_id(
+    canvas_id: Optional[int], user_id: Optional[str]
+) -> Optional[int]:
+    """The scope a resource reference must belong to, or None.
+
+    Derived SERVER-SIDE, from the generation's own canvas: canvas → project →
+    the project's team, or the owner's personal team when the project has none.
+    Nothing the client sends is consulted, because the scope is the thing being
+    checked — taking it from the request would make the check answer to the
+    party it exists to constrain.
+
+    A canvas in a TEAM project is why this cannot just be the runner's personal
+    team. Asset files there belong to the team scope, so a personal-team check
+    would refuse every one of them (``not_in_scope``) on a board whose whole
+    point is shared references. Before this, that was the only rule.
+
+    Falls back to the runner's personal team whenever the canvas cannot answer:
+    no canvas at all, or a canvas whose project row is gone. That fallback is
+    NARROWER than the pre-P4 rule, never wider — it is the same personal team
+    the old code always used — so a run that loses its project degrades to the
+    previous behaviour instead of failing.
+
+    ``None`` (nothing resolvable at either step: no project AND no personal
+    team, or no canvas and no user) is reported as ``scope_unresolved`` rather
+    than treated as "everything allowed": a scope check that cannot run has not
+    passed.
+    """
+    try:
+        if canvas_id is not None:
+            scope = await _canvas_project_scope_id(int(canvas_id))
+            if scope is not None:
+                return scope
+        if not user_id:
+            return None
+        return int(await _resolve_personal_team_id(str(user_id)))
+    except Exception as exc:  # no project/personal team row, DB unreachable
+        logger.warning(
+            "[canvas_generation][refs] could not resolve scope for canvas {} "
+            "user {}: {}",
+            canvas_id,
+            user_id,
+            exc,
+        )
+        # The cause is kept, not just logged. ``_registration_scope_id`` turns a
+        # None into a RuntimeError whose message is all the task row shows, and
+        # "could not resolve a registration scope" is the same sentence for a
+        # missing project row and for a database that is down — two facts with
+        # different responses. Stashed here rather than raised, because the
+        # REFERENCE path deliberately treats None as ``scope_unresolved`` and
+        # carries on.
+        _LAST_SCOPE_ERROR[(canvas_id, user_id)] = repr(exc)
+        return None
+
+
+async def _registration_scope_id(
+    canvas_id: Optional[int], user_id: Optional[str]
+) -> int:
+    """The scope a canvas run's PRODUCT is registered into.
+
+    The SAME scope its references are checked against (``_generation_scope_id``)
+    — canvas → project → the project's team, or the owner's personal team when
+    the project has none, falling back to the runner's personal team when there
+    is no canvas or no project row.
+
+    Before P4 this was always the runner's personal team, which left a team
+    board checking its inputs against the team while filing its output in one
+    person's private inbox: the picture everybody on the board is waiting for
+    would not appear in the team's Generated inbox at all. Two scopes for one
+    run is not a defensible split, and the input side is the one the asset
+    library forced to be right.
+
+    Raises rather than guessing when nothing resolves. Registration is REQUIRED
+    on this path (route C), so a scope we cannot name has to stop the step —
+    picking one would file the product where the user cannot see it, and a
+    generated file in the wrong tenant is not a failure you can undo by
+    retrying.
+    """
+    scope = await _generation_scope_id(canvas_id, user_id)
+    if scope is None:
+        cause = _LAST_SCOPE_ERROR.pop((canvas_id, user_id), None)
+        # The underlying exception rides in the message when there was one. A
+        # transient DB blip and a genuinely missing project row both arrive
+        # here as ``None``, and the task row shows only this sentence — so
+        # without the cause, "retry this" and "this data is wrong" look
+        # identical to whoever reads it.
+        raise RuntimeError(
+            "canvas generation persist could not resolve a registration scope "
+            f"(canvas={canvas_id}, user={user_id})" + (f": {cause}" if cause else "")
+        )
+    return int(scope)
+
+
+async def _source_asset_id_for(
+    params: Optional[Dict[str, Any]], scope_id: int
+) -> Optional[int]:
+    """``params.source_asset_id`` → a verified ``assets.id``, or None.
+
+    The canvas stamps this from the upstream asset card, so the value arrives
+    CLIENT-SUPPLIED and as a string (snowflake ids ride as strings on the wire).
+    Two things therefore have to happen before it can reach the column:
+
+    * parse it — a non-numeric value is a client bug, logged and dropped;
+    * resolve it in the registration scope — ``source_asset_id`` FK-references
+      ``assets.id``, so a stale or fabricated id would be an IntegrityError that
+      kills the whole registration. A provenance stamp must never be able to
+      lose the picture.
+
+    Dropping is always to ``None`` with a log, never a raise: the generation
+    itself succeeded, and the row is still complete without the stamp (the
+    params copy survives either way). Resolving it in the REGISTRATION scope
+    also means a card pointing at another tenant's asset cannot claim it —
+    that reference would already have been refused ``not_in_scope`` upstream.
+    """
+    raw = (params or {}).get("source_asset_id")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        asset_id = int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "[canvas_generation][persist] ignoring non-numeric source_asset_id {!r}",
+            raw,
+        )
+        return None
+    try:
+        from app.repositories.assets_repository import AssetsRepository
+
+        row = await AssetsRepository().get(asset_id, int(scope_id))
+    except Exception as exc:  # a lookup failure must not lose the generation
+        logger.warning(
+            "[canvas_generation][persist] could not verify source_asset_id {}: {}",
+            asset_id,
+            exc,
+        )
+        return None
+    if row is None:
+        logger.warning(
+            "[canvas_generation][persist] source_asset_id {} is not readable in "
+            "scope {} — provenance dropped",
+            asset_id,
+            scope_id,
+        )
+        return None
+    return asset_id
+
+
+async def _resolve_reference_paths(
+    stack: Any,
+    refs: tuple[str, ...] | list[str],
+    *,
+    user_id: Optional[str],
+    canvas_id: Optional[int] = None,
+) -> tuple[list[str], list[Dict[str, Any]]]:
+    """``(local_paths, dropped_refs)`` for the branches that need FILES.
+
+    The scope is resolved at most once, and only when a resource-shaped
+    reference is actually present — a run whose refs are all generated-media
+    must not start failing because a scope lookup is unavailable.
+
+    ``canvas_id`` is what makes the scope the CANVAS's rather than the runner's;
+    see ``_generation_scope_id``.
+    """
+    from app.services.library.generated_media_service import (
+        classify_reference_url,
+        generated_media_local_path,
+        resource_local_path,
+    )
+
+    local: list[str] = []
+    dropped: list[Dict[str, Any]] = []
+    scope_id: Optional[int] = None
+    scope_resolved = False
+    for url in refs:
+        kind, _row_id = classify_reference_url(url)
+        if kind == "genmedia":
+            path = await stack.enter_async_context(
+                generated_media_local_path(url, media_kind="image")
+            )
+            if path:
+                local.append(path)
+            else:
+                dropped.append({"url": str(url), "reason": "unresolved"})
+            continue
+        if kind == "resource":
+            if not scope_resolved:
+                scope_id = await _generation_scope_id(canvas_id, user_id)
+                scope_resolved = True
+            if scope_id is None:
+                dropped.append({"url": str(url), "reason": "scope_unresolved"})
+                continue
+            out = await stack.enter_async_context(
+                resource_local_path(url, scope_id=scope_id, media_kind="image")
+            )
+            if out.path:
+                local.append(out.path)
+            else:
+                dropped.append(
+                    {"url": str(url), "reason": out.reason or "no_image_file"}
+                )
+            continue
+        dropped.append({"url": str(url), "reason": "unknown_shape"})
+    return local, dropped
+
+
+async def _resolve_reference_urls(
+    refs: tuple[str, ...] | list[str],
+    *,
+    user_id: Optional[str],
+    canvas_id: Optional[int] = None,
+) -> tuple[list[str], list[Dict[str, Any]]]:
+    """``(absolute_urls, dropped_refs)`` for the DAEMON branch.
+
+    The daemon fetches references over the public API, so it wants URLs, not
+    paths — but a resource URL still has to clear the same two gates first
+    (in the CANVAS's scope, has image bytes) before it is handed to the user's
+    machine.
+    Generated-media URLs keep exactly their previous treatment: absolutise and
+    go, with no extra round trip.
+    """
+    from app.services.library.generated_media_service import (
+        classify_reference_url,
+        resource_reference_reason,
+    )
+
+    urls: list[str] = []
+    dropped: list[Dict[str, Any]] = []
+    scope_id: Optional[int] = None
+    scope_resolved = False
+    for url in refs:
+        kind, _row_id = classify_reference_url(url)
+        if kind == "genmedia":
+            urls.append(_absolute_media_url(url))
+            continue
+        if kind == "resource":
+            if not scope_resolved:
+                scope_id = await _generation_scope_id(canvas_id, user_id)
+                scope_resolved = True
+            if scope_id is None:
+                dropped.append({"url": str(url), "reason": "scope_unresolved"})
+                continue
+            reason = await resource_reference_reason(
+                url, scope_id=scope_id, media_kind="image"
+            )
+            if reason:
+                dropped.append({"url": str(url), "reason": reason})
+                continue
+            urls.append(_absolute_media_url(url))
+            continue
+        dropped.append({"url": str(url), "reason": "unknown_shape"})
+    return urls, dropped
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -181,9 +522,11 @@ async def generate_canvas_media_step(
         )
         eff, dropped = req.reconcile(caps)
 
-        if engine == "dreamina":
-            ref_urls = [_absolute_media_url(u) for u in eff.refs]
+        ref_urls, dropped_refs = await _resolve_reference_urls(
+            eff.refs, user_id=user_id, canvas_id=canvas_id
+        )
 
+        if engine == "dreamina":
             # Build the exact dreamina argv server-side (single source of
             # truth: the same pure builders the server provider uses). Refs
             # become {ref:N} placeholders the daemon swaps for local paths.
@@ -241,7 +584,6 @@ async def generate_canvas_media_step(
             # ever sends ``ratio``) and ``params.get("actual_model")`` (nothing
             # sets it) — both resolved to "" and the daemon fell back to its
             # own default, which is why a 16:9 pick came back portrait.
-            ref_urls = [_absolute_media_url(u) for u in eff.refs]
             payload = eff.to_codex_daemon_payload(
                 engine_model=engine_model, ref_urls=ref_urls
             )
@@ -251,9 +593,16 @@ async def generate_canvas_media_step(
         # rides the ticket because the daemon's upload — not this workflow —
         # is what creates the row. Deliberately NOT the payload: that carries
         # ref urls and the augmented prompt, and this sits in Redis.
+        daemon_scope_id = await _registration_scope_id(canvas_id, user_id)
         result = await dispatch_to_daemon(
             user_id=str(user_id),
-            scope_id=int(await _resolve_personal_team_id(str(user_id))),
+            # The same scope ``persist_canvas_generation_step`` registers a
+            # server-side product into. The daemon's upload endpoint is what
+            # creates the row on this branch, so the scope has to ride the
+            # ticket — and it has to be the SAME rule, or which tenant a team
+            # board's picture lands in would depend on which provider the run
+            # happened to pick.
+            scope_id=daemon_scope_id,
             kind=kind if kind in ("image", "video") else "image",
             payload=payload,
             attribution={
@@ -271,6 +620,12 @@ async def generate_canvas_media_step(
                 "requested": req.knobs_dict(),
                 "effective": eff.knobs_dict(),
                 "dropped": dropped,
+                # Resolved HERE, not echoed from the client: the daemon's
+                # upload endpoint writes the row, and this is the column the
+                # asset sheet's history filters on. Verified against a real
+                # asset in the registration scope first — the column is an FK,
+                # so an id that does not resolve would kill the upload.
+                "source_asset_id": await _source_asset_id_for(params, daemon_scope_id),
             },
         )
         return {
@@ -281,6 +636,7 @@ async def generate_canvas_media_step(
             "provider": f"{engine}-local",
             "model": engine_model or model or "",
             "dropped_knobs": dropped,
+            "dropped_refs": dropped_refs,
             # Both halves ride along as JSON-safe primitives: DBOS persists a
             # step's return value, and the record downstream is only worth
             # keeping if it can tell "we never sent it" from "they ignored it".
@@ -289,10 +645,6 @@ async def generate_canvas_media_step(
         }
 
     if kind == "video":
-        from app.services.library.generated_media_service import (
-            generated_media_local_path,
-        )
-
         provider, actual_model = await db_registry.resolve_video_provider(
             model or None, user_id=user_id
         )
@@ -316,13 +668,9 @@ async def generate_canvas_media_step(
         from contextlib import AsyncExitStack
 
         async with AsyncExitStack() as stack:
-            local_refs: list[str] = []
-            for u in eff.refs:
-                local = await stack.enter_async_context(
-                    generated_media_local_path(u, media_kind="image")
-                )
-                if local:
-                    local_refs.append(local)
+            local_refs, dropped_refs = await _resolve_reference_paths(
+                stack, eff.refs, user_id=user_id, canvas_id=canvas_id
+            )
             kwargs: dict = {
                 "prompt": eff.prompt,
                 "aspect": eff.ratio or "",
@@ -348,6 +696,7 @@ async def generate_canvas_media_step(
             "provider": "jimeng-cli",
             "model": gen_model or "",
             "dropped_knobs": dropped,
+            "dropped_refs": dropped_refs,
             "requested_params": req.knobs_dict(),
             "effective_params": eff.knobs_dict(),
         }
@@ -370,18 +719,10 @@ async def generate_canvas_media_step(
     # ``eff.refs`` means a provider with max_refs=0 never downloads one.
     from contextlib import AsyncExitStack
 
-    from app.services.library.generated_media_service import (
-        generated_media_local_path,
-    )
-
     async with AsyncExitStack() as stack:
-        local_refs: list[str] = []
-        for u in eff.refs:
-            local = await stack.enter_async_context(
-                generated_media_local_path(u, media_kind="image")
-            )
-            if local:
-                local_refs.append(local)
+        local_refs, dropped_refs = await _resolve_reference_paths(
+            stack, eff.refs, user_id=user_id, canvas_id=canvas_id
+        )
         result = await provider.generate(
             prompt,
             gen_model,
@@ -404,6 +745,7 @@ async def generate_canvas_media_step(
         "provider": getattr(result, "provider", "") or "",
         "model": gen_model or "",
         "dropped_knobs": dropped,
+        "dropped_refs": dropped_refs,
         "requested_params": req.knobs_dict(),
         "effective_params": eff.knobs_dict(),
     }
@@ -483,6 +825,7 @@ async def persist_canvas_generation_step(
             "provider": str(media.get("provider") or ""),
             "model": str(media.get("model") or ""),
             "dropped_knobs": list(media.get("dropped_knobs") or []),
+            "dropped_refs": list(media.get("dropped_refs") or []),
         }
 
     local_path = media.get("local_path")
@@ -490,8 +833,12 @@ async def persist_canvas_generation_step(
         if not user_id:
             raise ValueError("canvas generation persist has no user_id")
         media_kind = str(media.get("media_kind") or "image")
-        scope_id = int(await _resolve_personal_team_id(str(user_id)))
+        scope_id = await _registration_scope_id(canvas_id, user_id)
         params = {**(params or {}), **await _outcome_of(media, media_kind)}
+        # The COLUMN, not only the params copy: ``GET /generated?source_asset_id=``
+        # and the asset sheet's generation history both filter the column, so a
+        # stamp that lives only in ``params`` has no reader on this path.
+        source_asset_id = await _source_asset_id_for(params, scope_id)
         row = await register_generated_media(
             user_id=str(user_id),
             scope_id=scope_id,
@@ -510,6 +857,7 @@ async def persist_canvas_generation_step(
                 provider=media.get("provider"),
                 params=params,
                 derivation_kind=f"{media_kind}_gen",
+                source_asset_id=source_asset_id,
             ),
         )
         gen_id = row.get("id")
@@ -531,6 +879,11 @@ async def persist_canvas_generation_step(
             "result_url": result_url,
             "media_kind": media_kind,
             "dropped_knobs": list(media.get("dropped_knobs") or []),
+            # Orthogonal to dropped_knobs and reported beside it, never nested
+            # inside it: a run can drop a knob, drop a reference, or both, and
+            # a caller that reads one and not the other reads a truncated run
+            # as a clean one.
+            "dropped_refs": list(media.get("dropped_refs") or []),
         }
     finally:
         if local_path:
@@ -554,6 +907,11 @@ async def record_canvas_generation_result_step(result: Dict[str, Any]) -> None:
             # Business decoration only (route C): the lifecycle columns stay
             # the trigger's. An empty list is the honest "nothing dropped".
             "dropped_knobs": list(result.get("dropped_knobs") or []),
+            # References the run could not resolve, each with its reason
+            # ({url, reason}). Same terminal point as dropped_knobs so the
+            # frontend reads both from one metadata read — reading one and
+            # not the other is how a backend field ends up with no consumer.
+            "dropped_refs": list(result.get("dropped_refs") or []),
         },
     )
 

@@ -30,14 +30,22 @@ import type { ReactFlowInstance } from '@xyflow/react';
 
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
-import { buildCharacterTemplate } from '../smart/characterTemplate';
-import { buildEntityTemplate } from '../smart/entityTemplates';
+import { useCanvasScope } from '../smart/canvasScope';
+import { createAssetNode } from '../smart/factories';
+import {
+  applyLegacyVerdicts,
+  legacyCards,
+  resolveLegacyVerdicts,
+} from '../smart/legacyMigration';
 import { resumePendingGenerations } from '../smart/genResume';
 import { computeShotLabel, reconcileShotNodes } from '../smart/shotSync';
 import { onPromoteShot } from '../smart/promoteShotBus';
 import { PromoteShotDialog } from '../smart/PromoteShotDialog';
 import type { ShotNodeData, SmartNode } from '../smart/types';
-import { isSmartFamily } from '../types';
+import type { CanvasNode } from '../types';
+import { isEntityCanvas, isSmartFamily } from '../types';
+import { useOptionalToast } from '../../../components/Toast';
+import { fetchAssetDetail, resolveLegacyAsset } from '../../../services/assetsService';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { classifySaveFailure } from '../utils/saveFailure';
 import { viewportFramesAnyNode } from '../utils/viewport';
@@ -162,11 +170,14 @@ export function CanvasView({
   const name = useCanvasCoreStore((s) => s.name);
   const projectId = useCanvasCoreStore((s) => s.projectId);
   const episodeId = useCanvasCoreStore((s) => s.episodeId);
+  const assetId = useCanvasCoreStore((s) => s.assetId);
   const nodeCount = useCanvasCoreStore((s) => s.nodes.length);
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
   const { t } = useTranslation();
+  const toast = useOptionalToast();
+  const [searchParams] = useSearchParams();
 
   // Cmd+K palette + ? help — canvas-only scope, active only when ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -436,45 +447,127 @@ export function CanvasView({
     void resumePendingGenerations();
   }, [loadStatus, kind, canvasId]);
 
-  // Character canvas preset workflow (PR-CC2): an EMPTY kind='character'
-  // canvas seeds the bible-card + four agent branches exactly once. Guarded
-  // by nodeCount===0 AND a per-canvas ref (StrictMode double-run), persisted
-  // through the normal debounced save. ?name=&description=&characterId= from
-  // the library's "Open in Canvas" pre-fill the card.
+  // ── Asset-bound seeding (P4 Task 6) ──────────────────────────────────────
   //
-  // ⚠️ NOTHING IN THE APP PRODUCES THOSE PARAMS ANY MORE (P3 Task 6): the only
-  // "Open in Canvas" buttons lived on the retired `CharacterLibrary` /
-  // `EntityLibrary` bible cards. The seeding below still works for a
-  // hand-written URL, and the un-parameterised path (an empty entity canvas
-  // seeding an UNBOUND card) is unaffected — so this is left intact rather
-  // than trimmed. Re-establishing an entry point from the asset library is P4
-  // canvas work, together with `smart/entityRef.ts`.
-  const [searchParams] = useSearchParams();
+  // An EMPTY canvas that BELONGS to an asset (`canvases.asset_id`, set by the
+  // sheet's "Open In Canvas") gets exactly one card: a reference to that asset.
+  //
+  // This replaces the `?characterId=` / `?entityId=` preset-workflow seeding
+  // outright. That branch built a bible card plus four agent branches from the
+  // query string, and NOTHING had produced those parameters since P3 Task 6
+  // retired the old library pages — the canvas row's `asset_id` is where the
+  // identity lives now, which is also why the seeded card is BOUND rather than
+  // the unbound placeholder the old un-parameterised path produced.
+  //
+  // Latched per canvas (`seededRef`) against StrictMode's double-invoke, and
+  // gated on `nodeCount === 0` so it can never touch a canvas with work on it.
+  // The write goes through `setNodes`, i.e. the normal debounced save — a
+  // seeded card the user reloads away from would otherwise be a canvas that
+  // looks seeded and is not.
+  const { scopeId: assetScopeId } = useCanvasScope();
   const seededRef = useRef<string | null>(null);
+  // The reporter goes through a ref, and is NOT in the effect's deps.
+  // `useTranslation`'s `t` and a context handle are both free to change
+  // identity on any render; an effect that depended on either would re-run,
+  // and its cleanup would set `cancelled = true` on the in-flight fetch — so
+  // the seed would be requested over and over and applied never. Same reason
+  // `useAssetFailureReporter` keeps a ref beside its callback.
+  const reportSeedFailure = useCallback(() => {
+    toast?.addToast(t('canvas.assetSeed.failed', 'Could not load this canvas asset'), 'error');
+  }, [toast, t]);
+  const reportSeedFailureRef = useRef(reportSeedFailure);
+  reportSeedFailureRef.current = reportSeedFailure;
   useEffect(() => {
-    const isEntityKind =
-      kind === 'character' || kind === 'location' || kind === 'prop';
-    if (loadStatus !== 'ready' || !isEntityKind) return;
-    if (nodeCount > 0 || !canvasId || seededRef.current === canvasId) return;
+    if (loadStatus !== 'ready' || !canvasId || !assetId) return;
+    if (nodeCount > 0 || seededRef.current === canvasId) return;
+    if (!assetScopeId) {
+      // No `/team/:teamId` segment means no asset scope to ask with, and an
+      // empty `scope_id` is a 403, not an unscoped query. Not latched: the
+      // route can still resolve (the bare paths redirect through the personal
+      // team), and re-evaluating is free.
+      return;
+    }
     seededRef.current = canvasId;
-    const name = searchParams.get('name') ?? undefined;
-    const description = searchParams.get('description') ?? undefined;
-    const { nodes, connections } =
-      kind === 'character'
-        ? buildCharacterTemplate({
-            character_id: searchParams.get('characterId'),
-            name,
-            description,
-          })
-        : buildEntityTemplate(kind, {
-            entity_id: searchParams.get('entityId'),
-            name,
-            description,
-          });
-    const store = useCanvasCoreStore.getState();
-    store.setNodes(nodes);
-    store.setConnections(connections);
-  }, [loadStatus, kind, nodeCount, canvasId, searchParams]);
+    let cancelled = false;
+    fetchAssetDetail(assetScopeId, assetId)
+      .then((detail) => {
+        if (cancelled) return;
+        const store = useCanvasCoreStore.getState();
+        // The canvas may have been swapped, or reconcile may have put nodes
+        // here, while the detail was in flight. Seeding then would append a
+        // card to a document that is no longer empty.
+        if (store.canvasId !== canvasId || store.nodes.length > 0) return;
+        store.setNodes([
+          createAssetNode(detail, { position: { x: 0, y: 0 } }) as CanvasNode,
+        ]);
+      })
+      .catch((err) => {
+        // A blank board with no explanation is the silent no-op; say it.
+        console.error('[CanvasView] could not seed the canvas asset:', err);
+        if (!cancelled) reportSeedFailureRef.current();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadStatus, canvasId, assetId, assetScopeId, nodeCount]);
+
+  // ── Legacy entity card migration (P4 Task 6) ─────────────────────────────
+  //
+  // Canvases saved before the asset library hold `character`/`location`/`prop`
+  // cards keyed by `_legacy_project_*` row ids. Each one is resolved against
+  // `GET /assets/resolve-legacy`; a hit becomes an asset card IN PLACE (same
+  // node id, same position, edges untouched) and a miss gets a visible
+  // `Unmigrated` badge. `legacyMigration.ts` owns every rule.
+  //
+  // It runs AFTER the document is in the store, never before: the legacy cards
+  // paint immediately and swap when the answers arrive. And the answers are
+  // applied to the LIVE node list, not the snapshot they were computed from,
+  // so a drag during the round trip is not undone.
+  //
+  // `setNodesTransient` on purpose — no history entry (this is not a user
+  // edit) and NO forced save. The rewritten nodes ride out with the next real
+  // save; a PUT fired by merely opening a canvas would make every read of an
+  // old board a write.
+  const migratedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadStatus !== 'ready' || !canvasId || !assetScopeId) return;
+    if (migratedForRef.current === canvasId) return;
+    const snapshot = useCanvasCoreStore.getState().nodes;
+    if (legacyCards(snapshot).length === 0) return;
+    migratedForRef.current = canvasId;
+    let cancelled = false;
+    // Did this pass reach a conclusion? A node added or deleted while the
+    // resolves are out re-runs this effect (`nodeCount` is a dep), the cleanup
+    // sets `cancelled`, and the re-run then returns early on the latch — so
+    // the verdicts were thrown away and NOTHING would ever try again for this
+    // mount. Self-healing across reloads (the design re-resolves on every load
+    // until a save), but silent within one, which is the shape this branch
+    // keeps filing bugs about. Releasing the latch when a pass applied nothing
+    // lets the re-run pick the work back up.
+    let applied = false;
+    void resolveLegacyVerdicts(snapshot, {
+      resolve: (kind, legacyId) => resolveLegacyAsset(assetScopeId, kind, legacyId),
+      fetchDetail: (id) => fetchAssetDetail(assetScopeId, id),
+    }).then((verdicts) => {
+      if (cancelled || verdicts.length === 0) return;
+      const store = useCanvasCoreStore.getState();
+      if (store.canvasId !== canvasId) return;
+      const outcome = applyLegacyVerdicts(store.nodes, verdicts);
+      if (outcome.unchanged) return;
+      store.setNodesTransient(outcome.nodes);
+      applied = true;
+    });
+    return () => {
+      cancelled = true;
+      // Only when nothing landed. Clearing it unconditionally would re-resolve
+      // after every successful migration too, and the rewritten cards no
+      // longer look legacy, so `legacyCards(snapshot).length === 0` would stop
+      // it anyway — but relying on that makes the latch mean two things.
+      if (!applied && migratedForRef.current === canvasId) {
+        migratedForRef.current = null;
+      }
+    };
+  }, [loadStatus, canvasId, assetScopeId, nodeCount]);
 
   // React Flow imperative instance (Task 5 — viewport focus). `rfReady` is a
   // reactive twin of the ref: React Flow's own `onInit` timing relative to
@@ -728,7 +821,18 @@ export function CanvasView({
           index of what a canvas can do), these are pure action affordances:
           a disabled-but-present toolbar would just be furniture. The
           "Read-only" badge is what explains their absence. */}
-      {kind === 'smart' && !readOnly && <TopNodeBar surfaceRef={surfaceRef} />}
+      {/* Standard AND the four entity boards. The entity kinds used to be
+          excluded because they seeded a preset workflow and needed no way to
+          add anything; P4 deleted those templates, so a hand-made character /
+          location / prop / costume board opened blank with NO way to add a
+          node except the pane's drag-create menu — which a user has to know is
+          there. `lite` stays out on its own terms: it deliberately offers a
+          four-card menu instead of the full node set (see `DragCreateMenu`),
+          and that is a product decision this change has no business
+          reversing. */}
+      {(kind === 'smart' || isEntityCanvas(kind)) && !readOnly && (
+        <TopNodeBar surfaceRef={surfaceRef} />
+      )}
       {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && !readOnly && (
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />

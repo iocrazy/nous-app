@@ -25,12 +25,14 @@ import {
   fetchAsset,
   fetchAssetCounts,
   fetchAssetDetail,
+  fetchBundle,
   generateSlot,
   linkProject,
   listAssets,
   listProjectAssets,
   previewGenerateSlot,
   regeneratePrompt,
+  resolveLegacyAsset,
   searchAssets,
   translatePrompt,
   unlinkProject,
@@ -428,6 +430,101 @@ describe('fetchAssetDetail', () => {
     expect(asset.links).toEqual([]);
     expect(asset.linked_by).toEqual([]);
     expect(asset.loadouts).toEqual([]);
+    // `used_in` is NOT defaulted, unlike the four arrays: the caller did not
+    // ask for it, so the honest answer is "nobody looked" rather than an empty
+    // pair that reads as "used nowhere".
+    expect(asset.used_in).toBeUndefined();
+    expect(url.searchParams.has('include_used_in')).toBe(false);
+  });
+
+  it('asks for used_in only when the caller opts in', async () => {
+    const spy = stubFetch({ success: true, data: ASSET_ROW });
+
+    await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
+    expect(callAt(spy)[0].searchParams.get('include_used_in')).toBe('true');
+  });
+
+  it('keeps an asked-for-but-empty used_in apart from an absent one', async () => {
+    // The two states the opt-in creates, and the whole reason `used_in` is
+    // optional in the type: `{canvases: [], storyboards: []}` means the
+    // aggregate ran and found nothing; `undefined` means it never ran.
+    stubFetch({
+      success: true,
+      data: { ...ASSET_ROW, used_in: { canvases: [], storyboards: [] } },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
+    expect(asset.used_in).toEqual({ canvases: [], storyboards: [] });
+  });
+
+  it('reads a null used_in as absent, the way the wire spells "not asked"', async () => {
+    stubFetch({ success: true, data: { ...ASSET_ROW, used_in: null } });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID);
+
+    expect(asset.used_in).toBeUndefined();
+  });
+
+  it('carries used_in through with the canvases the server aggregated', async () => {
+    // The real `list_canvases_for_asset` row: string ids throughout, one entry
+    // per canvas with `node_ids` collected rather than one entry per node.
+    stubFetch({
+      success: true,
+      data: {
+        ...ASSET_ROW,
+        used_in: {
+          canvases: [
+            {
+              canvas_id: '727145299382534900',
+              canvas_name: 'Bamboo Sea Boards',
+              kind: 'smart',
+              project_id: '727145299382534000',
+              node_ids: ['asset-1', 'asset-2'],
+              loadout_ids: ['727145299382534401'],
+            },
+          ],
+          storyboards: [],
+        },
+      },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
+    expect(asset.used_in?.canvases).toHaveLength(1);
+    expect(asset.used_in?.canvases[0].canvas_name).toBe('Bamboo Sea Boards');
+    expect(asset.used_in?.canvases[0].node_ids).toEqual(['asset-1', 'asset-2']);
+    expect(asset.used_in?.storyboards).toEqual([]);
+  });
+
+  it('keeps a half-filled used_in rather than dropping the half that came', async () => {
+    // A response with `canvases` but no `storyboards` key must not lose the
+    // canvases; replacing the whole object on any missing half is the obvious
+    // wrong version of the normalizer above.
+    stubFetch({
+      success: true,
+      data: {
+        ...ASSET_ROW,
+        used_in: {
+          canvases: [
+            {
+              canvas_id: '727145299382534900',
+              canvas_name: 'Bamboo Sea Boards',
+              kind: 'smart',
+              project_id: '727145299382534000',
+              node_ids: ['asset-1'],
+              loadout_ids: [],
+            },
+          ],
+        },
+      },
+    });
+
+    const asset = await fetchAssetDetail(SCOPE, ASSET_ID, { usedIn: true });
+
+    expect(asset.used_in?.canvases).toHaveLength(1);
+    expect(asset.used_in?.storyboards).toEqual([]);
   });
 
   it('keeps outgoing and incoming links apart', async () => {
@@ -840,6 +937,129 @@ describe('project refs', () => {
   });
 });
 
+describe('bundle', () => {
+  // The wire shape as the router really emits it (Envelope[BundleResponse]):
+  // resource ids are JSON STRINGS on `/assets` — the repository stringifies
+  // every BIGINT column — and `dropped` is always present, empty or not.
+  const BUNDLE = {
+    prompt: { positive: 'a swordswoman, a long coat', negative: 'glasses' },
+    reference_resource_ids: ['727145299382534146', '727145299382534147'],
+    dropped: [{ resource_id: '727145299382534148', reason: 'over_limit' }],
+    max_refs: 2,
+  };
+
+  it('GETs the bundle with the model on the query string', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    const [url, init] = callAt(spy);
+    expect(url.pathname).toBe(`/api/v1/assets/${ASSET_ID}/bundle`);
+    expect(url.searchParams.get('model')).toBe('seedream-4');
+    expect(init.method).toBeUndefined(); // a GET, not a POST
+    expect(bundle.reference_resource_ids).toEqual([
+      '727145299382534146',
+      '727145299382534147',
+    ]);
+    expect(bundle.max_refs).toBe(2);
+  });
+
+  it('sends loadout_id when one is picked', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4', loadoutId: '400' });
+
+    expect(callAt(spy)[0].searchParams.get('loadout_id')).toBe('400');
+  });
+
+  it('omits loadout_id when there is none', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(callAt(spy)[0].searchParams.has('loadout_id')).toBe(false);
+  });
+
+  it('keeps `dropped` — the half a caller must render', async () => {
+    stubFetch({ success: true, data: BUNDLE });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(bundle.dropped).toEqual([
+      { resource_id: '727145299382534148', reason: 'over_limit' },
+    ]);
+  });
+
+  it('carries a zero-ref provider through as its own reason', async () => {
+    // ark / jimeng are pure text-to-image: max_refs 0, everything reported.
+    stubFetch({
+      success: true,
+      data: {
+        prompt: { positive: 'a swordswoman', negative: '' },
+        reference_resource_ids: [],
+        dropped: [{ resource_id: '727145299382534146', reason: 'provider_no_refs' }],
+        max_refs: 0,
+      },
+    });
+
+    const bundle = await fetchBundle(SCOPE, ASSET_ID, { model: 'ark-t2i' });
+
+    expect(bundle.max_refs).toBe(0);
+    expect(bundle.dropped[0].reason).toBe('provider_no_refs');
+  });
+
+  // ── the checklist's three wire states ──────────────────────────────────
+  //
+  // These pin the SPELLING, which is the only thing that keeps "unticked
+  // everything" apart from "did not ask". A zero-length repeated parameter is
+  // indistinguishable from an absent one, and absent means "send them all" —
+  // so an empty selection has to put one empty value on the wire.
+
+  it('omits selected_file_ids entirely when no checklist is given', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4' });
+
+    expect(callAt(spy)[0].searchParams.has('selected_file_ids')).toBe(false);
+  });
+
+  it('repeats selected_file_ids once per picked file, in order', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, {
+      model: 'seedream-4',
+      selectedFileIds: ['727145299382534147', '727145299382534146'],
+    });
+
+    expect(callAt(spy)[0].searchParams.getAll('selected_file_ids')).toEqual([
+      '727145299382534147',
+      '727145299382534146',
+    ]);
+  });
+
+  it('spells an EMPTY checklist as one empty value, not as absence', async () => {
+    const spy = stubFetch({ success: true, data: BUNDLE });
+
+    await fetchBundle(SCOPE, ASSET_ID, { model: 'seedream-4', selectedFileIds: [] });
+
+    const params = callAt(spy)[0].searchParams;
+    expect(params.has('selected_file_ids')).toBe(true);
+    expect(params.getAll('selected_file_ids')).toEqual(['']);
+  });
+
+  it('surfaces model_unknown as a typed error, not an empty bundle', async () => {
+    stubFetch(
+      { success: false, error: { code: 'model_unknown', detail: 'not available' } },
+      422,
+    );
+
+    const err = await fetchBundle(SCOPE, ASSET_ID, { model: 'ghost' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GeneratedApiError);
+    expect(err.code).toBe('model_unknown');
+  });
+});
+
 describe('scope_id and auth ride on every new call', () => {
   // A call that forgets `?scope_id=` is a 403 `not_a_member` at runtime and a
   // green unit test everywhere else, so the sweep is over ALL of them at once
@@ -862,6 +1082,7 @@ describe('scope_id and auth ride on every new call', () => {
     ['translatePrompt', () => translatePrompt(SCOPE, ASSET_ID, 'zh')],
     ['regeneratePrompt', () => regeneratePrompt(SCOPE, ASSET_ID)],
     ['previewGenerateSlot', () => previewGenerateSlot(SCOPE, ASSET_ID, 'sheet')],
+    ['fetchBundle', () => fetchBundle(SCOPE, ASSET_ID, { model: 'm' })],
     ['generateSlot', () => generateSlot(SCOPE, ASSET_ID, { slot: 'sheet' })],
     ['linkProject', () => linkProject(SCOPE, ASSET_ID, '55')],
     ['unlinkProject', () => unlinkProject(SCOPE, ASSET_ID, '55')],
@@ -875,5 +1096,45 @@ describe('scope_id and auth ride on every new call', () => {
     const [url] = callAt(spy);
     expect(url.searchParams.get('scope_id')).toBe(SCOPE);
     expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+  });
+});
+
+// ── resolve-legacy (P4 Task 6) ──────────────────────────────────────────────
+//
+// `GET /assets/resolve-legacy?scope_id=&kind=&legacy_id=` answers
+// `{"asset_id": "<id>" | null}`. Both arms are real answers the canvas acts
+// on, so both are pinned — and the null arm is a 200, not an error.
+
+describe('resolveLegacyAsset', () => {
+  it('sends the scope, the kind and the legacy id, and returns the asset id', async () => {
+    const spy = stubFetch({ success: true, data: { asset_id: '727145299382534201' } });
+    const out = await resolveLegacyAsset(SCOPE, 'character', '400000000000000001');
+    expect(out).toBe('727145299382534201');
+    const url = calledUrl(spy);
+    expect(url.pathname).toBe('/api/v1/assets/resolve-legacy');
+    expect(url.searchParams.get('scope_id')).toBe(SCOPE);
+    expect(url.searchParams.get('kind')).toBe('character');
+    expect(url.searchParams.get('legacy_id')).toBe('400000000000000001');
+  });
+
+  it('returns null for an unmigrated entity — a 200, not a throw', async () => {
+    stubFetch({ success: true, data: { asset_id: null } });
+    await expect(resolveLegacyAsset(SCOPE, 'prop', '400000000000000009')).resolves.toBeNull();
+  });
+
+  it('keeps the id a STRING, so a Snowflake never rides as a number', async () => {
+    stubFetch({ success: true, data: { asset_id: '727145299382534201' } });
+    const out = await resolveLegacyAsset(SCOPE, 'location', '4');
+    expect(typeof out).toBe('string');
+  });
+
+  it('a typed refusal still throws', async () => {
+    stubFetch(
+      { success: false, error: { code: 'not_a_member', detail: 'nope' } },
+      403,
+    );
+    await expect(
+      resolveLegacyAsset(SCOPE, 'character', '1'),
+    ).rejects.toBeInstanceOf(GeneratedApiError);
   });
 });

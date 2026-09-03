@@ -112,37 +112,6 @@ export async function fetchGenerations(
 }
 
 /**
- * Fetch the generations backlinked to one library entity (CC5 asset strip).
- * Newest first; one page is plenty for a card strip.
- *
- * NO IN-APP CALLER since P3 Task 6: its consumer was `EntityAssetStrip`, the
- * strip on the retired `CharacterLibrary` / `EntityLibrary` bible cards. Kept
- * on purpose rather than deleted, because the WRITE half is still live and
- * P4-owned — `smart/entityRef.ts` resolves the card a prompt hangs off and
- * `generationRunner` stamps `entity_kind` / `entity_id` into
- * `generated_media.params` on every canvas dispatch. Deleting the only reader
- * would leave that stamp with nothing that can ever read it back. P4 owns the
- * decision: re-point this at assets (`canvas_asset_refs`) or retire both
- * halves together. Its own test in `generatedMediaService.test.ts` stays.
- */
-export async function fetchEntityGenerations(
-  entityKind: 'character' | 'location' | 'prop',
-  entityId: string,
-  limit = 24,
-): Promise<GenerationsPage> {
-  const qs = new URLSearchParams({
-    entity_kind: entityKind,
-    entity_id: entityId,
-    limit: String(limit),
-  });
-  const res = await fetch(`${getApiUrl()}/api/v1/generated-media?${qs}`, {
-    headers: await getAuthHeaders(),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return normalizeGenerationsPage((await res.json()).data);
-}
-
-/**
  * Returns the URL for streaming/downloading the raw file of a generated-media item.
  * Callers must pass auth headers when fetching this URL directly.
  */

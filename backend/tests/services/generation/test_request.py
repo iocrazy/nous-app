@@ -57,6 +57,82 @@ def test_refs_capped_at_nine():
         source_url=None,
     )
     assert len(req.refs) == 9
+    # And it SAYS how many it took. This slice used to be silent, so a request
+    # cut from twelve to nine went out looking complete — only the per-provider
+    # trim below ever appended "refs" to `dropped`.
+    assert req.refs_truncated == 3
+
+
+def test_the_global_ceiling_is_reported_even_when_the_provider_is_generous():
+    """The case the silence hid. Nine references reach a provider that takes
+    nine, so the per-provider trim has nothing to do — and without the ceiling
+    being reported, three dropped references leave no trace anywhere."""
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"source_urls": [f"/u/{i}" for i in range(12)]},
+        source_url=None,
+    )
+
+    eff, dropped = req.reconcile(Caps(max_refs=9))
+
+    assert len(eff.refs) == 9
+    assert dropped == ["refs"]
+
+
+def test_a_request_inside_the_ceiling_reports_nothing():
+    """Negative control: "refs" on every run is "refs" on no run."""
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"source_urls": ["/u/1", "/u/2"]},
+        source_url=None,
+    )
+
+    _eff, dropped = req.reconcile(Caps(max_refs=9))
+
+    assert dropped == []
+    assert req.refs_truncated == 0
+
+
+def test_refs_is_named_once_however_many_stages_trimmed():
+    """Twelve references, a provider that takes two: BOTH the global ceiling
+    and the provider cap fired. The badge counts reasons, not stages, so
+    "refs" appears once — a duplicate would render as "Ignored: refs, refs"."""
+    req = GenerationRequest.from_params(
+        kind="image",
+        prompt="p",
+        model="m",
+        params={"source_urls": [f"/u/{i}" for i in range(12)]},
+        source_url=None,
+    )
+
+    eff, dropped = req.reconcile(Caps(max_refs=2))
+
+    assert len(eff.refs) == 2
+    assert dropped == ["refs"]
+
+
+def test_the_video_path_reports_the_ceiling_too():
+    """Video refs are governed by ``video_modes``, not ``max_refs`` — but the
+    global ceiling applies to both, so a frames2video job that lost three
+    references to it must say so as well."""
+    req = GenerationRequest.from_params(
+        kind="video",
+        prompt="p",
+        model="m",
+        params={"source_urls": [f"/u/{i}" for i in range(12)]},
+        source_url=None,
+    )
+
+    eff, dropped = req.reconcile(
+        Caps(max_refs=0, video_modes=frozenset({"frames", "multimodal"}))
+    )
+
+    assert len(eff.refs) == 9
+    assert dropped == ["refs"]
 
 
 def test_reconcile_drops_unsupported_knobs_and_names_them():

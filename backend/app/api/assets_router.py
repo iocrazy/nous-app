@@ -22,7 +22,7 @@ from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import AfterValidator
+from pydantic import AfterValidator, StringConstraints
 from sqlalchemy import select
 
 from app.core.deps import AuthDep
@@ -43,6 +43,7 @@ from app.schemas.assets import (
     AssetUpdate,
     AttachFileRequest,
     AttachFilesBatchRequest,
+    BundleResponse,
     DeletedResponse,
     DetachedResponse,
     DuplicateRequest,
@@ -60,10 +61,13 @@ from app.schemas.assets import (
     ProjectRefRequest,
     PromptTranslateRequest,
     RemovedResponse,
+    ResolveLegacyResponse,
     UnlinkedResponse,
+    UsedInCanvasRef,
     within_int64,
 )
 from app.services.assets.assets_service import AssetError, AssetsService
+from app.services.assets.legacy_refs import LEGACY_KINDS
 from app.services.library.resources_service import _resolve_personal_team_id
 
 router = APIRouter(tags=["assets"])
@@ -84,6 +88,15 @@ OptSnowflakeQuery = Annotated[
     Optional[str], Query(pattern=_SNOWFLAKE), AfterValidator(within_int64)
 ]
 SnowflakePath = Annotated[str, Path(pattern=_SNOWFLAKE), AfterValidator(within_int64)]
+# A REQUIRED snowflake in the query string. ``ScopeIdQuery`` is the same shape,
+# but naming a legacy row id after the scope would make the two look
+# interchangeable at the call site — they are not, and one of them is the tenant
+# boundary.
+SnowflakeQuery = Annotated[str, Query(pattern=_SNOWFLAKE), AfterValidator(within_int64)]
+# The three card kinds that ever carried a legacy project-entity id. Pinned to
+# the mapping's own key set (``LEGACY_KINDS``) rather than typed out again, so a
+# kind cannot be accepted here that the resolver has no table label for.
+LegacyKindQuery = Annotated[str, Query(pattern="^(" + "|".join(LEGACY_KINDS) + ")$")]
 # Path ids declared as ``int`` have the same reachable-500: FastAPI parses any
 # digit string into a Python int, which only fails once asyncpg tries to bind it.
 IdPath = Annotated[int, Path(ge=0, lt=_INT64_EXCLUSIVE_MAX)]
@@ -431,6 +444,48 @@ async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
         return _err(e)
 
 
+# ── legacy provenance lookup ────────────────────────────────────────────────
+#
+# ⚠️ ORDER IS LOAD-BEARING, exactly as for ``/assets/counts`` above: registered
+# below ``/assets/{asset_id}`` the literal "resolve-legacy" would be captured as
+# an ``int`` path param and answer 422 about an id nobody sent. Pinned by
+# ``tests/api/test_assets_resolve_legacy.py``.
+
+
+@router.get(
+    "/assets/resolve-legacy",
+    response_model=Envelope[ResolveLegacyResponse],
+    responses=_ERRORS,
+)
+async def resolve_legacy(
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    kind: LegacyKindQuery,
+    legacy_id: SnowflakeQuery,
+):
+    """Map a pre-P3 canvas card to the asset the migration produced.
+
+    Canvases saved before P3 hold ``character`` / ``location`` / ``prop`` cards
+    keyed by ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
+    row ids. Those are NOT ``assets.id``, so nothing downstream may treat one as
+    an asset — which is why the canvas resolves them HERE instead of stamping
+    them as provenance.
+
+    ``{"asset_id": null}`` is a 200: the question was well formed and the answer
+    is "no asset carries that provenance" — the entity's project never
+    migrated, or it was adopted by a run predating the adoption stamp (a
+    re-run repairs those). Only an unmappable ``kind`` refuses — that is a bad
+    request, and the router's own pattern already turns the common spelling
+    mistakes into a 422 before the service sees them.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        out = await _service().resolve_legacy(sid, kind, int(legacy_id))
+    except AssetError as e:
+        return _err(e)
+    return _ok(out)
+
+
 # ── single asset ────────────────────────────────────────────────────────────
 
 
@@ -439,10 +494,158 @@ async def asset_counts(auth: AuthDep, scope_id: ScopeIdQuery):
     response_model=Envelope[AssetDetailResponse],
     responses=_ERRORS,
 )
-async def get_asset(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+async def get_asset(
+    asset_id: IdPath,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    include_used_in: bool = Query(
+        False,
+        description=(
+            "Include used_in.canvases (the asset sheet's Used In panel). "
+            "Off by default: it is a five-table aggregate and most callers "
+            "render only the asset's face."
+        ),
+    ),
+):
+    """One asset with its files, links, loadouts — and, on request, its usage.
+
+    ``used_in`` costs a five-table aggregate (``canvas_asset_refs`` joined
+    through ``canvases``/``projects``/``teams``, two ``array_agg(DISTINCT …)``),
+    and one canvas can carry dozens of asset cards that each fetch their detail
+    on mount. So it is opt-in, and the answer is NULL — not an empty
+    ``used_in`` — when it was not asked for: "nobody looked" and "used nowhere"
+    are different facts and must not share a response. The sheet asks; the
+    canvas card, the picker, the legacy migration and the seeding path do not.
+
+    ``GET /assets/{id}/canvas-refs`` answers the same rows on their own, for a
+    caller that wants to refresh usage without re-reading the whole detail.
+    """
     try:
         sid = await _gate(scope_id, auth)
-        return _ok(await _service().get_asset(asset_id, sid))
+        return _ok(
+            await _service().get_asset(asset_id, sid, include_used_in=include_used_in)
+        )
+    except AssetError as e:
+        return _err(e)
+
+
+@router.get(
+    "/assets/{asset_id}/canvas-refs",
+    response_model=Envelope[List[UsedInCanvasRef]],
+    responses=_ERRORS,
+)
+async def asset_canvas_refs(asset_id: IdPath, auth: AuthDep, scope_id: ScopeIdQuery):
+    """Canvases in THIS scope that reference the asset (P4 reverse lookup).
+
+    The same rows ``GET /assets/{id}`` carries as ``used_in.canvases``, split
+    out so the sheet can refresh usage without re-fetching the whole detail.
+
+    Scope-limited, not merely gated: ``_gate`` proves the caller belongs to
+    ``scope_id``, and the repository then filters to canvases whose project
+    resolves to that same scope. Cross-scope canvases are therefore ABSENT
+    from the list rather than a 404 — the 404 belongs to the asset (raised by
+    the service's ``_require``), and the sibling
+    ``GET /resources/{id}/canvas-refs`` draws the same line: refuse on the
+    subject, filter the list.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(await _service().list_canvas_refs(asset_id, sid))
+    except AssetError as e:
+        return _err(e)
+
+
+# The catalog row name, not a provider key — same vocabulary the model picker
+# shows (``GET /canvases/generation-models``).
+#
+# The 100-character bound is OURS, not the column's: ``mediahub_models.name``
+# is unbounded ``Text``. It keeps a hostile query string from buying a full
+# catalog scan that was always going to end in ``model_unknown``. ⚠️ The cost
+# is that a catalog name longer than 100 characters answers a bare validation
+# 422 instead of the typed ``model_unknown`` — acceptable while no such row
+# exists, and a reason to raise this number rather than to explain it away if
+# one ever does.
+ModelQuery = Annotated[str, Query(min_length=1, max_length=100)]
+
+# The card's checklist, repeatable: ``?selected_file_ids=1&selected_file_ids=2``.
+#
+# THREE states, and the third is the one worth spelling out:
+#
+# * ABSENT (``None``) — no checklist. Every file the asset owns is a candidate.
+#   This is what the asset sheet asks, and it is why the sheet-side callers did
+#   not have to change when this parameter arrived.
+# * PRESENT with ids — those files, and only those, are candidates.
+# * PRESENT and EMPTY — the user unticked everything. On the wire that is
+#   ``?selected_file_ids=`` (one empty value), which FastAPI hands over as
+#   ``[""]``: distinguishable from absent, which a zero-length repeated
+#   parameter is NOT. Blank entries are stripped below, so it arrives at the
+#   service as an empty tuple and the answer is zero references — NOT "all of
+#   them", which is what collapsing this state into ABSENT would ship.
+#
+# Bounded twice — 500 entries, 40 characters each (a Snowflake is 19) — so a
+# hostile query string is a 422 at the boundary rather than a long round trip.
+# Ids are NOT parsed to int here: the service compares on ``str`` because the
+# file rows and the wire disagree about the type of a Snowflake, and an id that
+# names no file of this asset must simply match nothing, not fail a request
+# that can still be answered honestly.
+SelectedFilesQuery = Annotated[
+    Optional[List[Annotated[str, StringConstraints(max_length=40)]]],
+    Query(max_length=500),
+]
+
+
+@router.get(
+    "/assets/{asset_id}/bundle",
+    response_model=Envelope[BundleResponse],
+    responses=_ERRORS,
+)
+async def asset_bundle(
+    asset_id: IdPath,
+    auth: AuthDep,
+    scope_id: ScopeIdQuery,
+    model: ModelQuery,
+    loadout_id: OptSnowflakeQuery = None,
+    selected_file_ids: SelectedFilesQuery = None,
+):
+    """What this asset hands a generator running ``model`` (spec §6.3).
+
+    A READ: it composes and reports, it writes nothing and calls no provider.
+    ``model`` is required because the answer DEPENDS on it — the reference
+    ceiling is the provider's (``ProviderCapabilities.max_refs``), so the same
+    asset bundles differently for codex (9 references) and for ark (none at
+    all). A default model here would quietly answer for a provider the caller
+    is not about to use.
+
+    ``dropped`` is the load-bearing half. Every reference **in scope of the
+    request** that is not in ``reference_resource_ids`` appears there with a
+    reason — a reference chosen, not sent, and not reported is the recorded
+    "选了也生成了但图里没有" failure.
+
+    ``selected_file_ids`` is what puts the "in scope of the request" in that
+    sentence, and it bounds BOTH lists. Without it the ceiling would trim the
+    asset's whole file list and the caller would be left to intersect the
+    result with its own checklist — which drops the user's picks whenever they
+    are not a prefix of the priority order, and then blames the provider's
+    limit for it. It also means a caller whose picks were all delivered gets an
+    empty ``dropped`` instead of a standing false alarm about files it never
+    chose.
+    """
+    try:
+        sid = await _gate(scope_id, auth)
+        return _ok(
+            await _service().get_bundle(
+                asset_id,
+                sid,
+                model=model,
+                loadout_id=loadout_id,
+                selected_file_ids=(
+                    None
+                    if selected_file_ids is None
+                    else tuple(v for v in selected_file_ids if v.strip())
+                ),
+                user_id=auth.user_id,
+            )
+        )
     except AssetError as e:
         return _err(e)
 

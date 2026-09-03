@@ -16,6 +16,7 @@
 
 import { memo } from 'react';
 
+import { AssetNodeView } from './AssetNodeView';
 import { CharacterNodeView } from './CharacterNodeView';
 import { LibEntityNodeView } from './LibEntityNodeView';
 import { GroupNodeView } from './GroupNodeView';
@@ -33,6 +34,7 @@ import { TimelineNodeView } from './TimelineNodeView';
 const MemoLibEntityNodeView = memo(LibEntityNodeView);
 
 export const SMART_NODE_TYPES = {
+  asset: memo(AssetNodeView),
   character: memo(CharacterNodeView),
   location: MemoLibEntityNodeView,
   prop: MemoLibEntityNodeView,

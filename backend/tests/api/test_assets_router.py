@@ -68,7 +68,16 @@ def asset_row(**over):
 
 
 def detail_row(**over):
-    row = asset_row(files=[], links=[], linked_by=[], loadouts=[])
+    # ``used_in`` rides along because ``response_model`` DROPS undeclared keys
+    # and DEFAULTS missing ones — a fixture without it would answer 200 with an
+    # empty ``used_in`` whether or not the route still emits it.
+    row = asset_row(
+        files=[],
+        links=[],
+        linked_by=[],
+        loadouts=[],
+        used_in={"canvases": [], "storyboards": []},
+    )
     row.update(over)
     return row
 
@@ -141,10 +150,16 @@ class _FakeService:
             raise AssetError(409, "asset_exists", "exists", {"existing_asset_id": "7"})
         return asset_row(id="2", name=payload.name, asset_type=payload.asset_type)
 
-    async def get_asset(self, asset_id, scope_id):
+    async def get_asset(self, asset_id, scope_id, *, include_used_in=False):
+        self.calls.append(("get_asset", scope_id, {"include_used_in": include_used_in}))
         if asset_id == 404:
             raise AssetError(404, "asset_not_found", "nope")
-        return detail_row(id=str(asset_id))
+        row = detail_row(id=str(asset_id))
+        # Mirrors the service: the key is ABSENT when it was not asked for, so
+        # a router test can see the difference the flag actually makes.
+        if not include_used_in:
+            row.pop("used_in", None)
+        return row
 
     # Set to a resource_id that should blow up, to exercise the batch path.
     fail_on_resource_id = None
@@ -241,6 +256,7 @@ async def test_non_member_403(app):
         ("get", "/api/v1/assets?scope_id=666"),
         ("get", "/api/v1/assets/counts?scope_id=666"),
         ("get", "/api/v1/assets/5?scope_id=666"),
+        ("get", "/api/v1/assets/5/bundle?scope_id=666&model=m"),
         ("delete", "/api/v1/assets/5?scope_id=666"),
         ("post", "/api/v1/assets/5/duplicate?scope_id=666"),
         ("post", "/api/v1/assets/5/files?scope_id=666"),
@@ -633,3 +649,26 @@ async def test_create_defaults_to_manual_when_source_is_omitted(app):
         )
     assert r.status_code == 201, r.text
     assert app.state.fake.created_sources == ["manual"]
+
+
+# ── used_in is opt-in on the detail route (I2) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_detail_route_does_not_ask_for_used_in_by_default(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/v1/assets/5?scope_id=9000")
+    assert r.status_code == 200
+    assert app.state.fake.calls[-1] == ("get_asset", 9000, {"include_used_in": False})
+    # NULL on the wire, not an empty pair: "nobody looked" must stay
+    # distinguishable from "used nowhere".
+    assert r.json()["data"]["used_in"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_detail_route_passes_the_flag_through(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/api/v1/assets/5?scope_id=9000&include_used_in=true")
+    assert r.status_code == 200
+    assert app.state.fake.calls[-1] == ("get_asset", 9000, {"include_used_in": True})
+    assert r.json()["data"]["used_in"] == {"canvases": [], "storyboards": []}

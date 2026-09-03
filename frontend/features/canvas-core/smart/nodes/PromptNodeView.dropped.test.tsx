@@ -35,11 +35,20 @@ vi.mock('../../../../hooks/useResourceSearch', () => ({
 // pattern). `t` is created once so it stays referentially stable across
 // renders, exactly like the real hook.
 vi.mock('react-i18next', () => {
-  const t = (key: string, vars?: Record<string, unknown>): string => {
+  const t = (
+    key: string,
+    varsOrDefault?: Record<string, unknown> | string,
+  ): string => {
+    // i18next's second argument is EITHER interpolation vars or a string
+    // default. The production code uses both forms, so a mock that only
+    // understands one would make an unknown drop-reason look like a bug it
+    // is not (or hide one that is).
+    const fallback = typeof varsOrDefault === 'string' ? varsOrDefault : key;
+    const vars = typeof varsOrDefault === 'string' ? undefined : varsOrDefault;
     const template = key
       .split('.')
       .reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], en);
-    if (typeof template !== 'string') return key;
+    if (typeof template !== 'string') return fallback;
     return template.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars?.[name] ?? ''));
   };
   return { useTranslation: () => ({ t }) };
@@ -82,7 +91,7 @@ vi.mock('./useModelCapabilities', () => ({
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { markDroppedKnobs } from '../droppedKnobs';
-import { withGenerationRunner } from '../generationRunner';
+import { noAssetInputs, withGenerationRunner } from '../generationRunner';
 import { resumePendingGenerations } from '../genResume';
 import { PromptNodeView } from './PromptNodeView';
 
@@ -168,6 +177,141 @@ describe('PromptNodeView dropped-knob badge', () => {
   });
 });
 
+// References the run could not USE (asset-library P4 Task 3).
+//
+// The canvas can now be fed `/api/v1/resources/{id}/cover` references from
+// asset nodes, and those have failure modes a generated-media url does not:
+// out of scope, no image bytes behind the row, storage unreadable. The
+// backend reports each as `{url, reason}` in `dropped_refs`; without a
+// consumer here the picture would simply come back missing a reference and
+// nothing would say so — the "选了也生成了但图里没有" failure, again.
+describe('PromptNodeView dropped-reference badge', () => {
+  it('names how many references were dropped and why', () => {
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped_refs: [
+        { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' },
+      ],
+    });
+
+    const badge = getByTestId('dropped-knobs-badge');
+    expect(badge.textContent).toBe('Ignored: 1 reference(s) (out of scope)');
+    // The urls themselves are in the tooltip: the badge is a summary, but the
+    // user still has to be able to find out WHICH picture went missing.
+    expect(badge.getAttribute('title')).toBe(
+      '/api/v1/resources/91/cover — not_in_scope',
+    );
+  });
+
+  it('groups several drops by reason', () => {
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped_refs: [
+        { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' },
+        { url: '/api/v1/resources/92/cover', reason: 'not_in_scope' },
+        { url: '/api/v1/resources/93/cover', reason: 'no_image_file' },
+      ],
+    });
+    expect(getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: 2 reference(s) (out of scope), 1 reference(s) (no image file)',
+    );
+  });
+
+  it('shows knobs and references together — the two are orthogonal', () => {
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped: ['quality'],
+      last_dropped_refs: [
+        { url: '/api/v1/resources/91/cover', reason: 'materialize_failed' },
+      ],
+    });
+    expect(getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: quality, 1 reference(s) (unreadable)',
+    );
+  });
+
+  it('explains BOTH halves in the tooltip, not whichever came second', () => {
+    // The tooltip used to pick one: the url list whenever any reference was
+    // dropped, the knob sentence otherwise. A run that lost a knob AND a
+    // reference therefore showed only the urls, and "why was quality ignored"
+    // became unreachable on exactly the run that needed both answers.
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped: ['quality'],
+      last_dropped_refs: [
+        { url: '/api/v1/resources/91/cover', reason: 'materialize_failed' },
+      ],
+    });
+
+    const title = getByTestId('dropped-knobs-badge').getAttribute('title') ?? '';
+    expect(title).toContain('Not supported by this model');
+    expect(title).toContain('/api/v1/resources/91/cover — materialize_failed');
+  });
+
+  it('says only the knob half when no reference was dropped', () => {
+    const { getByTestId } = mount({ ...BASE_DATA, last_dropped: ['quality'] });
+
+    expect(getByTestId('dropped-knobs-badge').getAttribute('title')).toBe(
+      'Not supported by this model',
+    );
+  });
+
+  it('renders an unlabelled reason as its raw code rather than omitting it', () => {
+    // A backend that adds a reason before the locale does must still produce a
+    // visible badge. Swallowing the entry would be the silent drop this whole
+    // field exists to prevent.
+    const { getByTestId } = mount({
+      ...BASE_DATA,
+      last_dropped_refs: [{ url: '/api/v1/resources/91/cover', reason: 'brand_new' }],
+    });
+    expect(getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: 1 reference(s) (brand_new)',
+    );
+  });
+
+  it('every reason the backend can emit has copy in BOTH locales', async () => {
+    // The backend's vocabulary is fixed (canvas_generation.py's header block).
+    // A code with no label is not a crash, it just leaks an identifier at the
+    // user — so the parity check is here, where the list is read.
+    const zh = (await import('../../../../public/locales/zh.json')).default;
+    // The imported JSON carries its own literal type, and indexing it by a
+    // runtime string needs a widened view. `Record<string, unknown>` one level
+    // at a time, not a blanket cast: `Record<string, never>` (what this used
+    // to say) claims every value is `never`, which overlaps with nothing and
+    // is a TS2352 — the check still ran, but the file stopped typechecking.
+    const dropReasons = (tree: unknown): Record<string, unknown> => {
+      const canvas = (tree as Record<string, unknown>).canvas as
+        | Record<string, unknown>
+        | undefined;
+      return (canvas?.refDropReason ?? {}) as Record<string, unknown>;
+    };
+    const enReasons = dropReasons(en);
+    const zhReasons = dropReasons(zh);
+    for (const reason of [
+      'unknown_shape',
+      'not_in_scope',
+      'no_image_file',
+      'materialize_failed',
+      'scope_unresolved',
+      'unresolved',
+    ]) {
+      expect(
+        enReasons[reason],
+        `en is missing canvas.refDropReason.${reason}`,
+      ).toBeTruthy();
+      expect(
+        zhReasons[reason],
+        `zh is missing canvas.refDropReason.${reason}`,
+      ).toBeTruthy();
+    }
+  });
+
+  it('says nothing when every reference was used', () => {
+    const { queryByTestId } = mount({ ...BASE_DATA, last_dropped_refs: [] });
+    expect(queryByTestId('dropped-knobs-badge')).toBeNull();
+  });
+});
+
 // The negative prompt box under a model that cannot honour it.
 //
 // ⚠️ These are INVARIANT PINS, not coverage of new code. The P4 plan assumed
@@ -235,7 +379,7 @@ describe('a real run puts its dropped knobs on the node (seam)', () => {
 
     const runner = withGenerationRunner(
       async () => ({ ok: true, text: '', error: null }),
-      { canvasId: '9', onDropped: markDroppedKnobs },
+      { assetInputs: noAssetInputs, canvasId: '9', onDropped: markDroppedKnobs },
     );
     await runner({
       promptId: 'p1',
@@ -255,6 +399,60 @@ describe('a real run puts its dropped knobs on the node (seam)', () => {
       </ReactFlowProvider>,
     );
     expect(getByTestId('dropped-knobs-badge').textContent).toBe('Ignored: quality');
+  });
+
+  it('shows a dropped REFERENCE after the run that produced it', async () => {
+    // Same seam, other ledger. The two halves (backend field name, node data
+    // field name, badge copy) have to agree end to end or this is green in
+    // isolation and blank in the app.
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      canvasId: '9',
+      loadStatus: 'ready',
+      nodes: [{ id: 'p1', type: 'prompt', position: { x: 0, y: 0 }, data: { ...BASE_DATA } }],
+      connections: [],
+      selection: [],
+    });
+    dispatchGenerations.mockResolvedValue(['t1']);
+    pollGeneration.mockResolvedValue({
+      phase: 'completed',
+      metadata: {
+        result_url: '/gm/1/cover',
+        dropped_knobs: [],
+        dropped_refs: [
+          { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' },
+        ],
+      },
+    });
+
+    const runner = withGenerationRunner(
+      async () => ({ ok: true, text: '', error: null }),
+      { assetInputs: noAssetInputs, canvasId: '9', onDropped: markDroppedKnobs },
+    );
+    await runner({
+      promptId: 'p1',
+      body: 'a cat',
+      provider_slug: '',
+      agent_id: null,
+      gen: { kind: 'image', model: 'ark', count: 1 },
+    });
+
+    const node = useCanvasCoreStore
+      .getState()
+      .nodes.find((n) => (n as unknown as { id: string }).id === 'p1');
+    const data = (node as unknown as { data: Record<string, unknown> }).data;
+    expect(data.last_dropped_refs).toEqual([
+      { url: '/api/v1/resources/91/cover', reason: 'not_in_scope' },
+    ]);
+    const { getByTestId } = render(
+      <ReactFlowProvider>
+        <PromptNodeView {...baseProps} id="p1" type="prompt" data={data} />
+      </ReactFlowProvider>,
+    );
+    expect(getByTestId('dropped-knobs-badge').textContent).toBe(
+      'Ignored: 1 reference(s) (out of scope)',
+    );
   });
 });
 

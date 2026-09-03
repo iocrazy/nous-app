@@ -477,7 +477,11 @@ describe('canvasKindFor', () => {
     expect(canvasKindFor('character')).toBe('character');
     expect(canvasKindFor('location')).toBe('location');
     expect(canvasKindFor('prop')).toBe('prop');
-    expect(canvasKindFor('costume')).toBe('smart');
+    // Was 'smart' until P4 ruling G. That was never a design choice — it was
+    // the fallback firing because 'costume' was missing from both the
+    // Pydantic Literal and the TS union, while `canvases_kind_check` (mig
+    // 446) had allowed it all along. This assertion pinned the gap.
+    expect(canvasKindFor('costume')).toBe('costume');
     expect(canvasKindFor('prompt')).toBe('smart');
     expect(canvasKindFor('audio')).toBe('smart');
   });

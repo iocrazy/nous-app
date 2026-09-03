@@ -39,6 +39,7 @@ import {
 import { ApiError } from '../../../services/apiClient';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { markDroppedKnobs } from './droppedKnobs';
+import type { DroppedRef } from './types';
 import {
   appendGenerationResults,
   markGenerationRecover,
@@ -221,6 +222,7 @@ async function resumePromptTasks(
   // is gone. This under-reports rather than over-reports, and never reports
   // worse than the nothing it replaced.
   const droppedUnion: string[] = [];
+  const refUnion: DroppedRef[] = [];
   let observedDropped = false;
   await Promise.all(
     tasks.map(async (t) => {
@@ -237,6 +239,23 @@ async function resumePromptTasks(
           for (const knob of knobs) {
             if (typeof knob === 'string' && !droppedUnion.includes(knob))
               droppedUnion.push(knob);
+          }
+        }
+        // The reference ledger, read at the same point for the same reason.
+        // Carrying knobs across a reload and not references would put back
+        // half the bug: the badge would describe this run's knobs beside a
+        // CLEARED reference verdict, i.e. "every reference was used" about a
+        // run where one was not.
+        const refs = task.metadata?.dropped_refs;
+        if (Array.isArray(refs)) {
+          observedDropped = true;
+          for (const ref of refs) {
+            if (!ref || typeof ref !== 'object') continue;
+            const url = String((ref as DroppedRef).url ?? '');
+            const reason = String((ref as DroppedRef).reason ?? '');
+            if (!url) continue;
+            if (refUnion.some((r) => r.url === url && r.reason === reason)) continue;
+            refUnion.push({ url, reason });
           }
         }
         const url =
@@ -262,7 +281,7 @@ async function resumePromptTasks(
   // polls all broke observed nothing, and writing [] would turn that
   // non-answer into "nothing was dropped" (the catch branch below
   // deliberately does not set the flag, matching the runner).
-  if (observedDropped) markDroppedKnobs(promptId, droppedUnion);
+  if (observedDropped) markDroppedKnobs(promptId, droppedUnion, refUnion);
   if (landed > 0) {
     patch({ run_status: 'succeeded', run_error: firstError });
   } else {

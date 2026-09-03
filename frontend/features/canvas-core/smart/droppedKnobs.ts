@@ -10,16 +10,28 @@
 // the call sites so a fifth entry point cannot quietly do less.
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import type { DroppedRef } from './types';
 
 /**
- * Record the last run's dropped knobs on the prompt node.
+ * Record the last run's dropped knobs AND dropped references on the prompt
+ * node.
  *
- * Always writes, including the empty list: the badge must describe the run it
- * sits beside, so a clean re-run has to clear what an earlier one reported.
- * The node may be gone (deleted mid-run) — `patchNode` no-ops on a missing id.
+ * Always writes BOTH, including the empty lists: the badge must describe the
+ * run it sits beside, so a clean re-run has to clear what an earlier one
+ * reported. Writing one and leaving the other untouched would leave half a
+ * stale verdict standing — which is exactly the shape of bug that made a
+ * single choke point worth having. The node may be gone (deleted mid-run) —
+ * `patchNode` no-ops on a missing id.
+ *
+ * `refs` is optional only so the four existing call sites read unchanged; it
+ * defaults to `[]`, which CLEARS, never "leave whatever was there".
  */
-export function markDroppedKnobs(promptId: string, knobs: string[]): void {
+export function markDroppedKnobs(
+  promptId: string,
+  knobs: string[],
+  refs: DroppedRef[] = [],
+): void {
   useCanvasCoreStore.getState().patchNode(promptId, {
-    data: { last_dropped: knobs },
+    data: { last_dropped: knobs, last_dropped_refs: refs },
   });
 }

@@ -302,6 +302,36 @@ export interface AssetLoadoutRow {
   created_at: string;
 }
 
+/**
+ * One canvas that references this asset (`used_in.canvases`, P4 Task 1).
+ *
+ * `node_ids` is a LIST because a canvas may place the same asset on several
+ * cards; the server aggregates per canvas so a board using it three times
+ * appears ONCE. Every id is a string, the boundary's rule for Snowflakes.
+ */
+export interface UsedInCanvasRef {
+  canvas_id: string;
+  canvas_name: string;
+  /** `smart` / `storyboard` / `character` / … — the canvas row's own kind. */
+  kind: string;
+  project_id: string;
+  node_ids: string[];
+  loadout_ids: string[];
+}
+
+/**
+ * Where this asset is in use (spec §5.1).
+ *
+ * `storyboards` is declared and ALWAYS EMPTY today: the storyboard side has no
+ * ref mirror yet. It is on the wire rather than absent so a client renders "no
+ * storyboard usage" instead of branching on a missing key — and so the day it
+ * starts filling, nothing about the shape has to change.
+ */
+export interface AssetUsedIn {
+  canvases: UsedInCanvasRef[];
+  storyboards: unknown[];
+}
+
 export interface AssetRowDetail extends AssetRow {
   files: AssetFileRow[];
   /** Outgoing links (this asset → another). */
@@ -309,6 +339,20 @@ export interface AssetRowDetail extends AssetRow {
   /** Incoming links (another asset → this one). A different question. */
   linked_by: AssetLinkRow[];
   loadouts: AssetLoadoutRow[];
+  /**
+   * OPTIONAL, like the wire — `undefined` means NOBODY ASKED.
+   *
+   * `used_in` is opt-in (`fetchAssetDetail(..., { usedIn: true })`) because it
+   * costs a five-table aggregate server-side and only the asset sheet's Used
+   * In panel renders it, while a canvas can hold dozens of asset cards each
+   * fetching their own detail on mount.
+   *
+   * Three states, and they are three different facts: `undefined` (not
+   * asked), present with empty lists (asked, used nowhere), present and
+   * populated. Defaulting the first into the second would make a panel say
+   * "Used nowhere" about an answer nobody computed.
+   */
+  used_in?: AssetUsedIn;
 }
 
 /** Per-type tallies for the sidebar badges (`GET /assets/counts`). */
@@ -443,6 +487,99 @@ export interface GenerateSlotBody {
   count?: number;
 }
 
+// ─── Bundle delivery protocol ───────────────────────────────────────────────
+
+/**
+ * Why a reference the asset owns is not in the delivered list. A CLOSED set,
+ * mirroring `DroppedReason` in `backend/app/schemas/assets.py` — the backend's
+ * response model validates it, so a value outside these three never reaches
+ * the wire.
+ *
+ * `provider_no_refs` is not a flavour of `over_limit`: the provider takes no
+ * references at all, and the remedy is a different model rather than fewer
+ * picks. A UI that collapses the two sends people unpicking references that
+ * were never going to be sent.
+ */
+export type DroppedReason = 'no_image_file' | 'over_limit' | 'provider_no_refs';
+
+export interface DroppedReference {
+  resource_id: string;
+  reason: DroppedReason;
+}
+
+/**
+ * What an asset hands a generator running one specific model (spec §6.3).
+ *
+ * `dropped` is the load-bearing half and must be rendered: every reference
+ * IN SCOPE OF THE REQUEST that is not in `reference_resource_ids` is in there
+ * with a reason. `selectedFileIds` is what bounds that scope — with one, both
+ * lists describe the caller's own picks, so a run in which everything chosen
+ * was sent reports nothing rather than a standing alarm about files the caller
+ * never asked for. Reading only the id list reports a trimmed delivery as a complete
+ * one — the recorded "选了也生成了但图里没有" failure.
+ *
+ * `max_refs` is the PROVIDER's ceiling, echoed so a caller can say "2 of 5
+ * sent" without inferring it from the two list lengths (which would read 2 as
+ * the ceiling for an asset that only owns two files).
+ */
+export interface AssetBundle {
+  prompt: { positive: string; negative: string };
+  reference_resource_ids: string[];
+  dropped: DroppedReference[];
+  max_refs: number;
+}
+
+export interface BundleOptions {
+  /** A catalog row NAME, the same vocabulary the model picker shows. */
+  model: string;
+  loadoutId?: string;
+  /**
+   * The caller's checklist — the resource ids it wants considered.
+   *
+   * THREE states, and the third is the one that needs the care:
+   *
+   *  * `undefined` — no checklist. Every file the asset owns is a candidate,
+   *    which is what the asset sheet asks.
+   *  * a non-empty array — those files, and only those.
+   *  * an EMPTY array — the user unticked everything. Sent as one empty value
+   *    (`?selected_file_ids=`) because a zero-length repeated parameter is
+   *    indistinguishable from an absent one on the wire, and the backend reads
+   *    absent as "send them all". Collapsing the two here would ship exactly
+   *    the references the user just removed.
+   *
+   * Passing it is what makes the provider's ceiling trim the right population.
+   * Trimming server-side over everything and intersecting client-side after is
+   * the SAME two steps in the wrong order, and it delivers nothing whenever
+   * the picks are not a prefix of the priority order.
+   */
+  selectedFileIds?: readonly string[];
+}
+
+/**
+ * Compose this asset's delivery payload for `model`.
+ *
+ * `model` is required because the answer depends on it — the reference ceiling
+ * belongs to the provider, so the same asset bundles differently for codex
+ * (nine references) and for ark (none). A read: no provider call, no writes,
+ * no cost.
+ */
+export async function fetchBundle(
+  scopeId: string,
+  assetId: string,
+  opts: BundleOptions,
+): Promise<AssetBundle> {
+  const qs = query(scopeId, { model: opts.model, loadout_id: opts.loadoutId });
+  if (opts.selectedFileIds !== undefined) {
+    // `append`, not `set`: the parameter is repeatable. The empty-array arm
+    // still appends once — see `BundleOptions.selectedFileIds`.
+    if (opts.selectedFileIds.length === 0) qs.append('selected_file_ids', '');
+    else for (const id of opts.selectedFileIds) qs.append('selected_file_ids', id);
+  }
+  return envelopeFetch<AssetBundle>(`${BASE()}/${assetId}/bundle?${qs}`, {
+    headers: await getAuthHeaders(),
+  });
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -467,6 +604,20 @@ function normalizeDetail(raw: unknown): AssetRowDetail {
     links: Array.isArray(row.links) ? row.links : [],
     linked_by: Array.isArray(row.linked_by) ? row.linked_by : [],
     loadouts: Array.isArray(row.loadouts) ? row.loadouts : [],
+    // NOT defaulted, unlike the four arrays above — that is the whole point of
+    // the opt-in. A response with no `used_in` (nobody asked, or an older
+    // backend) stays `undefined`; only a response that HAS one is normalized,
+    // and then each list is checked on its own so a payload carrying
+    // `canvases` but no `storyboards` does not lose the half it did send.
+    used_in:
+      row.used_in === undefined || row.used_in === null
+        ? undefined
+        : {
+            canvases: Array.isArray(row.used_in.canvases) ? row.used_in.canvases : [],
+            storyboards: Array.isArray(row.used_in.storyboards)
+              ? row.used_in.storyboards
+              : [],
+          },
   };
 }
 
@@ -535,16 +686,75 @@ export async function fetchAssetCounts(scopeId: string): Promise<AssetCounts> {
   });
 }
 
-/** One asset with its files, links and loadouts. */
+export interface AssetDetailOptions {
+  /**
+   * Ask for `used_in` — the Used In panel's canvases.
+   *
+   * OFF by default, and that is a cost decision with a visible consequence:
+   * server-side it is a five-table aggregate, and a canvas board can hold
+   * dozens of asset cards that each fetch their own detail on mount. A caller
+   * that does not set this gets `used_in === undefined`, which means "not
+   * asked" — never "used nowhere".
+   *
+   * The sheet sets it. The canvas card, the asset picker, the legacy-card
+   * migration and the seeding path all render the asset's face only, so they
+   * do not.
+   */
+  usedIn?: boolean;
+}
+
+/** One asset with its files, links and loadouts (and, on request, its usage). */
 export async function fetchAssetDetail(
   scopeId: string,
   id: string,
+  opts: AssetDetailOptions = {},
 ): Promise<AssetRowDetail> {
+  const qs = query(scopeId, {
+    include_used_in: opts.usedIn ? 'true' : undefined,
+  });
   return normalizeDetail(
-    await envelopeFetch<unknown>(`${BASE()}/${id}?${query(scopeId)}`, {
+    await envelopeFetch<unknown>(`${BASE()}/${id}?${qs}`, {
       headers: await getAuthHeaders(),
     }),
   );
+}
+
+/**
+ * The three pre-P3 canvas card kinds `GET /assets/resolve-legacy` can map.
+ *
+ * These are the smart node TYPES the old entity canvases wrote
+ * (`character` / `location` / `prop`), and they are also the two legacy tables'
+ * vocabulary — `character` came from `_legacy_project_characters`, the other
+ * two from `_legacy_project_lib_entities`. The backend owns that mapping; the
+ * client only has to name the kind.
+ */
+export type LegacyEntityKind = 'character' | 'location' | 'prop';
+
+/**
+ * The asset a pre-P3 canvas card became, or `null` when there is none.
+ *
+ * `null` is a 200, not an error: the question was well formed and the answer is
+ * "no asset in this scope carries that provenance" — the entity's project
+ * never migrated. (Adoption used to be a second cause; the migration now
+ * stamps the adopted asset's `attrs.legacy_ids`, so an entity merged into a
+ * hand-made asset resolves like any other. Rows migrated before that change
+ * still answer `null` until the backfill is re-run.) A caller must treat
+ * `null` as "unmigrated" and leave the legacy card alone. Matching on name or
+ * type instead would rewire a card to an asset nobody chose.
+ *
+ * `legacyId` is a Snowflake string on the way out; the router parses it back to
+ * the JSON number the migration wrote.
+ */
+export async function resolveLegacyAsset(
+  scopeId: string,
+  kind: LegacyEntityKind,
+  legacyId: string,
+): Promise<string | null> {
+  const data = await envelopeFetch<{ asset_id?: string | null } | null>(
+    `${BASE()}/resolve-legacy?${query(scopeId, { kind, legacy_id: legacyId })}`,
+    { headers: await getAuthHeaders() },
+  );
+  return data?.asset_id ?? null;
 }
 
 /**

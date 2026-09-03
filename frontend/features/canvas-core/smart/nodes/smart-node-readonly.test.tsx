@@ -167,6 +167,28 @@ const OUTPUT_DATA = {
 
 const CASES: NodeCase[] = [
   {
+    // The reference-file CHECKLIST is the asset card's other write
+    // affordance, and it cannot appear here: this file renders the nodes
+    // with no Router, so `useCanvasScope` answers an empty scope, the card
+    // asks the assets API nothing (deliberately — an empty `scope_id` is a
+    // 403, not an unscoped query) and there are no files to list. Its
+    // read-only behaviour is pinned in `AssetNodeView.test.tsx`, which
+    // renders inside a route and stubs the detail fetch.
+    name: 'asset',
+    type: 'asset',
+    data: {
+      asset_id: '727145299382534300',
+      loadout_id: null,
+      selected_file_ids: [],
+      name: 'Cole Bannon',
+      asset_type: 'character',
+      cover_file_id: null,
+      readiness_state: 'ready',
+    },
+    writes: [{ what: 'loadout picker', label: 'Asset loadout' }],
+    reads: [{ what: 'Open Sheet link', testId: 'asset-node-open-sheet' }],
+  },
+  {
     name: 'character',
     type: 'character',
     data: { name: 'Ada', role_tag: 'lead', description: 'engineer', portrait_url: '' },

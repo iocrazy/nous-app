@@ -44,6 +44,12 @@ export interface GenerationTask {
      *  Always written by the workflow, `[]` meaning "nothing dropped" — an
      *  ABSENT key means an older task row, not a clean run. */
     dropped_knobs?: string[];
+    /** References the run could not resolve, each with a reason code (P4
+     *  asset library). Same contract as `dropped_knobs`: always written,
+     *  `[]` meaning "every reference was used", an ABSENT key meaning an
+     *  older task row. Reported SEPARATELY from `dropped_knobs` because a
+     *  run can drop a knob, a reference, or both. */
+    dropped_refs?: Array<{ url: string; reason: string }>;
     [k: string]: unknown;
   };
 }

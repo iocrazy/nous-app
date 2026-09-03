@@ -27,7 +27,7 @@ vi.mock('../services/canvasGenerationService', () => ({
   PollStopped: class PollStopped extends Error {},
 }));
 
-import { withGenerationRunner } from './generationRunner';
+import { noAssetInputs, withGenerationRunner } from './generationRunner';
 import type { RunnerContext } from './runner';
 
 const baseCtx = (over: Partial<RunnerContext> = {}): RunnerContext =>
@@ -39,12 +39,16 @@ const baseCtx = (over: Partial<RunnerContext> = {}): RunnerContext =>
     gen: { kind: 'image', model: 'm', ratio: 'auto', count: 1 },
     source_url: '/api/v1/generated-media/7/cover',
     source_urls: ['/api/v1/generated-media/7/cover'],
-    entity_ref: null,
+    asset_ref: null,
     ...over,
   }) as RunnerContext;
 
-const run = (ctx: RunnerContext) =>
+const run = (
+  ctx: RunnerContext,
+  assetInputs: Parameters<typeof withGenerationRunner>[1]['assetInputs'] = noAssetInputs,
+) =>
   withGenerationRunner(async () => ({ ok: true, text: '', error: null }), {
+    assetInputs,
     canvasId: 'c1',
   })(ctx);
 
@@ -86,6 +90,29 @@ describe('auto ratio at dispatch', () => {
     await run(baseCtx());
     expect(dispatchedParams()).not.toHaveProperty('ratio');
   });
+
+  it('follows the WIRED input, not an asset card reference (P4 Task 5)', async () => {
+    // Asset references LEAD `source_urls`, so the naive `source_urls[0]` read
+    // would start measuring them. `auto` means "match the image feeding this
+    // prompt", and an asset reference is a SUBJECT, not a composition —
+    // following it would turn a landscape board portrait because someone wired
+    // a character card in.
+    measureRatio.mockResolvedValue('16:9');
+    await run(
+      baseCtx({ source_url: undefined } as never),
+      async () => ({
+        reference_urls: ['/api/v1/resources/10/cover'],
+        prompt_prefix: '',
+        negative: '',
+        contributions: [],
+      }),
+    );
+    expect(measureRatio).toHaveBeenCalledWith('/api/v1/generated-media/7/cover');
+    expect(dispatchedParams().source_urls).toEqual([
+      '/api/v1/resources/10/cover',
+      '/api/v1/generated-media/7/cover',
+    ]);
+  });
 });
 
 // ── The resolved ratio has to reach the output slot (Task 7 fix round 1) ────
@@ -100,6 +127,9 @@ const dispatchedRatioArg = async (ctx: RunnerContext): Promise<unknown> => {
   const seen: unknown[][] = [];
   await withGenerationRunner(async () => ({ ok: true, text: '', error: null }), {
     canvasId: 'c1',
+    // No asset inputs in play: the resolver contract (assets P4) is always
+    // called, so it must answer with the empty composition, not be absent.
+    assetInputs: async () => ({ reference_urls: [], prompt_prefix: '', negative: '', contributions: [] }),
     onDispatched: (...a: unknown[]) => seen.push(a),
   })(ctx);
   return seen[0]?.[4];

@@ -96,6 +96,17 @@ class _FakeService:
             "resource_id": RESOURCE,
         }
 
+    # Only this id exists, and only in SCOPE — so "not found" and "another
+    # team's row" reach the router as the same typed refusal the service
+    # raises, rather than as two shapes the client has to tell apart.
+    async def get_item(self, gen_id, scope_id):
+        self.calls.append(("get_item", gen_id, scope_id))
+        if str(gen_id) != GEN:
+            raise AssetError(
+                404, "generation_not_found", "Generation not found in this scope"
+            )
+        return make_item()
+
     async def delete(self, gen_id, scope_id):
         self.calls.append(("delete", gen_id, scope_id))
 
@@ -560,3 +571,87 @@ async def test_include_intermediate_flag_reaches_the_service(app):
         r = await c.get(f"/api/v1/generated?scope_id={SCOPE}&include_intermediate=true")
     assert r.status_code == 200
     assert _filters(app)["include_intermediate"] is True
+
+
+# ── one item by id ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_returns_the_same_wire_shape_as_the_list(app):
+    """The parity that matters at the boundary: a client that renders a card
+    from the list must be able to render the same card from this endpoint
+    without a second code path. The service-level half of this pin (the SAME
+    row through both methods) lives in
+    ``tests/services/library/test_generated_inbox_service.py``."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        listed = await c.get(f"/api/v1/generated?scope_id={SCOPE}")
+        one = await c.get(f"/api/v1/generated/{GEN}?scope_id={SCOPE}")
+
+    assert one.status_code == 200, one.text
+    assert one.json()["success"] is True
+    assert one.json()["data"] == listed.json()["data"]["items"][0]
+    assert ("get_item", int(GEN), int(SCOPE)) in app.state.fake.calls
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_serialises_the_datetime(app):
+    """Same trap as the list: the service builds items with ``model_dump()``,
+    so ``created_at`` is a ``datetime`` and a bare ``JSONResponse`` would 500 on
+    the happy path."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated/{GEN}?scope_id={SCOPE}")
+
+    assert r.json()["data"]["created_at"].startswith("2026-08-20T12:00:00")
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_404s_in_the_error_envelope(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated/800000000000000009?scope_id={SCOPE}")
+
+    assert r.status_code == 404
+    assert r.json() == {
+        "success": False,
+        "error": {
+            "code": "generation_not_found",
+            "detail": "Generation not found in this scope",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_refuses_a_non_member_before_reading(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get(f"/api/v1/generated/{GEN}?scope_id=666")
+
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "not_a_member"
+    assert not [c for c in app.state.fake.calls if c[0] == "get_item"]
+
+
+@pytest.mark.asyncio
+async def test_counts_is_not_captured_as_a_gen_id(app):
+    """Route-order regression, the mirror of the one on ``/assets/counts``.
+
+    ``GET /{gen_id}`` is registered AFTER ``/counts``. Registered before it,
+    FastAPI would match "counts" as the ``int`` path param and the tab counters
+    would answer 422 about an id nobody sent. The line after is the negative
+    control: the dynamic route still works.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        counts = await c.get(f"/api/v1/generated/counts?scope_id={SCOPE}")
+        one = await c.get(f"/api/v1/generated/{GEN}?scope_id={SCOPE}")
+
+    assert counts.status_code == 200, counts.text
+    assert counts.json()["data"] == {"unreviewed": 4, "saved": 2, "in_assets": 1}
+    assert one.status_code == 200 and one.json()["data"]["id"] == GEN
+
+
+def test_the_literal_counts_route_is_registered_before_the_dynamic_get():
+    """Read off the router itself, not off one request."""
+    paths = [
+        (getattr(r, "path", ""), sorted(getattr(r, "methods", None) or []))
+        for r in gr.router.routes
+    ]
+    gets = [p for p, m in paths if m == ["GET"]]
+    assert gets.index("/generated/counts") < gets.index("/generated/{gen_id}")
