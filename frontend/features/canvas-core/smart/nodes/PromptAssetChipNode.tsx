@@ -25,6 +25,7 @@ import { PROMPT_ASSET_REF } from './promptImageRefs';
 
 function PromptAssetChipView({ node, deleteNode, editor }: NodeViewProps): React.ReactElement {
   const { asset_id, name, asset_type, cover_file_id } = node.attrs as MentionedAsset;
+  // `ref_resource_ids` rides along in the attrs for the strip; nothing renders it.
   // An asset with no cover is not an error — a prompt asset never has one.
   // Its type icon carries the same information the picture would.
   const Icon = ASSET_TYPE_ICON[asset_type] ?? ASSET_TYPE_ICON.prop;
@@ -74,6 +75,11 @@ export const PromptAssetChipNode = Node.create({
     name: { default: '' },
     asset_type: { default: 'prop' },
     cover_file_id: { default: null },
+    // `null` is the tiptap-side spelling of ABSENT (an attribute has to have a
+    // default). `collectAssetRefs` turns it back into a missing key, because
+    // "not asked" and "no reference images" are different answers and the
+    // strip renders them differently.
+    ref_resource_ids: { default: null },
   }),
 
   parseHTML: () => [{ tag: 'span[data-prompt-asset-id]' }],

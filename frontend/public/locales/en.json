@@ -3423,7 +3423,9 @@
       "count_one": "{{count}} result",
       "count_other": "{{count}} results",
       "hint": "Up/Down to move · Enter to insert · Esc to close",
-      "bundleFailed": "A mentioned asset could not be read on the last run"
+      "bundleFailed": "A mentioned asset could not be read on the last run",
+      "spanKnown": "{{name}} — {{count}} reference images",
+      "spanUnknown": "{{name}} — how many reference images it adds is not known yet"
     }
   },
   "modelParams": {

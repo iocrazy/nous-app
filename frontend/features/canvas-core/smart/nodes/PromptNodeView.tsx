@@ -40,7 +40,9 @@ import {
 import { useCanvasScope } from '../canvasScope';
 import type { MentionedAsset } from '../mentionedAssets';
 import { useModelCapabilities } from './useModelCapabilities';
-import type { AssetSummary } from '../../../../services/assetsService';
+import { fetchAssetDetail, type AssetSummary } from '../../../../services/assetsService';
+import { primarySlotFileIds } from '../assetFiles';
+import { promptStripEntries } from '../promptStrip';
 import { ASSET_TYPE_ICON } from '../../../../components/resources/assets/assetTypeMeta';
 import { GenFooterControls } from './GenFooterControls';
 import { AssetPromptPicker } from './AssetPromptPicker';
@@ -240,7 +242,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch],
   );
-  const mentionedAssets = (mentioned_assets ?? []) as MentionedAsset[];
   // While the picker is open, Escape, the arrows and Enter belong to it, not
   // the text. The picker never takes focus (the editor must keep it, or its
   // blur closes the popover), so its keys arrive here and are forwarded.
@@ -366,7 +367,25 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const caps = useModelCapabilities(gen?.model ?? null);
   const maxRefs = caps?.max_refs ?? null;
 
-  /** The `@Image N` candidates: every durable input this node already has. */
+  // The strip, in the order the run delivers — mentions (asset references)
+  // first, then the wired images, with the connected asset cards' references
+  // counted ahead of both. `promptStrip.ts` owns the arithmetic AND the cases
+  // where it refuses to answer; this component only draws what it returns.
+  const stripEntries = useMemo(
+    () =>
+      promptStripEntries(
+        id,
+        storeNodes as CanvasNode[],
+        storeConnections as CanvasConnection[],
+        maxRefs,
+      ),
+    [id, storeNodes, storeConnections, maxRefs],
+  );
+
+  /** The `@Image N` candidates: every durable input this node already has.
+   *  Numbered by their position among the WIRED images, which is what the
+   *  `@Image N` alias has always meant — not the delivery position, which
+   *  moves as assets are added and would rewrite chips already in the text. */
   const mentionImages = useMemo(
     () => inputUrls.map((url, i) => ({ url, label: `Image ${i + 1}` })),
     [inputUrls],
@@ -386,18 +405,34 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   );
 
   const handleMentionAsset = useCallback(
-    (asset: AssetSummary) => {
-      // No node is created. The chip IS the reference — `resolveAssetInputs`
-      // bundles it at run time exactly like a wired card would be.
+    async (asset: AssetSummary) => {
+      // Close FIRST: the detail fetch below is an interactive gap, and leaving
+      // the rows up would let a second click start a second insert.
+      mention.closePicker();
+      // The asset's primary-slot files, for the reference strip only. The RUN
+      // fetches this again at dispatch (a stale snapshot would deliver the
+      // wrong files); what it buys here is that one mention's span on the
+      // strip is a known number instead of a guess.
+      //
+      // A failure does NOT block the mention — the chip is fully functional
+      // without it and the run re-asks. It is logged, and the strip renders
+      // the mention as "span unknown" rather than inventing a count.
+      let refIds: string[] | undefined;
+      try {
+        const detail = await fetchAssetDetail(scopeId, asset.id);
+        refIds = primarySlotFileIds(detail, null);
+      } catch (err) {
+        console.error('[PromptNodeView] mention detail fetch failed:', err);
+      }
       bodyEditorRef.current?.insertAsset({
         asset_id: asset.id,
         name: asset.name,
         asset_type: asset.asset_type,
         cover_file_id: asset.cover_file_id,
+        ...(refIds ? { ref_resource_ids: refIds } : {}),
       });
-      mention.closePicker();
     },
-    [mention],
+    [mention, scopeId],
   );
 
   // ── Library picker handler ───────────────────────────────────────────────
@@ -568,109 +603,136 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </div>
           </div>
         )}
-        {inputUrls.length + mentionedAssets.length > 0 && (
+        {stripEntries.length > 0 && (
           <div
             data-testid="prompt-input-row"
             className="mb-1.5 flex flex-wrap items-center gap-1.5"
           >
-            {inputUrls.map((url, i) => (
-              <span key={url} className="relative inline-flex">
-                <button
-                  type="button"
-                  data-testid="prompt-input-thumb"
-                  title={sourceRef === url ? 'Selected as source' : 'Use as source'}
-                  onClick={() => toggleSourceRef(url)}
-                  draggable={!readOnly && manualUrlSet.has(url)}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData('application/x-nous-ref', url);
-                    e.dataTransfer.effectAllowed = 'move';
-                  }}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes('application/x-nous-ref'))
-                      e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    const from = e.dataTransfer.getData('application/x-nous-ref');
-                    if (!from || from === url) return;
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const before = e.clientX < rect.left + rect.width / 2;
-                    reorderManualRefs(from, url, before);
-                  }}
-                  disabled={readOnly}
-                  className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
-                    sourceRef === url
-                      ? 'border-canvas-strong ring-1 ring-canvas-strong'
-                      : 'border-canvas-line/60'
-                  }`}
-                >
-                  <img src={mediaSrc(url)} alt={`Input ${i + 1}`} className="h-full w-full object-cover" />
-                  {/* IC 图N corner badge */}
-                  <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">{i + 1}</span>
-                </button>
-                {/* Manual refs are removable (IC input-thumb-remove). */}
-                {!readOnly && manualUrlSet.has(url) && (
+            {/* DELIVERY ORDER, not drawing convenience: `generationRunner`
+                builds `[...asset references, ...wired images]`, so mentions
+                come FIRST here and the position badges count the wired asset
+                cards' references ahead of both. The strip is a claim about
+                which references survive the provider's ceiling — saying it
+                backwards is the confidently-wrong badge this repo has paid
+                for before. `promptStrip.ts` owns the arithmetic and the
+                cases where it declines to answer. */}
+            {stripEntries.map((entry) =>
+              entry.kind === 'mention' ? (
+                (() => {
+                  const asset = entry.asset;
+                  const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
+                  return (
+                    <span
+                      key={`mention-${asset.asset_id}`}
+                      data-testid="prompt-mention-thumb"
+                      data-asset-id={asset.asset_id}
+                      data-position={entry.position ?? ''}
+                      data-ref-count={entry.refCount ?? ''}
+                      data-beyond-limit={entry.beyondLimit ? 'true' : 'false'}
+                      title={
+                        entry.beyondLimit
+                          ? t('canvas.asset.refsLimit', {
+                              count: maxRefs ?? 0,
+                              defaultValue:
+                                'This model takes fewer reference images. The rest are not sent.',
+                            })
+                          : entry.refCount === null
+                            ? t('canvas.mention.spanUnknown', {
+                                name: asset.name,
+                                defaultValue:
+                                  '{{name}} — how many reference images it adds is not known yet',
+                              })
+                            : t('canvas.mention.spanKnown', {
+                                name: asset.name,
+                                count: entry.refCount,
+                                defaultValue: '{{name}} — {{count}} reference images',
+                              })
+                      }
+                      className={`relative inline-flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded border border-canvas-line/60 text-canvas-muted ${
+                        entry.beyondLimit ? 'opacity-40' : ''
+                      }`}
+                    >
+                      {asset.cover_file_id ? (
+                        <img
+                          src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
+                          alt={asset.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Icon size={11} />
+                      )}
+                      {/* No badge when the position is unknown: a number would
+                          be a claim about the request that nothing supports. */}
+                      {entry.position !== null && (
+                        <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
+                          {entry.position}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()
+              ) : (
+                <span key={`input-${entry.url}`} className="relative inline-flex">
                   <button
                     type="button"
-                    data-testid="remove-reference"
-                    aria-label="Remove reference"
-                    onClick={() => removeManualRef(url)}
-                    className="nodrag absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-canvas-strong text-[8px] font-bold text-canvas-card"
+                    data-testid="prompt-input-thumb"
+                    data-position={entry.position ?? ''}
+                    data-beyond-limit={entry.beyondLimit ? 'true' : 'false'}
+                    title={sourceRef === entry.url ? 'Selected as source' : 'Use as source'}
+                    onClick={() => toggleSourceRef(entry.url)}
+                    draggable={!readOnly && manualUrlSet.has(entry.url)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/x-nous-ref', entry.url);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      if (e.dataTransfer.types.includes('application/x-nous-ref'))
+                        e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      const from = e.dataTransfer.getData('application/x-nous-ref');
+                      if (!from || from === entry.url) return;
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const before = e.clientX < rect.left + rect.width / 2;
+                      reorderManualRefs(from, entry.url, before);
+                    }}
+                    disabled={readOnly}
+                    className={`nodrag relative h-6 w-6 shrink-0 overflow-hidden rounded border ${
+                      sourceRef === entry.url
+                        ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                        : 'border-canvas-line/60'
+                    } ${entry.beyondLimit ? 'opacity-40' : ''}`}
                   >
-                    ×
-                  </button>
-                )}
-              </span>
-            ))}
-            {/* @-mentioned assets ride here too, AFTER the wired inputs and in
-                the same order the run delivers them. They are references like
-                any other — leaving them out would make the strip's count
-                disagree with what is actually sent, which is the exact class
-                of drift the run badge exists to catch. Their thumbnail is the
-                asset's cover, badged with the type icon so a card reference
-                and a picture reference are not confused. */}
-            {mentionedAssets.map((asset, i) => {
-              const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
-              const rank = inputUrls.length + i;
-              // Past the provider's ceiling: this reference WILL be trimmed,
-              // and the trim is from the tail. `maxRefs === null` is "unknown",
-              // not "zero" — it greys nothing.
-              const beyond = maxRefs !== null && rank >= maxRefs;
-              return (
-                <span
-                  key={asset.asset_id}
-                  data-testid="prompt-mention-thumb"
-                  data-asset-id={asset.asset_id}
-                  data-beyond-limit={beyond ? 'true' : 'false'}
-                  title={
-                    beyond
-                      ? t('canvas.asset.refsLimit', {
-                          count: maxRefs ?? 0,
-                          defaultValue: 'This model takes fewer reference images. The rest are not sent.',
-                        })
-                      : asset.name
-                  }
-                  className={`relative inline-flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded border border-canvas-line/60 text-canvas-muted ${
-                    beyond ? 'opacity-40' : ''
-                  }`}
-                >
-                  {asset.cover_file_id ? (
                     <img
-                      src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
-                      alt={asset.name}
+                      src={mediaSrc(entry.url)}
+                      alt={entry.position !== null ? `Input ${entry.position}` : 'Input'}
                       className="h-full w-full object-cover"
                     />
-                  ) : (
-                    <Icon size={11} />
+                    {/* IC 图N corner badge */}
+                    {entry.position !== null && (
+                      <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
+                        {entry.position}
+                      </span>
+                    )}
+                  </button>
+                  {/* Manual refs are removable (IC input-thumb-remove). */}
+                  {!readOnly && manualUrlSet.has(entry.url) && (
+                    <button
+                      type="button"
+                      data-testid="remove-reference"
+                      aria-label="Remove reference"
+                      onClick={() => removeManualRef(entry.url)}
+                      className="nodrag absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-canvas-strong text-[8px] font-bold text-canvas-card"
+                    >
+                      ×
+                    </button>
                   )}
-                  <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
-                    {rank + 1}
-                  </span>
                 </span>
-              );
-            })}
+              ),
+            )}
             <span className="text-[10px] font-semibold text-canvas-muted">
-              {inputUrls.length + mentionedAssets.length} inputs
+              {stripEntries.length} inputs
             </span>
             {last_mention_error && (
               <span
@@ -690,9 +752,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 data-testid="add-reference"
                 aria-label="Add reference image"
                 onClick={() => setRefPickerOpen((v) => !v)}
-                disabled={inputUrls.length + mentionedAssets.length >= MAX_REFERENCE_IMAGES}
+                disabled={stripEntries.length >= MAX_REFERENCE_IMAGES}
                 title={
-                  inputUrls.length + mentionedAssets.length >= MAX_REFERENCE_IMAGES
+                  stripEntries.length >= MAX_REFERENCE_IMAGES
                     ? `Reference limit reached (${MAX_REFERENCE_IMAGES})`
                     : 'Add reference image'
                 }
@@ -703,7 +765,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             )}
           </div>
         )}
-        {inputUrls.length + mentionedAssets.length === 0 && gen && !readOnly && (
+        {stripEntries.length === 0 && gen && !readOnly && (
           <div className="mb-1.5 flex items-center">
             <button
               type="button"

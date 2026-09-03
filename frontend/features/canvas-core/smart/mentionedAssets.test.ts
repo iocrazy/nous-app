@@ -128,28 +128,44 @@ describe('promptBodyForRun', () => {
 });
 
 describe('every run site reads the body through promptBodyForRun', () => {
-  // A source scan, because the failure is a MISSING call and no assertion
-  // about behaviour can see one that was never wired. Each of these files
-  // builds a `RunnerContext` for a real run path.
-  const SITES = [
-    'CanvasComposer.tsx',
-    'regenerate.ts',
-    'chainRun.ts',
-    'loopRunner.ts',
-  ];
+  // A source scan, because the failure is a MISSING call and no behavioural
+  // assertion can see one that was never wired.
+  //
+  // The file list is DERIVED, not typed out. A hardcoded list is blind to the
+  // exact case `promptBodyForRun`'s own doc warns about — a FIFTH run site that
+  // builds a `RunnerContext` and reads `data.body`. It would compile, pass
+  // every test, and ship `@[asset:…]` to the provider.
+  //
+  // "Builds a run body" is spelled as: mentions `RunnerContext` and is not the
+  // module that DEFINES it. That is what every run site has in common and what
+  // nothing else in this directory does.
+  const DIR = __dirname;
+  const DEFINITION = 'runner.ts';
 
-  it.each(SITES)('%s does not read data.body directly', (file) => {
-    const src = fs.readFileSync(path.resolve(__dirname, file), 'utf8');
-    expect(src, `${file} never imports the renderer`).toContain('promptBodyForRun');
-    // `body: data.body` / `body: d.body ?? ''` — the shapes this file's history
-    // actually contains. A match means a run site went back to the raw field.
-    const bare = /\bbody:\s*(?:data|d)\.body\b/.exec(src);
-    expect(bare?.[0] ?? null, `${file} builds a run body from the raw field`).toBeNull();
+  const runSites = fs
+    .readdirSync(DIR)
+    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .filter((f) => f !== DEFINITION)
+    .filter((f) => fs.readFileSync(path.join(DIR, f), 'utf8').includes('RunnerContext'))
+    .sort();
+
+  it('found the run sites at all — an empty scan would pass every case below', () => {
+    // A positive control with a floor, not just `> 0`: the four known sites are
+    // composer Run/Cascade, chain run, loop round and rerun/retry. A scan that
+    // silently matched one file would otherwise look like a passing guard.
+    expect(runSites.length).toBeGreaterThanOrEqual(4);
+    for (const known of ['CanvasComposer.tsx', 'regenerate.ts', 'chainRun.ts', 'loopRunner.ts']) {
+      expect(runSites, `${known} is no longer recognised as a run site`).toContain(known);
+    }
   });
 
-  it('found real files — an empty scan would pass every case above', () => {
-    for (const file of SITES) {
-      expect(fs.existsSync(path.resolve(__dirname, file)), file).toBe(true);
-    }
+  it.each(runSites)('%s renders the body instead of reading the raw field', (file) => {
+    const src = fs.readFileSync(path.join(DIR, file), 'utf8');
+    expect(src, `${file} never imports the renderer`).toContain('promptBodyForRun');
+    // Any `body:` fed straight from a `.body` property, whatever the holder is
+    // called. The narrow `(?:data|d)` version this replaced would have missed
+    // `body: node.data.body` — the same blindness in a different direction.
+    const bare = /\bbody:\s*[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*\.body\b/.exec(src);
+    expect(bare?.[0] ?? null, `${file} builds a run body from a raw .body field`).toBeNull();
   });
 });

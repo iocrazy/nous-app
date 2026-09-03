@@ -114,11 +114,15 @@ export function collectAssetRefs(doc: JSONContent): MentionedAsset[] {
     const id = typeof attrs.asset_id === 'string' ? attrs.asset_id : '';
     if (!id || seen.has(id)) return;
     seen.add(id);
+    const refIds = attrs.ref_resource_ids;
     out.push({
       asset_id: id,
       name: attrs.name ?? '',
       asset_type: (attrs.asset_type ?? 'prop') as MentionedAsset['asset_type'],
       cover_file_id: attrs.cover_file_id ?? null,
+      // OMITTED, not `[]`, when unknown — see `MentionedAsset`. An empty array
+      // is a real answer that the strip is entitled to trust.
+      ...(Array.isArray(refIds) ? { ref_resource_ids: refIds.map(String) } : {}),
     });
   });
   return out;

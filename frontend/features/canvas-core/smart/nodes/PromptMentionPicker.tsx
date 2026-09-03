@@ -397,7 +397,17 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
               {assets.map((asset, i) => {
                 const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
                 return (
-                  <div key={asset.id} className="relative flex flex-col items-center gap-0.5">
+                  // `group` belongs HERE, on the wrapper — Tailwind compiles
+                  // `group-hover:` to `.group:hover .group-hover\:…`, so with
+                  // the class on the sibling pick button instead, the preview
+                  // key had no `.group` ancestor and its reveal rule never
+                  // matched. The affordance existed only for a pointer that
+                  // had already found an invisible 14px target in the corner,
+                  // and the tests locate it by testid so nothing caught it.
+                  <div
+                    key={asset.id}
+                    className="group relative flex flex-col items-center gap-0.5"
+                  >
                     <button
                       type="button"
                       data-testid="mention-asset-option"
@@ -412,7 +422,7 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
                         e.preventDefault();
                         onPickAsset(asset);
                       }}
-                      className="nodrag group flex w-full flex-col items-center gap-0.5"
+                      className="nodrag flex w-full flex-col items-center gap-0.5"
                     >
                       <span
                         className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border text-canvas-muted ${
@@ -456,7 +466,9 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
                             ),
                           });
                         }}
-                        className="nodrag absolute right-0 top-0 rounded-bl-md rounded-tr-md bg-canvas-strong/80 p-0.5 text-canvas-card opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100 focus:opacity-100"
+                        // Revealed by hovering the TILE, not by finding the
+                        // key. `focus:` keeps it reachable without a pointer.
+                        className="nodrag absolute right-0 top-0 rounded-bl-md rounded-tr-md bg-canvas-strong/90 p-0.5 text-canvas-card opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100 focus:opacity-100"
                       >
                         <Eye size={10} />
                       </button>

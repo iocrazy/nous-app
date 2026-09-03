@@ -48,6 +48,22 @@ export interface MentionedAsset {
   asset_type: AssetType;
   /** `resources.id` of the cover, for the chip and the input-strip thumbnail. */
   cover_file_id: string | null;
+  /**
+   * The asset's primary-slot files, snapshotted when the mention was inserted.
+   *
+   * DISPLAY ONLY — the run never reads it. `resolveAssetInputs` fetches the
+   * detail fresh at dispatch, because a stale snapshot would deliver the wrong
+   * files. What this buys is the input-reference strip: one mention expands to
+   * SEVERAL references behind one thumbnail, and without the count the strip
+   * cannot say where the next reference lands or which ones the provider's
+   * ceiling trims (see `promptStrip.ts`).
+   *
+   * ABSENT means NOT ASKED — a mention saved before this field existed, or one
+   * whose detail fetch failed at insert. It is not `[]`, which is a real answer
+   * (a `prompt` asset has no primary file slot and contributes no reference
+   * images). The strip renders the two differently on purpose.
+   */
+  ref_resource_ids?: string[];
 }
 
 /** The literal a mention writes into the prompt text. */
@@ -155,8 +171,11 @@ export function renderMentionText(
  * rerun/retry) and each builds its own `RunnerContext`. Reading `data.body`
  * directly at any of them ships the raw token to the provider, which is
  * invisible in a diff and invisible in a passing test — so the read is named,
- * and `mentionedAssets.guard.test.ts` fails if a run site goes back to the
- * bare field.
+ * and the source-scan guard at the bottom of `mentionedAssets.test.ts` fails if
+ * a run site goes back to the bare field. That guard DERIVES its file list by
+ * scanning this directory for anything that builds a `RunnerContext`, so a
+ * FIFTH run site is caught too — a hardcoded list would have been blind to
+ * exactly the growth this comment warns about.
  */
 export function promptBodyForRun(data: {
   body?: string;
