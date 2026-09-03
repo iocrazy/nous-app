@@ -15,7 +15,7 @@ Mockup（4 屏 + 三方案 + 分期）：https://claude.ai/code/artifact/f2ea214
 | 2 | 「加参考图」拾取器 `query` 写死为 `""`（`PromptNodeView.tsx:641`），`ResourcePickerSuggestion` 无输入框 | 喂给模型的参考图只能在前 50 条里按类型滚 |
 | 3 | Generated 收件箱从画布**不可达**（canvas-core 没有任何文件读 `generatedService` 列表） | 复用昨天的产出要绕：收件箱 → Save To Uploads → 回画布 → 加参考图 → 滚 |
 | 4 | 画布只认 `dataTransfer.files` 拖入（`CanvasSurface.tsx:160-168`）；没有任何侧栏/抽屉；所有拾取器单选即关（`AssetPickerDialog.tsx:127-129`、`PromptNodeView.tsx:302`、`useCanvasMentionPicker.ts:170`） | 五张参考图 = 五轮完整的打开 → 找 → 选 |
-| 5 | `@` 选中写 `resource_refs`（文本上下文，`PromptNodeView.tsx:167-180`）；加参考图写 `manual_refs`（真正的 i2i 输入，`:287-305`）；两者渲染同一个组件，界面不说明 | 两个长得一样的拾取，后果相反 |
+| 5 | `@` 选图片 = 正文内联 chip（chip 即参考图，`promptImageRefs.ts`）；加参考图写 `manual_refs`；`@` 选资产 = `@[asset:id]` token（Run 时 bundle 投递）。三种后果、两个入口，界面不说明（`resource_refs` 在 #2097 后已无写入方，只剩渲染与删除按钮） | 后果靠猜 |
 | 6 | `@` 的搜索走 `/api/v1/resources/search`，kind 词表无 character/prop | 资产不能 `@`；IC 对标项「@Character/@Scene/@Prop」（`2026-06-04-…-reference-catalog.md:83`）仍未建 |
 | 7 | 资产的文件勾选与 loadout 在**节点上**（`AssetNodeView.tsx:339-352, 441-480`），max_refs 裁剪结果只在跑完后可见（`:374, :401`） | 选中前不知道会送哪些文件 |
 | 8 | `lite` 画布无 Asset 入口（`DragCreateMenu.tsx:178-183`）；`storyboard` 无顶栏无 composer | 两种画布够不到资产 |
@@ -43,7 +43,7 @@ IC 的对应行为（行为规格，非代码）：一个全局素材库；提�
 
 ### 3.1 面板（岛式）
 - 位置：画布右侧浮层，`top/right/bottom = 14px`，宽 340px；Prompts 页 600px（列表 + 预览两栏）。圆角、阴影，样式沿用 `.canvas-island`。**不挤压画布**，底下画布照常可平移；面板内滚动，`nowheel nopan nodrag`。
-- 开关：顶栏 `Library` 胶囊、快捷键 `L`（与现有 `useCanvasShortcuts` 同表登记；输入框聚焦时不触发）、✕、Esc。宽度与最近页记在 `localStorage`（键 `canvas.library.v1`）。
+- 开关：顶栏 `Library` 胶囊、快捷键 `L`、✕、Esc。**现状修正**：`useCanvasShortcuts` 是一条 if/else 链，没有绑定表；`canvasShortcuts.ts` 那张表只供 `?` 帮助面板显示。加 `L` 要同时改两处（有 parity 测试则钉住）。其「输入中不触发」的守卫按事件目标判定（INPUT/TEXTAREA/SELECT/contentEditable），面板自身的搜索框已被覆盖，但面板打开时按 `L` 仍会到达画布——面板根元素 `stopPropagation` 掉 keydown，只把 Esc 透传。宽度与最近页记在 `localStorage`（键 `canvas.library.v1`）。
 - 小屏（视口宽 < 1100px）：改为底部抽屉，高 45vh，其余同。
 - 目标节点：从节点按钮打开时携带 `target = { nodeId, kind: 'prompt' }`，面板顶部一条绿色 target 条「Adding references to <node title>」/「Applying to <node title>」，✕ 可解除（转为浏览模式）。节点被选中并高亮，面板关闭时取消高亮。
 - 画布种类：`smart` 及四个实体画布全量；`lite` 与 `storyboard` 也能开（只提供 Media 页；`storyboard` 无 prompt 节点即无目标模式）。
@@ -53,14 +53,14 @@ IC 的对应行为（行为规格，非代码）：一个全局素材库；提�
 - 搜索（300ms 去抖）+ 分组 chip（用资产的 `tags`：Angle / Storyboard / Character / Product / Lighting / … 按数据动态列出，最多 8 个 + More）。
 - 列表 + 预览：列表行 = 标题 + 首行 + 分组；预览 = 正向 / 负向 / 参数建议（来自 prompt 资产的 `metadata.params`，无则不显示该段）。
 - 动作：**Insert positive**（把正向插到目标节点光标处；无目标时插到面板顶部提示「Select a prompt node」）/ **Apply all**（覆盖正文 + 负向 + 参数；覆盖前若正文非空弹一次确认）/ **Save current**（把目标节点的正文 + 负向存为 Mine 的新 prompt 资产，弹小表单：标题、分组）/ **New**（同表单，空白）。
-- 复用：`AssetPromptPicker` 的数据钩子（`fetchPromptAssets`、tag chip）抽成 hook 供面板用；旧的 420px 模态组件在本期结束时删除。
+- 数据来源**现状修正**：`fetchPromptAssets` 是浏览器直连 Supabase 查 `resources.gen_prompt*`，出错吞成 `[]`（RLS 下「拿空列表且不报错」的已知陷阱）。Prompts 页的 System / Mine / This project 一律走后端 `listAssets(scopeId, { type: 'prompt' })`；「带提示词的上传件」作为 Mine 第二源**必须经后端**，本期（P3）若没有现成端点就先不显示，不沿用直连查询。旧 420px 模态 `AssetPromptPicker` 在 P3 结束时删除。
 
 ### 3.3 Media 页
 - 三库分段（计数常显）：**Assets** / **Uploads** / **Generated**。
   - Assets：类型 chip Character / Location / Prop / Costume / Audio（不含 Prompt——归 Prompts 页）；Scope 切换 This project / All library（`library:'all'` 与今天 `AssetPickerDialog` 相同的显式退出）。
   - Uploads：Image / Video / Audio / Doc；走 `useResourceSearch`。
-  - Generated：范围 chip **This canvas**（默认）/ Today / All；默认隐藏中间件（mask / brush / reference 角色，同收件箱规则）；走 `/api/v1/generated` 列表。
-- 网格：justified 自适应（复用 `#2092` 的网格组件），多选（点选加 `⌘`、连选 `⇧`），单击 = 选中，双击 = 立即执行默认动作。
+  - Generated：范围 chip **This canvas**（默认）/ Today / All；默认隐藏中间件（`include_intermediate=false`，同收件箱规则）；走 `/api/v1/generated` 列表。**现状修正**：该端点今天只有 `project_id`（经 `canvases.project_id` 解析，是项目级过滤）没有 `canvas_id`；本期给它加 `canvas_id` 查询参数（与 `project_id` 同一 scope 校验），**不做**客户端过滤——分页下会丢项。
+- 网格：justified 自适应。**现状修正**：#2092 没有可复用的网格组件，只有与条目无关的纯函数 `computeJustifiedRows(aspectRatios, width, opts, reuse)` 与 `useJustifiedVirtualizer` 钩子（`ResourceGrid.tsx` 的格子标记与 resource 行耦合）；面板复用这两者、自写格子组件 `LibraryCell`。多选（点选加 `⌘`、连选 `⇧`），单击 = 选中，双击 = 立即执行默认动作。
 - 页脚：`N selected · M files`（M = 目标模型 max_refs 裁剪后真正会送的数量；无目标时不显示 M）+ **Place on canvas** + **Add as references**（有目标时为主按钮；无目标时只有 Place）。
 - 悬停预览（400ms）：大图、就绪状态、loadout 下拉（资产）、被几张画布引用、**文件表**（文件 / 槽位 / 当前模型下 Sends 或 Cut · max_refs）；换模型的后果一句话。数据来自 `GET /assets/{id}` + 现有 `useModelCapabilities`。
 - 拖放：`dataTransfer` 新增 MIME `application/x-nous-library`（JSON：`{ items: [{ store, id, url?, kind }] }`）。落点判定在 `CanvasSurface` 的 `onDrop`：
@@ -69,7 +69,7 @@ IC 的对应行为（行为规格，非代码）：一个全局素材库；提�
   - `media` 节点上 → 追加为该卡片的一项（与文件拖入同）。
 
 ### 3.4 `@` 调色板
-- 一个组件替换 `CanvasMentionPicker` + `MentionImageGrid`：首行写明后果（「Mentioning an asset sends its reference files at run. Mentioning an image adds it as a reference. Plain text stays text.」）；分组 **Assets / Input images / Uploads / Generated · this canvas**；`⇥` 切组；未就绪资产可见但标 Not ready。
+- **现状修正**：prompt 节点的 `@` 弹层在 #2097 已改为 `PromptMentionPicker`（Input images / Assets 两 tab、自带搜索、`library:'all'`）；`CanvasMentionPicker` 只剩「加参考图」弹层在用，`MentionImageGrid` 只剩贴身 composer 在用。因此本期是**扩展** `PromptMentionPicker`（加 Uploads / Generated 两组 + 后果首行），**替换** `CanvasMentionPicker`（加参考图弹层改为面板网格的紧凑态），贴身 composer 的 `MentionImageGrid` 留到 P3。首行写明后果（「Mentioning an asset sends its reference files at run. Mentioning an image adds it as a reference. Plain text stays text.」）；分组 **Assets / Input images / Uploads / Generated · this canvas**；`⇥` 切组；未就绪资产可见但标 Not ready。
 - 资产 `@` = 内联 chip（已拍板：Run 时按 bundle 自动投递，主槽为参考；缩略图进输入图条）。图片 `@` = 现有 `promptImageRef` chip。
 - 贴身 composer 的 `@` 与 prompt 节点共用此组件（补齐它今天缺的库来源）；两处弹出方向统一为**向下**（贴身 composer 的现状），prompt 节点空间不足时翻转。
 - 统一索引：前端 hook `useLibrarySearch(query, { stores, kinds, scope })` 并行请求三个列表端点并合并；不新增后端聚合端点（三库权限模型不同，服务端聚合会引入第四套过滤规则）。
@@ -118,7 +118,8 @@ IC 的对应行为（行为规格，非代码）：一个全局素材库；提�
 | 拖到 prompt 默认 | 加参考图；⌥ = 提及 | 弹二选一 | 用户拍板；参考图是 90% 用法 |
 | 索引 | 前端并行三路 | 后端聚合端点 | 三库权限模型不同，服务端聚合会造第四套过滤 |
 | 工作流库 | 不进面板，改名 | 进面板 | 它导入整张图，不是素材 |
-| 带提示词的上传件 | 作为 Mine 的第二源显示，不迁数据 | 迁成 prompt 资产 | 本期不动数据；迁移另立 |
+| 带提示词的上传件 | 作为 Mine 的第二源显示，不迁数据（须经后端，无端点则 P3 先不显示） | 迁成 prompt 资产 | 本期不动数据；迁移另立 |
+| Generated「本画布」 | 后端加 `canvas_id` 参数 | 客户端过滤 | 分页下客户端过滤会丢项 |
 
 ## 6. 分期（各自可独立上线）
 - **P1 · 一处实现**：`useLibrarySearch` + `LibraryGrid`（搜索/chip/多选/后果头/页脚）；替换加参考图弹层与 `@` 的 Library tab；`@` 分组含 Assets / Generated；四个「Library」改名。
