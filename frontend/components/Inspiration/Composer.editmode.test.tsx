@@ -54,7 +54,6 @@ describe('Composer edit mode', () => {
     const onSubmit = vi.fn().mockResolvedValue(NOTE);
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'first idea' }}
@@ -72,7 +71,6 @@ describe('Composer edit mode', () => {
     const onSubmit = vi.fn().mockResolvedValue(NOTE);
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'first idea' }}
@@ -91,7 +89,6 @@ describe('Composer edit mode', () => {
   it('submitLabel replaces the button text', () => {
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'x' }}
@@ -107,7 +104,6 @@ describe('Composer edit mode', () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error('note update failed'));
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'first idea' }}
@@ -126,7 +122,6 @@ describe('Composer edit mode', () => {
   it('offers no rating stars — the card owns the rating', () => {
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'x' }}
@@ -135,13 +130,12 @@ describe('Composer edit mode', () => {
     );
     // Two writers for one value would need a "who wins" story; NoteCard's
     // stars already have one (seq guard + 5 tests), so the modal has none.
-    expect(screen.queryByLabelText('Rating')).toBeNull();
+    expect(screen.queryByLabelText('New note rating')).toBeNull();
   });
 
   it('shows the reference read-only: the PATCH body has no ref_hotspot field', () => {
     render(
       <Composer
-        onCreated={vi.fn()}
         tagSuggestions={[]}
         noteId="7"
         prefill={{ content: 'x', refHotspot: REF }}

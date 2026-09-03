@@ -142,7 +142,7 @@ describe('Composer', () => {
     render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'rated idea' } });
     // RatingStars renders 5 icon-only buttons; the wrapper carries the label.
-    const stars = within(screen.getByLabelText('Rating')).getAllByRole('button');
+    const stars = within(screen.getByLabelText('New note rating')).getAllByRole('button');
     fireEvent.click(stars[3]); // 4 stars
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() =>

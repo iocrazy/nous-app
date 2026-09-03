@@ -18,7 +18,6 @@ import { AttachmentView } from './AttachmentView';
 import { RatingStars } from '../detail/DetailCardKit';
 
 interface BaseProps {
-  onCreated: (note: InspirationNote) => void;
   /** Called when a retried upload finally succeeds, so the page can merge the
    * new attachment into the (already-created) note's card. */
   onAttachmentUploaded?: (noteId: string, attachment: NoteAttachment) => void;
@@ -37,6 +36,10 @@ interface BaseProps {
  *  what makes `submitLabel` without `onSubmit` a compile error instead of a
  *  silently ignored prop. */
 interface CreateMode {
+  /** Only quick-capture creates notes, so this lives here rather than in
+   *  BaseProps — an edit modal would otherwise have to pass a no-op that
+   *  claims a capability it does not have. */
+  onCreated: (note: InspirationNote) => void;
   onSubmit?: undefined;
   submitLabel?: undefined;
   noteId?: undefined;
@@ -45,6 +48,7 @@ interface CreateMode {
 }
 
 interface EditMode {
+  onCreated?: undefined;
   /**
    * EDIT MODE switch. When given, Save routes here instead of `createNote`,
    * and nothing is cleared afterwards — the parent owns closing its modal,
@@ -94,7 +98,7 @@ export const Composer: React.FC<Props> = (props) => {
   // destructuring a discriminated union loses the correlation, and reading
   // `props.noteId` inside an `if (props.onSubmit)` branch is what lets the
   // compiler know the id is there.
-  const { onCreated, onAttachmentUploaded, tagSuggestions, prefill, autoFocus } = props;
+  const { onAttachmentUploaded, tagSuggestions, prefill, autoFocus } = props;
   const submitLabel = props.submitLabel;
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -237,7 +241,7 @@ export const Composer: React.FC<Props> = (props) => {
           failed.push({ ...item, noteId: note.id });
         }
       }
-      onCreated({ ...note, attachments: [...note.attachments, ...uploaded] });
+      props.onCreated({ ...note, attachments: [...note.attachments, ...uploaded] });
       setText('');
       setRating(0);
       setStaged(failed);
@@ -286,6 +290,10 @@ export const Composer: React.FC<Props> = (props) => {
         value={text}
         onChange={setText}
         placeholder={t('inspiration.placeholder', 'Capture an idea… #tag inline, paste an image, or drop any file')}
+        // Quick capture starts small (NoteEditor's own default is 2) and
+        // grows; the edit modal opens onto existing prose, so it keeps the
+        // roomier box the old bespoke modal had.
+        minRows={isEdit ? 6 : undefined}
         autoFocus={autoFocus}
         onSubmit={() => void submit()}
         onFiles={stageFiles}
@@ -391,12 +399,17 @@ export const Composer: React.FC<Props> = (props) => {
           Edit mode leaves the slot empty rather than showing a second set of
           stars: NoteCard's stars already write this field (with a per-note
           seq guard), and two writers for one value would need a "who wins"
-          story that nothing here provides. */}
+          story that nothing here provides.
+
+          The stars are labelled "New note rating", NOT "Rating": NoteCard's
+          own stars are on screen at the same time, and two identically-named
+          controls writing two different notes is an ambiguity for screen
+          readers and for anything looking for "the rating". */}
       <div className="mt-2 flex items-center justify-between border-t border-line pt-2">
         {isEdit ? (
           <div />
         ) : (
-          <div aria-label={t('inspiration.rating', 'Rating')} className="px-1">
+          <div aria-label={t('inspiration.ratingNewNote', 'New note rating')} className="px-1">
             <RatingStars value={rating} onChange={setRating} size={14} />
           </div>
         )}

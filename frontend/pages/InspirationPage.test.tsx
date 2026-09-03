@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const listNotes = vi.fn();
@@ -7,6 +7,7 @@ const getTagCounts = vi.fn();
 const getActivity = vi.fn();
 const deleteNote = vi.fn();
 const updateNote = vi.fn();
+const deleteAttachment = vi.fn();
 vi.mock('../services/inspirationService', () => ({
   listNotes: (...a: unknown[]) => listNotes(...a),
   getTagCounts: (...a: unknown[]) => getTagCounts(...a),
@@ -15,6 +16,7 @@ vi.mock('../services/inspirationService', () => ({
   updateNote: (...a: unknown[]) => updateNote(...a),
   createNote: vi.fn(),
   uploadAttachment: vi.fn(),
+  deleteAttachment: (...a: unknown[]) => deleteAttachment(...a),
   attachmentUrlWithToken: (id: string) => `http://api.test/att/${id}`,
 }));
 const getHotspots = vi.fn();
@@ -73,6 +75,13 @@ const NOTE = {
 
 describe('InspirationPage', () => {
   beforeEach(() => {
+    // Reset the write-path spies too: several tests below assert "was not
+    // called", which a leaked call from an earlier test silently defeats.
+    listNotes.mockReset();
+    updateNote.mockReset();
+    deleteNote.mockReset();
+    deleteAttachment.mockReset();
+    addToast.mockReset();
     listNotes.mockResolvedValue([NOTE]);
     getTagCounts.mockResolvedValue([{ tag: 'hooks', cnt: 3 }]);
     getActivity.mockResolvedValue([]);
@@ -180,31 +189,116 @@ describe('InspirationPage', () => {
     expect(screen.getByRole('button', { name: /Food topic/ })).toBeTruthy();
   });
 
-  it('edits a note through the modal (NoteEditor) and saves the new content', async () => {
-    updateNote.mockResolvedValue({ ...NOTE, content_md: 'updated content #hooks' });
-    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
-    await screen.findByText(noteBody('first idea #hooks'));
+  // The edit modal is now the Composer itself (same editor, toolbar, staged
+  // files and attachment handling as quick capture), so it is scoped by its
+  // dialog role rather than by "take the last rendered textbox / Save" —
+  // that positional disambiguation broke the moment the modal grew a second
+  // button, and would have silently pointed at the wrong control instead of
+  // failing loudly.
+  const openEditModal = async () => {
     fireEvent.click(screen.getByLabelText('Note actions'));
     fireEvent.click(screen.getByText('Edit'));
+    return screen.findByRole('dialog', { name: 'Edit note' });
+  };
 
-    // The composer's NoteEditor is always mounted too, so disambiguate by
-    // taking the last-rendered instance (the modal one).
-    const editors = await screen.findAllByLabelText('note-editor');
-    const modalEditor = editors[editors.length - 1] as HTMLTextAreaElement;
-    expect(modalEditor.value).toBe('first idea #hooks');
+  it('edits a note through the modal and saves the new content', async () => {
+    updateNote.mockResolvedValue({ ...NOTE, content_md: 'updated content #hooks' });
+    // A successful save bumps refreshKey, so listNotes runs again — model the
+    // server rather than letting the assertion race that refetch: before the
+    // fix this test only passed when it happened to check first.
+    listNotes.mockResolvedValueOnce([NOTE]);
+    listNotes.mockResolvedValue([{ ...NOTE, content_md: 'updated content #hooks' }]);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
 
-    fireEvent.change(modalEditor, { target: { value: 'updated content #hooks' } });
-    // The composer's own submit button is also labeled "Save" — the modal's
-    // is the last one rendered (it mounts after the always-present composer).
-    const saveButtons = screen.getAllByText('Save');
-    fireEvent.click(saveButtons[saveButtons.length - 1]);
+    const editor = within(modal).getByRole('textbox') as HTMLTextAreaElement;
+    expect(editor.value).toBe('first idea #hooks');
+    fireEvent.change(editor, { target: { value: 'updated content #hooks' } });
+    fireEvent.click(within(modal).getByText('Save Changes'));
 
     await waitFor(() =>
       expect(updateNote).toHaveBeenCalledWith('1', { content_md: 'updated content #hooks' }),
     );
     await waitFor(() => expect(screen.getByText(noteBody('updated content #hooks'))).toBeTruthy());
     // Modal closes after a successful save.
-    expect(screen.queryByText('Edit note')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a failed save keeps the modal open and reports why', async () => {
+    updateNote.mockRejectedValue(new Error('note update failed'));
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    fireEvent.change(within(modal).getByRole('textbox'), { target: { value: 'broken edit' } });
+    fireEvent.click(within(modal).getByText('Save Changes'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('note update failed', 'error'));
+    // Still open, still holding the user's text — the edit is not lost.
+    expect(screen.getByRole('dialog', { name: 'Edit note' })).toBeTruthy();
+    expect((within(modal).getByRole('textbox') as HTMLTextAreaElement).value).toBe('broken edit');
+  });
+
+  it('cancelling closes the modal without writing anything', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await screen.findByText(noteBody('first idea #hooks'));
+    const modal = await openEditModal();
+    fireEvent.change(within(modal).getByRole('textbox'), { target: { value: 'discarded' } });
+    fireEvent.click(within(modal).getByLabelText('Cancel edit'));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(updateNote).not.toHaveBeenCalled();
+    expect(screen.getByText(noteBody('first idea #hooks'))).toBeTruthy();
+  });
+
+  it('the modal removes a stored attachment and drops it from the card', async () => {
+    const withFile = {
+      ...NOTE,
+      attachments: [{ id: 'a2', mime: 'application/pdf', size_bytes: 20, original_name: 'report.pdf' }],
+    };
+    // Real wire shapes: after the DELETE lands, neither the PATCH response
+    // nor a refetch still carries that attachment. Mocking them as if they
+    // did would test a server that does not exist.
+    listNotes.mockResolvedValueOnce([withFile]);
+    listNotes.mockResolvedValue([{ ...withFile, attachments: [] }]);
+    deleteAttachment.mockResolvedValue(undefined);
+    updateNote.mockResolvedValue({ ...withFile, attachments: [] });
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    // The card renders the file first; the modal then offers to remove it.
+    await waitFor(() => expect(screen.getAllByText('report.pdf').length).toBe(1));
+    const modal = await openEditModal();
+
+    fireEvent.click(within(modal).getByLabelText('Remove report.pdf'));
+    fireEvent.click(within(modal).getByText('Save Changes'));
+
+    await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith('a2'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // The card must not keep showing a file that is gone from the server.
+    expect(screen.queryByText('report.pdf')).toBeNull();
+  });
+
+  it('a removal that landed leaves the card even when the same save then fails', async () => {
+    const withFile = {
+      ...NOTE,
+      attachments: [{ id: 'a2', mime: 'application/pdf', size_bytes: 20, original_name: 'report.pdf' }],
+    };
+    listNotes.mockResolvedValue([withFile]);
+    deleteAttachment.mockResolvedValue(undefined);
+    updateNote.mockRejectedValue(new Error('note update failed'));
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getAllByText('report.pdf').length).toBe(1));
+    const modal = await openEditModal();
+
+    fireEvent.click(within(modal).getByLabelText('Remove report.pdf'));
+    fireEvent.click(within(modal).getByText('Save Changes'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('note update failed', 'error'));
+    // The DELETE already landed, so the file is gone server-side. Without the
+    // onAttachmentDeleted wiring the card would keep advertising a file that
+    // no longer exists — and nothing would ever correct it, because the modal
+    // is still open and the PATCH that would refresh the list never succeeded.
+    expect(screen.queryByText('report.pdf')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Edit note' })).toBeTruthy();
   });
 
   it('clicking the same category chip twice clears the filter', async () => {

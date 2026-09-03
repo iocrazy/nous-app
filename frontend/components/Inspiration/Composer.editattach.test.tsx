@@ -47,7 +47,6 @@ function renderEditor(over: Partial<React.ComponentProps<typeof Composer>> = {})
     return SAVED;
   });
   const props = {
-    onCreated: vi.fn(),
     tagSuggestions: [],
     noteId: '7',
     prefill: { content: 'first idea' },
