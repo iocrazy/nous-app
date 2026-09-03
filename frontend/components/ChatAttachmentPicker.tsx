@@ -24,7 +24,13 @@ import {
 } from './ChatAttachmentPicker.helpers';
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
 import { ResourceChipBody } from './chat/ResourceChipBody';
-import { removeStagedResource, type StagedResourceRef } from './chat/stagedResources';
+import { AssetChipBody } from './chat/AssetChipBody';
+import {
+  removeStagedAsset,
+  removeStagedResource,
+  type StagedAssetRef,
+  type StagedResourceRef,
+} from './chat/stagedResources';
 
 export interface StagedAttachment {
   kind: 'image' | 'video' | 'pdf';
@@ -43,9 +49,14 @@ interface ChatAttachmentPickerProps {
   attachments: StagedAttachment[];
   onChange: (next: StagedAttachment[]) => void;
   disabled?: boolean;
-  /** Library assets waiting to be sent with this turn. */
+  /** Library resources waiting to be sent with this turn. */
   resources?: StagedResourceRef[];
   onResourcesChange?: (next: StagedResourceRef[]) => void;
+  /** Library ASSETS waiting to be sent with this turn (P5). Their own list,
+   *  not folded into `resources`: they resolve through a different backend
+   *  path and carry a different snapshot. */
+  assets?: StagedAssetRef[];
+  onAssetsChange?: (next: StagedAssetRef[]) => void;
 }
 
 function _kindIcon(kind: StagedAttachment['kind']): React.ReactNode {
@@ -60,6 +71,8 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
   disabled = false,
   resources = [],
   onResourcesChange,
+  assets = [],
+  onAssetsChange,
 }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -99,12 +112,24 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
     [resources, onResourcesChange],
   );
 
+  const removeAsset = useCallback(
+    (assetId: string) => {
+      onAssetsChange?.(removeStagedAsset(assets, assetId));
+    },
+    [assets, onAssetsChange],
+  );
+
   const isDisabled = disabled || uploading;
 
   // Nothing staged at all + no upload → just the picker button (anchored to
-  // ChatInput layout). Staged resources alone must keep the row: they are
-  // the only thing telling the user the asset was picked up.
-  if (attachments.length === 0 && resources.length === 0 && !uploading) {
+  // ChatInput layout). Staged resources OR assets alone must keep the row:
+  // they are the only thing telling the user the item was picked up.
+  if (
+    attachments.length === 0
+    && resources.length === 0
+    && assets.length === 0
+    && !uploading
+  ) {
     return (
       <button
         type="button"
@@ -143,6 +168,17 @@ export const ChatAttachmentPicker: React.FC<ChatAttachmentPickerProps> = ({
           transcriptStatus={r.transcript_status}
           summaryStatus={r.summary_status}
           onRemove={() => removeResource(r.resource_id)}
+        />
+      ))}
+
+      {assets.map((a) => (
+        <AssetChipBody
+          key={a.asset_id}
+          assetId={a.asset_id}
+          name={a.name}
+          assetType={a.asset_type}
+          coverFileId={a.cover_file_id}
+          onRemove={() => removeAsset(a.asset_id)}
         />
       ))}
 

@@ -1734,7 +1734,11 @@
       "open": "Open {{name}}",
       "missing": "Missing: {{slots}}",
       "coverage": "{{filled}} of {{total}} slots filled",
-      "moreProjects": "+{{n}}"
+      "moreProjects": "+{{n}}",
+      "actions": "Actions for {{name}}"
+    },
+    "agent": {
+      "staged": "Added {{name}} To The Chat Composer"
     },
     "presets": {
       "title": "System Presets",
@@ -1888,7 +1892,6 @@
       "notLoopable": "Not Loopable",
       "sendToCanvas": "Send To Canvas",
       "sendToAgent": "Send To Agent",
-      "arrivesWithP5": "Arrives with P5",
       "copyLoadoutPrompt": "Copy Loadout Prompt",
       "promptCopied": "Prompt Copied",
       "copyFailed": "Could Not Copy To The Clipboard",
@@ -3601,6 +3604,13 @@
     "rejectedNote": "Rejected — the agent will not run this action.",
     "approvalResolved": "This request was already handled.",
     "attachmentFailures": "{{count}} attachment(s) failed to load",
+    "attachmentFailureReason": {
+      "unknown": "The Attachment Could Not Be Used",
+      "asset_not_accessible": "One Asset Is Not In A Workspace You Belong To",
+      "asset_deleted": "One Asset Has Been Deleted",
+      "asset_no_primary_image": "One Asset Has No Main Image Yet",
+      "asset_type_unknown": "One Asset Has A Type This Version Cannot Read"
+    },
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",
@@ -3628,7 +3638,8 @@
       "tooMany": "Too many files ({{count}} > {{max}})",
       "uploadFailed": "Upload \"{{name}}\" failed: {{message}}",
       "dropToUpload": "Drop files to attach",
-      "resourceRef": "Attached resource"
+      "resourceRef": "Attached resource",
+      "assetRef": "Attached asset"
     },
     "followups": {
       "title": "Followups",

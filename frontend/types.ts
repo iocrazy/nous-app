@@ -2213,8 +2213,14 @@ export interface UsageDailySummary {
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
 export interface AIChatMessageAttachment {
-  kind: string; // image | video | pdf | resource_ref
+  kind: string; // image | video | pdf | resource_ref | asset_ref
   resource_id?: string | null;
+  /** P5: `assets.id` for `kind === 'asset_ref'`. Persisted server-side —
+   *  `_DISPLAY_ATTACHMENT_KEYS` in `conversations_ai_store.py` carries it —
+   *  so a reloaded bubble can still name the asset it was about. */
+  asset_id?: string | null;
+  /** P5: the loadout the asset was sent with, or null for the default one. */
+  loadout_id?: string | null;
   mime?: string | null;
   alt_text?: string | null;
   name?: string | null;
@@ -2413,6 +2419,29 @@ export type ResourceRefAttachment = {
   name: string;               // snapshot — UI uses this even if resource deleted later
   mime: string;
   scope: { type: 'personal' | 'team'; id: string };
+};
+
+/** P5 reference attachment for a library ASSET (asset sheet / asset card
+ *  "Send To Agent", and — from Task 6 — the @ picker's Assets tab).
+ *
+ *  Mirrors `AttachmentRequest`'s asset fields exactly. `mime` and `url` are
+ *  present and EMPTY on purpose rather than omitted: the backend's binary
+ *  path reads both, and an asset reference claims neither a media type nor a
+ *  fetchable location — it names a row the server resolves by id. Sending
+ *  `''` says "nothing to claim"; omitting them would leave the same fields
+ *  `undefined` and make the wire shape differ from the resource ref beside
+ *  it for no reason a reader could check.
+ */
+export type AssetRefAttachment = {
+  kind: 'asset_ref';
+  /** BIGINT serialized as string (Snowflake). */
+  asset_id: string;
+  /** `asset_loadouts.id`, or null for "use the default loadout". */
+  loadout_id: string | null;
+  /** Snapshot — the bubble uses this even if the asset is renamed later. */
+  name: string;
+  mime: '';
+  url: '';
 };
 
 /** AI processing state of a resource (`resources.transcript_status`

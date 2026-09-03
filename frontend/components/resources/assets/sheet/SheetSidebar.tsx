@@ -4,10 +4,12 @@
 //
 // SEND TO CANVAS is live as of P4 Task 6 — it opens
 // `SendAssetToCanvasDialog`, which appends a reference card to a canvas the
-// user picks. SEND TO AGENT is still DISABLED with a title naming the phase
-// that brings it (P5): a live button that does nothing is the silent no-op
-// this repo keeps re-learning; a disabled one with a reason is a promise the
-// user can read.
+// user picks. SEND TO AGENT is live as of P5 Task 5: it stages the asset in
+// the floating chat's composer through `utils/sendAssetToAgent`, the shared
+// helper the shelf card's action menu also calls. Both call sites go through
+// that helper on purpose — the resource-library version of this feature was
+// once wired to one of its two menus and silently did nothing from the other
+// for a whole release.
 //
 // USED IN answers two questions since P4 Task 8: which PROJECTS reference the
 // asset (`project_ids`, P2) and which CANVASES place a card for it
@@ -40,6 +42,8 @@ import type {
   AssetRowDetail,
   UsedInCanvasRef,
 } from '../../../../services/assetsService';
+import { useOptionalToast } from '../../../Toast';
+import { sendAssetToAgent } from '../../../../utils/sendAssetToAgent';
 import { shortProjectLabel } from '../AssetCard';
 import { typeSingularKey } from '../assetTypeMeta';
 import { canvasKindFor } from './assetSheetModel';
@@ -109,6 +113,14 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const [sendOpen, setSendOpen] = useState(false);
+  // Optional: the sheet always mounts under a ToastProvider, but a bare unit
+  // mount of this panel does not, and the send must not depend on the
+  // confirmation being renderable.
+  const toast = useOptionalToast();
+
+  const handleSendToAgent = useCallback(() => {
+    sendAssetToAgent(detail, { addToast: toast?.addToast ?? null, t });
+  }, [detail, toast, t]);
 
   return (
     <aside data-testid="sheet-sidebar" className="flex w-64 shrink-0 flex-col gap-4">
@@ -125,8 +137,7 @@ export const SheetSidebar: React.FC<SheetSidebarProps> = ({
         <button
           type="button"
           data-testid="send-to-agent"
-          disabled
-          title={t('assets.sheet.arrivesWithP5', 'Arrives with P5')}
+          onClick={handleSendToAgent}
           className={ACTION}
         >
           <Bot size={13} aria-hidden="true" />

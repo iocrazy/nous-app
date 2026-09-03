@@ -43,13 +43,20 @@ import {
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
-import { AttachmentFailureBanner } from './chat/AttachmentFailureBanner';
+import {
+  AttachmentFailureBanner,
+  type AttachmentFailure,
+} from './chat/AttachmentFailureBanner';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
 import {
+  mergeAssetAttachments,
   mergeRefAttachments,
+  stageAsset as stageAssetInto,
   stageResource as stageResourceInto,
+  type AssetRefInsertItem,
+  type StagedAssetRef,
   type StagedResourceRef,
 } from './chat/stagedResources';
 import type { ResourceRefInsertItem } from './chat/ChatInputResourceMention';
@@ -62,6 +69,7 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
+import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
@@ -241,8 +249,15 @@ export function AIChatPanel({
   const [attachmentFailureCount, setAttachmentFailureCount] = useState<number | undefined>(
     undefined,
   );
+  // P5: the failures themselves, so the banner can name the REASON. Kept
+  // beside the count rather than replacing it — a turn can report failures
+  // whose reason this build has no string for, and the count is still true.
+  const [attachmentFailures, setAttachmentFailures] = useState<
+    AttachmentFailure[] | undefined
+  >(undefined);
   useEffect(() => {
     setAttachmentFailureCount(undefined);
+    setAttachmentFailures(undefined);
   }, [activeSessionId]);
 
   // Agent-scoped mode: when agentSlug prop is provided the panel locks to that
@@ -351,6 +366,13 @@ export function AIChatPanel({
   const stageResource = useCallback((item: ResourceRefInsertItem) => {
     setStagedResources((prev) => stageResourceInto(prev, item));
   }, []);
+  // Library ASSETS (P5) — their own list beside the resources above. Same
+  // functional-update rule, and for the same reason: the pendingAsset effect
+  // must not re-fire because the list it just wrote to changed identity.
+  const [stagedAssets, setStagedAssets] = useState<StagedAssetRef[]>([]);
+  const stageAsset = useCallback((item: AssetRefInsertItem) => {
+    setStagedAssets((prev) => stageAssetInto(prev, item));
+  }, []);
 
   // --- Resource @-mention picker state ---
   // Editor ref so we can call insertResourceRef when user picks an item.
@@ -439,6 +461,16 @@ export function AIChatPanel({
     lockedAgent,
     notify: notifyProcessing,
     t,
+  });
+  // Asset → composer, from the asset sheet's sidebar and the shelf card's
+  // action menu (both via `utils/sendAssetToAgent`). Its own hook, so each
+  // one-shot channel keeps exactly one effect watching it.
+  useComposerAssetAttach({
+    stageAsset,
+    focusComposer,
+    selectedAgentSlug,
+    setSelectedAgentSlug,
+    lockedAgent,
   });
   // The rest of the F1 chain, watched from the Task Center: a transcription
   // started here has no summary until the transcript lands, and a
@@ -686,6 +718,7 @@ export function AIChatPanel({
 
       setSending(true);
       setAttachmentFailureCount(undefined);
+      setAttachmentFailures(undefined);
 
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
@@ -695,6 +728,11 @@ export function AIChatPanel({
       // in a restored draft AND everything staged in the attachment row.
       const sentResources = stagedResources;
       const sentRefs = mergeRefAttachments(refAttachments, sentResources);
+      // Assets have one source (the staged row — there is no inline asset
+      // node), but the dedup still matters: two entries for one asset would
+      // be resolved, rendered and billed twice.
+      const sentAssets = stagedAssets;
+      const sentAssetRefs = mergeAssetAttachments(sentAssets);
       // Both halves, in the shape the reducer will persist. The refs used to
       // be left out here, so a just-sent turn showed no chip until the
       // history reload put one there — the optimistic bubble and the
@@ -713,6 +751,16 @@ export function AIChatPanel({
           mime: r.mime,
           alt_text: r.name,
         })),
+        // The asset half of the optimistic bubble. `name`, not `alt_text`:
+        // that is the key the asset attachment carries on the wire and the
+        // one the reducer persists, so the optimistic chip and the reloaded
+        // one read the same field rather than agreeing by luck.
+        ...sentAssetRefs.map((r) => ({
+          kind: r.kind,
+          asset_id: r.asset_id,
+          loadout_id: r.loadout_id,
+          name: r.name,
+        })),
       ];
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
@@ -728,6 +776,7 @@ export function AIChatPanel({
       // in the message bubble. Restored on failure so the user can retry.
       setStagedAttachments([]);
       setStagedResources([]);
+      setStagedAssets([]);
 
       // Streaming assistant bubble — created on the first delta, grown in
       // place, then replaced by the authoritative row on history reload.
@@ -754,6 +803,10 @@ export function AIChatPanel({
             mime: r.mime,
             alt_text: r.name,
           })),
+          // asset_ref: already the exact wire shape (`toAssetAttachment`
+          // builds it), so it goes out unmapped. Reshaping it here would be a
+          // second place for the contract to drift from the schema.
+          ...sentAssetRefs,
         ];
         if (allAttachments.length > 0) {
           opts.attachments = allAttachments;
@@ -802,6 +855,7 @@ export function AIChatPanel({
             const failures = evt.data?.attachment_failures;
             if (Array.isArray(failures) && failures.length > 0) {
               setAttachmentFailureCount(failures.length);
+              setAttachmentFailures(failures as AttachmentFailure[]);
             }
           }
           // Unknown event types are no-ops (forward-compat per the
@@ -828,6 +882,7 @@ export function AIChatPanel({
           ));
           setStagedAttachments(sentAttachments);
           setStagedResources(sentResources);
+          setStagedAssets(sentAssets);
         } else {
           const landed = serverMsgs
             .slice(-3)
@@ -835,6 +890,7 @@ export function AIChatPanel({
           if (!landed) {
             setStagedAttachments(sentAttachments);
             setStagedResources(sentResources);
+            setStagedAssets(sentAssets);
           }
         }
       } finally {
@@ -853,7 +909,8 @@ export function AIChatPanel({
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
-     addToast, planMode, stagedAttachments, stagedResources, contextCapsule, t],
+     addToast, planMode, stagedAttachments, stagedResources, stagedAssets,
+     contextCapsule, t],
   );
 
   const handleSuggest = useCallback(
@@ -1172,7 +1229,10 @@ export function AIChatPanel({
               />
             ))}
 
-            <AttachmentFailureBanner count={attachmentFailureCount} />
+            <AttachmentFailureBanner
+              count={attachmentFailureCount}
+              failures={attachmentFailures}
+            />
 
             {/* Typing dots only until the first streamed delta arrives —
                 after that the growing assistant bubble is the indicator. */}
@@ -1196,13 +1256,17 @@ export function AIChatPanel({
             wrapping row. Only rendered when something is staged; the picker
             button itself lives next to ChatInput. */}
         {activeSessionId && effectiveAgentSlug
-          && (stagedAttachments.length > 0 || stagedResources.length > 0) && (
+          && (stagedAttachments.length > 0
+            || stagedResources.length > 0
+            || stagedAssets.length > 0) && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 bg-ink-900/30">
             <ChatAttachmentPicker
               attachments={stagedAttachments}
               onChange={setStagedAttachments}
               resources={stagedResources}
               onResourcesChange={setStagedResources}
+              assets={stagedAssets}
+              onAssetsChange={setStagedAssets}
               disabled={sending}
             />
           </div>
@@ -1272,7 +1336,9 @@ export function AIChatPanel({
         {/* Chat input + B: attachment picker (when no staged chips above) */}
         <div className="flex items-end gap-1 bg-ink-900 border-t border-ink-700/50">
           {activeSessionId && effectiveAgentSlug
-            && stagedAttachments.length === 0 && stagedResources.length === 0 && (
+            && stagedAttachments.length === 0
+            && stagedResources.length === 0
+            && stagedAssets.length === 0 && (
             <div className="pl-2 pb-2">
               <ChatAttachmentPicker
                 attachments={[]}
@@ -1296,7 +1362,9 @@ export function AIChatPanel({
               onMentionRequest={handleMentionRequest}
               editorRef={chatEditorRef}
               hasAttachments={
-                stagedAttachments.length > 0 || stagedResources.length > 0
+                stagedAttachments.length > 0
+                || stagedResources.length > 0
+                || stagedAssets.length > 0
               }
             />
           </div>

@@ -10,7 +10,7 @@
  * producer, so the backend cannot tell which path an asset took.
  */
 
-import type { ResourceRefAttachment } from '../../types';
+import type { AssetRefAttachment, ResourceRefAttachment } from '../../types';
 import type { ResourceRefInsertItem } from './ChatInputResourceMention';
 
 /**
@@ -102,6 +102,128 @@ export function mergeRefAttachments(
   for (const ref of [...inline, ...staged.map(toRefAttachment)]) {
     if (seen.has(ref.resource_id)) continue;
     seen.add(ref.resource_id);
+    out.push(ref);
+  }
+  return out;
+}
+
+// ─── Library assets (P5) ────────────────────────────────────────────────────
+//
+// A parallel, deliberately SEPARATE staging list. An asset is a library
+// entity — a character, a location, a prompt — not a media file: it has no
+// mime, no processing status, and the backend resolves it through a different
+// resolver into a consistency prompt plus a primary image. Folding the two
+// into one array would mean every consumer re-deriving which kind it holds,
+// and the one that got it wrong would send an asset down the resource path,
+// where it resolves to nothing and the user is told their attachment could
+// not be READ.
+
+/**
+ * An asset waiting above the composer. Same two halves as
+ * {@link StagedResourceRef}: the wire fields (`asset_id`, `loadout_id`,
+ * `name`) and the snapshot the chip paints from (`asset_type`,
+ * `cover_file_id`, `scope_id`), which die at the boundary.
+ */
+export interface StagedAssetRef {
+  asset_id: string;
+  /** Null means "the asset's default loadout" — the backend's reading, not a
+   *  missing value. v1 has no loadout picker at either entry point. */
+  loadout_id: string | null;
+  name: string;
+  /** One of `ASSET_TYPES`; drives the chip's fallback icon. */
+  asset_type: string;
+  /** `assets.cover_file_id` → `/api/v1/resources/{id}/cover`, or '' when the
+   *  asset has no cover and the chip should draw its type icon instead. */
+  cover_file_id: string;
+  /** Owning team id, or '' for a system preset. Snapshot only. */
+  scope_id: string;
+}
+
+/** What either entry point hands the composer (the store channel's
+ *  `PendingAsset`, or a row from the Assets tab of the @ picker). */
+export interface AssetRefInsertItem {
+  id: string;
+  name?: string | null;
+  asset_type?: string | null;
+  loadout_id?: string | null;
+  cover_file_id?: string | null;
+  scope_id?: string | null;
+}
+
+/** Normalise into the staged shape. Absent → '' for the snapshot fields for
+ *  the same reason the resource path does it: an empty snapshot claims
+ *  nothing, where `undefined` would have to be re-checked at every read.
+ *  `loadout_id` is the exception — null there is a MEANING (the default
+ *  loadout), so it is preserved rather than flattened. */
+export function toStagedAsset(item: AssetRefInsertItem): StagedAssetRef {
+  return {
+    asset_id: String(item.id ?? ''),
+    loadout_id: item.loadout_id ?? null,
+    name: item.name ?? '',
+    asset_type: item.asset_type ?? '',
+    cover_file_id: item.cover_file_id ?? '',
+    scope_id: item.scope_id ?? '',
+  };
+}
+
+/** Append unless the same asset is already waiting (a double-click is one
+ *  intent, not two copies). */
+export function stageAsset(
+  list: StagedAssetRef[],
+  item: AssetRefInsertItem,
+): StagedAssetRef[] {
+  const next = toStagedAsset(item);
+  if (!next.asset_id) return list;
+  if (list.some((s) => s.asset_id === next.asset_id)) return list;
+  return [...list, next];
+}
+
+/** Drop one staged asset by id (the chip's × button). */
+export function removeStagedAsset(
+  list: StagedAssetRef[],
+  assetId: string,
+): StagedAssetRef[] {
+  return list.filter((s) => s.asset_id !== assetId);
+}
+
+/**
+ * The wire form. Only these fields cross the boundary — `asset_type`,
+ * `cover_file_id` and `scope_id` are composer-side snapshots the server does
+ * not read (it re-resolves the asset by id and re-checks access by team
+ * membership), so sending them would state as fact something the receiver
+ * would ignore.
+ */
+export function toAssetAttachment(staged: StagedAssetRef): AssetRefAttachment {
+  return {
+    kind: 'asset_ref',
+    asset_id: staged.asset_id,
+    loadout_id: staged.loadout_id,
+    name: staged.name,
+    mime: '',
+    url: '',
+  };
+}
+
+/**
+ * The staged assets as attachments, deduped by `asset_id`.
+ *
+ * `stageAsset` already refuses a duplicate, so this is the second guard, not
+ * the first — and it is the one that matters: sending one asset twice makes
+ * the backend resolve it twice, render two `<asset>` entries for the same
+ * row, and bill the turn for both.
+ *
+ * Deliberately NOT merged into `mergeRefAttachments`: assets have exactly one
+ * source (this list — there is no inline tiptap asset node), and a shared
+ * function would have to dedupe on two different id fields at once.
+ */
+export function mergeAssetAttachments(
+  staged: StagedAssetRef[],
+): AssetRefAttachment[] {
+  const out: AssetRefAttachment[] = [];
+  const seen = new Set<string>();
+  for (const ref of staged.map(toAssetAttachment)) {
+    if (seen.has(ref.asset_id)) continue;
+    seen.add(ref.asset_id);
     out.push(ref);
   }
   return out;

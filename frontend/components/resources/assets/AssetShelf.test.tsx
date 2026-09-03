@@ -82,7 +82,12 @@ vi.mock('react-i18next', () => ({
 }));
 
 const addToast = vi.fn();
-vi.mock('../../Toast', () => ({ useToast: () => ({ addToast }) }));
+// `useOptionalToast` too: the asset card's action menu reads it (P5), and a
+// mock factory missing an export makes every render of that card throw.
+vi.mock('../../Toast', () => ({
+  useToast: () => ({ addToast }),
+  useOptionalToast: () => ({ addToast }),
+}));
 
 const refreshAssetCounts = vi.fn();
 vi.mock('../../../contexts/ResourcesContext', () => ({

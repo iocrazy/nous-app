@@ -88,6 +88,20 @@ export type ChatAttachmentInput =
       url?: string;
       mime?: string;
       alt_text?: string;
+    }
+  // P5: a library ASSET reference. Resolved server-side by
+  // `asset_ref_resolver` into a consistency prompt plus its primary image,
+  // both of which land in `<available_resources>`. `name` rather than
+  // `alt_text` — that is the key the backend's asset branch and the reducer's
+  // whitelist both read — and `mime` / `url` are present and empty because an
+  // asset claims neither a media type nor a fetchable location.
+  | {
+      kind: 'asset_ref';
+      asset_id: string;
+      loadout_id: string | null;
+      name: string;
+      mime?: string;
+      url?: string;
     };
 
 /**
