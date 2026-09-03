@@ -23,8 +23,10 @@ import { chainTailsFor } from '../chainRun';
 import { graphIndexFor } from '../graphIndex';
 import {
   resolveSourceUrlsFromIndex,
+  upstreamAssetNodesFromIndex,
   upstreamPromptTextFromIndex,
 } from '../promptInputs';
+import { upstreamAssetRefCount } from '../promptStrip';
 
 /**
  * Durable image urls wired into this prompt, in connection order (IC's
@@ -52,4 +54,27 @@ export function useUpstreamPromptText(id: string): string {
  *  behind it is cached per graph shape, so a drag recomputes nothing. */
 export function useIsChainTail(id: string): boolean {
   return useCanvasCoreStore((s) => chainTailsFor(s.nodes, s.connections).has(id));
+}
+
+/**
+ * How many references the asset CARDS wired into this prompt put ahead of its
+ * own reference strip (`promptStrip.ts`).
+ *
+ * A NUMBER, which is the whole point: the strip needs to know where its first
+ * tile lands in the request, and a number compares stable under `Object.is`,
+ * so dragging a card around — or dragging anything else — renders nothing.
+ * Returning the cards themselves would defeat that, since the array is rebuilt
+ * on every store change.
+ *
+ * `maxRefs` participates because the ceiling is applied WITHIN each card's own
+ * selection server-side, so a card with five ticked files contributes at most
+ * `max_refs` of them.
+ */
+export function useUpstreamAssetRefCount(id: string, maxRefs: number | null): number {
+  return useCanvasCoreStore((s) =>
+    upstreamAssetRefCount(
+      upstreamAssetNodesFromIndex(id, graphIndexFor(s.nodes, s.connections)),
+      maxRefs,
+    ),
+  );
 }

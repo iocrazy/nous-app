@@ -20,6 +20,7 @@ import { rerunPrompt } from '../regenerate';
 import {
   useIsChainTail,
   useNodeInputUrls,
+  useUpstreamAssetRefCount,
   useUpstreamPromptText,
 } from './useGraphDerived';
 import { MAX_REFERENCE_IMAGES, reorderRefs } from '../refOrder';
@@ -242,6 +243,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch],
   );
+  // From this node's OWN data — no graph read, so the strip needs no `s.nodes`
+  // subscription for the half that belongs to this card. Memoised because the
+  // `?? []` fallback would otherwise mint a fresh array every render and defeat
+  // the strip's own memo on a node that has no mentions.
+  const mentionedAssets = useMemo(
+    () => (mentioned_assets ?? []) as MentionedAsset[],
+    [mentioned_assets],
+  );
   // While the picker is open, Escape, the arrows and Enter belong to it, not
   // the text. The picker never takes focus (the editor must keep it, or its
   // blur closes the popover), so its keys arrive here and are forwarded.
@@ -371,15 +380,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // first, then the wired images, with the connected asset cards' references
   // counted ahead of both. `promptStrip.ts` owns the arithmetic AND the cases
   // where it refuses to answer; this component only draws what it returns.
+  //
+  // Both graph-derived inputs come through SELECTOR HOOKS, never `s.nodes`:
+  // this card must not re-render when an unrelated node is dragged, which is
+  // what `CanvasSurface.rerender.test.tsx` pins. `inputUrls` is shallow-stable
+  // and the card contribution is a number, so a drag changes neither.
+  const assetRefsAhead = useUpstreamAssetRefCount(id, maxRefs);
   const stripEntries = useMemo(
     () =>
-      promptStripEntries(
-        id,
-        storeNodes as CanvasNode[],
-        storeConnections as CanvasConnection[],
+      promptStripEntries({
+        mentions: mentionedAssets,
+        inputUrls,
+        assetRefsAhead,
         maxRefs,
-      ),
-    [id, storeNodes, storeConnections, maxRefs],
+      }),
+    [mentionedAssets, inputUrls, assetRefsAhead, maxRefs],
   );
 
   /** The `@Image N` candidates: every durable input this node already has.

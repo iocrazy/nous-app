@@ -44,15 +44,19 @@
 // The post-run ledgers stay authoritative either way — `last_dropped_refs` from
 // the backend and `last_mention_dropped` from the bundle both land on the same
 // "Ignored" badge.
+//
+// ─ Why this takes values, not the graph ─────────────────────────────────────
+//
+// A node view must never subscribe to `s.nodes` (`useGraphDerived.ts`): a drag
+// tick replaces that array every frame, so the subscription re-renders the card
+// no matter how well it is memoised. So this function is handed three already-
+// stable projections — the node's own mentions, the input urls a selector hook
+// answers, and a NUMBER for what the upstream cards contribute — and touches no
+// store at all. That also makes it a plain pure function to test.
 
-import type { CanvasConnection, CanvasNode } from '../types';
+import type { AssetNodeData } from './types';
 import type { MentionedAsset } from './mentionedAssets';
-import {
-  assetReferenceUrl,
-  mentionedAssetsOf,
-  resolveSourceUrls,
-  upstreamAssetNodes,
-} from './promptInputs';
+import { assetReferenceUrl } from './promptInputs';
 
 /** One tile on the strip. */
 export type StripEntry =
@@ -77,30 +81,55 @@ export type StripEntry =
     };
 
 /**
+ * How many references the connected asset CARDS put ahead of this strip.
+ *
+ * Their bundle applies the provider ceiling WITHIN each card's own selection
+ * (`build_bundle::_restrict_to_selection`), which is the same arithmetic the
+ * card's own row-dimming uses — so the two surfaces agree by construction.
+ *
+ * A NUMBER on purpose: it is what a node view subscribes to, and a number
+ * compares stable under `Object.is`, so a drag that moves the card without
+ * changing its checklist re-renders nothing.
+ */
+export function upstreamAssetRefCount(
+  cards: ReadonlyArray<{ data: AssetNodeData }>,
+  maxRefs: number | null,
+): number {
+  const cap = maxRefs ?? Number.POSITIVE_INFINITY;
+  let total = 0;
+  for (const card of cards) {
+    total += Math.min((card.data.selected_file_ids ?? []).length, cap);
+  }
+  return total;
+}
+
+export interface PromptStripInput {
+  /** This prompt's own `mentioned_assets`, in body order. */
+  mentions: readonly MentionedAsset[];
+  /** The durable images wired in plus `manual_refs`, in delivery order. */
+  inputUrls: readonly string[];
+  /** {@link upstreamAssetRefCount} for the cards feeding this prompt. */
+  assetRefsAhead: number;
+  /** The provider's reference ceiling; null = unknown, which dims nothing. */
+  maxRefs: number | null;
+}
+
+/**
  * The strip, in delivery order: mentions (asset references) first, then the
  * wired images and manual refs.
  *
  * Connected asset CARDS are not drawn here — they are their own cards — but
- * their references are counted, because they occupy the first positions of the
- * same request and therefore decide where everything on this strip lands.
+ * their references are counted through `assetRefsAhead`, because they occupy
+ * the first positions of the same request and therefore decide where
+ * everything on this strip lands.
  */
-export function promptStripEntries(
-  promptId: string,
-  nodes: CanvasNode[],
-  connections: CanvasConnection[],
-  maxRefs: number | null,
-): StripEntry[] {
-  const cap = maxRefs ?? Number.POSITIVE_INFINITY;
-
-  // Positions the wired asset cards consume before this strip starts. Their
-  // bundle applies the provider ceiling WITHIN each card's own selection
-  // (`build_bundle::_restrict_to_selection`), which is the same arithmetic the
-  // card's own row-dimming uses — so the two surfaces agree by construction.
-  let next = 1;
-  for (const card of upstreamAssetNodes(promptId, nodes, connections)) {
-    const selected = card.data.selected_file_ids ?? [];
-    next += Math.min(selected.length, cap);
-  }
+export function promptStripEntries({
+  mentions,
+  inputUrls,
+  assetRefsAhead,
+  maxRefs,
+}: PromptStripInput): StripEntry[] {
+  let next = assetRefsAhead + 1;
 
   // url -> the position it was first given. Deduped because the runner dedupes
   // (`resolveAssetInputs` on the asset side, the `.filter()` above on the wired
@@ -118,7 +147,7 @@ export function promptStripEntries(
   /** Set once a span cannot be measured; from then on nothing is asserted. */
   let unknown = false;
 
-  for (const asset of mentionedAssetsOf(promptId, nodes)) {
+  for (const asset of mentions) {
     const ids = asset.ref_resource_ids;
     if (!Array.isArray(ids)) {
       // Not "zero references" — "we did not ask". A mention saved before the
@@ -148,7 +177,7 @@ export function promptStripEntries(
     });
   }
 
-  for (const url of resolveSourceUrls(promptId, nodes, connections)) {
+  for (const url of inputUrls) {
     if (unknown) {
       entries.push({ kind: 'input', url, position: null, beyondLimit: false, refCount: 1 });
       continue;

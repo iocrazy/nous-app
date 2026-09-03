@@ -273,11 +273,20 @@ export function upstreamAssetNodes(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
 ): Array<{ nodeId: string; data: AssetNodeData }> {
-  const byId = new Map(nodes.map((n) => [String(asObj(n).id), n]));
+  return upstreamAssetNodesFromIndex(promptId, graphIndexFor(nodes, connections));
+}
+
+/** {@link upstreamAssetNodes} against a prebuilt {@link GraphIndex} — the form
+ *  a node view subscribes through, so it never has to read `s.nodes` itself
+ *  (see `useGraphDerived.ts` for why that rule exists). */
+export function upstreamAssetNodesFromIndex(
+  promptId: string,
+  index: GraphIndex,
+): Array<{ nodeId: string; data: AssetNodeData }> {
+  const { byId } = index;
   const seen = new Set<string>();
   const out: Array<{ nodeId: string; data: AssetNodeData }> = [];
-  for (const c of connections) {
-    if (String(asObj(c).target) !== promptId) continue;
+  for (const c of index.incoming.get(promptId) ?? []) {
     const nodeId = String(asObj(c).source);
     if (seen.has(nodeId)) continue;
     seen.add(nodeId);
