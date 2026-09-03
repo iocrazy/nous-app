@@ -147,7 +147,23 @@ export function promptStripEntries({
   /** Set once a span cannot be measured; from then on nothing is asserted. */
   let unknown = false;
 
+  // ONE TILE PER ASSET, first occurrence wins.
+  //
+  // Two chips naming the same asset are ONE delivery — `mentionedAssetsOf`
+  // dedupes before the run path bundles anything, so a second tile would show a
+  // reference nobody is sending twice. The url-level `take()` below is not a
+  // substitute: it would give the duplicate the FIRST tile's position, drawing
+  // two thumbnails claiming the same slot.
+  //
+  // Normally unreachable — `collectAssetRefs` dedupes as the document is read —
+  // so this is about what arrives from PERSISTED data: a node saved by an older
+  // build, or hand-edited `nodes_json`. The strip and the run must agree about
+  // what is being sent whatever the stored list looks like.
+  const seenAsset = new Set<string>();
+
   for (const asset of mentions) {
+    if (seenAsset.has(asset.asset_id)) continue;
+    seenAsset.add(asset.asset_id);
     const ids = asset.ref_resource_ids;
     if (!Array.isArray(ids)) {
       // Not "zero references" — "we did not ask". A mention saved before the

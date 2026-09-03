@@ -123,6 +123,32 @@ describe('positions — counted in delivery order', () => {
     expect(entries.map((e) => e.position)).toEqual([3, 4]);
   });
 
+  it('the same ASSET named twice is one tile, not two', () => {
+    // Two chips for one asset are one delivery — `mentionedAssetsOf` dedupes
+    // before the run bundles anything, so a second tile would draw a reference
+    // that is not being sent twice. Reachable only from persisted data (an
+    // older build, or hand-edited `nodes_json`); `collectAssetRefs` dedupes as
+    // the document is read.
+    const entries = strip({
+      mentions: [mention('7', ['70']), mention('7', ['70']), mention('8', ['80'])],
+      inputUrls: [GM('1')],
+    });
+    expect(entries.map((e) => (e.kind === 'mention' ? e.asset.asset_id : 'input'))).toEqual([
+      '7',
+      '8',
+      'input',
+    ]);
+    // …and the duplicate does not consume a position either.
+    expect(entries.map((e) => e.position)).toEqual([1, 2, 3]);
+  });
+
+  it('a duplicate is dropped even when its span is unknown', () => {
+    // The unknown cascade must not be triggered twice by what is one mention.
+    const entries = strip({ mentions: [mention('7'), mention('7')] });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].refCount).toBeNull();
+  });
+
   it('the same reference twice is one position', () => {
     const entries = strip({ mentions: [mention('7', ['70']), mention('8', ['70', '80'])] });
     expect(entries.map((e) => e.position)).toEqual([1, 1]);
