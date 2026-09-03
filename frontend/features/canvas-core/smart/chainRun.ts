@@ -15,6 +15,7 @@ import { markDroppedKnobs } from './droppedKnobs';
 import { graphIndexFor, topologyKeyOf } from './graphIndex';
 import { withGenerationRunner } from './generationRunner';
 import { resolveAssetRef } from './assetRef';
+import { promptBodyForRun } from './mentionedAssets';
 import {
   resolveEffectiveSourceUrl,
   resolveEffectiveSourceUrls,
@@ -212,7 +213,7 @@ export async function startChainRun(tailId: string): Promise<boolean> {
           return { ok: false, text: '', error: 'prompt missing' };
         const ctx: RunnerContext = {
           promptId: thin.promptId,
-          body: data.body,
+          body: promptBodyForRun(data),
           provider_slug: data.provider_slug,
           agent_id: data.agent_id,
           gen: data.gen ?? null,

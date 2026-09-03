@@ -3234,7 +3234,9 @@
       "no_image_file": "no image file",
       "materialize_failed": "unreadable",
       "scope_unresolved": "scope unknown",
-      "unresolved": "unresolved"
+      "unresolved": "unresolved",
+      "over_limit": "over the model's limit",
+      "provider_no_refs": "model takes no references"
     },
     "knobNotSupported": "Not supported by this model",
     "saveBadge": {
@@ -3403,6 +3405,25 @@
     },
     "assetSeed": {
       "failed": "Could not load this canvas asset"
+    },
+    "mention": {
+      "tabInput": "Input Images",
+      "tabAssets": "Assets",
+      "library": "Library",
+      "inLibraryOnly": "In Library Only",
+      "searchLabel": "Search assets",
+      "searchPlaceholder": "Search assets…",
+      "allTypes": "All",
+      "noInputs": "No input images on this node",
+      "noResults": "No assets found",
+      "noScope": "Open this canvas from a workspace to browse assets",
+      "loadFailed": "Could not load the asset library",
+      "loading": "Loading…",
+      "preview": "Preview",
+      "count_one": "{{count}} result",
+      "count_other": "{{count}} results",
+      "hint": "Up/Down to move · Enter to insert · Esc to close",
+      "bundleFailed": "A mentioned asset could not be read on the last run"
     }
   },
   "modelParams": {

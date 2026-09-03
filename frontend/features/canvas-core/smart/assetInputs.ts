@@ -16,7 +16,11 @@
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { currentCanvasScopeId } from './canvasScope';
-import { resolveAssetInputs, type ComposedAssetInputs } from './promptInputs';
+import {
+  assetReferenceUrl,
+  resolveAssetInputs,
+  type ComposedAssetInputs,
+} from './promptInputs';
 
 /** `(promptId, model) -> what the upstream asset cards add`. */
 export type AssetInputsResolver = (
@@ -25,20 +29,50 @@ export type AssetInputsResolver = (
 ) => Promise<ComposedAssetInputs>;
 
 /**
- * Report one run's bundle outcome onto the asset cards that fed it.
+ * Report one run's bundle outcome onto whatever fed it.
  *
- * Writes BOTH fields for EVERY contributing card, including the clean case: the
- * badge must describe the run it sits beside, so a run that dropped nothing has
- * to clear what an earlier one reported. `patchNode` no-ops on a node that was
- * deleted mid-run.
+ * Two destinations, because there are two kinds of contributor:
+ *
+ *   a wired CARD    reports on itself (`last_bundle_*`), where the user ticked
+ *                   the boxes that produced the answer;
+ *   an @-MENTION    has no card, so the whole run's mention outcome is
+ *                   aggregated onto the PROMPT node (`last_mention_*`) — the
+ *                   only place a user can see it.
+ *
+ * Writes for EVERY contributor including the clean case: the badge must
+ * describe the run it sits beside, so a run that dropped nothing has to clear
+ * what an earlier one reported. Mentions are written even when there are none,
+ * for exactly the same reason — deleting the last chip must clear the badge.
+ * `patchNode` no-ops on a node that was deleted mid-run.
  */
-export function markAssetBundleResult(inputs: ComposedAssetInputs): void {
+export function markAssetBundleResult(
+  inputs: ComposedAssetInputs,
+  promptId: string,
+): void {
   const { patchNode } = useCanvasCoreStore.getState();
+  const mentionDropped: Array<{ url: string; reason: string }> = [];
+  const mentionErrors: string[] = [];
   for (const c of inputs.contributions) {
+    if (c.source === 'mention' || c.nodeId === null) {
+      for (const d of c.dropped) {
+        mentionDropped.push({ url: assetReferenceUrl(d.resource_id), reason: d.reason });
+      }
+      if (c.error) mentionErrors.push(c.error);
+      continue;
+    }
     patchNode(c.nodeId, {
       data: { last_bundle_dropped: c.dropped, last_bundle_error: c.error },
     });
   }
+  patchNode(promptId, {
+    data: {
+      last_mention_dropped: mentionDropped,
+      // Joined rather than kept per-asset: the badge names a count and a
+      // reason, and one line per failed mention would push the run status off
+      // the card. The tooltip carries all of them.
+      last_mention_error: mentionErrors.length > 0 ? mentionErrors.join('\n') : null,
+    },
+  });
 }
 
 /**
@@ -57,9 +91,10 @@ export const resolveAssetInputsForRun: AssetInputsResolver = async (
     model,
     scopeId: currentCanvasScopeId(),
   });
-  // Unconditional: a prompt with no asset cards has no contributions, so this
-  // writes nothing. Guarding it would be one more place to get the "clear the
+  // Unconditional: a prompt with no asset cards has no card contributions, so
+  // this writes nothing to any card — but it still clears the prompt's own
+  // mention verdict. Guarding it would be one more place to get the "clear the
   // previous verdict" case wrong.
-  markAssetBundleResult(inputs);
+  markAssetBundleResult(inputs, promptId);
   return inputs;
 };

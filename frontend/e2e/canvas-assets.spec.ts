@@ -575,3 +575,77 @@ test('a legacy card the server cannot map says Unmigrated rather than guessing',
   await expect(page.getByTestId('smart-asset-node')).toHaveCount(0);
   expect(rec.legacyQueries).toHaveLength(1);
 });
+
+// ─── 5. @-mention → run ──────────────────────────────────────────────────────
+
+test('an @-mentioned asset delivers like a wired card, without creating a node', async ({
+  page,
+}) => {
+  const rec = newRecorder();
+  const canvasId = '208443000009105';
+  await routeCanvasApi(page, rec, { canvasId, nodes: [promptNode('p1', { x: 320, y: 180 })] });
+
+  await page.goto(`/team/${SCOPE_ID}/canvas/${canvasId}`);
+  const prompt = page.locator('.react-flow__node[data-id="p1"]');
+  await expect(prompt).toBeVisible();
+
+  // Type `@` at the end of the body. The picker opens off the editor's own
+  // keydown, so this has to be a REAL keystroke — a value write would never
+  // reach it.
+  const body = prompt.getByRole('textbox', { name: 'Prompt body' });
+  await body.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' @');
+
+  const picker = page.getByTestId('prompt-mention-picker');
+  await expect(picker).toBeVisible();
+  // Two tabs, and with no wired inputs this board opens on Assets.
+  await expect(picker.getByTestId('mention-tab-assets')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  const option = picker.getByTestId('mention-asset-option');
+  await expect(option).toBeVisible();
+  await expect(option).toContainText('Cole Bannon');
+  await option.click();
+
+  // The mention is an inline CHIP, and no node was created for it.
+  await expect(prompt.getByTestId('prompt-asset-chip')).toContainText('Cole Bannon');
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  // …and it counts as a reference on the input strip, cover and all.
+  const thumb = prompt.getByTestId('prompt-mention-thumb');
+  await expect(thumb).toBeVisible();
+  await expect(thumb).toHaveAttribute('data-asset-id', ASSET_ID);
+  await expect(prompt.getByTestId('prompt-input-row')).toContainText('1 inputs');
+
+  await page.getByRole('button', { name: 'Cascade Run', exact: true }).click();
+  await expect.poll(() => rec.dispatches.length, { timeout: 15_000 }).toBe(1);
+
+  // Bundled through the SAME endpoint a wired card uses, with the asset's
+  // PRIMARY slot as the checklist — a mention has no card to tick boxes on, so
+  // it means "this asset, generically".
+  expect(rec.bundleQueries).toHaveLength(1);
+  expect(rec.bundleQueries[0].assetId).toBe(ASSET_ID);
+  expect(rec.bundleQueries[0].model).toBe(MODEL);
+  expect(rec.bundleQueries[0].selectedFileIds).toEqual([SHEET_FILE]);
+
+  const dispatched = rec.dispatches[0] as {
+    prompt: string;
+    params: { source_urls?: string[]; source_asset_id?: string };
+  };
+  expect(dispatched.params.source_urls).toEqual([
+    `/api/v1/resources/${SHEET_FILE}/cover`,
+    `/api/v1/resources/${STILLS_FILE}/cover`,
+  ]);
+  // The storage token NEVER reaches the model — the asset's name does.
+  expect(dispatched.prompt).toBe(
+    'weathered field jacket, grey eyes\na lighthouse at dawn @Cole Bannon',
+  );
+  expect(dispatched.prompt).not.toContain('@[asset:');
+  // Provenance falls back to the first mention when no card is wired.
+  expect(dispatched.params.source_asset_id).toBe(ASSET_ID);
+
+  await page.screenshot({ path: 'e2e-artifacts/canvas-assets-mention.png', fullPage: true });
+});

@@ -19,6 +19,7 @@ import { resolveAssetInputsForRun } from './assetInputs';
 import { markDroppedKnobs } from './droppedKnobs';
 import { markGenerationRecover, upsertGenerationSlots } from './genSlots';
 import { resolveAssetRef } from './assetRef';
+import { promptBodyForRun } from './mentionedAssets';
 import { DEFAULT_SPLIT_SEPARATOR, splitPromptItems } from './promptSplit';
 import {
   resolveEffectiveSourceUrl,
@@ -101,7 +102,7 @@ export async function rerunPrompt(
 
   const ctx: RunnerContext = {
     promptId,
-    body: data.body,
+    body: promptBodyForRun(data),
     provider_slug: data.provider_slug,
     agent_id: data.agent_id,
     gen: data.gen ?? null,
@@ -112,7 +113,13 @@ export async function rerunPrompt(
     negative_body: data.negative_body ?? null,
     asset_ref: resolveAssetRef(promptId, nodes, connections),
     split_prompts: data.split_enabled
-      ? splitPromptItems(data.body, data.split_separator ?? DEFAULT_SPLIT_SEPARATOR)
+      ? splitPromptItems(
+          // Split the RENDERED body: a separator inside a rendered asset name is
+          // still a separator, and splitting the raw text would leave a token
+          // in one of the items.
+          promptBodyForRun(data),
+          data.split_separator ?? DEFAULT_SPLIT_SEPARATOR,
+        )
       : undefined,
   };
 

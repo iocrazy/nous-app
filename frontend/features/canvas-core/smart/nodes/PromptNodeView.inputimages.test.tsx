@@ -4,7 +4,7 @@
  * The wired inputs (resolveSourceUrls) render as a thumbnail row above the
  * textarea (Infinite's「2 输入图」); clicking one selects it as the i2i
  * source (data.source_ref, toggles off on re-click). Typing @ opens a
- * two-tab picker — Input images / Library — defaulting to Input when
+ * two-tab picker — Input Images / Assets — defaulting to Input when
  * inputs exist (IC rule); picking an input inserts @Image N and sets
  * source_ref.
  */
@@ -141,7 +141,7 @@ describe('@ picker input tab', () => {
   // handler, not from a ChangeEvent it never produces. It notifies on the
   // next tick (so the character lands first), so callers await what they
   // actually need — the two tabs render different roots, and only the
-  // Library one carries the `canvas-mention-picker` testid.
+  // Library one carries the `mention-assets-*` testids.
   function openPicker(): void {
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Prompt body' }), { key: '@' });
   }
@@ -160,12 +160,20 @@ describe('@ picker input tab', () => {
     await waitFor(() => expect(promptData().body).toContain('@Image 2'));
   });
 
-  it('without inputs the Input tab is disabled and Library is active', async () => {
+  it('without inputs the picker opens on Assets, and the Input tab says why it is empty', async () => {
     seed(false);
     renderPrompt();
     openPicker();
-    expect(await screen.findByTestId('mention-tab-input')).toBeDisabled();
-    expect(screen.getByTestId('canvas-mention-picker')).toBeInTheDocument();
+    // The tab is reachable, not disabled: a disabled tab explains nothing,
+    // and "this node has no input images yet" is the answer the user needs.
+    const inputTab = await screen.findByTestId('mention-tab-input');
+    expect(inputTab).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('mention-tab-assets')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(inputTab);
+    expect(screen.getByTestId('mention-input-empty')).toBeInTheDocument();
   });
 });
 

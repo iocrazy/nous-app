@@ -33,13 +33,21 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import type { PromptImageRef } from './promptImageRefs';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
+import {
+  PromptMentionPicker,
+  type PromptMentionPickerHandle,
+} from './PromptMentionPicker';
+import { useCanvasScope } from '../canvasScope';
+import type { MentionedAsset } from '../mentionedAssets';
+import { useModelCapabilities } from './useModelCapabilities';
+import type { AssetSummary } from '../../../../services/assetsService';
+import { ASSET_TYPE_ICON } from '../../../../components/resources/assets/assetTypeMeta';
 import { GenFooterControls } from './GenFooterControls';
 import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
 import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
-import type { ResourceSearchResult } from '../../../../types';
 import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
@@ -70,6 +78,9 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     last_dropped,         // knobs the backend ignored on the last run (P4)
     last_dropped_refs,    // references it could not use on that run (P4 assets)
+    mentioned_assets = [], // assets named in the body with @ (inline chips)
+    last_mention_dropped,  // what a mentioned asset's bundle would not send
+    last_mention_error = null, // that bundle request itself failed
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const { t } = useTranslation();
@@ -79,9 +90,18 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // only joined here, at the one place a user reads them. References are
   // grouped by reason rather than listed per-url: the badge is a summary, and
   // the urls are in the tooltip.
+  // BOTH reference ledgers, joined only here. `last_dropped_refs` is what the
+  // BACKEND could not use on the run; `last_mention_dropped` is what the bundle
+  // endpoint refused to send for an @-mentioned asset at dispatch. Different
+  // authorities, same question for the user ("which picture is missing"), so
+  // they share one badge — and both are rewritten by every run, so neither can
+  // describe an older one.
   const droppedRefs: DroppedRef[] = useMemo(
-    () => (Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
-    [last_dropped_refs],
+    () => [
+      ...(Array.isArray(last_dropped_refs) ? last_dropped_refs : []),
+      ...(Array.isArray(last_mention_dropped) ? last_mention_dropped : []),
+    ],
+    [last_dropped_refs, last_mention_dropped],
   );
   const ignoredParts: string[] = useMemo(() => {
     const refCounts = droppedRefs.reduce<Map<string, number>>((acc, ref) => {
@@ -161,25 +181,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       ? formatElapsed(finalElapsed)
       : null;
 
-  // ── @-mention handler ────────────────────────────────────────────────────
-  // Builds a PromptResourceRef from the picked SearchResult and appends it
-  // to resource_refs (deduplicated by resource_id).
-  const handleSelectRef = useCallback(
-    (item: ResourceSearchResult) => {
-      const ref: PromptResourceRef = {
-        resource_id: item.id,
-        name: item.name,
-        kind: item.kind,
-        mime: item.mime ?? '',
-        scope: item.scope,
-      };
-      const current = resource_refs as PromptResourceRef[];
-      if (current.some((r) => r.resource_id === ref.resource_id)) return;
-      patch({ resource_refs: [...current, ref] });
-    },
-    [resource_refs, patch],
-  );
-
   // ── IME-safe draft mirror (2026-08-18 incident) ─────────────────────────
   // The textarea renders a LOCAL draft, not the store body: patching the
   // store on every keystroke round-trips through React Flow asynchronously,
@@ -205,20 +206,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     [patch],
   );
 
-  const mention = useCanvasMentionPicker({
-    value: draft,
-    onValueChange: pushBody,
-    onSelectRef: handleSelectRef,
-  });
-
-  const handleBodyChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setDraft(e.target.value);
-      if (composingRef.current) return;
-      mention.handleChange(e);
-    },
-    [mention.handleChange],
-  );
+  const mention = useCanvasMentionPicker();
 
   // ── Image chips in the body ──────────────────────────────────────────────
   const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
@@ -228,6 +216,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const seededChips = useRef<PromptImageRef[]>(
     (image_refs ?? []) as PromptImageRef[],
   ).current;
+  // The name table the editor re-hydrates `@[asset:id]` tokens with. Seeded
+  // once for the same reason the image chips are: from then on the document
+  // owns the list, and the editor keeps accumulating names it has seen.
+  const seededAssetChips = useRef<MentionedAsset[]>(
+    (mentioned_assets ?? []) as MentionedAsset[],
+  ).current;
   // The document is the chip list; node data mirrors it so a reload can
   // rebuild them (body is plain text and cannot carry them).
   const handleImageRefsChange = useCallback(
@@ -236,7 +230,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch],
   );
-  // While the picker is open, Escape and arrows belong to it, not the text.
+  // Same rule for asset mentions, and it is what makes "delete the chip,
+  // delete the reference" true without any extra bookkeeping: the document is
+  // re-collected on every change, so a removed chip prunes the entry here and
+  // the run stops bundling that asset.
+  const handleAssetRefsChange = useCallback(
+    (assets: MentionedAsset[]) => {
+      patch({ mentioned_assets: assets });
+    },
+    [patch],
+  );
+  const mentionedAssets = (mentioned_assets ?? []) as MentionedAsset[];
+  // While the picker is open, Escape, the arrows and Enter belong to it, not
+  // the text. The picker never takes focus (the editor must keep it, or its
+  // blur closes the popover), so its keys arrive here and are forwarded.
+  const mentionPickerRef = useRef<PromptMentionPickerHandle | null>(null);
   const handleBodyKeyDown = useCallback(
     (event: KeyboardEvent): boolean => {
       if (!mention.pickerOpen) return false;
@@ -245,26 +253,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         return true;
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        mention.moveActive(event.key === 'ArrowDown' ? 1 : -1);
+        mentionPickerRef.current?.move(event.key === 'ArrowDown' ? 1 : -1);
         return true;
+      }
+      if (event.key === 'Enter') {
+        // Only swallow Enter when there was something to insert. An empty
+        // result list must let the keystroke reach the text, or the box looks
+        // frozen while the popover happens to be open.
+        return mentionPickerRef.current?.commitActive() ?? false;
       }
       return false;
     },
     [mention],
   );
-  const handleCompositionStart = useCallback(() => {
-    composingRef.current = true;
-  }, []);
-  const handleCompositionEnd = useCallback(
-    (e: React.CompositionEvent<HTMLTextAreaElement>) => {
-      composingRef.current = false;
-      mention.handleChange({
-        target: e.currentTarget,
-      } as unknown as React.ChangeEvent<HTMLTextAreaElement>);
-    },
-    [mention.handleChange],
-  );
-
   // Wired input images (IC parity ⑤ — Infinite's 「N 输入图」row + the
   // @-picker's 输入图 tab). Recomputed from the live graph so absorbing /
   // rewiring upstream nodes updates the row immediately.
@@ -346,29 +347,58 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch, sourceRef],
   );
-  // IC rule: the picker opens on the Input tab when inputs exist, else
-  // falls to the asset library; reset each time the picker opens.
-  const [mentionTab, setMentionTab] = useState<'input' | 'library'>('library');
+  // The whole-library resource search now serves ONE affordance: the input
+  // row's "Add reference image" picker. The `@` picker no longer opens it —
+  // it asks the ASSET library instead (PromptMentionPicker), which is the
+  // question someone typing `@` in a prompt is actually asking.
+  //
+  // Always '' because that picker has no search box of its own; it shows the
+  // default listing and filters by kind.
+  const { data: searchData, loading: searchLoading } = useResourceSearch('', activeKind);
 
-  // Search for resources whenever the picker is open (debounced inside the hook).
-  // Pass '' when picker is closed so cached data is reused on next open.
-  const { data: searchData, loading: searchLoading } = useResourceSearch(
-    mention.pickerOpen ? mention.query : '',
-    activeKind,
+  // Scope for the asset calls the mention picker makes. '' when the canvas URL
+  // has no team segment — the picker says so rather than sending a request
+  // that is a 403 by construction.
+  const { scopeId } = useCanvasScope();
+
+  // The provider's reference ceiling, for greying the inputs past it. null =
+  // unknown (loading / no model / old backend), which renders FULL support.
+  const caps = useModelCapabilities(gen?.model ?? null);
+  const maxRefs = caps?.max_refs ?? null;
+
+  /** The `@Image N` candidates: every durable input this node already has. */
+  const mentionImages = useMemo(
+    () => inputUrls.map((url, i) => ({ url, label: `Image ${i + 1}` })),
+    [inputUrls],
   );
 
-  // Keep keyboard-wrap bound tight: update the hook's itemCountRef whenever
-  // results change. Uses a ref internally so this never triggers re-renders.
-  useEffect(() => {
-    mention.setItemCount(searchData.results.length);
-  }, [searchData.results.length, mention.setItemCount]);
+  const handleMentionImage = useCallback(
+    (image: { url: string; label: string }) => {
+      bodyEditorRef.current?.insertImage({
+        url: image.url,
+        alias: image.label,
+        kind: 'image',
+      });
+      patch({ source_ref: image.url });
+      mention.closePicker();
+    },
+    [patch, mention],
+  );
 
-  useEffect(() => {
-    if (mention.pickerOpen) {
-      setMentionTab(inputUrls.length > 0 ? 'input' : 'library');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on open only
-  }, [mention.pickerOpen]);
+  const handleMentionAsset = useCallback(
+    (asset: AssetSummary) => {
+      // No node is created. The chip IS the reference — `resolveAssetInputs`
+      // bundles it at run time exactly like a wired card would be.
+      bodyEditorRef.current?.insertAsset({
+        asset_id: asset.id,
+        name: asset.name,
+        asset_type: asset.asset_type,
+        cover_file_id: asset.cover_file_id,
+      });
+      mention.closePicker();
+    },
+    [mention],
+  );
 
   // ── Library picker handler ───────────────────────────────────────────────
   // Applies the pure-function result: patch this node's body/negative_body,
@@ -538,7 +568,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             </div>
           </div>
         )}
-        {inputUrls.length > 0 && (
+        {inputUrls.length + mentionedAssets.length > 0 && (
           <div
             data-testid="prompt-input-row"
             className="mb-1.5 flex flex-wrap items-center gap-1.5"
@@ -592,18 +622,77 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 )}
               </span>
             ))}
+            {/* @-mentioned assets ride here too, AFTER the wired inputs and in
+                the same order the run delivers them. They are references like
+                any other — leaving them out would make the strip's count
+                disagree with what is actually sent, which is the exact class
+                of drift the run badge exists to catch. Their thumbnail is the
+                asset's cover, badged with the type icon so a card reference
+                and a picture reference are not confused. */}
+            {mentionedAssets.map((asset, i) => {
+              const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
+              const rank = inputUrls.length + i;
+              // Past the provider's ceiling: this reference WILL be trimmed,
+              // and the trim is from the tail. `maxRefs === null` is "unknown",
+              // not "zero" — it greys nothing.
+              const beyond = maxRefs !== null && rank >= maxRefs;
+              return (
+                <span
+                  key={asset.asset_id}
+                  data-testid="prompt-mention-thumb"
+                  data-asset-id={asset.asset_id}
+                  data-beyond-limit={beyond ? 'true' : 'false'}
+                  title={
+                    beyond
+                      ? t('canvas.asset.refsLimit', {
+                          count: maxRefs ?? 0,
+                          defaultValue: 'This model takes fewer reference images. The rest are not sent.',
+                        })
+                      : asset.name
+                  }
+                  className={`relative inline-flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded border border-canvas-line/60 text-canvas-muted ${
+                    beyond ? 'opacity-40' : ''
+                  }`}
+                >
+                  {asset.cover_file_id ? (
+                    <img
+                      src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
+                      alt={asset.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Icon size={11} />
+                  )}
+                  <span className="pointer-events-none absolute left-0 top-0 rounded-br-md bg-canvas-strong px-1 text-[8px] font-bold leading-3 text-canvas-card">
+                    {rank + 1}
+                  </span>
+                </span>
+              );
+            })}
             <span className="text-[10px] font-semibold text-canvas-muted">
-              {inputUrls.length} inputs
+              {inputUrls.length + mentionedAssets.length} inputs
             </span>
+            {last_mention_error && (
+              <span
+                data-testid="mention-bundle-error"
+                title={last_mention_error}
+                className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn"
+              >
+                {t(
+                  'canvas.mention.bundleFailed',
+                  'A mentioned asset could not be read on the last run',
+                )}
+              </span>
+            )}
             {!readOnly && (
               <button
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
                 onClick={() => setRefPickerOpen((v) => !v)}
-                disabled={inputUrls.length >= MAX_REFERENCE_IMAGES}
+                disabled={inputUrls.length + mentionedAssets.length >= MAX_REFERENCE_IMAGES}
                 title={
-                  inputUrls.length >= MAX_REFERENCE_IMAGES
+                  inputUrls.length + mentionedAssets.length >= MAX_REFERENCE_IMAGES
                     ? `Reference limit reached (${MAX_REFERENCE_IMAGES})`
                     : 'Add reference image'
                 }
@@ -614,7 +703,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             )}
           </div>
         )}
-        {inputUrls.length === 0 && gen && !readOnly && (
+        {inputUrls.length + mentionedAssets.length === 0 && gen && !readOnly && (
           <div className="mb-1.5 flex items-center">
             <button
               type="button"
@@ -692,6 +781,8 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             value={draft}
             onChange={pushBody}
             onRefsChange={handleImageRefsChange}
+            onAssetRefsChange={handleAssetRefsChange}
+            knownAssets={seededAssetChips}
             onAtTyped={mention.openPicker}
             onMentionQueryChange={mention.setMentionQuery}
             onKeyDown={handleBodyKeyDown}
@@ -701,79 +792,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         </div>
 
         {mention.pickerOpen && (
-          <div
-            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {/* IC's mention-source-tabs: 输入图 / 资产库. */}
-            <div className="mb-1 flex items-center gap-1">
-              <button
-                type="button"
-                data-testid="mention-tab-input"
-                disabled={inputUrls.length === 0}
-                onClick={() => setMentionTab('input')}
-                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-                  mentionTab === 'input'
-                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                Input images
-              </button>
-              <button
-                type="button"
-                data-testid="mention-tab-library"
-                onClick={() => setMentionTab('library')}
-                className={`nodrag rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                  mentionTab === 'library'
-                    ? 'border-canvas-strong bg-canvas-strong text-canvas-card'
-                    : 'border-canvas-line text-canvas-text'
-                }`}
-              >
-                Library
-              </button>
-            </div>
-            {mentionTab === 'input' ? (
-              <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-canvas-line bg-canvas-card p-2">
-                {inputUrls.slice(0, 36).map((url, i) => (
-                  <button
-                    key={url}
-                    type="button"
-                    data-testid="mention-input-option"
-                    onMouseDown={(e) => {
-                      // mousedown, not click: the editor must keep focus or
-                      // its blur closes this popover first.
-                      e.preventDefault();
-                      bodyEditorRef.current?.insertImage({
-                        url,
-                        alias: `Image ${i + 1}`,
-                        kind: 'image',
-                      });
-                      patch({ source_ref: url });
-                      mention.closePicker();
-                    }}
-                    className="nodrag flex flex-col items-center gap-0.5"
-                  >
-                    <span className="h-12 w-12 overflow-hidden rounded-md border border-canvas-line/60">
-                      <img src={mediaSrc(url)} alt={`Image ${i + 1}`} className="h-full w-full object-cover" />
-                    </span>
-                    <span className="text-[9px] text-canvas-muted">Image {i + 1}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <CanvasMentionPicker
-                items={searchData.results}
-                query={mention.query}
-                loading={searchLoading}
-                counts={searchData.counts}
-                activeKind={activeKind}
-                onKindChange={setActiveKind}
-                onSelect={mention.handleSelect}
-                activeIndex={mention.activeIndex}
-              />
-            )}
-          </div>
+          <PromptMentionPicker
+            ref={mentionPickerRef}
+            scopeId={scopeId}
+            inputImages={mentionImages}
+            onPickImage={handleMentionImage}
+            onPickAsset={handleMentionAsset}
+            query={mention.query}
+          />
         )}
 
         {/* Fixed full-screen modal — no relative positioning needed. */}

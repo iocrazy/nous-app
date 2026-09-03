@@ -174,3 +174,48 @@ describe('rerunPrompt (G4-F3 failed-retry)', () => {
     expect((slot?.data as { images?: Array<{ url: string }> }).images?.[0].url).toBe('/gm/3/cover');
   });
 });
+
+describe('the prompt text a rerun dispatches', () => {
+  it('carries the mentioned asset’s NAME, never its storage token', async () => {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      kind: 'smart',
+      canvasId: '9',
+      nodes: [
+        {
+          ...PROMPT,
+          data: {
+            ...(PROMPT.data as Record<string, unknown>),
+            body: 'a shot of @[asset:727145299382534201] at dusk',
+            mentioned_assets: [
+              {
+                asset_id: '727145299382534201',
+                name: 'Ava',
+                asset_type: 'character',
+                cover_file_id: null,
+              },
+            ],
+          },
+        } as CanvasNode,
+        SLOT,
+      ],
+      connections: [],
+      selection: [],
+    });
+
+    let seen = '';
+    useRegenStore.setState({
+      runnerOverride: async (ctx): Promise<RunnerResult> => {
+        seen = ctx.body;
+        return { ok: true, text: '', error: null, urls: ['/gm/2/cover'], media_kind: 'image' };
+      },
+    });
+
+    await regenerateForOutput('out1');
+
+    expect(seen).toBe('a shot of @Ava at dusk');
+    // The token is a STORAGE form. A model that received it would try to
+    // interpret it, and nobody comparing generated images would ever notice.
+    expect(seen).not.toContain('@[asset:');
+  });
+});

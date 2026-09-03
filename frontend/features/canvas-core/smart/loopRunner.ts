@@ -21,6 +21,7 @@
 
 import type { CanvasConnection, CanvasNode } from '../types';
 import { resolveAssetRef } from './assetRef';
+import { promptBodyForRun, type MentionedAsset } from './mentionedAssets';
 import {
   resolveEffectiveSourceUrl,
   resolveEffectiveSourceUrls,
@@ -102,12 +103,13 @@ export async function runLoopCascade(opts: LoopRunOptions): Promise<LoopRunSumma
           agent_id?: string | null;
           gen?: RunnerContext['gen'];
           negative_body?: string | null;
+          mentioned_assets?: MentionedAsset[];
         }
       | undefined;
     if (!d) continue;
     baseContexts.push({
       promptId: id,
-      body: d.body ?? '',
+      body: promptBodyForRun(d),
       provider_slug: d.provider_slug ?? '',
       agent_id: d.agent_id ?? null,
       // Without gen the generation runner passes the prompt to the TEXT
