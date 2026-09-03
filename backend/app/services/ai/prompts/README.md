@@ -4,7 +4,7 @@
 
 - `prompt_composer.py` — `PromptComposer.compose()` 是唯一入口，八条 dispatch 路径都走它
 - `link_injection.py` — 用户消息里的 URL → 抓取 → 中和后的块，前插到 request instructions
-- `render_available_resources()` — @-mention 的资源清单（模块级函数，供 chat 层按轮调用）
+- `render_available_resources()` — @-mention 的资源与资产清单（模块级函数，供 chat 层按轮调用）
 
 ## Model Experience
 
@@ -72,32 +72,59 @@ Model: {model} | Time: {YYYY-MM-DD HH:MM UTC}
 
 #### What the model sees
 
-一行一个自闭合元素，后跟 ResourceFetch 的用法说明：
+一个框里两种条目：`<resource … />` 是可取的文件，`<asset …>…</asset>` 是资产库实体（角色 / 场景 / 道具 …），正文就是它的一致性提示词。资源条目全部排在资产条目之前——资产用 `primary_resource_id` 指回其中一条，模型读到指针时那张图已经在页面上了。真实渲染结果逐字如下：
 
 ```markdown
 <available_resources>
-  <resource id="…" kind="video" mime="…" scope="…" size="12MB" updated="…" name="…" status="transcript:ready summary:none" />
+  <resource id="9001" kind="image" mime="image/png" scope="team:42" size="793KB" updated="2026-09-01" name="lin-wei-ref.png" />
+  <asset id="7001" type="character" name="Lin Wei" scope="42" primary_resource_id="9001" has_image="true" loadout="5001">a tall woman in her mid 30s, short black hair, red wool scarf</asset>
 </available_resources>
 
 Use the ResourceFetch tool to load any of these on demand:
   ResourceFetch(resource_id, mode?, args?)
+  - mode for video: summary (default) | transcript | frames
+    frames returns evenly sampled still images from the video; args.frames sets how many (default 6, max 12)
+  - mode for doc: excerpt (default) | full
+  - mode for pdf: excerpt (default) | page (args.page)
+  - mode for image: omit (returns image part)
+  - mode for audio: transcript (default)
+  - an <asset> entry carries its consistency prompt as the body; fetch its picture with ResourceFetch(primary_resource_id, mode=image) when has_image is true
 ```
+
+最后那行 `- an <asset> entry …` **只在本轮有资产时出现**；纯资源的轮次与 P5 之前逐字一致。
 
 `status` 属性只对 video/audio 出现——对一个 markdown 文件说 `transcript:none` 是模型要读过去的纯噪声。（源码注释里说它还会 churn cache fingerprint；实际上这一块不进任何一个指纹，那句话指的是渲染文本本身。）
 
-**所有属性值都过 `escape_frame_attr`**，因为 `name` 是用户可自由改的文件名；见 `../../../boundary/frame_markers.py`。
+资产条目的三条形状约定：
+
+- **图片不内联。** `<asset>` 只给 `primary_resource_id`，那是一条普通 `resources` 行，模型自己决定要不要花一次 `ResourceFetch` 去看（P5 裁决 F）。
+- **`has_image` 是独立字段，写作 `"true"` / `"false"`。** 音频资产有主资源却没有图，两者必须能分开——不然模型会对着 `.wav` 调 `mode=image`。Python 的 `True` 在属性里是另一个 token，拼写由渲染层负责，不由 `ChatAssetRef` 负责。
+- **`primary_resource_id` / `loadout` 为空时整个属性省略，不渲染成空串。** `primary_resource_id=""` 读起来仍然像一个 id，模型会拿它去调用然后失败；属性缺席 + `has_image="false"` 才是「没有图可取」。
+
+**所有属性值都过 `escape_frame_attr`，`<asset>` 的正文过 `escape_frame_body`**（`name` 是用户可自由改的，一致性提示词整段都是用户写的）；见 `../../../boundary/frame_markers.py`。
+
+⚠️ **`asset` 刻意不在 `OWNED_FRAMES` 里**（P5 裁决 A，spec §6.5 已按此修订）：它是我们拥有的框**内部的元素**，不是框。用户提示词里出现字面 `</asset>` 只会截断它自己那一条，后面的文字仍在 `<available_resources>` 内，拿不到 harness 权威；反过来把它登记成框，会把提示词里每一次合法提到该词都糟蹋掉。`tests/services/ai/prompts/test_frame_escape_wiring.py` 的 `ignore` 名单记着这条理由。
 
 #### Token effect
 
-与本轮 @-mention 的资源条数成正比，每条约 30-60 token。**资源正文不在这里**——这一块只是目录，正文要模型主动调 `ResourceFetch` 才进上下文。没有 @-mention 时整块返回空字符串，这样无 mention 的轮次系统消息缓存键不变。
+与本轮 @-mention 的条数成正比：
+
+- **每条 `<resource … />`** 约 30-60 token。
+- **每条 `<asset …>…</asset>`** = 属性约 25-40 token + 一致性提示词。提示词是这里唯一无自然上限的输入（资产自身提示词 + loadout 的 `prompt_extra` + 每个链接的服装 / 道具 / 场景的提示词拼起来），所以在 `app/services/assets/chat_ref.py` 里**硬截断到 `MAX_CONSISTENCY_PROMPT_CHARS = 600` 字符**。⚠️ `" [truncated]"` 标记是**追加在上限之外**的，被截断的条目正文是 **612** 字符而不是 600——按常量本身算预算会每条少算 12 字符。600 字符在纯 ASCII 下约 150 token，全中文时可以接近 600 token，估上限要按后者。
+- **总量上界 = 本轮附件条数 × 上述单条上限**，而附件条数由 composer 的暂存附件列表封顶——不随资产链接数增长。
+
+**资源正文与资产主图都不在这里**——这一块只是目录，正文/图片要模型主动调 `ResourceFetch` 才进上下文。没有 @-mention 也没有资产时整块返回空字符串，这样无 mention 的轮次系统消息缓存键不变。
 
 #### KV Cache effect
 
-它拼在 request instructions 里，位于缓存边界**之后**，所以逐轮变化不影响稳定前缀。
+它拼在 request instructions 里，位于缓存边界**之后**，所以逐轮变化不影响稳定前缀——资产条目同样在边界之后，改一个资产的提示词、它的 loadout 或它的链接，只动这段后缀。
+
+本模块不缓存资产内容：每轮从活数据重新组装，所以资产表里的编辑对下一条消息立即可见，没有失效步骤。
 
 ## Known Limitations and Deferred Work
 
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
+- **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。

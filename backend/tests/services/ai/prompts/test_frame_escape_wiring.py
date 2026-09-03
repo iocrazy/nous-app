@@ -141,6 +141,9 @@ def test_every_frame_rendered_in_prompt_code_is_registered():
         "description",
         "model",
         "resource",
+        # P5 ruling A: <asset> is an element inside <available_resources>, not
+        # a frame — closing it truncates that one entry, never the frame.
+        "asset",
         "slug",
         "h2",
         "p",

@@ -324,6 +324,8 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 - Send to Agent：复用 `pendingResource` 通道，扩展为 `pendingAsset {asset_id, loadout_id}`；后端 `resolve_resource_refs` 增补 asset 引用 → 展开为主图 + 一致性提示词进 `<available_resources>`（走 `escape_frame_body`，并把 `<asset>` 框登记进 `OWNED_FRAMES`）。
 - 聊天里 `@` 选择器加 Assets 一栏（v1 只做插入引用，不做 loadout 选择）。
 
+**修订记录（2026-09-03，P5 裁决 A）**：上面那句「把 `<asset>` 框登记进 `OWNED_FRAMES`」**作废**。`<asset>` 不是框，而是 `<available_resources>`（已登记的框）**内部的元素**，与 `<resource … />` 平级；属性走 `escape_frame_attr`、正文走 `escape_frame_body`，`asset` 只加进 `tests/services/ai/prompts/test_frame_escape_wiring.py` 的 `ignore` 名单。理由：用户提示词里的字面 `</asset>` 只截断它自己那一条，后面的文字仍在框内、拿不到 harness 权威；而把它登记成框会把提示词里每一次合法提到该词都糟蹋掉。落点见 `backend/app/services/ai/prompts/README.md` 的 `<available_resources>` 一节。
+
 ## 7. 错误处理与不变量
 
 ### 7.0 作用域与权限（2026-08-28 复盘补）
