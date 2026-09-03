@@ -3606,6 +3606,7 @@
     "attachmentFailures": "{{count}} 个附件加载失败",
     "attachmentFailureReason": {
       "unknown": "该附件无法使用",
+      "unknownCount": "{{n}} 个附件无法使用",
       "asset_not_accessible": "有资产不在你所属的工作区内",
       "asset_deleted": "有资产已被删除",
       "asset_no_primary_image": "有资产还没有主图",

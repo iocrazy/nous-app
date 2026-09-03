@@ -3606,6 +3606,7 @@
     "attachmentFailures": "{{count}} attachment(s) failed to load",
     "attachmentFailureReason": {
       "unknown": "The Attachment Could Not Be Used",
+      "unknownCount": "{{n}} Attachments Could Not Be Used",
       "asset_not_accessible": "One Asset Is Not In A Workspace You Belong To",
       "asset_deleted": "One Asset Has Been Deleted",
       "asset_no_primary_image": "One Asset Has No Main Image Yet",

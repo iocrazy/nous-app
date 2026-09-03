@@ -27,16 +27,23 @@ const lookup = (key: string): string | undefined =>
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (k: string, opts?: unknown) => {
+    // The real three-arg shape: `t(key)`, `t(key, options)` and
+    // `t(key, defaultValue, options)` are all live in this component, and a
+    // two-arg stand-in silently drops the interpolation values of the third
+    // form — the banner would render "{{n}} Attachments…" and the test would
+    // be measuring the mock rather than the component.
+    t: (k: string, arg2?: unknown, arg3?: unknown) => {
+      const opts = (typeof arg2 === 'object' ? arg2 : arg3) as
+        | Record<string, unknown>
+        | undefined;
       const hit = lookup(k);
-      if (typeof hit === 'string') {
-        if (opts && typeof opts === 'object' && 'count' in (opts as Record<string, unknown>)) {
-          return hit.replace('{{count}}', String((opts as { count: unknown }).count));
-        }
-        return hit;
+      const template =
+        typeof hit === 'string' ? hit : typeof arg2 === 'string' ? arg2 : k;
+      let out = template;
+      for (const [name, value] of Object.entries(opts ?? {})) {
+        out = out.split(`{{${name}}}`).join(String(value));
       }
-      // The with-fallback form: `t(key, defaultString)`.
-      return typeof opts === 'string' ? opts : k;
+      return out;
     },
   }),
 }));
@@ -44,6 +51,11 @@ vi.mock('react-i18next', () => ({
 import { AttachmentFailureBanner } from './AttachmentFailureBanner';
 
 const failure = (reason: string, index = 0) => ({ index, kind: 'asset_ref', reason });
+
+/** A BINARY-path failure. `chat_attachment_resolver` builds these as
+ *  `f"{type(exc).__name__}: {exc}"`, so the reason is a free-form exception
+ *  string — not a code, not translatable, and almost never repeated verbatim. */
+const binaryFailure = (reason: string, index = 0) => ({ index, kind: 'image', reason });
 
 describe('AttachmentFailureBanner — asset reasons', () => {
   it.each([
@@ -90,6 +102,84 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     const line = screen.getByTestId('attachment-failure-reason');
     expect(line.textContent).toBe('The Attachment Could Not Be Used');
     expect(line.textContent).not.toContain('some_future_reason');
+  });
+});
+
+describe('AttachmentFailureBanner — free-form binary reasons are counted, not listed', () => {
+  it('collapses several unnamed failures into ONE line carrying the count', () => {
+    // Before this, three binary failures printed the same generic sentence
+    // three times — a line that says nothing, said repeatedly.
+    render(
+      <AttachmentFailureBanner
+        count={3}
+        failures={[
+          binaryFailure('ValueError: bad header', 0),
+          binaryFailure('TimeoutError: read timed out', 1),
+          binaryFailure('produced no usable attachments', 2),
+        ]}
+      />,
+    );
+    const lines = screen.getAllByTestId('attachment-failure-reason');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].getAttribute('data-unnamed-count')).toBe('3');
+    expect(lines[0].textContent).toBe('3 Attachments Could Not Be Used');
+  });
+
+  it('uses the singular line for exactly one unnamed failure', () => {
+    render(
+      <AttachmentFailureBanner count={1} failures={[binaryFailure('ValueError: bad header')]} />,
+    );
+    expect(screen.getByTestId('attachment-failure-reason').textContent).toBe(
+      'The Attachment Could Not Be Used',
+    );
+  });
+
+  it('never prints the exception text at the user', () => {
+    render(
+      <AttachmentFailureBanner
+        count={2}
+        failures={[binaryFailure('ValueError: bad header', 0), binaryFailure('OSError: x', 1)]}
+      />,
+    );
+    const banner = screen.getByRole('status');
+    expect(banner.textContent).not.toContain('ValueError');
+    expect(banner.textContent).not.toContain('OSError');
+  });
+
+  it('keeps the typed asset lines beside the counted generic one', () => {
+    // A mixed turn: an asset failed for a reason worth naming, and two files
+    // failed for reasons that are not. Both halves have to survive.
+    render(
+      <AttachmentFailureBanner
+        count={3}
+        failures={[
+          failure('asset_deleted', 0),
+          binaryFailure('ValueError: bad header', 1),
+          binaryFailure('OSError: x', 2),
+        ]}
+      />,
+    );
+    const lines = screen.getAllByTestId('attachment-failure-reason');
+    expect(lines.map((el) => el.getAttribute('data-reason'))).toEqual([
+      'asset_deleted',
+      'unknown',
+    ]);
+    expect(lines[0].textContent).toBe('One Asset Has Been Deleted');
+    expect(lines[1].textContent).toBe('2 Attachments Could Not Be Used');
+  });
+
+  it('counts every unnamed failure, including repeats of one string', () => {
+    // De-duplicating the generic bucket would UNDER-report: two files that
+    // failed identically are still two files the user did not get.
+    render(
+      <AttachmentFailureBanner
+        count={2}
+        failures={[binaryFailure('OSError: x', 0), binaryFailure('OSError: x', 1)]}
+      />,
+    );
+    expect(
+      screen.getByTestId('attachment-failure-reason').getAttribute('data-unnamed-count'),
+    ).toBe('2');
   });
 
   it('still renders the headline alone when the caller kept no failures', () => {

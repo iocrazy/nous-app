@@ -150,39 +150,107 @@ const ReadinessRing: React.FC<ReadinessRingProps> = ({ ready, filled, total, lab
  * the sheet — the two would fight over every click. Being a sibling also
  * keeps the `asset-card` element's contents byte-for-byte what they were, so
  * nothing that counts children or icons inside it changes meaning.
+ *
+ * It carries the WAI-ARIA menu keyboard model, not just the roles. A
+ * `role="menu"` announces a contract to a screen-reader user — arrow keys
+ * move between items, Escape closes and returns you where you were — and
+ * declaring it without implementing it strands them in a widget that does not
+ * behave the way it just said it would. That is worse than a plain popover,
+ * which promises nothing. So: opening focuses the first item, ↑↓ wrap, Home /
+ * End jump, Escape closes AND restores focus to the trigger (without that
+ * last part, closing drops the caret at the top of the document and the user
+ * has to tab back through the whole shelf).
  */
 const AssetCardMenu: React.FC<{ asset: AssetRow }> = ({ asset }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   // Optional: the shelf mounts under a ToastProvider, a bare card test does
   // not, and the send must not depend on the confirmation being renderable.
   const toast = useOptionalToast();
+
+  /** The items, read from the DOM rather than from a list in state. One
+   *  source — what is actually rendered — so an item added later is in the
+   *  keyboard order without anyone remembering to register it. */
+  const items = useCallback(
+    (): HTMLElement[] =>
+      Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
+    [],
+  );
+
+  /** Close and put the caret back on the trigger. Every close path routes
+   *  through here except the outside CLICK, where the user has already moved
+   *  their own focus and yanking it back would fight them. */
+  const close = useCallback((restoreFocus = true) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
+  // Opening moves focus INTO the menu: a menu you have to tab into is a menu
+  // the keyboard user cannot tell opened.
+  useEffect(() => {
+    if (!open) return;
+    items()[0]?.focus();
+  }, [open, items]);
+
+  const onMenuKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const list = items();
+      if (list.length === 0) return;
+      const at = list.indexOf(document.activeElement as HTMLElement);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        list[(at + 1 + list.length) % list.length]?.focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        list[(at - 1 + list.length) % list.length]?.focus();
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        list[0]?.focus();
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        list[list.length - 1]?.focus();
+      } else if (e.key === 'Tab') {
+        // Tabbing away is a close, not a trap — but the focus goes where the
+        // user aimed it, so no restore.
+        close(false);
+      }
+    },
+    [items, close],
+  );
+
+  const onTriggerKeyDown = useCallback((e: React.KeyboardEvent<HTMLButtonElement>) => {
+    // The standard way into a menu button. Enter / Space already open it via
+    // the native button click.
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setOpen(true);
+    }
+  }, []);
+
   const onSendToAgent = useCallback(() => {
-    setOpen(false);
+    close();
     sendAssetToAgent(asset, { addToast: toast?.addToast ?? null, t });
-  }, [asset, toast, t]);
+  }, [asset, close, toast, t]);
 
   return (
     <div ref={rootRef} className="absolute right-1 top-8 z-10">
       <button
+        ref={triggerRef}
         type="button"
         data-testid="asset-card-menu"
         aria-haspopup="menu"
@@ -192,14 +260,17 @@ const AssetCardMenu: React.FC<{ asset: AssetRow }> = ({ asset }) => {
           defaultValue: 'Actions for {{name}}',
         })}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={onTriggerKeyDown}
         className="rounded-full border border-line-strong bg-card/90 p-1 text-content-3 transition-colors hover:text-content"
       >
         <MoreVertical size={13} aria-hidden="true" />
       </button>
       {open && (
         <div
+          ref={menuRef}
           role="menu"
           data-testid="asset-card-menu-popover"
+          onKeyDown={onMenuKeyDown}
           className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-line-strong bg-card py-1 shadow-lg"
         >
           <button
@@ -249,7 +320,14 @@ export const AssetCard: React.FC<AssetCardProps> = ({
   const overflowProjects = projectIds.length - shownProjects.length;
 
   return (
-    <div className="relative">
+    // `h-full` on BOTH halves, and neither is decoration. The shelf grid
+    // stretches its items, and this wrapper — not the card button — is now the
+    // grid item; without `h-full` on the button the card shrinks to its own
+    // content and a row of cards with different name/chip heights stops
+    // lining up along the bottom, which is the whole reason the grid stretches
+    // them. The wrapper's own `h-full` covers the flex-row hosts where
+    // stretching is not the default.
+    <div className="relative h-full">
       <button
         type="button"
         onClick={() => onOpen(asset)}
@@ -261,7 +339,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({
           name: asset.name,
           defaultValue: 'Open {{name}}',
         })}
-        className="group flex flex-col overflow-hidden rounded-xl border border-line bg-card text-left transition-colors hover:border-line-strong"
+        className="group flex h-full flex-col overflow-hidden rounded-xl border border-line bg-card text-left transition-colors hover:border-line-strong"
       >
         <div className="relative aspect-[4/5] w-full bg-island-2">
           {asset.cover_file_id ? (

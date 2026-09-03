@@ -5,14 +5,34 @@ import { useTranslation } from 'react-i18next';
  *  stream's `done` event and on the non-streaming `/chat` response.
  *
  *  `index` is a position in the FULL attachment list the client sent (the
- *  backend re-bases its binary indices for exactly that reason), and `reason`
- *  is a stable code — never a sentence. Anything the UI cannot name falls back
- *  to the generic line rather than printing the code at the user. */
+ *  backend re-bases its binary indices for exactly that reason).
+ *
+ *  `reason` is a CLOSED VOCABULARY on the asset path (ruling C's four codes)
+ *  and FREE FORM on the binary one — `chat_attachment_resolver` builds it as
+ *  `f"{type(exc).__name__}: {exc}"` for anything it caught, so two binary
+ *  failures rarely share a string and none of them is translatable. That split
+ *  is why this component groups rather than merely de-duplicating. */
 export interface AttachmentFailure {
   index: number;
   kind: string;
   reason: string;
 }
+
+/**
+ * The reasons this build has copy for — ruling C's four, all on the asset
+ * path. An explicit list rather than an `i18n.exists` probe: the check has to
+ * work under the `t`-only react-i18next mocks every consumer test uses, and
+ * being explicit makes the typed-vs-free-form split reviewable instead of
+ * implicit. A new backend reason needs a line here AND a string in both
+ * locales; missing either lands it in the counted bucket, which is degraded
+ * but never wrong.
+ */
+const NAMED_REASONS = new Set([
+  'asset_not_accessible',
+  'asset_deleted',
+  'asset_no_primary_image',
+  'asset_type_unknown',
+]);
 
 export interface AttachmentFailureBannerProps {
   /** Number of attachments the backend could not resolve for the last turn.
@@ -22,10 +42,11 @@ export interface AttachmentFailureBannerProps {
    * The failures themselves, when the caller kept them.
    *
    * OPTIONAL, and the count is not derived from it: a caller that has only a
-   * count still gets the headline. When they are present each distinct reason
-   * gets its own line, because "2 attachments could not be used" does not tell
-   * a user whether to re-share an asset, generate its first image, or stop
-   * waiting for a deleted one.
+   * count still gets the headline. When they are present each distinct NAMED
+   * reason gets its own line, because "2 attachments could not be used" does
+   * not tell a user whether to re-share an asset, generate its first image, or
+   * stop waiting for a deleted one. Unnamed ones are counted into a single
+   * line instead — see NAMED_REASONS.
    */
   failures?: AttachmentFailure[];
 }
@@ -38,9 +59,10 @@ export interface AttachmentFailureBannerProps {
  *
  * P5 extends it from a bare count to the REASONS: `asset_ref` attachments
  * fail for four typed causes (ruling C) and each one has a different thing to
- * do about it. A code with no string renders the generic line, never the raw
- * code — an untranslated identifier in a user-facing banner is the failure
- * mode this component exists to prevent, not a lesser version of it.
+ * do about it. A code with no string is COUNTED into one generic line, never
+ * printed — an untranslated identifier in a user-facing banner is the failure
+ * mode this component exists to prevent, not a lesser version of it, and one
+ * generic sentence repeated per failure is that same noise in other clothes.
  *
  * Kept as its own component (rather than inline in AIChatPanel) so the
  * failure-count → banner mapping is unit-testable without standing up
@@ -53,11 +75,20 @@ export const AttachmentFailureBanner: React.FC<AttachmentFailureBannerProps> = (
   const { t } = useTranslation();
   if (!count || count <= 0) return null;
 
-  // Distinct reasons, in the order they first occur, so three assets that
-  // failed the same way produce one line rather than three identical ones.
-  const reasons: string[] = [];
+  // Two buckets. NAMED reasons get a line each, in first-occurrence order and
+  // de-duplicated, so three assets that failed the same way say it once.
+  // Everything else is COUNTED, not listed: binary reasons are free-form
+  // exception strings, so listing one line per failure printed the same
+  // untranslated sentence N times over — a line that said nothing, repeatedly.
+  const named: string[] = [];
+  let unnamed = 0;
   for (const f of failures ?? []) {
-    if (f.reason && !reasons.includes(f.reason)) reasons.push(f.reason);
+    if (!f.reason) continue;
+    if (NAMED_REASONS.has(f.reason)) {
+      if (!named.includes(f.reason)) named.push(f.reason);
+    } else {
+      unnamed += 1;
+    }
   }
 
   return (
@@ -68,19 +99,35 @@ export const AttachmentFailureBanner: React.FC<AttachmentFailureBannerProps> = (
       <span className="text-xs font-medium text-warn">
         {t('chat.attachmentFailures', { count })}
       </span>
-      {reasons.map((reason) => (
+      {named.map((reason) => (
         <span
           key={reason}
           data-testid="attachment-failure-reason"
           data-reason={reason}
           className="text-[11px] text-warn"
         >
-          {t(
-            `chat.attachmentFailureReason.${reason}`,
-            t('chat.attachmentFailureReason.unknown', 'The Attachment Could Not Be Used'),
-          )}
+          {t(`chat.attachmentFailureReason.${reason}`)}
         </span>
       ))}
+      {unnamed > 0 && (
+        <span
+          data-testid="attachment-failure-reason"
+          data-reason="unknown"
+          data-unnamed-count={unnamed}
+          className="text-[11px] text-warn"
+        >
+          {/* `{{n}}`, never `{{count}}` — i18next reads a `count` option as a
+              plural selector and would go looking for `_one` / `_other`
+              siblings that do not exist, falling through to the raw key. */}
+          {unnamed === 1
+            ? t('chat.attachmentFailureReason.unknown', 'The Attachment Could Not Be Used')
+            : t(
+              'chat.attachmentFailureReason.unknownCount',
+              '{{n}} Attachments Could Not Be Used',
+              { n: unnamed },
+            )}
+        </span>
+      )}
     </div>
   );
 };
