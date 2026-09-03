@@ -46,8 +46,13 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
       <div className="flex items-center gap-2 text-[11px] text-content-3 tabular-nums">
         <span>{timeOf(note.created_at)}</span>
         {note.pinned && <Pin size={11} className="text-[var(--accent-text)]" />}
+        {/* role="group" on the wrapper is load-bearing, not decoration: a bare
+            <div> is role=generic, where ARIA prohibits naming, so the
+            aria-label would be dropped by screen readers while still
+            satisfying getByLabelText. Two unnamed star rows (card + composer)
+            writing different notes is exactly the ambiguity this prevents. */}
         {onRating && (
-          <div aria-label={t('inspiration.rating', 'Rating')}>
+          <div role="group" aria-label={t('inspiration.rating', 'Rating')}>
             <RatingStars value={note.rating ?? 0} onChange={(v) => onRating(note, v)} size={12} />
           </div>
         )}

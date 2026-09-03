@@ -161,6 +161,15 @@ describe('Composer', () => {
     expect(createNote.mock.calls[0]).toEqual(['plain idea', undefined]);
   });
 
+  it('exposes the rating group to the accessibility tree, not just to the DOM', () => {
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    // A bare <div aria-label> is role=generic, where ARIA PROHIBITS naming —
+    // screen readers drop the label entirely while getByLabelText (which reads
+    // the DOM attribute) still finds it. Querying by ROLE is what makes this
+    // assertion mean "a real user can tell these stars apart from the card's".
+    expect(screen.getByRole('group', { name: 'New note rating' })).toBeTruthy();
+  });
+
   it('has no decorative "Private" control', () => {
     render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
     // It used to be a <span> with a chevron and no onClick, over a schema that

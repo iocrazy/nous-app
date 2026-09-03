@@ -171,7 +171,19 @@ export const Composer: React.FC<Props> = (props) => {
     for (const item of pending) {
       try {
         const attachment = await uploadAttachment(noteId, item.file);
-        setStaged((prev) => prev.filter((x) => x.key !== item.key));
+        // Promote in place rather than filter out. On the happy path the
+        // parent closes the modal immediately so nobody sees the difference —
+        // but when a LATER step aborts, the modal stays open, and a file that
+        // is already on the server would otherwise be visible nowhere: not a
+        // pending chip, not a stored attachment. The obvious user response
+        // (pick the same file again) then puts a duplicate on the server.
+        setStaged((prev) =>
+          prev.map((x) =>
+            x.key === item.key
+              ? { kind: 'existing' as const, key: `e${attachment.id}`, attachment }
+              : x,
+          ),
+        );
         onAttachmentUploaded?.(noteId, attachment);
       } catch (err) {
         addToast(uploadFailedMsg(item.file.name, err), 'error');
@@ -198,11 +210,29 @@ export const Composer: React.FC<Props> = (props) => {
           'error',
         );
         // Put it back: the UI must not claim a removal the server refused.
+        // At its ORIGINAL index, not appended — a failure that changed nothing
+        // must not reorder the user's attachments as a side effect.
         setRemoved((prev) => prev.filter((x) => x.id !== attachment.id));
-        setStaged((prev) => [
-          ...prev,
-          { kind: 'existing', key: `e${attachment.id}`, attachment },
-        ]);
+        setStaged((prev) => {
+          const row: StagedItem = { kind: 'existing', key: `e${attachment.id}`, attachment };
+          const at = (props.existingAttachments ?? []).findIndex(
+            (a) => a.id === attachment.id,
+          );
+          if (at < 0) return [...prev, row];
+          // Re-insert ahead of the first surviving row that started out later
+          // in the seed order; anything not in the seed (freshly uploaded)
+          // sorts after, which matches where it was added.
+          const seedIndex = (item: StagedItem) =>
+            item.kind === 'existing'
+              ? (props.existingAttachments ?? []).findIndex((a) => a.id === item.attachment.id)
+              : -1;
+          const before = prev.findIndex((x) => {
+            const i = seedIndex(x);
+            return i >= 0 && i > at;
+          });
+          if (before < 0) return [...prev, row];
+          return [...prev.slice(0, before), row, ...prev.slice(before)];
+        });
         return false;
       }
     }
@@ -409,7 +439,11 @@ export const Composer: React.FC<Props> = (props) => {
         {isEdit ? (
           <div />
         ) : (
-          <div aria-label={t('inspiration.ratingNewNote', 'New note rating')} className="px-1">
+          <div
+            role="group"
+            aria-label={t('inspiration.ratingNewNote', 'New note rating')}
+            className="px-1"
+          >
             <RatingStars value={rating} onChange={setRating} size={14} />
           </div>
         )}

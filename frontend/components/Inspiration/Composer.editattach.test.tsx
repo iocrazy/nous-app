@@ -34,6 +34,7 @@ import type { InspirationNote, NoteAttachment } from '../../services/inspiration
 
 const PIC: NoteAttachment = { id: 'a1', mime: 'image/png', size_bytes: 10, original_name: 'pic.png' };
 const PDF: NoteAttachment = { id: 'a2', mime: 'application/pdf', size_bytes: 20, original_name: 'report.pdf' };
+const PDF2: NoteAttachment = { id: 'a3', mime: 'application/pdf', size_bytes: 30, original_name: 'notes.pdf' };
 
 const SAVED: InspirationNote = {
   id: '7', content_md: 'edited', tags: [], ref_hotspot: null, pinned: false, rating: 0,
@@ -171,5 +172,53 @@ describe('Composer edit-mode attachments', () => {
     // Re-issuing the DELETE would 404 on a file that is already gone and turn
     // a recoverable PATCH failure into a permanently unsaveable modal.
     expect(deleteAttachment).toHaveBeenCalledTimes(1);
+  });
+  it('keeps an already-uploaded file visible as a stored attachment when a later step aborts', async () => {
+    uploadAttachment.mockReset();
+    uploadAttachment
+      .mockImplementationOnce(async (noteId: string, file: File) => {
+        order.push(`upload:${noteId}:${file.name}`);
+        return { id: 'new1', mime: 'image/png', size_bytes: 1, original_name: file.name };
+      })
+      .mockRejectedValueOnce(new Error('network down'));
+    const { onSubmit } = renderEditor();
+    pick('first.png');
+    pick('second.png');
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('Upload failed: second.png: network down', 'error'),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+    // first.png IS on the server now. The modal stays open, so if it merely
+    // left the pending row it would be invisible here — and the obvious user
+    // move (pick the same file again) would put a duplicate on the server.
+    // AttachmentView renders stored images as <img alt={original_name}>.
+    expect(screen.getByAltText('first.png')).toBeTruthy();
+    expect(screen.getByLabelText('Retry second.png')).toBeTruthy();
+  });
+
+  it('restores a failed removal to its original position, not the end of the list', async () => {
+    deleteAttachment.mockRejectedValue(new Error('HTTP 502'));
+    // Same mime family, so AttachmentView renders them in list order and the
+    // DOM order IS the list order.
+    renderEditor({ existingAttachments: [PDF, PDF2] });
+    expect(
+      screen.getAllByLabelText(/^Remove /).map((b) => b.getAttribute('aria-label')),
+    ).toEqual(['Remove report.pdf', 'Remove notes.pdf']);
+
+    fireEvent.click(screen.getByLabelText('Remove report.pdf'));
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('Remove failed: report.pdf: HTTP 502', 'error'),
+    );
+
+    // Appending it would silently reorder the user's attachments as a side
+    // effect of a failure that changed nothing.
+    await waitFor(() =>
+      expect(
+        screen.getAllByLabelText(/^Remove /).map((b) => b.getAttribute('aria-label')),
+      ).toEqual(['Remove report.pdf', 'Remove notes.pdf']),
+    );
   });
 });

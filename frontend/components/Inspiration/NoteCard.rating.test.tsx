@@ -80,4 +80,10 @@ describe('NoteCard rating', () => {
     render(<NoteCard note={note()} {...base} />);
     expect(screen.queryByLabelText('Rating')).toBeNull();
   });
+  it('exposes the rating group to the accessibility tree, not just to the DOM', () => {
+    render(<NoteCard note={note()} {...base} onRating={vi.fn()} />);
+    // Same reason as the composer's: role=generic forbids aria-label, so
+    // without an explicit role this name exists only for the test runner.
+    expect(screen.getByRole('group', { name: 'Rating' })).toBeTruthy();
+  });
 });

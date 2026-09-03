@@ -8,6 +8,7 @@ vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'http://api.test' }));
 import {
   attachmentUrlWithToken,
   createNote,
+  deleteAttachment,
   deleteNote,
   getActivity,
   getTagCounts,
@@ -96,6 +97,36 @@ describe('inspirationService', () => {
   it('deleteNote sends DELETE and tolerates empty body', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response));
     await expect(deleteNote('9')).resolves.toBeUndefined();
+  });
+
+  it('deleteAttachment surfaces the backend detail, not just the status code', async () => {
+    // The backend distinguishes 404 "attachment not found" from 502
+    // "attachment deletion failed" (inspiration_router.py). Throwing a bare
+    // "HTTP 502" would drop that on the floor — and the Composer puts this
+    // string straight into a user-facing toast.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => ({ detail: 'attachment deletion failed' }),
+      } as Response),
+    );
+    await expect(deleteAttachment('a2')).rejects.toThrow('attachment deletion failed');
+  });
+
+  it('deleteAttachment falls back to the status code when there is no body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new Error('no body');
+        },
+      } as unknown as Response),
+    );
+    await expect(deleteAttachment('a2')).rejects.toThrow('HTTP 502');
   });
 
   it('non-ok response throws detail message', async () => {
