@@ -11,13 +11,17 @@
 // drag. `text/plain` is written alongside it purely so dropping into a text
 // field yields the titles instead of nothing.
 
+import { LIBRARY_DND_MIME, hasLibraryDrag } from '../../../canvas-kit/libraryDrag';
 import { resolveReferenceRefs, addReferences } from './addReferences';
 import type { GeneratedImageRef, MediaNodeData } from '../smart/types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import type { LibraryItem, LibraryStore } from './librarySearch';
+import { LIBRARY_STORES, type LibraryItem, type LibraryStore } from './librarySearch';
 import { placeLibraryItems } from './placeLibraryItems';
 
-export const LIBRARY_DND_MIME = 'application/x-nous-library';
+// Re-exported, not redefined: the two primitives live in the kit so
+// `CanvasEngine` can ask "is this ours?" without importing from a feature,
+// while every reader following the drop path still finds them here.
+export { LIBRARY_DND_MIME, hasLibraryDrag };
 
 /** The wire form. Deliberately a JSON string in one MIME slot: dataTransfer
  *  carries strings, and one slot keeps the reader from having to reassemble
@@ -34,8 +38,23 @@ export function writeLibraryDrag(dt: DataTransfer, items: readonly LibraryItem[]
   dt.setData('text/plain', items.map((i) => i.title).join(', '));
 }
 
-export function hasLibraryDrag(dt: { types: readonly string[] | DOMStringList }): boolean {
-  return Array.from(dt.types ?? []).includes(LIBRARY_DND_MIME);
+/**
+ * Is this payload entry one we are willing to act on?
+ *
+ * The MIME slot is writable by ANY page the user drags from, and both fields
+ * flow straight into URL templates (`addReferences`) and into
+ * `fetchAssetDetail`. Same-origin in practice and the backend's reference
+ * bridge refuses anything outside `DURABLE_PREFIXES`, so this is a narrowing
+ * at the boundary rather than a live exploit — but a foreign drag should be
+ * DROPPED here, where the shape is known, not carried inward to fail as a
+ * mint error the user is then told about.
+ *
+ * The id is Snowflake-shaped for all three stores: digits, as a string.
+ */
+function validDragItem(i: { store: unknown; id: unknown }): boolean {
+  return (
+    LIBRARY_STORES.includes(i.store as LibraryStore) && /^\d+$/.test(String(i.id))
+  );
 }
 
 export function readLibraryDrag(dt: DataTransfer): LibraryItem[] | null {
@@ -43,7 +62,7 @@ export function readLibraryDrag(dt: DataTransfer): LibraryItem[] | null {
   try {
     const parsed = JSON.parse(dt.getData(LIBRARY_DND_MIME)) as LibraryDragPayload;
     if (!Array.isArray(parsed?.items)) return null;
-    return parsed.items.map((i) => ({
+    return parsed.items.filter(validDragItem).map((i) => ({
       store: i.store,
       id: String(i.id),
       title: i.title,

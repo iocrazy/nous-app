@@ -52,11 +52,10 @@ import {
 import { GuideOverlay } from './GuideOverlay';
 import { snapConnectTargetFor } from './snapConnect';
 // The one thing this kit knows about the canvas-core library: how to spot
-// its drag on the wire. The predicate is a MIME test over `dataTransfer`
-// and pulls no rendering with it — but the direction of this import is a
-// kit reaching into a feature, so if a second one is ever wanted, move
-// the constant and the predicate down here instead of adding another.
-import { hasLibraryDrag } from '../features/canvas-core/library/dropLibraryItems';
+// its drag on the wire. A MIME test over `dataTransfer`, and it lives HERE
+// rather than in the feature — the kit is the layer features build on, so
+// an import pointing the other way would invert that.
+import { hasLibraryDrag } from './libraryDrag';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useDragToCreate } from './useDragToCreate';
 import type { SnapPort } from './portSnap';

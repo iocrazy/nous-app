@@ -258,7 +258,24 @@ describe('LibraryPreviewCard', () => {
     await settle();
 
     const note = await screen.findByTestId('library-preview-note');
-    expect(note).toHaveTextContent(`On ${MODEL}, 3 references are sent.`);
+    expect(note).toHaveTextContent(`On ${MODEL}, 3 of these are sent (up to 3).`);
+  });
+
+  it('the note counts what is SENT, not the ceiling — they are different numbers', async () => {
+    // The discriminating case, and the reason the wording changed: this asset
+    // has TWO primary-slot files under a ceiling of three. The old sentence
+    // read the ceiling out as the count and told the user three references
+    // were going, under a table drawing two. A card whose whole purpose is
+    // saying what will be delivered cannot be the thing that misstates it.
+    fetchAssetDetail.mockResolvedValue(MIXED_DETAIL);
+    render(
+      <LibraryPreviewCard item={ASSET} anchor={rectAt(200, 120)} model={MODEL} scopeId={SCOPE} />,
+    );
+    await settle();
+
+    await waitFor(() => expect(screen.getAllByTestId('library-preview-row')).toHaveLength(2));
+    const note = await screen.findByTestId('library-preview-note');
+    expect(note).toHaveTextContent(`On ${MODEL}, 2 of these are sent (up to 3).`);
   });
 
   it('with no target node it says so rather than inventing a ceiling', async () => {

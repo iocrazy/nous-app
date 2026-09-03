@@ -67,6 +67,21 @@ class ReferenceError_ extends Error {
 }
 
 /**
+ * The typed reason behind a `resolveReferenceRefs` refusal.
+ *
+ * Anything the resolver did not raise itself — a network failure inside the
+ * mint, a 500 from the detail fetch — is a `mint_failed`, because that is what
+ * the user needs to be told about it: the round trip did not come back.
+ *
+ * Exported so a SECOND consumer of the resolver (`mentionLibraryItems`) reads
+ * the reason the same way rather than duck-typing `.reason` off an error class
+ * it cannot see.
+ */
+export function referenceFailureReason(err: unknown): AddReferenceFailure {
+  return err instanceof ReferenceError_ ? err.reason : 'mint_failed';
+}
+
+/**
  * The durable refs one library item contributes.
  *
  * `opts.allowVideo` is the ONE axis a caller may widen — see
@@ -115,6 +130,16 @@ export async function resolveReferenceRefs(
   }));
 }
 
+/** Slots left on the LIVE node under a ceiling. Read fresh on every call —
+ *  the node is re-read after every await for the same reason. */
+function roomOn(nodeId: string, maxRefs: number): number {
+  const current =
+    ((useCanvasCoreStore.getState().nodes.find((n) => (n as { id?: unknown }).id === nodeId) as
+      | { data?: PromptNodeData }
+      | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
+  return Math.max(0, maxRefs - current.length);
+}
+
 export async function addReferences(
   nodeId: string,
   items: readonly LibraryItem[],
@@ -122,16 +147,31 @@ export async function addReferences(
   opts?: AddReferencesOptions,
 ): Promise<AddReferencesResult> {
   const out: AddReferencesResult = { added: 0, skipped: 0, clamped: 0, failed: [] };
-  for (const item of items) {
+  for (const [i, item] of items.entries()) {
+    // ROOM FIRST, resolve second — the order is the fix, not a tidy-up.
+    // Resolving an UPLOAD calls `/generated-media/import-from-resource`, which
+    // has no idempotency key and registers a fresh `generated_media` row every
+    // time. Resolving before measuring meant ten uploads picked into two free
+    // slots minted ten rows, kept two, and left eight `user_upload` rows in
+    // the user's Generated inbox to triage. Multi-select turned that from a
+    // one-at-a-time wart into a per-gesture one.
+    //
+    // With no room left there is nothing further to learn from a round trip,
+    // so the tail is counted as clamped WITHOUT resolving and the loop stops.
+    // ⚠️ The count is one per remaining ITEM: an asset's ref count is only
+    // knowable from its detail fetch, which is exactly the round trip being
+    // avoided. So `clamped` can UNDERSTATE for assets — it never overstates,
+    // and it is never zero when something was refused.
+    if (typeof opts?.maxRefs === 'number' && roomOn(nodeId, opts.maxRefs) === 0) {
+      out.clamped += items.length - i;
+      break;
+    }
     let resolved: GeneratedImageRef[];
     try {
       resolved = await resolveReferenceRefs(item, scopeId);
     } catch (err) {
       console.error('[addReferences] could not resolve', item, err);
-      out.failed.push({
-        item,
-        reason: err instanceof ReferenceError_ ? err.reason : 'mint_failed',
-      });
+      out.failed.push({ item, reason: referenceFailureReason(err) });
       continue;
     }
     // The LIVE node, re-read after the await — a stale closure would drop any
@@ -153,9 +193,10 @@ export async function addReferences(
       take = fresh.slice(0, room);
       out.clamped += fresh.length - take.length;
     }
-    // `continue`, not `break`: a later item may still be a duplicate or a
-    // failure, and the caller's message is only honest if every item is
-    // accounted for.
+    // `continue`, not `break`: this item contributed nothing (it was already
+    // on the node), but the node may still have room and a later item may
+    // still be a duplicate or a failure. The only `break` is the one at the
+    // top, where there is no room left for anything.
     if (take.length === 0) continue;
     store.patchNode(nodeId, { data: { manual_refs: [...current, ...take] } });
     out.added += take.length;

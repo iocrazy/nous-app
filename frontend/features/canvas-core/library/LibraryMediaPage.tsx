@@ -139,13 +139,22 @@ export function LibraryMediaPage({
     !readOnly && target !== null && target.kind === 'prompt' && targetData !== null;
   const atLimit = inTargetMode && used >= max;
 
+  // "This Project" needs a project. `fetchLibraryAssets` falls through to the
+  // scope-wide search when there is none, so a project-less canvas showed the
+  // chip PRESSED over every asset in the workspace — the P1 label over a
+  // scope-wide list that Plan-time ruling 1 exists to prevent. The chip is
+  // disabled below with the reason as its title; this is the other half, so
+  // a scope left over from the last canvas cannot mislabel this one's shelf.
+  const projectScopeOk = projectId !== null && projectId !== undefined && projectId !== '';
+  const effectiveAssetScope: AssetScope = projectScopeOk ? assetScope : 'all';
+
   const result = useLibrarySearch(query, {
     scopeId,
     // Nothing fetches while the panel is closed — it stays mounted for the
     // whole canvas session, not just while it is visible.
     stores: open ? [mediaStore] : [],
     assetType: mediaStore === 'assets' ? ((kind as AssetType | null) ?? null) : null,
-    assetScope,
+    assetScope: effectiveAssetScope,
     projectId,
     uploadKinds: mediaStore === 'uploads' ? (kind ?? '') : '',
     generatedScope,
@@ -208,6 +217,19 @@ export function LibraryMediaPage({
           );
           setSelection([]);
         })
+        // Every known rejection is typed inside `placeLibraryItems`, so this
+        // is the guard against a future one — an unhandled rejection here
+        // would look exactly like a placement that worked.
+        .catch((err: unknown) => {
+          console.error('[LibraryMediaPage] place failed:', err);
+          toast?.addToast(
+            t('canvas.library.placeFailed', {
+              count: picked.length,
+              defaultValue: '{{count}} could not be placed',
+            }),
+            'error',
+          );
+        })
         .finally(() => setBusy(false));
     },
     [busy, readOnly, scopeId, setSelection, t, toast],
@@ -260,6 +282,17 @@ export function LibraryMediaPage({
           }
           setSelection([]);
         })
+        // Same guard as `doPlace` above, for the same reason.
+        .catch((err: unknown) => {
+          console.error('[LibraryMediaPage] add references failed:', err);
+          toast?.addToast(
+            t('canvas.library.someFailed', {
+              count: picked.length,
+              defaultValue: '{{count}} could not be added as references',
+            }),
+            'error',
+          );
+        })
         .finally(() => setBusy(false));
     },
     [atLimit, busy, max, readOnly, scopeId, setSelection, t, target, toast],
@@ -282,7 +315,7 @@ export function LibraryMediaPage({
       : mediaStore === 'generated'
         ? (Object.entries(GENERATED_SCOPE_LABEL) as Array<[string, Label]>)
         : [];
-  const activeScope = mediaStore === 'assets' ? assetScope : generatedScope;
+  const activeScope = mediaStore === 'assets' ? effectiveAssetScope : generatedScope;
 
   const consequence = readOnly
     ? t('canvas.library.readOnlyConsequence', 'Browse only · this canvas is read-only')
@@ -297,10 +330,17 @@ export function LibraryMediaPage({
       })
     : t('canvas.library.browseConsequence', 'Place on canvas, or drag onto a node');
 
-  // What will REALLY be sent, after the node's remaining room. PICKS, not
-  // files: only the resolver knows how many files an asset expands into, and
-  // a bigger number here would be a promise the send cannot keep.
-  const fileCount = inTargetMode ? Math.max(0, Math.min(chosen.length, max - used)) : null;
+  // What will REALLY be sent, after the node's remaining room — in FILES,
+  // which is what the footer's word says (spec §3.3: "目标模型 max_refs 裁剪后
+  // 真正会送的数量"). One asset expands to one ref per primary-slot file, so
+  // for a pick list containing an asset the number is NOT KNOWABLE here: only
+  // the detail rows say how many files it carries, and this is a footer, not
+  // a fetch. `null` hides the count rather than printing "1 file" over a send
+  // of four — the hover preview is where a per-asset answer already lives.
+  const fileCount =
+    inTargetMode && !chosen.some((i) => i.store === 'assets')
+      ? Math.max(0, Math.min(chosen.length, max - used))
+      : null;
 
   const placeAction = {
     label: t('canvas.library.place', 'Place on Canvas'),
@@ -345,22 +385,31 @@ export function LibraryMediaPage({
 
       {scopeChips.length > 0 && (
         <div className="flex flex-wrap gap-1 border-b border-canvas-line px-2 py-1.5">
-          {scopeChips.map(([value, [key, english]]) => (
-            <button
-              key={value}
-              type="button"
-              data-testid={`library-scope-${value}`}
-              aria-pressed={activeScope === value}
-              onClick={() =>
-                mediaStore === 'assets'
-                  ? useLibraryStore.getState().setAssetScope(value as AssetScope)
-                  : useLibraryStore.getState().setGeneratedScope(value as GeneratedScope)
-              }
-              className={chipClass(activeScope === value)}
-            >
-              {t(key, english)}
-            </button>
-          ))}
+          {scopeChips.map(([value, [key, english]]) => {
+            const noProject = mediaStore === 'assets' && value === 'this-project' && !projectScopeOk;
+            return (
+              <button
+                key={value}
+                type="button"
+                data-testid={`library-scope-${value}`}
+                aria-pressed={activeScope === value}
+                disabled={noProject}
+                title={
+                  noProject
+                    ? t('canvas.library.noProject', 'This canvas has no project')
+                    : undefined
+                }
+                onClick={() =>
+                  mediaStore === 'assets'
+                    ? useLibraryStore.getState().setAssetScope(value as AssetScope)
+                    : useLibraryStore.getState().setGeneratedScope(value as GeneratedScope)
+                }
+                className={`${chipClass(activeScope === value)} disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                {t(key, english)}
+              </button>
+            );
+          })}
         </div>
       )}
 

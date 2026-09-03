@@ -193,7 +193,7 @@ export function CanvasView({
     readOnly,
     onOpenPalette: () => setPaletteOpen(true),
     onOpenHelp: () => setHelpOpen(true),
-    onToggleLibrary: () => useLibraryStore.getState().toggle(),
+    onToggleLibrary: isSmartFamily(kind) ? () => useLibraryStore.getState().toggle() : undefined, // `L` must not toggle a panel this kind never mounts (:841) — the module-singleton `open` would then leak into the next canvas.
   });
 
   // Phase 6a — cross-tab / cross-user realtime invalidation.

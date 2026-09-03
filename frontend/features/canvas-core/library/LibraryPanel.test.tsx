@@ -91,6 +91,18 @@ const UPLOAD_ROW = {
   summary_status: null,
 };
 
+/** `GET /api/v1/assets/search` row — the real wire shape, string ids. */
+const ASSET_ROW = {
+  id: '727145299382534300',
+  scope_id: SCOPE,
+  asset_type: 'character' as const,
+  name: 'Cole Bannon',
+  role_tag: 'lead',
+  readiness: { state: 'ready' as const, missing: [] },
+  cover_file_id: '600000000000000001',
+  is_system_preset: false,
+};
+
 class ObserverStub {
   observe(): void {}
   unobserve(): void {}
@@ -182,6 +194,17 @@ afterEach(() => {
   cleanup();
   useCanvasCoreStore.getState().reset();
 });
+
+/** Open the panel on Assets and wait for the one row to land. */
+async function openOnAssets(target?: { nodeId: string; kind: 'prompt'; title: string }) {
+  searchAssets.mockResolvedValue([ASSET_ROW]);
+  listAssets.mockResolvedValue([ASSET_ROW]);
+  act(() => {
+    useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets', target });
+  });
+  renderPanel();
+  await waitFor(() => expect(screen.getAllByTestId('library-cell').length).toBe(1));
+}
 
 /** Open the panel on Uploads and wait for the one row to land. */
 async function openOnUploads(target?: { nodeId: string; kind: 'prompt'; title: string }) {
@@ -434,6 +457,75 @@ describe('LibraryPanel', () => {
     fireEvent.click(screen.getByTestId('library-page-prompts'));
     expect(screen.getByTestId('library-prompts-stub')).toBeTruthy();
     expect(screen.queryByTestId('library-grid')).toBeNull();
+  });
+
+  // ── "This Project" needs a project ────────────────────────────────────
+  //
+  // `fetchLibraryAssets` falls through to the scope-wide search when there is
+  // no project id, so the chip could show PRESSED over every asset in the
+  // workspace — a P1 label on a scope-wide list, which is the exact failure
+  // Plan-time ruling 1 exists to prevent. The affordance this replaced had
+  // the typed answer: the deleted `insertProjectAssets` toasted "This canvas
+  // has no project".
+  it('disables This Project on a canvas with none, and says why', async () => {
+    seedNodes([]); // reset() leaves projectId null
+    await openOnAssets();
+
+    const chip = screen.getByTestId('library-scope-this-project');
+    expect(chip).toBeDisabled();
+    expect(chip.getAttribute('title')).toBe('This canvas has no project');
+    // And the shelf is labelled for what it actually shows.
+    expect(screen.getByTestId('library-scope-all').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('asks the SCOPE-WIDE search when there is no project, whatever the stored scope says', async () => {
+    // A scope left over from the last canvas must not mislabel this one.
+    act(() => { useLibraryStore.getState().setAssetScope('this-project'); });
+    await openOnAssets();
+
+    expect(searchAssets).toHaveBeenCalled();
+    expect(listAssets).not.toHaveBeenCalled();
+    expect(screen.getByTestId('library-scope-this-project').getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  it('with a project the chip is live and asks the project-scoped list', async () => {
+    useCanvasCoreStore.setState({ projectId: '900000000000000777' } as never);
+    act(() => { useLibraryStore.getState().setAssetScope('this-project'); });
+    await openOnAssets();
+
+    expect(screen.getByTestId('library-scope-this-project')).not.toBeDisabled();
+    await waitFor(() => expect(listAssets).toHaveBeenCalled());
+    expect(listAssets).toHaveBeenCalledWith(
+      SCOPE,
+      expect.objectContaining({ projectId: '900000000000000777' }),
+    );
+  });
+
+  // ── The footer counts FILES ───────────────────────────────────────────
+  it('counts files for picks whose file count is knowable', async () => {
+    seedNodes([promptNode()]);
+    await openOnUploads({ nodeId: 'p1', kind: 'prompt', title: 'Harbour at dusk' });
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-footer-count').textContent).toBe('1 selected · 1 files'),
+    );
+  });
+
+  it('says only "selected" once an ASSET is picked — the file count is not knowable here', async () => {
+    // One asset expands to one ref per primary-slot file, and only the detail
+    // rows say how many that is. Printing "1 file" over a send of four is the
+    // footer misstating delivery; the hover preview is where the per-asset
+    // answer already lives.
+    seedNodes([promptNode()]);
+    await openOnAssets({ nodeId: 'p1', kind: 'prompt', title: 'Harbour at dusk' });
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-footer-count').textContent).toBe('1 selected'),
+    );
   });
 
   it('Select All takes the whole shelf — the bulk gesture the chip merge dropped', async () => {

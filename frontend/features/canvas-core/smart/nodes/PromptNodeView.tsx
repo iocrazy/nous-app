@@ -34,7 +34,7 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
 import { addReferences } from '../../library/addReferences';
 import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
-import { useLibraryDrop } from '../../library/useLibraryDrop';
+import { useLibraryDrop, useLibraryMention } from '../../library/useLibraryDrop';
 import { useLibraryStore } from '../../library/libraryStore';
 import type { PromptImageRef } from './promptImageRefs';
 import {
@@ -358,6 +358,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const caps = useModelCapabilities(gen?.model ?? null);
   const maxRefs = caps?.max_refs ?? null;
   const runDrop = useLibraryDrop(scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES }); // Runs a library drop on this node AND speaks its outcome — the drop path had been discarding it.
+  const runMention = useLibraryMention(scopeId, id); // The ⌥ half of the same gesture: inserts CHIPS into the body and speaks the same outcome ladder.
 
   // The strip, in the order the run delivers — mentions (asset references)
   // first, then the wired images, with the connected asset cards' references
@@ -510,7 +511,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         e.stopPropagation();
         setDropHint(null);
         const items = readLibraryDrag(e.dataTransfer) ?? [];
-        if (e.altKey) { for (const it of items) bodyEditorRef.current?.insertText(`@${it.title} `); return; } // ⌥ = MENTION, an edit to the prompt DOCUMENT: only this component holds the editor handle, so `dropLibraryItems` routes it and the insert happens here. Plain text for now — chips are P3's.
+        if (e.altKey) { void runMention(items, bodyEditorRef.current); return; } // ⌥ = MENTION: chips, never `insertText` — see mentionLibraryItems.ts.
         void runDrop(items, { kind: 'prompt', nodeId: id, mention: false });
       }}
     >

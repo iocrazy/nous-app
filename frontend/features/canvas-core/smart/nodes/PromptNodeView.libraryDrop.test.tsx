@@ -9,6 +9,12 @@
 // the object version re-rendered this 1000-line node for the whole hover —
 // the exact cost the node registry's `memo` was added to remove.
 //
+// The `⌥` cases at the bottom are spec §4.4's acceptance ("正文追加 chip") and
+// its other half: a mention must NOT write `manual_refs`. They drive the real
+// drop handler and assert on the EDITOR HANDLE, because that is the seam the
+// insert crosses — the body itself is TipTap's, and the first cut of this
+// feature wrote plain text through it that looked fine and delivered nothing.
+//
 // The repeat-dragover case below is a BEHAVIOURAL pin, not a render-count one:
 // it proves the hint is derived from a value that repeats, which is what makes
 // the bail-out reachable. It cannot by itself prove the bail-out happens —
@@ -16,8 +22,9 @@
 // would pin incidental re-render sources too and go stale on the next
 // unrelated edit. Stated rather than papered over.
 
+import React from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // `t(dropConsequenceKey(...))` passes NO English default — the key is the whole
@@ -42,6 +49,34 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 vi.mock('./useGenerationModels', () => ({ useGenerationModels: () => [] }));
+
+// The editor is stubbed down to its HANDLE. `⌥` inserts chips through
+// `insertImage` / `insertAsset`, and those calls are the observable the real
+// TipTap document cannot give a jsdom test — `insertText` is exposed too so a
+// regression back to plain text is visible as a call, not as an absence.
+const editorHandle = {
+  insertImage: vi.fn(),
+  insertAsset: vi.fn(),
+  insertText: vi.fn(),
+  focus: vi.fn(),
+};
+vi.mock('./PromptBodyEditor', () => ({
+  PromptBodyEditor: React.forwardRef(function PromptBodyEditorStub(_props, ref) {
+    React.useImperativeHandle(ref, () => editorHandle);
+    return <div data-testid="prompt-body-editor" />;
+  }),
+}));
+
+const fetchAssetDetail = vi.fn();
+const importResourceAsCanvasMedia = vi.fn();
+vi.mock('../../../../services/assetsService', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
+}));
+vi.mock('../mediaImport', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  importResourceAsCanvasMedia: (...a: unknown[]) => importResourceAsCanvasMedia(...a),
+}));
 vi.mock('../../../../services/resourceService', () => ({
   fetchPromptAssets: vi.fn().mockResolvedValue([]),
   getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
@@ -57,14 +92,21 @@ const baseProps = {
   deletable: true, draggable: true, selectable: true,
 } as const;
 
+const EXISTING_REF = { url: '/api/v1/generated-media/700000000000000009/file', kind: 'image' };
+
 const DATA = {
   body: 'pos', provider_slug: '', agent_id: null,
   run_status: 'idle', resource_refs: [],
+  // Non-empty on purpose: "a mention does not touch `manual_refs`" is only a
+  // real assertion against a list that had something in it to lose.
+  manual_refs: [EXISTING_REF],
 };
 
 /** The REAL `DataTransfer` interface — a `types` list plus `getData` by key. */
-function libraryDataTransfer(): DataTransfer {
-  const store = new Map<string, string>([[LIBRARY_DND_MIME, JSON.stringify({ items: [] })]]);
+function libraryDataTransfer(
+  items: Array<{ store: string; id: string; kind: string; title: string }> = [],
+): DataTransfer {
+  const store = new Map<string, string>([[LIBRARY_DND_MIME, JSON.stringify({ items })]]);
   return {
     get types() {
       return [...store.keys()];
@@ -97,7 +139,31 @@ function mount(readOnly = false) {
 
 afterEach(() => {
   useCanvasCoreStore.getState().reset();
+  editorHandle.insertImage.mockReset();
+  editorHandle.insertAsset.mockReset();
+  editorHandle.insertText.mockReset();
 });
+
+/** The dropped payload for the ⌥ cases: one asset and two pictures. */
+const THREE = [
+  { store: 'assets', id: '727145299382534300', kind: 'character', title: 'Cole Bannon' },
+  { store: 'generated', id: '800000000000000001', kind: 'image', title: 'A wide shot' },
+  { store: 'generated', id: '800000000000000002', kind: 'image', title: 'Harbour at dusk' },
+];
+
+function refsOn(nodeId: string): Array<{ url: string }> {
+  return (
+    (useCanvasCoreStore.getState().nodes.find((n) => (n as { id: string }).id === nodeId) as {
+      data?: { manual_refs?: Array<{ url: string }> };
+    }).data?.manual_refs ?? []
+  );
+}
+
+function drop(el: Element, dt: DataTransfer, altKey: boolean): void {
+  const evt = new Event('drop', { bubbles: true, cancelable: true });
+  Object.assign(evt, { dataTransfer: dt, altKey });
+  fireEvent(el, evt);
+}
 
 describe('PromptNodeView library drop hint', () => {
   it('says which of the two things the drop will do, and switches with ⌥', () => {
@@ -134,6 +200,56 @@ describe('PromptNodeView library drop hint', () => {
 
     fireEvent.dragLeave(node);
     expect(screen.queryByTestId('prompt-drop-hint')).toBeNull();
+  });
+
+  it('⌥ inserts a CHIP per item — spec §4.4, and the reason the label is honest', async () => {
+    fetchAssetDetail.mockResolvedValue({
+      id: THREE[0].id, asset_type: 'character', name: 'Cole Bannon',
+      cover_file_id: '600000000000000001', readiness: { state: 'ready', missing: [] },
+      files: [], links: [], linked_by: [], loadouts: [],
+    });
+    const node = mount();
+
+    drop(node, libraryDataTransfer(THREE), true);
+
+    // Three items → three chips. The version this replaces looped
+    // `insertText`, whose caret handling deleted the previous item's mention,
+    // so five items left ONE — and none of the three was a chip a run reads.
+    await waitFor(() => expect(editorHandle.insertAsset).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(editorHandle.insertImage).toHaveBeenCalledTimes(2));
+    expect(editorHandle.insertImage.mock.calls.map((c) => c[0].alias)).toEqual([
+      'A wide shot',
+      'Harbour at dusk',
+    ]);
+    expect(editorHandle.insertText).not.toHaveBeenCalled();
+  });
+
+  it('⌥ leaves manual_refs alone — a mention is not a reference', async () => {
+    fetchAssetDetail.mockResolvedValue({
+      id: THREE[0].id, asset_type: 'character', name: 'Cole Bannon',
+      cover_file_id: null, readiness: { state: 'ready', missing: [] },
+      files: [], links: [], linked_by: [], loadouts: [],
+    });
+    const node = mount();
+    expect(refsOn('p1')).toEqual([EXISTING_REF]);
+
+    drop(node, libraryDataTransfer(THREE), true);
+    await waitFor(() => expect(editorHandle.insertImage).toHaveBeenCalledTimes(2));
+
+    // Untouched: the two paths write to two different places, and the whole
+    // point of the ⌥ modifier is choosing between them.
+    expect(refsOn('p1')).toEqual([EXISTING_REF]);
+  });
+
+  it('WITHOUT ⌥ the same drop adds references and inserts no chip', async () => {
+    const node = mount();
+
+    drop(node, libraryDataTransfer([THREE[1]]), false);
+
+    await waitFor(() => expect(refsOn('p1')).toHaveLength(2));
+    expect(refsOn('p1')[1].url).toBe('/api/v1/generated-media/800000000000000001/file');
+    expect(editorHandle.insertImage).not.toHaveBeenCalled();
+    expect(editorHandle.insertAsset).not.toHaveBeenCalled();
   });
 
   it('a viewer gets no hint — the node is not a drop target at all', () => {

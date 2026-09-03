@@ -176,7 +176,7 @@ export function LibraryPanel(): React.ReactElement | null {
 
       {page === 'prompts' ? (
         <p data-testid="library-prompts-stub" className="p-3 text-[11px] text-canvas-muted">
-          {t('canvas.library.promptsLater', 'Prompt templates arrive with P3')}
+          {t('canvas.library.promptsLater', 'Prompt templates are coming soon')}
         </p>
       ) : (
         <LibraryMediaPage target={target} targetData={targetData} />

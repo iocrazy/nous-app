@@ -100,6 +100,30 @@ describe('the drag payload', () => {
     dt.setData(LIBRARY_DND_MIME, '{not json');
     expect(readLibraryDrag(dt)).toBeNull();
   });
+
+  it('drops entries whose store or id is not ours, keeping the good ones', () => {
+    // The MIME slot is writable by ANY page the user drags from, and both
+    // fields flow into url templates and into `fetchAssetDetail`. A foreign
+    // entry is dropped HERE, where the shape is known — not carried inward to
+    // surface later as a mint error the user is then told about.
+    const dt = fakeDataTransfer();
+    dt.setData(
+      LIBRARY_DND_MIME,
+      JSON.stringify({
+        items: [
+          { store: 'generated', id: '800000000000000001', kind: 'image', title: 'A wide shot' },
+          { store: 'evil', id: '800000000000000002', kind: 'image', title: 'Not a store' },
+          { store: 'uploads', id: '../../etc/passwd', kind: 'image', title: 'Not an id' },
+          { store: 'assets', id: '727145299382534300', kind: 'character', title: 'Cole Bannon' },
+        ],
+      }),
+    );
+
+    expect(readLibraryDrag(dt)!.map((i) => i.id)).toEqual([
+      '800000000000000001',
+      '727145299382534300',
+    ]);
+  });
 });
 
 describe('dropLibraryItems', () => {

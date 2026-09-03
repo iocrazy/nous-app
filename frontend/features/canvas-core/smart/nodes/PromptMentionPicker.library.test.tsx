@@ -207,6 +207,24 @@ describe('PromptMentionPicker library groups', () => {
     );
   });
 
+  it('ONE click picks — the gesture the Input Images and Assets tabs already use', async () => {
+    // The grid drives its ring from a controlled `activeIndex` and its
+    // selection from `selection={[]}`, so a no-op `onSelectionChange` left a
+    // single click reaching NOTHING: no ring move, no pick, no error. The two
+    // other tabs of this same popover commit on one press, so one palette
+    // taught two gestures depending on which tab you were on.
+    renderPicker();
+    fireEvent.click(screen.getByTestId('mention-tab-uploads'));
+    await waitFor(() => expect(screen.getAllByTestId('library-cell')).toHaveLength(1));
+
+    fireEvent.click(screen.getAllByTestId('library-cell')[0]);
+
+    expect(onPickLibraryImage).toHaveBeenCalledTimes(1);
+    expect(onPickLibraryImage).toHaveBeenCalledWith(
+      expect.objectContaining({ store: 'uploads', id: '655000000000000001' }),
+    );
+  });
+
   it('Tab walks the groups and wraps', () => {
     renderPicker([{ url: '/api/v1/generated-media/1/file', label: 'Image 1' }]);
     const root = screen.getByTestId('prompt-mention-picker');

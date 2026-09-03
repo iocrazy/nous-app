@@ -30,6 +30,7 @@ import {
   type LibraryDropTarget,
 } from './dropLibraryItems';
 import type { LibraryItem } from './librarySearch';
+import { mentionLibraryItems, type MentionInserters } from './mentionLibraryItems';
 
 /** Which toast a message asks for. `error` is reserved for a real refusal —
  *  "already there" and "over quota" are outcomes, not faults. */
@@ -50,13 +51,26 @@ export function describeDropOutcome(
   t: TFunction,
 ): DropMessage | null {
   if (outcome.failed > 0) {
-    return {
-      text: t('canvas.library.someFailed', {
-        count: outcome.failed,
-        defaultValue: '{{count}} could not be added as references',
-      }),
-      tone: 'error',
-    };
+    // The empty pane is a PLACEMENT, not a reference: an audio upload dropped
+    // there could never have become a reference, so saying it "could not be
+    // added as a reference" describes an attempt that was never made. The
+    // click path has said `placeFailed` there all along — this is the same
+    // split the `alreadyOnCanvas` branch below already makes.
+    return target.kind === 'canvas'
+      ? {
+          text: t('canvas.library.placeFailed', {
+            count: outcome.failed,
+            defaultValue: '{{count}} could not be placed',
+          }),
+          tone: 'error',
+        }
+      : {
+          text: t('canvas.library.someFailed', {
+            count: outcome.failed,
+            defaultValue: '{{count}} could not be added as references',
+          }),
+          tone: 'error',
+        };
   }
   if (outcome.placed + outcome.referenced === 0 && outcome.skipped > 0) {
     // Nothing moved and nothing is marked, so silence here looks exactly like
@@ -106,11 +120,64 @@ export function useLibraryDrop(
   const maxRefs = opts?.maxRefs;
   return useCallback(
     async (items, target) => {
-      const outcome = await dropLibraryItems(items, target, scopeId, { maxRefs });
+      // Every KNOWN rejection is already typed one level down, so this catch
+      // is the guard against a future one — and an unhandled rejection inside
+      // a drop handler looks exactly like a drop that worked. Reported as
+      // every item failing, which is what did happen.
+      let outcome: LibraryDropOutcome;
+      try {
+        outcome = await dropLibraryItems(items, target, scopeId, { maxRefs });
+      } catch (err) {
+        console.error('[useLibraryDrop] drop threw:', err);
+        outcome = { handled: true, placed: 0, referenced: 0, mentioned: 0,
+          failed: items.length, skipped: 0, clamped: 0 };
+      }
       const message = describeDropOutcome(outcome, target, t);
       if (message) toast?.addToast(message.text, message.tone);
       return outcome;
     },
     [scopeId, maxRefs, t, toast],
+  );
+}
+
+/**
+ * Run an `⌥` mention drop on ONE prompt node and report it.
+ *
+ * The sibling of `useLibraryDrop`, and here rather than in
+ * `mentionLibraryItems.ts` for the reason that module is pure: the insert
+ * needs an editor handle only the node holds, and the ECHO needs `t` and the
+ * toast. Keeping the two runners in one file is what stops the drop path and
+ * the mention path from growing two different vocabularies for one failure —
+ * the message goes through `describeDropOutcome`, key for key.
+ */
+export function useLibraryMention(
+  scopeId: string,
+  nodeId: string,
+): (items: readonly LibraryItem[], handle: MentionInserters | null) => Promise<void> {
+  const { t } = useTranslation();
+  const toast = useOptionalToast();
+  return useCallback(
+    async (items, handle) => {
+      if (!handle || items.length === 0) return;
+      let failed: number;
+      let mentioned = 0;
+      try {
+        const r = await mentionLibraryItems(items, scopeId, handle);
+        mentioned = r.mentioned;
+        failed = r.failed.length;
+      } catch (err) {
+        // Same guard as the drop path above, for the same reason.
+        console.error('[useLibraryMention] mention threw:', err);
+        failed = items.length;
+      }
+      const message = describeDropOutcome(
+        { handled: true, placed: 0, referenced: 0, mentioned,
+          failed, skipped: 0, clamped: 0 },
+        { kind: 'prompt', nodeId, mention: true },
+        t,
+      );
+      if (message) toast?.addToast(message.text, message.tone);
+    },
+    [scopeId, nodeId, t, toast],
   );
 }

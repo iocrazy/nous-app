@@ -3264,7 +3264,7 @@
       "placeFailed_other": "{{count}} could not be placed",
       "alreadyOnCanvas_one": "{{count}} already on this canvas",
       "alreadyOnCanvas_other": "{{count}} already on this canvas",
-      "promptsLater": "Prompt templates arrive with P3",
+      "promptsLater": "Prompt templates are coming soon",
       "selectAll": "Select All",
       "scopeThisProject": "This Project",
       "scopeAllLibrary": "All Library",
@@ -3287,11 +3287,12 @@
       "dropAppend": "Add to This Card",
       "previewSends": "Sends",
       "previewCut": "Cut · max {{max}}",
-      "modelNote": "On {{model}}, {{max}} references are sent.",
+      "modelNote": "On {{model}}, {{sends}} of these are sent (up to {{max}}).",
       "previewFailed": "Could not load this asset",
       "previewNoModel": "Pick a target node to see which files are sent.",
       "previewOtherSlots_one": "{{count}} file in other slots is not sent by default",
-      "previewOtherSlots_other": "{{count}} files in other slots are not sent by default"
+      "previewOtherSlots_other": "{{count}} files in other slots are not sent by default",
+      "noProject": "This canvas has no project"
     },
     "addImage": "+ Add Image",
     "generate": "Generate",

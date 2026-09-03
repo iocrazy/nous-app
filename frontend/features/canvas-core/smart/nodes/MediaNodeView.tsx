@@ -178,8 +178,11 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
         if (readOnly) return;
-        if (hasLibraryDrag(e.dataTransfer)) { // A library drag carries no `files`, so it has to be answered BEFORE the guard below, which would refuse it as an empty drop.
-          e.preventDefault(); e.stopPropagation(); setDragOver(false);
+        // A library drag carries no `files`: answered BEFORE the guard below, which would refuse it as an empty drop.
+        if (hasLibraryDrag(e.dataTransfer)) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOver(false);
           void runDrop(readLibraryDrag(e.dataTransfer) ?? [], { kind: 'media', nodeId: id });
           return;
         }

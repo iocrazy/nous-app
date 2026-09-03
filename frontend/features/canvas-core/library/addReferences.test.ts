@@ -284,6 +284,40 @@ describe('addReferences', () => {
     ]);
   });
 
+  it('a FULL node mints nothing — the refusal happens before the round trip', async () => {
+    // `/generated-media/import-from-resource` has no idempotency key, so every
+    // upload resolve registers a fresh `generated_media` row. Resolving before
+    // measuring room meant ten uploads picked into a full node minted ten rows
+    // and kept none, leaving the user's Generated inbox to triage. The refusal
+    // is still SPOKEN — `clamped` counts the tail rather than dropping it.
+    seed([
+      { url: '/api/v1/generated-media/800000000000000009/file', kind: 'image' },
+      { url: '/api/v1/generated-media/800000000000000008/file', kind: 'image' },
+    ]);
+    const result = await addReferences('p1', [UPLOAD, { ...UPLOAD, id: '655000000000000002' }], SCOPE, {
+      maxRefs: 2,
+    });
+
+    expect(importResourceAsCanvasMedia).not.toHaveBeenCalled();
+    expect(result).toEqual({ added: 0, skipped: 0, clamped: 2, failed: [] });
+    expect(refs()).toHaveLength(2);
+  });
+
+  it('stops minting as soon as the node fills up mid-list', async () => {
+    // One free slot, three uploads. Only the first may cost a round trip.
+    seed([{ url: '/api/v1/generated-media/800000000000000009/file', kind: 'image' }]);
+    const result = await addReferences(
+      'p1',
+      [UPLOAD, { ...UPLOAD, id: '655000000000000002' }, { ...UPLOAD, id: '655000000000000003' }],
+      SCOPE,
+      { maxRefs: 2 },
+    );
+
+    expect(importResourceAsCanvasMedia).toHaveBeenCalledTimes(1);
+    expect(result.added).toBe(1);
+    expect(result.clamped).toBe(2);
+  });
+
   it('never allows video — a reference is an image, whatever the placer accepts', async () => {
     seed();
     const r = await addReferences('p1', [{ ...GENERATED, kind: 'video' }], SCOPE);

@@ -70,6 +70,7 @@ import { getResourceCoverUrl } from '../../../../services/resourceService';
 import type { AddReferencesResult } from '../../library/addReferences';
 import { LibraryGrid } from '../../library/LibraryGrid';
 import { useLibrarySearch, type LibraryItem } from '../../library/librarySearch';
+import { libraryKey } from '../../library/librarySelection';
 import { mediaSrc } from '../mediaUrl';
 
 const DEBOUNCE_MS = 300;
@@ -519,7 +520,21 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
             onQueryChange={setSearch}
             searchPlaceholder={t('canvas.library.searchPlaceholder', 'Search Library…')}
             selection={[]}
-            onSelectionChange={() => {}}
+            onSelectionChange={(keys) => {
+              // The palette is SINGLE-pick, so a click has to commit here.
+              // The grid drives its ring from the controlled `activeIndex`
+              // below and its selection from `selection={[]}` — so with a
+              // no-op handler a single click reached nothing at all, while
+              // the Input Images and Assets tabs of this same popover commit
+              // on one press. One palette, two gestures, no error.
+              //
+              // The base selection is always empty, so a plain or ⌘ click
+              // yields exactly one key and that key IS the row just clicked.
+              // A ⇧ range is not a single pick and still commits nothing.
+              if (keys.length !== 1) return;
+              const row = libraryRows.find((r) => libraryKey(r) === keys[0]);
+              if (row) pickLibrary(row);
+            }}
             consequence={t(
               'canvas.library.mentionAddsReference',
               'Picking one adds it as a reference on this node',

@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 
+import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { AssetScope, GeneratedScope, LibraryStore } from './librarySearch';
 import type { LibraryItemKey } from './librarySelection';
 
@@ -103,6 +104,20 @@ export interface LibraryPanelState extends Persisted {
   clearTarget(): void;
 }
 
+/**
+ * Drop the highlight this panel put on its target — and ONLY that one.
+ *
+ * Guarded on the selection still BEING the target: between opening and
+ * closing, the user may have clicked another card, and a bare
+ * `setSelection([])` would then deselect something the panel never selected.
+ */
+function releaseHighlight(target: LibraryTarget | null): void {
+  if (!target) return;
+  const canvas = useCanvasCoreStore.getState();
+  const sel = canvas.selection;
+  if (sel.length === 1 && sel[0] === target.nodeId) canvas.setSelection([]);
+}
+
 export const useLibraryStore = create<LibraryPanelState>((set, get) => {
   const persist = () => {
     const { page, mediaStore, width } = get();
@@ -128,12 +143,20 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
         selection: [],
         focusNonce: opts.focusSearch ? s.focusNonce + 1 : s.focusNonce,
       }));
+      // Spec §3.1: the aimed-at node is SELECTED and highlighted while the
+      // panel points at it. The panel sits on the right and the target bar
+      // names the node, but with a dozen cards on the board a name is not a
+      // location — nothing said WHICH card was about to receive references.
+      // The canvas's own selection is the highlight this board already has,
+      // so this borrows it rather than inventing a second marker.
+      if (opts.target) useCanvasCoreStore.getState().setSelection([opts.target.nodeId]);
       persist();
     },
     // Closing releases the target. A target that outlives its panel silently
     // re-arms the next open, so the user's next `L` would start adding
     // references to a node they have forgotten about.
     close() {
+      releaseHighlight(get().target);
       set({ open: false, target: null, selection: [] });
     },
     toggle() {
@@ -171,6 +194,7 @@ export const useLibraryStore = create<LibraryPanelState>((set, get) => {
       persist();
     },
     clearTarget() {
+      releaseHighlight(get().target);
       set({ target: null });
     },
   };

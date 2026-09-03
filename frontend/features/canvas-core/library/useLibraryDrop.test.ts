@@ -66,6 +66,22 @@ describe('describeDropOutcome', () => {
     expect(m).toEqual({ text: '2 could not be added as references', tone: 'error' });
   });
 
+  it('the PANE landing says "could not be placed" — nothing was ever a reference', () => {
+    // An audio upload dropped on the empty pane never attempted a reference,
+    // so the reference sentence describes a step that was never taken. The
+    // click path has said this all along (`LibraryMediaPage.doPlace`), and the
+    // brief's requirement is that click and drop copy agree.
+    expect(describeDropOutcome(outcome({ failed: 2 }), CANVAS, t)).toEqual({
+      text: '2 could not be placed',
+      tone: 'error',
+    });
+    // The two node landings keep the reference wording, which is true there.
+    expect(describeDropOutcome(outcome({ failed: 2 }), MEDIA, t)).toEqual({
+      text: '2 could not be added as references',
+      tone: 'error',
+    });
+  });
+
   it('a drop that changed nothing because it was ALL already there still speaks', () => {
     // Silence here would look exactly like success: nothing moved on screen.
     expect(describeDropOutcome(outcome({ skipped: 2 }), PROMPT, t)).toEqual({
@@ -107,6 +123,22 @@ describe('useLibraryDrop', () => {
 
     await waitFor(() =>
       expect(addToast).toHaveBeenCalledWith('2 could not be added as references', 'error'),
+    );
+  });
+
+  it('an unexpected throw is reported as every item failing, not as success', async () => {
+    // Every known rejection is typed one level down, so this is the guard
+    // against a future one — and an unhandled rejection inside a drop handler
+    // is indistinguishable from a drop that worked.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    dropLibraryItems.mockRejectedValue(new Error('boom'));
+    const { result } = renderHook(() => useLibraryDrop('s'));
+
+    const got = await result.current(ITEMS, PROMPT);
+
+    expect(got.failed).toBe(ITEMS.length);
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('1 could not be added as references', 'error'),
     );
   });
 

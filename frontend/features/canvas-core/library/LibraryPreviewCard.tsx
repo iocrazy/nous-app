@@ -120,8 +120,14 @@ export function LibraryPreviewCard({
       : maxRefs !== null
         ? t('canvas.library.modelNote', {
             model,
+            // The number SENT, counted off the table above — not the ceiling.
+            // An asset with two primary-slot files under a `max_refs` of 3
+            // drew two Sends rows beneath a sentence claiming three, and a
+            // prompt asset drew none beneath the same sentence. This card's
+            // whole job is telling the truth about delivery before the pick.
+            sends: rows.filter((r) => r.sends).length,
             max: maxRefs,
-            defaultValue: 'On {{model}}, {{max}} references are sent.',
+            defaultValue: 'On {{model}}, {{sends}} of these are sent (up to {{max}}).',
           })
         : null;
 
