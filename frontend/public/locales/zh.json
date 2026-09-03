@@ -3243,6 +3243,9 @@
       "alreadyReferenced_one": "有 {{count}} 项已在该节点上",
       "alreadyReferenced_other": "有 {{count}} 项已在该节点上",
       "quotaClamped_one": "有 {{count}} 张参考图未添加 · 额度已满",
+      "mentionConsequence": "提及资产会在运行时发送它的参考文件；提及图片会把它加为参考图；纯文本仍然是文本。",
+      "mentionAddsReference": "选中一张会把它加为该节点的参考图",
+      "noCanvas": "从工作区打开这个画布，才能看到它的生成结果",
       "quotaClamped_other": "有 {{count}} 张参考图未添加 · 额度已满"
     },
     "addImage": "+ 添加图片",

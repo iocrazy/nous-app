@@ -32,6 +32,7 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
+import { addReferences } from '../../library/addReferences';
 import { LibraryReferencePopover } from '../../library/LibraryReferencePopover';
 import type { PromptImageRef } from './promptImageRefs';
 import {
@@ -260,6 +261,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         mentionPickerRef.current?.move(event.key === 'ArrowDown' ? 1 : -1);
         return true;
       }
+      if (event.key === 'Tab' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        mentionPickerRef.current?.cycleTab();
+        return true;
+      }
       if (event.key === 'Enter') {
         // Only swallow Enter when there was something to insert. An empty
         // result list must let the keystroke reach the text, or the box looks
@@ -336,6 +342,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // has no team segment — the picker says so rather than sending a request
   // that is a 403 by construction.
   const { scopeId } = useCanvasScope();
+  const canvasId = useCanvasCoreStore((s) => s.canvasId);
 
   // The provider's reference ceiling, for greying the inputs past it. null =
   // unknown (loading / no model / old backend), which renders FULL support.
@@ -838,7 +845,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             inputImages={mentionImages}
             onPickImage={handleMentionImage}
             onPickAsset={handleMentionAsset}
+            onPickLibraryImage={(item) => {
+              mention.closePicker();
+              void addReferences(id, [item], scopeId);
+            }}
             query={mention.query}
+            canvasId={canvasId}
           />
         )}
 

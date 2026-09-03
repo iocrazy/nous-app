@@ -3243,6 +3243,9 @@
       "alreadyReferenced_one": "{{count}} already on this node",
       "alreadyReferenced_other": "{{count}} already on this node",
       "quotaClamped_one": "{{count}} reference not added · quota reached",
+      "mentionConsequence": "Mentioning an asset sends its reference files at run. Mentioning an image adds it as a reference. Plain text stays text.",
+      "mentionAddsReference": "Picking one adds it as a reference on this node",
+      "noCanvas": "Open this canvas from a workspace to see its generations",
       "quotaClamped_other": "{{count}} references not added · quota reached"
     },
     "addImage": "+ Add Image",

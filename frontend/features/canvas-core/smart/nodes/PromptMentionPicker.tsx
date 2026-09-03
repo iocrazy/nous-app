@@ -4,11 +4,15 @@
  * Replaces the tall whole-resource-library list that used to open here. That
  * list answered "which file in my library?", which is not the question someone
  * typing `@` in a prompt is asking — they mean "which of the pictures already
- * feeding this node?" or "which entity from my asset library?". So there are
- * two tabs and both are THUMBNAIL GRIDS: a picture is recognised by looking at
- * it, and a filename column made the user read instead of look.
+ * feeding this node?", "which entity from my asset library?" or "which picture
+ * out of everything I have?". So there are four groups and every one of them
+ * is a THUMBNAIL GRID: a picture is recognised by looking at it, and a
+ * filename column made the user read instead of look.
  *
  * ─ What a pick does ─────────────────────────────────────────────────────────
+ *
+ * Three different outcomes behind four identically-shaped grids, which is why
+ * the consequence line at the top is fixed copy rather than a nicety.
  *
  *   Input Images  inserts an `@Image N` chip and marks that picture as the
  *                 node's i2i source. No new state — the picture was already an
@@ -16,14 +20,20 @@
  *   Assets        inserts an ASSET chip. No node is created: the mention IS
  *                 the reference, and at run time it is bundled exactly like a
  *                 wired asset card (see `mentionedAssets.ts`).
+ *   Uploads       adds a `manual_refs` entry — the picture lands on the node's
+ *   Generated     REFERENCE STRIP, not in the sentence. The caller does the
+ *                 writing (`addReferences`); this component only reports which
+ *                 item was chosen.
  *
  * ─ Keyboard ────────────────────────────────────────────────────────────────
  *
  * The editor keeps focus the whole time (every pick is bound to `mousedown`
  * with `preventDefault`, or the editor's blur would close this popover before
- * a click resolved). So the arrow keys and Enter arrive at the EDITOR, and it
- * forwards them here through the imperative handle. The alternative — a
- * focusable list — would take focus off the text the user is mid-sentence in.
+ * a click resolved). So the arrow keys, Enter and `⇥` arrive at the EDITOR,
+ * and it forwards them here through the imperative handle. The alternative —
+ * a focusable list — would take focus off the text the user is mid-sentence
+ * in. The root's own `onKeyDown` therefore covers only the cases where focus
+ * really is inside the popover, such as the library grid's search box.
  *
  * `nodrag`/`nowheel` are load-bearing, not decoration: React Flow listens for
  * mousedown on the node and stops propagation, so without them every row
@@ -57,6 +67,8 @@ import {
   type AssetSummary,
 } from '../../../../services/assetsService';
 import { getResourceCoverUrl } from '../../../../services/resourceService';
+import { LibraryGrid } from '../../library/LibraryGrid';
+import { useLibrarySearch, type LibraryItem } from '../../library/librarySearch';
 import { mediaSrc } from '../mediaUrl';
 
 const DEBOUNCE_MS = 300;
@@ -64,6 +76,9 @@ const LIMIT = 60;
 
 /** IC caps the candidate grid; the same ceiling applies to both tabs. */
 export const MENTION_CANDIDATE_LIMIT = 36;
+
+/** Shared empty list, so a group with no rows keeps a stable identity. */
+const NO_ROWS: LibraryItem[] = [];
 
 export interface MentionInputImage {
   url: string;
@@ -77,6 +92,10 @@ export interface PromptMentionPickerHandle {
   /** Insert the active row. Returns false when there is nothing to insert —
    *  the caller then lets Enter reach the text, rather than swallowing it. */
   commitActive: () => boolean;
+  /** Advance to the next group, wrapping. Driven by the editor's `Tab`: the
+   *  editor owns focus the whole time this popover is open, so a `⇥` a REAL
+   *  user presses never reaches the root's own key handler. */
+  cycleTab: () => void;
 }
 
 interface Props {
@@ -86,15 +105,42 @@ interface Props {
   inputImages: MentionInputImage[];
   onPickImage: (image: MentionInputImage, index: number) => void;
   onPickAsset: (asset: AssetSummary) => void;
+  /** A library picture: it becomes a REFERENCE on the node, not a body chip. */
+  onPickLibraryImage: (item: LibraryItem) => void;
   /** The live `@query` the editor reports, which seeds the search box. */
   query: string;
+  /** Canvas id for the `Generated · this canvas` group. null disables that
+   *  group — a canvas opened without one has no generations to scope to, and
+   *  asking anyway would list the whole workspace under a label that promises
+   *  this board. */
+  canvasId: string | null;
 }
 
-type Tab = 'input' | 'assets';
+type Tab = 'input' | 'assets' | 'uploads' | 'generated';
+
+/** Group order, exported so `⇥` and the tab strip cannot disagree. */
+export const MENTION_TABS: readonly Tab[] = ['input', 'assets', 'uploads', 'generated'];
+
+/** Label per group. Uploads and Generated reuse the panel's own store names —
+ *  the same shelf under two entry points must not acquire two names. */
+const TAB_LABEL: Record<Tab, readonly [string, string]> = {
+  input: ['canvas.mention.tabInput', 'Input Images'],
+  assets: ['canvas.mention.tabAssets', 'Assets'],
+  uploads: ['canvas.library.storeUploads', 'Uploads'],
+  generated: ['canvas.library.storeGenerated', 'Generated'],
+};
 
 export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
   function PromptMentionPicker(
-    { scopeId, inputImages, onPickImage, onPickAsset, query },
+    {
+      scopeId,
+      inputImages,
+      onPickImage,
+      onPickAsset,
+      onPickLibraryImage,
+      query,
+      canvasId,
+    },
     ref,
   ) {
     const { t } = useTranslation();
@@ -123,6 +169,22 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
       const timer = setTimeout(() => setDebounced(search), DEBOUNCE_MS);
       return () => clearTimeout(timer);
     }, [search]);
+
+    // Uploads and Generated come from the shared index. Assets deliberately do
+    // NOT: this picker has an in-library toggle the panel has no equivalent
+    // for, and routing it through the shared hook would either lose the toggle
+    // or push a picker-only knob into the shared hook.
+    //
+    // `stores` drops 'generated' when there is no canvas id, rather than
+    // blanking the rows afterwards: a disabled store is never fetched at all,
+    // so a scope-wide request is not paid for and then thrown away.
+    const library = useLibrarySearch(debounced, {
+      scopeId,
+      stores: canvasId ? ['uploads', 'generated'] : ['uploads'],
+      uploadKinds: 'image',
+      canvasId,
+      generatedScope: 'this-canvas',
+    });
 
     const [type, setType] = useState<AssetType | null>(null);
     /**
@@ -185,7 +247,19 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
 
     const assets = useMemo(() => rows.slice(0, MENTION_CANDIDATE_LIMIT), [rows]);
 
-    const count = tab === 'input' ? images.length : assets.length;
+    // Memoised: a fresh array every render would change `commitActive`'s identity
+    // and with it the imperative handle the editor holds — the exact churn
+    // `pickRef` exists to prevent.
+    const uploadItems = library.uploads.items;
+    const generatedItems = library.generated.items;
+    const libraryRows = useMemo(() => {
+      if (tab === 'uploads') return uploadItems;
+      if (tab === 'generated') return canvasId ? generatedItems : NO_ROWS;
+      return NO_ROWS;
+    }, [tab, canvasId, uploadItems, generatedItems]);
+
+    const count =
+      tab === 'input' ? images.length : tab === 'assets' ? assets.length : libraryRows.length;
 
     // Clamped rather than stored blindly: the list shrinks under the user as
     // the search narrows, and an index past the end would make Enter do
@@ -207,8 +281,8 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
     // Read the pick handlers through a ref so `commitActive` — and therefore
     // the imperative handle the editor holds — does not change identity on
     // every parent render.
-    const pickRef = useRef({ onPickImage, onPickAsset });
-    pickRef.current = { onPickImage, onPickAsset };
+    const pickRef = useRef({ onPickImage, onPickAsset, onPickLibraryImage });
+    pickRef.current = { onPickImage, onPickAsset, onPickLibraryImage };
 
     const commitActive = useCallback((): boolean => {
       if (tab === 'input') {
@@ -217,18 +291,36 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
         pickRef.current.onPickImage(image, inputImages.indexOf(image));
         return true;
       }
-      const asset = assets[active];
-      if (!asset) return false;
-      pickRef.current.onPickAsset(asset);
+      if (tab === 'assets') {
+        const asset = assets[active];
+        if (!asset) return false;
+        pickRef.current.onPickAsset(asset);
+        return true;
+      }
+      const row = libraryRows[active];
+      if (!row) return false;
+      pickRef.current.onPickLibraryImage(row);
       return true;
-    }, [tab, active, images, assets, inputImages]);
-
-    useImperativeHandle(ref, () => ({ move, commitActive }), [move, commitActive]);
+    }, [tab, active, images, assets, libraryRows, inputImages]);
 
     const switchTab = useCallback((next: Tab) => {
       setTab(next);
       setRawActive(0);
     }, []);
+
+    // ONE implementation behind both `⇥` paths — the root's own handler (for a
+    // synthetic dispatch, and for a pointer user who has clicked into the
+    // grid's search box) and the editor's forward through the handle.
+    const cycleTab = useCallback(() => {
+      setTab((cur) => MENTION_TABS[(MENTION_TABS.indexOf(cur) + 1) % MENTION_TABS.length]);
+      setRawActive(0);
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({ move, commitActive, cycleTab }),
+      [move, commitActive, cycleTab],
+    );
 
     const typeChips = useMemo(() => [null, ...ASSET_TYPES] as const, []);
 
@@ -248,26 +340,38 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
         // summoned.
         className="mh-pop-in nodrag nowheel absolute left-0 top-full z-[60] mt-1 flex w-[26rem] max-w-[92vw] flex-col rounded-xl border border-canvas-line bg-canvas-card shadow-lg"
         onMouseDown={(e) => e.preventDefault()}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return;
+          e.preventDefault();
+          cycleTab();
+        }}
       >
+        {/* The first line, before any group: three groups here write three
+            DIFFERENT things (a body chip, a bundled asset, a reference on the
+            node), and identically-shaped grids cannot say which. */}
+        <p
+          data-testid="mention-consequence"
+          className="border-b border-canvas-line px-2 py-1 text-[10px] leading-snug text-canvas-muted"
+        >
+          {t(
+            'canvas.library.mentionConsequence',
+            'Mentioning an asset sends its reference files at run. Mentioning an image adds it as a reference. Plain text stays text.',
+          )}
+        </p>
+
         <div className="flex items-center gap-1 border-b border-canvas-line/70 p-1.5">
-          <button
-            type="button"
-            data-testid="mention-tab-input"
-            aria-pressed={tab === 'input'}
-            onClick={() => switchTab('input')}
-            className={pillClass(tab === 'input')}
-          >
-            {t('canvas.mention.tabInput', 'Input Images')}
-          </button>
-          <button
-            type="button"
-            data-testid="mention-tab-assets"
-            aria-pressed={tab === 'assets'}
-            onClick={() => switchTab('assets')}
-            className={pillClass(tab === 'assets')}
-          >
-            {t('canvas.mention.tabAssets', 'Assets')}
-          </button>
+          {MENTION_TABS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              data-testid={`mention-tab-${name}`}
+              aria-pressed={tab === name}
+              onClick={() => switchTab(name)}
+              className={pillClass(tab === name)}
+            >
+              {t(TAB_LABEL[name][0], TAB_LABEL[name][1])}
+            </button>
+          ))}
         </div>
 
         {tab === 'assets' && (
@@ -333,152 +437,182 @@ export const PromptMentionPicker = forwardRef<PromptMentionPickerHandle, Props>(
           </>
         )}
 
-        <div className="max-h-[15rem] min-h-0 flex-1 overflow-y-auto p-2">
-          {tab === 'input' ? (
-            images.length === 0 ? (
-              <p data-testid="mention-input-empty" className="px-1 py-2 text-[10px] text-canvas-muted">
-                {t('canvas.mention.noInputs', 'No input images on this node')}
+        {tab === 'uploads' || tab === 'generated' ? (
+          <LibraryGrid
+            testId="mention-library-grid"
+            className="max-h-[15rem] min-h-0 flex-1"
+            items={libraryRows}
+            loading={library[tab].loading}
+            error={library[tab].error}
+            onRetry={library[tab].reload}
+            query={search}
+            onQueryChange={setSearch}
+            searchPlaceholder={t('canvas.library.searchPlaceholder', 'Search Library…')}
+            selection={[]}
+            onSelectionChange={() => {}}
+            consequence={t(
+              'canvas.library.mentionAddsReference',
+              'Picking one adds it as a reference on this node',
+            )}
+            onItemActivate={(item) => pickRef.current.onPickLibraryImage(item)}
+            emptyLabel={
+              tab === 'generated' && !canvasId
+                ? t(
+                    'canvas.library.noCanvas',
+                    'Open this canvas from a workspace to see its generations',
+                  )
+                : t('canvas.library.empty', 'Nothing Here Yet')
+            }
+            targetRowHeight={84}
+          />
+        ) : (
+          <div className="max-h-[15rem] min-h-0 flex-1 overflow-y-auto p-2">
+            {tab === 'input' ? (
+              images.length === 0 ? (
+                <p data-testid="mention-input-empty" className="px-1 py-2 text-[10px] text-canvas-muted">
+                  {t('canvas.mention.noInputs', 'No input images on this node')}
+                </p>
+              ) : (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {images.map((image, i) => (
+                    <button
+                      key={image.url}
+                      type="button"
+                      data-testid="mention-input-option"
+                      data-active={i === active ? 'true' : 'false'}
+                      title={image.label}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        onPickImage(image, inputImages.indexOf(image));
+                      }}
+                      className="nodrag group flex flex-col items-center gap-0.5"
+                    >
+                      <span
+                        className={`h-12 w-12 overflow-hidden rounded-md border ${
+                          i === active ? 'border-canvas-strong ring-1 ring-canvas-strong' : 'border-canvas-line/60'
+                        }`}
+                      >
+                        <img
+                          src={mediaSrc(image.url)}
+                          alt={image.label}
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                      <span className="max-w-full truncate text-[9px] text-canvas-muted group-hover:text-canvas-text">
+                        {image.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : !scopeId ? (
+              <p data-testid="mention-assets-error" className="px-1 py-2 text-[10px] text-warn">
+                {t(
+                  'canvas.mention.noScope',
+                  'Open this canvas from a workspace to browse assets',
+                )}
+              </p>
+            ) : listError ? (
+              <p data-testid="mention-assets-error" className="px-1 py-2 text-[10px] text-warn">
+                {t('canvas.mention.loadFailed', 'Could not load the asset library')}
+              </p>
+            ) : loading ? (
+              <p className="flex items-center gap-1.5 px-1 py-2 text-[10px] text-canvas-muted">
+                <Loader2 size={11} className="animate-spin" />
+                {t('canvas.mention.loading', 'Loading…')}
+              </p>
+            ) : assets.length === 0 ? (
+              <p data-testid="mention-assets-empty" className="px-1 py-2 text-[10px] text-canvas-muted">
+                {t('canvas.mention.noResults', 'No assets found')}
               </p>
             ) : (
               <div className="grid grid-cols-4 gap-1.5">
-                {images.map((image, i) => (
-                  <button
-                    key={image.url}
-                    type="button"
-                    data-testid="mention-input-option"
-                    data-active={i === active ? 'true' : 'false'}
-                    title={image.label}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      onPickImage(image, inputImages.indexOf(image));
-                    }}
-                    className="nodrag group flex flex-col items-center gap-0.5"
-                  >
-                    <span
-                      className={`h-12 w-12 overflow-hidden rounded-md border ${
-                        i === active ? 'border-canvas-strong ring-1 ring-canvas-strong' : 'border-canvas-line/60'
-                      }`}
+                {assets.map((asset, i) => {
+                  const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
+                  return (
+                    // `group` belongs HERE, on the wrapper — Tailwind compiles
+                    // `group-hover:` to `.group:hover .group-hover\:…`, so with
+                    // the class on the sibling pick button instead, the preview
+                    // key had no `.group` ancestor and its reveal rule never
+                    // matched. The affordance existed only for a pointer that
+                    // had already found an invisible 14px target in the corner,
+                    // and the tests locate it by testid so nothing caught it.
+                    <div
+                      key={asset.id}
+                      className="group relative flex flex-col items-center gap-0.5"
                     >
-                      <img
-                        src={mediaSrc(image.url)}
-                        alt={image.label}
-                        className="h-full w-full object-cover"
-                      />
-                    </span>
-                    <span className="max-w-full truncate text-[9px] text-canvas-muted group-hover:text-canvas-text">
-                      {image.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : !scopeId ? (
-            <p data-testid="mention-assets-error" className="px-1 py-2 text-[10px] text-warn">
-              {t(
-                'canvas.mention.noScope',
-                'Open this canvas from a workspace to browse assets',
-              )}
-            </p>
-          ) : listError ? (
-            <p data-testid="mention-assets-error" className="px-1 py-2 text-[10px] text-warn">
-              {t('canvas.mention.loadFailed', 'Could not load the asset library')}
-            </p>
-          ) : loading ? (
-            <p className="flex items-center gap-1.5 px-1 py-2 text-[10px] text-canvas-muted">
-              <Loader2 size={11} className="animate-spin" />
-              {t('canvas.mention.loading', 'Loading…')}
-            </p>
-          ) : assets.length === 0 ? (
-            <p data-testid="mention-assets-empty" className="px-1 py-2 text-[10px] text-canvas-muted">
-              {t('canvas.mention.noResults', 'No assets found')}
-            </p>
-          ) : (
-            <div className="grid grid-cols-4 gap-1.5">
-              {assets.map((asset, i) => {
-                const Icon = ASSET_TYPE_ICON[asset.asset_type] ?? ASSET_TYPE_ICON.prop;
-                return (
-                  // `group` belongs HERE, on the wrapper — Tailwind compiles
-                  // `group-hover:` to `.group:hover .group-hover\:…`, so with
-                  // the class on the sibling pick button instead, the preview
-                  // key had no `.group` ancestor and its reveal rule never
-                  // matched. The affordance existed only for a pointer that
-                  // had already found an invisible 14px target in the corner,
-                  // and the tests locate it by testid so nothing caught it.
-                  <div
-                    key={asset.id}
-                    className="group relative flex flex-col items-center gap-0.5"
-                  >
-                    <button
-                      type="button"
-                      data-testid="mention-asset-option"
-                      data-asset-id={asset.id}
-                      data-active={i === active ? 'true' : 'false'}
-                      title={`${asset.name} · ${t(typeSingularKey(asset.asset_type), asset.asset_type)}${
-                        asset.readiness?.state === 'draft'
-                          ? ` · ${t('assets.readiness.draft', 'Draft')}`
-                          : ''
-                      }`}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        onPickAsset(asset);
-                      }}
-                      className="nodrag flex w-full flex-col items-center gap-0.5"
-                    >
-                      <span
-                        className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border text-canvas-muted ${
-                          i === active
-                            ? 'border-canvas-strong ring-1 ring-canvas-strong'
-                            : 'border-canvas-line/60'
-                        }`}
-                      >
-                        {asset.cover_file_id ? (
-                          <img
-                            src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <Icon size={16} />
-                        )}
-                      </span>
-                      <span className="max-w-full truncate text-[9px] text-canvas-muted group-hover:text-canvas-text">
-                        {asset.name}
-                      </span>
-                    </button>
-                    {asset.cover_file_id && (
                       <button
                         type="button"
-                        data-testid="mention-asset-preview"
+                        data-testid="mention-asset-option"
                         data-asset-id={asset.id}
-                        aria-label={t('canvas.mention.preview', 'Preview')}
-                        title={t('canvas.mention.preview', 'Preview')}
+                        data-active={i === active ? 'true' : 'false'}
+                        title={`${asset.name} · ${t(typeSingularKey(asset.asset_type), asset.asset_type)}${
+                          asset.readiness?.state === 'draft'
+                            ? ` · ${t('assets.readiness.draft', 'Draft')}`
+                            : ''
+                        }`}
                         onMouseDown={(e) => {
-                          // Preview must not also insert: stop the pick
-                          // button's handler from seeing this press.
                           e.preventDefault();
-                          e.stopPropagation();
-                          const withCovers = assets.filter((a) => a.cover_file_id);
-                          setPreview({
-                            ids: withCovers.map((a) => String(a.cover_file_id)),
-                            index: Math.max(
-                              0,
-                              withCovers.findIndex((a) => a.id === asset.id),
-                            ),
-                          });
+                          onPickAsset(asset);
                         }}
-                        // Revealed by hovering the TILE, not by finding the
-                        // key. `focus:` keeps it reachable without a pointer.
-                        className="nodrag absolute right-0 top-0 rounded-bl-md rounded-tr-md bg-canvas-strong/90 p-0.5 text-canvas-card opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100 focus:opacity-100"
+                        className="nodrag flex w-full flex-col items-center gap-0.5"
                       >
-                        <Eye size={10} />
+                        <span
+                          className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border text-canvas-muted ${
+                            i === active
+                              ? 'border-canvas-strong ring-1 ring-canvas-strong'
+                              : 'border-canvas-line/60'
+                          }`}
+                        >
+                          {asset.cover_file_id ? (
+                            <img
+                              src={mediaSrc(getResourceCoverUrl(asset.cover_file_id))}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <Icon size={16} />
+                          )}
+                        </span>
+                        <span className="max-w-full truncate text-[9px] text-canvas-muted group-hover:text-canvas-text">
+                          {asset.name}
+                        </span>
                       </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                      {asset.cover_file_id && (
+                        <button
+                          type="button"
+                          data-testid="mention-asset-preview"
+                          data-asset-id={asset.id}
+                          aria-label={t('canvas.mention.preview', 'Preview')}
+                          title={t('canvas.mention.preview', 'Preview')}
+                          onMouseDown={(e) => {
+                            // Preview must not also insert: stop the pick
+                            // button's handler from seeing this press.
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const withCovers = assets.filter((a) => a.cover_file_id);
+                            setPreview({
+                              ids: withCovers.map((a) => String(a.cover_file_id)),
+                              index: Math.max(
+                                0,
+                                withCovers.findIndex((a) => a.id === asset.id),
+                              ),
+                            });
+                          }}
+                          // Revealed by hovering the TILE, not by finding the
+                          // key. `focus:` keeps it reachable without a pointer.
+                          className="nodrag absolute right-0 top-0 rounded-bl-md rounded-tr-md bg-canvas-strong/90 p-0.5 text-canvas-card opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100 focus:opacity-100"
+                        >
+                          <Eye size={10} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <div
           data-testid="mention-footer"
