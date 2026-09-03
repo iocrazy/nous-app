@@ -1,6 +1,6 @@
 # 画布 Library 面板 — 设计（提示词库 + 素材库统一调用）
 
-**日期**：2026-09-03 · **状态**：用户已拍板方案与四项决策，spec 待用户过目 · **范围**：`frontend/features/canvas-core`（新目录 `library/`）、`frontend/components/assets`、`components/resources`、`components/generated` 的复用组件；后端一个只读聚合搜索端点
+**日期**：2026-09-03 · **状态**：用户已拍板方案与四项决策，spec 待用户过目 · **范围**：`frontend/features/canvas-core`（新目录 `library/`）、`frontend/components/assets`、`components/resources`、`components/generated` 的复用组件；后端只加 `GET /api/v1/generated` 的 `canvas_id` 查询参数（不做聚合端点）
 
 Mockup（4 屏 + 三方案 + 分期）：https://claude.ai/code/artifact/f2ea2142-e0a4-4e93-ba1d-48e806068e6d
 侦察报告（18 条入口 + 15 条实证痛点）：`.superpowers/recon/2026-09-03-canvas-library-recon.md`（在 `feat-canvas-fluency-w1w2` worktree，git-ignored；本 spec §1 摘录了结论）
