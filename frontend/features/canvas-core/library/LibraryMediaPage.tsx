@@ -17,7 +17,7 @@
 // all-duplicate, clamped — is spoken. A pick that changes nothing and says
 // nothing is the silent no-op this repo keeps re-learning.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useOptionalToast } from '../../../components/Toast';
@@ -39,6 +39,7 @@ import {
   type LibraryItem,
   type LibraryStore,
 } from './librarySearch';
+import { LibraryPreviewCard } from './LibraryPreviewCard';
 import { libraryKey, selectedItems } from './librarySelection';
 import { useLibraryStore, type LibraryTarget } from './libraryStore';
 import { chipClass, type Label } from './libraryChrome';
@@ -119,6 +120,13 @@ export function LibraryMediaPage({
   const selection = useLibraryStore((s) => s.selection);
 
   const [busy, setBusy] = useState(false);
+  // The cell the pointer is resting on, for the hover preview. Cleared on
+  // leave, on a drag starting (a card floating over the drop path is in the
+  // way of the gesture) and on every control that swaps the shelf underneath —
+  // the anchor rect belongs to a cell that is about to stop existing, and a
+  // card left pinned to it would describe the wrong item at the wrong place.
+  const [hover, setHover] = useState<{ item: LibraryItem; rect: DOMRect } | null>(null);
+  useEffect(() => setHover(null), [mediaStore, kind, assetScope, generatedScope, query]);
 
   const model = targetData?.gen?.model ?? null;
   const caps = useModelCapabilities(model);
@@ -392,6 +400,7 @@ export function LibraryMediaPage({
           readOnly
             ? undefined
             : (item, e) => {
+                setHover(null);
                 // Drag the SELECTION when the grabbed cell is part of it, else
                 // just that cell. Dragging one item out of a five-item
                 // selection and getting five is the behaviour every file
@@ -404,9 +413,19 @@ export function LibraryMediaPage({
                 e.dataTransfer.effectAllowed = 'copy';
               }
         }
+        onItemHover={(item, rect) => setHover(item && rect ? { item, rect } : null)}
         emptyLabel={t('canvas.library.empty', 'Nothing Here Yet')}
         targetRowHeight={96}
       />
+
+      {hover && (
+        <LibraryPreviewCard
+          item={hover.item}
+          anchor={hover.rect}
+          model={inTargetMode ? model : null}
+          scopeId={scopeId}
+        />
+      )}
     </>
   );
 }

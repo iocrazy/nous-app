@@ -3284,7 +3284,12 @@
       "dropPlace": "放到画布",
       "dropAddReference": "加为参考图",
       "dropInsertMention": "插入为提及",
-      "dropAppend": "追加到这张卡片"
+      "dropAppend": "追加到这张卡片",
+      "previewSends": "会发送",
+      "previewCut": "已截断 · 上限 {{max}} 张",
+      "modelNote": "在 {{model}} 上会发送 {{max}} 张参考图。",
+      "previewFailed": "无法加载该资产",
+      "previewNoModel": "先指向一个目标节点，才能知道哪些文件会被发送。"
     },
     "addImage": "+ 添加图片",
     "generate": "生成",

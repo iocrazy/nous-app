@@ -3284,7 +3284,12 @@
       "dropPlace": "Place on Canvas",
       "dropAddReference": "Add as Reference",
       "dropInsertMention": "Insert as Mention",
-      "dropAppend": "Add to This Card"
+      "dropAppend": "Add to This Card",
+      "previewSends": "Sends",
+      "previewCut": "Cut · max {{max}}",
+      "modelNote": "On {{model}}, {{max}} references are sent.",
+      "previewFailed": "Could not load this asset",
+      "previewNoModel": "Pick a target node to see which files are sent."
     },
     "addImage": "+ Add Image",
     "generate": "Generate",
