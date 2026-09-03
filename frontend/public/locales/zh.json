@@ -4763,8 +4763,6 @@
     "insertCode": "插入代码块",
     "attachFile": "添加附件",
     "insertLink": "插入链接",
-    "private": "私密",
-    "privateHint": "笔记仅自己可见",
     "backToThisMonth": "回到本月"
   },
   "editor": {

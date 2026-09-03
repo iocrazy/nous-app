@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const createNote = vi.fn();
 const uploadAttachment = vi.fn();
@@ -128,5 +128,38 @@ describe('Composer', () => {
       ),
     );
     expect(screen.queryByText('p.png')).toBeNull();
+  });
+  // ── bottom row: real rating in, fake "Private" out ───────────────────────
+
+  it('picking a rating sends it in the SAME createNote call', async () => {
+    createNote.mockResolvedValue({ id: '1', attachments: [], tags: [] });
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'rated idea' } });
+    // RatingStars renders 5 icon-only buttons; the wrapper carries the label.
+    const stars = within(screen.getByLabelText('Rating')).getAllByRole('button');
+    fireEvent.click(stars[3]); // 4 stars
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() =>
+      expect(createNote).toHaveBeenCalledWith('rated idea', undefined, 4),
+    );
+  });
+
+  it('an untouched rating is omitted entirely — 0 is already the DB default', async () => {
+    createNote.mockResolvedValue({ id: '1', attachments: [], tags: [] });
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'plain idea' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(createNote).toHaveBeenCalled());
+    // Exactly two args, not three-with-0: nothing in the request says "the
+    // user rated this note zero" when the user never touched the stars.
+    expect(createNote.mock.calls[0]).toEqual(['plain idea', undefined]);
+  });
+
+  it('has no decorative "Private" control', () => {
+    render(<Composer onCreated={vi.fn()} tagSuggestions={[]} />);
+    // It used to be a <span> with a chevron and no onClick, over a schema that
+    // has no visibility column at all — a control that promised a choice
+    // nothing could make. Removed rather than wired up.
+    expect(screen.queryByText('Private')).toBeNull();
   });
 });

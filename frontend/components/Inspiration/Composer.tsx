@@ -3,7 +3,7 @@
 // staged multi-format attachments (paste / drop / picker), Cmd+Enter submit.
 import React, { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Hash, Link as LinkIcon, Lock, Paperclip, Send, SquareCode, X } from 'lucide-react';
+import { Hash, Link as LinkIcon, Paperclip, Send, SquareCode, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
   createNote,
@@ -13,6 +13,7 @@ import {
   type RefHotspot,
 } from '../../services/inspirationService';
 import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
+import { RatingStars } from '../detail/DetailCardKit';
 
 interface Props {
   onCreated: (note: InspirationNote) => void;
@@ -26,6 +27,17 @@ interface Props {
    * remounts (keyed by prefillNonce) on every new prefill, so this only
    * needs to run once per mount, not react to later changes. */
   autoFocus?: boolean;
+  /**
+   * EDIT MODE switch. When given, Save routes here instead of `createNote`,
+   * and nothing is cleared afterwards — the parent owns closing its modal,
+   * and blanking the box first would only flash an empty editor on the way
+   * out. Must resolve to the post-save server row.
+   *
+   * Absent → the quick-capture (new note) behaviour, byte-for-byte unchanged.
+   */
+  onSubmit?: (content: string, refHotspot?: RefHotspot) => Promise<InspirationNote>;
+  /** Submit button label. Defaults to "Save". */
+  submitLabel?: string;
 }
 
 /** A staged file, tagged with the note it failed to attach to (if any) so a
@@ -42,13 +54,19 @@ export const Composer: React.FC<Props> = ({
   tagSuggestions,
   prefill,
   autoFocus,
+  onSubmit,
+  submitLabel,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [text, setText] = useState(prefill?.content ?? '');
   const [ref, setRef] = useState(prefill?.refHotspot ?? null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
+  const [rating, setRating] = useState(0);
   const [saving, setSaving] = useState(false);
+  // One boolean, derived — every edit-only / create-only branch below reads
+  // this so the two modes can never drift apart.
+  const isEdit = !!onSubmit;
   const editorRef = useRef<NoteEditorHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const nextKey = useRef(0);
@@ -65,7 +83,18 @@ export const Composer: React.FC<Props> = ({
     if (!content || saving) return;
     setSaving(true);
     try {
-      const note = await createNote(content, ref ?? undefined);
+      if (onSubmit) {
+        await onSubmit(content, ref ?? undefined);
+        // Deliberately no clearing/reset: see the `onSubmit` prop doc.
+        return;
+      }
+      // `rating > 0 ? 3-arg : 2-arg` rather than always passing `rating`:
+      // 0 IS the DB default, so an untouched star row must not put a
+      // "rated zero" claim in the request body (nor change the existing
+      // two-arg call shape every other caller and test already pins).
+      const note = rating > 0
+        ? await createNote(content, ref ?? undefined, rating)
+        : await createNote(content, ref ?? undefined);
       const uploaded: NoteAttachment[] = [];
       const failed: StagedFile[] = [];
       for (const item of staged) {
@@ -85,6 +114,7 @@ export const Composer: React.FC<Props> = ({
       }
       onCreated({ ...note, attachments: [...note.attachments, ...uploaded] });
       setText('');
+      setRating(0);
       setStaged(failed);
     } catch (err) {
       addToast((err as Error).message, 'error');
@@ -116,13 +146,18 @@ export const Composer: React.FC<Props> = ({
             {ref.source && <span className="text-[10px] font-bold text-content-2">{ref.source}</span>}
             <div className="truncate text-[12px] text-content">{ref.title}</div>
           </div>
-          <button
-            aria-label="Remove hotspot reference"
-            onClick={() => setRef(null)}
-            className="shrink-0 text-content-3 hover:text-content"
-          >
-            <X size={13} />
-          </button>
+          {/* Read-only in edit mode ON PURPOSE: NoteUpdateIn accepts only
+              content_md / pinned / rating, so a "removed" reference could
+              never be persisted — the button would be a silent no-op. */}
+          {!isEdit && (
+            <button
+              aria-label="Remove hotspot reference"
+              onClick={() => setRef(null)}
+              className="shrink-0 text-content-3 hover:text-content"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
       )}
       <NoteEditor
@@ -216,21 +251,33 @@ export const Composer: React.FC<Props> = ({
         </div>
       )}
 
+      {/* The left slot used to hold a decorative "Private" pill: a <span> with
+          a chevron, no onClick, over a schema with no visibility column. It
+          promised a choice nothing could make, so it is gone. The rating that
+          replaced it is real — createNote takes it in the SAME request, which
+          is what lets an external client (the iOS Shortcut) post body+rating
+          without a follow-up PATCH.
+
+          Edit mode leaves the slot empty rather than showing a second set of
+          stars: NoteCard's stars already write this field (with a per-note
+          seq guard), and two writers for one value would need a "who wins"
+          story that nothing here provides. */}
       <div className="mt-2 flex items-center justify-between border-t border-line pt-2">
-        <span
-          title={t('inspiration.privateHint', 'Notes are private to your account')}
-          className="inline-flex cursor-default items-center gap-1.5 rounded-md px-2 py-1 text-xs text-content-3"
-        >
-          <Lock size={12} className="opacity-70" />
-          {t('inspiration.private', 'Private')}
-          <ChevronDown size={12} className="opacity-50" />
-        </span>
+        {isEdit ? (
+          <div />
+        ) : (
+          <div aria-label={t('inspiration.rating', 'Rating')} className="px-1">
+            <RatingStars value={rating} onChange={setRating} size={14} />
+          </div>
+        )}
         <button
           onClick={() => void submit()}
           disabled={saving || !text.trim()}
           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-400 disabled:opacity-40"
         >
-          {saving ? t('inspiration.saving', 'Saving…') : t('inspiration.save', 'Save')}
+          {saving
+            ? t('inspiration.saving', 'Saving…')
+            : submitLabel ?? t('inspiration.save', 'Save')}
           <Send size={12} />
         </button>
       </div>
