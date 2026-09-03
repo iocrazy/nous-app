@@ -32,8 +32,8 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
+import { LibraryReferencePopover } from '../../library/LibraryReferencePopover';
 import type { PromptImageRef } from './promptImageRefs';
-import { CanvasMentionPicker } from './CanvasMentionPicker';
 import {
   PromptMentionPicker,
   type PromptMentionPickerHandle,
@@ -50,15 +50,12 @@ import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
 import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
-import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
 /** Hit area of the browser's `resize` grip, in CSS px. */
 const GRIP_PX = 18;
-
-type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
@@ -158,9 +155,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Agent picker (CC3) — writes the pre-plumbed agent_id channel; the run
   // injects the agent's IDENTITY/SOUL server-side.
   const agents = useAgents();
-
-  // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
-  const [activeKind, setActiveKind] = useState<ActiveKind>('');
 
   // Library picker (Phase 2 asset library) — pulls a saved prompt + its
   // cover into this node, wiring a fresh media node upstream of it.
@@ -295,26 +289,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const [refPickerOpen, setRefPickerOpen] = useState(false);
   const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
   const manualUrlSet = new Set(manualRefs.map((r) => r.url));
-  const addManualRef = useCallback(
-    async (resourceId: string) => {
-      try {
-        const minted = await importResourceAsCanvasMedia(resourceId);
-        const current =
-          ((useCanvasCoreStore
-            .getState()
-            .nodes.find((n) => (n as { id?: unknown }).id === id) as
-            | { data?: PromptNodeData }
-            | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
-        if (current.some((r) => r.url === minted.url)) return;
-        patch({ manual_refs: [...current, { url: minted.url, kind: minted.kind }] });
-      } catch (err) {
-        console.error('[PromptNodeView] add reference failed:', err);
-      } finally {
-        setRefPickerOpen(false);
-      }
-    },
-    [id, patch],
-  );
   const removeManualRef = useCallback(
     (url: string) => {
       const current =
@@ -357,14 +331,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch, sourceRef],
   );
-  // The whole-library resource search now serves ONE affordance: the input
-  // row's "Add reference image" picker. The `@` picker no longer opens it —
-  // it asks the ASSET library instead (PromptMentionPicker), which is the
-  // question someone typing `@` in a prompt is actually asking.
-  //
-  // Always '' because that picker has no search box of its own; it shows the
-  // default listing and filters by kind.
-  const { data: searchData, loading: searchLoading } = useResourceSearch('', activeKind);
 
   // Scope for the asset calls the mention picker makes. '' when the canvas URL
   // has no team segment — the picker says so rather than sending a request
@@ -602,7 +568,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           )}
         </div>
       </div>
-      {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
+      {/* relative so PromptMentionPicker's `top-full` positions against this section */}
       <div className="relative p-3">
         {/* Upstream prompt preview (IC inputPromptPreview). */}
         {upstreamText && (
@@ -804,22 +770,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           </div>
         )}
         {refPickerOpen && (
-          <div
-            data-testid="reference-picker"
-            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <CanvasMentionPicker
-              items={searchData.results}
-              query=""
-              loading={searchLoading}
-              counts={searchData.counts}
-              activeKind={activeKind}
-              onKindChange={setActiveKind}
-              onSelect={(item) => void addManualRef(item.id)}
-              activeIndex={0}
-            />
-          </div>
+          <LibraryReferencePopover
+            nodeId={id}
+            model={gen?.model ?? null}
+            onClose={() => setRefPickerOpen(false)}
+          />
         )}
         {/* The resizer now lives on this wrapper. A <textarea> had one for
             free; a contenteditable does not, and IC's promptH (a body height

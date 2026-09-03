@@ -11,29 +11,53 @@
 
 import { ReactFlowProvider } from '@xyflow/react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import type { CanvasNode } from '../../types';
 import { PromptNodeView } from './PromptNodeView';
-import type { ResourceSearchResponse } from '../../../../types';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (k: string, d?: unknown) => (typeof d === 'string' ? d : k),
   }),
 }));
-vi.mock('../../../../hooks/useResourceSearch', () => ({
-  useResourceSearch: vi.fn(),
+const searchResources = vi.fn();
+const searchAssets = vi.fn();
+const fetchGenerated = vi.fn();
+const listGenerationCapabilities = vi.fn();
+
+vi.mock('../../../../services/resourceSearchService', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  searchResources: (...a: unknown[]) => searchResources(...a),
 }));
-import { useResourceSearch } from '../../../../hooks/useResourceSearch';
+vi.mock('../../../../services/assetsService', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  searchAssets: (...a: unknown[]) => searchAssets(...a),
+}));
+vi.mock('../../../../services/generatedService', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchGenerated: (...a: unknown[]) => fetchGenerated(...a),
+}));
+vi.mock('../../services/canvasGenerationService', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listGenerationCapabilities: () => listGenerationCapabilities(),
+}));
 
-const EMPTY_SEARCH: ResourceSearchResponse = {
-  results: [],
-  counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
-  next_cursor: null,
-};
+// The reference popover renders the real LibraryGrid, which asks the
+// virtualizer for a container width and observes it. jsdom has neither, and
+// without the stubs the observer is missing and the run stops being pristine.
+class ObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): [] {
+    return [];
+  }
+}
 
+const SCOPE = '727145299382534100';
 const URL_A = '/api/v1/generated-media/a.png';
 const URL_B = '/api/v1/generated-media/b.png';
 
@@ -85,9 +109,18 @@ function renderPrompt(): void {
     .getState()
     .nodes.find((n) => (n as { id: string }).id === 'p1') as { data: unknown }).data;
   render(
-    <ReactFlowProvider>
-      <PromptNodeView {...baseProps} id="p1" type="prompt" data={data as never} />
-    </ReactFlowProvider>,
+    <MemoryRouter initialEntries={[`/team/${SCOPE}/canvas/900000000000000001`]}>
+      <Routes>
+        <Route
+          path="/team/:teamId/canvas/:canvasId"
+          element={
+            <ReactFlowProvider>
+              <PromptNodeView {...baseProps} id="p1" type="prompt" data={data as never} />
+            </ReactFlowProvider>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
   );
 }
 
@@ -98,10 +131,16 @@ function promptData(): { source_ref?: string; body: string } {
 }
 
 beforeEach(() => {
-  vi.mocked(useResourceSearch).mockReturnValue({
-    data: EMPTY_SEARCH,
-    loading: false,
-  } as never);
+  global.ResizeObserver = ObserverStub as unknown as typeof ResizeObserver;
+  global.IntersectionObserver = ObserverStub as unknown as typeof IntersectionObserver;
+  searchResources.mockReset().mockResolvedValue({
+    results: [],
+    counts: { all: 0, video: 0, image: 0, doc: 0, audio: 0, pdf: 0 },
+    next_cursor: null,
+  });
+  searchAssets.mockReset().mockResolvedValue([]);
+  fetchGenerated.mockReset().mockResolvedValue({ items: [], next_cursor: null });
+  listGenerationCapabilities.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -235,10 +274,12 @@ describe('manual references (⑨C)', () => {
     expect(refs).toEqual([]);
   });
 
-  it('Add reference key opens the picker', () => {
+  it('Add reference key opens a picker that can be SEARCHED', () => {
     seed(false);
     renderPrompt();
     fireEvent.click(screen.getByTestId('add-reference'));
     expect(screen.getByTestId('reference-picker')).toBeInTheDocument();
+    // The whole point of the replacement: the old popover had no input at all.
+    expect(screen.getByTestId('library-search')).toBeInTheDocument();
   });
 });

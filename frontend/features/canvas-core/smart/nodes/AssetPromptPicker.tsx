@@ -12,7 +12,7 @@
  * which one `onPick` reports as the chosen lang; the caller decides how to
  * apply it (e.g. writing gen_prompt vs gen_prompt_zh into a Prompt node).
  *
- * Styling reuses the canvas popover convention from CanvasMentionPicker /
+ * Styling reuses the canvas popover convention from
  * ResourcePickerSuggestion (ink-900/ink-700/ink-800 dark palette), wrapped
  * in a centered modal (à la ResourcePicker) since this needs room for
  * search + chips + a scrolling list, not just an inline dropdown.
