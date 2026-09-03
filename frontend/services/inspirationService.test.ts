@@ -38,6 +38,23 @@ describe('inspirationService', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token');
   });
 
+  it('listNotes sends min_rating when a floor is picked', async () => {
+    await listNotes({ min_rating: 4 });
+    const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toContain('min_rating=4');
+  });
+
+  // 0 is the dropdown's "Any rating" value, i.e. NO filter. Sending
+  // `min_rating=0` would still return every note today, so the bug would be
+  // invisible in the UI — pin the param's absence instead.
+  it('listNotes omits min_rating when the floor is 0 or unset', async () => {
+    await listNotes({ min_rating: 0 });
+    await listNotes({});
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    for (const [url] of calls) expect(String(url)).not.toContain('min_rating');
+  });
+
   it('createNote POSTs content and optional ref_hotspot', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ id: '1', attachments: [] })));
     await createNote('idea #x', { title: 'Hot', source: 'DOUYIN' });

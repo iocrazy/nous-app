@@ -3,7 +3,7 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link2, Search, X } from 'lucide-react';
+import { Link2, Search, Star, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
@@ -29,6 +29,10 @@ import {
 } from '../services/inspirationService';
 import { fetchAllTags } from '../services/unifiedTagService';
 import { PageHeader } from '../components/layout/PageHeader';
+// Reused verbatim from the Resources filter bar — both are plain controlled
+// components with no ResourcesContext dependency.
+import { FilterChip } from '../components/resources/filter/FilterChip';
+import { RatingFilterDropdown } from '../components/resources/filter/RatingFilterDropdown';
 import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
@@ -68,6 +72,9 @@ export const InspirationPage: React.FC = () => {
   const [poolTags, setPoolTags] = useState<Tag[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
+  // 0 = "Any rating" (no filter); 1-5 = minimum stars.
+  const [minRating, setMinRating] = useState(0);
+  const [ratingChipOpen, setRatingChipOpen] = useState(false);
   const [queryInput, setQueryInput] = useState('');
   const [q, setQ] = useState('');
   const [hasMore, setHasMore] = useState(false);
@@ -118,8 +125,15 @@ export const InspirationPage: React.FC = () => {
   }, [date]);
 
   const filters = useMemo(
-    () => ({ date: date ?? undefined, tag: tag ?? undefined, q: q || undefined }),
-    [date, tag, q],
+    () => ({
+      date: date ?? undefined,
+      tag: tag ?? undefined,
+      q: q || undefined,
+      // `|| undefined`, not the raw 0: "Any rating" must drop the param
+      // rather than ask for `rating >= 0`.
+      min_rating: minRating || undefined,
+    }),
+    [date, tag, q, minRating],
   );
 
   // Autocomplete suggestions shared by the Composer and the edit NoteEditor —
@@ -417,6 +431,26 @@ export const InspirationPage: React.FC = () => {
                 {date} <X size={10} aria-label="Clear date filter" />
               </button>
             )}
+            <FilterChip
+              chipId="rating"
+              label={t('resources.filter.rating', 'Rating')}
+              activeSummary={minRating > 0 ? `≥${minRating}★` : null}
+              isActive={minRating > 0}
+              isOpen={ratingChipOpen}
+              onToggle={() => setRatingChipOpen((v) => !v)}
+              onClose={() => setRatingChipOpen(false)}
+              onClear={() => setMinRating(0)}
+              icon={Star}
+            >
+              <RatingFilterDropdown
+                minRating={minRating}
+                onChange={(next) => {
+                  setMinRating(next);
+                  // Same snappy auto-close as the Resources bar's rating chip.
+                  if (next === 0) setRatingChipOpen(false);
+                }}
+              />
+            </FilterChip>
             <div className="flex w-64 items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5">
               <Search size={13} className="shrink-0 text-content-4" />
               <input

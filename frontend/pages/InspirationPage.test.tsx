@@ -131,6 +131,55 @@ describe('InspirationPage', () => {
     vi.useRealTimers();
   });
 
+  // ── rating filter ──────────────────────────────────────────────────────
+  // Opens the chip (if shut) and picks an option out of RatingFilterDropdown's
+  // menu. Two details drive the shape of this helper:
+  //   - the options carry no text (they are "≥" + N star glyphs), so they are
+  //     addressed positionally in the order the dropdown declares them:
+  //     [0] Any rating, then CHOICES = [≥5, ≥4, ≥3, ≥2, ≥1];
+  //   - the chip's accessible name gains a " · ≥N★" summary once active, and
+  //     picking a floor deliberately leaves the dropdown open (only "Any"
+  //     closes it) — hence the prefix match and the open-state check.
+  const pickRating = async (index: number) => {
+    if (!screen.queryByRole('menu', { name: 'Rating filter' })) {
+      fireEvent.click(screen.getByRole('button', { name: /^Rating/ }));
+    }
+    const menu = await screen.findByRole('menu', { name: 'Rating filter' });
+    fireEvent.click(within(menu).getAllByRole('button')[index]);
+  };
+
+  it('picking a rating floor refetches with min_rating', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await waitFor(() => expect(listNotes).toHaveBeenCalled());
+    await pickRating(2); // ≥4
+    await waitFor(() =>
+      expect(listNotes).toHaveBeenLastCalledWith(
+        expect.objectContaining({ min_rating: 4 }),
+        expect.anything(),
+        undefined,
+      ),
+    );
+    expect(screen.getByLabelText('Clear Rating')).toBeTruthy();
+  });
+
+  // "Any rating" must mean *no filter*, not `min_rating: 0` — the two are
+  // indistinguishable on screen but only the former is the right request.
+  it('choosing Any rating clears min_rating rather than sending 0', async () => {
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
+    await waitFor(() => expect(listNotes).toHaveBeenCalled());
+    await pickRating(2); // ≥4
+    await waitFor(() =>
+      expect(listNotes).toHaveBeenLastCalledWith(
+        expect.objectContaining({ min_rating: 4 }),
+        expect.anything(),
+        undefined,
+      ),
+    );
+    await pickRating(0); // Any rating
+    await waitFor(() => expect(listNotes.mock.lastCall?.[0].min_rating).toBeUndefined());
+    expect(screen.queryByLabelText('Clear Rating')).toBeNull();
+  });
+
   it('delete flows through confirm and removes the card', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     deleteNote.mockResolvedValue(undefined);

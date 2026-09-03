@@ -39,6 +39,8 @@ export interface NoteFilters {
   date?: string;
   tag?: string;
   q?: string;
+  /** 1-5 = only notes rated at least this. 0/undefined = no rating filter. */
+  min_rating?: number;
 }
 
 export interface ApiToken {
@@ -103,6 +105,11 @@ export async function listNotes(
   if (filters.date) params.set('date', filters.date);
   if (filters.tag) params.set('tag', filters.tag);
   if (filters.q) params.set('q', filters.q);
+  // Truthiness on purpose (unlike `createNote`'s rating): 0 is the dropdown's
+  // "Any rating" value, i.e. no filter — sending `min_rating=0` would ask the
+  // backend to filter by `rating >= 0`, which is a different request that
+  // happens to return the same rows.
+  if (filters.min_rating) params.set('min_rating', String(filters.min_rating));
   params.set('limit', String(limit));
   if (beforeId) params.set('before_id', beforeId);
   const resp = await fetch(`${base()}/notes?${params.toString()}`, {
