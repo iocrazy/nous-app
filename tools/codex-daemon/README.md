@@ -90,6 +90,14 @@ running while `status` reported everything green.
 than 0.4.0, because older builds silently drop the `quality` setting instead of
 passing it to `codex`. The refusal names your version and this command.
 
+**Worth having, not required:** 0.5.0 asks the image CLI for its event stream
+(`--json-events`) so that when the model *declines* a prompt on content
+grounds, the words it wrote — what it objected to, and the rewrite it suggests
+— reach you instead of being dropped. The CLI reports that case as
+`missing_image_result`, which says nothing you can act on. A 0.4.0 daemon still
+generates images correctly; nous just tells you "the image model declined this
+prompt" with no explanation attached, so this is not gated.
+
 ## Commands
 
 | Command | What it does |

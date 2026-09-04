@@ -45,6 +45,24 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     hint: 'Check the collection name, or file the post from the app.',
   },
   {
+    // The image model DECLINED the prompt on content grounds: it answered with
+    // prose (why, plus a rewrite that would work) instead of calling the image
+    // tool. Two raw shapes reach here and both must match:
+    //
+    //   [content_refused] …      daemon >= 0.5.0 + the typed backend path
+    //   …image_generation_call…  what a 0.4.0 daemon still produces, and what
+    //                            every failure already in the history says —
+    //                            `gpt-image-2-skill`'s own `missing_image_result`
+    //                            envelope after dbos_error_to_text shredded the
+    //                            multi-line JSON down to its longest line.
+    //
+    // No "try again" in the hint: a refusal is deterministic, the same words
+    // get declined the same way. The prompt is what has to change.
+    test: /\[content_refused\]|missing_image_result|image_generation_call/i,
+    message: 'The image model declined this prompt.',
+    hint: "Open Details for the model's own explanation and the rewrite it suggests, then edit the wording and run again.",
+  },
+  {
     // ffmpeg audio extraction produced no stream — the source video has no
     // audio track (e.g. a B站 DASH clip merged without sound). The
     // extract→transcribe chain (manual Transcribe on a no-audio video) fails

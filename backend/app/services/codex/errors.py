@@ -33,6 +33,12 @@ _STATUS_BY_CODE: dict[str, int] = {
     # so the retry middleware calls it non-retryable and the call never falls
     # through to a paid model.
     "daemon_outdated": 426,
+    # The model answered, but declined to draw: it returned prose (why, plus a
+    # rewrite that would work) instead of calling the image tool. 422 because
+    # the REQUEST is what needs changing — nothing is broken, retrying the same
+    # words will be declined the same way, and like every code here it is 4xx
+    # so the retry middleware never falls through to a model the user pays for.
+    "content_refused": 422,
 }
 
 

@@ -9,10 +9,19 @@ ChatGPT 订阅额度。catalog 行 `codex-image`（`mediahub_models`，migration
 
 - 二进制：`gpt-image-2-skill`（Rust 静态二进制，Dockerfile 从 npm registry 直接拉
   `…-linux-x64-static` tarball，版本 + sha256 双 pin，**不装 node/npm**）。
-- 调用形态：`gpt-image-2-skill --json --provider codex --auth-file $CODEX_AUTH_FILE
-  images generate|edit --prompt … --out … --size … --format png --quality high`。
-  `--json` 模式 stdout 是单个纯 JSON 对象：成功 `{"ok":true,"output":{"path":…}}`，
-  失败 `{"ok":false,"error":{"code":…,"message":…}}` 且 exit 1。
+- 调用形态：`gpt-image-2-skill --json --json-events --provider codex --auth-file
+  $CODEX_AUTH_FILE images generate|edit --prompt … --out … --size … --format png
+  --quality high`。`--json` 模式 stdout 是单个纯 JSON 对象：成功
+  `{"ok":true,"output":{"path":…}}`，失败 `{"ok":false,"error":{"code":…,"message":…}}`
+  且 exit 1。
+- `--json-events` 只影响 **stderr**（stdout 形状不变），把上游 SSE 事件流以 NDJSON
+  逐行吐出。加它的唯一理由：模型按内容策略**拒绝**时不会调用 image_generation 工具，
+  CLI 只报 `missing_image_result`（描述管道形状，用户无从下手），而模型写的拒绝理由
+  + 它主动给出的可用改写**只存在于这条流里**。`split_skill_events()` 在 `_run_cli`
+  里一次性把流与 CLI 自身的诊断分开：**只有解析不出 JSON 的行**才会进日志、进
+  `CodexCliError.stderr`、参与分类——流里全是模型可控文本，让它参与判定等于允许模型
+  伪造一个 auth 失败，把用户支去重新登录。拒绝走 `code="content_refused"`，模型原话
+  走 `detail`（再经 workflow 落 `task_tracking.metadata.failure`，jsonb 才存得住中文）。
 - 上游端点：`chatgpt.com/backend-api/codex/responses`（ChatGPT 私有后端）。这是
   ToS 灰色地带，账号风控风险自担——正因如此该 provider 是 owner 私有的，不开放
   给全站用户。

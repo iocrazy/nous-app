@@ -32,6 +32,29 @@ export interface TaskErrorCopy {
   hint?: string;
   /** Present only when the backend supplied a structured code. */
   code?: string;
+  /**
+   * Free-form text the failing party wrote for the user to READ — today, the
+   * model's own words when it declined a prompt (why, and the rewrite it
+   * suggests). Present only when there is some: an empty string here would
+   * render a blank explanation panel, which says "it had nothing to say"
+   * rather than "this daemon is too old to tell you".
+   *
+   * It rides `metadata`, never `error_msg`, and that is not a style choice:
+   * `error_msg` is derived from the pickled exception by
+   * `public.dbos_error_to_text()` (migration 219), which splits on every byte
+   * >= 0x80 and keeps the longest chunk — a Chinese sentence arrives there as
+   * a fragment. jsonb keeps it byte-for-byte.
+   */
+  detail?: string;
+}
+
+/** `metadata.failure.detail`, when it is really there and really a string.
+ *  The metadata comes off the wire; shape is not a promise. */
+function failureDetail(metadata: Record<string, unknown> | null | undefined): string | undefined {
+  const failure = (metadata ?? {})['failure'];
+  if (!failure || typeof failure !== 'object' || Array.isArray(failure)) return undefined;
+  const detail = (failure as Record<string, unknown>)['detail'];
+  return typeof detail === 'string' && detail.trim() ? detail : undefined;
 }
 
 export function taskErrorCopy(
@@ -39,13 +62,14 @@ export function taskErrorCopy(
   errorMsg?: string | null,
   t?: TranslateFn,
 ): TaskErrorCopy {
+  const detail = failureDetail(metadata);
   const resolved = resolveTaskError(metadata, null, t);
   if (resolved.code) {
-    return { message: resolved.title, hint: resolved.hint, code: resolved.code };
+    return { message: resolved.title, hint: resolved.hint, code: resolved.code, ...(detail ? { detail } : {}) };
   }
   // No structured code: read the prose. Passing `null` as resolveTaskError's
   // rawError above is deliberate — its own raw fallback truncates to 160
   // chars and skips the pattern table, which is strictly worse here.
   const { message, hint } = humanizeTaskError(errorMsg);
-  return hint ? { message, hint } : { message };
+  return { message, ...(hint ? { hint } : {}), ...(detail ? { detail } : {}) };
 }

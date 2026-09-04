@@ -119,7 +119,7 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
       )}
 
       {task.error_msg && (() => {
-        const { message, hint, code } = taskErrorCopy(task.metadata, task.error_msg, t);
+        const { message, hint, code, detail } = taskErrorCopy(task.metadata, task.error_msg, t);
         const raw = task.error_msg.trim();
         const showRaw = raw.length > 0 && raw !== message;
         return (
@@ -134,6 +134,17 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
               )}
             </div>
             {hint && <p className="mt-0.5 text-rose-300/70">{hint}</p>}
+            {/* Above the <details>, for the same reason as in TaskDetailModal:
+                this is the failing party's explanation written for the user,
+                not technical overflow. */}
+            {detail && (
+              <pre
+                data-testid="task-error-detail"
+                className="mt-1.5 text-[11px] text-ink-300 whitespace-pre-wrap break-words bg-ink-950/60 border border-ink-700/60 rounded p-2 max-h-56 overflow-y-auto font-sans"
+              >
+                {detail}
+              </pre>
+            )}
             {showRaw && (
               <details className="mt-1">
                 <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-rose-300/60 hover:text-rose-300">

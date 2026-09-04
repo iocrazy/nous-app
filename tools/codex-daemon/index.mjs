@@ -42,7 +42,7 @@ import { fileURLToPath } from 'node:url';
  *  backend/app/services/codex/daemon_dispatch.py, which is what 0.4.0 marks:
  *  a daemon at or above it forwards --quality, one below it drops the knob on
  *  the floor. */
-export const DAEMON_VERSION = '0.4.0';
+export const DAEMON_VERSION = '0.5.0';
 
 const API_BASE = process.env.NOUS_API_BASE || 'https://api.nous.ink';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
@@ -235,7 +235,7 @@ export function runCommand(bin, args, { timeoutMs = 15 * 60_000, stdin = null } 
       if (code === 0) resolve({ out, err });
       else {
         reject(failure(`${bin} exited ${code}: ${(err || out).slice(0, 400)}`, {
-          stderr: err, exitCode: code,
+          stderr: err, stdout: out, exitCode: code,
         }));
       }
     });
@@ -372,6 +372,11 @@ export async function downloadRef(url, dir, index) {
  *  the CLI default is the honest answer for that. */
 export function buildImageArgs({ prompt, size, quality, model, refs, out }) {
   const args = [
+    // Global flag, so it precedes the subcommand. It moves NOTHING on stdout
+    // (still just the skill's `{ok,error}` envelope) and puts the response
+    // event stream on stderr — the only channel that carries the model's own
+    // words when it declines a prompt. See imageJobFailure.
+    '--json-events',
     'images',
     refs.length ? 'edit' : 'generate',
     '--prompt', String(prompt ?? ''),
@@ -386,16 +391,105 @@ export function buildImageArgs({ prompt, size, quality, model, refs, out }) {
   return args;
 }
 
+/** How much of the model's explanation travels. It rides a WS frame and then
+ *  a jsonb column; the useful part (why, plus the rewrite it offers) is a
+ *  short paragraph. */
+const MODEL_TEXT_MAX = 1500;
+
+/** Skill error codes that mean "the model answered, but not with an image".
+ *  The code comes from the SKILL's own `{ok,error}` envelope on stdout — for
+ *  `gpt-image-2-skill` that envelope is the CLI's, never the model's (unlike
+ *  `codex exec`, whose stdout IS model output). That distinction is what makes
+ *  it safe to read here at all. */
+const REFUSAL_SKILL_CODES = new Set(['missing_image_result']);
+
+/** Split a `--json-events` stderr into the model's words and the CLI's own
+ *  plain-text diagnostics.
+ *
+ *  Every line the event stream writes is NDJSON, so anything that does NOT
+ *  parse is the CLI talking. Only that half may reach `classifyJobError`:
+ *  the parsed half is a verbatim dump of the model's response, and letting it
+ *  steer a verdict would let the model forge an auth failure and send the user
+ *  off to re-login for what is really a refusal. */
+export function extractModelText(stderr) {
+  const plain = [];
+  let text = '';
+  for (const line of String(stderr ?? '').split('\n')) {
+    const s = line.trim();
+    if (!s) continue;
+    let ev;
+    try {
+      ev = JSON.parse(s);
+    } catch {
+      plain.push(s);
+      continue;
+    }
+    if (ev?.type !== 'response.output_item.done') continue;
+    const item = ev?.data?.item;
+    if (item?.type !== 'message') continue;
+    for (const c of item?.content ?? []) {
+      if (c?.type === 'output_text' && c?.text) {
+        text += (text ? '\n' : '') + String(c.text);
+      }
+    }
+  }
+  return { modelText: text.slice(0, MODEL_TEXT_MAX), plainStderr: plain.join('\n') };
+}
+
+/** Rebuild a `gpt-image-2-skill` rejection into the failure the daemon reports.
+ *
+ *  Two jobs, both load-bearing:
+ *
+ *  1. **Say what happened.** A policy refusal reaches the CLI as
+ *     `missing_image_result` — a fact about the pipeline's shape, not about
+ *     the request — while the model's own explanation (which names the
+ *     offending words AND offers a working rewrite) is left in the event
+ *     stream. That text becomes `detail`, and the verdict becomes
+ *     `content_refused`, which is a different thing from a crash.
+ *  2. **Keep the message readable.** `runCommand` builds its message from
+ *     `(stderr || stdout)`, and with `--json-events` stderr is a full NDJSON
+ *     dump of the response — so without this the user's log and the server
+ *     would both get a blob instead of a sentence.
+ *
+ *  `spawnFailed` / `timedOut` are carried through untouched: those outrank
+ *  anything the stream says, exactly as `classifyJobError` already orders them. */
+export function imageJobFailure(err) {
+  const { modelText, plainStderr } = extractModelText(err?.stderr);
+  let envelope = null;
+  try {
+    envelope = JSON.parse(String(err?.stdout ?? ''));
+  } catch { /* not the skill's envelope — fall back to the thrown message */ }
+  const skillCode = String(envelope?.error?.code ?? '');
+  const skillMessage = String(envelope?.error?.message ?? '');
+  const refused = REFUSAL_SKILL_CODES.has(skillCode)
+    && !err?.spawnFailed && !err?.timedOut;
+  const message = skillCode
+    ? `gpt-image-2-skill: ${skillCode}: ${skillMessage}`.slice(0, 280)
+    : String(err?.message ?? 'gpt-image-2-skill failed').slice(0, 280);
+  return Object.assign(new Error(message), {
+    code: refused ? 'content_refused' : err?.code,
+    spawnFailed: Boolean(err?.spawnFailed),
+    timedOut: Boolean(err?.timedOut),
+    exitCode: err?.exitCode ?? null,
+    stderr: plainStderr,
+    detail: modelText,
+  });
+}
+
 async function runImageJob(payload, workDir) {
   const out = path.join(workDir, 'out.png');
   const refs = [];
   for (const [i, url] of (payload.ref_urls ?? []).slice(0, 9).entries()) {
     refs.push(await downloadRef(url, workDir, i));
   }
-  await runCommand('gpt-image-2-skill', buildImageArgs({
-    prompt: payload.prompt, size: payload.size, quality: payload.quality,
-    model: payload.model, refs, out,
-  }));
+  try {
+    await runCommand('gpt-image-2-skill', buildImageArgs({
+      prompt: payload.prompt, size: payload.size, quality: payload.quality,
+      model: payload.model, refs, out,
+    }));
+  } catch (err) {
+    throw imageJobFailure(err);
+  }
   return out;
 }
 
@@ -538,7 +632,8 @@ export function classifyJobError(err) {
   // timed-out run can still carry both, and neither is the real story.
   if (err?.timedOut) return 'timeout';
   const thrown = err?.code;
-  if (thrown === 'codex_no_output' || thrown === 'ref_rejected') return thrown;
+  if (thrown === 'codex_no_output' || thrown === 'ref_rejected'
+      || thrown === 'content_refused') return thrown;
   if (AUTH_RE.test(String(err?.stderr ?? ''))) return 'codex_not_logged_in';
   return 'job_failed';
 }
@@ -645,7 +740,11 @@ async function connect(cfg) {
       const message = err instanceof Error ? err.message : String(err);
       const code = classifyJobError(err);
       log(`job ${jobId} failed: ${message}`);
-      send({ type: 'job_failed', code, message: message.slice(0, 400) });
+      // `detail` is free-form text the MODEL wrote (a refusal explanation and
+      // the rewrite it suggests). It is payload for the user to read, never a
+      // signal: `code` is what the server branches on.
+      const detail = typeof err?.detail === 'string' ? err.detail.slice(0, MODEL_TEXT_MAX) : '';
+      send({ type: 'job_failed', code, message: message.slice(0, 400), ...(detail ? { detail } : {}) });
     } finally {
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
