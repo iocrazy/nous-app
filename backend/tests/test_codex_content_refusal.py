@@ -26,8 +26,8 @@ from app.services.codex.daemon_dispatch import (
     DaemonJobFailedError,
     dispatch_to_daemon,
 )
-from app.services.generation.failure import describe_generation_failure
 from app.services.codex.errors import from_daemon_error
+from app.services.generation.failure import describe_generation_failure
 
 REFUSAL_TEXT = (
     "抱歉，我不能帮助生成带有明显性化服饰与姿势的写实人物图像。\n\n"
