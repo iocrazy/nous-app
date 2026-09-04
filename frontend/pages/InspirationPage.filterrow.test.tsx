@@ -103,16 +103,15 @@ describe('Inspiration filter row', () => {
     ).toBeTruthy();
   });
 
-  it('keeps the active-tag pill on the same row as the Rating chip', async () => {
+  it('keeps every filter control on that one row', async () => {
     const { container } = await renderPage();
     await waitFor(() => expect(getTagCounts).toHaveBeenCalled());
 
-    // Activating a tag from the sidebar list is what surfaces the pill.
-    fireEvent.click(await screen.findByText('#hooks (3)'));
-    const pill = (await screen.findByLabelText('Clear tag filter')).closest(
-      'button',
+    // The row is shared, not one row per chip — that is what makes it wrap as
+    // a unit when the window narrows.
+    const tagsChip = container.querySelector(
+      '[data-chip-id="note_tags"]',
     ) as HTMLElement;
-
-    expect(ratingChip(container).parentElement!.contains(pill)).toBe(true);
+    expect(tagsChip.parentElement).toBe(ratingChip(container).parentElement);
   });
 });

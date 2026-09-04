@@ -3,7 +3,7 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link2, Search, Star, X } from 'lucide-react';
+import { Link2, Search, Star, Tag as TagIcon, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
@@ -33,6 +33,7 @@ import { PageHeader } from '../components/layout/PageHeader';
 // components with no ResourcesContext dependency.
 import { FilterChip } from '../components/resources/filter/FilterChip';
 import { RatingFilterDropdown } from '../components/resources/filter/RatingFilterDropdown';
+import { NoteTagsFilterDropdown } from '../components/Inspiration/NoteTagsFilterDropdown';
 import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
@@ -75,6 +76,7 @@ export const InspirationPage: React.FC = () => {
   // 0 = "Any rating" (no filter); 1-5 = minimum stars.
   const [minRating, setMinRating] = useState(0);
   const [ratingChipOpen, setRatingChipOpen] = useState(false);
+  const [tagChipOpen, setTagChipOpen] = useState(false);
   const [queryInput, setQueryInput] = useState('');
   const [q, setQ] = useState('');
   const [hasMore, setHasMore] = useState(false);
@@ -483,14 +485,30 @@ export const InspirationPage: React.FC = () => {
           `shrink-0`; filters dropped into it crowd the search box and the
           Rating chip ends up stranded mid-header. */}
       <div className="mb-3 flex items-center gap-1.5 flex-wrap">
-        {tag && (
-          <button
-            onClick={() => setTag(null)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-          >
-            #{tag} <X size={10} aria-label="Clear tag filter" />
-          </button>
-        )}
+        {/* Single-select: the backend takes one optional `tag`. This chip
+            replaced the read-only "#tag ×" pill that used to sit here — the
+            pill could only clear a tag chosen from the sidebar list, and
+            keeping both would have shown the active tag twice. */}
+        <FilterChip
+          chipId="note_tags"
+          label={t('inspiration.tags', 'Tags')}
+          activeSummary={tag ? `#${tag}` : null}
+          isActive={!!tag}
+          isOpen={tagChipOpen}
+          onToggle={() => setTagChipOpen((v) => !v)}
+          onClose={() => setTagChipOpen(false)}
+          onClear={() => setTag(null)}
+          icon={TagIcon}
+        >
+          <NoteTagsFilterDropdown
+            tags={tags}
+            activeTag={tag}
+            onChange={(next) => {
+              setTag(next);
+              setTagChipOpen(false);
+            }}
+          />
+        </FilterChip>
         {date && (
           <button
             onClick={() => setDate(null)}
