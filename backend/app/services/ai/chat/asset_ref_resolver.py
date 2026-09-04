@@ -56,8 +56,8 @@ _MEDIA_READ_REASON = "chat-asset-ref-primary-image-availability"
 # The closed vocabulary every `attachment_failures` entry on the REFERENCE
 # path draws from. Declared here because this is where four of the five are
 # produced; the fifth (`attachment_limit_exceeded`) is emitted by
-# `ai_library_chat_service` — the cap spans both reference kinds, so neither
-# resolver can see enough to raise it. One list, so a frontend adding copy for
+# `ai_library_chat_service` — the cap counts `asset_ref` entries only (resource
+# refs are uncapped by ruling), and it is applied before this resolver runs. One list, so a frontend adding copy for
 # a new code has one place to read.
 AssetRefFailureReason = Literal[
     "asset_not_accessible",

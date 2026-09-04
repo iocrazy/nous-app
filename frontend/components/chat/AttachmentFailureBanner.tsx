@@ -11,7 +11,7 @@ import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
  *
  *  `reason` is a CLOSED VOCABULARY on the reference path (ruling C's four
  *  asset codes plus `attachment_limit_exceeded`, which the chat service raises
- *  for either reference kind) and FREE FORM on the binary one —
+ *  for `asset_ref` entries only — resource refs are uncapped) and FREE FORM on the binary one —
  *  `chat_attachment_resolver` builds it as
  *  `f"{type(exc).__name__}: {exc}"` for anything it caught, so two binary
  *  failures rarely share a string and none of them is translatable. That split
