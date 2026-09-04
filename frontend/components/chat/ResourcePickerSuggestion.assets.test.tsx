@@ -213,3 +213,27 @@ describe('the resource tabs are unchanged by the addition', () => {
     expect(screen.getByTestId('resource-picker-count').textContent).toBe('1 of 1');
   });
 });
+
+describe('the keyboard hint claims only what is true', () => {
+  // `AIChatPanel.handleMentionKey` returns false unless the Assets tab is
+  // active, so on the five resource tabs the arrows do nothing and Enter falls
+  // through to send. The footer promised `↑↓ navigate · ↵ insert` on all six
+  // (final review M4). It now appears only where it holds.
+  const HINT = 'chat.mentionPicker.hintKbd';
+
+  it('is shown on the Assets tab', async () => {
+    renderPicker(makeAssets({ active: true }));
+    await screen.findAllByTestId('mention-asset-option');
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+  });
+
+  it('is absent on a resource tab', () => {
+    renderPicker(makeAssets({ active: false }));
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('is absent when there is no Assets tab at all', () => {
+    renderPicker(undefined);
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+});

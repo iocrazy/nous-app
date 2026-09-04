@@ -2219,8 +2219,11 @@ export interface AIChatMessageAttachment {
    *  `_DISPLAY_ATTACHMENT_KEYS` in `conversations_ai_store.py` carries it —
    *  so a reloaded bubble can still name the asset it was about. */
   asset_id?: string | null;
-  /** P5: the loadout the asset was sent with, or null for the default one. */
-  loadout_id?: string | null;
+  // No `loadout_id` here on purpose: the server's `_DISPLAY_ATTACHMENT_KEYS`
+  // whitelists it, but the reducer drops nulls and v1 always sends null, so no
+  // persisted row can carry one. Declaring it would invite a read that is
+  // always undefined (final review M2). Add it back with the v2 loadout
+  // picker, which is when a value first exists.
   mime?: string | null;
   alt_text?: string | null;
   name?: string | null;
@@ -2425,18 +2428,26 @@ export type ResourceRefAttachment = {
  *  "Send To Agent", and — from Task 6 — the @ picker's Assets tab).
  *
  *  Mirrors `AttachmentRequest`'s asset fields exactly. `mime` and `url` are
- *  present and EMPTY on purpose rather than omitted: the backend's binary
- *  path reads both, and an asset reference claims neither a media type nor a
- *  fetchable location — it names a row the server resolves by id. Sending
- *  `''` says "nothing to claim"; omitting them would leave the same fields
- *  `undefined` and make the wire shape differ from the resource ref beside
- *  it for no reason a reader could check.
+ *  present and EMPTY on purpose rather than omitted — but NOT because the
+ *  backend reads them: an `asset_ref` never enters the binary bucket at all
+ *  (`ai_library_chat_service` splits it off by kind before
+ *  `chat_attachment_resolver` sees anything), so nothing on the server reads
+ *  either field. The real reason is shape parity for a human: every
+ *  attachment on this wire carries the same six keys, so a payload in a log or
+ *  a network tab reads the same way whichever kind it is, and `''` states
+ *  "nothing to claim" where `undefined` would read as "forgot to set".
+ *  Consequence worth knowing: `mime: ''` is not null, so the persist reducer
+ *  keeps it and a reloaded bubble carries an empty mime nothing renders.
  */
 export type AssetRefAttachment = {
   kind: 'asset_ref';
   /** BIGINT serialized as string (Snowflake). */
   asset_id: string;
-  /** `asset_loadouts.id`, or null for "use the default loadout". */
+  /** `asset_loadouts.id`, or null for "use the default loadout".
+   *  v1 ALWAYS sends null — neither entry point (the asset sheet's Send To
+   *  Agent, the @ picker's Assets tab) has a loadout picker. The field stays on
+   *  the wire because the server's default-loadout behaviour is defined
+   *  against it (ruling D) and the v2 picker will send a real id. */
   loadout_id: string | null;
   /** Snapshot — the bubble uses this even if the asset is renamed later. */
   name: string;

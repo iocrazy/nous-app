@@ -3,7 +3,7 @@
  *
  * The count alone was already an improvement on the old silent no-op, but "2
  * attachments could not be used" does not tell a user whether to re-share an
- * asset, generate its first image, or stop waiting on a deleted one. Four
+ * asset, generate its first image, or stop waiting on a deleted one. Five
  * typed reasons come back from the backend and each one has a different next
  * step.
  *
@@ -63,6 +63,7 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     ['asset_deleted', 'One Asset Has Been Deleted'],
     ['asset_no_primary_image', 'One Asset Has No Main Image Yet'],
     ['asset_type_unknown', 'One Asset Has A Type This Version Cannot Read'],
+    ['attachment_limit_exceeded', 'Only The First 8 References Were Used'],
   ])('names %s in plain English', (reason, copy) => {
     render(<AttachmentFailureBanner count={1} failures={[failure(reason)]} />);
     expect(screen.getByText(copy)).toBeTruthy();
@@ -79,6 +80,22 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     // The count still reports all three — the lines summarise, they do not
     // replace the tally.
     expect(screen.getByText('3 attachment(s) failed to load')).toBeTruthy();
+  });
+
+  it('names the reference cap for a resource ref too, not only for an asset', () => {
+    // `attachment_limit_exceeded` is the one code that can arrive with
+    // `kind: 'resource_ref'` — the cap spans both reference kinds. Grouping is
+    // keyed on reason, so it must not depend on the kind beside it.
+    render(
+      <AttachmentFailureBanner
+        count={1}
+        failures={[{ index: 8, kind: 'resource_ref', reason: 'attachment_limit_exceeded' }]}
+      />,
+    );
+    expect(screen.getByText('Only The First 8 References Were Used')).toBeTruthy();
+    expect(
+      screen.getByTestId('attachment-failure-reason').getAttribute('data-reason'),
+    ).toBe('attachment_limit_exceeded');
   });
 
   it('keeps two different reasons apart', () => {

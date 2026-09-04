@@ -81,11 +81,16 @@ function persistedTurns(text: string, reply: string) {
       // The persisted attachment shape, already narrowed by the store's
       // `_DISPLAY_ATTACHMENT_KEYS` whitelist — a bubble built from the
       // OUTGOING payload would pass here and render blank in production.
+      //
+      // FOUR keys, not five: `loadout_id` is whitelisted server-side but the
+      // reducer drops nulls (`if a.get(k) is not None`) and v1 always sends
+      // null, so no persisted row can carry it. `url` is absent for the same
+      // reason it is absent from the whitelist. Verified against the real
+      // reducer, not inferred (final review M2).
       attachments: [
         {
           kind: 'asset_ref',
           asset_id: READY.id,
-          loadout_id: null,
           name: READY.name,
           mime: '',
         },

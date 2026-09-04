@@ -282,7 +282,16 @@ export function ResourcePickerSuggestion({
               })
             : items.length > 0 && `${items.length} of ${counts.all}`}
         </span>
-        <span>{t('chat.mentionPicker.hintKbd')}</span>
+        {/* Assets tab ONLY. The hint promises `↑↓ navigate · ↵ insert`, and
+            `AIChatPanel.handleMentionKey` takes the arrow keys over only when
+            the Assets tab is active — on the five resource tabs the highlight
+            has been pinned at 0 since launch and Enter falls through to send.
+            Printing it there is a user-visible claim about behaviour that does
+            not exist (final review M4). Arrow navigation for the resource
+            tabs is the other way to make this true; it is not a ten-line
+            change (parent-owned index, per-tab reset, Enter routing), so the
+            lie goes rather than the feature getting half-built. */}
+        {assetsActive && <span>{t('chat.mentionPicker.hintKbd')}</span>}
       </div>
     </div>
   );
