@@ -8,9 +8,9 @@ every decision it makes is testable without a database.
 Two independent halves, reported separately (a run can be entirely one of
 them, and collapsing the counts would hide that):
 
-1. **register** — every resource sitting in a scope's ``temp`` folder
-   (``chat_upload.TEMP_FOLDER_NAME``) that has no ``generated_media`` row
-   pointing at it gets one: ``origin_kind='chat_upload'``,
+1. **register** — every resource sitting in a scope's chat-uploads folder
+   (``chat_upload.chat_uploads_folder_criteria()``) that has no
+   ``generated_media`` row pointing at it gets one: ``origin_kind='chat_upload'``,
    ``review_state='saved'``, ``promoted_resource_id`` = the resource,
    ``file_path`` = the resource's own path. **No blob is copied** — the row
    registers bytes that already exist.
@@ -54,7 +54,10 @@ from app.models import (
     ResourceItems,
     Resources,
 )
-from app.services.library.chat_upload import TEMP_FOLDER_NAME, media_kind_for_mime
+from app.services.library.chat_upload import (
+    chat_uploads_folder_criteria,
+    media_kind_for_mime,
+)
 
 SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
 
@@ -90,6 +93,37 @@ def _resources_with_asset_files_stmt():
         .join(Assets, Assets.id == AssetFiles.asset_id)
         .where(Assets.deleted_at.is_(None))
         .distinct()
+    )
+
+
+def _chat_upload_resources_stmt():
+    """Live resources filed in a scope's chat-uploads folder.
+
+    Pure + module-level for the same reason as
+    ``_resources_with_asset_files_stmt`` above: the folder predicate is the
+    whole correctness of the register half, and it is only checkable on the
+    compiled SQL. Dropping the legacy arm (or the ``system_key IS NULL`` guard
+    inside it) leaves a query that still runs and still returns rows — it just
+    returns the wrong set, and reports the shortfall as "already registered".
+    """
+    return (
+        select(
+            Resources.id,
+            ResourceItems.scope_id,
+            Resources.creator_id,
+            Resources.file_path,
+            Resources.mime_type,
+        )
+        .select_from(Resources)
+        .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+        .join(Folders, Folders.id == ResourceItems.folder_id)
+        .where(
+            chat_uploads_folder_criteria(),
+            Folders.is_trashed.is_(False),
+            Resources.is_trashed.is_(False),
+            Resources.file_path.is_not(None),
+        )
+        .order_by(Resources.id)
     )
 
 
@@ -140,38 +174,24 @@ async def _load_inputs() -> PlannerInputs:
     """The three planner inputs, read in one place (ORM).
 
     ``folder_id`` lives on ``resource_items``, not on ``resources`` — the
-    temp-folder membership is a two-hop join. Trashed resources and trashed
-    folders are excluded: an inbox row for a file on its way to deletion is
-    noise (temp clean-up is manual — ``POST /api/v1/generated/cleanup``; the
-    TTL sweeper is unscheduled). ``file_path IS NULL`` rows are excluded
-    because
+    chat-uploads-folder membership is a two-hop join. That folder is matched by
+    the SHARED criterion from ``chat_upload``: the keyed
+    ``system_key='chat_uploads'`` folder OR a not-yet-adopted legacy ``temp``
+    one. Both arms are needed, and the legacy arm is the load-bearing one right
+    now: a scope gets adopted only when someone uploads to it (migration 450,
+    which adopts the rest, ships in a later PR), so most scopes still hold an
+    unkeyed ``temp`` folder. Keying only on ``system_key`` would report an
+    empty plan and call it reconciled.
+
+    Trashed resources and trashed folders are excluded: an inbox row for a file
+    on its way to deletion is noise (temp clean-up is manual —
+    ``POST /api/v1/generated/cleanup``; the TTL sweeper was retired in P6).
+    ``file_path IS NULL`` rows are excluded because
     ``generated_media.file_path`` is NOT NULL.
     """
     async with read_scope() as session:
         temp_rows = (
-            (
-                await session.execute(
-                    select(
-                        Resources.id,
-                        ResourceItems.scope_id,
-                        Resources.creator_id,
-                        Resources.file_path,
-                        Resources.mime_type,
-                    )
-                    .select_from(Resources)
-                    .join(ResourceItems, ResourceItems.resource_id == Resources.id)
-                    .join(Folders, Folders.id == ResourceItems.folder_id)
-                    .where(
-                        Folders.name == TEMP_FOLDER_NAME,
-                        Folders.is_trashed.is_(False),
-                        Resources.is_trashed.is_(False),
-                        Resources.file_path.is_not(None),
-                    )
-                    .order_by(Resources.id)
-                )
-            )
-            .mappings()
-            .all()
+            (await session.execute(_chat_upload_resources_stmt())).mappings().all()
         )
         gen_rows = (
             (

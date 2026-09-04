@@ -286,9 +286,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
   // Mobile detection (matches Tailwind md: breakpoint at 768px)
   const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 768;
 
-  // ─── Hide 'temp' from the top-level My Uploads FOLDERS grid ───────
-  // Only filter at the root level (no folder selected) — the folder itself is
-  // still reachable by URL, and its contents are listed by the Generated inbox.
   // Folder single-click opens the info panel, which shrinks the grid and
   // reflows the auto-fill columns — moving the card out from under the second
   // click of a double-click, so the dblclick never fires (or hits a neighbour).
@@ -315,10 +312,6 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
       }
     }, 250);
   };
-
-  const visibleFolders = isResourcesView && !selectedFolderId && !selectedSmartFolderId && !selectedLibraryId
-    ? filteredFolders.filter((f) => f.name !== 'temp')
-    : filteredFolders;
 
   // Filter bar visibility — search-row toggle remembers the choice in
   // localStorage. Hidden in shared / recycle views where filters don't
@@ -835,7 +828,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
           </button>
           <span className="text-xs text-ink-500">
             {t('resources.multiSelectCount', {
-              total: visibleFolders.length + sortedItems.length,
+              total: filteredFolders.length + sortedItems.length,
               selected: selectedIds.size,
             })}
           </span>
@@ -940,7 +933,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {!isSharedView && (
           loading ? (
             viewMode === 'list' ? <SkeletonList /> : <SkeletonGrid />
-          ) : (visibleFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
+          ) : (filteredFolders.length > 0 || sortedItems.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) ? (
             <div className="space-y-5">
               {/* Trashed folders in recycle bin */}
               {isRecycleView && recycleSubFolders.length > 0 && (
@@ -973,14 +966,14 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               )}
 
               {/* Folders section */}
-              {visibleFolders.length > 0 && (
+              {filteredFolders.length > 0 && (
                 <div>
                   {sortedItems.length > 0 && (
                     <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">{t('resources.folders')}</h3>
                   )}
                   {viewMode === 'grid' || viewMode === 'justified' ? (
                     <div className="grid grid-cols-2 gap-3 downloads-grid">
-                      {visibleFolders.map((folder) => {
+                      {filteredFolders.map((folder) => {
                         const folderNavigate = () => {
                           cancelPendingFolderClick();
                           if (selectedLibraryId) {
@@ -1030,7 +1023,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {visibleFolders.map((folder) => {
+                      {filteredFolders.map((folder) => {
                         const folderNavigate = () => {
                           cancelPendingFolderClick();
                           if (selectedLibraryId) {
@@ -1085,7 +1078,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               {/* Files section */}
               {sortedItems.length > 0 && (
                 <div>
-                  {(visibleFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
+                  {(filteredFolders.length > 0 || (isRecycleView && recycleSubFolders.length > 0)) && (
                     <h3 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest mb-3">{t('resources.files')}</h3>
                   )}
                   {viewMode === 'list' && (

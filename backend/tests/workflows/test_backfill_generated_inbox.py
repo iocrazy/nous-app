@@ -6,7 +6,9 @@ which already-registered rows get flipped to ``in_assets`` — so both are
 pinned here, including the re-run (idempotency) shape.
 
 ``TestSystemScopeWrapping`` covers the one thing the pure planner cannot:
-that the workflow enters a system scope before it touches the DB.
+that the workflow enters a system scope before it touches the DB, and
+``TestChatUploadsFolderIdentity`` covers the other: which folders the register
+half actually reads from (mig 450 moved that from a name to a ``system_key``).
 """
 
 from types import SimpleNamespace
@@ -173,27 +175,89 @@ class TestAssetFilesQuery:
         assert "DISTINCT" in sql
 
 
-class TestTempSweeperIsNotScheduled:
+class TestChatUploadsFolderIdentity:
+    """P6 mig 450: the folder is matched by ``system_key``, not by name.
+
+    The register half's entire correctness is this predicate, and it is only
+    visible on the compiled SQL — every wrong version of it still runs, still
+    returns rows, and reports whatever it missed as "already registered".
+
+    The criterion is IMPORTED from ``chat_upload`` rather than restated here
+    for the same reason ``_NOT_MARKABLE`` is shared: two copies would let the
+    upload path and the reconciliation disagree about which folder holds a
+    scope's chat uploads, and the disagreement would be silent.
+    """
+
+    def _sql(self):
+        from sqlalchemy.dialects import postgresql
+
+        from app.workflows.backfill_generated_inbox import (
+            _chat_upload_resources_stmt,
+        )
+
+        return str(
+            _chat_upload_resources_stmt().compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+
+    def test_the_keyed_folder_is_matched(self):
+        assert "system_key = 'chat_uploads'" in self._sql()
+
+    def test_a_not_yet_adopted_legacy_temp_folder_is_still_matched(self):
+        """Most scopes are NOT adopted yet: migration 450 ships in a later PR,
+        and this code adopts a scope only when someone uploads to it. Dropping
+        this arm turns "nobody has adopted this scope" into an empty, confident
+        plan — and it would do so for the majority of scopes."""
+        sql = self._sql()
+        assert "system_key IS NULL" in sql
+        assert "name = 'temp'" in sql
+
+    def test_the_two_arms_are_a_union_not_a_conjunction(self):
+        sql = self._sql()
+        assert "system_key = 'chat_uploads' OR public.folders.system_key IS NULL" in sql
+
+    def test_trashed_folders_and_resources_are_excluded(self):
+        sql = self._sql()
+        assert "public.folders.is_trashed IS false" in sql
+        assert "public.resources.is_trashed IS false" in sql
+
+    def test_rows_without_a_file_path_are_excluded(self):
+        """``generated_media.file_path`` is NOT NULL — registering these would
+        fail the insert rather than the plan."""
+        assert "public.resources.file_path IS NOT NULL" in self._sql()
+
+    def test_the_criterion_comes_from_the_upload_path(self):
+        import app.workflows.backfill_generated_inbox as wf
+        from app.services.library.chat_upload import chat_uploads_folder_criteria
+
+        assert wf.chat_uploads_folder_criteria is chat_uploads_folder_criteria
+
+
+class TestTempSweeperIsGone:
     """Spec decision 7: temp clean-up is manual (`POST /generated/cleanup`).
 
     The inbox rows this task creates point at the resource's own file; a
     daily sweep would trash those files under a live inbox card. The cron
-    decorator has been commented out since 2026-06-13, but the worker still
-    imported the module through the scheduled bundle — one uncommented line
-    away from arming it again, and reading as "scheduled" to anyone who
-    grepped the bundle.
+    decorator had been commented out since 2026-06-13 and P1 removed the
+    scheduled-bundle import; asset-library P6 (2026-09-04) deleted the module
+    itself, so the sweep can no longer be armed by uncommenting one line.
+
+    Both assertions stay falsifiable: restoring the module turns the first
+    red, and re-adding a bundle import turns the second red.
     """
+
+    def test_the_sweeper_module_no_longer_exists(self):
+        import importlib.util
+
+        assert importlib.util.find_spec("app.workflows.temp_resource_sweeper") is None
 
     def test_scheduled_bundle_does_not_export_the_sweeper(self):
         import app.workflows._scheduled_bundle as bundle
 
         assert not hasattr(bundle, "temp_resource_sweeper_scheduled")
         assert not hasattr(bundle, "sweep_temp_resources")
-
-    def test_the_sweeper_itself_still_exists_for_manual_use(self):
-        from app.workflows import temp_resource_sweeper
-
-        assert callable(temp_resource_sweeper.sweep_temp_resources)
 
 
 class TestSystemScopeWrapping:

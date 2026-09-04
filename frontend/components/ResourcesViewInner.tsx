@@ -13,7 +13,7 @@ import { AssetsView } from './resources/assets/AssetsView';
 import { ModuleDisabledPage } from './ModuleDisabledPage';
 import { useModuleStatus } from '../hooks/useModuleStatus';
 import { semanticSearch, hybridSearch } from '../services/searchService';
-import type { Folder, SmartCollection } from '../types';
+import type { Folder, Resource, ResourceItem, SmartCollection } from '../types';
 import {
   renameFolder,
   uploadNewVersion,
@@ -32,6 +32,7 @@ import { useResourceTouch } from '../hooks/useResourceTouch';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
 import { GalleryUploadDialog } from './GalleryUploadDialog';
+import { SaveAsAssetDialog } from './assets/SaveAsAssetDialog';
 import {
   moveResourceItem,
   moveFolder,
@@ -397,12 +398,28 @@ export const ResourcesViewInner: React.FC = () => {
     setLastClickedId(compositeId);
   }, [handleToggleSelect, setMultiSelectMode, setSelectedIds, setLastClickedId]);
 
+  // ─── "As Asset" (My Uploads context menu, P6 ruling E) ─
+  // State lives here, next to the other overlay dialogs, because the menu is
+  // unmounted the moment it is clicked: a dialog owned by the menu would
+  // close with it. `null` is closed — there is no separate open flag to fall
+  // out of step with the subject.
+  const [saveAsAssetResource, setSaveAsAssetResource] = useState<Resource | null>(null);
+
+  const handleSaveAsAsset = useCallback((item: ResourceItem) => {
+    const resource = item.resource;
+    if (!resource?.id) return;
+    // Ids are strings everywhere on this wire; a row read straight from
+    // PostgREST can still hand us a number for a BIGINT column.
+    setSaveAsAssetResource({ ...resource, id: String(resource.id) });
+  }, []);
+
   // ─── Context menu items (extracted to hook) ──────────
   const contextMenuItems = useContextMenuItems({
     contextMenu,
     isPersonal, scopeId, selectedFolderId, selectedLibraryId,
     navigate, resPath, canDo,
-    fileInputRef, setCreatingFolder, onUploadGallery: () => setGalleryDialogOpen(true), setLoading,
+    fileInputRef, setCreatingFolder, onUploadGallery: () => setGalleryDialogOpen(true),
+    onSaveAsAsset: handleSaveAsAsset, setLoading,
     setSelectedResource, setSelectedFolder, setShowInfoPanel,
     setResources, addToast, loadFolders, loadChildFolders, reloadResources,
     handleTrash, ops, versionInputRef,
@@ -602,6 +619,20 @@ export const ResourcesViewInner: React.FC = () => {
         onConfirmPermanentDelete={confirmPermanentDelete}
         touchDragState={touchDragState}
       />
+
+      {/* As Asset — one My Uploads file (P6 ruling E). */}
+      {saveAsAssetResource && (
+        <SaveAsAssetDialog
+          open
+          scopeId={scopeId}
+          resource={saveAsAssetResource}
+          onClose={() => setSaveAsAssetResource(null)}
+          // The grid does not change: attaching never moves or copies the
+          // file, so the row the user right-clicked is still exactly where it
+          // was. Only the dialog closes.
+          onDone={() => setSaveAsAssetResource(null)}
+        />
+      )}
 
       {/* Upload Gallery dialog */}
       <GalleryUploadDialog

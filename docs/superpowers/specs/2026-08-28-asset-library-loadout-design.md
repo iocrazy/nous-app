@@ -368,7 +368,7 @@ CREATE INDEX idx_apr_project ON asset_project_refs(project_id);
 | **P3 项目分级视图 + 迁移执行** | 项目侧栏改数据源 / Link from library / import-from-script 改落 assets / 跑迁移 / 旧表 rename legacy | P2 |
 | **P4 画布** ✅ 2026-09-02 | asset 节点 / bundle 投递协议（含**资源参考桥**）/ Output 的 As Asset 预填 / Send To Canvas / Insert project assets / canvas_asset_refs + `used_in` 反查 / 旧智能卡加载时迁移 | P2 |
 | **P5 聊天 / agent** | pendingAsset / resolver / `<asset>` 框 / @ 选择器 | P2 |
-| **P6 清尾** | 删 legacy 表 / EntityAssetStrip / tempResources / temp_resource_sweeper（含 `ChatTempTtlPanel` + `tempTtlService`，P1 已下架其渲染点）；temp 文件夹改名 "Chat uploads" 并在 My Uploads 下可见（§3.7 未做的那半边）；My Uploads 右键的 As Asset 入口（**Output 节点那个 P4 已做**） | P3 P4 |
+| **P6 清尾** 🚧 2026-09-04 进行中 | 删 legacy 表（**独立有门禁 PR**，合前 pg_dump）/ ~~EntityAssetStrip~~（P3 Task 6 已删，no-op）/ tempResources / temp_resource_sweeper（含 `ChatTempTtlPanel` + `tempTtlService`，P1 已下架其渲染点；`temp_ttl_settings.py` 保留作 ORM 守卫样本）；temp 文件夹以 `system_key='chat_uploads'` 收养并改名 "Chat Uploads"（Title Case）在 My Uploads 下可见（§3.7 未做的那半边）；My Uploads 右键的 As Asset 入口走新端点 `POST /resources/{id}/save-as-asset`（**Output 节点那个 P4 已做**）。计划 `docs/superpowers/plans/2026-09-04-asset-library-p6-cleanup.md` | P3 P4 |
 
 P1 与 P2 可并行（不同 worktree）。
 

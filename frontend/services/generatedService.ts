@@ -1,6 +1,9 @@
 // frontend/services/generatedService.ts
 // Client for the Generated inbox — `/api/v1/generated`
-// (backend/app/api/generated_router.py, spec §6.1).
+// (backend/app/api/generated_router.py, spec §6.1), plus the one sibling route
+// that lives under `/api/v1/resources` because its subject is a resource:
+// `saveResourceAsAsset`. Same request body, same envelope, same error copy —
+// see the note on that function for why it is not in `resourceService`.
 //
 // Scope is a `teams.id` snowflake and rides as `?scope_id=` on EVERY call,
 // including the mutations: the router gates on team membership per request and
@@ -97,6 +100,17 @@ export interface SaveAsAssetResult {
   resource_id: string;
 }
 
+/**
+ * What `POST /resources/{id}/save-as-asset` answers: the generation shape plus
+ * the inbox row that now registers the resource. The extra key is the whole
+ * difference between the two endpoints' 201s (a backend test pins the key-set
+ * difference at exactly `generated_id`), and it is a STRING like every other
+ * Snowflake on the wire.
+ */
+export interface SaveResourceAsAssetResult extends SaveAsAssetResult {
+  generated_id: string;
+}
+
 export interface BatchFailure {
   id: string;
   code: string;
@@ -171,6 +185,10 @@ export interface GeneratedListOptions {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const BASE = () => `${getApiUrl()}/api/v1/generated`;
+
+/** The resources router, for the one call this module makes against it —
+ *  `saveResourceAsAsset`. Same `?scope_id=` gate, same envelope. */
+const RESOURCES_BASE = () => `${getApiUrl()}/api/v1/resources`;
 
 /** `?scope_id=` plus any extra params, in one place so no call can forget it. */
 function query(scopeId: string, params: Record<string, string | undefined> = {}): URLSearchParams {
@@ -287,6 +305,73 @@ export async function saveGenerationAsAsset(
   body: SaveAsAssetBody,
 ): Promise<SaveAsAssetResult> {
   return postJson<SaveAsAssetResult>(`${BASE()}/${id}/save-as-asset?${query(scopeId)}`, body);
+}
+
+/**
+ * Every refusal code {@link saveResourceAsAsset} can raise that is NOT already
+ * rendered by the generation path, mirrored from
+ * `backend/app/api/resources_assets_router.py`.
+ *
+ * A TRIPWIRE, not a mechanism: nothing reads this list at runtime — the dialog
+ * resolves `saveAsAsset.err.<code>` straight from whatever the server sent, so
+ * an unlisted code still reaches the user (as the generic sentence). What the
+ * list buys is that `saveAsAssetI18n.test.ts` fails when a code is added here
+ * without copy in both locales, which forces whoever widens the backend's
+ * error set to write the sentence a user will actually read.
+ */
+export const RESOURCE_SAVE_AS_ASSET_ERROR_CODES = [
+  'resource_not_accessible',
+  'resource_not_found',
+  'resource_kind_unsupported',
+  'resource_file_unresolved',
+] as const;
+
+/**
+ * The same action for a LIBRARY RESOURCE — `POST /resources/{id}/save-as-asset`
+ * (`backend/app/api/resources_assets_router.py`).
+ *
+ * It lives beside {@link saveGenerationAsAsset} rather than in
+ * `resourceService`/`assetsService` because it is the same call with a
+ * different subject: the request body is literally the backend's
+ * `SaveAsAssetRequest` (one Pydantic class, pinned by a backend test), the
+ * response is this module's {@link SaveAsAssetResult} plus one key, and every
+ * refusal it can raise is read by the same `saveAsAsset.err.*` copy. Splitting
+ * it across modules would mean two homes for one contract.
+ *
+ * Why the endpoint exists at all: only chat uploads and promoted generations
+ * ever get a `generated_media` row, so a plain My Uploads file has nothing for
+ * `/generated/{id}/save-as-asset` to take. The server finds-or-mints that row
+ * inside the attach transaction — a cancelled dialog therefore leaves no
+ * orphan inbox card, which is exactly why the client must NOT mint one first.
+ *
+ * Typed refusals a caller must be ready to render (all `GeneratedApiError`):
+ * `not_a_member` (403, not in the target team), `resource_not_accessible`
+ * (404, not yours / not there — one answer on purpose), `resource_not_found`
+ * (404 from the attach: yours, but not filed in THIS team's library),
+ * `resource_kind_unsupported` (422, no slot takes this file shape),
+ * `resource_file_unresolved` (422, never downloaded / an album directory),
+ * plus the asset codes the generation path already renders (`asset_not_found`,
+ * `not_authorised`, `invalid_slot`, `loadout_mismatch`, `asset_exists`).
+ *
+ * `signal` is honoured and its `AbortError` is rethrown untouched: a cancel is
+ * not evidence about the server (see `envelopeFetch`).
+ */
+export async function saveResourceAsAsset(
+  scopeId: string,
+  resourceId: string,
+  body: SaveAsAssetBody,
+  opts: { signal?: AbortSignal } = {},
+): Promise<SaveResourceAsAssetResult> {
+  const auth = await getAuthHeaders();
+  return envelopeFetch<SaveResourceAsAssetResult>(
+    `${RESOURCES_BASE()}/${resourceId}/save-as-asset?${query(scopeId)}`,
+    {
+      method: 'POST',
+      headers: jsonHeaders(auth),
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    },
+  );
 }
 
 /** Discard a generation. Resolves only on a real 2xx; otherwise it throws. */

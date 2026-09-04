@@ -9,7 +9,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   FolderOpen, Upload, Trash2, Share2, Download,
   FolderPlus, ExternalLink, Pencil, Copy, Move, RefreshCw, Eye,
-  Sparkles, Tag, Bookmark, Images, Bot,
+  Sparkles, Tag, Bookmark, Images, Bot, Boxes,
   Lock,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -25,7 +25,24 @@ import {
 import { fetchResourceTags } from '../services/unifiedTagService';
 import { hasToPublishTag, toggleToPublish } from '../services/toPublishService';
 import { downloadWithAuth } from '../utils/download';
-import { sendResourceToAgent } from '../utils/sendResourceToAgent';
+import { resourceKind, sendResourceToAgent } from '../utils/sendResourceToAgent';
+
+/**
+ * Which files "As Asset" offers itself on.
+ *
+ * The backend refuses everything else with a typed 422
+ * (`resource_kind_unsupported`), because the asset slot table has exactly two
+ * file shapes: a visual reference for every non-`audio` type, and an audio
+ * file for `audio`'s slots. Mirroring that set here is what keeps the menu
+ * from offering an action that can only fail — and `resourceKind` is the
+ * repo's ONE mime→kind ladder (it mirrors the backend's `_mime_kind.py`), so
+ * this is a subset of an existing list, not a second list.
+ *
+ * ⚠️ Not a substitute for rendering the refusal: `resourceKind` falls back to
+ * `file_type` for rows whose mime never got recorded, so the menu can still
+ * offer a file the server then rejects. The dialog names that code.
+ */
+const ASSET_ATTACHABLE_KINDS = new Set(['image', 'audio']);
 
 // Publishing currently supports video only, mirroring the Distribution publish
 // picker (uploads/generated videos; downloads aren't publishable). The
@@ -56,6 +73,12 @@ interface UseContextMenuItemsOptions {
   setCreatingFolder: (v: boolean) => void;
   /** Open the Upload Gallery dialog (empty-area menu). */
   onUploadGallery: () => void;
+  /**
+   * Open "As Asset" on this file. Required, not optional: an optional
+   * callback would let a host mount the menu with a silently dead entry, and
+   * the whole point of this item is that a user action reaches a typed result.
+   */
+  onSaveAsAsset: (item: ResourceItem) => void;
   setLoading: (v: boolean) => void;
   setSelectedResource: (v: any) => void;
   setSelectedFolder: (v: any) => void;
@@ -97,6 +120,7 @@ export function useContextMenuItems({
   fileInputRef,
   setCreatingFolder,
   onUploadGallery,
+  onSaveAsAsset,
   setLoading,
   setSelectedResource,
   setSelectedFolder,
@@ -190,6 +214,23 @@ export function useContextMenuItems({
         disabled: !resourceId,
         divider: true,
       });
+      // As Asset: attach this file to an asset slot (P6 ruling E). Shown for
+      // images and audio only — the two shapes a slot accepts — the same way
+      // the two items below show for images only. The server mints the inbox
+      // row the attach needs inside its own transaction, so cancelling the
+      // dialog leaves nothing behind; the client must not pre-create one.
+      if (ASSET_ATTACHABLE_KINDS.has(resourceKind(item.resource as Resource | undefined))) {
+        items.push({
+          label: t('resources.saveAsAsset', 'As Asset'),
+          icon: <Boxes size={14} />,
+          onClick: () => {
+            if (!resourceId) return;
+            onSaveAsAsset(item as ResourceItem);
+          },
+          disabled: !resourceId,
+          divider: true,
+        });
+      }
       // Asset AI (images only): reverse-prompt + 12-dimension auto-tag.
       // Both dispatch DBOS workflows — progress lives in the Task Center.
       if (item.resource?.file_type === 'image') {
@@ -356,5 +397,5 @@ export function useContextMenuItems({
       });
     }
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, onUploadGallery, versionInputRef, publishMark]);
+  }, [contextMenu, t, onSaveAsAsset, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, onUploadGallery, versionInputRef, publishMark]);
 }

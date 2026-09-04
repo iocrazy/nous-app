@@ -65,6 +65,12 @@ on:
       # too — otherwise the one guard that runs them against a real Postgres
       # never fires for the change that moved them.
       - 'backend/app/workflows/backfill_generated_inbox.py'
+      # The chat-uploads folder is identified by `system_key`, and the
+      # criterion the backfill joins on lives in chat_upload.py. Same reason as
+      # the line above: the shared definition has to reach the one chain that
+      # runs the backfill against a real Postgres, or the two readers can drift
+      # apart with nothing executing either of them.
+      - 'backend/app/services/library/chat_upload.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/repositories/canvas_asset_refs_repository.py'

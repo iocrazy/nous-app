@@ -2,8 +2,9 @@
 
 Personal scope reads/writes ``user_settings.settings_json.chat_temp_ttl_days``.
 Team scope reads/writes ``teams.settings_json.chat_temp_ttl_days``.
-Returns ``None`` when the value is ``-1`` (never expire) so the sweeper
-can skip the scope cleanly.
+Returns ``None`` when the value is ``-1`` (never expire). The sweeper that
+consumed this was retired in P6 (2026-09-04); the helper stays as a generic
+``settings_json`` reader/writer and as the ORM B2 compile-coverage sample.
 """
 
 from __future__ import annotations
@@ -34,8 +35,7 @@ async def _resolve_personal_user_id(scope_id: str) -> Optional[str]:
 
     Callers pass scope_id in two shapes depending on origin:
       - Old (UI panels): the user UUID directly
-      - New (post-PR-C iterators, e.g. temp_resource_sweeper): the
-        personal team snowflake
+      - New (post-PR-C iterators): the personal team snowflake
 
     user_settings is keyed by auth.users.id (UUID), so translate the
     snowflake variant by looking up the team's owner. Returns None when

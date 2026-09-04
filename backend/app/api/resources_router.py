@@ -9,11 +9,13 @@ Sub-modules:
 - resources_crud_router     — CRUD, file serving, recycle bin, tags, move
 - resources_versions_router — version management, HLS, transcode
 - resources_folders_router  — folders + smart folders
+- resources_assets_router   — save a resource as an asset (P6 ruling E)
 """
 
 from fastapi import APIRouter
 
 from app.api.resources_ai_router import router as ai_router
+from app.api.resources_assets_router import router as assets_router
 from app.api.resources_crud_router import router as crud_router
 from app.api.resources_folders_router import router as folders_router
 from app.api.resources_gallery_router import router as gallery_router
@@ -39,4 +41,8 @@ router.include_router(ai_router)
 # GET /resources/{resource_id}. POST /resources/galleries and the
 # /resources/{id}/gallery-items sub-paths register first as the defensive default.
 router.include_router(gallery_router)
+# POST /resources/{id}/save-as-asset — a static SUB-path under the same catch-all
+# id segment crud_router owns, so it registers first for the same reason the
+# routers above do.
+router.include_router(assets_router)
 router.include_router(crud_router)

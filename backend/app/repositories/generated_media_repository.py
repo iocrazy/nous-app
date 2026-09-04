@@ -184,6 +184,34 @@ def _object_refcount_stmt(file_path: str):
     )
 
 
+# Advisory-lock namespace for "register THIS resource into the inbox". The
+# prefix is what keeps ``hashtextextended`` from colliding with another
+# module's per-id locks (script_repository's ``script_provision:``,
+# project_stage_nodes_repository's ``project_stage_nodes_instantiate:``) — the
+# same namespacing idiom, expressed in ORM rather than ``text()``.
+_REGISTRATION_LOCK_NAMESPACE = "generated_media_registration:"
+
+
+def _registration_lock_stmt(resource_id: int):
+    """``pg_advisory_xact_lock`` over the registration of ONE resource.
+
+    ``hashtextextended(text, int8) -> int8`` turns the namespaced id into the
+    64-bit key the advisory-lock primitive takes. TRANSACTION-level: it is
+    released by the caller's COMMIT/ROLLBACK, never held past it, so a caller
+    that crashes cannot wedge the resource.
+
+    Pure/sync so the compiled SQL can be asserted without a database — the
+    same reason its sibling ``_stmt`` helpers in this module are.
+    """
+    return select(
+        func.pg_advisory_xact_lock(
+            func.hashtextextended(
+                _REGISTRATION_LOCK_NAMESPACE + str(int(resource_id)), 0
+            )
+        )
+    )
+
+
 def _registered_resource_lookup_stmt(resource_id: int):
     """The idempotency SELECT for ``insert_registered_resource``.
 
@@ -523,6 +551,18 @@ class GeneratedMediaRepository:
             )
         return _normalize(dict(row)) if row else None
 
+    async def lock_resource_registration(self, resource_id: int) -> None:
+        """Serialise inbox registration of ONE resource for this transaction.
+
+        MUST be called inside an ambient ``unit_of_work()`` — ``write_scope()``
+        joins it, and a transaction-level advisory lock taken in its own
+        auto-committing transaction is released immediately and guards
+        nothing. See :func:`_registration_lock_stmt` and the concurrency note
+        on :meth:`insert_registered_resource`.
+        """
+        async with write_scope() as session:
+            await session.execute(_registration_lock_stmt(int(resource_id)))
+
     async def insert_registered_resource(
         self,
         *,
@@ -544,9 +584,32 @@ class GeneratedMediaRepository:
         Idempotent by ``promoted_resource_id``: a resource that already has an
         inbox row gets that row back instead of a duplicate. The check is a
         SELECT, not a DB constraint — ``promoted_resource_id`` has no unique
-        index — so two concurrent callers for the same brand-new resource can
-        still both insert. That is the accepted shape here: the only writers
-        are one upload (once per resource) and a re-runnable backfill.
+        index (``idx_genmedia_promoted`` is a plain index) — so two concurrent
+        callers for the same resource can still both insert.
+
+        ⚠️ **Whether that is acceptable is a property of the CALLER, not of
+        this method.** Three writers today, and they do not share a risk
+        profile:
+
+        * ``services/library/chat_upload`` — once per brand-new resource, at
+          the moment it is created. Nothing else knows the id yet.
+        * ``workflows/backfill_generated_inbox`` — a single admin-dispatched
+          reconciliation, re-runnable, not concurrent with itself.
+        * ``services/library/generated_inbox_service.save_resource_as_asset``
+          — **user-triggered, repeatable and concurrently reachable** (a
+          double-submitted dialog, a client retry). Two such calls could each
+          SELECT nothing and both INSERT under READ COMMITTED, and since the
+          lookup is ``id asc limit 1`` the second row would become a permanent
+          orphan ``saved`` card. That caller therefore takes
+          :func:`_registration_lock_stmt` (via
+          :meth:`lock_resource_registration`) inside its transaction BEFORE
+          calling this method; the loser blocks until the winner commits and
+          then finds the winner's row here.
+
+        A partial unique index on ``promoted_resource_id`` would be the real
+        fix, but it cannot be added blind: legacy promotes may already have
+        left duplicates in production, which would make ``CREATE INDEX`` fail
+        under CI auto-apply. Tracked as a follow-up, not done here.
         """
         async with read_scope() as session:
             existing = (

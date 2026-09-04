@@ -61,13 +61,6 @@ from app.workflows.stranded_issue_monitor import (  # noqa: F401
     stranded_issue_monitor_workflow,
 )
 from app.workflows.task_broadcast_scanner import task_broadcast_workflow  # noqa: F401
-
-# temp_resource_sweeper is deliberately NOT imported here: chat-temp clean-up
-# is manual (POST /api/v1/generated/cleanup), spec decision 7. Its cron
-# decorator has been commented out since 2026-06-13, so importing it armed
-# nothing — but a bundle import reads as "this is scheduled" and left the
-# schedule one uncommented line away, while the Generated inbox now holds
-# rows pointing at exactly the files a sweep would trash.
 from app.workflows.topic_inspiration import topic_fetch_workflow  # noqa: F401
 from app.workflows.workflow_health_sweeper import (  # noqa: F401
     workflow_health_sweeper_workflow,
