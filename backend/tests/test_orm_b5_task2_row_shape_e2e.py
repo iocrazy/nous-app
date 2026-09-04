@@ -205,7 +205,7 @@ async def test_agents_budget_scan_stmt_entity_level_negative_control_proves_sens
         bad_row["id"]
 
 
-# ── shared DDL ── teams backs the JOIN in the two statements below ────
+# ── shared DDL ── teams backs the JOIN in the backfill statement below ──
 
 _TEAMS_DDL = """
 CREATE TABLE teams (
