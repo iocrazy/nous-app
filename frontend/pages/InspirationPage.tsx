@@ -427,44 +427,9 @@ export const InspirationPage: React.FC = () => {
         // No secondary rail in this module, so this IS the module name.
         level="module"
         title={t('inspiration.title', 'Inspiration')}
+        // Verbs only. Filters get their own row below — see the comment on it.
         actions={
           <>
-            {tag && (
-              <button
-                onClick={() => setTag(null)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-              >
-                #{tag} <X size={10} aria-label="Clear tag filter" />
-              </button>
-            )}
-            {date && (
-              <button
-                onClick={() => setDate(null)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-              >
-                {date} <X size={10} aria-label="Clear date filter" />
-              </button>
-            )}
-            <FilterChip
-              chipId="rating"
-              label={t('inspiration.rating', 'Rating')}
-              activeSummary={minRating > 0 ? `≥${minRating}★` : null}
-              isActive={minRating > 0}
-              isOpen={ratingChipOpen}
-              onToggle={() => setRatingChipOpen((v) => !v)}
-              onClose={() => setRatingChipOpen(false)}
-              onClear={() => setMinRating(0)}
-              icon={Star}
-            >
-              <RatingFilterDropdown
-                minRating={minRating}
-                onChange={(next) => {
-                  setMinRating(next);
-                  // Same snappy auto-close as the Resources bar's rating chip.
-                  if (next === 0) setRatingChipOpen(false);
-                }}
-              />
-            </FilterChip>
             <div className="flex w-64 items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5">
               <Search size={13} className="shrink-0 text-content-4" />
               <input
@@ -511,6 +476,50 @@ export const InspirationPage: React.FC = () => {
           </>
         }
       />
+
+      {/* Filter row — same shape as the Resources bar
+          (`resources/filter/FilterBar.tsx`): its own wrapping line under the
+          header, never inside `actions`. That slot is right-aligned and
+          `shrink-0`; filters dropped into it crowd the search box and the
+          Rating chip ends up stranded mid-header. */}
+      <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+        {tag && (
+          <button
+            onClick={() => setTag(null)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+          >
+            #{tag} <X size={10} aria-label="Clear tag filter" />
+          </button>
+        )}
+        {date && (
+          <button
+            onClick={() => setDate(null)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+          >
+            {date} <X size={10} aria-label="Clear date filter" />
+          </button>
+        )}
+        <FilterChip
+          chipId="rating"
+          label={t('inspiration.rating', 'Rating')}
+          activeSummary={minRating > 0 ? `≥${minRating}★` : null}
+          isActive={minRating > 0}
+          isOpen={ratingChipOpen}
+          onToggle={() => setRatingChipOpen((v) => !v)}
+          onClose={() => setRatingChipOpen(false)}
+          onClear={() => setMinRating(0)}
+          icon={Star}
+        >
+          <RatingFilterDropdown
+            minRating={minRating}
+            onChange={(next) => {
+              setMinRating(next);
+              // Same snappy auto-close as the Resources bar's rating chip.
+              if (next === 0) setRatingChipOpen(false);
+            }}
+          />
+        </FilterChip>
+      </div>
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">
