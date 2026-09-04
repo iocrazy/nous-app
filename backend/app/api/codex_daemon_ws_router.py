@@ -146,6 +146,39 @@ def _buffered_bytes(buf: list[str]) -> int:
     return sum(len(p.encode("utf-8", "surrogatepass")) for p in buf)
 
 
+# How much of the model's prose crosses this seam. It goes on to a jsonb
+# column and then into a UI panel; the useful part (why, plus the rewrite the
+# model offers) is a short paragraph. The daemon already caps it — this is the
+# server refusing to take the daemon's word for it.
+MODEL_DETAIL_MAX = 1500
+
+
+def assemble_job_failure(message: dict) -> dict:
+    """Turn a ``job_failed`` frame into the pub/sub result.
+
+    ``error`` keeps the exact ``"<code>: <message>"`` shape
+    ``codex.errors.from_daemon_error`` splits on — changing it would collapse
+    every typed codex-local failure into the generic ``codex_failed``.
+
+    ``error_detail`` is new in daemon 0.5.0 and carries the MODEL's own words
+    for a content refusal (why it declined, and the rewrite it suggests). It
+    is payload to show a human, never a signal: nothing branches on it, and
+    ``code`` remains the only verdict. A 0.4.0 daemon sends no ``detail``, and
+    absent must stay absent — an empty string here would render as a blank
+    explanation panel, which reads as "the model said nothing" rather than
+    "this daemon cannot tell you".
+
+    The frame arrives off a socket, so a non-string ``detail`` is dropped
+    rather than coerced: shape is not a promise.
+    """
+    code = str(message.get("code") or "job_failed")
+    out: dict = {"error": f"{code}: {message.get('message') or ''}".strip()}
+    detail = message.get("detail")
+    if isinstance(detail, str) and detail.strip():
+        out["error_detail"] = detail[:MODEL_DETAIL_MAX]
+    return out
+
+
 def assemble_job_result(
     message: dict, chunks: dict[str, list[str] | _Poisoned]
 ) -> dict:
@@ -328,10 +361,8 @@ async def ws_codex_agent(websocket: WebSocket) -> None:
                     )
                 elif kind == "job_failed":
                     chunks.pop(job_id, None)
-                    code = str(message.get("code") or "job_failed")
                     await daemon_presence.publish_result(
-                        job_id,
-                        {"error": f"{code}: {message.get('message') or ''}".strip()},
+                        job_id, assemble_job_failure(message)
                     )
             else:
                 logger.debug("[codex-daemon] unknown frame: {}", kind)

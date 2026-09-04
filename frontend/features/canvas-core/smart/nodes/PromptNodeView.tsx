@@ -17,6 +17,7 @@ import { useNodeDataPatch } from './useNodeDataPatch';
 import { startChainRun, useChainRunStore } from '../chainRun';
 import { splitPromptItems } from '../promptSplit';
 import { rerunPrompt } from '../regenerate';
+import { humanizeTaskError } from '../../../../utils/humanizeTaskError';
 import {
   useIsChainTail,
   useNodeInputUrls,
@@ -1046,8 +1047,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           >
             <div className="text-[11px] font-bold text-rose-500">Run failed</div>
             {run_error && (
+              // Same reader Task Center uses. Rendering the raw string here
+              // meant the node showed `RuntimeError: "mess…` clipped to one
+              // line for a failure Task Center could already put in plain
+              // words (2026-09-04). The raw text stays on `title`, so the
+              // technical string is still one hover away.
               <div className="mt-0.5 text-[10px] text-canvas-muted" title={run_error}>
-                {run_error}
+                {humanizeTaskError(run_error).message}
               </div>
             )}
             <button

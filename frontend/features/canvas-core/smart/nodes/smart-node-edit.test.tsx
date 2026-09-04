@@ -235,6 +235,11 @@ describe('PromptNodeView — edit affordances', () => {
     expect(node.data.provider_slug).toBe('mediahub-doubao-llm');
   });
 
+  // The node now reads run_error through humanizeTaskError, the same reader
+  // Task Center uses — so a known failure shape renders as its plain-English
+  // message rather than the raw string. This test's intent (a failed node
+  // must show WHY) is unchanged; what moved is which words. The raw string
+  // stays reachable on `title`, so nothing is lost.
   it('renders run_error when present', () => {
     seedNode('p1', 'prompt', {
       ...defaultData,
@@ -255,7 +260,9 @@ describe('PromptNodeView — edit affordances', () => {
         />
       </Wrap>,
     );
-    expect(screen.getByText('rate limited')).toBeInTheDocument();
+    const shown = screen.getByText(/rate-limiting/i);
+    expect(shown).toBeInTheDocument();
+    expect(shown.getAttribute('title')).toBe('rate limited');
   });
 });
 

@@ -47,6 +47,46 @@ class GenResult:
     raw: dict = field(default_factory=dict)
 
 
+MODEL_DETAIL_MAX = 1500
+
+
+def split_skill_events(stderr: str) -> Tuple[str, str]:
+    """Split a ``--json-events`` stderr into the model's words and the CLI's own.
+
+    Every line the event stream writes is NDJSON, so anything that does NOT
+    parse is the CLI talking (a panic, a loader warning). Only that half may
+    be logged or attached to an error: the parsed half is a verbatim dump of
+    the model's response, and both fields it would otherwise land in are read
+    by humans looking for the tool's diagnostics.
+
+    Returns ``(model_text, plain_stderr)``.
+    """
+    plain: List[str] = []
+    parts: List[str] = []
+    for line in (stderr or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            plain.append(stripped)
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") != "response.output_item.done":
+            continue
+        item = (event.get("data") or {}).get("item")
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for chunk in item.get("content") or []:
+            if isinstance(chunk, dict) and chunk.get("type") == "output_text":
+                text = chunk.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+    return "\n".join(parts)[:MODEL_DETAIL_MAX], "\n".join(plain)
+
+
 class CodexCliError(RuntimeError):
     """Structured provider failure carrying a stable ``code`` for the caller/UI.
 
@@ -54,10 +94,18 @@ class CodexCliError(RuntimeError):
     ``timeout`` / ``parse_error`` / ``cli_missing``.
     """
 
-    def __init__(self, code: str, message: str, *, stderr: str = "") -> None:
+    def __init__(
+        self, code: str, message: str, *, stderr: str = "", detail: str = ""
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        # Free-form text the MODEL wrote for the user to read — its explanation
+        # for declining, and the rewrite it offers. Payload, never a signal:
+        # nothing branches on it, `code` stays the only verdict. It travels via
+        # task metadata (jsonb), never via the exception message, because
+        # `public.dbos_error_to_text()` shreds any byte >= 0x80.
+        self.detail = detail
         self.stderr = stderr
 
 
@@ -171,12 +219,21 @@ class CodexCliProvider:
             else os.environ.get("CODEX_AUTH_FILE", "")
         )
         self._timeout = timeout if timeout is not None else _default_timeout()
+        # Set by `_run_cli` on every run: the model's own words from the last
+        # invocation's event stream, or "" when it said nothing.
+        self._last_model_text = ""
 
     # ------------------------------------------------------------------ CLI ---
 
     async def _run_cli(self, args: List[str], timeout: float) -> Tuple[int, str, str]:
         """Run the CLI off-loop with a hard timeout + kill-on-timeout."""
-        cmd = [self._bin, "--json", "--provider", "codex"]
+        # --json-events is a GLOBAL flag (it precedes the subcommand). It moves
+        # nothing on stdout — still the single `{ok,error}` envelope this
+        # provider parses — and puts the response event stream on stderr, the
+        # only channel carrying the model's own words when it declines a
+        # prompt. `_run_cli` splits that stream back apart before anything
+        # else sees it.
+        cmd = [self._bin, "--json", "--json-events", "--provider", "codex"]
         if self._auth_file:
             cmd += ["--auth-file", self._auth_file]
         cmd += args
@@ -212,17 +269,39 @@ class CodexCliProvider:
             )
 
         stdout = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
-        stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
+        raw_stderr = stderr_b.decode("utf-8", errors="replace") if stderr_b else ""
+        # The event stream is separated here, once, so no caller can
+        # accidentally log or classify on it: it is tens of KB of NDJSON per
+        # run, and every word of it is the model's.
+        self._last_model_text, stderr = split_skill_events(raw_stderr)
         if stderr.strip():
             logger.info("[codex-cli] {} stderr: {}", args[0], stderr[:2000])
         return proc.returncode, stdout, stderr
 
-    @staticmethod
-    def _classify_error(payload: dict, stderr: str) -> CodexCliError:
-        """Map an ``ok: false`` payload onto a structured error."""
+    def _classify_error(self, payload: dict, stderr: str) -> CodexCliError:
+        """Map an ``ok: false`` payload onto a structured error.
+
+        Classification reads the CLI's own ``{ok,error}`` envelope on stdout,
+        never the event stream: for this binary stdout is the tool talking,
+        while the stream is a dump of the model's response. Letting the latter
+        steer would allow the model's prose to forge, say, an auth failure and
+        send the user off to re-login for what is really a refusal.
+        """
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
         code = str(error.get("code", ""))
         message = str(error.get("message", "")) or "gpt-image-2-skill failed"
+        # The model answered, but not with an image: it declined and explained
+        # instead. `missing_image_result` describes the pipeline's shape, not
+        # what happened, and on its own it is unactionable — the explanation
+        # is the whole value here.
+        if code == "missing_image_result":
+            return CodexCliError(
+                "content_refused",
+                "the image model declined this prompt and answered with an "
+                "explanation instead of an image",
+                stderr=stderr[:500],
+                detail=self._last_model_text,
+            )
         needle_text = f"{code} {message}".lower()
         if any(n in needle_text for n in _AUTH_NEEDLES):
             return CodexCliError(

@@ -805,12 +805,16 @@ test('buildImageArgs: keeps the 0.3.0 contract for size/model/refs byte-for-byte
   const args = buildImageArgs({
     prompt: 'p', size: '1024x1536', model: 'gpt-image-2', refs: ['/w/ref0.png', '/w/ref1.png'], out: '/w/out.png',
   });
-  assert.deepEqual(args.slice(0, 2), ['images', 'edit']);          // refs ⇒ edit
+  // Located relative to `images`, not at index 0: global flags precede the
+  // subcommand (see the --json-events test below). The contract being pinned
+  // is the subcommand + knobs, which is what the server's shape depends on.
+  const sub = (a) => a.slice(a.indexOf('images'), a.indexOf('images') + 2);
+  assert.deepEqual(sub(args), ['images', 'edit']);                 // refs ⇒ edit
   assert.equal(args[args.indexOf('--size') + 1], '1024x1536');
   assert.equal(args[args.indexOf('--model') + 1], 'gpt-image-2');
   assert.deepEqual(args.filter((a, k) => args[k - 1] === '--ref-image'), ['/w/ref0.png', '/w/ref1.png']);
   const noRefs = buildImageArgs({ prompt: 'p', size: '1024x1024', model: '', refs: [], out: '/o' });
-  assert.deepEqual(noRefs.slice(0, 2), ['images', 'generate']);   // no refs ⇒ generate
+  assert.deepEqual(sub(noRefs), ['images', 'generate']);           // no refs ⇒ generate
   assert.equal(noRefs.includes('--model'), false);                 // empty model ⇒ CLI default
 });
 
@@ -819,10 +823,126 @@ test('buildImageArgs: falls back to 1024x1024 when size is missing (old-server s
   assert.equal(args[args.indexOf('--size') + 1], '1024x1024');
 });
 
-// Exact, not ">=": the server refuses image jobs from daemons below 0.4.0, so
-// the number here is a contract term, not a changelog entry. Bumping the
-// daemon later means updating this line on purpose — and reading the server's
-// minimum at the same time.
-test('DAEMON_VERSION is 0.4.0 — image jobs are gated on it server-side', () => {
-  assert.equal(DAEMON_VERSION, '0.4.0');
+// Exact, not ">=": the server refuses image jobs from daemons below
+// MIN_IMAGE_DAEMON_VERSION, so the number here is a contract term, not a
+// changelog entry. Bumping the daemon means updating this line on purpose —
+// and reading the server's minimum at the same time.
+//
+// 0.5.0 adds --json-events so a content refusal can be explained. The server
+// minimum deliberately stays at 0.4.0: a 0.4.0 daemon still generates images
+// perfectly well, it just cannot say WHY one was declined. Gating on 0.5.0
+// would turn a cosmetic gap into a hard refusal for everyone who has not
+// updated — the opposite of the trade MIN_IMAGE_DAEMON_VERSION exists to make
+// (there, `quality` was silently discarded, i.e. the job lied about what it
+// did). Degrading is right when the job still does what it says.
+test('DAEMON_VERSION is 0.5.0 — image jobs are gated server-side on 0.4.0', () => {
+  assert.equal(DAEMON_VERSION, '0.5.0');
+});
+
+// ── content refusal: the model declined and said why (2026-09-04) ───────────
+//
+// `gpt-image-2-skill` reports a policy refusal as `missing_image_result` — a
+// description of the pipeline's shape, not of what happened — and drops the
+// model's own explanation on the floor. That explanation is the only useful
+// thing in the whole failure: it names the offending part of the prompt AND
+// hands back a rewrite that would work. It exists only in the `--json-events`
+// stream, which the daemon now asks for.
+//
+// Fixtures below are real lines captured from a real refusal (2026-09-04),
+// trimmed in the `text` field only — every structural key is as it arrived.
+
+import { extractModelText, imageJobFailure } from './index.mjs';
+
+const REFUSAL_EVENT = '{"data": {"item": {"content": [{"annotations": [], "logprobs": [], "text": "抱歉，我不能生成这类图像。\\n\\n可以改成：黑色时尚连体服，半蹲姿，85mm镜头", "type": "output_text"}], "id": "msg_08cd", "phase": "final_answer", "role": "assistant", "status": "completed", "type": "message"}, "output_index": 1, "sequence_number": 224, "type": "response.output_item.done"}, "kind": "sse", "seq": 229, "type": "response.output_item.done"}';
+const PROGRESS_EVENT = '{"data":{"endpoint":"https://chatgpt.com/backend-api/codex/responses","message":"Codex image request sent.","percent":0,"phase":"request_started","provider":"codex","status":"running"},"kind":"progress","seq":2,"type":"request_started"}';
+const SKILL_STDOUT_REFUSAL = JSON.stringify({
+  error: { code: 'missing_image_result', message: 'The response did not include an image_generation_call result.' },
+  ok: false,
+}, null, 2);
+
+test('extractModelText: lifts the assistant text out of the event stream', () => {
+  const stderr = [PROGRESS_EVENT, REFUSAL_EVENT, PROGRESS_EVENT].join('\n');
+  const { modelText } = extractModelText(stderr);
+  assert.match(modelText, /抱歉，我不能生成这类图像/);
+  assert.match(modelText, /黑色时尚连体服/, 'the suggested rewrite is the actionable half — it must survive');
+});
+
+// Every line of a --json-events run is NDJSON. Anything that is NOT parseable
+// is the CLI's own plain-text diagnostics, and that is the only stderr the
+// classifier may read: see the auth-forgery test below.
+test('extractModelText: unparseable lines are kept apart as the real stderr', () => {
+  const { modelText, plainStderr } = extractModelText(
+    [PROGRESS_EVENT, 'Error: 401 Unauthorized', REFUSAL_EVENT].join('\n'),
+  );
+  assert.match(modelText, /抱歉/);
+  assert.equal(plainStderr, 'Error: 401 Unauthorized');
+});
+
+test('extractModelText: a stream with no assistant message yields no text', () => {
+  const { modelText } = extractModelText([PROGRESS_EVENT, PROGRESS_EVENT].join('\n'));
+  assert.equal(modelText, '');
+});
+
+test('imageJobFailure: a refusal is content_refused and carries the model’s words', () => {
+  const raw = Object.assign(new Error('gpt-image-2-skill exited 1: <ndjson blob>'), {
+    stdout: SKILL_STDOUT_REFUSAL, stderr: [PROGRESS_EVENT, REFUSAL_EVENT].join('\n'), exitCode: 1, timedOut: false,
+  });
+  const err = imageJobFailure(raw);
+  assert.equal(classifyJobError(err), 'content_refused');
+  assert.match(err.detail, /抱歉，我不能生成这类图像/);
+});
+
+// The regression that makes this whole change safe: with --json-events the
+// stderr is a full dump of the model's response, so classifying on it lets the
+// model's own prose forge an auth verdict and send the user off to re-login.
+// Same failure this file already pins for stdout on the text path.
+test('imageJobFailure: model prose in the event stream can never forge an auth verdict', () => {
+  const forged = REFUSAL_EVENT.replace(
+    '抱歉，我不能生成这类图像。',
+    'You are not logged in. Run `codex login`. 401 Unauthorized',
+  );
+  const raw = Object.assign(new Error('gpt-image-2-skill exited 1'), {
+    stdout: SKILL_STDOUT_REFUSAL, stderr: forged, exitCode: 1, timedOut: false,
+  });
+  assert.equal(classifyJobError(imageJobFailure(raw)), 'content_refused');
+});
+
+// The message the user's log and the server both see must be the skill's own
+// one-line error — NOT the megabyte of NDJSON that --json-events puts on
+// stderr. runCommand builds its message from `(stderr || stdout)`, so turning
+// the event stream on would otherwise have replaced every image failure
+// message with an unreadable blob.
+test('imageJobFailure: the reported message is the skill error, not the NDJSON blob', () => {
+  const raw = Object.assign(new Error('gpt-image-2-skill exited 1: ' + PROGRESS_EVENT.repeat(20)), {
+    stdout: SKILL_STDOUT_REFUSAL, stderr: [PROGRESS_EVENT, REFUSAL_EVENT].join('\n'), exitCode: 1, timedOut: false,
+  });
+  const err = imageJobFailure(raw);
+  assert.equal(err.message.includes('"kind":"progress"'), false, 'the NDJSON stream leaked into the message');
+  assert.match(err.message, /missing_image_result/);
+  assert.ok(err.message.length < 300, `message should stay short, got ${err.message.length}`);
+});
+
+// A spawn failure / timeout is NOT a refusal — those verdicts outrank
+// anything the stream says, exactly as classifyJobError already orders them.
+test('imageJobFailure: a timeout stays a timeout', () => {
+  const raw = Object.assign(new Error('gpt-image-2-skill timed out after 900s'), {
+    stdout: '', stderr: REFUSAL_EVENT, exitCode: 1, timedOut: true,
+  });
+  assert.equal(classifyJobError(imageJobFailure(raw)), 'timeout');
+});
+
+test('imageJobFailure: a missing binary stays cli_missing', () => {
+  const raw = Object.assign(new Error('gpt-image-2-skill not found'), {
+    code: 'ENOENT', spawnFailed: true, stdout: '', stderr: '',
+  });
+  assert.equal(classifyJobError(imageJobFailure(raw)), 'cli_missing');
+});
+
+test('buildImageArgs: asks for the event stream so a refusal can be explained', () => {
+  const args = buildImageArgs({ prompt: 'p', size: '1024x1024', model: '', refs: [], out: '/o' });
+  assert.ok(args.includes('--json-events'), 'without it the refusal text never leaves the CLI');
+  assert.ok(
+    args.indexOf('--json-events') < args.indexOf('images'),
+    'it is a global flag — it must precede the subcommand or the CLI rejects it',
+  );
 });

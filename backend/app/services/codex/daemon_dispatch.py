@@ -66,6 +66,27 @@ class DaemonUpdateRequiredError(RuntimeError):
     """The connected daemon is too old for this job; message says how to update."""
 
 
+class DaemonJobFailedError(RuntimeError):
+    """The daemon ran the job and reported a failure.
+
+    ``str(self)`` is deliberately the same ``"<code>: <message>"`` string the
+    plain ``RuntimeError`` used to carry — ``codex.errors.from_daemon_error``
+    splits on it, so changing the message would silently collapse every typed
+    codex-local failure into the generic ``codex_failed``.
+
+    ``code`` / ``detail`` default to empty because pickle reconstructs an
+    exception by calling ``cls(*self.args)``, and DBOS pickles whatever a
+    workflow raises. Nothing relies on them surviving that trip: callers
+    translate via ``describe_generation_failure`` while still in-process, and what
+    crosses the DBOS boundary afterwards is a plain ``RuntimeError``.
+    """
+
+    def __init__(self, message: str, code: str = "", detail: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.detail = detail
+
+
 class DaemonTransport(Protocol):
     async def is_online(self, user_id: str) -> bool: ...
     async def send_job(self, user_id: str, job: dict) -> None: ...
@@ -203,5 +224,13 @@ async def dispatch_to_daemon(
 
     if result.get("error"):
         logger.info("[codex-daemon] job {} failed: {}", job_id, result["error"])
-        raise RuntimeError(str(result["error"]))
+        raw = str(result["error"])
+        # The code is the leading token of the daemon's own message, the same
+        # split ``errors.from_daemon_error`` makes. Read here too so callers
+        # that want the verdict do not have to re-parse prose.
+        code = raw.partition(":")[0].strip()
+        detail = result.get("error_detail")
+        raise DaemonJobFailedError(
+            raw, code=code, detail=detail if isinstance(detail, str) else ""
+        )
     return result

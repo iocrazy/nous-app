@@ -454,6 +454,73 @@ async def _resolve_reference_urls(
     return urls, dropped
 
 
+async def _dispatch_and_record_failure(**kwargs: Any) -> Dict[str, Any]:
+    """``dispatch_to_daemon``, plus the half of a daemon failure that cannot
+    ride the exception.
+
+    A content refusal is the case this exists for: the model's own words are
+    the only useful part of that failure — they name what it objected to and
+    hand back a rewrite that works — and they are its prose, so routinely
+    non-ASCII. ``task_tracking.error_msg`` is derived from the pickled
+    exception by ``public.dbos_error_to_text()`` (migration 219), which splits
+    on every byte >= 0x80 and keeps the longest chunk; a Chinese sentence
+    arrives there as a fragment. So the words go to ``metadata`` (jsonb, and
+    business decoration the workflow owns under route C §3) and the exception
+    carries one ASCII line.
+
+    Re-raised as a plain ``RuntimeError``: what crosses the DBOS boundary gets
+    pickled, and the typed error's extra fields would not survive that trip
+    anyway (see ``DaemonJobFailedError``). Failure stays a raise — returning a
+    dict here would have the mirror trigger mark the task completed.
+    """
+    from app.services.codex.daemon_dispatch import (
+        DaemonJobFailedError,
+        dispatch_to_daemon,
+    )
+
+    try:
+        return await dispatch_to_daemon(**kwargs)
+    except DaemonJobFailedError as exc:
+        await _record_failure_detail(exc)
+
+
+async def _record_failure_detail(exc: BaseException) -> None:
+    """Persist a failed generation's explanation, then re-raise one clean line.
+
+    Never returns: it always raises. Both codex image paths funnel through
+    here — the user's own daemon and the in-container subprocess — because a
+    user cannot tell which one ran and neither should read differently.
+
+    What crosses the DBOS boundary is a plain ``RuntimeError``: a raised
+    exception gets pickled, and the typed error's extra fields would not
+    survive that trip anyway. Still a raise, never a failed dict — returning
+    one would have the mirror trigger mark the task completed (route C §4).
+    """
+    from app.services.generation.failure import describe_generation_failure
+
+    message, patch = describe_generation_failure(exc)
+    task_id = DBOS.workflow_id
+    if task_id:
+        await _patch_task_metadata(task_id, patch)
+    raise RuntimeError(message) from exc
+
+
+async def _patch_task_metadata(task_id: str, patch: Dict[str, Any]) -> None:
+    """Write business decoration onto this run's task row (route C §3).
+
+    Deliberately swallow-and-log: this is called on the failure path, and a
+    metadata write that fails must not replace the failure the user actually
+    needs to see. Logged rather than passed, per CLAUDE.md's rule on
+    catch-swallowing.
+    """
+    from app.services.infra.unified_task_manager import get_task_manager
+
+    try:
+        await get_task_manager().patch_metadata(task_id, patch)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.error("[canvas-gen] could not record failure metadata: {}", exc)
+
+
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def generate_canvas_media_step(
     kind: str,
@@ -508,8 +575,6 @@ async def generate_canvas_media_step(
     )
     if local:
         engine, engine_model = local
-        from app.services.codex.daemon_dispatch import dispatch_to_daemon
-
         # Capabilities live under the catalog's actual_provider, so map the
         # engine back to it. Neither name in hand is that key: ``engine_model``
         # ("gpt-image-2") resolves to no protocol, and ``engine`` only appears
@@ -594,7 +659,7 @@ async def generate_canvas_media_step(
         # is what creates the row. Deliberately NOT the payload: that carries
         # ref urls and the augmented prompt, and this sits in Redis.
         daemon_scope_id = await _registration_scope_id(canvas_id, user_id)
-        result = await dispatch_to_daemon(
+        result = await _dispatch_and_record_failure(
             user_id=str(user_id),
             # The same scope ``persist_canvas_generation_step`` registers a
             # server-side product into. The daemon's upload endpoint is what
@@ -723,17 +788,25 @@ async def generate_canvas_media_step(
         local_refs, dropped_refs = await _resolve_reference_paths(
             stack, eff.refs, user_id=user_id, canvas_id=canvas_id
         )
-        result = await provider.generate(
-            prompt,
-            gen_model,
-            aspect_ratio=eff.ratio or "",
-            reference_image_url=source_url if eff.refs else None,
-            reference_image_paths=local_refs or None,
-            # IC ⑨ quality pill — consumed by the codex adapter, ignored by
-            # providers without a quality knob (ark/jimeng take **kwargs).
-            quality=eff.quality,
-            resolution=eff.resolution,
-        )
+        try:
+            result = await provider.generate(
+                prompt,
+                gen_model,
+                aspect_ratio=eff.ratio or "",
+                reference_image_url=source_url if eff.refs else None,
+                reference_image_paths=local_refs or None,
+                # IC ⑨ quality pill — consumed by the codex adapter, ignored by
+                # providers without a quality knob (ark/jimeng take **kwargs).
+                quality=eff.quality,
+                resolution=eff.resolution,
+            )
+        except Exception as exc:
+            # Only failures that brought an explanation for the user are
+            # rewritten; everything else propagates exactly as before, so no
+            # provider loses the message it chose to raise.
+            if not getattr(exc, "detail", ""):
+                raise
+            await _record_failure_detail(exc)
     remote_url = getattr(result, "image_url", None) or None
     local_path = getattr(result, "image_path", None) or None
     if not remote_url and not local_path:

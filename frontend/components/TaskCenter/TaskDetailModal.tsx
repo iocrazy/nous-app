@@ -116,14 +116,27 @@ const TaskErrorBlock: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const { t } = useTranslation();
   if (!task.error_msg) return null;
 
-  const { message, hint } = taskErrorCopy(task.metadata, task.error_msg, t);
+  const { message, hint, detail } = taskErrorCopy(task.metadata, task.error_msg, t);
   const raw = task.error_msg.trim();
   const showRaw = raw.length > 0 && raw !== message;
 
   return (
     <div className="px-4 pt-4 text-xs text-red-400">
-      <div className="whitespace-pre-wrap break-words">{message}</div>
+      <div data-testid="task-error-message" className="whitespace-pre-wrap break-words">{message}</div>
       {hint && <p className="mt-0.5 text-red-300/70">{hint}</p>}
+      {/* Not inside the <details> below. This is the failing party's own
+          explanation written FOR the user — for a content refusal it names
+          what was objected to and hands back a working rewrite — so it is the
+          most useful thing on screen, not the technical overflow. Burying it
+          under a collapsed disclosure is the 2026-09-04 bug. */}
+      {detail && (
+        <pre
+          data-testid="task-error-detail"
+          className="mt-1.5 text-[11px] text-ink-300 whitespace-pre-wrap break-words bg-ink-950/60 border border-ink-700/60 rounded p-2 max-h-56 overflow-y-auto font-sans"
+        >
+          {detail}
+        </pre>
+      )}
       {showRaw && (
         <details className="mt-1">
           <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
