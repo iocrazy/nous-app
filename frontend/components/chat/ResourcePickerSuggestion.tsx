@@ -31,10 +31,10 @@ function _relative(iso: string): string {
 /**
  * The Assets tab (P5).
  *
- * OPTIONAL as a whole, and that is the point: `CanvasMentionPicker` renders
- * this same popover as a positioning shell and has its own asset grid one
- * level up. A required prop would have made every existing caller declare a
- * tab it does not want.
+ * OPTIONAL as a whole, and that is the point: the issue reply box
+ * (`IssueReplyBox.tsx`) renders this same popover and, per ruling H, does not
+ * support asset references in this phase. A required prop would have made
+ * every existing caller declare a tab it does not want.
  *
  * The parent owns `active` for the same reason it owns `activeKind`: it is the
  * parent that routes the arrow keys, and a tab this component kept to itself
