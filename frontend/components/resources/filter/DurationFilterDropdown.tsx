@@ -81,7 +81,7 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
   const isActive = (preset: DurationPresetId) => value.preset === preset;
 
   return (
-    <div className="w-56 py-1" role="menu" aria-label="Duration filter">
+    <div className="w-max min-w-[12rem] py-1" role="menu" aria-label="Duration filter">
       {PRESETS.map((preset) => {
         const active = isActive(preset);
         return (

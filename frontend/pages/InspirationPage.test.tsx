@@ -112,7 +112,11 @@ describe('InspirationPage', () => {
         undefined,
       ),
     );
-    expect(screen.getByLabelText('Clear tag filter')).toBeTruthy();
+    // The active tag now shows on the Tags chip; the "#tag ×" pill it used to
+    // put in the header was retired when that chip landed (it could only
+    // clear a tag, never pick one, so the two were the same state twice).
+    expect(screen.getByRole('button', { name: /^Tags · #hooks/ })).toBeTruthy();
+    expect(screen.getByLabelText('Clear Tags')).toBeTruthy();
   });
 
   it('search input debounces into q filter', async () => {

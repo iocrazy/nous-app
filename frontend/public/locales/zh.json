@@ -4792,6 +4792,7 @@
     "saving": "保存中…",
     "activity": "活跃度",
     "tags": "标签",
+    "noTagsYet": "暂无标签",
     "edit": "编辑",
     "pin": "置顶",
     "unpin": "取消置顶",

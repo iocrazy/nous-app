@@ -89,7 +89,7 @@ export const DateAddedFilterDropdown: React.FC<DateAddedFilterDropdownProps> = (
   const isActive = (preset: DatePresetId) => value.preset === preset;
 
   return (
-    <div className="w-56 py-1" role="menu" aria-label="Date added filter">
+    <div className="w-max min-w-[12rem] py-1" role="menu" aria-label="Date added filter">
       {PRESETS.map((preset) => {
         const active = isActive(preset);
         const Icon = icons[preset];

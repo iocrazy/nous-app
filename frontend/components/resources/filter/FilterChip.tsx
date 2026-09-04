@@ -93,7 +93,16 @@ export const FilterChip: React.FC<FilterChipProps> = ({
   const displayLabel = isActive && activeSummary ? `${label} · ${activeSummary}` : label;
 
   return (
-    <div ref={rootRef} className="relative" data-chip-id={chipId}>
+    // `w-fit` is load-bearing, not cosmetic: this root is the containing block
+    // the panel's `min-w-full` resolves against. A bare block-level root
+    // stretches to its parent, so a chip mounted in a plain block container
+    // would get a panel as wide as the page. Every bar today mounts chips as
+    // flex items (content-sized already), which is exactly why that failure
+    // mode would ship silently — no test and no existing screen would show it.
+    // fit-content is what a flex item already computes, so this changes
+    // nothing for the current callers and makes the contract independent of
+    // how the caller lays out.
+    <div ref={rootRef} className="relative w-fit" data-chip-id={chipId}>
       <div
         className={`inline-flex items-center rounded-lg border transition-colors ${
           isActive
@@ -126,7 +135,24 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         )}
       </div>
       {isOpen && (
-        <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
+        // Sizing follows the app-wide UiSelect contract (see
+        // `ui/UiSelect.menuWidth.test.tsx`): no width, just a floor and a
+        // ceiling, so the panel is whatever its content needs. This used to be
+        // `min-w-[14rem]`, which stacked with each body's own fixed `w-44` /
+        // `w-48` / `w-56` — the 224px floor won on every body narrower than
+        // that and left dead space down the panel's right edge.
+        //   w-max        shrink-to-fit
+        //   min-w-full   100% of this `relative` root, i.e. the chip itself,
+        //                so a wide chip never sits above a narrower panel
+        //   max-w-[90vw] never runs off the viewport
+        //   overflow-hidden  `w-max` gives up the shrink-to-fit clamp a plain
+        //                `width:auto` box would have had, so a body wide
+        //                enough to beat the ceiling would otherwise paint
+        //                OUTSIDE these rounded borders. Bodies whose rows can
+        //                hold user-authored text carry their own max-w too —
+        //                a `truncate` row never truncates inside a `w-max`
+        //                parent, it just makes the box wider.
+        <div className="absolute left-0 top-full mt-1.5 z-30 w-max min-w-full max-w-[90vw] overflow-hidden bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
           {children}
         </div>
       )}

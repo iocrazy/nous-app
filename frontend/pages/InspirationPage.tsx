@@ -3,7 +3,7 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link2, Search, Star, X } from 'lucide-react';
+import { Link2, Search, Star, Tag as TagIcon, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
@@ -33,6 +33,7 @@ import { PageHeader } from '../components/layout/PageHeader';
 // components with no ResourcesContext dependency.
 import { FilterChip } from '../components/resources/filter/FilterChip';
 import { RatingFilterDropdown } from '../components/resources/filter/RatingFilterDropdown';
+import { NoteTagsFilterDropdown } from '../components/Inspiration/NoteTagsFilterDropdown';
 import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
@@ -75,6 +76,7 @@ export const InspirationPage: React.FC = () => {
   // 0 = "Any rating" (no filter); 1-5 = minimum stars.
   const [minRating, setMinRating] = useState(0);
   const [ratingChipOpen, setRatingChipOpen] = useState(false);
+  const [tagChipOpen, setTagChipOpen] = useState(false);
   const [queryInput, setQueryInput] = useState('');
   const [q, setQ] = useState('');
   const [hasMore, setHasMore] = useState(false);
@@ -427,44 +429,9 @@ export const InspirationPage: React.FC = () => {
         // No secondary rail in this module, so this IS the module name.
         level="module"
         title={t('inspiration.title', 'Inspiration')}
+        // Verbs only. Filters get their own row below — see the comment on it.
         actions={
           <>
-            {tag && (
-              <button
-                onClick={() => setTag(null)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-              >
-                #{tag} <X size={10} aria-label="Clear tag filter" />
-              </button>
-            )}
-            {date && (
-              <button
-                onClick={() => setDate(null)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-              >
-                {date} <X size={10} aria-label="Clear date filter" />
-              </button>
-            )}
-            <FilterChip
-              chipId="rating"
-              label={t('inspiration.rating', 'Rating')}
-              activeSummary={minRating > 0 ? `≥${minRating}★` : null}
-              isActive={minRating > 0}
-              isOpen={ratingChipOpen}
-              onToggle={() => setRatingChipOpen((v) => !v)}
-              onClose={() => setRatingChipOpen(false)}
-              onClear={() => setMinRating(0)}
-              icon={Star}
-            >
-              <RatingFilterDropdown
-                minRating={minRating}
-                onChange={(next) => {
-                  setMinRating(next);
-                  // Same snappy auto-close as the Resources bar's rating chip.
-                  if (next === 0) setRatingChipOpen(false);
-                }}
-              />
-            </FilterChip>
             <div className="flex w-64 items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5">
               <Search size={13} className="shrink-0 text-content-4" />
               <input
@@ -511,6 +478,72 @@ export const InspirationPage: React.FC = () => {
           </>
         }
       />
+
+      {/* Filter row — same shape as the Resources bar
+          (`resources/filter/FilterBar.tsx`): its own wrapping line under the
+          header, never inside `actions`. That slot is right-aligned and
+          `shrink-0`; filters dropped into it crowd the search box and the
+          Rating chip ends up stranded mid-header.
+
+          Notes tab only. `tag` and `minRating` feed `listNotes` and nothing
+          else, so on the Hotspots tab these chips would sit there, light up
+          when clicked, and change nothing — a silent no-op control. */}
+      {tab === 'notes' && (
+      <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+        {/* Single-select: the backend takes one optional `tag`. This chip
+            replaced the read-only "#tag ×" pill that used to sit here — the
+            pill could only clear a tag chosen from the sidebar list, and
+            keeping both would have shown the active tag twice. */}
+        <FilterChip
+          chipId="note_tags"
+          label={t('inspiration.tags', 'Tags')}
+          activeSummary={tag ? `#${tag}` : null}
+          isActive={!!tag}
+          isOpen={tagChipOpen}
+          onToggle={() => setTagChipOpen((v) => !v)}
+          onClose={() => setTagChipOpen(false)}
+          onClear={() => setTag(null)}
+          icon={TagIcon}
+        >
+          <NoteTagsFilterDropdown
+            tags={tags}
+            activeTag={tag}
+            onChange={(next) => {
+              setTag(next);
+              setTagChipOpen(false);
+            }}
+          />
+        </FilterChip>
+        {date && (
+          <button
+            onClick={() => setDate(null)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+          >
+            {date} <X size={10} aria-label="Clear date filter" />
+          </button>
+        )}
+        <FilterChip
+          chipId="rating"
+          label={t('inspiration.rating', 'Rating')}
+          activeSummary={minRating > 0 ? `≥${minRating}★` : null}
+          isActive={minRating > 0}
+          isOpen={ratingChipOpen}
+          onToggle={() => setRatingChipOpen((v) => !v)}
+          onClose={() => setRatingChipOpen(false)}
+          onClear={() => setMinRating(0)}
+          icon={Star}
+        >
+          <RatingFilterDropdown
+            minRating={minRating}
+            onChange={(next) => {
+              setMinRating(next);
+              // Same snappy auto-close as the Resources bar's rating chip.
+              if (next === 0) setRatingChipOpen(false);
+            }}
+          />
+        </FilterChip>
+      </div>
+      )}
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">

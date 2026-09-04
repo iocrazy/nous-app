@@ -52,7 +52,7 @@ export const TagsFilterDropdown: React.FC<TagsFilterDropdownProps> = ({
 
   if (allTags.length === 0) {
     return (
-      <div className="w-64 px-3 py-4 text-xs text-content-3" role="menu" aria-label="Tags filter">
+      <div className="w-max min-w-[11rem] px-3 py-4 text-xs text-content-3" role="menu" aria-label="Tags filter">
         {t('resources.filter.noTags', 'No tags yet')}
       </div>
     );
