@@ -93,7 +93,16 @@ export const FilterChip: React.FC<FilterChipProps> = ({
   const displayLabel = isActive && activeSummary ? `${label} · ${activeSummary}` : label;
 
   return (
-    <div ref={rootRef} className="relative" data-chip-id={chipId}>
+    // `w-fit` is load-bearing, not cosmetic: this root is the containing block
+    // the panel's `min-w-full` resolves against. A bare block-level root
+    // stretches to its parent, so a chip mounted in a plain block container
+    // would get a panel as wide as the page. Every bar today mounts chips as
+    // flex items (content-sized already), which is exactly why that failure
+    // mode would ship silently — no test and no existing screen would show it.
+    // fit-content is what a flex item already computes, so this changes
+    // nothing for the current callers and makes the contract independent of
+    // how the caller lays out.
+    <div ref={rootRef} className="relative w-fit" data-chip-id={chipId}>
       <div
         className={`inline-flex items-center rounded-lg border transition-colors ${
           isActive

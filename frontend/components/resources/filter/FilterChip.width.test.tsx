@@ -83,6 +83,34 @@ describe('FilterChip dropdown panel — content-sized, not pinned to a number', 
     //   max-w-[90vw] — ceiling: never wider than the viewport
     expect(widthUtilities(panel)).toEqual(['w-max', 'min-w-full', 'max-w-[90vw]']);
   });
+
+  it('sizes the root to the chip, so the floor means the chip and not the page', () => {
+    // The panel's floor is `min-w-full`, i.e. 100% of THIS element. A bare
+    // block-level root would stretch to whatever container it was dropped in,
+    // and the floor would silently become "as wide as the page". Every bar
+    // today mounts chips as flex items, which are content-sized anyway — so
+    // that failure mode would ship with nothing turning red. `w-fit` makes the
+    // root content-sized regardless of how the caller lays it out, which is
+    // why it is asserted here rather than left to the callers.
+    const { container } = render(
+      // A plain block container: the case no caller exercises today.
+      <div>
+        <FilterChip
+          chipId="probe"
+          label="Probe"
+          isActive={false}
+          isOpen
+          onToggle={vi.fn()}
+          onClose={vi.fn()}
+        >
+          <div>body</div>
+        </FilterChip>
+      </div>,
+    );
+
+    const root = container.querySelector('[data-chip-id="probe"]') as HTMLElement;
+    expect(root.className.split(/\s+/)).toEqual(['relative', 'w-fit']);
+  });
 });
 
 /**
