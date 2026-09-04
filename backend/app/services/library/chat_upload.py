@@ -272,14 +272,47 @@ def legacy_chat_uploads_criteria():
     )
 
 
+def adoptable_chat_uploads_criteria():
+    """SQLAlchemy criterion: a legacy ``temp`` folder we may CLAIM.
+
+    Strictly narrower than :func:`legacy_chat_uploads_criteria`, and the
+    difference is deliberate — reading a folder is harmless, claiming one is
+    not. Adoption sets ``is_system=true``, which the API layer turns into a
+    409 on rename / move / trash / delete: claim the wrong folder and the user
+    permanently loses control of a directory they made.
+
+    Root-only (``parent_id IS NULL AND library_id IS NULL``) because that is
+    what the real folder always looked like, not because it is cautious. The
+    pre-450 ``_ensure_temp_folder`` was the ONLY writer of a folder named
+    ``temp``, and its insert passed ``name`` / ``scope_id`` / ``created_by``
+    and nothing else, so both columns took the DB default. A "temp" folder
+    nested under a project — a user's scratch drawer — was therefore never
+    ours, however small its id.
+
+    MUST stay identical to migration 450's candidate predicate. If the two
+    ever disagree, each claims a different row and the second one violates
+    ``ux_folders_scope_system_key`` — during a user's upload.
+    """
+    from app.models import Folders  # noqa: PLC0415
+
+    return (
+        legacy_chat_uploads_criteria()
+        & (Folders.parent_id.is_(None))
+        & (Folders.library_id.is_(None))
+    )
+
+
 def chat_uploads_folder_criteria():
     """SQLAlchemy criterion: every folder that holds chat uploads.
 
-    The union of the two arms above. Readers that reconcile history (the
-    backfill) want both, because migration 450 adopts ONE ``temp`` folder per
-    scope and leaves any others as plain user folders — their contents are
-    still chat uploads, and narrowing to the keyed arm alone would report
-    "0 temp resources" for them, which is a wrong answer that raises no error.
+    The union of the two arms above — the READ side, deliberately wider
+    than what :func:`adoptable_chat_uploads_criteria` will claim. Readers
+    that reconcile history (the backfill) want both arms, because migration
+    450 adopts ONE ``temp`` folder per scope and leaves any others as plain
+    user folders: their contents are still chat uploads, and narrowing to the
+    keyed arm alone would report "0 temp resources" for them — a wrong answer
+    that raises no error. Reading a folder costs nothing; CLAIMING one is
+    what needs the narrow rule.
     """
     from sqlalchemy import or_  # noqa: PLC0415
 
@@ -312,13 +345,15 @@ async def _ensure_chat_uploads_folder(scope_id: str, user_id: str) -> str:
     Three steps, in this order — the order is the whole point:
 
     1. **Find by ``system_key``.** The name is never matched here.
-    2. **Adopt** the oldest live ``temp`` folder that has no key yet. This is
-       migration 450's rule, restated in code so that whichever runs first
+    2. **Adopt** the oldest live, unkeyed, ROOT-level ``temp`` folder — see
+       :func:`adoptable_chat_uploads_criteria` for why root-level is part of
+       the identity rather than a safety margin. This is migration 450's
+       candidate predicate restated in code, so that whichever runs first
        (migration or deploy — the two chains have no ordering guarantee) the
-       other one finds nothing left to do. ``MIN(id)`` because folder ids are
+       other finds nothing left to do. ``MIN(id)`` because folder ids are
        snowflakes: smallest is oldest, i.e. the one chat uploads have actually
-       been landing in. Any other ``temp`` folder in the scope is left alone as
-       a plain user folder.
+       been landing in. Every other ``temp`` folder in the scope is left alone
+       as a plain user folder.
     3. **Create** one carrying the key, ``is_system=True`` and the display
        name. Never a bare name.
 
@@ -354,7 +389,7 @@ async def _ensure_chat_uploads_folder(scope_id: str, user_id: str) -> str:
                         select(Folders.id)
                         .where(
                             Folders.scope_id == sid,
-                            legacy_chat_uploads_criteria(),
+                            adoptable_chat_uploads_criteria(),
                             Folders.is_trashed.is_(False),
                         )
                         .order_by(Folders.id.asc())

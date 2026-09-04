@@ -181,6 +181,31 @@ class TestIdentityCriteria:
         assert "name = 'temp'" in sql
         assert " OR " in sql
 
+    def test_the_adoptable_arm_is_root_only(self):
+        """What we may CLAIM is narrower than what we may READ.
+
+        Adoption flips ``is_system``, which the API turns into a 409 on
+        rename / move / trash / delete. A user's nested "temp" scratch folder
+        must never be claimed — the pre-450 code that created the real one
+        passed neither ``parent_id`` nor ``library_id``, so root-level is a
+        fact about the folder, not a precaution.
+        """
+        sql = _sql(m.adoptable_chat_uploads_criteria())
+        assert "system_key IS NULL" in sql
+        assert "name = 'temp'" in sql
+        assert "parent_id IS NULL" in sql
+        assert "library_id IS NULL" in sql
+
+    def test_the_read_union_stays_wide(self):
+        """The root-only guards belong to adoption ONLY.
+
+        Putting them on the read side would drop a nested legacy folder's
+        uploads out of the backfill's plan and report that as reconciled.
+        """
+        sql = _sql(m.chat_uploads_folder_criteria())
+        assert "parent_id" not in sql
+        assert "library_id" not in sql
+
     def test_display_name_is_title_case_and_key_is_stable(self):
         assert m.CHAT_UPLOADS_SYSTEM_KEY == "chat_uploads"
         assert m.CHAT_UPLOADS_DISPLAY_NAME == "Chat Uploads"
@@ -325,6 +350,26 @@ class TestAdoption:
         assert "system_key IS NULL" in candidate_sql
         assert "name = 'temp'" in candidate_sql
         assert "is_trashed IS false" in candidate_sql
+
+    @pytest.mark.asyncio
+    async def test_the_candidate_query_can_only_claim_a_root_folder(self, monkeypatch):
+        """All five conditions of migration 450's candidate predicate, on the
+        one query that claims a row. Any of them missing here and the two
+        rules have drifted apart."""
+        _, writes = _install(
+            monkeypatch,
+            reads=[[]],
+            writes=[[(LEGACY_FOLDER_ID,)], [(LEGACY_FOLDER_ID,)]],
+        )
+
+        await m._ensure_chat_uploads_folder(SCOPE_ID_STR, USER_ID)
+
+        candidate_sql = _sql(writes.statements[0])
+        assert f"scope_id = {SCOPE_ID_INT}" in candidate_sql
+        assert "is_trashed IS false" in candidate_sql
+        assert "system_key IS NULL" in candidate_sql
+        assert "parent_id IS NULL" in candidate_sql
+        assert "library_id IS NULL" in candidate_sql
 
 
 # ------------------------------------------------------------------ #

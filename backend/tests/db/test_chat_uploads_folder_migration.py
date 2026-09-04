@@ -99,7 +99,14 @@ async def scopes(pg):
     try:
         yield ids
     finally:
+        # Folders first (libraries and teams are referenced by them), and the
+        # libraries by TEXT scope_id — that column is not the bigint the
+        # folders one is.
         await pg.execute("DELETE FROM folders WHERE scope_id = ANY($1::bigint[])", ids)
+        await pg.execute(
+            "DELETE FROM libraries WHERE scope_id = ANY($1::text[])",
+            [str(i) for i in ids],
+        )
         await pg.execute("DELETE FROM teams WHERE id = ANY($1::bigint[])", ids)
 
 
@@ -121,18 +128,44 @@ async def _engine():
 
 
 async def _mk_folder(
-    pg, scope_id: int, name: str, *, system_key=None, is_system=False, trashed=False
+    pg,
+    scope_id: int,
+    name: str,
+    *,
+    system_key=None,
+    is_system=False,
+    trashed=False,
+    parent_id=None,
+    library_id=None,
 ) -> int:
     return int(
         await pg.fetchval(
             "INSERT INTO folders (name, scope_id, created_by, system_key, "
-            "is_system, is_trashed) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            "is_system, is_trashed, parent_id, library_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
             name,
             scope_id,
             USER,
             system_key,
             is_system,
             trashed,
+            parent_id,
+            library_id,
+        )
+    )
+
+
+async def _mk_library(pg, scope_id: int) -> int:
+    """A library to hang a non-root folder off. ``libraries.scope_id`` is TEXT
+    here, not the bigint that ``folders.scope_id`` is — copying the real column
+    types matters, a "tidier" int bind is rejected."""
+    return int(
+        await pg.fetchval(
+            "INSERT INTO libraries (name, scope_type, scope_id, created_by) "
+            "VALUES ($1, 'team', $2, $3) RETURNING id",
+            "Chat Uploads Test Library",
+            str(scope_id),
+            USER,
         )
     )
 
@@ -258,6 +291,77 @@ class TestMigrationAdoption:
         assert after["name"] == LEGACY_CHAT_UPLOADS_FOLDER_NAME
 
 
+class TestMigrationAdoptsRootOnly:
+    """Root-only is a fact about the folder, not a precaution.
+
+    ``_ensure_temp_folder`` was the only code that ever created a ``temp``
+    folder and it passed neither ``parent_id`` nor ``library_id``, so the real
+    one is always at the root of the scope's library-less tree. A nested
+    "temp" is a user's scratch drawer, and adopting it would set
+    ``is_system`` — after which they can no longer rename, move, or delete
+    their own folder, while their chat attachments sit somewhere else.
+    """
+
+    async def test_a_nested_temp_with_a_smaller_id_is_not_adopted(self, pg, scopes):
+        """Explicitly the id-ordering trap: the nested one is OLDER, so a
+        rule that only sorted by id would take it."""
+        scope = scopes[0]
+        parent = await _mk_folder(pg, scope, "My Project")
+        nested = await _mk_folder(
+            pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME, parent_id=parent
+        )
+        root = await _mk_folder(pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        assert nested < root, "the nested folder must be the older one here"
+
+        await _run_migration(pg)
+
+        adopted = await _folder(pg, root)
+        assert adopted["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
+        assert adopted["name"] == CHAT_UPLOADS_DISPLAY_NAME
+        untouched = await _folder(pg, nested)
+        assert untouched["system_key"] is None
+        assert untouched["is_system"] is False
+        assert untouched["name"] == LEGACY_CHAT_UPLOADS_FOLDER_NAME
+
+    async def test_a_temp_inside_a_library_with_a_smaller_id_is_not_adopted(
+        self, pg, scopes
+    ):
+        scope = scopes[0]
+        library = await _mk_library(pg, scope)
+        in_library = await _mk_folder(
+            pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME, library_id=library
+        )
+        root = await _mk_folder(pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        assert in_library < root
+
+        await _run_migration(pg)
+
+        assert (await _folder(pg, root))["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
+        assert (await _folder(pg, in_library))["system_key"] is None
+
+    async def test_a_scope_whose_only_temp_is_nested_adopts_nothing(self, pg, scopes):
+        """No candidate is the right answer, not a reason to relax the rule.
+        The scope simply has no chat-uploads folder yet."""
+        scope = scopes[0]
+        parent = await _mk_folder(pg, scope, "My Project")
+        nested = await _mk_folder(
+            pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME, parent_id=parent
+        )
+
+        await _run_migration(pg)
+
+        assert (await _folder(pg, nested))["system_key"] is None
+        assert (
+            await pg.fetchval(
+                "SELECT count(*) FROM folders WHERE scope_id = $1 "
+                "AND system_key = $2",
+                scope,
+                CHAT_UPLOADS_SYSTEM_KEY,
+            )
+            == 0
+        )
+
+
 class TestMigrationIdempotency:
     async def test_a_second_run_changes_zero_rows(self, pg, scopes):
         """Re-running a migration must be free. Both exits are exercised: the
@@ -303,18 +407,33 @@ class TestCodeAgreesWithTheMigration:
     async def test_the_code_adopts_the_same_row_the_migration_would(self, pg, scopes):
         """Two scopes, identical shapes, one adopted by each side. They must
         land on the same row — that agreement is what lets the migration and
-        the deploy arrive in either order."""
+        the deploy arrive in either order.
+
+        ORDER MATTERS IN THE SETUP: migration 450 is GLOBAL, so the code
+        scope's folders are created AFTER it runs. Build them first and the
+        migration adopts them too, the code's lookup returns the keyed row
+        without ever reaching its own candidate query, and this test passes
+        while asserting nothing about the code at all.
+        """
         by_migration, by_code, _ = scopes
         m_first = await _mk_folder(pg, by_migration, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
-        await _mk_folder(pg, by_migration, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
-        c_first = await _mk_folder(pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
-        c_second = await _mk_folder(pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        m_second = await _mk_folder(pg, by_migration, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
 
         await _run_migration(pg)
+
+        c_first = await _mk_folder(pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        c_second = await _mk_folder(pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        assert (await _folder(pg, c_first))[
+            "system_key"
+        ] is None, (
+            "the code scope must still be unadopted here, or this test is vacuous"
+        )
+
         chosen = await _ensure_chat_uploads_folder(str(by_code), str(USER))
 
         assert chosen == str(c_first), "the code must adopt the OLDEST, as 450 does"
         assert (await _folder(pg, m_first))["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
+        assert (await _folder(pg, m_second))["system_key"] is None
         adopted = await _folder(pg, c_first)
         assert adopted["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
         assert adopted["is_system"] is True
@@ -333,6 +452,61 @@ class TestCodeAgreesWithTheMigration:
         assert await _ensure_chat_uploads_folder(str(scope), str(USER)) == str(first)
         assert await _run_migration(pg) == 0
         assert (await _folder(pg, second))["system_key"] is None
+
+    async def test_the_code_also_refuses_a_nested_temp(self, pg, scopes):
+        """Lockstep, the case that matters most: the two rules must reject the
+        SAME row. If only the migration were tightened, a deploy that reached
+        production first would claim the user's nested folder and the later
+        migration would find it already keyed — permanent, and invisible."""
+        by_migration, by_code, _ = scopes
+        m_parent = await _mk_folder(pg, by_migration, "My Project")
+        m_nested = await _mk_folder(
+            pg, by_migration, LEGACY_CHAT_UPLOADS_FOLDER_NAME, parent_id=m_parent
+        )
+        m_root = await _mk_folder(pg, by_migration, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+
+        await _run_migration(pg)
+
+        # Built after the migration on purpose — see the sibling test: 450 is
+        # global, and a scope it already adopted proves nothing about the code.
+        c_parent = await _mk_folder(pg, by_code, "My Project")
+        c_nested = await _mk_folder(
+            pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME, parent_id=c_parent
+        )
+        c_root = await _mk_folder(pg, by_code, LEGACY_CHAT_UPLOADS_FOLDER_NAME)
+        assert c_nested < c_root, "the nested folder must be the older one here"
+        assert (await _folder(pg, c_root))["system_key"] is None
+
+        chosen = await _ensure_chat_uploads_folder(str(by_code), str(USER))
+
+        assert chosen == str(c_root)
+        assert (await _folder(pg, m_root))["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
+        for nested in (m_nested, c_nested):
+            row = await _folder(pg, nested)
+            assert row["system_key"] is None
+            assert row["is_system"] is False
+            assert row["name"] == LEGACY_CHAT_UPLOADS_FOLDER_NAME
+
+    async def test_the_code_creates_rather_than_claiming_a_nested_temp(
+        self, pg, scopes
+    ):
+        """The self-healing path: no adoptable candidate means a NEW keyed
+        folder, which the user can see and understand — not a silent hijack of
+        the folder they made."""
+        scope = scopes[0]
+        parent = await _mk_folder(pg, scope, "My Project")
+        nested = await _mk_folder(
+            pg, scope, LEGACY_CHAT_UPLOADS_FOLDER_NAME, parent_id=parent
+        )
+
+        created = await _ensure_chat_uploads_folder(str(scope), str(USER))
+
+        assert int(created) != nested
+        row = await _folder(pg, int(created))
+        assert row["system_key"] == CHAT_UPLOADS_SYSTEM_KEY
+        assert row["name"] == CHAT_UPLOADS_DISPLAY_NAME
+        assert (await _folder(pg, nested))["system_key"] is None
+        assert (await _folder(pg, nested))["is_system"] is False
 
     async def test_a_fresh_scope_gets_exactly_one_keyed_folder(self, pg, scopes):
         scope = scopes[0]
