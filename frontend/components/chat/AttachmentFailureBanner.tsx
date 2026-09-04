@@ -23,12 +23,15 @@ export interface AttachmentFailure {
 }
 
 /**
- * The reasons this build has copy for — ruling C's four on the asset path,
- * plus `attachment_limit_exceeded`, which the chat service raises when a turn
- * carries more REFERENCE attachments (`resource_ref` + `asset_ref` together)
- * than `MAX_REFERENCE_ATTACHMENTS`. That fifth one is the only member that can
- * arrive with `kind: 'resource_ref'`, which is why this set is keyed on reason
- * alone.
+ * The reasons this build has copy for — ruling C's four, plus
+ * `attachment_limit_exceeded`, which the chat service raises when a turn
+ * carries more `asset_ref` attachments than `MAX_ASSET_REF_ATTACHMENTS`. All
+ * five arrive with `kind: 'asset_ref'`; `resource_ref` has no cap (any number
+ * of them is one batched query) and no typed failure of its own.
+ *
+ * Keyed on REASON, never on kind: the kind says which bucket the attachment
+ * went to, and grouping by it would split one user-visible problem across two
+ * lines the day a second bucket learns to report the same cause.
  *
  * An explicit list rather than an `i18n.exists` probe: the check has to work
  * under the `t`-only react-i18next mocks every consumer test uses, and being
