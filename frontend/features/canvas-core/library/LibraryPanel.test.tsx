@@ -73,6 +73,7 @@ vi.mock('./addReferences', async (importOriginal) => ({
 import { _resetModelCapabilitiesCache } from '../smart/nodes/useModelCapabilities';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { LibraryPanel } from './LibraryPanel';
+import { PREVIEW_DELAY_MS } from './LibraryPreviewCard';
 import { useLibraryStore } from './libraryStore';
 
 const SCOPE = '727145299382534100';
@@ -526,6 +527,34 @@ describe('LibraryPanel', () => {
     await waitFor(() =>
       expect(screen.getByTestId('library-footer-count').textContent).toBe('1 selected'),
     );
+  });
+
+  // The preview is `position: fixed` at a rect measured ONCE, when the pointer
+  // arrived. Scroll the shelf and that rect describes a cell that has moved —
+  // the card then floats beside whatever slid into its place, labelled with the
+  // item that is no longer there. Dropping the hover is the honest answer: the
+  // pointer's next move re-opens it against a fresh rect.
+  it('a scroll drops the hover preview rather than leaving it pinned to a moved cell', async () => {
+    // `shouldAdvanceTime`: the preview opens on a 400ms timer, and RTL's
+    // `waitFor` polls on timers too — frozen fake timers would deadlock the
+    // two against each other.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await openOnUploads();
+      const cell = screen.getAllByTestId('library-cell')[0];
+      fireEvent.mouseEnter(cell);
+      await act(async () => {
+        vi.advanceTimersByTime(PREVIEW_DELAY_MS + 50);
+      });
+      expect(screen.getByTestId('library-preview')).toBeTruthy();
+
+      const scroller = screen.getByTestId('library-grid').querySelector('.overflow-y-auto');
+      expect(scroller).toBeTruthy();
+      fireEvent.scroll(scroller as Element);
+      await waitFor(() => expect(screen.queryByTestId('library-preview')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Select All takes the whole shelf — the bulk gesture the chip merge dropped', async () => {

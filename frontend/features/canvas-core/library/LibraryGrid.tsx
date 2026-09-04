@@ -215,11 +215,15 @@ export function LibraryGrid({
           primaryAction.onClick(chosen);
           return;
         }
-        const item = items[active];
+        // `cursor`, not `active`: a CONTROLLED caller drives the ring while
+        // this component's own `active` sits wherever its last click left it.
+        // Committing `active` there would ring one cell and activate another
+        // — the very desync the controlled prop exists to close.
+        const item = items[cursor];
         if (item) onItemActivate?.(item);
       }
     },
-    [items, active, chosen, primaryAction, onItemActivate],
+    [items, cursor, chosen, primaryAction, onItemActivate],
   );
 
   // One cell block, both branches. `active`/`selected` are read here rather
@@ -354,8 +358,12 @@ export function LibraryGrid({
               // No measured height yet, so the virtualizer has nothing to
               // window over. Render the whole partition instead of nothing.
               <div className="flex flex-col" style={{ gap: GAP }}>
-                {rows.map((row, rowIndex) => (
-                  <div key={rowIndex} className="flex" style={{ gap: GAP, height: row.height }}>
+                {rows.map((row) => (
+                  // Keyed on the row's FIRST ITEM INDEX, not on its ordinal. A
+                  // narrowing search repacks the rows, and an ordinal key tells
+                  // React "same row, different contents" for every row after
+                  // the change — the cells are then re-used across items.
+                  <div key={row.start} className="flex" style={{ gap: GAP, height: row.height }}>
                     {renderCells(row)}
                   </div>
                 ))}

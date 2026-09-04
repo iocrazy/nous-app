@@ -52,6 +52,33 @@ The walkthrough logs in as the project's dedicated Claude debug account
 Never paste the password into a conversation, commit, or this file. See
 `helpers.ts::loadProdCreds` for the exact resolution order.
 
+## Minting an access token (`get-token.spec.ts`)
+
+`get-token.spec.ts` logs in and hands back a real production JWT for the debug
+account — useful for driving the API by hand with `curl`. It is **skipped by
+default**: `npm run e2e:prod` runs every spec in this directory, and a second
+login on every walkthrough only to mint a credential nobody here consumes is
+cost without a reader.
+
+```bash
+# writes to /media/heygo/program/datahub/nous/secrets/claude-debug.token
+E2E_MINT_TOKEN=1 npx playwright test --config e2e-prod/playwright.config.ts get-token
+
+# or choose the path
+E2E_MINT_TOKEN=1 E2E_TOKEN_OUT=/tmp/nous.token \
+  npx playwright test --config e2e-prod/playwright.config.ts get-token
+
+# hosts come from frontend/.env.production (VITE_API_URL / VITE_API_FALLBACK_URL)
+curl -H "Authorization: Bearer $(cat /tmp/nous.token)" https://cn.nous.ink:88/api/v1/auth/me
+```
+
+**The token is never printed.** It goes to the file at mode `0600` (the file is
+unlinked first, so a re-mint cannot inherit looser permissions from a
+leftover); stdout gets only the path and the `exp` claim as an ISO timestamp. A
+JWT echoed to stdout ends up in scrollback, CI logs and any transcript of the
+run — a bearer credential for the real stack, copied into places nobody chose.
+Delete the file when you are done with it.
+
 ## Target data — the owner's real project (default)
 
 The walkthrough runs against **the owner's own production project**

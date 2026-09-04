@@ -27,6 +27,15 @@ Six decisions this plan makes that a reader of the spec alone would not predict.
 
 ---
 
+## Post-merge corrections (2026-09-04)
+
+Two places where this plan no longer describes what shipped in PR #2102. The plan text above is left as written and corrected here, so the record of what was planned stays readable.
+
+1. **`lite` did NOT stay behind.** Task 7 mounts the panel behind `isSmartFamily(kind)`, and that predicate already lists `lite` (`frontend/features/canvas-core/types.ts`), so a lite canvas got the Library panel with Task 7. Only `storyboard` and `classic` — the two kinds outside the smart family — are still P3. The Spec-coverage row and Gap 2 above have been corrected to say so.
+2. **`⌥` mention ships as CHIPS, not plain text.** The code in Task 6's block writes `insertText('@' + title + ' ')`; final review ruling R31 replaced that with `mentionLibraryItems.ts`, which inserts a real asset chip or image chip per item. Plain text delivered nothing to the run (a run reads chips, not prose) and, routed through the editor's `insertAtMention`, destroyed text before the caret. `insertText` itself survives on the editor handle but has no production caller left.
+
+---
+
 ## Hand-off for a new session
 
 This plan was written in a docs-only worktree. Implementation needs a fresh one.
@@ -5301,7 +5310,8 @@ Every §3.x design item and §4 acceptance item, mapped to the task that lands i
 | §3.1 width + last page in `localStorage['canvas.library.v1']` | 7 |
 | §3.1 bottom drawer below 1100px | 7 |
 | §3.1 target bar, node highlight, ✕ releases | 7 |
-| §3.1 `lite` / `storyboard` can open the panel | **P3** (spec §6 stages it there) |
+| §3.1 `lite` can open the panel | 7 (shipped — `isSmartFamily` already includes `lite`) |
+| §3.1 `storyboard` / `classic` can open the panel | **P3** (spec §6 stages it there) |
 | §3.2 Prompts page — sources, search, list + preview, four actions | **P3** (stub only, Task 7) |
 | §3.3 Assets segment: type chips + This project / All library scope | 7 |
 | §3.3 Uploads segment: Image / Video / Audio / Doc | 7 |
@@ -5345,6 +5355,6 @@ Every §3.x design item and §4 acceptance item, mapped to the task that lands i
 **Gaps, and why each is a gap rather than an omission**
 
 1. Everything marked **P3** is staged there by spec §6 itself. The two that a reader might expect here anyway: the Prompts page (§3.2, §4.8) and the deletion of `AssetPromptPicker` / `MentionImageGrid` (§3.5, half of §4.9) — Plan-time ruling 5 explains why they move together.
-2. `lite` / `storyboard` panel access (§3.1 last line) is P3 in spec §6, and Task 7 mounts the panel behind `isSmartFamily(kind)` accordingly.
+2. `storyboard` / `classic` panel access (§3.1 last line) is P3 in spec §6. Task 7 mounts the panel behind `isSmartFamily(kind)` (`CanvasPage.tsx`), and that predicate already includes `lite` — so `lite` got the panel with Task 7 and only the two kinds outside the smart family are still waiting.
 3. The hover preview's loadout dropdown and "used in N canvases" line need `fetchAssetDetail(..., { usedIn: true })`, which the service documents as a five-table server-side aggregate that is off by default. The acceptance-bearing half of §3.3's preview is the Sends / Cut table, and Task 9 ships that; the two decorative rows follow in P3 with the Prompts page's own detail fetches.
 4. Task 8's mutation check 1 has **no unit-level guard**: jsdom does not model "a `dragover` that never calls `preventDefault()` makes the browser refuse the drop", so removing the `libraryDrag` term from `CanvasEngine`'s guard breaks the feature with every test still green. It is verified by hand in Task 10's real-stack item 3.
