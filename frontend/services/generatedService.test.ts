@@ -21,6 +21,7 @@ import {
   GeneratedApiError,
   saveGeneration,
   saveGenerationAsAsset,
+  saveResourceAsAsset,
 } from './generatedService';
 
 // Spread the real module rather than replacing it with two exports: a
@@ -118,6 +119,38 @@ const SAVE_AS_ASSET_BODY = {
     generation: { ...SAVE_BODY.data, review_state: 'in_assets' },
     asset_id: '727145299382534201',
     resource_id: '727145299382534301',
+  },
+};
+
+/**
+ * `POST /resources/{id}/save-as-asset` — the generation 201 plus `generated_id`
+ * (`backend/app/api/resources_assets_router.py::save_resource_as_asset`). The
+ * `origin_kind` is `library_upload`: the row the server minted registers a My
+ * Uploads file, and calling it a chat upload would mislabel it in the inbox
+ * forever.
+ */
+const SAVE_RESOURCE_AS_ASSET_BODY = {
+  success: true,
+  data: {
+    generation: {
+      ...SAVE_BODY.data,
+      id: '727145299382534177',
+      review_state: 'in_assets',
+      origin_kind: 'library_upload',
+      promoted_resource_id: '727145299382534301',
+    },
+    asset_id: '727145299382534201',
+    resource_id: '727145299382534301',
+    generated_id: '727145299382534177',
+  },
+};
+
+/** 422 from the same route: a video has no slot that takes it. */
+const ERROR_KIND_UNSUPPORTED = {
+  success: false,
+  error: {
+    code: 'resource_kind_unsupported',
+    detail: "Only image and audio resources can be saved as an asset; this one is 'video/mp4'",
   },
 };
 
@@ -343,6 +376,89 @@ describe('saveGenerationAsAsset', () => {
     expect(out.asset_id).toBe('727145299382534201');
     expect(out.resource_id).toBe('727145299382534301');
     expect(out.generation.review_state).toBe('in_assets');
+  });
+});
+
+describe('saveResourceAsAsset', () => {
+  const RESOURCE_ID = '727145299382534301';
+
+  it('POSTs to the RESOURCES route with the same body the generation route takes', async () => {
+    const spy = stubFetch(SAVE_RESOURCE_AS_ASSET_BODY, 201);
+
+    await saveResourceAsAsset(SCOPE, RESOURCE_ID, {
+      asset_id: '727145299382534201',
+      slot: 'sheet',
+    });
+
+    const url = calledUrl(spy);
+    // NOT `/generated/...`: the path parameter is a resource, and a My Uploads
+    // file usually has no `generated_media` row at all.
+    expect(url.pathname).toBe(`/api/v1/resources/${RESOURCE_ID}/save-as-asset`);
+    expect(url.searchParams.get('scope_id')).toBe(SCOPE);
+
+    const init = calledInit(spy);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual({
+      asset_id: '727145299382534201',
+      slot: 'sheet',
+    });
+    expect(calledHeader(spy, 'Authorization')).toBe('Bearer test');
+    expect(calledHeader(spy, 'Content-Type')).toBe('application/json');
+  });
+
+  it('reads the extra generated_id the generation route does not return', async () => {
+    stubFetch(SAVE_RESOURCE_AS_ASSET_BODY, 201);
+
+    const out = await saveResourceAsAsset(SCOPE, RESOURCE_ID, {
+      asset_id: '727145299382534201',
+    });
+
+    // Strings, not numbers: these are Snowflakes.
+    expect(out.generated_id).toBe('727145299382534177');
+    expect(out.asset_id).toBe('727145299382534201');
+    expect(out.resource_id).toBe(RESOURCE_ID);
+    expect(out.generation.review_state).toBe('in_assets');
+    expect(out.generation.origin_kind).toBe('library_upload');
+  });
+
+  it('surfaces the typed 422 rather than resolving with nothing', async () => {
+    stubFetch(ERROR_KIND_UNSUPPORTED, 422);
+
+    const err = await saveResourceAsAsset(SCOPE, RESOURCE_ID, {
+      asset_id: '727145299382534201',
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GeneratedApiError);
+    expect(err.code).toBe('resource_kind_unsupported');
+    expect(err.status).toBe(422);
+    // The detail names what IS accepted — the dialog's copy is generic, and
+    // this is what a developer reading a log has to go on.
+    expect(err.detail).toContain('image');
+    expect(err.detail).toContain('audio');
+  });
+
+  it('passes the abort signal through and rethrows the cancel untouched', async () => {
+    const controller = new AbortController();
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async (_u, init) => {
+      // The signal must reach fetch: without it a cancelled dialog keeps the
+      // request in flight and the late reply lands on a closed dialog.
+      expect((init as RequestInit).signal).toBe(controller.signal);
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    });
+
+    const err = await saveResourceAsAsset(
+      SCOPE,
+      RESOURCE_ID,
+      { asset_id: '727145299382534201' },
+      { signal: controller.signal },
+    ).catch((e) => e);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    // A caller's own cancel is NOT evidence the server is down, so it must not
+    // arrive wrapped (and must not feed the failover counter).
+    expect(err).not.toBeInstanceOf(GeneratedApiError);
+    expect((err as Error).name).toBe('AbortError');
+    expect(failoverMock).not.toHaveBeenCalled();
   });
 });
 

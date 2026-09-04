@@ -15,6 +15,11 @@
 //  * A batch resolves with per-id outcomes. "3 attached" on its own would
 //    report a half-applied batch as a success, so the failure branch names
 //    the codes and hands the failed ids back through `onDone`.
+//
+// Two subjects, one picker (P6 ruling E): generations from the inbox and the
+// canvas, and a single My Uploads FILE from the resources context menu. They
+// differ only in what is being attached and which endpoint takes it, so the
+// branch happens once — in `subject` — and never again below it.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,9 +34,14 @@ import {
   GeneratedApiError,
 } from '../../services/assetsService';
 import type { AssetLoadout, AssetSummary } from '../../services/assetsService';
-import { batchGenerated, saveGenerationAsAsset } from '../../services/generatedService';
+import {
+  batchGenerated,
+  saveGenerationAsAsset,
+  saveResourceAsAsset,
+} from '../../services/generatedService';
 import type { GeneratedItem, SaveAsAssetBody } from '../../services/generatedService';
 import { generatedMediaCoverUrl } from '../../services/generatedMediaService';
+import { getResourceCoverUrl } from '../../services/resourceService';
 import { ASSET_TYPES, UNSORTED, slotsFor, type AssetType } from './assetSlots';
 
 /** Keystrokes settle before the search fires. */
@@ -82,13 +92,93 @@ export interface SaveAsAssetOutcome {
   slot: string;
 }
 
-export interface SaveAsAssetDialogProps {
+/**
+ * The My Uploads subject: a `Resource` row, structurally.
+ *
+ * Declared as the fields this dialog reads rather than importing `Resource`,
+ * so the context menu can hand over the row it already holds and a future
+ * caller with a narrower row is not forced to fabricate the other thirty
+ * columns.
+ */
+export interface SaveAsAssetResource {
+  id: string;
+  filename: string;
+  mime_type?: string | null;
+  file_type?: string | null;
+  created_at?: string | null;
+}
+
+interface SaveAsAssetDialogCommonProps {
   open: boolean;
   scopeId: string;
-  /** One for a card action, many for the batch bar. Never empty when open. */
-  items: GeneratedItem[];
   onClose: () => void;
   onDone: (result: SaveAsAssetOutcome) => void;
+}
+
+/**
+ * The two subjects are a DISCRIMINATED UNION, not one optional-everything
+ * prop bag: they submit to different endpoints, and a caller that passed
+ * neither (or both) would otherwise compile into a dialog that opens on
+ * nothing or silently picks a branch. `never` on the other side is what makes
+ * the compiler say so at the call site.
+ */
+export interface SaveAsAssetDialogGeneratedProps extends SaveAsAssetDialogCommonProps {
+  /** One for a card action, many for the batch bar. Never empty when open. */
+  items: GeneratedItem[];
+  resource?: never;
+}
+
+export interface SaveAsAssetDialogResourceProps extends SaveAsAssetDialogCommonProps {
+  /** A single My Uploads file. There is no batch form of this entry. */
+  resource: SaveAsAssetResource;
+  items?: never;
+}
+
+export type SaveAsAssetDialogProps =
+  | SaveAsAssetDialogGeneratedProps
+  | SaveAsAssetDialogResourceProps;
+
+/**
+ * What the dialog needs to know about whatever it is attaching, so the body of
+ * the component branches ONCE (here) instead of at every read of `first`.
+ *
+ * `submit` returns the per-id outcome both endpoints have to produce: the
+ * batch path really can half-succeed, and flattening that to a boolean is how
+ * "12 of 20 saved" gets reported as a success.
+ */
+interface Subject {
+  /** Identity for the reset effect — changes when the caller retargets. */
+  key: string;
+  title: string;
+  coverUrl: string;
+  /** Second line under the cover. Empty renders nothing. */
+  metaLine: string;
+  /** Third line: where this came from. */
+  sourceLabel: string;
+  /** Prefill for the "create new" name. */
+  defaultName: string;
+  /** The asset to pin at the top of the list, when the subject knows one. */
+  suggestedAssetId: string | null;
+  /** Extra thumbs for the batch strip. Always empty for a resource. */
+  siblings: { id: string; title: string; coverUrl: string }[];
+  submit: (body: SaveAsAssetBody) => Promise<{
+    assetId: string | null;
+    attachedCount: number;
+    failed: { id: string; code: string }[];
+  }>;
+}
+
+/**
+ * "cover.png" → "cover". The extension is a storage detail; carrying it into
+ * an asset name produces "cover.png" as a character's name the first time
+ * anyone uses this entry, and nobody renames what the box already filled in.
+ * A dotfile or an extensionless name is left alone.
+ */
+export function assetNameFromFilename(filename: string): string {
+  const trimmed = (filename ?? '').trim();
+  const dot = trimmed.lastIndexOf('.');
+  if (dot <= 0 || dot === trimmed.length - 1) return trimmed;
+  return trimmed.slice(0, dot);
 }
 
 /**
@@ -137,16 +227,89 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   open,
   scopeId,
   items,
+  resource,
   onClose,
   onDone,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
 
-  const first = items[0];
   /** Stable identity for the effects that must re-run when the caller opens
    *  the dialog on a DIFFERENT set of generations. */
-  const itemsKey = items.map((row) => row.id).join(',');
+  const itemsKey = (items ?? []).map((row) => row.id).join(',');
+
+  /**
+   * The ONE branch on which subject this is. Everything below reads `subject`,
+   * so adding a third entry point never means auditing a dozen `items[0]`
+   * reads again.
+   */
+  const subject = useMemo<Subject | null>(() => {
+    if (resource) {
+      const at = resource.created_at ? new Date(resource.created_at) : null;
+      const when = at && !Number.isNaN(at.getTime()) ? at.toLocaleDateString() : '';
+      return {
+        key: `resource:${resource.id}`,
+        title: resource.filename,
+        // The resource's own cover endpoint, NOT a generated-media one: this
+        // file may have no inbox row at all until the server mints one.
+        coverUrl: getResourceCoverUrl(resource.id),
+        metaLine: [resource.mime_type ?? resource.file_type ?? '', when]
+          .filter(Boolean)
+          .join(' · '),
+        sourceLabel: t('resources.saveAsAssetSource', 'My Uploads'),
+        defaultName: assetNameFromFilename(resource.filename),
+        // A resource carries no `source_asset_id`: nothing generated it, so
+        // there is no asset to suggest. Inventing one would pin an unrelated
+        // asset at the top of the picker.
+        suggestedAssetId: null,
+        siblings: [],
+        submit: async (body) => {
+          const result = await saveResourceAsAsset(scopeId, resource.id, body);
+          return { assetId: result.asset_id, attachedCount: 1, failed: [] };
+        },
+      };
+    }
+
+    const rows = items ?? [];
+    const head = rows[0];
+    if (!head) return null;
+    const at = new Date(head.created_at);
+    const when = Number.isNaN(at.getTime()) ? head.created_at : at.toLocaleDateString();
+    return {
+      key: `generated:${itemsKey}`,
+      title: head.title,
+      coverUrl: generatedMediaCoverUrl(head.id),
+      metaLine: [head.model, when].filter(Boolean).join(' · '),
+      sourceLabel: head.source.label,
+      defaultName: head.title,
+      suggestedAssetId: head.source_asset_id ?? null,
+      siblings: rows.slice(1).map((row) => ({
+        id: row.id,
+        title: row.title,
+        coverUrl: generatedMediaCoverUrl(row.id),
+      })),
+      submit: async (body) => {
+        if (rows.length === 1) {
+          const result = await saveGenerationAsAsset(scopeId, rows[0].id, body);
+          return { assetId: result.asset_id, attachedCount: 1, failed: [] };
+        }
+        const result = await batchGenerated(scopeId, {
+          ids: rows.map((row) => row.id),
+          action: 'save_as_asset',
+          save_as_asset: body,
+        });
+        return {
+          assetId: null,
+          attachedCount: result.ok.length,
+          failed: result.failed.map((f) => ({ id: f.id, code: f.code })),
+        };
+      },
+    };
+    // `items` is a fresh array each render; `itemsKey` is its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resource, itemsKey, scopeId, t]);
+
+  const subjectKey = subject?.key ?? '';
 
   const [type, setType] = useState<AssetType>('character');
   const [query, setQuery] = useState('');
@@ -154,7 +317,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   const [results, setResults] = useState<AssetSummary[]>([]);
   const [suggested, setSuggested] = useState<AssetSummary | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
-  const [newName, setNewName] = useState(first?.title ?? '');
+  const [newName, setNewName] = useState('');
   const [slot, setSlot] = useState<string>(UNSORTED);
   const [loadouts, setLoadouts] = useState<AssetLoadout[]>([]);
   const [loadoutId, setLoadoutId] = useState<string | null>(null);
@@ -216,20 +379,21 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
     setSearchError(false);
     setSuggested(null);
     setTarget(null);
-    setNewName(items[0]?.title ?? '');
+    setNewName(subject?.defaultName ?? '');
     setSlot(UNSORTED);
     setLoadouts([]);
     setLoadoutId(null);
     setLoadoutsPending(false);
     setExistingConflictId(null);
     setBusy(false);
-    // `items` is a fresh array each render; `itemsKey` is its identity.
+    // `subject` is rebuilt each render; `subjectKey` is its identity, and
+    // `defaultName` is read fresh above rather than tracked as a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, itemsKey]);
+  }, [open, subjectKey]);
 
   // ─── The suggestion ──────────────────────────────────────────────────────
 
-  const suggestedId = first?.source_asset_id ?? null;
+  const suggestedId = subject?.suggestedAssetId ?? null;
 
   useEffect(() => {
     if (!open || !suggestedId) return;
@@ -378,7 +542,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   };
 
   const submit = async () => {
-    if (!target || busy || items.length === 0) return;
+    if (!target || busy || !subject) return;
     setBusy(true);
     try {
       let assetId: string;
@@ -410,24 +574,12 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
       // `loadout_id: null` would be a claim about a loadout we do not have.
       if (loadoutId) body.loadout_id = loadoutId;
 
-      let attachedCount: number;
-      let failed: { id: string; code: string }[] = [];
-
-      if (items.length === 1) {
-        const result = await saveGenerationAsAsset(scopeId, items[0].id, body);
-        // The server's own answer wins over what we picked: it is the row
-        // that actually exists now.
-        assetId = result.asset_id || assetId;
-        attachedCount = 1;
-      } else {
-        const result = await batchGenerated(scopeId, {
-          ids: items.map((row) => row.id),
-          action: 'save_as_asset',
-          save_as_asset: body,
-        });
-        attachedCount = result.ok.length;
-        failed = result.failed.map((f) => ({ id: f.id, code: f.code }));
-      }
+      const outcome = await subject.submit(body);
+      // The server's own answer wins over what we picked: it is the row that
+      // actually exists now.
+      assetId = outcome.assetId || assetId;
+      const attachedCount = outcome.attachedCount;
+      const failed = outcome.failed;
 
       if (failed.length === 0) {
         addToast(
@@ -473,15 +625,9 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
-  if (!open || !first) return null;
+  if (!open || !subject) return null;
 
-  const created = new Date(first.created_at);
-  const createdLabel = Number.isNaN(created.getTime())
-    ? first.created_at
-    : created.toLocaleDateString();
-  const metaLine = [first.model, createdLabel].filter(Boolean).join(' · ');
-
-  const siblings = items.slice(1);
+  const { siblings } = subject;
   const stripThumbs = siblings.slice(0, STRIP_LIMIT);
   const stripOverflow = siblings.length - stripThumbs.length;
 
@@ -539,17 +685,17 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
         {/* ─── What is being attached ─── */}
         <div className="w-40 shrink-0 space-y-2">
           <img
-            src={generatedMediaCoverUrl(first.id)}
-            alt={first.title}
+            src={subject.coverUrl}
+            alt={subject.title}
             className="aspect-square w-full rounded-lg border border-line object-cover"
           />
           <div className="space-y-0.5 text-[11px] leading-snug">
-            <div className="font-medium text-content" title={first.title}>
-              {first.title}
+            <div className="font-medium text-content" title={subject.title}>
+              {subject.title}
             </div>
-            <div className="tabular-nums text-content-4">{metaLine}</div>
-            <div className="text-content-3" title={first.source.label}>
-              {first.source.label}
+            <div className="tabular-nums text-content-4">{subject.metaLine}</div>
+            <div className="text-content-3" title={subject.sourceLabel}>
+              {subject.sourceLabel}
             </div>
           </div>
 
@@ -566,7 +712,7 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
                   <img
                     key={row.id}
                     data-testid="sa-more-thumb"
-                    src={generatedMediaCoverUrl(row.id)}
+                    src={row.coverUrl}
                     alt={row.title}
                     className="h-7 w-7 rounded border border-line object-cover"
                   />

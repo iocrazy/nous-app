@@ -1688,7 +1688,9 @@
     "saved": "Saved",
     "saveFailed": "Failed to save",
     "textTooLargeToEdit": "File is too large to preview or edit inline.",
-    "previewFailed": "Failed to load preview"
+    "previewFailed": "Failed to load preview",
+    "saveAsAsset": "As Asset",
+    "saveAsAssetSource": "My Uploads"
   },
   "assets": {
     "types": {
@@ -2164,7 +2166,11 @@
       "not_found": "That generation no longer exists.",
       "asset_exists": "An asset with this name and type already exists here.",
       "invalid_slot": "That slot is not valid for this asset type.",
-      "unreadable_body": "The server sent a response we could not read."
+      "unreadable_body": "The server sent a response we could not read.",
+      "resource_not_accessible": "That file is not available here. It may have been deleted, or it belongs to someone else.",
+      "resource_not_found": "That file is not filed in this workspace's library, so it cannot be attached here.",
+      "resource_kind_unsupported": "Only images and audio can be attached to an asset slot.",
+      "resource_file_unresolved": "That file has not finished downloading, so there is nothing to attach yet."
     }
   },
   "smartFolder": {
