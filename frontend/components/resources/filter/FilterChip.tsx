@@ -126,7 +126,17 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         )}
       </div>
       {isOpen && (
-        <div className="absolute left-0 top-full mt-1.5 z-30 min-w-[14rem] bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
+        // Sizing follows the app-wide UiSelect contract (see
+        // `ui/UiSelect.menuWidth.test.tsx`): no width, just a floor and a
+        // ceiling, so the panel is whatever its content needs. This used to be
+        // `min-w-[14rem]`, which stacked with each body's own fixed `w-44` /
+        // `w-48` / `w-56` — the 224px floor won on every body narrower than
+        // that and left dead space down the panel's right edge.
+        //   w-max        shrink-to-fit
+        //   min-w-full   100% of this `relative` root, i.e. the chip itself,
+        //                so a wide chip never sits above a narrower panel
+        //   max-w-[90vw] never runs off the viewport
+        <div className="absolute left-0 top-full mt-1.5 z-30 w-max min-w-full max-w-[90vw] bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
           {children}
         </div>
       )}

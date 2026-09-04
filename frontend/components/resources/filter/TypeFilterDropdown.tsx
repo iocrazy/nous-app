@@ -47,7 +47,7 @@ export const TypeFilterDropdown: React.FC<TypeFilterDropdownProps> = ({
   ];
 
   return (
-    <div className="w-44 py-1" role="menu" aria-label="Type filter">
+    <div className="w-max min-w-[9rem] py-1" role="menu" aria-label="Type filter">
       {options.map((opt) => {
         const active = selectedSet.has(opt.value);
         const Icon = opt.Icon;

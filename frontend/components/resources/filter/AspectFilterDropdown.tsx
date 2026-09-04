@@ -71,7 +71,7 @@ export const AspectFilterDropdown: React.FC<AspectFilterDropdownProps> = ({
   };
 
   return (
-    <div className="w-56 py-1" role="menu" aria-label="Aspect filter">
+    <div className="w-max min-w-[11rem] py-1" role="menu" aria-label="Aspect filter">
       {BUCKET_ORDER.map((bucket) => {
         const active = selectedSet.has(bucket);
         const Icon = icons[bucket];

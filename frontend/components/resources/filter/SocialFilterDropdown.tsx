@@ -109,7 +109,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
   );
 
   return (
-    <div className="w-72 py-1.5" role="menu" aria-label="Social filter">
+    <div className="w-max min-w-[18rem] py-1.5" role="menu" aria-label="Social filter">
       {/* Combine mode radios */}
       <div
         className="px-3 pt-1 pb-2 border-b border-line space-y-1"

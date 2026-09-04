@@ -58,7 +58,7 @@ export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
   const anyActive = FLAG_ORDER.some((k) => value[k]);
 
   return (
-    <div className="w-48 py-1" role="menu" aria-label="AI status filter">
+    <div className="w-max min-w-[9rem] py-1" role="menu" aria-label="AI status filter">
       {FLAG_ORDER.map((key) => {
         const active = value[key];
         const Icon = icons[key];
