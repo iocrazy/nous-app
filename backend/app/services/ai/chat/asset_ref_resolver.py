@@ -259,12 +259,12 @@ async def resolve_asset_refs(
         loudly — the same posture ``slots.readiness`` takes, because a renamed
         or typo'd type must not come back as a well-formed entry with no image.
     ``attachment_limit_exceeded``
-        NOT produced here. The turn carried more reference attachments than
-        ``ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS``, so this one was
-        never resolved. Listed in this vocabulary because it arrives in the
-        same ``attachment_failures`` list and needs the same UI copy; raised
-        one level up because the cap counts ``resource_ref`` and ``asset_ref``
-        together and this resolver only ever sees the latter.
+        NOT produced here. The turn carried more ``asset_ref`` attachments
+        than ``ai_library_chat_service.MAX_ASSET_REF_ATTACHMENTS``, so this one
+        was never resolved. Listed in this vocabulary because it arrives in the
+        same ``attachment_failures`` list and needs the same UI copy; raised one
+        level up because this function is handed an ALREADY-CAPPED list and
+        cannot see what was refused.
     """
     if not attachments:
         return [], []
@@ -322,10 +322,10 @@ async def resolve_asset_refs(
     # ``link_targets`` traversals), against one batched ``resources`` read for
     # the whole turn. Left per-asset deliberately — batching them needs three
     # new multi-asset repository methods, and the loop is now BOUNDED:
-    # ``ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS`` (8) caps how many
-    # references one turn resolves, so the worst case is ~40 serial round
-    # trips rather than the unbounded one final review I2 found. Revisit if
-    # that cap rises or a caller starts resolving asset refs in bulk.
+    # ``ai_library_chat_service.MAX_ASSET_REF_ATTACHMENTS`` (8) caps how many
+    # asset refs one turn resolves, so the worst case is ~40 serial round trips
+    # rather than the unbounded one final review I2 found. Revisit if that cap
+    # rises or a caller starts resolving asset refs in bulk.
     staged: List[Tuple[str, Dict[str, Any], Optional[Dict], List[Dict], Dict]] = []
     for asset_id in order:
         row = by_id.get(asset_id)

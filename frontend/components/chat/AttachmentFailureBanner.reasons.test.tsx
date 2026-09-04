@@ -49,6 +49,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { AttachmentFailureBanner } from './AttachmentFailureBanner';
+import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
 
 const failure = (reason: string, index = 0) => ({ index, kind: 'asset_ref', reason });
 
@@ -63,7 +64,11 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     ['asset_deleted', 'One Asset Has Been Deleted'],
     ['asset_no_primary_image', 'One Asset Has No Main Image Yet'],
     ['asset_type_unknown', 'One Asset Has A Type This Version Cannot Read'],
-    ['attachment_limit_exceeded', 'Only The First 8 References Were Used'],
+    // Interpolated, not literal: the copy says `{{n}}` and the banner feeds it
+    // `MAX_ASSET_REF_ATTACHMENTS`. Asserting the rendered sentence is what
+    // proves the interpolation actually happened — a raw `{{n}}` reaching a
+    // user is exactly the class of bug this file exists to catch.
+    ['attachment_limit_exceeded', `Only The First ${MAX_ASSET_REF_ATTACHMENTS} Assets Were Used`],
   ])('names %s in plain English', (reason, copy) => {
     render(<AttachmentFailureBanner count={1} failures={[failure(reason)]} />);
     expect(screen.getByText(copy)).toBeTruthy();
@@ -82,20 +87,22 @@ describe('AttachmentFailureBanner — asset reasons', () => {
     expect(screen.getByText('3 attachment(s) failed to load')).toBeTruthy();
   });
 
-  it('names the reference cap for a resource ref too, not only for an asset', () => {
-    // `attachment_limit_exceeded` is the one code that can arrive with
-    // `kind: 'resource_ref'` — the cap spans both reference kinds. Grouping is
-    // keyed on reason, so it must not depend on the kind beside it.
+  it('never leaves a raw interpolation token in the rendered copy', () => {
+    // The failure mode the constant exists to prevent, stated directly: if the
+    // banner stopped passing `n`, i18next would render `{{n}}` verbatim in a
+    // user-facing warning.
     render(
       <AttachmentFailureBanner
         count={1}
-        failures={[{ index: 8, kind: 'resource_ref', reason: 'attachment_limit_exceeded' }]}
+        failures={[failure('attachment_limit_exceeded', 8)]}
       />,
     );
-    expect(screen.getByText('Only The First 8 References Were Used')).toBeTruthy();
+    const line = screen.getByTestId('attachment-failure-reason');
+    expect(line.textContent).not.toContain('{{');
     expect(
-      screen.getByTestId('attachment-failure-reason').getAttribute('data-reason'),
-    ).toBe('attachment_limit_exceeded');
+      screen.getByText(`Only The First ${MAX_ASSET_REF_ATTACHMENTS} Assets Were Used`),
+    ).toBeTruthy();
+    expect(line.getAttribute('data-reason')).toBe('attachment_limit_exceeded');
   });
 
   it('keeps two different reasons apart', () => {

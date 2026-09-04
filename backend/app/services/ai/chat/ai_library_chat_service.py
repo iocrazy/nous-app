@@ -61,31 +61,39 @@ from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in test
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
 
-# How many REFERENCE attachments (`resource_ref` + `asset_ref`) one turn may
-# resolve. Deliberately the same number as the binary bucket's
+# How many `asset_ref` attachments one turn may resolve.
+#
+# ASSET REFS ONLY, and the asymmetry is the whole reason the cap exists (final
+# review I2). A `resource_ref` costs ONE BATCHED QUERY no matter how many the
+# turn carries, so capping those would refuse a working path for no cost
+# reason. P5's `asset_ref` costs about FIVE SERIAL round trips EACH (loadouts,
+# files, two link traversals, one accessible-assets lookup), and
+# `ChatMessageRequest.attachments` has no `max_length` — so before this cap any
+# logged-in caller could POST 200 asset refs and spend a single request on
+# ~1000 serial queries, the connection-pool starvation this repo has already
+# paid for once.
+#
+# Deliberately the same number as the binary bucket's
 # `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN`, but a SEPARATE constant:
-# the two buckets bound different costs (bytes fetched versus database round
-# trips) and coupling them would make one cap move for the other's reason.
+# the two bound different costs (bytes fetched versus database round trips) and
+# coupling them would make one move for the other's reason.
 #
-# Why references need their own cap at all (final review I2): a `resource_ref`
-# costs one batched query no matter how many there are, but P5's `asset_ref`
-# costs about FIVE SERIAL round trips EACH (loadouts, files, two link
-# traversals, one accessible-assets lookup). `ChatMessageRequest.attachments`
-# has no `max_length`, so before this cap any logged-in caller could POST 200
-# asset refs and spend a single request on ~1000 serial queries — the
-# connection-pool starvation this repo has already paid for once.
-#
-# Over-cap references are NOT resolved and NOT silently dropped: each gets an
+# Over-cap refs are NOT resolved and NOT silently dropped: each gets an
 # `attachment_limit_exceeded` entry in `attachment_failures`, indexed into the
 # caller's full attachment list. Silent truncation is the flaw already recorded
 # against the binary path; repeating it here would be a choice, not an
 # inheritance.
-MAX_REFERENCE_ATTACHMENTS: int = 8
+#
+# ⚠️ MIRRORED IN TYPESCRIPT. `frontend/components/chat/attachmentLimits.ts`
+# holds the same 8 because the banner interpolates it into user-facing copy.
+# `tests/services/ai/chat/test_attachment_limit_frontend_mirror.py` reads that
+# file and fails if the two disagree — change one, change both.
+MAX_ASSET_REF_ATTACHMENTS: int = 8
 
 # The reason code the cap reports. Part of the closed `attachment_failures`
 # vocabulary declared in `asset_ref_resolver.AssetRefFailureReason`; emitted
-# HERE rather than in either resolver because the cap is what the two
-# reference kinds share, and neither resolver can see the other's count.
+# HERE rather than in the resolver because the resolver is handed a list that
+# has already been capped — it cannot see what was refused.
 ATTACHMENT_LIMIT_REASON: str = "attachment_limit_exceeded"
 
 
@@ -700,11 +708,12 @@ class AILibraryChatService:
 
         # (`_att_dicts` normalized above, before the user-message persist.)
         #
-        # `MAX_REFERENCE_ATTACHMENTS` is applied HERE, over the two reference
-        # kinds together and in the caller's own order, so the cap counts what
-        # the request actually costs rather than what one resolver happens to
-        # see. Over-cap entries keep their POSITION (see `_asset_input` below)
-        # and get a typed failure; they are never resolved.
+        # `MAX_ASSET_REF_ATTACHMENTS` is applied HERE, to the `asset_ref`
+        # bucket ONLY. `resource_ref` is deliberately uncapped: however many a
+        # turn carries, they cost one batched query, so a cap there would
+        # refuse a working path for no cost reason. Over-cap asset refs keep
+        # their POSITION (see `_asset_input` below) and get a typed failure;
+        # they are never resolved.
         #
         # Positions, not distinct ids: a repeated `asset_id` past the cap is
         # reported as over-cap even though the earlier chip delivered it. The
@@ -717,12 +726,14 @@ class AILibraryChatService:
         asset_att_indices: list[int] = []
         over_cap_failures: list[dict] = []
         over_cap_indices: set[int] = set()
-        _refs_seen = 0
+        _asset_refs_seen = 0
         for _i, _att in enumerate(_att_dicts):
             _kind = _att.get("kind")
-            if _kind in ("resource_ref", "asset_ref"):
-                _refs_seen += 1
-                if _refs_seen > MAX_REFERENCE_ATTACHMENTS:
+            if _kind == "resource_ref":
+                ref_atts.append(_att)
+            elif _kind == "asset_ref":
+                _asset_refs_seen += 1
+                if _asset_refs_seen > MAX_ASSET_REF_ATTACHMENTS:
                     over_cap_indices.add(_i)
                     over_cap_failures.append(
                         {
@@ -732,17 +743,14 @@ class AILibraryChatService:
                         }
                     )
                     continue
-                if _kind == "resource_ref":
-                    ref_atts.append(_att)
-                else:
-                    asset_att_indices.append(_i)
+                asset_att_indices.append(_i)
             else:
                 binary_atts.append(_att)
                 binary_source_index.append(_i)
         if over_cap_failures:
             logger.warning(
-                f"[chat] {len(over_cap_failures)} reference attachment(s) over "
-                f"MAX_REFERENCE_ATTACHMENTS={MAX_REFERENCE_ATTACHMENTS} — "
+                f"[chat] {len(over_cap_failures)} asset_ref attachment(s) over "
+                f"MAX_ASSET_REF_ATTACHMENTS={MAX_ASSET_REF_ATTACHMENTS} — "
                 f"not resolved, reported as {ATTACHMENT_LIMIT_REASON}"
             )
 

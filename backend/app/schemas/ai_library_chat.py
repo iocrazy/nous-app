@@ -252,13 +252,14 @@ class ChatRequest(BaseModel):
     # them as image parts; text-only models gracefully degrade to
     # placeholder text.
     #
-    # No `max_length` on purpose. The per-bucket caps live where the cost is
-    # known: `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN` bounds bytes
-    # fetched, `ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS` bounds
-    # database round trips (final review I2). A single length here would reject
-    # the whole request with a 422 that names no attachment, where the service
-    # answers the turn and reports each refused entry as a typed
-    # `attachment_limit_exceeded` failure against its own index.
+    # No `max_length` on purpose. The caps live where the cost is known:
+    # `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN` bounds bytes fetched,
+    # `ai_library_chat_service.MAX_ASSET_REF_ATTACHMENTS` bounds database round
+    # trips (final review I2). `resource_ref` needs neither — any number of them
+    # is one batched query. A single length here would reject the whole request
+    # with a 422 that names no attachment, where the service answers the turn
+    # and reports each refused entry as a typed `attachment_limit_exceeded`
+    # failure against its own index.
     attachments: list[AttachmentRequest] = Field(default_factory=list)
 
     @model_validator(mode="after")

@@ -1,0 +1,116 @@
+"""The asset-ref cap is a SECOND copy: Python decides it, TypeScript says it.
+
+``MAX_ASSET_REF_ATTACHMENTS`` lives in ``ai_library_chat_service`` and again in
+``frontend/components/chat/attachmentLimits.ts``, because the failure banner
+interpolates it into user-facing copy in two locales. Nothing else enforces the
+pair, and the drift is invisible in the worst way: raise the server cap to 12
+and the banner keeps telling users "only the first 8 assets were used" — a
+sentence that is wrong, translated, and confidently rendered.
+
+Same posture as ``tests/services/assets/test_slots_frontend_mirror.py``: a TEXT
+PARSE of what a reader of the TS file sees, not an execution, so it needs no
+node toolchain in the backend test run. Its own ``attachmentLimits.test.ts``
+would hardcode the number a third time and stay green while diverging; only a
+test that reads BOTH files can see it.
+
+The locale strings are pinned here too. A constant that no string interpolates
+is a mirror of nothing — the point of the pair is the SENTENCE.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from app.services.ai.chat.ai_library_chat_service import (
+    ATTACHMENT_LIMIT_REASON,
+    MAX_ASSET_REF_ATTACHMENTS,
+)
+
+# tests/services/ai/chat/<this file> → ai → services → tests → backend → root.
+# FIVE, not four: the slots mirror next door sits one directory shallower, and
+# copying its `parents[4]` here pointed at `backend/` — every path then missed,
+# every case SKIPPED, and a green run said nothing. "Not found" must never read
+# as "agrees".
+_ROOT = Path(__file__).resolve().parents[5]
+MIRROR = _ROOT / "frontend" / "components" / "chat" / "attachmentLimits.ts"
+LOCALES = {
+    "en": _ROOT / "frontend" / "public" / "locales" / "en.json",
+    "zh": _ROOT / "frontend" / "public" / "locales" / "zh.json",
+}
+
+
+def _ts_int_const(source: str, name: str) -> int:
+    """The value of ``export const <name> = <int>;``.
+
+    Anchored on ``export const`` so a mention inside a comment or a docstring
+    cannot answer for the declaration — the failure this whole file exists to
+    catch is a number that LOOKS present while the real one moved.
+    """
+    m = re.search(rf"^export const {name}\s*=\s*(\d+)\s*;", source, re.M)
+    assert m, f"{name} not found as an exported int in {MIRROR.name} — renamed?"
+    return int(m.group(1))
+
+
+@pytest.fixture(scope="module")
+def mirror_source() -> str:
+    if not MIRROR.exists():
+        pytest.skip(f"frontend mirror not checked out: {MIRROR} (backend-only tree)")
+    return MIRROR.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_the_typescript_cap_equals_the_python_cap(mirror_source):
+    assert _ts_int_const(mirror_source, "MAX_ASSET_REF_ATTACHMENTS") == (
+        MAX_ASSET_REF_ATTACHMENTS
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("locale", sorted(LOCALES))
+def test_the_copy_interpolates_the_constant_instead_of_a_literal(locale):
+    """Both locales must say ``{{n}}``, and neither may bake the number in.
+
+    The number-free assertion is the load-bearing half: a string that happens
+    to read "8" today passes any equality check against the constant and then
+    goes stale the moment the cap moves. `{{n}}` cannot go stale.
+    """
+    if not LOCALES[locale].exists():
+        pytest.skip("frontend locales not checked out (backend-only tree)")
+    data = json.loads(LOCALES[locale].read_text(encoding="utf-8"))
+    copy = data["chat"]["attachmentFailureReason"][ATTACHMENT_LIMIT_REASON]
+    assert "{{n}}" in copy, f"{locale}: the cap must be interpolated, not written"
+    assert str(MAX_ASSET_REF_ATTACHMENTS) not in copy, (
+        f"{locale}: the copy hardcodes {MAX_ASSET_REF_ATTACHMENTS} — it will "
+        "keep saying that after the cap moves"
+    )
+    # `{{count}}` is a plural SELECTOR in i18next: it would send the lookup
+    # hunting for `_one` / `_other` siblings that do not exist and fall through
+    # to the raw key. The banner's own comment says so; this pins it.
+    assert "{{count}}" not in copy
+
+
+@pytest.mark.unit
+def test_the_parser_would_notice_a_changed_value():
+    """Guard on the guard: a parser that returned a default for anything it did
+    not understand would make the assertion above pass on a file that says
+    nothing at all.
+    """
+    mutated = "export const MAX_ASSET_REF_ATTACHMENTS = 12;\n"
+    assert _ts_int_const(mutated, "MAX_ASSET_REF_ATTACHMENTS") == 12
+    assert _ts_int_const(mutated, "MAX_ASSET_REF_ATTACHMENTS") != (
+        MAX_ASSET_REF_ATTACHMENTS
+    ), "if the real cap is 12, this control needs a different number"
+
+
+@pytest.mark.unit
+def test_the_parser_does_not_accept_a_mention_in_prose(mirror_source):
+    """A comment naming the constant must not satisfy the declaration search —
+    otherwise deleting the export while leaving the doc comment reads as fine.
+    """
+    commented = " * MAX_ASSET_REF_ATTACHMENTS = 99 in some other place\n"
+    with pytest.raises(AssertionError):
+        _ts_int_const(commented, "MAX_ASSET_REF_ATTACHMENTS")

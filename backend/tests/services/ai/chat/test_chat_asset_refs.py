@@ -781,13 +781,18 @@ def test_ref_id_coercion_stays_narrow():
 
 
 # ---------------------------------------------------------------------------
-# MAX_REFERENCE_ATTACHMENTS (final review I2)
+# MAX_ASSET_REF_ATTACHMENTS (final review I2)
 # ---------------------------------------------------------------------------
 #
 # Driven through the real consumer for the same reason as everything above: the
 # cap lives in the bucket split, and the thing it must get right — that an
 # over-cap entry is not resolved AND is reported against its position in the
 # CALLER's list — is only visible from outside.
+#
+# ASSET refs only. `resource_ref` stays uncapped because any number of them is
+# one batched query, and the two negative cases below are what keep that a
+# decision rather than an accident: cap resources by mistake, or spend one
+# budget on both kinds, and a turn starts refusing work it used to do.
 
 
 def _resource_ref(rid: str) -> dict:
@@ -801,13 +806,13 @@ def _resource_ref(rid: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_reference_attachments_past_the_cap_are_not_resolved():
+async def test_asset_refs_past_the_cap_are_not_resolved():
     """Nine asset refs: eight reach the resolver, the ninth is refused."""
     from app.services.ai.chat.ai_library_chat_service import (
-        MAX_REFERENCE_ATTACHMENTS,
+        MAX_ASSET_REF_ATTACHMENTS,
     )
 
-    assert MAX_REFERENCE_ATTACHMENTS == 8
+    assert MAX_ASSET_REF_ATTACHMENTS == 8
     attachments = [{"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(9)]
 
     result, captured, _ = await _run_turn(
@@ -831,54 +836,51 @@ async def test_reference_attachments_past_the_cap_are_not_resolved():
 
 
 @pytest.mark.asyncio
-async def test_the_cap_counts_both_reference_kinds_together():
-    """A `resource_ref` costs one batched query and an `asset_ref` costs about
-    five serial ones, but the cap bounds the REQUEST, so it counts them in the
-    caller's own order rather than per kind."""
+async def test_nine_resource_refs_are_all_resolved():
+    """The negative case, and the reason the cap is asset-only.
+
+    However many `resource_ref`s a turn carries they cost ONE batched query, so
+    capping them would refuse a working path for no cost reason — and nothing
+    client-side limits how many the `@` picker can stage. Nine here, one past
+    the asset cap, so an accidental cross-kind cap fails loudly instead of
+    quietly shrinking what a user may mention.
+    """
+    attachments = [_resource_ref(str(100 + i)) for i in range(9)]
+    rows = [_resource_meta(str(100 + i), f"file-{i}.png") for i in range(9)]
+
+    result, captured, _ = await _run_turn(
+        attachments=attachments, resource_refs=(rows, [])
+    )
+
+    assert result["attachment_failures"] == []
+    assert captured["asset_resolver"].await_count == 0, "no asset refs this turn"
+    assert _system_message(captured).count("<resource ") == 9
+
+
+@pytest.mark.asyncio
+async def test_resource_refs_do_not_consume_the_asset_budget():
+    """Mixed turn: resource refs must not push asset refs over the cap.
+
+    Counting both kinds against one budget is the specific mistake this pins.
+    Five resources plus eight assets is thirteen references and zero failures.
+    """
     attachments = [_resource_ref(str(100 + i)) for i in range(5)] + [
-        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(5)
+        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)
     ]
+    rows = [_resource_meta(str(100 + i), f"file-{i}.png") for i in range(5)]
 
     result, captured, _ = await _run_turn(
         attachments=attachments,
         asset_result=([_asset_ref()], []),
-        resource_refs=([], []),
+        resource_refs=(rows, []),
         meta={PRIMARY_ID: _resource_meta()},
     )
 
-    # Positions 0-7 are within the cap (five resources + three assets);
-    # positions 8 and 9 are the fourth and fifth assets, refused.
-    assert result["attachment_failures"] == [
-        {"index": 8, "kind": "asset_ref", "reason": "attachment_limit_exceeded"},
-        {"index": 9, "kind": "asset_ref", "reason": "attachment_limit_exceeded"},
-    ]
+    assert result["attachment_failures"] == []
     handed = captured["asset_resolver"].call_args[0][0]
-    assert [a.get("kind") for a in handed[5:]] == [
-        "asset_ref",
-        "asset_ref",
-        "asset_ref",
-        None,
-        None,
-    ]
-
-
-@pytest.mark.asyncio
-async def test_an_over_cap_resource_ref_reports_its_own_kind():
-    """The reason is shared; the kind is not. A consumer grouping by kind must
-    not be told an over-cap resource reference was an asset."""
-    attachments = [
-        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)
-    ] + [_resource_ref("100")]
-
-    result, _, _ = await _run_turn(
-        attachments=attachments,
-        asset_result=([_asset_ref()], []),
-        meta={PRIMARY_ID: _resource_meta()},
-    )
-
-    assert result["attachment_failures"] == [
-        {"index": 8, "kind": "resource_ref", "reason": "attachment_limit_exceeded"}
-    ]
+    # All eight asset positions survived; none was blanked.
+    assert [a.get("kind") for a in handed].count("asset_ref") == 8
+    assert {} not in handed
 
 
 @pytest.mark.asyncio
@@ -899,9 +901,9 @@ async def test_exactly_the_cap_is_allowed():
 
 
 @pytest.mark.asyncio
-async def test_the_reference_cap_does_not_touch_the_binary_bucket():
+async def test_the_asset_cap_does_not_touch_the_binary_bucket():
     """Binary attachments keep their own cap and their own (silent, recorded
-    elsewhere) behaviour — the two buckets bound different costs."""
+    elsewhere) behaviour — the two bound different costs."""
     attachments = [
         {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)
     ] + [
@@ -921,8 +923,8 @@ async def test_the_reference_cap_does_not_touch_the_binary_bucket():
             meta={PRIMARY_ID: _resource_meta()},
         )
 
-    # All three images reached the binary resolver: the reference cap counted
-    # only references.
+    # All three images reached the binary resolver: the asset cap counted only
+    # asset refs.
     assert mock_binary.await_count == 1
     assert len(mock_binary.await_args[0][0]) == 3
     assert not [

@@ -1,6 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { MAX_ASSET_REF_ATTACHMENTS } from './attachmentLimits';
+
 /** One entry of the backend's `attachment_failures`, as it arrives on the
  *  stream's `done` event and on the non-streaming `/chat` response.
  *
@@ -114,7 +116,14 @@ export const AttachmentFailureBanner: React.FC<AttachmentFailureBannerProps> = (
           data-reason={reason}
           className="text-[11px] text-warn"
         >
-          {t(`chat.attachmentFailureReason.${reason}`)}
+          {/* `n` is passed for every reason, not just the one that reads it:
+              i18next ignores an unused option, and branching per reason here
+              is how the interpolation silently stops being supplied the day a
+              second code needs it. `{{n}}`, never `{{count}}` — see the note
+              on the unnamed line below for why that matters. */}
+          {t(`chat.attachmentFailureReason.${reason}`, {
+            n: MAX_ASSET_REF_ATTACHMENTS,
+          })}
         </span>
       ))}
       {unnamed > 0 && (
