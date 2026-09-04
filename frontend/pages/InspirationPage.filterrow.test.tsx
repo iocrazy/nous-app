@@ -72,8 +72,19 @@ async function renderPage() {
   return view;
 }
 
-const ratingChip = (container: HTMLElement) =>
-  container.querySelector('[data-chip-id="rating"]') as HTMLElement;
+/**
+ * Throws when the chip is missing. `Node.contains(null)` returns `false` per
+ * spec, so `expect(slot.contains(chip)).toBe(false)` would pass on a page that
+ * rendered no chip at all — the exact "a negative assertion passes on nothing"
+ * trap this suite's sibling file warns about.
+ */
+const chipById = (container: HTMLElement, id: string): HTMLElement => {
+  const el = container.querySelector(`[data-chip-id="${id}"]`);
+  if (!el) throw new Error(`chip "${id}" is not mounted`);
+  return el as HTMLElement;
+};
+
+const ratingChip = (container: HTMLElement) => chipById(container, 'rating');
 
 describe('Inspiration filter row', () => {
   beforeEach(() => {
@@ -109,9 +120,21 @@ describe('Inspiration filter row', () => {
 
     // The row is shared, not one row per chip — that is what makes it wrap as
     // a unit when the window narrows.
-    const tagsChip = container.querySelector(
-      '[data-chip-id="note_tags"]',
-    ) as HTMLElement;
+    const tagsChip = chipById(container, 'note_tags');
     expect(tagsChip.parentElement).toBe(ratingChip(container).parentElement);
+  });
+
+  it('drops the whole row on the Hotspots tab, where the filters do nothing', async () => {
+    const { container } = await renderPage();
+
+    // `tag` and `minRating` feed `listNotes` and nothing else. Leaving the
+    // chips up on a tab that renders no notes gives the user two controls that
+    // light up when clicked and change nothing — a silent no-op.
+    fireEvent.click(screen.getByRole('button', { name: 'Hotspots' }));
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-chip-id="rating"]')).toBeNull(),
+    );
+    expect(container.querySelector('[data-chip-id="note_tags"]')).toBeNull();
   });
 });

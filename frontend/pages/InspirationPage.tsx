@@ -483,7 +483,12 @@ export const InspirationPage: React.FC = () => {
           (`resources/filter/FilterBar.tsx`): its own wrapping line under the
           header, never inside `actions`. That slot is right-aligned and
           `shrink-0`; filters dropped into it crowd the search box and the
-          Rating chip ends up stranded mid-header. */}
+          Rating chip ends up stranded mid-header.
+
+          Notes tab only. `tag` and `minRating` feed `listNotes` and nothing
+          else, so on the Hotspots tab these chips would sit there, light up
+          when clicked, and change nothing — a silent no-op control. */}
+      {tab === 'notes' && (
       <div className="mb-3 flex items-center gap-1.5 flex-wrap">
         {/* Single-select: the backend takes one optional `tag`. This chip
             replaced the read-only "#tag ×" pill that used to sit here — the
@@ -538,6 +543,7 @@ export const InspirationPage: React.FC = () => {
           />
         </FilterChip>
       </div>
+      )}
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">
