@@ -1,5 +1,5 @@
 /**
- * Prompt Library picker for the canvas — browse resources that carry a
+ * Prompt Templates picker for the canvas — browse resources that carry a
  * generation prompt, search/filter them, and pick one to seed a Prompt
  * node (spec 2026-07-26-asset-prompt-management, Phase 2 Task 2).
  *
@@ -12,7 +12,7 @@
  * which one `onPick` reports as the chosen lang; the caller decides how to
  * apply it (e.g. writing gen_prompt vs gen_prompt_zh into a Prompt node).
  *
- * Styling reuses the canvas popover convention from CanvasMentionPicker /
+ * Styling reuses the canvas popover convention from
  * ResourcePickerSuggestion (ink-900/ink-700/ink-800 dark palette), wrapped
  * in a centered modal (à la ResourcePicker) since this needs room for
  * search + chips + a scrolling list, not just an inline dropdown.
@@ -117,7 +117,7 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
       >
         <div className="flex items-center justify-between px-3 py-2 border-b border-ink-800 shrink-0">
           <h3 className="text-[13px] font-semibold text-ink-100">
-            {t('canvas.assetPromptPicker.title', 'Prompt Library')}
+            {t('canvas.library.promptTemplates', 'Prompt Templates')}
           </h3>
           <div className="flex items-center gap-2">
             <div className="flex rounded-full border border-ink-700 overflow-hidden text-[10px]">

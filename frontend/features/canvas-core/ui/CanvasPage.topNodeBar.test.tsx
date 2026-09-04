@@ -1,5 +1,5 @@
 /**
- * Who gets the top node bar (P4 final wave, item 7 / T6 concern 1).
+ * Who gets the top node bar, and who gets the Library panel beside it.
  *
  * The bar was gated on `kind === 'smart'` while the four entity kinds seeded a
  * preset workflow and had nothing to add. P4 deleted those templates, so a
@@ -12,6 +12,12 @@
  * (`DragCreateMenu` cuts `SMART_ITEMS` down to four), `storyboard` is a
  * different surface entirely, and a read-only session must not offer create
  * actions on ANY kind.
+ *
+ * The panel's gate is deliberately the OTHER shape — smart family, read-only
+ * or not — because `L` is view-only and fires for a viewer, so gating the
+ * mount on `!readOnly` would turn that key into a silent no-op. Nothing else
+ * in the tree can catch that: the panel's own tests render it directly, so
+ * they never see this line.
  */
 
 import React from 'react';
@@ -54,6 +60,9 @@ vi.mock('./useCanvasShortcuts', () => ({ useCanvasShortcuts: () => {} }));
 // bar is mounted at all, which a `() => null` mock cannot tell you.
 vi.mock('./TopNodeBar', () => ({
   TopNodeBar: () => <div data-testid="top-node-bar" />,
+}));
+vi.mock('../library/LibraryPanel', () => ({
+  LibraryPanel: () => <div data-testid="library-panel" />,
 }));
 
 vi.mock('../../../services/scriptService', () => ({
@@ -123,5 +132,30 @@ describe('top node bar visibility by canvas kind', () => {
     seedReady({ kind: 'character', readOnly: true });
     renderView();
     expect(screen.queryByTestId('top-node-bar')).toBeNull();
+  });
+});
+
+describe('library panel visibility by canvas kind', () => {
+  it.each(['smart', 'lite', 'character'])('mounts on a %s board', (kind) => {
+    seedReady({ kind });
+    renderView();
+    expect(screen.getByTestId('library-panel')).toBeInTheDocument();
+  });
+
+  it('mounts for a READ-ONLY viewer, unlike the node bar beside it', () => {
+    // `L` toggles this panel and fires in a read-only session. Gate the mount
+    // on `!readOnly` and that key becomes a silent no-op for every viewer —
+    // no error, no panel, nothing to see. This case is the only guard on that
+    // line; the panel drops its own write actions separately.
+    seedReady({ kind: 'smart', readOnly: true });
+    renderView();
+    expect(screen.getByTestId('library-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('top-node-bar')).toBeNull();
+  });
+
+  it('stays off a storyboard, which is not the smart family', () => {
+    seedReady({ kind: 'storyboard' });
+    renderView();
+    expect(screen.queryByTestId('library-panel')).toBeNull();
   });
 });

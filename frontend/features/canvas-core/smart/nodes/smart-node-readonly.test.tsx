@@ -289,7 +289,7 @@ const CASES: NodeCase[] = [
       { what: 'kind picker', label: 'Prompt kind' },
       { what: 'provider picker', label: 'Prompt provider' },
       { what: 'agent picker', label: 'Prompt agent' },
-      { what: 'library loader', label: 'Load from library' },
+      { what: 'library loader', label: 'Prompt Templates' },
       { what: 'ref chip remove', label: 'Remove reference to clip' },
       { what: 'Retry', testId: 'prompt-retry' },
     ],

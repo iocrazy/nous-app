@@ -231,6 +231,7 @@ def _inbox_filters(
     state: Optional[str],
     origin_kinds: Optional[list[str]],
     project_id: Optional[int],
+    canvas_id: Optional[int],
     media_kind: Optional[str],
     model: Optional[str],
     since: Optional[datetime.datetime],
@@ -242,6 +243,8 @@ def _inbox_filters(
     state=None -> every state except 'deleted'. project_id is resolved through
     canvases.project_id; rows without a canvas_id (chat uploads, agent runs)
     never match a project filter -- the inbox says so in its empty state.
+    canvas_id narrows to ONE canvas and needs no such resolution: it is the
+    column itself.
 
     source_asset_id is the asset a run was launched FROM (stamped by
     ``generate_slot``). Every parameter here is required with no default on
@@ -265,6 +268,12 @@ def _inbox_filters(
                 select(Canvases.id).where(Canvases.project_id == int(project_id))
             )
         )
+    if canvas_id is not None:
+        # A DIRECT column predicate, unlike ``project_id`` above, which has to
+        # resolve through ``canvases.project_id``. "This canvas" is a question
+        # the row can answer by itself, and routing it through the subquery
+        # would answer the whole project's inbox under one canvas's name.
+        crit.append(GeneratedMedia.canvas_id == int(canvas_id))
     if media_kind:
         crit.append(GeneratedMedia.media_kind == media_kind)
     if model:
@@ -587,6 +596,7 @@ class GeneratedMediaRepository:
         state: Optional[str] = None,
         origin_kinds: Optional[list[str]] = None,
         project_id: Optional[int] = None,
+        canvas_id: Optional[int] = None,
         media_kind: Optional[str] = None,
         model: Optional[str] = None,
         since: Optional[datetime.datetime] = None,
@@ -607,6 +617,7 @@ class GeneratedMediaRepository:
                 state=state,
                 origin_kinds=origin_kinds,
                 project_id=project_id,
+                canvas_id=canvas_id,
                 media_kind=media_kind,
                 model=model,
                 since=since,

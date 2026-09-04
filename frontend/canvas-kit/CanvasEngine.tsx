@@ -51,6 +51,11 @@ import {
 } from './alignmentGuides';
 import { GuideOverlay } from './GuideOverlay';
 import { snapConnectTargetFor } from './snapConnect';
+// The one thing this kit knows about the canvas-core library: how to spot
+// its drag on the wire. A MIME test over `dataTransfer`, and it lives HERE
+// rather than in the feature — the kit is the layer features build on, so
+// an import pointing the other way would invert that.
+import { hasLibraryDrag } from './libraryDrag';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 import { useDragToCreate } from './useDragToCreate';
 import type { SnapPort } from './portSnap';
@@ -215,6 +220,14 @@ export interface CanvasEngineProps {
   /** URL drags (from other tabs / asset managers): text/uri-list, text/html
    *  or plain http(s) text dropped on the blank pane. */
   onUrlDrop?: (dataTransfer: DataTransfer, flowPosition: { x: number; y: number }) => void;
+  /** An in-app library drag (`application/x-nous-library`) dropped on the
+   *  blank pane. `alt` is passed through rather than interpreted here: the
+   *  engine knows nothing about what the modifier means to the caller. */
+  onLibraryDrop?: (
+    dataTransfer: DataTransfer,
+    flowPosition: { x: number; y: number },
+    alt: boolean,
+  ) => void;
   /** Fires with FLOW coords as the pointer moves over the canvas (null on
    *  leave) — consumers track it for paste-at-pointer (IC lastMouseWorld). */
   onPointerWorld?: (pos: { x: number; y: number } | null) => void;
@@ -369,6 +382,7 @@ export function CanvasEngine({
   paneCreateMenu = false,
   onFileDrop,
   onUrlDrop,
+  onLibraryDrop,
   onPointerWorld,
   onReconnect,
   minimap,
@@ -804,16 +818,28 @@ export function CanvasEngine({
       const urlDrag =
         onUrlDrop &&
         (types.includes('text/uri-list') || types.includes('text/html') || types.includes('text/plain'));
-      if (!fileDrag && !urlDrag) return;
+      // Without this term the browser REFUSES the drop outright: a dragover
+      // that never calls preventDefault means "not a drop target here", and
+      // no amount of correct drop-handler code downstream is ever reached.
+      const libraryDrag = onLibraryDrop && hasLibraryDrag(e.dataTransfer);
+      if (!fileDrag && !urlDrag && !libraryDrag) return;
       e.preventDefault();
     },
-    [onFileDrop, onUrlDrop],
+    [onFileDrop, onUrlDrop, onLibraryDrop],
   );
   const onContainerDrop = useCallback(
     (e: React.DragEvent) => {
-      if (!onFileDrop && !onUrlDrop) return;
+      if (!onFileDrop && !onUrlDrop && !onLibraryDrop) return;
       const files = Array.from(e.dataTransfer.files ?? []);
       if ((e.target as Element).closest?.('.react-flow__node')) return;
+      if (onLibraryDrop && hasLibraryDrag(e.dataTransfer)) {
+        e.preventDefault();
+        const flowPos =
+          instanceRef.current?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) ??
+          { x: e.clientX, y: e.clientY };
+        onLibraryDrop(e.dataTransfer, flowPos, e.altKey);
+        return;
+      }
       if (files.length === 0) {
         // No File payload — this may still be a URL drag from another tab.
         if (!onUrlDrop) return;
@@ -835,7 +861,9 @@ export function CanvasEngine({
         }) ?? { x: e.clientX, y: e.clientY };
       onFileDrop(files, flowPosition);
     },
-    [onFileDrop],
+    // `onUrlDrop` was missing here — a canvas that swapped its url handler
+    // kept dispatching to the first one it ever had.
+    [onFileDrop, onUrlDrop, onLibraryDrop],
   );
   // Container-level right-click so the native browser menu never leaks while
   // the create menu is interacting (bug: right-clicking the open menu's
@@ -920,8 +948,8 @@ export function CanvasEngine({
       tabIndex={0}
       className={`${themedChrome ? 'mh-canvas ' : ''}relative h-full w-full outline-none`}
       onDoubleClick={onContainerDoubleClick}
-      onDragOver={onFileDrop ? onContainerDragOver : undefined}
-      onDrop={onFileDrop ? onContainerDrop : undefined}
+      onDragOver={onFileDrop || onUrlDrop || onLibraryDrop ? onContainerDragOver : undefined}
+      onDrop={onFileDrop || onUrlDrop || onLibraryDrop ? onContainerDrop : undefined}
       onContextMenu={paneCreateMenu ? onContainerContextMenu : undefined}
     
       onPointerMove={

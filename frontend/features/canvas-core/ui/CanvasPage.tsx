@@ -28,6 +28,8 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import type { ReactFlowInstance } from '@xyflow/react';
 
+import { LibraryPanel } from '../library/LibraryPanel';
+import { useLibraryStore } from '../library/libraryStore';
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
 import { useCanvasScope } from '../smart/canvasScope';
@@ -191,6 +193,7 @@ export function CanvasView({
     readOnly,
     onOpenPalette: () => setPaletteOpen(true),
     onOpenHelp: () => setHelpOpen(true),
+    onToggleLibrary: isSmartFamily(kind) ? () => useLibraryStore.getState().toggle() : undefined, // `L` must not toggle a panel this kind never mounts (:841) — the module-singleton `open` would then leak into the next canvas.
   });
 
   // Phase 6a — cross-tab / cross-user realtime invalidation.
@@ -833,6 +836,9 @@ export function CanvasView({
       {(kind === 'smart' || isEntityCanvas(kind)) && !readOnly && (
         <TopNodeBar surfaceRef={surfaceRef} />
       )}
+      {/* No `!readOnly` gate, unlike its neighbours: `L` fires for a viewer, so
+          gating this makes that key a silent no-op — see LibraryMediaPage. */}
+      {isSmartFamily(kind) && <LibraryPanel />}
       {isSmartFamily(kind) && !readOnly && <ArrangeSelectedButton />}
       {isSmartFamily(kind) && !readOnly && (
         <CanvasComposer surfaceRef={surfaceRef} teamId={teamId} />

@@ -32,8 +32,11 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { PromptBodyEditor, type PromptBodyEditorHandle } from './PromptBodyEditor';
+import { addReferences } from '../../library/addReferences';
+import { dropConsequenceKey, hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
+import { useLibraryDrop, useLibraryMention } from '../../library/useLibraryDrop';
+import { useLibraryStore } from '../../library/libraryStore';
 import type { PromptImageRef } from './promptImageRefs';
-import { CanvasMentionPicker } from './CanvasMentionPicker';
 import {
   PromptMentionPicker,
   type PromptMentionPickerHandle,
@@ -50,15 +53,12 @@ import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
 import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
-import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
 /** Hit area of the browser's `resize` grip, in CSS px. */
 const GRIP_PX = 18;
-
-type ActiveKind = '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf';
 
 // Canvas pill trigger — keeps the node's ghost/rounded look while borrowing the
 // shared UiSelect portal menu (fixes the native popup covering the trigger).
@@ -159,9 +159,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // injects the agent's IDENTITY/SOUL server-side.
   const agents = useAgents();
 
-  // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
-  const [activeKind, setActiveKind] = useState<ActiveKind>('');
-
   // Library picker (Phase 2 asset library) — pulls a saved prompt + its
   // cover into this node, wiring a fresh media node upstream of it.
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -213,6 +210,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
   // ── Image chips in the body ──────────────────────────────────────────────
   const bodyEditorRef = useRef<PromptBodyEditorHandle | null>(null);
+  const [dropHint, setDropHint] = useState<'mention' | 'reference' | null>(null); // PRIMITIVE on purpose: `dragover` fires at pointer-move rate, and a fresh object would fail React's bail-out and re-render this whole node every frame.
   /** Body height when a press on the resize grip started — see the resizer. */
   const pressHeightRef = useRef<number | null>(null);
   // Seeded once: the document owns the chips from then on.
@@ -266,6 +264,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         mentionPickerRef.current?.move(event.key === 'ArrowDown' ? 1 : -1);
         return true;
       }
+      if (event.key === 'Tab' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        mentionPickerRef.current?.cycleTab();
+        return true;
+      }
       if (event.key === 'Enter') {
         // Only swallow Enter when there was something to insert. An empty
         // result list must let the keystroke reach the text, or the box looks
@@ -292,29 +295,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   const chainTail = useIsChainTail(id);
   const chainRunning = useChainRunStore((s) => s.runningTail === id);
   const requestChainStop = useChainRunStore((s) => s.requestStop);
-  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  // The card's heading is the literal "Prompt", so the body's first line is
+  // what a user would call this one — that is what the target bar names.
+  const openLibraryForRefs = useCallback(() => {
+    const title = (body ?? '').split('\n')[0].slice(0, 40) || 'Prompt';
+    const target = { nodeId: id, kind: 'prompt' as const, title };
+    useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'uploads', focusSearch: true, target });
+  }, [id, body]);
   const manualRefs = (data as unknown as PromptNodeData).manual_refs ?? [];
   const manualUrlSet = new Set(manualRefs.map((r) => r.url));
-  const addManualRef = useCallback(
-    async (resourceId: string) => {
-      try {
-        const minted = await importResourceAsCanvasMedia(resourceId);
-        const current =
-          ((useCanvasCoreStore
-            .getState()
-            .nodes.find((n) => (n as { id?: unknown }).id === id) as
-            | { data?: PromptNodeData }
-            | undefined)?.data?.manual_refs ?? []) as GeneratedImageRef[];
-        if (current.some((r) => r.url === minted.url)) return;
-        patch({ manual_refs: [...current, { url: minted.url, kind: minted.kind }] });
-      } catch (err) {
-        console.error('[PromptNodeView] add reference failed:', err);
-      } finally {
-        setRefPickerOpen(false);
-      }
-    },
-    [id, patch],
-  );
   const removeManualRef = useCallback(
     (url: string) => {
       const current =
@@ -357,24 +346,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     },
     [patch, sourceRef],
   );
-  // The whole-library resource search now serves ONE affordance: the input
-  // row's "Add reference image" picker. The `@` picker no longer opens it —
-  // it asks the ASSET library instead (PromptMentionPicker), which is the
-  // question someone typing `@` in a prompt is actually asking.
-  //
-  // Always '' because that picker has no search box of its own; it shows the
-  // default listing and filters by kind.
-  const { data: searchData, loading: searchLoading } = useResourceSearch('', activeKind);
 
   // Scope for the asset calls the mention picker makes. '' when the canvas URL
   // has no team segment — the picker says so rather than sending a request
   // that is a 403 by construction.
   const { scopeId } = useCanvasScope();
+  const canvasId = useCanvasCoreStore((s) => s.canvasId);
 
   // The provider's reference ceiling, for greying the inputs past it. null =
   // unknown (loading / no model / old backend), which renders FULL support.
   const caps = useModelCapabilities(gen?.model ?? null);
   const maxRefs = caps?.max_refs ?? null;
+  const runDrop = useLibraryDrop(scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES }); // Runs a library drop on this node AND speaks its outcome — the drop path had been discarding it.
+  const runMention = useLibraryMention(scopeId, id); // The ⌥ half of the same gesture: inserts CHIPS into the body and speaks the same outcome ladder.
 
   // The strip, in the order the run delivers — mentions (asset references)
   // first, then the wired images, with the connected asset cards' references
@@ -518,7 +502,20 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       data-testid="smart-prompt-node"
       className={`group relative mh-node ${haloTone} ${selected ? 'mh-node-selected' : ''}`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.prompt }}
+      onDragOver={(e) => { if (readOnly || !hasLibraryDrag(e.dataTransfer)) return; e.preventDefault(); setDropHint(e.altKey ? 'mention' : 'reference'); }}
+      onDragLeave={() => setDropHint(null)}
+      onDrop={(e) => {
+        // Not ours — a file or url drag falls through to the pane's own handler.
+        if (readOnly || !hasLibraryDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropHint(null);
+        const items = readLibraryDrag(e.dataTransfer) ?? [];
+        if (e.altKey) { void runMention(items, bodyEditorRef.current); return; } // ⌥ = MENTION: chips, never `insertText` — see mentionLibraryItems.ts.
+        void runDrop(items, { kind: 'prompt', nodeId: id, mention: false });
+      }}
     >
+      {dropHint && <span data-testid="prompt-drop-hint" className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-[inherit] border-2 border-[var(--accent-border)] bg-[var(--accent-soft)] pt-1 text-[10px] font-medium text-[var(--accent-text)]">{t(dropConsequenceKey({ kind: 'prompt', nodeId: id, mention: dropHint === 'mention' }))}</span>}
       <Handle
         type="target"
         position={Position.Left}
@@ -567,7 +564,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
             onClick={() => setLibraryOpen(true)}
-            aria-label="Load from library"
+            aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
             data-testid="prompt-library-button"
             disabled={readOnly}
           >
@@ -602,7 +599,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           )}
         </div>
       </div>
-      {/* relative so the CanvasMentionPicker's `bottom-full` positions above this section */}
+      {/* relative so PromptMentionPicker's `top-full` positions against this section */}
       <div className="relative p-3">
         {/* Upstream prompt preview (IC inputPromptPreview). */}
         {upstreamText && (
@@ -774,7 +771,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
                 type="button"
                 data-testid="add-reference"
                 aria-label="Add reference image"
-                onClick={() => setRefPickerOpen((v) => !v)}
+                onClick={openLibraryForRefs}
                 disabled={stripEntries.length >= MAX_REFERENCE_IMAGES}
                 title={
                   stripEntries.length >= MAX_REFERENCE_IMAGES
@@ -795,30 +792,12 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
               data-testid="add-reference"
               aria-label="Add reference image"
               title="Add reference image"
-              onClick={() => setRefPickerOpen((v) => !v)}
+              onClick={openLibraryForRefs}
               className="nodrag flex h-6 items-center gap-1 rounded border border-dashed border-canvas-line px-2 text-[10px] text-canvas-muted hover:text-canvas-text"
             >
               <ImagePlus size={12} />
               Add reference
             </button>
-          </div>
-        )}
-        {refPickerOpen && (
-          <div
-            data-testid="reference-picker"
-            className="mh-pop-in absolute bottom-full left-0 z-50 mb-1"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <CanvasMentionPicker
-              items={searchData.results}
-              query=""
-              loading={searchLoading}
-              counts={searchData.counts}
-              activeKind={activeKind}
-              onKindChange={setActiveKind}
-              onSelect={(item) => void addManualRef(item.id)}
-              activeIndex={0}
-            />
           </div>
         )}
         {/* The resizer now lives on this wrapper. A <textarea> had one for
@@ -883,7 +862,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             inputImages={mentionImages}
             onPickImage={handleMentionImage}
             onPickAsset={handleMentionAsset}
+            onPickLibraryImage={(item) =>
+              // Ceiling handed down; close only once something actually landed.
+              addReferences(id, [item], scopeId, { maxRefs: maxRefs ?? MAX_REFERENCE_IMAGES }).then(
+                (r) => { if (r.added > 0) mention.closePicker(); return r; },
+              )
+            }
             query={mention.query}
+            canvasId={canvasId}
           />
         )}
 

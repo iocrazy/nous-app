@@ -46,6 +46,9 @@ import { KnifeOverlay } from '../../../canvas-kit/KnifeOverlay';
 import { sampleEdgesFromDom, sampleNodesFromDom } from '../../../canvas-kit/knifeDomSampling';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
 import { DragCreateMenu } from './DragCreateMenu';
+import { useCanvasScope } from '../smart/canvasScope';
+import { readLibraryDrag } from '../library/dropLibraryItems';
+import { useLibraryDrop } from '../library/useLibraryDrop';
 import { extractDropUrls, fetchUrlAsFile } from '../smart/dropUrl';
 import { setPointerWorld } from './pointerWorld';
 import { setRfInstance } from './rfInstance';
@@ -165,6 +168,21 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       void createMediaNodeFromFiles(files, flowPosition);
     },
     [],
+  );
+  const { scopeId } = useCanvasScope();
+  const runDrop = useLibraryDrop(scopeId);
+  // Empty pane only — a drop that landed on a node was answered by that node
+  // and never propagated here. `alt` is the engine's, and it means nothing on
+  // the blank pane: there is no document to mention into.
+  const onLibraryDrop = useCallback(
+    (dt: DataTransfer, flowPosition: { x: number; y: number }) => {
+      const items = readLibraryDrag(dt);
+      // A FOREIGN drag, not a failure: nothing of ours ran, so there is
+      // nothing to report. A drop that DID run and failed now speaks.
+      if (!items) return;
+      void runDrop(items, { kind: 'canvas', position: flowPosition });
+    },
+    [runDrop],
   );
   // Infinite parity: pasting files appends to the selected media node, else
   // creates one at the viewport center. Node-clipboard paste (mod+V keydown)
@@ -636,6 +654,7 @@ export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
       // alignment snap on drop keeps things tidy without the "sticky" feel.
       snapToGrid={false}
       onFileDrop={canTakeFiles ? onFileDrop : undefined}
+      onLibraryDrop={canTakeFiles ? onLibraryDrop : undefined}
       onUrlDrop={
         canTakeFiles
           ? (dt, flowPos) => {

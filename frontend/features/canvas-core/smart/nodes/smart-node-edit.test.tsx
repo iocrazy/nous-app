@@ -30,8 +30,8 @@ vi.mock('../../../../hooks/useResourceSearch', () => ({
   }),
 }));
 
-// ResourcePickerSuggestion (rendered by CanvasMentionPicker) uses useTranslation.
-// Passthrough so existing tests that don't open the picker are unaffected.
+// The prompt node's subtree uses useTranslation throughout. Passthrough so
+// existing tests that don't open a picker are unaffected.
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));

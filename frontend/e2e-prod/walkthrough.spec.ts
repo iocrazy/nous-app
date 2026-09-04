@@ -25,7 +25,7 @@ import { loadProdCreds, WALKTHROUGH_IDS } from './helpers';
 const { teamId: TEAM_ID, projectId: PROJECT_ID, episodeId: EPISODE_ID, sceneId: SCENE_ID, shotId: SHOT_ID } =
   WALKTHROUGH_IDS;
 
-test('prod walkthrough: login → overview → storyboard → canvas → shot list → script editor → project materials → generated inbox → assets codex', async ({ page }) => {
+test('prod walkthrough: login → overview → storyboard → canvas → library panel → shot list → script editor → project materials → generated inbox → assets codex', async ({ page }) => {
   const creds = loadProdCreds();
 
   // i18n defaults to 'zh' with nothing in localStorage (i18n.ts:8) — pin 'en'
@@ -180,6 +180,94 @@ test('prod walkthrough: login → overview → storyboard → canvas → shot li
       ? 'an asset card was visible on the episode canvas'
       : 'no asset card on this board — the P4 card was NOT exercised',
   });
+
+  // ── 5c. The canvas Library panel (§4.10). NOT on the storyboard canvas
+  // above: `LibraryPanel` mounts behind `isSmartFamily(kind)` and 'storyboard'
+  // is deliberately outside that family (see CanvasPage.tsx and canvas-core
+  // types.ts) — lite/storyboard panel access is staged to P3. So this step
+  // goes to a real smart canvas through the workspace's own Canvas module,
+  // the same two clicks a user makes.
+  //
+  // The card is chosen BY KIND, never by position. That module's list is
+  // unfiltered and ordered newest-edited first
+  // (`canvas_repository.list_for_project`), and the episode's system
+  // storyboard canvas is project-scoped and therefore in it — so `.first()`
+  // would open a canvas the panel does not mount on whenever that canvas
+  // happened to be touched last, and a healthy build would go red for a
+  // reason that has nothing to do with the Library. A gate whose red does not
+  // mean a regression is a gate people learn to wave through.
+  //
+  // Opened with the `L` shortcut rather than the top-bar chip on purpose: the
+  // chip is Standard-canvas-and-entity-board chrome, while `L` is wired for
+  // the whole smart family, so this passes whichever of the six kinds below
+  // the card turns out to be. It is also §4.2's own entry point.
+  //
+  // Read-only throughout: open the panel, switch segment, type in the search
+  // box, close it. Nothing is placed and nothing is saved.
+  //
+  // DISJUNCTION + annotation, the same shape as 5b: a project with no
+  // smart-family canvas is a legitimate state, and asserting a card would
+  // turn "nothing sketched here" into a red deploy. Either such a card is
+  // there and the panel gets exercised, or the module mounted and showed what
+  // it has — a blank surface, the failure this walkthrough exists for, is
+  // neither.
+  await page.getByTestId('ws-module-canvas').click();
+  // Exactly the kinds `isSmartFamily` accepts (features/canvas-core/types.ts).
+  // A kind added there without being added here costs coverage, not a red run.
+  const SMART_FAMILY_KINDS = ['smart', 'lite', 'character', 'location', 'prop', 'costume'];
+  const smartCards = page.locator(
+    SMART_FAMILY_KINDS.map(
+      (k) => `[data-testid="workspace-canvas-card"][data-canvas-kind="${k}"]:visible`,
+    ).join(', '),
+  );
+  const sawCanvasCard = await smartCards
+    .first()
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (sawCanvasCard) {
+    await smartCards.first().click();
+    await expect(page.locator('.react-flow').first()).toBeVisible({ timeout: 20_000 });
+    // `useCanvasShortcuts` listens on window, so no click into the surface is
+    // needed — and a pane click would change the selection on someone's real
+    // canvas, which this walkthrough does not do.
+    await page.keyboard.press('l');
+    await expect(page.getByTestId('library-panel')).toBeVisible({ timeout: 15_000 });
+    // Uploads: the one segment that reads a store every account has.
+    await page.getByTestId('library-segment-uploads').click();
+    await page.getByTestId('library-search').fill('a');
+    // The consequence line is the grid's own chrome — it renders whether or
+    // not the search matched anything, so a visible one separates "mounted
+    // and empty" from "mounted and broken", and it is §4.6's acceptance.
+    await expect(page.getByTestId('library-consequence')).toBeVisible();
+    await page.getByTestId('library-close').click();
+    await expect(page.getByTestId('library-panel')).toBeHidden();
+  } else {
+    // No smart-family card. The module must still have MOUNTED, which is two
+    // legitimate states: it says the list is empty, or it drew cards and none
+    // of them is a kind the panel mounts on. A blank surface is neither.
+    const anyCard = page.locator('[data-testid="workspace-canvas-card"]:visible');
+    const emptyShown = await page
+      .getByTestId('workspace-canvas-empty')
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(emptyShown || (await anyCard.count()) > 0).toBe(true);
+  }
+  test.info().annotations.push({
+    type: 'library-panel',
+    description: sawCanvasCard
+      ? 'the Library panel opened on a smart-family canvas and its search box responded'
+      : 'no smart-family canvas in this project — the Library panel was NOT exercised',
+  });
+
+  // Back to the storyboard module for the remaining episode steps.
+  await page.goto(`/team/${TEAM_ID}/projects/${PROJECT_ID}`);
+  await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('ws-module-episodes').click();
+  await expect(page.getByTestId('ws-ep-card')).toBeVisible();
+  await page.getByTestId('ws-ep-storyboard').click();
+  await expect(page.getByTestId('episode-storyboard-page')).toBeVisible({ timeout: 15_000 });
 
   // ── 6. Shot List tab (view three) — the flat per-shot table. ────────────
   await page.locator('[data-view="shotlist"]').click();

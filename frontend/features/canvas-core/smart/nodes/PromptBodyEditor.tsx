@@ -42,11 +42,32 @@ import {
   type PromptImageRef,
 } from './promptImageRefs';
 
+/**
+ * How an insert treats the text before the caret.
+ *
+ * `consumeMention` defaults to TRUE, which is the `@` picker's contract: the
+ * user typed `@que`, the picker matched on it, and the chip has to REPLACE that
+ * token or the query is left stranded in the body.
+ *
+ * Every other caller wants `false`. The deletion is not "remove the query I
+ * matched" — it is "delete from the last literal `@` within 80 characters back
+ * to the caret", which cannot tell a pending query from an email address the
+ * user typed an hour ago. A `⌥` library drop has no pending query at all, so
+ * on a body ending `contact me at foo@bar.com` the default silently ate
+ * `@bar.com`, and with two literal `@` in the window a second insert ate the
+ * first chip along with them.
+ */
+export interface MentionInsertOptions {
+  consumeMention?: boolean;
+}
+
 export interface PromptBodyEditorHandle {
-  /** Insert an image chip at the caret, replacing a pending `@query` token. */
-  insertImage: (image: PromptImageRef) => void;
-  /** Insert an asset chip at the caret, replacing a pending `@query` token. */
-  insertAsset: (asset: MentionedAsset) => void;
+  /** Insert an image chip at the caret. Replaces a pending `@query` token
+   *  unless `opts.consumeMention` is false. */
+  insertImage: (image: PromptImageRef, opts?: MentionInsertOptions) => void;
+  /** Insert an asset chip at the caret. Replaces a pending `@query` token
+   *  unless `opts.consumeMention` is false. */
+  insertAsset: (asset: MentionedAsset, opts?: MentionInsertOptions) => void;
   /** Insert plain text at the caret, replacing a pending `@query` token. */
   insertText: (text: string) => void;
   focus: () => void;
@@ -305,19 +326,32 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
       editor?.setEditable(!readOnly);
     }, [editor, readOnly]);
 
-    /** Replace the pending `@query` before the caret, then insert `content`.
-     *  Both mention paths (an image chip, a library resource's name) consume
-     *  the same token, so the removal lives here rather than in each caller. */
+    /**
+     * Insert `content` at the caret, optionally consuming a pending `@query`.
+     *
+     * The consuming half belongs to ONE caller — the `@` picker, whose whole
+     * gesture is "the user typed `@que` and chose a row". It searches the 80
+     * characters before the caret for the last `@` and deletes from there, so
+     * it is a text-shaped heuristic, not a record of what the picker matched:
+     * it cannot tell a pending query from an address the user typed earlier.
+     * A caller with no pending query must opt out — see
+     * {@link MentionInsertOptions}.
+     */
     const insertAtMention = useCallback(
-      (content: Parameters<typeof editor.commands.insertContent>[0]) => {
+      (
+        content: Parameters<typeof editor.commands.insertContent>[0],
+        consumeMention = true,
+      ) => {
         if (!editor) return;
         const { state } = editor.view;
         const from = state.selection.from;
-        const textBefore = state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\n');
-        const at = textBefore.lastIndexOf('@');
         const chain = editor.chain().focus();
-        if (at >= 0) {
-          chain.deleteRange({ from: from - (textBefore.length - at), to: from });
+        if (consumeMention) {
+          const textBefore = state.doc.textBetween(Math.max(0, from - 80), from, '\n', '\n');
+          const at = textBefore.lastIndexOf('@');
+          if (at >= 0) {
+            chain.deleteRange({ from: from - (textBefore.length - at), to: from });
+          }
         }
         chain.insertContent(content).run();
       },
@@ -325,24 +359,30 @@ export const PromptBodyEditor = forwardRef<PromptBodyEditorHandle, Props>(
     );
 
     const insertImage = useCallback(
-      (image: PromptImageRef) => {
-        insertAtMention([
-          { type: PROMPT_IMAGE_REF, attrs: { ...image } },
-          { type: 'text', text: ' ' },
-        ]);
+      (image: PromptImageRef, opts?: MentionInsertOptions) => {
+        insertAtMention(
+          [
+            { type: PROMPT_IMAGE_REF, attrs: { ...image } },
+            { type: 'text', text: ' ' },
+          ],
+          opts?.consumeMention ?? true,
+        );
       },
       [insertAtMention],
     );
 
     const insertAsset = useCallback(
-      (asset: MentionedAsset) => {
+      (asset: MentionedAsset, opts?: MentionInsertOptions) => {
         // Remember the name BEFORE the chip exists: `insertContent` triggers an
         // update, whose re-seed guard reads this index.
         assetIndexRef.current.set(asset.asset_id, asset);
-        insertAtMention([
-          { type: PROMPT_ASSET_REF, attrs: { ...asset } },
-          { type: 'text', text: ' ' },
-        ]);
+        insertAtMention(
+          [
+            { type: PROMPT_ASSET_REF, attrs: { ...asset } },
+            { type: 'text', text: ' ' },
+          ],
+          opts?.consumeMention ?? true,
+        );
       },
       [insertAtMention],
     );

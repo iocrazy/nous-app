@@ -154,6 +154,13 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
               />
             </div>
           <button
+            data-testid="workspace-canvas-card"
+            /* The list is unfiltered and newest-edited first (canvas_repository
+               .list_for_project), so it mixes kinds — including the episode's
+               system storyboard canvas. The kind rides on the card so a caller
+               that only works on some kinds can say which, instead of taking
+               whichever card sorted first. The testid stays kind-free. */
+            data-canvas-kind={canvas.kind}
             onClick={() => navigate(editorPath(String(canvas.id)))}
             className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
           >

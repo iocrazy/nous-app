@@ -31,7 +31,10 @@ import { useNodeReveal } from './useNodeReveal';
 import { MediaItemEditor } from './MediaItemEditor';
 import type { EditorMode } from '../../editor/UnifiedImageEditor';
 import { createMediaNodeFromFiles } from '../dropCreate';
+import { hasLibraryDrag, readLibraryDrag } from '../../library/dropLibraryItems';
+import { useLibraryDrop } from '../../library/useLibraryDrop';
 import { OutputLightbox, type LightboxItem } from './OutputLightbox';
+import { useCanvasScope } from '../canvasScope';
 import { useCanvasReadOnly } from './useCanvasReadOnly';
 import { useNodeDataPatch } from './useNodeDataPatch';
 
@@ -76,6 +79,10 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   // file drop) — they POST an import AND patch the node. Thumbnails and
   // the lightbox are pure viewing and stay.
   const readOnly = useCanvasReadOnly();
+  // The scope is only for the `assets` store — which a media card takes too.
+  const { scopeId } = useCanvasScope();
+  // Runs a library drop on this card AND speaks its outcome.
+  const runDrop = useLibraryDrop(scopeId);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -163,7 +170,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         width: (data as { node_w?: number }).node_w ?? SMART_NODE_DEFAULT_WIDTH.media,
       }}
       onDragOver={(e) => {
-        if (!readOnly && e.dataTransfer.types.includes('Files')) {
+        if (!readOnly && (e.dataTransfer.types.includes('Files') || hasLibraryDrag(e.dataTransfer))) {
           e.preventDefault();
           setDragOver(true);
         }
@@ -171,6 +178,14 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
         if (readOnly) return;
+        // A library drag carries no `files`: answered BEFORE the guard below, which would refuse it as an empty drop.
+        if (hasLibraryDrag(e.dataTransfer)) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragOver(false);
+          void runDrop(readLibraryDrag(e.dataTransfer) ?? [], { kind: 'media', nodeId: id });
+          return;
+        }
         if (!e.dataTransfer.files?.length) return;
         e.preventDefault();
         e.stopPropagation();
@@ -178,6 +193,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         void uploadFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      {dragOver && <span data-testid="media-drop-hint" className="pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-[inherit] pt-1 text-[10px] font-medium text-[var(--accent-text)]">{t('canvas.library.dropAppend', 'Add to This Card')}</span>}
       {(items?.length ?? 0) > 0 && (
         <OutputNodeToolbar
           items={(items ?? []).map((it) => ({ url: it.url, name: it.name }))}

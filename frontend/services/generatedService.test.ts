@@ -271,6 +271,19 @@ describe('fetchGenerated', () => {
     expect(url.searchParams.get('cursor')).toBe('abc123');
     expect(url.searchParams.get('limit')).toBe('24');
   });
+
+  it('sends canvas_id when asked, and omits it otherwise', async () => {
+    const spy = stubFetch(PAGE_BODY);
+    stubFetch(PAGE_BODY); // the second call needs its own queued response
+
+    await fetchGenerated(SCOPE, { canvasId: '900000000000000001' });
+    await fetchGenerated(SCOPE, {});
+
+    const asked = new URL((spy.mock.calls[0] as [string])[0]);
+    const omitted = new URL((spy.mock.calls[1] as [string])[0]);
+    expect(asked.searchParams.get('canvas_id')).toBe('900000000000000001');
+    expect(omitted.searchParams.has('canvas_id')).toBe(false);
+  });
 });
 
 // ── counts ──────────────────────────────────────────────────────────────────

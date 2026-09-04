@@ -7,7 +7,7 @@
  * through the existing canvasCoreStore actions (setNodes / setConnections /
  * setSelection), never bypassing them. Escape or a backdrop click dismisses.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import {
   BotMessageSquare,
   Boxes,
@@ -23,13 +23,12 @@ import {
 import { isSmartFamily } from '../types';
 import { useTranslation } from 'react-i18next';
 
-import { AssetPickerDialog } from '../smart/nodes/AssetPickerDialog';
+import { useLibraryStore } from '../library/libraryStore';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import type { CanvasConnection, CanvasNode } from '../types';
 import { canConnectSmart } from '../smart/types';
 import { createEmptyGroup } from '../smart/grouping';
 import {
-  createAssetNode,
   createLlmNode,
   createLoopNode,
   createMediaNode,
@@ -56,7 +55,7 @@ interface MenuItem {
   targetHandle: string | null;
   /** Absent on `pick` items — see {@link MenuItem.pick}. */
   make?: (position: { x: number; y: number }) => CanvasNode;
-  /** Asks the library which asset before creating anything. */
+  /** Opens the Library panel instead of creating anything here. */
   pick?: true;
   /** Card chrome (smart only) — Infinite-style icon + one-line description. */
   icon?: LucideIcon;
@@ -137,9 +136,9 @@ const SMART_ITEMS: MenuItem[] = [
     descKey: 'canvas.dragCreate.desc.timeline',
     descDefault: 'Multi-segment film, stitched in order',
   },
-  // Asset-library reference (P4 Task 4). `pick` rather than `make`: which
-  // asset it points at is a question only the library can answer, and the
-  // seed for `selected_file_ids` needs the asset's detail row.
+  // Asset-library reference. `pick` rather than `make`: which asset it points
+  // at is a question only the Library can answer, so this card hands the user
+  // over to the panel rather than creating an empty card here.
   {
     type: 'asset',
     label: 'Asset',
@@ -159,7 +158,6 @@ export function DragCreateMenu({
   onClose,
 }: DragCreateMenuProps) {
   const { t } = useTranslation();
-  const [pickerOpen, setPickerOpen] = useState(false);
   const kind = useCanvasCoreStore((s) => s.kind);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
@@ -205,9 +203,9 @@ export function DragCreateMenu({
   const place = useCallback(
     (node: CanvasNode, targetHandle: string | null) => {
       const id = (node as Record<string, unknown>).id as string;
-      // The LIVE lists, not this closure's: the asset picker resolves after a
-      // round trip, and a stale snapshot would drop whatever arrived while
-      // its detail fetch was in flight.
+      // The LIVE lists, not this closure's: the menu can outlive the render
+      // that captured them (realtime edits, an in-flight autosave reconcile),
+      // and a stale snapshot would drop whatever arrived meanwhile.
       const store = useCanvasCoreStore.getState();
       setNodes([...store.nodes, node]);
       // Wire back to the origin only when the menu came from a wire drop —
@@ -231,15 +229,25 @@ export function DragCreateMenu({
   const create = useCallback(
     (item: MenuItem) => {
       if (item.pick) {
-        // The menu stays mounted behind the picker so its origin handle
-        // survives; `place` is called from the picker's onPick instead.
-        setPickerOpen(true);
+        // The panel, not a modal — and with the search box focused, because a
+        // user who reached for "Asset" already knows which one they want.
+        //
+        // WARNING: This card no longer wires back to the origin handle: the
+        // panel places through `placeLibraryItems`, which has no notion of a
+        // pending connection. Threading one through would mean panel state
+        // that remembers a half-drawn wire across a browsing session.
+        useLibraryStore.getState().openPanel({
+          page: 'media',
+          mediaStore: 'assets',
+          focusSearch: true,
+        });
+        onClose();
         return;
       }
       if (!item.make) return;
       place(item.make(flowPosition), item.targetHandle);
     },
-    [flowPosition, place],
+    [flowPosition, place, onClose],
   );
 
   return (
@@ -291,17 +299,6 @@ export function DragCreateMenu({
           </div>
         )}
       </div>
-      {pickerOpen && (
-        <AssetPickerDialog
-          onPick={(asset) =>
-            place(
-              createAssetNode(asset, { position: flowPosition }) as CanvasNode,
-              null,
-            )
-          }
-          onClose={() => setPickerOpen(false)}
-        />
-      )}
     </>
   );
 }

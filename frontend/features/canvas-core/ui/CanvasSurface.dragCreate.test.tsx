@@ -7,7 +7,7 @@
  * node type creates the node AND auto-wires it — both through the store actions.
  */
 
-import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,31 +15,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
 }));
 
-// The Asset menu item opens the library picker rather than creating a node,
-// so the two assets calls behind it are stubbed. String ids — the wire shape.
+// The Asset menu item opens the Library panel rather than creating a node, so
+// nothing here talks to the assets API at all. The scope id still shapes the
+// route the pane menu renders under — a string, the wire shape.
 const ASSET_SCOPE = '727145299382534100';
-const ASSET_ID = '727145299382534300';
-const ASSET_SUMMARY = {
-  id: ASSET_ID,
-  scope_id: ASSET_SCOPE,
-  asset_type: 'character' as const,
-  name: 'Cole Bannon',
-  role_tag: 'lead',
-  readiness: { state: 'ready' as const, missing: [] },
-  cover_file_id: null,
-  is_system_preset: false,
-};
-const searchAssets = vi.fn();
-const fetchAssetDetail = vi.fn();
-
-vi.mock('../../../services/assetsService', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    searchAssets: (...a: unknown[]) => searchAssets(...a),
-    fetchAssetDetail: (...a: unknown[]) => fetchAssetDetail(...a),
-  };
-});
 
 let capturedProps: Record<string, unknown> = {};
 vi.mock('@xyflow/react', async (importOriginal) => {
@@ -56,24 +35,18 @@ vi.mock('@xyflow/react', async (importOriginal) => {
 import { CanvasSurface } from './CanvasSurface';
 import { DragCreateMenu } from './DragCreateMenu';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
+import { useLibraryStore } from '../library/libraryStore';
 import type { CanvasKind, CanvasNode } from '../types';
 
 beforeEach(() => {
-  searchAssets.mockReset().mockResolvedValue([ASSET_SUMMARY]);
-  fetchAssetDetail.mockReset().mockResolvedValue({
-    ...ASSET_SUMMARY,
-    files: [],
-    links: [],
-    linked_by: [],
-    loadouts: [],
-    used_in: { canvases: [], storyboards: [] },
-  });
+  useLibraryStore.setState({ open: false, focusNonce: 0 });
 });
 
 afterEach(() => {
   cleanup();
   capturedProps = {};
   useCanvasCoreStore.getState().reset();
+  useLibraryStore.setState({ open: false, focusNonce: 0 });
 });
 
 function seed(kind: CanvasKind, nodes: CanvasNode[]): void {
@@ -206,7 +179,7 @@ describe('DragCreateMenu — lite kind (IC four cards)', () => {
   });
 });
 
-describe('DragCreateMenu — Asset (P4 Task 4)', () => {
+describe('DragCreateMenu — Asset card', () => {
   function renderPaneMenu() {
     return render(
       <MemoryRouter initialEntries={[`/team/${ASSET_SCOPE}/canvas/9`]}>
@@ -241,24 +214,21 @@ describe('DragCreateMenu — Asset (P4 Task 4)', () => {
     expect(screen.queryByRole('menuitem', { name: /Asset/ })).toBeNull();
   });
 
-  it('picking Asset places the card at the drop point with the reference bound', async () => {
+  it('the Asset card opens the Library panel instead of a modal', () => {
     seed('smart', []);
     renderPaneMenu();
     act(() => fireEvent.click(screen.getByRole('menuitem', { name: /Asset/ })));
-    // Nothing yet — the library still has to be asked which asset.
-    expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
 
-    fireEvent.click(await screen.findByTestId('asset-picker-row'));
-    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(1));
-    const node = useCanvasCoreStore.getState().nodes[0] as {
-      type: string;
-      position: { x: number; y: number };
-      data: { asset_id: string };
-    };
-    expect(node.type).toBe('asset');
-    expect(node.data.asset_id).toBe(ASSET_ID);
-    expect(node.position).toEqual({ x: 77, y: 88 });
-    // Pane create is free-standing: no origin handle, so no edge.
+    // The panel is open on the media page, with the search box asked to take
+    // focus — a user who reached for "Asset" already knows which one.
+    const lib = useLibraryStore.getState();
+    expect(lib.open).toBe(true);
+    expect(lib.page).toBe('media');
+    expect(lib.mediaStore).toBe('assets');
+    expect(lib.focusNonce).toBeGreaterThan(0);
+
+    // Nothing is created here any more: the panel places what the user picks.
+    expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
     expect(useCanvasCoreStore.getState().connections).toHaveLength(0);
   });
 });

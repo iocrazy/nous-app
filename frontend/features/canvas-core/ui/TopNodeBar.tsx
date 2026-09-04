@@ -16,16 +16,14 @@
  * eleven chips above it would hand back exactly what that menu withholds.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   BotMessageSquare,
-  Boxes,
   Clapperboard,
   Film,
   ImagePlus,
   Library,
-  Loader2,
   MonitorPlay,
   Repeat2,
   TextCursorInput,
@@ -34,15 +32,11 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { useOptionalToast } from '../../../components/Toast';
-import { listProjectAssets } from '../../../services/assetsService';
-import { AssetPickerDialog } from '../smart/nodes/AssetPickerDialog';
-import { buildProjectAssetNodes } from '../smart/assetPlacement';
+import { useLibraryStore } from '../library/libraryStore';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { screenToWorld } from '../utils/viewport';
 import type { CanvasNode } from '../types';
 import {
-  createAssetNode,
   createLlmNode,
   createLoopNode,
   createMediaNode,
@@ -59,14 +53,11 @@ interface Chip {
    *  cards, so the two entry points cannot drift apart in one locale. */
   label: string;
   icon: LucideIcon;
-  /** Chips that create a node outright. Absent on `pick` chips, which have
-   *  to ask the library which asset first. */
+  /** Chips that create a node outright. Absent on the `panel` chip, which
+   *  has to ask the library what to place first. */
   make?: (position: { x: number; y: number }) => CanvasNode;
-  /** Opens the asset picker instead of creating immediately. */
-  pick?: true;
-  /** Pulls the whole project shelf in at once — asks the server, then places
-   *  many nodes. Not a `make`: the answer is a request, not arithmetic. */
-  bulk?: true;
+  /** Opens the Library panel instead of creating anything. */
+  panel?: true;
 }
 
 const CHIPS: Chip[] = [
@@ -97,13 +88,11 @@ const CHIPS: Chip[] = [
   { key: 'loop', label: 'Loop', icon: Repeat2, make: (p) => createLoopNode({}, { position: p }) as CanvasNode },
   { key: 'timeline', label: 'Timeline', icon: Film, make: (p) => createTimelineNode({}, { position: p }) as CanvasNode },
   { key: 'output', label: 'Output', icon: MonitorPlay, make: (p) => createOutputNode({}, { position: p }) as CanvasNode },
-  // Asset-library reference (P4 Task 4). No `make`: which asset is a
-  // question only the library can answer, so this one opens the picker.
-  { key: 'asset', label: 'Asset', icon: Boxes, pick: true },
-  // The whole project shelf at once (P4 Task 6) — the bulk sibling of the
-  // chip above. It sits here rather than in a menu of its own because what it
-  // does IS what this strip does: put nodes on the canvas.
-  { key: 'project-assets', label: 'Project Assets', icon: Library, bulk: true },
+  // ONE Library chip where Asset and Project Assets used to be. Both did the
+  // same thing at different granularities — pick one asset, or take the whole
+  // project shelf — and the panel expresses that as a scope plus a selection,
+  // which is a knob rather than a second button.
+  { key: 'library', label: 'Library', icon: Library, panel: true },
 ];
 
 /**
@@ -126,14 +115,9 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
   // `CanvasComposer.dropPosition` — both readers sit outside React Flow's
   // provider, so `useViewport()` is not available to either of them anyway.
   const { t } = useTranslation();
-  const toast = useOptionalToast();
   const viewport = useCanvasCoreStore((s) => s.viewport);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
-  const projectId = useCanvasCoreStore((s) => s.projectId);
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [inserting, setInserting] = useState(false);
 
   const centreInWorld = useCallback(() => {
     const rect = surfaceRef.current?.getBoundingClientRect();
@@ -145,9 +129,8 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
 
   const append = useCallback(
     (node: CanvasNode) => {
-      // Read the LIVE list rather than the closure's: the picker resolves
-      // asynchronously, and a stale `nodes` would drop anything created
-      // while its detail fetch was in flight.
+      // Read the LIVE list rather than the closure's: a stale `nodes` would
+      // drop anything created while this render was on screen.
       const current = useCanvasCoreStore.getState().nodes;
       setNodes([...current, node]);
       setSelection([String((node as { id?: unknown }).id)]);
@@ -155,87 +138,16 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
     [setNodes, setSelection],
   );
 
-  /**
-   * Insert Project Assets — every asset linked to this canvas's project, in
-   * four lanes (character / location / prop / costume, plus a lane each for
-   * prompt and audio when the project has them).
-   *
-   * EVERY outcome says something. A project with no assets, a project whose
-   * assets are all on the board already, and a failed request are three
-   * different answers and each gets its own line — an action that sometimes
-   * places nothing and reports nothing is indistinguishable from a broken
-   * button, which is the silent no-op this repo keeps re-learning.
-   */
-  const insertProjectAssets = useCallback(() => {
-    if (inserting) return;
-    if (!projectId) {
-      toast?.addToast(
-        t('canvas.projectAssets.noProject', 'This canvas has no project'),
-        'error',
-      );
-      return;
-    }
-    setInserting(true);
-    listProjectAssets(projectId)
-      .then((assets) => {
-        if (assets.length === 0) {
-          toast?.addToast(
-            t('canvas.projectAssets.empty', 'This project has no assets yet'),
-            'info',
-          );
-          return;
-        }
-        // Read the LIVE node list, not the closure's — the request took time
-        // and anything created meanwhile must survive.
-        const current = useCanvasCoreStore.getState().nodes;
-        const plan = buildProjectAssetNodes(assets, current);
-        if (plan.inserted === 0) {
-          toast?.addToast(
-            t('canvas.projectAssets.allPresent', 'Every project asset is already here'),
-            'info',
-          );
-          return;
-        }
-        setNodes([...current, ...plan.nodes]);
-        setSelection(plan.nodes.map((node) => String((node as { id?: unknown }).id)));
-        toast?.addToast(
-          plan.skipped > 0
-            ? t('canvas.projectAssets.insertedWithSkipped', {
-                inserted: plan.inserted,
-                skipped: plan.skipped,
-                defaultValue: 'Added {{inserted}} · {{skipped}} already here',
-              })
-            : t('canvas.projectAssets.inserted', {
-                inserted: plan.inserted,
-                defaultValue: 'Added {{inserted}}',
-              }),
-          'success',
-        );
-      })
-      .catch((err) => {
-        console.error('[TopNodeBar] listProjectAssets failed:', err);
-        toast?.addToast(
-          t('canvas.projectAssets.failed', 'Could not load the project assets'),
-          'error',
-        );
-      })
-      .finally(() => setInserting(false));
-  }, [inserting, projectId, toast, t, setNodes, setSelection]);
-
   const addAtCenter = useCallback(
     (chip: Chip) => {
-      if (chip.pick) {
-        setPickerOpen(true);
-        return;
-      }
-      if (chip.bulk) {
-        insertProjectAssets();
+      if (chip.panel) {
+        useLibraryStore.getState().openPanel({ page: 'media', mediaStore: 'assets' });
         return;
       }
       if (!chip.make) return;
       append(chip.make(centreInWorld()));
     },
-    [append, centreInWorld, insertProjectAssets],
+    [append, centreInWorld],
   );
 
   return (
@@ -247,29 +159,19 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
     >
       {CHIPS.map((chip) => {
         const Icon = chip.icon;
-        const busy = chip.bulk === true && inserting;
         return (
           <button
             key={chip.key}
             type="button"
             data-testid={`top-node-chip-${chip.key}`}
-            disabled={busy}
             onClick={() => addAtCenter(chip)}
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-border)]"
           >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
+            <Icon size={12} />
             {t(`canvas.nodeBar.${chip.key}`, chip.label)}
           </button>
         );
       })}
-      {pickerOpen && (
-        <AssetPickerDialog
-          onPick={(asset) =>
-            append(createAssetNode(asset, { position: centreInWorld() }) as CanvasNode)
-          }
-          onClose={() => setPickerOpen(false)}
-        />
-      )}
     </div>
   );
 }

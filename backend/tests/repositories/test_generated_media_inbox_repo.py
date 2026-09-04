@@ -29,6 +29,7 @@ def test_default_state_excludes_deleted_only():
             state=None,
             origin_kinds=None,
             project_id=None,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=None,
@@ -46,6 +47,7 @@ def test_state_and_origin_filters():
             state="unreviewed",
             origin_kinds=["canvas_run", "shot_generate"],
             project_id=None,
+            canvas_id=None,
             media_kind="image",
             model="seedream-4",
             since=None,
@@ -65,6 +67,7 @@ def test_project_filter_goes_through_canvases():
             state=None,
             origin_kinds=None,
             project_id=55,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=None,
@@ -83,6 +86,7 @@ def test_since_filter():
             state=None,
             origin_kinds=None,
             project_id=None,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=since,
@@ -106,6 +110,7 @@ def test_source_asset_filter_is_an_equality_on_the_stamped_column():
             state=None,
             origin_kinds=None,
             project_id=None,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=None,
@@ -128,6 +133,7 @@ def test_no_source_asset_filter_leaves_the_column_alone():
             state=None,
             origin_kinds=None,
             project_id=None,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=None,
@@ -364,6 +370,7 @@ def _role_sql(*, include_intermediate: bool) -> str:
             state=None,
             origin_kinds=None,
             project_id=None,
+            canvas_id=None,
             media_kind=None,
             model=None,
             since=None,
@@ -472,3 +479,46 @@ async def test_count_by_state_include_flag_drops_the_predicate(monkeypatch):
 
     assert "'mask'" not in sql and "role" not in sql
     assert "count(" in sql and "scope_id = 7" in sql
+
+
+def test_canvas_id_filters_on_the_column_not_through_canvases():
+    """`canvas_id` is a DIRECT column predicate.
+
+    `project_id` has to go through a subquery on `canvases.project_id`; this one
+    does not, and the difference is the point of the parameter. A subquery here
+    would answer the project's whole inbox for every canvas in it.
+    """
+    sql = _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            canvas_id=900000000000000001,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=None,
+            include_intermediate=False,
+        )
+    )
+    assert "canvas_id = 900000000000000001" in sql
+    assert "SELECT canvases.id" not in sql
+
+
+def test_canvas_id_none_adds_no_predicate():
+    sql = _sql(
+        _inbox_filters(
+            scope_id=7,
+            state=None,
+            origin_kinds=None,
+            project_id=None,
+            canvas_id=None,
+            media_kind=None,
+            model=None,
+            since=None,
+            source_asset_id=None,
+            include_intermediate=False,
+        )
+    )
+    assert "canvas_id" not in sql

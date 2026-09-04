@@ -10,6 +10,7 @@
 
 import { Image as ImageIcon, Library, Play, Video } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { mediaSrc } from '../mediaUrl';
 import { createPromptFromNode } from '../recreate';
@@ -37,6 +38,7 @@ export function AttachedComposerPanel({
   pinned,
   readOnly,
 }: AttachedComposerPanelProps) {
+  const { t } = useTranslation();
   const [kind, setKind] = useState<'image' | 'video'>('image');
   const [body, setBody] = useState('');
   const [model, setModel] = useState('');
@@ -232,7 +234,7 @@ export function AttachedComposerPanel({
         <button
           type="button"
           data-testid="composer-library"
-          aria-label="Load from library"
+          aria-label={t('canvas.library.promptTemplates', 'Prompt Templates')}
           onClick={() => setLibraryOpen(true)}
           className="nodrag absolute right-3 top-16 flex h-6 w-6 items-center justify-center rounded border border-canvas-line text-canvas-muted hover:text-canvas-text"
         >
