@@ -34,8 +34,7 @@ async def _resolve_personal_user_id(scope_id: str) -> Optional[str]:
 
     Callers pass scope_id in two shapes depending on origin:
       - Old (UI panels): the user UUID directly
-      - New (post-PR-C iterators, e.g. temp_resource_sweeper): the
-        personal team snowflake
+      - New (post-PR-C iterators): the personal team snowflake
 
     user_settings is keyed by auth.users.id (UUID), so translate the
     snowflake variant by looking up the team's owner. Returns None when

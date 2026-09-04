@@ -173,27 +173,29 @@ class TestAssetFilesQuery:
         assert "DISTINCT" in sql
 
 
-class TestTempSweeperIsNotScheduled:
+class TestTempSweeperIsGone:
     """Spec decision 7: temp clean-up is manual (`POST /generated/cleanup`).
 
     The inbox rows this task creates point at the resource's own file; a
     daily sweep would trash those files under a live inbox card. The cron
-    decorator has been commented out since 2026-06-13, but the worker still
-    imported the module through the scheduled bundle — one uncommented line
-    away from arming it again, and reading as "scheduled" to anyone who
-    grepped the bundle.
+    decorator had been commented out since 2026-06-13 and P1 removed the
+    scheduled-bundle import; asset-library P6 (2026-09-04) deleted the module
+    itself, so the sweep can no longer be armed by uncommenting one line.
+
+    Both assertions stay falsifiable: restoring the module turns the first
+    red, and re-adding a bundle import turns the second red.
     """
+
+    def test_the_sweeper_module_no_longer_exists(self):
+        import importlib.util
+
+        assert importlib.util.find_spec("app.workflows.temp_resource_sweeper") is None
 
     def test_scheduled_bundle_does_not_export_the_sweeper(self):
         import app.workflows._scheduled_bundle as bundle
 
         assert not hasattr(bundle, "temp_resource_sweeper_scheduled")
         assert not hasattr(bundle, "sweep_temp_resources")
-
-    def test_the_sweeper_itself_still_exists_for_manual_use(self):
-        from app.workflows import temp_resource_sweeper
-
-        assert callable(temp_resource_sweeper.sweep_temp_resources)
 
 
 class TestSystemScopeWrapping:

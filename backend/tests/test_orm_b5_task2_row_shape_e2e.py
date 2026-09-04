@@ -23,16 +23,14 @@ with a genuine ``aiosqlite``-backed ``AsyncSession``:
      alternative, executed against the identical table/row, produces the
      wrong shape — proving the positive test is actually sensitive to the
      bug class, not just re-confirming whatever the code already does. The
-     other three sites in this batch select individual named columns (never
+     other two sites in this batch select individual named columns (never
      ``select(Model)``/``select(*Model.__table__.c)`` ambiguity), so a
      negative control would just be re-deriving the same assertion; they get
-     a positive real-engine round trip proving the JOIN/DISTINCT/CASE
+     a positive real-engine round trip proving the JOIN / JSONB-predicate
      mechanics instead.
 
 Covers:
   - app.workflows.agent_runs_sweeper._agents_budget_scan_stmt (ai_agents)
-  - app.workflows.temp_resource_sweeper._temp_folder_scopes_stmt (folders
-    LEFT JOIN teams)
   - app.workflows.backfill_normalize_personal_project_team_ids.
     _misstamped_personal_projects_stmt (projects JOIN teams)
   - app.workflows.autopilot_sweep._eligible_projects_stmt (projects JOIN
@@ -45,6 +43,13 @@ Covers:
     determines the ``.mappings()`` row shape for a table-valued FROM clause
     (no entity-vs-column ambiguity is possible here: the columns are named
     directly in ``.table_valued(...)``).
+
+NOTE (2026-09-04, asset-library P6): this file used to carry a fifth sample,
+``temp_resource_sweeper._temp_folder_scopes_stmt`` (folders LEFT JOIN teams,
+CASE + DISTINCT). That workflow was deleted along with the rest of the temp
+TTL surface, so the sample went with it — B5 row-shape coverage is one
+statement lighter, and no statement in this batch now exercises the
+LEFT JOIN + CASE + DISTINCT combination.
 
 Real model ``__table__`` objects drive both DDL and INSERT (real bind/result
 processors); only the DDL is hand-rolled with SQLite-native column types
@@ -66,7 +71,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import AiAgents, Episodes, Folders, Projects, ProjectStageNodes, Teams
+from app.models import AiAgents, Episodes, Projects, ProjectStageNodes, Teams
 from app.workflows.agent_runs_sweeper import _agents_budget_scan_stmt
 from app.workflows.autopilot_sweep import _eligible_projects_stmt
 from app.workflows.backfill_normalize_personal_project_team_ids import (
@@ -76,7 +81,6 @@ from app.workflows.scheduled_quotas import (
     _grant_daily_free_points_stmt,
     _reclaim_daily_free_points_stmt,
 )
-from app.workflows.temp_resource_sweeper import _temp_folder_scopes_stmt
 
 _UID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 _AGENT_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -201,137 +205,14 @@ async def test_agents_budget_scan_stmt_entity_level_negative_control_proves_sens
         bad_row["id"]
 
 
-# ── temp_resource_sweeper.py — folders LEFT JOIN teams, CASE + DISTINCT ────
+# ── shared DDL ── teams backs the JOIN in the two statements below ────
 
-_FOLDERS_DDL = """
-CREATE TABLE folders (
-    name TEXT, scope_id INTEGER, created_by TEXT, sort_order INTEGER,
-    is_system BOOLEAN, visibility TEXT, is_trashed BOOLEAN,
-    created_at TIMESTAMP, updated_at TIMESTAMP, id INTEGER PRIMARY KEY,
-    icon TEXT, color TEXT, trashed_at TIMESTAMP, parent_id INTEGER,
-    library_id INTEGER, is_smart BOOLEAN, smart_rules TEXT
-)
-"""
 _TEAMS_DDL = """
 CREATE TABLE teams (
     name TEXT, owner_id TEXT, invite_code TEXT, id INTEGER PRIMARY KEY,
     settings_json TEXT, kind TEXT, created_at TIMESTAMP, enabled_modules TEXT
 )
 """
-
-
-@pytest.mark.asyncio
-async def test_temp_folder_scopes_stmt_yields_column_keyed_rows_personal_and_team():
-    """The REAL production statement (_temp_folder_scopes_stmt) round-tripped
-    through a genuine Result gives column-keyed RowMappings matching
-    ``_iter_scopes``'s ``row["scope_type"]``/``row["scope_id"]`` reads — one
-    row per distinct (personal-team, collaborative-team, orphan-scope LEFT
-    JOIN miss, and excluded-trashed) case. Each of teams 2/3/999 owns exactly
-    one folder so the WHERE/JOIN conditions are independently discriminative
-    (fix-round self-verification: the ``is_trashed`` filter was flipped
-    locally, confirmed this test goes red — team 3 would otherwise leak in —
-    then restored; see PR description)."""
-    engine = create_async_engine("sqlite+aiosqlite://")
-    engine = engine.execution_options(schema_translate_map={"public": None})
-    async with engine.begin() as conn:
-        await conn.exec_driver_sql(_FOLDERS_DDL)
-        await conn.exec_driver_sql(_TEAMS_DDL)
-        await conn.execute(
-            insert(Teams.__table__).values(
-                id=1,
-                name="Personal",
-                owner_id=_UID,
-                invite_code="p1",
-                settings_json="{}",
-                kind="personal",
-            )
-        )
-        await conn.execute(
-            insert(Teams.__table__).values(
-                id=2,
-                name="Collab",
-                owner_id=_UID,
-                invite_code="c1",
-                settings_json="{}",
-                kind="collaborative",
-            )
-        )
-        # team 3 owns ONLY a trashed folder — a leaked row here can only come
-        # from the is_trashed filter being dropped, never from team 2's row.
-        await conn.execute(
-            insert(Teams.__table__).values(
-                id=3,
-                name="Collab (trashed-only)",
-                owner_id=_UID,
-                invite_code="c2",
-                settings_json="{}",
-                kind="collaborative",
-            )
-        )
-        await conn.execute(
-            insert(Folders.__table__).values(
-                id=10,
-                name="temp",
-                scope_id=1,
-                created_by=_UID,
-                sort_order=0,
-                is_system=True,
-                visibility="inherited",
-                is_trashed=False,
-            )
-        )
-        await conn.execute(
-            insert(Folders.__table__).values(
-                id=11,
-                name="temp",
-                scope_id=2,
-                created_by=_UID,
-                sort_order=0,
-                is_system=True,
-                visibility="inherited",
-                is_trashed=False,
-            )
-        )
-        # A trashed temp folder must be excluded by the WHERE clause.
-        await conn.execute(
-            insert(Folders.__table__).values(
-                id=12,
-                name="temp",
-                scope_id=3,
-                created_by=_UID,
-                sort_order=0,
-                is_system=True,
-                visibility="inherited",
-                is_trashed=True,
-            )
-        )
-        # Orphan scope (no matching team row) — the LEFT JOIN must still
-        # yield the row (scope_type falls back to 'team' via the CASE), not
-        # silently drop it the way an INNER JOIN would.
-        await conn.execute(
-            insert(Folders.__table__).values(
-                id=13,
-                name="temp",
-                scope_id=999,
-                created_by=_UID,
-                sort_order=0,
-                is_system=True,
-                visibility="inherited",
-                is_trashed=False,
-            )
-        )
-
-    sessionmaker = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    try:
-        async with sessionmaker() as session:
-            rows = (await session.execute(_temp_folder_scopes_stmt())).mappings().all()
-    finally:
-        await engine.dispose()
-
-    got = {(str(r["scope_type"]), str(r["scope_id"])) for r in rows}
-    assert got == {("personal", "1"), ("team", "2"), ("team", "999")}
 
 
 # ── backfill_normalize_personal_project_team_ids.py — projects JOIN teams ──
