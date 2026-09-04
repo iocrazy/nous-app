@@ -65,6 +65,13 @@ on:
       # too — otherwise the one guard that runs them against a real Postgres
       # never fires for the change that moved them.
       - 'backend/app/workflows/backfill_generated_inbox.py'
+      # mig 450 moved the chat-uploads folder's identity from its NAME to
+      # `system_key`, and the criterion the backfill joins on now lives in
+      # chat_upload.py. Same reason as the line above: the shared definition
+      # and the migration that created the rows it matches have to reach the
+      # one chain that runs them against a real Postgres.
+      - 'backend/app/services/library/chat_upload.py'
+      - 'backend/tests/db/test_chat_uploads_folder_migration.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/repositories/canvas_asset_refs_repository.py'
@@ -322,3 +329,19 @@ jobs:
           # unique index, not of our Python), or that reconciliation agrees with
           # apply about adopting a same-name asset of ANY source.
           uv run pytest tests/db/test_assets_migration_integration.py -v
+
+      - name: Exercise the chat-uploads folder adoption (mig 450)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # Migration 450 is a single UPDATE whose whole value is in what it
+          # does NOT touch: it must adopt exactly one `temp` folder per scope
+          # (the oldest), leave the rest as plain user folders, and change zero
+          # rows on a second run. None of that is checkable without a server —
+          # DISTINCT ON, the NOT EXISTS guard and the partial unique index that
+          # backs it all only exist in Postgres. The same step also runs the
+          # code-side adoption against the real index, which is what proves the
+          # migration and `chat_upload.py` agree instead of each minting a row.
+          uv run pytest tests/db/test_chat_uploads_folder_migration.py -v

@@ -6,7 +6,9 @@ which already-registered rows get flipped to ``in_assets`` — so both are
 pinned here, including the re-run (idempotency) shape.
 
 ``TestSystemScopeWrapping`` covers the one thing the pure planner cannot:
-that the workflow enters a system scope before it touches the DB.
+that the workflow enters a system scope before it touches the DB, and
+``TestChatUploadsFolderIdentity`` covers the other: which folders the register
+half actually reads from (mig 450 moved that from a name to a ``system_key``).
 """
 
 from types import SimpleNamespace
@@ -171,6 +173,65 @@ class TestAssetFilesQuery:
         assert "assets.deleted_at IS NULL" in sql
         assert "JOIN public.assets" in sql
         assert "DISTINCT" in sql
+
+
+class TestChatUploadsFolderIdentity:
+    """P6 mig 450: the folder is matched by ``system_key``, not by name.
+
+    The register half's entire correctness is this predicate, and it is only
+    visible on the compiled SQL — every wrong version of it still runs, still
+    returns rows, and reports whatever it missed as "already registered".
+
+    The criterion is IMPORTED from ``chat_upload`` rather than restated here
+    for the same reason ``_NOT_MARKABLE`` is shared: two copies would let the
+    upload path and the reconciliation disagree about which folder holds a
+    scope's chat uploads, and the disagreement would be silent.
+    """
+
+    def _sql(self):
+        from sqlalchemy.dialects import postgresql
+
+        from app.workflows.backfill_generated_inbox import (
+            _chat_upload_resources_stmt,
+        )
+
+        return str(
+            _chat_upload_resources_stmt().compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+
+    def test_the_keyed_folder_is_matched(self):
+        assert "system_key = 'chat_uploads'" in self._sql()
+
+    def test_a_not_yet_adopted_legacy_temp_folder_is_still_matched(self):
+        """Migration 450 and this workflow have no ordering guarantee, and the
+        migration adopts only ONE ``temp`` folder per scope. Dropping this arm
+        turns "the migration has not run here" into an empty, confident plan."""
+        sql = self._sql()
+        assert "system_key IS NULL" in sql
+        assert "name = 'temp'" in sql
+
+    def test_the_two_arms_are_a_union_not_a_conjunction(self):
+        sql = self._sql()
+        assert "system_key = 'chat_uploads' OR public.folders.system_key IS NULL" in sql
+
+    def test_trashed_folders_and_resources_are_excluded(self):
+        sql = self._sql()
+        assert "public.folders.is_trashed IS false" in sql
+        assert "public.resources.is_trashed IS false" in sql
+
+    def test_rows_without_a_file_path_are_excluded(self):
+        """``generated_media.file_path`` is NOT NULL — registering these would
+        fail the insert rather than the plan."""
+        assert "public.resources.file_path IS NOT NULL" in self._sql()
+
+    def test_the_criterion_comes_from_the_upload_path(self):
+        import app.workflows.backfill_generated_inbox as wf
+        from app.services.library.chat_upload import chat_uploads_folder_criteria
+
+        assert wf.chat_uploads_folder_criteria is chat_uploads_folder_criteria
 
 
 class TestTempSweeperIsGone:

@@ -33,11 +33,13 @@ def wired(monkeypatch):
     async def _scope(*, session_id, user_id):
         return ("team", "777")
 
-    async def _folder(scope_type, scope_id, user_id):
+    async def _folder(scope_id, user_id):
         return "folder-1"
 
     monkeypatch.setattr(chat_upload, "resolve_chat_scope", _scope)
-    monkeypatch.setattr(chat_upload, "_ensure_temp_folder", _folder)
+    # P6 Task 2: the folder is found by system_key now, and the helper no
+    # longer takes scope_type (folders are keyed by scope_id alone).
+    monkeypatch.setattr(chat_upload, "_ensure_chat_uploads_folder", _folder)
     monkeypatch.setattr(chat_upload, "_resources_service", lambda: svc)
 
     calls = []
