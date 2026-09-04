@@ -116,9 +116,21 @@ class AttachmentRequest(BaseModel):
     to multimodal Attachment[] (image / video frames / PDF pages) before
     composing the user message."""
 
-    kind: str = Field(..., description="image | video | pdf")
+    kind: str = Field(..., description="image | video | pdf | resource_ref | asset_ref")
     """Source format. video → frames extracted via Q2; pdf → pages
-    rendered via Q3; image → passed through as-is."""
+    rendered via Q3; image → passed through as-is.
+
+    Two kinds carry no bytes and name a library row instead: ``resource_ref``
+    resolves ``resource_id`` through ``resource_ref_resolver`` (S4), and
+    ``asset_ref`` resolves ``asset_id`` (+ optional ``loadout_id``) through
+    ``asset_ref_resolver`` (P5). Both are listed in ``<available_resources>``
+    and loaded only if the model calls ``ResourceFetch``.
+
+    The field stays a free string rather than an enum: unknown kinds fall
+    through to the binary path, which reports ``unsupported attachment kind``
+    as a typed failure the user sees. Narrowing it to a Literal would turn the
+    same input into a 422 from FastAPI with no per-attachment reason.
+    """
 
     url: Optional[str] = Field(
         default=None,
@@ -152,6 +164,47 @@ class AttachmentRequest(BaseModel):
         default=None,
         description="Frontend scope hint only — backend re-checks access.",
     )
+
+    # P5: @-reference asset fields (kind='asset_ref')
+    asset_id: Optional[str] = Field(
+        default=None,
+        description="assets.id Snowflake for kind='asset_ref'.",
+    )
+    loadout_id: Optional[str] = Field(
+        default=None,
+        description="Optional asset_loadouts.id for kind='asset_ref'. Null "
+        "(the only value v1 clients send) means the asset's default loadout.",
+    )
+
+    @field_validator("resource_id", "asset_id", "loadout_id", mode="before")
+    @classmethod
+    def _coerce_ref_id_str(cls, v: Any) -> Any:
+        """Accept a Snowflake sent as a JSON number.
+
+        All three are BIGINT Snowflakes modelled as ``str`` because a JS number
+        loses the low bits above 2^53. Our own clients send strings — the assets
+        and resources routers ``str()`` every id on the way out — but pydantic
+        v2's lax mode does NOT coerce int→str, so a hand-built client, a script,
+        or any future caller that forgets would 422 the ENTIRE ChatRequest with
+        `string_type`. That is the same failure this model avoids for ``kind``
+        by leaving it a free string: a whole-request rejection says nothing
+        about which attachment was wrong, where a coerced id resolves normally
+        and a genuinely bad one comes back as a per-attachment typed failure.
+
+        Deliberately narrow. ``bool`` is an ``int`` subclass and would become
+        ``"True"``; a float would become ``"7001.0"``. Neither is an id, so both
+        fall through to pydantic and are rejected. This is also why the file's
+        model-wide ``_COERCE_IDS`` config is not used here — it would coerce
+        every str field on the model, silently turning ``kind: 5`` into the
+        string ``"5"``.
+
+        Downstream, ``asset_ref_resolver.coerce_asset_id`` normalizes again for
+        callers that never cross this boundary (internal invocations, tests).
+        Both must agree, which is why neither one is allowed to be the only one.
+        """
+        if isinstance(v, int) and not isinstance(v, bool):
+            return str(v)
+        return v
 
 
 class ScriptContextRequest(BaseModel):
@@ -198,6 +251,15 @@ class ChatRequest(BaseModel):
     # G2: optional multi-modal attachments. Vision-capable models see
     # them as image parts; text-only models gracefully degrade to
     # placeholder text.
+    #
+    # No `max_length` on purpose. The caps live where the cost is known:
+    # `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN` bounds bytes fetched,
+    # `ai_library_chat_service.MAX_ASSET_REF_ATTACHMENTS` bounds database round
+    # trips (final review I2). `resource_ref` needs neither — any number of them
+    # is one batched query. A single length here would reject the whole request
+    # with a 422 that names no attachment, where the service answers the turn
+    # and reports each refused entry as a typed `attachment_limit_exceeded`
+    # failure against its own index.
     attachments: list[AttachmentRequest] = Field(default_factory=list)
 
     @model_validator(mode="after")

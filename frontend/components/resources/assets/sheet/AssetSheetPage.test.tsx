@@ -24,7 +24,12 @@ const navigate = vi.fn();
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 
 const addToast = vi.fn();
-vi.mock('../../../Toast', () => ({ useToast: () => ({ addToast }) }));
+// `useOptionalToast` too: the sheet sidebar's Send To Agent reads it (P5),
+// and a mock factory missing an export makes the whole sidebar throw.
+vi.mock('../../../Toast', () => ({
+  useToast: () => ({ addToast }),
+  useOptionalToast: () => ({ addToast }),
+}));
 
 const refreshAssetCounts = vi.fn();
 vi.mock('../../../../contexts/ResourcesContext', () => ({
@@ -730,20 +735,25 @@ describe('Send To Canvas', () => {
   });
 });
 
-describe('the deferred surfaces', () => {
-  // Send To Canvas USED to be asserted disabled here, beside Send To Agent.
-  // P4 Task 6 shipped it, so the two are no longer the same case: one opens a
-  // picker, the other is still a placeholder. Asserting both halves keeps the
-  // distinction pinned — a regression that re-disabled the canvas action, or
-  // one that quietly enabled the agent action, each fails its own line.
-  it('Send To Canvas is live and Send To Agent still names its phase', async () => {
+describe('the sidebar actions', () => {
+  // Both of these USED to be asserted disabled, each with a title naming the
+  // phase that would bring it. P4 Task 6 shipped Send To Canvas and P5 Task 5
+  // shipped Send To Agent, so this now pins the opposite property: neither
+  // wears a "coming later" title any more. A placeholder assertion outliving
+  // its placeholder is how a shipped surface keeps telling users it has not
+  // shipped — the test would go on passing while the button stayed dead.
+  //
+  // What the agent button DOES is pinned in
+  // `SheetSidebar.sendToAgent.test.tsx`; this file only owns the sheet's
+  // wiring of it.
+  it('Send To Canvas and Send To Agent are both live', async () => {
     await renderSheet();
     const canvas = screen.getByTestId('send-to-canvas');
     const agent = screen.getByTestId('send-to-agent');
     expect(canvas).toBeEnabled();
     expect(canvas).not.toHaveAttribute('title');
-    expect(agent).toBeDisabled();
-    expect(agent).toHaveAttribute('title', 'Arrives with P5');
+    expect(agent).toBeEnabled();
+    expect(agent).not.toHaveAttribute('title');
   });
 
   it('Used In lists the projects by name', async () => {

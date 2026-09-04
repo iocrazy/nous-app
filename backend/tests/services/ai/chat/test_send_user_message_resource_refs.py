@@ -275,8 +275,11 @@ async def test_resource_ref_wiring_calls_resolver_and_registers_tool():
     assert passed_atts[0]["kind"] == "resource_ref"
     assert resolver_call.kwargs["user_id"] == str(USER_ID)
 
-    # 2. Renderer was called with the resolved refs list
-    mock_renderer.assert_called_once_with([fake_ref])
+    # 2. Renderer was called with the resolved refs list and an EMPTY asset
+    # list — a resource-only turn must still render exactly as it did before
+    # P5, which is what pins "no assets" as a real second argument rather than
+    # a default the call site happens to omit.
+    mock_renderer.assert_called_once_with([fake_ref], [])
 
     # 3. runner.resource_fetch_handler was set during the turn (not None).
     # Note: Fix 3 clears it in a finally block after the turn finishes, so we

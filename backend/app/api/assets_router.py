@@ -32,6 +32,7 @@ from app.core.scope_guards import (
 )
 from app.db.session import read_scope, unit_of_work
 from app.models import Projects, TeamMembers
+from app.models.assets import ASSET_TYPES
 from app.schemas.assets import (
     SNOWFLAKE_PATTERN,
     AssetCountsResponse,
@@ -97,6 +98,13 @@ SnowflakeQuery = Annotated[str, Query(pattern=_SNOWFLAKE), AfterValidator(within
 # the mapping's own key set (``LEGACY_KINDS``) rather than typed out again, so a
 # kind cannot be accepted here that the resolver has no table label for.
 LegacyKindQuery = Annotated[str, Query(pattern="^(" + "|".join(LEGACY_KINDS) + ")$")]
+# The ``?type=`` vocabulary, built FROM ``ASSET_TYPES`` rather than typed out
+# again. The two shelf routes above still spell theirs literally; this one is
+# derived because it is the endpoint a picker calls with a type it read off the
+# same tuple, and a seventh asset type that reached the model but not this
+# pattern would answer 422 for a type the product supports.
+_ASSET_TYPE_PATTERN = "^(" + "|".join(ASSET_TYPES) + ")$"
+AssetTypeQuery = Annotated[Optional[str], Query(pattern=_ASSET_TYPE_PATTERN)]
 # Path ids declared as ``int`` have the same reachable-500: FastAPI parses any
 # digit string into a Python int, which only fails once asyncpg tries to bind it.
 IdPath = Annotated[int, Path(ge=0, lt=_INT64_EXCLUSIVE_MAX)]
@@ -484,6 +492,60 @@ async def resolve_legacy(
     except AssetError as e:
         return _err(e)
     return _ok(out)
+
+
+# ── membership-wide search (P5 ruling G) ────────────────────────────────────
+#
+# ⚠️ ORDER IS LOAD-BEARING, for the third time on this router and for the same
+# reason as ``/assets/counts`` and ``/assets/resolve-legacy``: registered below
+# ``/assets/{asset_id}`` the literal "search" is captured as an ``int`` path
+# param and the request answers 422 about an id nobody sent. Pinned by
+# ``tests/api/test_assets_search_router.py::test_search_is_not_captured_as_an_asset_id``.
+
+
+@router.get(
+    "/assets/search",
+    response_model=Envelope[List[AssetResponse]],
+    responses=_ERRORS,
+)
+async def search_assets(
+    auth: AuthDep,
+    q: Optional[str] = Query(None, max_length=200),
+    type: AssetTypeQuery = None,
+    library: str = Query("all", pattern="^(in|out|all)$"),
+    limit: int = Query(24, ge=1, le=50),
+):
+    """The chat @-picker's asset shelf — every team the CALLER belongs to.
+
+    Deliberately takes NO ``scope_id`` and therefore has no ``_gate``: a chat
+    window outlives any one workspace route, so there is no scope to send and
+    none to check. Authorization is ruling B's predicate instead — membership
+    in the asset's scope OR ``is_system_preset``, soft-deleted rows excluded —
+    which lives once in ``AssetsRepository.list_accessible`` and is the same
+    query the chat's asset-ref resolver reads through. That shared source is
+    the point: a picker that offered an asset the resolver then refused to
+    attach would be a dead entry with no error anywhere.
+
+    The identity is the AUTHENTICATED user's, never a query parameter. There is
+    no route on this router by which a caller can search as somebody else.
+
+    ``library`` defaults to ``all`` here and to ``in`` on the shelf, and the
+    difference is deliberate: the shelf answers "my library", this answers
+    "which asset did I mean" — and a character a script imported is one the
+    user can perfectly well mean. ``limit`` caps at 50 rather than the shelf's
+    200 because this feeds a dropdown, not a page.
+    """
+    try:
+        rows = await _service().search_accessible_assets(
+            auth.user_id,
+            q=q,
+            asset_type=type,
+            library=library,
+            limit=limit,
+        )
+    except AssetError as e:
+        return _err(e)
+    return _ok(rows)
 
 
 # ── single asset ────────────────────────────────────────────────────────────

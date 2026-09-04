@@ -43,17 +43,30 @@ import {
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
-import { AttachmentFailureBanner } from './chat/AttachmentFailureBanner';
+import {
+  AttachmentFailureBanner,
+  type AttachmentFailure,
+} from './chat/AttachmentFailureBanner';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
 import {
+  mergeAssetAttachments,
   mergeRefAttachments,
+  stageAsset as stageAssetInto,
   stageResource as stageResourceInto,
+  type AssetRefInsertItem,
+  type StagedAssetRef,
   type StagedResourceRef,
 } from './chat/stagedResources';
 import type { ResourceRefInsertItem } from './chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from './chat/ResourcePickerSuggestion';
+import type {
+  AssetGridPickerHandle,
+  AssetGridQuery,
+  AssetGridRow,
+} from './assets/AssetGridPicker';
+import { searchAssetsAccessible } from '../services/assetsService';
 import { EmptyState } from './chat/EmptyState';
 import { useToast } from './Toast';
 import { useChatAttachmentUpload } from '../hooks/useChatAttachmentUpload';
@@ -62,6 +75,7 @@ import { useComposerPaste } from '../hooks/useComposerPaste';
 import { useResourceSearch } from '../hooks/useResourceSearch';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 import { useComposerResourceAttach } from '../hooks/useComposerResourceAttach';
+import { useComposerAssetAttach } from '../hooks/useComposerAssetAttach';
 import { useResourceProcessingFollowUps } from '../hooks/useResourceProcessingFollowUps';
 import { providerErrorMessage } from '../utils/providerErrorMessage';
 
@@ -241,8 +255,15 @@ export function AIChatPanel({
   const [attachmentFailureCount, setAttachmentFailureCount] = useState<number | undefined>(
     undefined,
   );
+  // P5: the failures themselves, so the banner can name the REASON. Kept
+  // beside the count rather than replacing it — a turn can report failures
+  // whose reason this build has no string for, and the count is still true.
+  const [attachmentFailures, setAttachmentFailures] = useState<
+    AttachmentFailure[] | undefined
+  >(undefined);
   useEffect(() => {
     setAttachmentFailureCount(undefined);
+    setAttachmentFailures(undefined);
   }, [activeSessionId]);
 
   // Agent-scoped mode: when agentSlug prop is provided the panel locks to that
@@ -351,6 +372,13 @@ export function AIChatPanel({
   const stageResource = useCallback((item: ResourceRefInsertItem) => {
     setStagedResources((prev) => stageResourceInto(prev, item));
   }, []);
+  // Library ASSETS (P5) — their own list beside the resources above. Same
+  // functional-update rule, and for the same reason: the pendingAsset effect
+  // must not re-fire because the list it just wrote to changed identity.
+  const [stagedAssets, setStagedAssets] = useState<StagedAssetRef[]>([]);
+  const stageAsset = useCallback((item: AssetRefInsertItem) => {
+    setStagedAssets((prev) => stageAssetInto(prev, item));
+  }, []);
 
   // --- Resource @-mention picker state ---
   // Editor ref so we can call insertResourceRef when user picks an item.
@@ -392,6 +420,15 @@ export function AIChatPanel({
     '' | 'video' | 'image' | 'doc' | 'audio' | 'pdf'
   >('');
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  // P5: the picker's sixth tab. Library ASSETS are a different population from
+  // the five resource kinds, so they get their own active flag rather than a
+  // seventh `activeKind` value — the two axes answer to different searches and
+  // a shared enum would make every read re-derive which one it is holding.
+  const [mentionAssetsTab, setMentionAssetsTab] = useState(false);
+  // `null` until the grid answers: an unvisited Assets tab must not badge a
+  // "0" the user reads as "my library is empty".
+  const [mentionAssetCount, setMentionAssetCount] = useState<number | null>(null);
+  const mentionAssetPickerRef = useRef<AssetGridPickerHandle | null>(null);
   const { data: mentionSearchData, loading: mentionLoading } = useResourceSearch(
     mentionQuery,
     mentionActiveKind,
@@ -403,16 +440,33 @@ export function AIChatPanel({
     setMentionPickerOpen(true);
   }, []);
 
+  /**
+   * Close, and forget which tab was open.
+   *
+   * The reset belongs on CLOSE, not on open: `handleMentionRequest` fires on
+   * every keystroke of the live query, so resetting there would bounce the
+   * user off the Assets tab the moment they typed the next character. Closing
+   * ends the mention session, which is the only moment the choice stops
+   * meaning anything.
+   */
+  const closeMentionPicker = useCallback(() => {
+    setMentionPickerOpen(false);
+    setMentionAssetsTab(false);
+    // The next `@` opens a fresh session; a count carried over from the last
+    // one would badge a number for a search this session never ran.
+    setMentionAssetCount(null);
+  }, []);
+
   // Item 1: close picker on Escape or click-outside
   useEffect(() => {
     if (!mentionPickerOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMentionPickerOpen(false);
+      if (e.key === 'Escape') closeMentionPicker();
     };
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('[data-testid="resource-picker"]')) {
-        setMentionPickerOpen(false);
+        closeMentionPicker();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -421,7 +475,7 @@ export function AIChatPanel({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onClick);
     };
-  }, [mentionPickerOpen]);
+  }, [mentionPickerOpen, closeMentionPicker]);
 
   // Resource → composer, for both entry points: the @ picker below and the
   // library context menu's "Send to Agent" (which arrives on the
@@ -440,6 +494,16 @@ export function AIChatPanel({
     notify: notifyProcessing,
     t,
   });
+  // Asset → composer, from the asset sheet's sidebar and the shelf card's
+  // action menu (both via `utils/sendAssetToAgent`). Its own hook, so each
+  // one-shot channel keeps exactly one effect watching it.
+  useComposerAssetAttach({
+    stageAsset,
+    focusComposer,
+    selectedAgentSlug,
+    setSelectedAgentSlug,
+    lockedAgent,
+  });
   // The rest of the F1 chain, watched from the Task Center: a transcription
   // started here has no summary until the transcript lands, and a
   // transcription REFUSED because an audio extraction held the slot has to
@@ -447,19 +511,99 @@ export function AIChatPanel({
   // report through the same toast.
   useResourceProcessingFollowUps({ notify: notifyProcessing, t });
 
+  /** Delete the "@query" the user typed to open the picker. Once the pick is
+   *  staged above the composer that text is a placeholder for nothing, and
+   *  leaving it behind sends "@clip.mp4" as message body. */
+  const dropMentionTrigger = useCallback(() => {
+    (chatEditorRef.current?.commands as unknown as {
+      removeMentionTrigger?: () => boolean;
+    } | undefined)?.removeMentionTrigger?.();
+  }, []);
+
   const handleMentionSelect = useCallback(
     (item: ResourceSearchResult) => {
       attachResource(item);
-      // The asset now lives above the composer, so the "@query" the user
-      // typed to get here is no longer a placeholder for anything — leaving
-      // it behind would send "@clip.mp4" as message text.
-      (chatEditorRef.current?.commands as unknown as {
-        removeMentionTrigger?: () => boolean;
-      } | undefined)?.removeMentionTrigger?.();
-      setMentionPickerOpen(false);
+      dropMentionTrigger();
+      closeMentionPicker();
       setMentionQuery('');
     },
-    [attachResource],
+    [attachResource, dropMentionTrigger, closeMentionPicker],
+  );
+
+  /**
+   * The Assets tab's transport: every team the user belongs to, plus the
+   * system presets. No `scope_id` — a chat window outlives any one workspace
+   * route, so the server authorizes by membership instead (ruling B/G), which
+   * is the same predicate the backend's asset-ref resolver reads.
+   */
+  const fetchMentionAssets = useCallback(
+    (params: AssetGridQuery, signal: AbortSignal): Promise<AssetGridRow[]> =>
+      searchAssetsAccessible(params.q ?? '', {
+        type: params.type ?? undefined,
+        library: params.library,
+        limit: params.limit,
+        signal,
+      }),
+    [],
+  );
+
+  /**
+   * ↑ / ↓ / Enter, routed from the composer to the open picker.
+   *
+   * Only the ASSETS tab is claimed. The five resource tabs have never moved
+   * their highlight with the arrows — `mentionActiveIndex` has been pinned at
+   * 0 since the picker shipped — and claiming Enter for a row the user cannot
+   * see selected would silently swallow a send. That gap is real and named in
+   * the PR's known items; closing it is a change to the resource path, which
+   * this task deliberately leaves alone.
+   */
+  const handleMentionKey = useCallback(
+    (key: 'ArrowUp' | 'ArrowDown' | 'Enter'): boolean => {
+      if (!mentionPickerOpen || !mentionAssetsTab) return false;
+      const handle = mentionAssetPickerRef.current;
+      if (!handle) return false;
+      if (key === 'ArrowDown') {
+        handle.move(1);
+        return true;
+      }
+      if (key === 'ArrowUp') {
+        handle.move(-1);
+        return true;
+      }
+      // Enter. `commitActive` answers false when nothing is highlighted, and
+      // that false is what lets the keystroke fall through to send.
+      return handle.commitActive();
+    },
+    [mentionPickerOpen, mentionAssetsTab],
+  );
+
+  /**
+   * Picking an asset STAGES it — it does not insert a tiptap node.
+   *
+   * An asset is not a span of the sentence: the backend resolves it into a
+   * consistency prompt plus a primary image, which is a turn-level attachment,
+   * not a word. Same holding area, same removal affordance and same send path
+   * as the sheet's "Send To Agent" (P5 Task 5), so the two entry points cannot
+   * disagree about what was attached.
+   */
+  const handleMentionAssetSelect = useCallback(
+    (row: AssetGridRow) => {
+      stageAsset({
+        id: row.id,
+        name: row.name,
+        asset_type: row.asset_type,
+        // v1 has no loadout picker at either entry point; null is the
+        // backend's "use the default loadout", not a missing value.
+        loadout_id: null,
+        cover_file_id: row.cover_file_id,
+        scope_id: row.scope_id ?? null,
+      });
+      dropMentionTrigger();
+      closeMentionPicker();
+      setMentionQuery('');
+      focusComposer();
+    },
+    [stageAsset, dropMentionTrigger, closeMentionPicker, focusComposer],
   );
 
   // Paste + drag-drop upload hooks — all three funnel files into handleFiles
@@ -686,6 +830,7 @@ export function AIChatPanel({
 
       setSending(true);
       setAttachmentFailureCount(undefined);
+      setAttachmentFailures(undefined);
 
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
@@ -695,6 +840,11 @@ export function AIChatPanel({
       // in a restored draft AND everything staged in the attachment row.
       const sentResources = stagedResources;
       const sentRefs = mergeRefAttachments(refAttachments, sentResources);
+      // Assets have one source (the staged row — there is no inline asset
+      // node), but the dedup still matters: two entries for one asset would
+      // be resolved, rendered and billed twice.
+      const sentAssets = stagedAssets;
+      const sentAssetRefs = mergeAssetAttachments(sentAssets);
       // Both halves, in the shape the reducer will persist. The refs used to
       // be left out here, so a just-sent turn showed no chip until the
       // history reload put one there — the optimistic bubble and the
@@ -713,6 +863,16 @@ export function AIChatPanel({
           mime: r.mime,
           alt_text: r.name,
         })),
+        // The asset half of the optimistic bubble. `name`, not `alt_text`:
+        // that is the key the asset attachment carries on the wire and the
+        // one the reducer persists, so the optimistic chip and the reloaded
+        // one read the same field rather than agreeing by luck.
+        ...sentAssetRefs.map((r) => ({
+          kind: r.kind,
+          asset_id: r.asset_id,
+          loadout_id: r.loadout_id,
+          name: r.name,
+        })),
       ];
       const tempUser: AIChatMessage = {
         id: `tmp-user-${Date.now()}`,
@@ -728,6 +888,7 @@ export function AIChatPanel({
       // in the message bubble. Restored on failure so the user can retry.
       setStagedAttachments([]);
       setStagedResources([]);
+      setStagedAssets([]);
 
       // Streaming assistant bubble — created on the first delta, grown in
       // place, then replaced by the authoritative row on history reload.
@@ -754,6 +915,10 @@ export function AIChatPanel({
             mime: r.mime,
             alt_text: r.name,
           })),
+          // asset_ref: already the exact wire shape (`toAssetAttachment`
+          // builds it), so it goes out unmapped. Reshaping it here would be a
+          // second place for the contract to drift from the schema.
+          ...sentAssetRefs,
         ];
         if (allAttachments.length > 0) {
           opts.attachments = allAttachments;
@@ -802,6 +967,7 @@ export function AIChatPanel({
             const failures = evt.data?.attachment_failures;
             if (Array.isArray(failures) && failures.length > 0) {
               setAttachmentFailureCount(failures.length);
+              setAttachmentFailures(failures as AttachmentFailure[]);
             }
           }
           // Unknown event types are no-ops (forward-compat per the
@@ -828,6 +994,7 @@ export function AIChatPanel({
           ));
           setStagedAttachments(sentAttachments);
           setStagedResources(sentResources);
+          setStagedAssets(sentAssets);
         } else {
           const landed = serverMsgs
             .slice(-3)
@@ -835,6 +1002,7 @@ export function AIChatPanel({
           if (!landed) {
             setStagedAttachments(sentAttachments);
             setStagedResources(sentResources);
+            setStagedAssets(sentAssets);
           }
         }
       } finally {
@@ -853,7 +1021,8 @@ export function AIChatPanel({
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
-     addToast, planMode, stagedAttachments, stagedResources, contextCapsule, t],
+     addToast, planMode, stagedAttachments, stagedResources, stagedAssets,
+     contextCapsule, t],
   );
 
   const handleSuggest = useCallback(
@@ -1172,7 +1341,10 @@ export function AIChatPanel({
               />
             ))}
 
-            <AttachmentFailureBanner count={attachmentFailureCount} />
+            <AttachmentFailureBanner
+              count={attachmentFailureCount}
+              failures={attachmentFailures}
+            />
 
             {/* Typing dots only until the first streamed delta arrives —
                 after that the growing assistant bubble is the indicator. */}
@@ -1196,13 +1368,17 @@ export function AIChatPanel({
             wrapping row. Only rendered when something is staged; the picker
             button itself lives next to ChatInput. */}
         {activeSessionId && effectiveAgentSlug
-          && (stagedAttachments.length > 0 || stagedResources.length > 0) && (
+          && (stagedAttachments.length > 0
+            || stagedResources.length > 0
+            || stagedAssets.length > 0) && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-t border-ink-800 bg-ink-900/30">
             <ChatAttachmentPicker
               attachments={stagedAttachments}
               onChange={setStagedAttachments}
               resources={stagedResources}
               onResourcesChange={setStagedResources}
+              assets={stagedAssets}
+              onAssetsChange={setStagedAssets}
               disabled={sending}
             />
           </div>
@@ -1250,9 +1426,21 @@ export function AIChatPanel({
               loading={mentionLoading}
               counts={mentionSearchData.counts}
               activeKind={mentionActiveKind}
-              onKindChange={setMentionActiveKind}
+              onKindChange={(kind) => {
+                setMentionAssetsTab(false);
+                setMentionActiveKind(kind);
+              }}
               onSelect={handleMentionSelect}
               activeIndex={mentionActiveIndex}
+              assets={{
+                active: mentionAssetsTab,
+                onActivate: () => setMentionAssetsTab(true),
+                count: mentionAssetCount,
+                onCountChange: setMentionAssetCount,
+                onSelect: handleMentionAssetSelect,
+                fetch: fetchMentionAssets,
+                pickerRef: mentionAssetPickerRef,
+              }}
             />
           </div>
         )}
@@ -1272,7 +1460,9 @@ export function AIChatPanel({
         {/* Chat input + B: attachment picker (when no staged chips above) */}
         <div className="flex items-end gap-1 bg-ink-900 border-t border-ink-700/50">
           {activeSessionId && effectiveAgentSlug
-            && stagedAttachments.length === 0 && stagedResources.length === 0 && (
+            && stagedAttachments.length === 0
+            && stagedResources.length === 0
+            && stagedAssets.length === 0 && (
             <div className="pl-2 pb-2">
               <ChatAttachmentPicker
                 attachments={[]}
@@ -1294,9 +1484,12 @@ export function AIChatPanel({
                     : t('chat.placeholder', 'Type a message...')
               }
               onMentionRequest={handleMentionRequest}
+              onMentionKey={handleMentionKey}
               editorRef={chatEditorRef}
               hasAttachments={
-                stagedAttachments.length > 0 || stagedResources.length > 0
+                stagedAttachments.length > 0
+                || stagedResources.length > 0
+                || stagedAssets.length > 0
               }
             />
           </div>

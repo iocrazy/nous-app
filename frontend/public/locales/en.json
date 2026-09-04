@@ -1734,7 +1734,11 @@
       "open": "Open {{name}}",
       "missing": "Missing: {{slots}}",
       "coverage": "{{filled}} of {{total}} slots filled",
-      "moreProjects": "+{{n}}"
+      "moreProjects": "+{{n}}",
+      "actions": "Actions for {{name}}"
+    },
+    "agent": {
+      "staged": "Added {{name}} To The Chat Composer"
     },
     "presets": {
       "title": "System Presets",
@@ -1888,7 +1892,6 @@
       "notLoopable": "Not Loopable",
       "sendToCanvas": "Send To Canvas",
       "sendToAgent": "Send To Agent",
-      "arrivesWithP5": "Arrives with P5",
       "copyLoadoutPrompt": "Copy Loadout Prompt",
       "promptCopied": "Prompt Copied",
       "copyFailed": "Could Not Copy To The Clipboard",
@@ -3601,6 +3604,15 @@
     "rejectedNote": "Rejected — the agent will not run this action.",
     "approvalResolved": "This request was already handled.",
     "attachmentFailures": "{{count}} attachment(s) failed to load",
+    "attachmentFailureReason": {
+      "unknown": "The Attachment Could Not Be Used",
+      "unknownCount": "{{n}} Attachments Could Not Be Used",
+      "asset_not_accessible": "One Asset Is Not In A Workspace You Belong To",
+      "asset_deleted": "One Asset Has Been Deleted",
+      "asset_no_primary_image": "One Asset Has No Main Image Yet",
+      "asset_type_unknown": "One Asset Has A Type This Version Cannot Read",
+      "attachment_limit_exceeded": "Only The First {{n}} Assets Were Used"
+    },
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",
@@ -3628,7 +3640,8 @@
       "tooMany": "Too many files ({{count}} > {{max}})",
       "uploadFailed": "Upload \"{{name}}\" failed: {{message}}",
       "dropToUpload": "Drop files to attach",
-      "resourceRef": "Attached resource"
+      "resourceRef": "Attached resource",
+      "assetRef": "Attached asset"
     },
     "followups": {
       "title": "Followups",
@@ -3655,7 +3668,15 @@
       "noResults": "No resources match \"{{q}}\"",
       "hintKbd": "↑↓ navigate · ↵ insert · Esc cancel",
       "statusProcessing": "Processing…",
-      "statusUnprocessed": "Not processed yet"
+      "statusUnprocessed": "Not processed yet",
+      "assets": "Assets",
+      "assetsAllTypes": "All",
+      "assetsLoading": "Loading…",
+      "assetsEmpty": "No assets found",
+      "assetsError": "Could not load the asset library",
+      "assetsPreview": "Preview",
+      "assetsCount_one": "{{count}} asset",
+      "assetsCount_other": "{{count}} assets"
     },
     "sidebarTitle": "Channels",
     "newChannel": "New channel",

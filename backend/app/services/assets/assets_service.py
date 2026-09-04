@@ -54,6 +54,7 @@ from app.services.assets.bundle import build_bundle
 from app.services.assets.legacy_refs import LEGACY_KINDS, legacy_table_for_kind
 from app.services.assets.slot_generation import (
     SlotNotGeneratable,
+    files_by_slot,
     reference_order,
     slot_prompt,
 )
@@ -456,6 +457,48 @@ class AssetsService:
             # "recent" order inside each group.
             out.sort(key=lambda r: 0 if r["readiness"]["state"] == "draft" else 1)
         return out
+
+    async def search_accessible_assets(
+        self,
+        user_id: str,
+        *,
+        q: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        library: str = "all",
+        limit: int = 24,
+    ) -> List[Dict[str, Any]]:
+        """Every asset the USER can read, across every team they belong to —
+        the chat @-picker's shelf.
+
+        The scope-less sibling of :meth:`list_assets`, and the ONLY difference
+        that matters is where visibility comes from: this one has no
+        ``scope_id`` to gate on, because a chat turn has no workspace. Ruling B
+        of the P5 plan puts that predicate in exactly one place —
+        ``AssetsRepository.list_accessible`` — which the chat resolver reads
+        through too, so the picker cannot offer an asset the resolver would
+        then refuse to attach.
+
+        ``include_deleted`` is deliberately NOT a parameter here. The
+        repository has it so a caller can tell "deleted" from "not yours"
+        when it already holds an id; a SEARCH answering with soft-deleted rows
+        would put them back on a shelf the user emptied.
+
+        The rows are derived and serialized by the SAME pipeline the shelf
+        uses (:meth:`_derived`), so the card the picker renders is the card
+        ``GET /assets`` renders — one serializer, not two that drift.
+
+        ``readiness`` is not a filter here (the shelf has one): the picker's
+        question is "which asset did I mean", and a draft character is still
+        the one the user meant.
+        """
+        rows = await self.assets.list_accessible(
+            str(user_id),
+            q=q,
+            asset_type=asset_type,
+            library=library,
+            limit=int(limit),
+        )
+        return await self._derived(rows)
 
     async def count_by_type(self, scope_id: int) -> Dict[str, int]:
         """Per-type tallies for one scope — the sidebar's six badges.
@@ -1400,21 +1443,12 @@ class AssetsService:
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Group the asset's files by slot, honouring the loadout as a filter.
 
-        A loadout-scoped file belongs to ONE outfit. The prompt already treats
-        the loadout as a filter (``_linked_asset_rows``); letting a file pinned
-        to a DIFFERENT loadout become a reference would make one plan describe
-        two outfits — a costume in the picture that the prompt deliberately
-        left out. With no loadout requested, only the unpinned files apply.
+        Thin alias over ``slot_generation.files_by_slot``, which owns the rule
+        (a chat asset reference is the third caller and must pick the same
+        primary image this service does). Kept as a method because the callers
+        inside this class read better for it.
         """
-        out: Dict[str, List[Dict[str, Any]]] = {}
-        for f in files:
-            pinned = f.get("loadout_id")
-            if pinned is not None and (
-                loadout is None or int(pinned) != int(loadout["id"])
-            ):
-                continue
-            out.setdefault(f["slot"], []).append(f)
-        return out
+        return files_by_slot(files, loadout)
 
     async def _slot_plan(
         self,
@@ -1455,10 +1489,10 @@ class AssetsService:
                 f"The '{slot}' slot of a {asset_type} asset cannot be generated",
             )
 
-        files_by_slot = self._files_by_slot(
+        slot_map = self._files_by_slot(
             await self.relations.list_files(asset_id), loadout
         )
-        refs = reference_order(files_by_slot, asset_type, max_refs=MAX_SLOT_REFERENCES)
+        refs = reference_order(slot_map, asset_type, max_refs=MAX_SLOT_REFERENCES)
         return {
             "positive": prompt["positive"],
             "negative": prompt["negative"],
@@ -1524,21 +1558,21 @@ class AssetsService:
                 {"model": str(model)},
             )
         linked = await self._linked_asset_rows(row, int(scope_id), loadout)
-        files_by_slot = self._files_by_slot(
+        slot_map = self._files_by_slot(
             await self.relations.list_files(int(asset_id)), loadout
         )
-        await self._stamp_image_availability(files_by_slot)
+        await self._stamp_image_availability(slot_map)
         return build_bundle(
             row,
             loadout,
             linked,
-            files_by_slot,
+            slot_map,
             caps,
             selected_resource_ids=selected_file_ids,
         )
 
     async def _stamp_image_availability(
-        self, files_by_slot: Dict[str, List[Dict[str, Any]]]
+        self, slot_map: Dict[str, List[Dict[str, Any]]]
     ) -> None:
         """Mark each file row with whether it has image bytes to send.
 
@@ -1559,9 +1593,7 @@ class AssetsService:
         the file's BYTES to an outside provider, this one returns ids the
         caller can already read off ``GET /assets/{id}``.
         """
-        candidates = {
-            int(f["resource_id"]) for rows in files_by_slot.values() for f in rows
-        }
+        candidates = {int(f["resource_id"]) for rows in slot_map.values() for f in rows}
         if not candidates:
             return
         rows = await self.relations.resource_media_rows(
@@ -1570,7 +1602,7 @@ class AssetsService:
         available = {
             rid for rid in candidates if _reference_stored_path(rows.get(rid) or {})
         }
-        for slot_rows in files_by_slot.values():
+        for slot_rows in slot_map.values():
             for f in slot_rows:
                 f["has_image"] = int(f["resource_id"]) in available
 

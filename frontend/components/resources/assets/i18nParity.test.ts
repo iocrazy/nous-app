@@ -128,6 +128,14 @@ describe('Asset library i18n parity', () => {
     'assets.card.missing',
     'assets.card.coverage',
     'assets.card.moreProjects',
+    // The card's action menu (P5 Task 5). `actions` is the trigger's ENTIRE
+    // accessible name — the button is an icon — so a missing zh value leaves
+    // screen-reader users on the shelf with an unnamed control.
+    'assets.card.actions',
+    // The confirmation toast both Send To Agent entry points fire. Its own
+    // sub-namespace rather than `assets.sheet.*`: the shelf card raises it
+    // too, and it is not about the sheet.
+    'assets.agent.staged',
     'assets.presets.title',
     'assets.presets.hint',
     'assets.empty.none',
@@ -211,10 +219,11 @@ describe('Asset library i18n parity', () => {
     'assets.sheet.notLoopable',
     'assets.sheet.sendToCanvas',
     'assets.sheet.sendToAgent',
-    // `arrivesWithP4` is gone: Send To Canvas shipped in P4 Task 6, so the
-    // button no longer wears a "coming later" title and the string has no
-    // renderer. `arrivesWithP5` stays — Send To Agent is still a placeholder.
-    'assets.sheet.arrivesWithP5',
+    // `arrivesWithP4` and `arrivesWithP5` are BOTH gone now. Send To Canvas
+    // shipped in P4 Task 6 and Send To Agent in P5 Task 5, so neither button
+    // wears a "coming later" title any more and neither string has a
+    // renderer. A placeholder string outliving its placeholder is how a
+    // shipped surface keeps telling users it has not shipped.
     // Send To Canvas's own dialog (P4 Task 6). Every failure reason has its
     // own line: a read-only canvas, a lost optimistic-lock race and a dead
     // request are three different things to do next.
@@ -578,6 +587,8 @@ describe('Asset library i18n parity', () => {
     const placeholders: Record<string, string[]> = {
       'assets.newOfType': ['type'],
       'assets.card.open': ['name'],
+      'assets.card.actions': ['name'],
+      'assets.agent.staged': ['name'],
       'assets.card.missing': ['slots'],
       'assets.card.coverage': ['filled', 'total'],
       'assets.card.moreProjects': ['n'],

@@ -15,10 +15,16 @@ file does that.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from app.repositories.assets_repository import AssetsRepository, _like_escape
+from app.repositories.assets_repository import (
+    AssetsRepository,
+    _coerce_user_id,
+    _like_escape,
+)
 
 SCOPE = 727145299382534200
 
@@ -307,3 +313,118 @@ def test_resolve_legacy_is_deterministic():
     sql = _legacy_sql()
     assert "ORDER BY public.assets.id ASC" in sql
     assert "LIMIT" in sql
+
+
+# ── membership-wide access (P5 ruling B) ───────────────────────────────────
+#
+# ``list_accessible`` is exercised behaviourally against an in-memory fixture in
+# tests/services/ai/chat/test_asset_ref_resolver.py, which is where the
+# equivalence with ``get`` is pinned. What that evaluator cannot answer is what
+# PostgreSQL is actually asked — specifically whether the ILIKE escape survives,
+# which is the difference between a search that filters and one that silently
+# widens. These pins cover that half.
+
+USER = "11111111-1111-1111-1111-111111111111"
+
+
+def _acc_sql(**kw) -> str:
+    stmt = AssetsRepository()._accessible_stmt(USER, **kw)
+    return " ".join(str(stmt.compile(dialect=postgresql.dialect())).split())
+
+
+def test_access_is_membership_or_preset_and_never_a_single_scope():
+    sql = _acc_sql()
+    assert "FROM public.team_members" in sql
+    assert "public.assets.is_system_preset IS true" in sql
+    # No scope_id equality anywhere: a chat turn has none to give, and one that
+    # crept in would quietly answer for a single team.
+    assert "public.assets.scope_id = " not in sql
+
+
+def test_soft_deleted_rows_are_excluded_by_default():
+    assert "public.assets.deleted_at IS NULL" in _acc_sql()
+
+
+def test_include_deleted_drops_only_the_deleted_filter():
+    """The "was it deleted or can you not see it" probe must not also relax
+    membership — that would answer a question about somebody else's asset."""
+    sql = _acc_sql(include_deleted=True)
+    assert "public.assets.deleted_at IS NULL" not in sql
+    assert "FROM public.team_members" in sql
+    assert "public.assets.is_system_preset IS true" in sql
+
+
+def test_the_search_term_keeps_its_ilike_escape_on_both_columns():
+    sql = _acc_sql(q="a_b")
+    # Two literal backslashes in the SQL text: SQLAlchemy escapes the escape
+    # character. The same rendering as ``_list_stmt`` — the two must agree, or
+    # the shelf and the chat search answer differently for ``a_b``.
+    assert sql.count("ESCAPE '\\\\'") == 2
+    assert "public.assets.name ILIKE" in sql
+    assert "public.assets.description ILIKE" in sql
+
+
+def test_a_search_term_is_bound_not_interpolated():
+    assert "DROP TABLE" not in _acc_sql(q="x'; DROP TABLE assets; --")
+
+
+def test_library_none_emits_no_membership_predicate():
+    """None means "both shelf and project assets" — a WHERE true would hide the
+    difference between unfiltered and filtered-to-everything."""
+    # The column is always in the SELECT list; what must be absent is the
+    # PREDICATE.
+    assert "public.assets.in_library IS" not in _acc_sql()
+    assert "public.assets.in_library IS true" in _acc_sql(library="in")
+
+
+def test_an_unknown_library_filter_still_raises():
+    with pytest.raises(ValueError, match="unsupported library filter"):
+        _acc_sql(library="everything")
+
+
+def test_no_limit_by_default_and_a_clamped_one_when_asked():
+    assert "LIMIT" not in _acc_sql()
+    stmt = AssetsRepository()._accessible_stmt(USER, limit=9999)
+    assert stmt._limit == 200
+
+
+# ── the caller id is normalised before it is bound ──────────────────────────
+#
+# ``team_members.user_id`` is a ``uuid`` column and every caller hands the id
+# down as a ``str`` (it comes off a JWT). asyncpg accepts a string there, so
+# the membership arm worked for reasons nothing in the codebase asserted — a
+# driver leniency, not a contract. These pin the normalisation instead.
+
+
+def _acc_bind_values(user_id):
+    stmt = AssetsRepository()._accessible_stmt(user_id)
+    return list(stmt.compile(dialect=postgresql.dialect()).params.values())
+
+
+def test_a_string_user_id_is_bound_as_a_uuid_not_as_text():
+    values = _acc_bind_values(USER)
+    assert uuid.UUID(USER) in values
+    assert USER not in values, "the raw string reached the bind parameter"
+
+
+def test_a_uuid_user_id_is_passed_through_unchanged():
+    """Both shapes must produce the SAME bind, or the two call sites (chat
+    resolver, search endpoint) could differ on whether a row is visible."""
+    assert _acc_bind_values(uuid.UUID(USER)) == _acc_bind_values(USER)
+
+
+@pytest.mark.parametrize("bad", ["", "not-a-uuid", "12345", None, 7])
+def test_a_malformed_user_id_raises_where_it_is_wrong(bad):
+    """Loudly, at the boundary. Binding it anyway defers the failure to a
+    driver error three frames down, and the honest name for the condition
+    ("this is not a user id") is lost by then."""
+    with pytest.raises(ValueError, match="not a valid user id"):
+        _coerce_user_id(bad)
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", None])
+def test_the_statement_builder_refuses_a_malformed_user_id_too(bad):
+    """The raise must be reachable through the method callers actually use —
+    a helper that validates and a builder that skips it would be no guard."""
+    with pytest.raises(ValueError, match="not a valid user id"):
+        AssetsRepository()._accessible_stmt(bad)

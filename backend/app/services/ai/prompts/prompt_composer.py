@@ -33,16 +33,18 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
 from app.boundary.frame_markers import (
     escape_frame_attr,
     escape_frame_body,
+    escape_frame_prose,
 )
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
 from app.schemas.ai_library import ComposedSystemPrompt
+from app.services.assets.chat_ref import ChatAssetRef
 from app.utils.ai_status import ai_status_str
 
 CACHE_BOUNDARY_MARKER = "<!-- CACHE_BOUNDARY -->"
@@ -634,13 +636,36 @@ class PromptComposer:
         return h.hexdigest()
 
 
-def render_available_resources(refs: list[dict] | None) -> str:
-    """Render the ``<available_resources>`` block for resource_ref refs.
+def render_available_resources(
+    refs: list[dict] | None,
+    assets: Sequence[ChatAssetRef] | None = None,
+) -> str:
+    """Render the ``<available_resources>`` block for this turn's @-mentions.
 
-    Returns empty string when there are no refs so the system message
-    cache key stays stable for turns without any @-mention.
+    Two kinds of entry share one frame: ``<resource … />`` (a file the model
+    can fetch) and ``<asset …>consistency prompt</asset>`` (a library entity —
+    a character, a location — whose picture is one of the resources). They are
+    siblings on purpose (P5 ruling A): ``<asset>`` is an ELEMENT INSIDE the
+    frame we own, not a frame of its own, so it is deliberately absent from
+    ``OWNED_FRAMES`` — registering it there would mangle every legitimate
+    mention of the word in a prompt for no authority gained.
+
+    The consistency prompt is nonetheless the only user-written, unbounded,
+    newline-bearing value this frame carries, and the frame is read LINE BY
+    LINE. So it goes through ``escape_frame_prose``, not ``escape_frame_body``
+    (final review I1): flattened to one line so it cannot emit a forged
+    ``  <resource … />`` row, and entity-escaped so it cannot forge one
+    in-line either. A user-authored ``</asset>`` consequently does not even
+    truncate its own entry any more.
+
+    Assets render AFTER every resource so the primary images they point at are
+    already on the page when the model reads ``primary_resource_id``.
+
+    Returns empty string when there is nothing to render — refs AND assets
+    both empty — so the system message cache key stays stable for turns
+    without any @-mention.
     """
-    if not refs:
+    if not refs and not assets:
         return ""
 
     def _fmt_size(n: int | None) -> str:
@@ -675,7 +700,7 @@ def render_available_resources(refs: list[dict] | None) -> str:
 
     lines = ["<available_resources>"]
     any_status = False
-    for r in refs:
+    for r in refs or []:
         # Every value is escaped, not just the obviously user-owned ones:
         # picking per-attribute is how the next attribute added here ends up
         # raw. `name` is the live vector — users rename resources freely.
@@ -697,7 +722,51 @@ def render_available_resources(refs: list[dict] | None) -> str:
             # free to open a frame the model trusts.
             attrs.append(f'brief="{escape_frame_attr(r["brief"])}"')
         lines.append(f"  <resource {' '.join(attrs)} />")
+    for a in assets or []:
+        # Same posture as the resource attributes above: every value goes
+        # through `escape_frame_attr`, including the ones that look
+        # machine-generated. `name` is user-typed, and an id that arrived as a
+        # string from a wire payload is only as trustworthy as its source.
+        asset_attrs = [
+            f'id="{escape_frame_attr(a.asset_id)}"',
+            f'type="{escape_frame_attr(a.asset_type)}"',
+            f'name="{escape_frame_attr(a.name)}"',
+            f'scope="{escape_frame_attr(a.scope_id)}"',
+        ]
+        # Absent, not empty: `primary_resource_id=""` reads as an id the model
+        # may pass to ResourceFetch, and it would fail there with nothing
+        # explaining why. A missing attribute plus has_image="false" says
+        # "there is no picture to fetch" without inviting the call. `loadout`
+        # follows the same rule for symmetry — a v1 client never picks one.
+        if a.primary_resource_id is not None:
+            asset_attrs.append(
+                f'primary_resource_id="{escape_frame_attr(a.primary_resource_id)}"'
+            )
+        # Spelled here, not in the dataclass: `has_image` is a real bool and
+        # Python would render it "True"/"False", which is not what an XML-ish
+        # attribute means to the model.
+        asset_attrs.append(f'has_image="{"true" if a.has_image else "false"}"')
+        if a.loadout_id is not None:
+            asset_attrs.append(f'loadout="{escape_frame_attr(a.loadout_id)}"')
+        # `escape_frame_prose`, NOT `escape_frame_body`: this frame is a
+        # line-oriented catalogue and the consistency prompt is the only
+        # user-written, newline-bearing, model-visible value in it. Body
+        # escaping alone leaves the newlines and the `<`, which is enough to
+        # emit a `  <resource … />` line indistinguishable from one we wrote
+        # (final review I1). Flattening kills the forged row, entity-escaping
+        # kills a forged element that stays on this line.
+        body = escape_frame_prose(a.consistency_prompt)
+        lines.append(f"  <asset {' '.join(asset_attrs)}>{body}</asset>")
     lines.append("</available_resources>")
+    # Only describe ResourceFetch when this turn actually has something to
+    # fetch. The chat service registers the tool on RESOURCE refs, so an
+    # assets-only turn (every asset a `prompt` type, or none with a readable
+    # primary) has no tool at all — printing six lines of video/doc/pdf modes
+    # there tells the model about a tool it does not have, and about kinds
+    # nothing on the page even is.
+    fetchable_assets = [a for a in (assets or []) if a.primary_resource_id]
+    if not refs and not fetchable_assets:
+        return "\n".join(lines)
     lines.append("")
     lines.append("Use the ResourceFetch tool to load any of these on demand:")
     lines.append("  ResourceFetch(resource_id, mode?, args?)")
@@ -715,6 +784,17 @@ def render_available_resources(refs: list[dict] | None) -> str:
     lines.append("  - mode for pdf: excerpt (default) | page (args.page)")
     lines.append("  - mode for image: omit (returns image part)")
     lines.append("  - mode for audio: transcript (default)")
+    if fetchable_assets:
+        # The <asset> body is the consistency text; the picture is NOT inlined.
+        # Without this line the model has an id attribute and no stated way to
+        # turn it into an image, which reads as "the asset has no picture".
+        # Gated on an asset that HAS a primary: when none does, the sentence
+        # explains how to use an attribute that appears nowhere on the page.
+        lines.append(
+            "  - an <asset> entry carries its consistency prompt as the body; "
+            "fetch its picture with ResourceFetch(primary_resource_id, "
+            "mode=image) when has_image is true"
+        )
     if any_status:
         # Without this the model sees an opaque attribute and still relays a
         # bare failure — the exact complaint that motivated the change.

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Copy, Check, FileText } from 'lucide-react';
+import { Copy, Check, FileText, Shapes } from 'lucide-react';
 
 import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
@@ -217,6 +217,46 @@ function ResourceRefChip({
   );
 }
 
+/**
+ * A library ASSET the user attached, as it appears in their own bubble.
+ *
+ * Same family as the resource chip beside it (agent tokens, name, no × —
+ * history is not editable), and the same reason for its shape: the persisted
+ * attachment keeps only the whitelisted keys, so a reloaded bubble knows the
+ * asset by `asset_id` / `name` and nothing else.
+ *
+ * NO COVER AND NO TYPE ICON, both on purpose and for one reason: neither
+ * `cover_file_id` nor `asset_type` crosses the boundary. They are
+ * composer-side snapshots; the wire shape omits them and the reducer's key
+ * whitelist would drop them anyway. Guessing a cover from `asset_id` would
+ * 404 on every render (an asset id is not a resource id), and painting a type
+ * icon from the optimistic snapshot alone would make the chip CHANGE the
+ * moment history reloaded — the exact popping this strip was fixed to stop.
+ * One neutral library glyph renders identically before and after the reload.
+ */
+function AssetRefChip({
+  attachment,
+}: {
+  attachment: AIChatMessageAttachment;
+}): React.ReactElement {
+  const { t } = useTranslation();
+  // `name` first: that is the key the asset attachment sends and the reducer
+  // persists. `alt_text` is read as a fallback only because both keys land in
+  // the same column and a future sender may use the other one.
+  const label =
+    attachment.name ?? attachment.alt_text ?? t('chat.attachments.assetRef');
+  return (
+    <span
+      data-testid="bubble-asset-chip"
+      data-asset-id={attachment.asset_id ?? ''}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-agent-line bg-agent-soft text-agent text-[11px] max-w-full"
+    >
+      <Shapes size={11} className="shrink-0" data-testid="bubble-asset-chip-icon" />
+      <span className="truncate max-w-[160px]">{label}</span>
+    </span>
+  );
+}
+
 /** Images, file chips, and library references shown above the message text.
     References used to be dropped here on the grounds that the @-mention was
     already in the text; it no longer is — the picker moved chips out of the
@@ -233,9 +273,15 @@ function AttachmentStrip({
   return (
     <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
       {attachments.map((att, i) => {
-        const key = `${att.resource_id ?? att.alt_text ?? 'att'}-${i}`;
+        const key = `${att.resource_id ?? att.asset_id ?? att.alt_text ?? 'att'}-${i}`;
         if (att.kind === 'resource_ref') {
           return <ResourceRefChip key={key} attachment={att} />;
+        }
+        // P5. Without this branch an asset falls through to the grey filename
+        // chip below and reads as an unrecognised file — it does not crash,
+        // which is exactly why it would have gone unnoticed.
+        if (att.kind === 'asset_ref') {
+          return <AssetRefChip key={key} attachment={att} />;
         }
         const src =
           att.preview_data_url ??

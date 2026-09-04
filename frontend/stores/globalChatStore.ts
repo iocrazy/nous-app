@@ -82,6 +82,42 @@ export interface PendingResource {
   nonce: number;
 }
 
+/** One-shot "put this library ASSET into the composer as an asset chip"
+ *  request (asset sheet sidebar + asset card menu, both via
+ *  `utils/sendAssetToAgent`). Sibling of `pendingResource` and deliberately
+ *  NOT the same channel: an asset is a library ENTITY (a character, a
+ *  location, a prompt), not a media file, so it carries no mime, no kind and
+ *  no processing status — and it triggers no AI top-up on the way (P5 ruling
+ *  I: `ensureResourceProcessed` is for media, and running it here would bill
+ *  the user for work on a row that has no transcript to make).
+ *
+ *  `loadoutId` is null in v1: neither entry point offers a loadout picker, and
+ *  the backend reads null as "use the default loadout". It is carried anyway
+ *  so the wire shape does not change when v2 adds the picker.
+ *
+ *  Nonce disambiguates repeat sends of the same asset. Consumed (cleared) by
+ *  AIChatPanel; never persisted. */
+export interface PendingAsset {
+  /** `assets.id` — BIGINT serialized as string (Snowflake). */
+  assetId: string;
+  /** `asset_loadouts.id`, or null for "the default one". */
+  loadoutId: string | null;
+  /** Snapshot — the chip keeps rendering it even if the asset is renamed. */
+  name: string;
+  /** One of `ASSET_TYPES` (character | location | prop | costume | prompt |
+   *  audio). Kept as a plain string here so the store does not depend on the
+   *  asset-library modules; the chip narrows it when it picks an icon. */
+  assetType: string;
+  /** `assets.cover_file_id` → the resource whose cover the chip paints, or
+   *  null when the asset has no cover yet (the chip falls back to its type
+   *  icon). */
+  coverFileId: string | null;
+  /** Owning team, or null for a system preset. Snapshot only — the backend
+   *  re-checks access by team membership, exactly as it does for resources. */
+  scopeId: string | null;
+  nonce: number;
+}
+
 interface GlobalChatState {
   open: boolean;
   /** Window rect, anchored bottom-right (offsets in px). */
@@ -97,6 +133,8 @@ interface GlobalChatState {
   pendingQuote: PendingQuote | null;
   /** Pending "insert this resource chip" request (not persisted). */
   pendingResource: PendingResource | null;
+  /** Pending "insert this asset chip" request (not persisted). */
+  pendingAsset: PendingAsset | null;
 
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -114,6 +152,9 @@ interface GlobalChatState {
   /** Open the floating chat and stage a resource chip for the composer. */
   sendResourceToChat: (resource: Omit<PendingResource, 'nonce'>) => void;
   consumePendingResource: () => void;
+  /** Open the floating chat and stage an asset chip for the composer. */
+  sendAssetToChat: (asset: Omit<PendingAsset, 'nonce'>) => void;
+  consumePendingAsset: () => void;
 }
 
 export const CHAT_MIN_W = 340;
@@ -132,6 +173,7 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       chatRequest: null,
       pendingQuote: null,
       pendingResource: null,
+      pendingAsset: null,
 
       setOpen: (open) => set({ open }),
       toggle: () => set((s) => ({ open: !s.open })),
@@ -158,11 +200,20 @@ export const useGlobalChatStore = create<GlobalChatState>()(
           },
         })),
       consumePendingResource: () => set({ pendingResource: null }),
+      sendAssetToChat: (asset) =>
+        set((s) => ({
+          open: true,
+          pendingAsset: {
+            ...asset,
+            nonce: (s.pendingAsset?.nonce ?? 0) + 1,
+          },
+        })),
+      consumePendingAsset: () => set({ pendingAsset: null }),
     }),
     {
       name: 'mediahub.global_chat',
       // pageContext holds page callbacks — never persist it, and the
-      // three one-shot channels must not survive a reload either (a
+      // four one-shot channels must not survive a reload either (a
       // resurrected intent would re-fire on every page load).
       partialize: (s) => ({
         open: s.open,

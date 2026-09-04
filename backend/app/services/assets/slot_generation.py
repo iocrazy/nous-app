@@ -270,6 +270,34 @@ def _slot_priority(asset_type: str) -> List[str]:
     return seq
 
 
+def files_by_slot(
+    files: List[Dict[str, Any]], loadout: Optional[Dict[str, Any]]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Group one asset's ``asset_files`` rows by slot, honouring the loadout.
+
+    A loadout-scoped file belongs to ONE outfit. The prompt already treats the
+    loadout as a filter, so letting a file pinned to a DIFFERENT loadout become
+    a reference would make one plan describe two outfits — a costume in the
+    picture that the prompt deliberately left out. With no loadout requested,
+    only the unpinned files apply.
+
+    Public and here rather than private to ``AssetsService`` because three
+    surfaces now group the same rows (the slot plan, the canvas bundle, and a
+    chat asset reference) and the rule is the one thing they must not disagree
+    about: a second copy would let the primary image on the asset sheet differ
+    from the one the model is told to fetch.
+    """
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for f in files:
+        pinned = f.get("loadout_id")
+        if pinned is not None and (
+            loadout is None or int(pinned) != int(loadout["id"])
+        ):
+            continue
+        out.setdefault(f["slot"], []).append(f)
+    return out
+
+
 def reference_order(
     files_by_slot: Dict[str, List[Dict[str, Any]]],
     asset_type: str,
@@ -317,10 +345,12 @@ def reference_order(
 # on the dedupe rule or on what counts as a negative fragment. They were
 # underscore-private and imported across the boundary anyway, which said
 # the opposite of what the arrangement actually is.
+# ``files_by_slot`` is public for the same reason: three callers, one rule.
 __all__ = [
     "NEGATIVE_SPLIT",
     "SlotNotGeneratable",
     "dedupe_fragments",
+    "files_by_slot",
     "reference_order",
     "slot_prompt",
 ]

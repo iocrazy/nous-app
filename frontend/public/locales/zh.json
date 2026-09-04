@@ -1734,7 +1734,11 @@
       "open": "打开 {{name}}",
       "missing": "缺少：{{slots}}",
       "coverage": "已填 {{filled}} / {{total}} 个槽位",
-      "moreProjects": "+{{n}}"
+      "moreProjects": "+{{n}}",
+      "actions": "{{name}} 的操作"
+    },
+    "agent": {
+      "staged": "已把 {{name}} 添加到聊天输入框"
     },
     "presets": {
       "title": "系统预设",
@@ -1888,7 +1892,6 @@
       "notLoopable": "不循环",
       "sendToCanvas": "发送到画布",
       "sendToAgent": "发送给智能体",
-      "arrivesWithP5": "随 P5 上线",
       "copyLoadoutPrompt": "复制造型提示词",
       "promptCopied": "提示词已复制",
       "copyFailed": "无法写入剪贴板",
@@ -3601,6 +3604,15 @@
     "rejectedNote": "已拒绝——该操作不会执行。",
     "approvalResolved": "该请求已在别处处理。",
     "attachmentFailures": "{{count}} 个附件加载失败",
+    "attachmentFailureReason": {
+      "unknown": "该附件无法使用",
+      "unknownCount": "{{n}} 个附件无法使用",
+      "asset_not_accessible": "有资产不在你所属的工作区内",
+      "asset_deleted": "有资产已被删除",
+      "asset_no_primary_image": "有资产还没有主图",
+      "asset_type_unknown": "有资产的类型当前版本无法识别",
+      "attachment_limit_exceeded": "本轮只使用了前 {{n}} 个资产"
+    },
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",
       "reviewChapter": "审阅我的章节",
@@ -3628,7 +3640,8 @@
       "tooMany": "文件过多（{{count}} > {{max}}）",
       "uploadFailed": "上传 \"{{name}}\" 失败：{{message}}",
       "dropToUpload": "拖放文件以附加",
-      "resourceRef": "关联素材"
+      "resourceRef": "关联素材",
+      "assetRef": "关联资产"
     },
     "followups": {
       "title": "Followups",
@@ -3655,7 +3668,15 @@
       "noResults": "没有匹配 \"{{q}}\" 的资源",
       "hintKbd": "↑↓ 选择 · ↵ 插入 · Esc 取消",
       "statusProcessing": "处理中…",
-      "statusUnprocessed": "尚未处理"
+      "statusUnprocessed": "尚未处理",
+      "assets": "资产库",
+      "assetsAllTypes": "全部",
+      "assetsLoading": "加载中…",
+      "assetsEmpty": "没有找到资产",
+      "assetsError": "无法加载资产库",
+      "assetsPreview": "预览",
+      "assetsCount_one": "{{count}} 个资产",
+      "assetsCount_other": "{{count}} 个资产"
     },
     "sidebarTitle": "频道",
     "newChannel": "新建频道",

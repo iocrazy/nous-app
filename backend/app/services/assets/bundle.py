@@ -85,7 +85,7 @@ _LINKED_PROMPT_ORDER = ("costume", "prop", "location")
 DroppedReference = Dict[str, str]
 
 
-def _linked_positive_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]:
+def linked_positive_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]:
     """``prompt_positive`` of the linked assets, costumes/props before location.
 
     ⚠️ **No link relation produces a location today.** ``LINK_RULES`` allows
@@ -129,7 +129,7 @@ def _linked_negative_texts(linked_assets: Sequence[Dict[str, Any]]) -> List[str]
     return out
 
 
-def _partition_files(
+def partition_files_by_image(
     files_by_slot: Dict[str, List[Dict[str, Any]]],
 ) -> tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
     """Split the slot map into (files with image bytes, files without).
@@ -138,6 +138,13 @@ def _partition_files(
     row: absent means "not looked up", which is treated as a candidate. Only an
     explicit ``False`` disqualifies a file — a caller that cannot resolve media
     rows must not have every reference silently vanish.
+
+    PUBLIC because ``assets/chat_ref.py`` must apply the SAME rule before it
+    ranks: picking the top-priority file first and checking its ``has_image``
+    afterwards answers a different question — on a slot map whose highest
+    priority file has no bytes, that reports "this asset has no image" while
+    a usable one sits in the next slot down. The two surfaces must agree on
+    which file IS the asset's picture.
     """
     keep: Dict[str, List[Dict[str, Any]]] = {}
     drop: Dict[str, List[Dict[str, Any]]] = {}
@@ -252,7 +259,7 @@ def build_bundle(
     happens before the ranking rather than after it.
     """
     asset_type = str(asset_row.get("asset_type") or "")
-    linked_positive = _linked_positive_texts(linked_assets)
+    linked_positive = linked_positive_texts(linked_assets)
 
     positive = ", ".join(
         dedupe_fragments(
@@ -274,7 +281,7 @@ def build_bundle(
     )
 
     candidates = _restrict_to_selection(files_by_slot, selected_resource_ids)
-    with_image, without_image = _partition_files(candidates)
+    with_image, without_image = partition_files_by_image(candidates)
     dropped: List[DroppedReference] = [
         {"resource_id": str(rid), "reason": "no_image_file"}
         for rid in _all_in_priority_order(without_image, asset_type)
@@ -298,4 +305,8 @@ def build_bundle(
     }
 
 
-__all__ = ["build_bundle"]
+# ``linked_positive_texts`` is PUBLIC because a second surface composes from
+# the same rows: ``assets/chat_ref.py`` reuses it so an asset delivered to a
+# generator and the same asset mentioned in chat cannot start disagreeing
+# about the order its costumes/props/location are described in.
+__all__ = ["build_bundle", "linked_positive_texts", "partition_files_by_image"]

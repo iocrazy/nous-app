@@ -44,7 +44,31 @@ let _probeTimer: ReturnType<typeof setInterval> | null = null;
 
 export const isUsingFallbackApi = (): boolean => _useFallback;
 
-/** Call on fetch-level failures only (TypeError / abort on timeout). */
+/**
+ * Did this `fetch` rejection come from the CALLER cancelling, rather than from
+ * the network failing?
+ *
+ * A caller-initiated abort is a decision, not an outage: a picker superseding
+ * its own search, a component unmounting mid-request. Counting one toward
+ * {@link reportApiNetworkFailure} would let ordinary typing flip the whole app
+ * onto the fallback base — the threshold is two, the count never resets on
+ * success, and the app then stays on the fallback until a probe flips it back.
+ *
+ * Keyed on the ERROR NAME, deliberately not on `signal.aborted`:
+ * `AbortSignal.timeout()` also leaves the signal aborted, and a timeout IS a
+ * network signal that must keep counting. It rejects with `TimeoutError`,
+ * which this does not match.
+ *
+ * Duck-typed rather than `instanceof Error`: the rejection is a `DOMException`,
+ * and not every environment makes that an `Error` subclass.
+ */
+export const isCallerAbort = (err: unknown): boolean =>
+  typeof err === 'object' &&
+  err !== null &&
+  (err as { name?: unknown }).name === 'AbortError';
+
+/** Call on fetch-level failures only (TypeError / abort on timeout).
+ *  NOT for a caller's own abort — see {@link isCallerAbort}. */
 export const reportApiNetworkFailure = (): void => {
   if (_useFallback || !getFallbackApiUrl()) return;
   _failureCount += 1;

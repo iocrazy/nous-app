@@ -5,7 +5,7 @@
 | 模块 | 挡什么 |
 |------|--------|
 | `external_text.py` | 提示词注入 —— 整份外部文档，随机 id 包裹 |
-| `frame_markers.py` | 提示词注入 —— 属性值/框内散文的闭合标记 |
+| `frame_markers.py` | 提示词注入 —— 属性值/框内散文的闭合标记，以及逐行框里的伪造行 |
 | `url_guard.py` / `ssrf_proxy.py` / `pinned_dns.py` | SSRF |
 | `path_guard.py` | 路径穿越 |
 | `max_bytes.py` | 超大响应体 |
@@ -14,7 +14,7 @@
 
 ## Model Experience
 
-本包不直接组装提示词——它提供被 `../services/ai/prompts/` 调用的**变换**。模型可见面通过那两个函数的输出体现：
+本包不直接组装提示词——它提供被 `../services/ai/prompts/` 调用的**变换**。模型可见面通过这些函数的输出体现：
 
 ### `neutralize_external_text()` 的输出
 
@@ -40,7 +40,7 @@
 
 **每次调用产生新的随机 marker id，所以同一份文本两次中和的结果不同**。任何把中和结果放进稳定前缀的用法都会让前缀逐轮失效。当前调用方（translate / summarize / link_injection）都把它放在请求尾部的动态区，是对的；**新调用方要保持这个位置**。
 
-### `escape_frame_attr()` / `escape_frame_body()` 的输出
+### `escape_frame_attr()` / `escape_frame_body()` / `escape_frame_prose()` 的输出
 
 #### What the model sees
 
@@ -48,17 +48,24 @@
 
 `escape_frame_body` 只把**我们自己拥有的**框的闭合标记（`OWNED_FRAMES`）改写成 `<\/frame>`；不属于我们的标签（`</div>`、`</think>`）原样保留，因为剧本正文可能合法地谈到它们，而只有我们自己的框才赋予权威。
 
+`escape_frame_prose` 用于**逐行框里的一段散文**（今天唯一的调用方是 `<available_resources>` 里 `<asset>` 的一致性提示词）。它先压平 `\r\n\t`，再走一遍 `escape_frame_body`，最后把 `&<>` 转成实体——引号**不**转义，因为这是元素正文不是属性值。
+
+为什么需要第三个：`escape_frame_body` 保留换行与 `<` 是**刻意的契约**，对自由排版的框正确；但 `<available_resources>` 是模型**按行读**的目录，一行一条 `<resource … />`。一段允许换行且不转义 `<` 的用户文本因此可以排出一条与真行**字节级无法区分**的兄弟目录行（终审 I1 在真渲染器上复现过）。它关不掉框、伪造 id 也进不了 ResourceFetch 白名单，所以不是提权——它伪造的是「这些条目是系统列出来的」这层权威。压平杀掉伪造的行，实体转义杀掉留在同一行里的伪造元素，两条都需要。
+
+**选哪一个的判据是「这段文本落进的框是不是按行读的」**，不是「它有多长」。
+
 #### Token effect
 
 可忽略。转义只在命中时增加个位数字符，普通文本零变化——这是它与 `neutralize_external_text` 分工的原因：属性值和单行散文不值得为它付随机包裹那几十个 token。
 
 #### KV Cache effect
 
-**确定性**：同一输入永远得到同一输出，没有随机成分。所以转义后的文本可以安全地放进稳定前缀（`<available_skills>` 的 slug 就在前缀里）。这是它与 `neutralize_external_text` 的关键差别。
+**确定性**：同一输入永远得到同一输出，没有随机成分（三个函数都是）。所以转义后的文本可以安全地放进稳定前缀（`<available_skills>` 的 slug 就在前缀里）。这是它与 `neutralize_external_text` 的关键差别。⚠️ `escape_frame_prose` 今天的调用方在缓存边界**之后**，那是它的调用方的性质，不是本函数的限制。
 
 ## Known Limitations and Deferred Work
 
-- **`escape_frame_body` 只处理闭合标记，不处理开标记**。内容可以插入一个假的 `<available_skills>` 开标记；它关不掉真框，但可能让模型误以为出现了嵌套结构。判断是代价（把剧本里每个 `<` 都转义）大于收益。
+- **`escape_frame_body` 只处理闭合标记，不处理开标记**。内容可以插入一个假的 `<available_skills>` 开标记；它关不掉真框，但可能让模型误以为出现了嵌套结构。判断是代价（把剧本里每个 `<` 都转义）大于收益。⚠️ 这一条**不适用于 `escape_frame_prose`**：它把每个 `<` 都转义了，所以开标记也伪造不了——代价换来的是逐行框的完整性，那笔账在那个位置上算得过来。
+- **谁该用 `escape_frame_prose` 靠人判断**。`OWNED_FRAMES` 的完整性有扫描守卫兜底，「这个框是不是逐行的」没有。今天只有一个逐行框，新增一个而误用了 `escape_frame_body`，没有任何测试会说话。
 - **`OWNED_FRAMES` 靠登记维持完整性**。新框忘了登记就没有防护——`tests/services/ai/prompts/test_frame_escape_wiring.py` 的扫描守卫是唯一的兜底，而它只扫三个已知文件；**在别处新建提示词框，守卫扫不到**。
 - **`_INJECTION_PATTERNS` 是字面量表，天然滞后**。新模型的新特殊 token 要手工补进去。它是第二层防御，不是主防御——主防御是那个随机 id。
 - **子进程环境未擦洗**（2026-08-22 实测）：`app/` 下 35 处 spawn 零处擦洗（2 处传 `env=` 的也是 `os.environ` 全量复制）。凭证会随完整环境进入 yt-dlp / ffmpeg / node 等第三方二进制，而 yt-dlp 处理的是攻击者可控的 URL。见 CLAUDE.md「防御模式」节。这是本包该覆盖而尚未覆盖的边界——本包目前只挡"进提示词"，不挡"进子进程"。

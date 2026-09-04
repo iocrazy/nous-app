@@ -35,9 +35,17 @@ from app.repositories.skill_repository import get_skill_repository
 from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.adapters.response import adapter_text
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
+from app.services.ai.chat.asset_ref_resolver import (
+    AssetRefFailure,
+    coerce_asset_id,
+    resolve_asset_refs,
+)
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
-from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
+from app.services.ai.chat.resource_ref_resolver import (
+    fetch_resource_meta,
+    resolve_resource_refs,
+)
 from app.services.ai.permissions.high_risk_caps import (
     high_risk_caps,
     media_kill_switch_engaged,
@@ -52,6 +60,41 @@ from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in test
 )
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
+
+# How many `asset_ref` attachments one turn may resolve.
+#
+# ASSET REFS ONLY, and the asymmetry is the whole reason the cap exists (final
+# review I2). A `resource_ref` costs ONE BATCHED QUERY no matter how many the
+# turn carries, so capping those would refuse a working path for no cost
+# reason. P5's `asset_ref` costs about FIVE SERIAL round trips EACH (loadouts,
+# files, two link traversals, one accessible-assets lookup), and
+# `ChatMessageRequest.attachments` has no `max_length` — so before this cap any
+# logged-in caller could POST 200 asset refs and spend a single request on
+# ~1000 serial queries, the connection-pool starvation this repo has already
+# paid for once.
+#
+# Deliberately the same number as the binary bucket's
+# `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN`, but a SEPARATE constant:
+# the two bound different costs (bytes fetched versus database round trips) and
+# coupling them would make one move for the other's reason.
+#
+# Over-cap refs are NOT resolved and NOT silently dropped: each gets an
+# `attachment_limit_exceeded` entry in `attachment_failures`, indexed into the
+# caller's full attachment list. Silent truncation is the flaw already recorded
+# against the binary path; repeating it here would be a choice, not an
+# inheritance.
+#
+# ⚠️ MIRRORED IN TYPESCRIPT. `frontend/components/chat/attachmentLimits.ts`
+# holds the same 8 because the banner interpolates it into user-facing copy.
+# `tests/services/ai/chat/test_attachment_limit_frontend_mirror.py` reads that
+# file and fails if the two disagree — change one, change both.
+MAX_ASSET_REF_ATTACHMENTS: int = 8
+
+# The reason code the cap reports. Part of the closed `attachment_failures`
+# vocabulary declared in `asset_ref_resolver.AssetRefFailureReason`; emitted
+# HERE rather than in the resolver because the resolver is handed a list that
+# has already been capped — it cannot see what was refused.
+ATTACHMENT_LIMIT_REASON: str = "attachment_limit_exceeded"
 
 
 class AILibraryChatService:
@@ -644,19 +687,72 @@ class AILibraryChatService:
                     {"role": role, "content": msg.get("content") or ""}
                 )
 
-        # S4 Task 6: split attachments by kind before resolution.
-        # resource_ref attachments → resource_ref_resolver (metadata only,
-        # content loaded lazily via ResourceFetch tool during the turn).
-        # All other kinds → existing G2 binary attachment path (image/pdf/audio).
+        # S4 Task 6 / P5 Task 3: split attachments by kind before resolution.
+        # THREE buckets, each explicit — a kind that falls through to
+        # `binary_atts` by accident does not fail quietly, it fails wrongly:
+        # chat_attachment_resolver raises "unsupported attachment kind" and the
+        # user is told their attachment could not be READ, when in fact their
+        # reference was never resolved.
+        #   resource_ref → resource_ref_resolver (metadata only; content loaded
+        #                  lazily via the ResourceFetch tool during the turn)
+        #   asset_ref    → asset_ref_resolver (library entity → consistency
+        #                  prompt + a primary image folded in below)
+        #   everything else → the existing G2 binary path (image/pdf/audio)
+        #
+        # `binary_source_index` maps a binary failure's index back to the
+        # caller's FULL attachment list. Without it `attachment_failures` would
+        # carry two different index bases in one list — binary indices counted
+        # among binaries, asset indices counted among all attachments — and any
+        # consumer that points at the n-th chip would point at the wrong one as
+        # soon as a turn mixed the two.
 
         # (`_att_dicts` normalized above, before the user-message persist.)
+        #
+        # `MAX_ASSET_REF_ATTACHMENTS` is applied HERE, to the `asset_ref`
+        # bucket ONLY. `resource_ref` is deliberately uncapped: however many a
+        # turn carries, they cost one batched query, so a cap there would
+        # refuse a working path for no cost reason. Over-cap asset refs keep
+        # their POSITION (see `_asset_input` below) and get a typed failure;
+        # they are never resolved.
+        #
+        # Positions, not distinct ids: a repeated `asset_id` past the cap is
+        # reported as over-cap even though the earlier chip delivered it. The
+        # alternative — de-duplicating before counting — would let a caller
+        # send 200 copies of one id and still spend 200 slots' worth of
+        # request body, which is the thing being bounded.
         ref_atts: list = []
         binary_atts: list = []
-        for _att in _att_dicts:
-            if _att.get("kind") == "resource_ref":
+        binary_source_index: list[int] = []
+        asset_att_indices: list[int] = []
+        over_cap_failures: list[dict] = []
+        over_cap_indices: set[int] = set()
+        _asset_refs_seen = 0
+        for _i, _att in enumerate(_att_dicts):
+            _kind = _att.get("kind")
+            if _kind == "resource_ref":
                 ref_atts.append(_att)
+            elif _kind == "asset_ref":
+                _asset_refs_seen += 1
+                if _asset_refs_seen > MAX_ASSET_REF_ATTACHMENTS:
+                    over_cap_indices.add(_i)
+                    over_cap_failures.append(
+                        {
+                            "index": _i,
+                            "kind": _kind,
+                            "reason": ATTACHMENT_LIMIT_REASON,
+                        }
+                    )
+                    continue
+                asset_att_indices.append(_i)
             else:
                 binary_atts.append(_att)
+                binary_source_index.append(_i)
+        if over_cap_failures:
+            logger.warning(
+                f"[chat] {len(over_cap_failures)} asset_ref attachment(s) over "
+                f"MAX_ASSET_REF_ATTACHMENTS={MAX_ASSET_REF_ATTACHMENTS} — "
+                f"not resolved, reported as {ATTACHMENT_LIMIT_REASON}"
+            )
 
         # Resource-ref path: resolve metadata, extend system message, register tool.
         resource_refs: list = []
@@ -670,8 +766,57 @@ class AILibraryChatService:
                 f"[chat] resource_ref resolution failed (non-fatal): {rr_exc}"
             )
 
-        if resource_refs:
-            resources_block = render_available_resources(resource_refs)
+        # Asset-ref path (P5). The resolver gets the FULL attachment list, not
+        # the asset bucket: AssetRefFailure.index counts positions among all
+        # attachments, so handing it a pre-filtered bucket would make every
+        # reported index point at the wrong chip.
+        #
+        # Over-cap entries are blanked rather than removed: the resolver counts
+        # indices against the list it is handed, so dropping them would shift
+        # every later index and point each failure at the wrong chip. A dict
+        # with no `kind` is skipped by the resolver's own filter and holds the
+        # slot.
+        asset_refs: list = []
+        asset_failures: list = []
+        if asset_att_indices:
+            _asset_input = [
+                ({} if _i in over_cap_indices else _att)
+                for _i, _att in enumerate(_att_dicts)
+            ]
+            try:
+                asset_refs, asset_failures = await resolve_asset_refs(
+                    _asset_input, user_id=str(user_id)
+                )
+            except Exception as ar_exc:
+                # Non-fatal for the turn, but NOT silent: one typed failure per
+                # asset the user attached, so the banner says the references
+                # were dropped instead of the assets simply never appearing.
+                # `asset_not_accessible` is the honest reason here — we do not
+                # know whether these assets exist, and inventing a more
+                # specific one would be a guess the UI presents as fact.
+                logger.warning(
+                    f"[chat] asset_ref resolution failed (non-fatal): {ar_exc!r}"
+                )
+                asset_refs = []
+                asset_failures = [
+                    AssetRefFailure(index=i, reason="asset_not_accessible")
+                    for i in asset_att_indices
+                ]
+
+        if asset_refs:
+            asset_refs, extra_refs, primary_failures = (
+                await self._merge_asset_primaries(
+                    asset_refs,
+                    resource_refs,
+                    attachments=_att_dicts,
+                    user_id=str(user_id),
+                )
+            )
+            resource_refs = resource_refs + extra_refs
+            asset_failures = asset_failures + primary_failures
+
+        if resource_refs or asset_refs:
+            resources_block = render_available_resources(resource_refs, asset_refs)
             if resources_block:
                 composed = composed.model_copy(
                     update={
@@ -680,6 +825,12 @@ class AILibraryChatService:
                         )
                     }
                 )
+
+        # The tool is gated on RESOURCE refs, not on the block being rendered:
+        # a turn that mentions only a `prompt`-type asset has a block to show
+        # and nothing to fetch, and advertising ResourceFetch with an empty
+        # accessible set invites a call that can only fail.
+        if resource_refs:
             # Build ResourceFetch tool spec and register a closure on the runner.
             resource_fetch_spec = {
                 "type": "function",
@@ -735,7 +886,8 @@ class AILibraryChatService:
 
             runner.resource_fetch_handler = _resource_fetch_handler
             logger.info(
-                f"[chat] resource_ref: {len(resource_refs)} ref(s) wired; "
+                f"[chat] resource_ref: {len(resource_refs)} ref(s) wired "
+                f"(incl. primaries of {len(asset_refs)} asset ref(s)); "
                 f"ResourceFetch tool registered"
             )
 
@@ -824,7 +976,19 @@ class AILibraryChatService:
         # user message. Failures degrade gracefully (text-only message
         # with placeholder describing what was skipped).
         new_user_msg: Dict[str, Any]
-        attachment_failures: list = []
+        # One list, one shape, one index basis. Entries are `{index, kind,
+        # reason}` dicts from here on rather than two dataclasses that happen
+        # to be spelled differently — the asset path counts indices against the
+        # caller's full attachment list, so the binary path's indices are
+        # translated through `binary_source_index` to match.
+        attachment_failures: list = [
+            {"index": f.index, "kind": "asset_ref", "reason": f.reason}
+            for f in asset_failures
+        ]
+        # Built during the bucket split above, already on the caller's index
+        # basis. Merged here so every typed failure leaves this method through
+        # one list with one shape.
+        attachment_failures.extend(over_cap_failures)
         if binary_atts:
             try:
                 from app.agent_framework.multimodal import build_user_message
@@ -841,15 +1005,23 @@ class AILibraryChatService:
                 resolved = await resolve_attachments(
                     [AttachmentRequest.model_validate(a) for a in binary_atts]
                 )
-                attachment_failures = list(resolved.failures)
+                _binary_failures = list(resolved.failures)
                 # The vision gate drops attachments SILENTLY (see
                 # vision_gate_failures) — record one typed failure per
                 # dropped request so the user is told, instead of the
                 # image simply never arriving.
-                attachment_failures.extend(
+                _binary_failures.extend(
                     vision_gate_failures(
                         binary_atts, resolved, supports_vision=supports_vision
                     )
+                )
+                attachment_failures.extend(
+                    {
+                        "index": binary_source_index[f.request_index],
+                        "kind": f.kind,
+                        "reason": f.reason,
+                    }
+                    for f in _binary_failures
                 )
 
                 new_user_msg = build_user_message(
@@ -857,10 +1029,10 @@ class AILibraryChatService:
                     resolved.attachments,
                     supports_vision=supports_vision,
                 )
-                if attachment_failures:
+                if _binary_failures:
                     logger.info(
                         f"[chat] G2 attachment failures: "
-                        f"{len(attachment_failures)} of {len(binary_atts)} "
+                        f"{len(_binary_failures)} of {len(binary_atts)} "
                         f"could not be resolved"
                     )
             except Exception as att_exc:
@@ -1298,12 +1470,15 @@ class AILibraryChatService:
             "usage": usage_snapshot,
             "run_id": str(run_id) if run_id else None,
             "tool_calls": tool_calls_trace,
-            # G2: surface any attachment failures so the chat UI can
-            # show "I couldn't read X.pdf" — empty list on success.
-            "attachment_failures": [
-                {"index": f.request_index, "kind": f.kind, "reason": f.reason}
-                for f in attachment_failures
-            ],
+            # G2/P5: surface any attachment failures so the chat UI can show
+            # "I couldn't read X.pdf" or "that character is no longer
+            # accessible" — empty list on success. Already `{index, kind,
+            # reason}` dicts with `index` counted against the caller's full
+            # attachment list, for both the binary and the asset_ref path.
+            # Ordered by index so the banner lists them the way the chips sit.
+            "attachment_failures": sorted(
+                attachment_failures, key=lambda f: f["index"]
+            ),
             # G1: when the run paused for human approval, this is the
             # row id the frontend can subscribe / poll for resolution.
             # None on the common case (turn ran to completion).
@@ -1313,6 +1488,114 @@ class AILibraryChatService:
             # Partial content, if any, is still persisted above.
             "cancelled": bool(result.get("cancelled")),
         }
+
+    async def _merge_asset_primaries(
+        self,
+        asset_refs: List[Any],
+        resource_refs: List[dict],
+        *,
+        attachments: List[dict],
+        user_id: str,
+    ) -> tuple[List[Any], List[dict], List[AssetRefFailure]]:
+        """Fold each asset's primary image into the turn's resource refs.
+
+        Returns ``(asset_refs, extra_resource_refs, failures)``. Ruling F: an
+        ``<asset>`` entry does not carry a picture, it carries a
+        ``primary_resource_id`` pointing at an ordinary ``<resource … />`` line
+        that the model can fetch. Nothing else synthesizes that line — the
+        renderer takes the two lists as given — so it is made here, and made
+        through ``fetch_resource_meta`` so the name, mime, scope label and AI
+        status come from the same query the ``@``-mention path uses.
+
+        Two things this method exists to get right:
+
+        **Deduplication.** A user can @-mention a character AND, separately,
+        the very PNG that is its reference sheet. Rendering that resource twice
+        would spend the tokens twice and invite two fetches of one file, so a
+        primary already present among ``resource_refs`` is not re-added — the
+        ``<asset>`` still points at it, because the id is the same id.
+
+        **Truthfulness about the picture.** ``has_image`` is computed by the
+        resolver through a SYSTEM-scoped read (it has to be: an asset's file
+        rows are readable via the asset, not via the caller's team
+        membership). ``ResourceFetch``, by contrast, only serves ids in this
+        turn's accessible set. So an asset can arrive with ``has_image=True``
+        and a primary the caller cannot read as a resource — a system preset
+        whose files live outside every team they belong to is the concrete
+        case. Advertising it would hand the model an id that fails when used,
+        with nothing saying why. Instead the entry is rewritten to state what
+        is true (``has_image=False``, no ``primary_resource_id`` attribute —
+        exactly the "there is no picture to fetch" shape the README pins) and
+        a typed ``asset_no_primary_image`` failure tells the user.
+        """
+        import dataclasses
+
+        from app.services.assets.chat_ref import expects_primary_image
+
+        wanted: List[str] = []
+        known: set = {str(r["id"]) for r in resource_refs}
+        for ref in asset_refs:
+            pid = ref.primary_resource_id
+            if pid and pid not in known and pid not in wanted:
+                wanted.append(pid)
+
+        metas: dict = {}
+        if wanted:
+            try:
+                metas = await fetch_resource_meta(user_id, wanted)
+            except Exception as fm_exc:
+                # Same posture as the resolver failures above: degrade to "no
+                # picture", never to a picture the model cannot fetch.
+                logger.warning(
+                    f"[chat] asset primary-image lookup failed (non-fatal): "
+                    f"{fm_exc!r}"
+                )
+                metas = {}
+
+        # First attachment position per asset id, so a failure points at the
+        # chip the user actually sees. Same normalization the resolver used —
+        # `coerce_asset_id` is shared rather than re-implemented.
+        #
+        # FIRST, not every: attaching one asset twice yields ONE ref (the
+        # resolver dedupes by id) and therefore ONE failure, reported against
+        # the earlier chip — matching how the resolver reports its own. Two
+        # entries for one asset would read as two separate problems.
+        first_index: dict = {}
+        for idx, att in enumerate(attachments):
+            if not isinstance(att, dict) or att.get("kind") != "asset_ref":
+                continue
+            aid = coerce_asset_id(att.get("asset_id"))
+            if aid is not None and aid not in first_index:
+                first_index[aid] = idx
+
+        out_assets: List[Any] = []
+        extra_refs: List[dict] = []
+        failures: List[AssetRefFailure] = []
+        for ref in asset_refs:
+            pid = ref.primary_resource_id
+            if not pid or pid in known:
+                out_assets.append(ref)
+                continue
+            meta = metas.get(pid)
+            if meta is None:
+                logger.info(
+                    f"[chat] asset {ref.asset_id} primary resource {pid} is not "
+                    f"readable by user={user_id} — delivered without a picture"
+                )
+                out_assets.append(
+                    dataclasses.replace(ref, primary_resource_id=None, has_image=False)
+                )
+                if expects_primary_image(ref.asset_type):
+                    idx = first_index.get(ref.asset_id)
+                    if idx is not None:
+                        failures.append(
+                            AssetRefFailure(index=idx, reason="asset_no_primary_image")
+                        )
+                continue
+            out_assets.append(ref)
+            extra_refs.append(meta)
+            known.add(pid)
+        return out_assets, extra_refs, failures
 
     async def _maybe_compact(
         self,
