@@ -1,9 +1,16 @@
 """The chat-uploads folder is identified by ``system_key``, never by name.
 
-Migration 450 moved the identity of the per-scope folder that holds chat/issue
+P6 moved the identity of the per-scope folder that holds chat/issue
 attachments from ``name='temp'`` to ``system_key='chat_uploads'``. This file
 pins the code half of that move — the half that decides, on every single chat
 upload, whether to reuse, adopt or create.
+
+Right now it is the ONLY half that runs. Migration 450, which adopts the
+folders in scopes nobody uploads to, is a separate follow-up PR that must not
+merge until this backend is live (the old name-matching backend would mint a
+second ``temp`` folder beside a renamed one). So every assertion below about
+adoption is also the assertion that a scope which never saw the migration still
+lands on its existing folder instead of a fresh one.
 
 WHY THE ORDER OF THE THREE BRANCHES IS THE TEST
 ───────────────────────────────────────────────
@@ -15,7 +22,8 @@ no write was attempted at all, the adopt case asserts no INSERT followed.
 The session is stubbed here, so what these prove is the decision sequence and
 the statements' shape. That the partial unique index actually rejects the
 second keyed folder is a property of Postgres and is pinned in
-``tests/db/test_chat_uploads_folder_migration.py``.
+``tests/db/test_chat_uploads_folder_migration.py``, which travels with
+migration 450 in the follow-up PR.
 
 Wire shapes: ``resolve_chat_scope`` hands ``scope_id`` over as a **str**
 (a teams.id snowflake), while ``folders.id`` comes back from asyncpg as a

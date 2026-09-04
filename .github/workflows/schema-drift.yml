@@ -65,13 +65,12 @@ on:
       # too — otherwise the one guard that runs them against a real Postgres
       # never fires for the change that moved them.
       - 'backend/app/workflows/backfill_generated_inbox.py'
-      # mig 450 moved the chat-uploads folder's identity from its NAME to
-      # `system_key`, and the criterion the backfill joins on now lives in
-      # chat_upload.py. Same reason as the line above: the shared definition
-      # and the migration that created the rows it matches have to reach the
-      # one chain that runs them against a real Postgres.
+      # The chat-uploads folder is identified by `system_key`, and the
+      # criterion the backfill joins on lives in chat_upload.py. Same reason as
+      # the line above: the shared definition has to reach the one chain that
+      # runs the backfill against a real Postgres, or the two readers can drift
+      # apart with nothing executing either of them.
       - 'backend/app/services/library/chat_upload.py'
-      - 'backend/tests/db/test_chat_uploads_folder_migration.py'
       - 'backend/app/repositories/assets_repository.py'
       - 'backend/app/repositories/asset_relations_repository.py'
       - 'backend/app/repositories/canvas_asset_refs_repository.py'
@@ -329,37 +328,3 @@ jobs:
           # unique index, not of our Python), or that reconciliation agrees with
           # apply about adopting a same-name asset of ANY source.
           uv run pytest tests/db/test_assets_migration_integration.py -v
-
-      - name: Exercise the chat-uploads folder adoption (mig 450)
-        working-directory: backend
-        env:
-          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
-        run: |
-          set -euo pipefail
-          # Migration 450 is a single UPDATE whose whole value is in what it
-          # does NOT touch: it must adopt exactly one `temp` folder per scope
-          # (the oldest), leave the rest as plain user folders, and change zero
-          # rows on a second run. None of that is checkable without a server —
-          # DISTINCT ON, the NOT EXISTS guard and the partial unique index that
-          # backs it all only exist in Postgres. The same step also runs the
-          # code-side adoption against the real index, which is what proves the
-          # migration and `chat_upload.py` agree instead of each minting a row.
-          #
-          # AND ASSERT THEY ACTUALLY RAN. This file skips itself at module
-          # level when INTEGRATION_DATABASE_URL is unset, and pytest exits 0
-          # when it skips everything — so the exit code alone cannot tell
-          # "18 passed" from "18 skipped". The DSN above is always set on this
-          # job, which means a skip here is a broken job, not a valid outcome:
-          # going green while asserting nothing is exactly the "can't run →
-          # pass" path this workflow's header forbids. The summary line is the
-          # signal; awk (not `grep -q`) so a non-match is a 0 count rather than
-          # a non-zero exit this step would have to launder with `|| true`.
-          log="$(mktemp)"
-          uv run pytest tests/db/test_chat_uploads_folder_migration.py -v | tee "$log"
-          passed=$(awk '/[0-9]+ passed/ {n++} END {print n+0}' "$log")
-          skipped=$(awk '/[0-9]+ skipped/ || /no tests ran/ {n++} END {print n+0}' "$log")
-          echo "summary check: passed_lines=${passed} skipped_lines=${skipped}"
-          if [ "$passed" -eq 0 ] || [ "$skipped" -ne 0 ]; then
-            echo "::error::mig 450 integration tests did not run (passed=${passed} skipped=${skipped}). A skipped file is not a green file — check INTEGRATION_DATABASE_URL and the Postgres service."
-            exit 1
-          fi

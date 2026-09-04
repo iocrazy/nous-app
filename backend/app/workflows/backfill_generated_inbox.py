@@ -175,12 +175,13 @@ async def _load_inputs() -> PlannerInputs:
 
     ``folder_id`` lives on ``resource_items``, not on ``resources`` — the
     chat-uploads-folder membership is a two-hop join. That folder is matched by
-    the SHARED criterion from ``chat_upload`` (mig 450): the keyed
+    the SHARED criterion from ``chat_upload``: the keyed
     ``system_key='chat_uploads'`` folder OR a not-yet-adopted legacy ``temp``
-    one. Both arms are needed — the migration adopts a single ``temp`` folder
-    per scope, and this workflow can run before the migration does (the
-    migration and backend deploy chains have no ordering guarantee), so keying
-    only on ``system_key`` would report an empty plan and call it reconciled.
+    one. Both arms are needed, and the legacy arm is the load-bearing one right
+    now: a scope gets adopted only when someone uploads to it (migration 450,
+    which adopts the rest, ships in a later PR), so most scopes still hold an
+    unkeyed ``temp`` folder. Keying only on ``system_key`` would report an
+    empty plan and call it reconciled.
 
     Trashed resources and trashed folders are excluded: an inbox row for a file
     on its way to deletion is noise (temp clean-up is manual —

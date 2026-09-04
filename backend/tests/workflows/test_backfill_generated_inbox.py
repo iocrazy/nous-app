@@ -206,9 +206,10 @@ class TestChatUploadsFolderIdentity:
         assert "system_key = 'chat_uploads'" in self._sql()
 
     def test_a_not_yet_adopted_legacy_temp_folder_is_still_matched(self):
-        """Migration 450 and this workflow have no ordering guarantee, and the
-        migration adopts only ONE ``temp`` folder per scope. Dropping this arm
-        turns "the migration has not run here" into an empty, confident plan."""
+        """Most scopes are NOT adopted yet: migration 450 ships in a later PR,
+        and this code adopts a scope only when someone uploads to it. Dropping
+        this arm turns "nobody has adopted this scope" into an empty, confident
+        plan — and it would do so for the majority of scopes."""
         sql = self._sql()
         assert "system_key IS NULL" in sql
         assert "name = 'temp'" in sql

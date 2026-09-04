@@ -15,7 +15,9 @@ P1 Task 6:    ``_register_in_generated_inbox`` — the saved resource also gets
               resource) so chat uploads show up in the Generated inbox. No
               blob copy: the row points at the resource's own file_path.
 P6 Task 2:    the folder is identified by ``system_key='chat_uploads'``, never
-              by its name (migration 450). See the constants below.
+              by its name. Migration 450 backfills the identity onto folders
+              this code never touches; it ships in a SEPARATE, later PR and
+              nothing here depends on it having run. See the constants below.
 """
 
 from __future__ import annotations
@@ -37,12 +39,13 @@ from starlette.datastructures import Headers
 CHAT_UPLOADS_SYSTEM_KEY = "chat_uploads"
 CHAT_UPLOADS_DISPLAY_NAME = "Chat Uploads"
 
-# What the folder was called before it had an identity. Migration 450 adopts
-# the oldest such folder per scope; the code below applies the SAME rule so
-# that whichever of the two lands first, the other is a no-op. Kept (not
-# deleted) because a scope that never ran the migration — deployment order
-# between ``run-migration.yml`` and ``deploy-gpu.yml`` is not guaranteed —
-# must still find the folder its history is in rather than mint a second one.
+# What the folder was called before it had an identity. Adopting it is THE
+# mechanism here, not a fallback: migration 450 ships in a later PR (it must
+# not land while the old name-matching backend is still running, or that
+# backend mints a second ``temp`` folder beside the renamed one), so until then
+# every scope is adopted lazily, by this code, on its next chat upload.
+# Migration 450 then covers whatever is left — the scopes nobody uploaded to.
+# Both use the SAME rule, so each is a no-op for what the other already did.
 LEGACY_CHAT_UPLOADS_FOLDER_NAME = "temp"
 
 # Extension sets for kind inference (fallback when MIME is not recognised).
@@ -307,8 +310,10 @@ def chat_uploads_folder_criteria():
 
     The union of the two arms above — the READ side, deliberately wider
     than what :func:`adoptable_chat_uploads_criteria` will claim. Readers
-    that reconcile history (the backfill) want both arms, because migration
-    450 adopts ONE ``temp`` folder per scope and leaves any others as plain
+    that reconcile history (the backfill) want both arms, because a scope may
+    not be adopted yet at all (migration 450 is a later PR, and this code
+    adopts a scope only when someone uploads to it) and because adoption takes
+    ONE ``temp`` folder per scope, leaving any others as plain
     user folders: their contents are still chat uploads, and narrowing to the
     keyed arm alone would report "0 temp resources" for them — a wrong answer
     that raises no error. Reading a folder costs nothing; CLAIMING one is
@@ -322,7 +327,7 @@ def chat_uploads_folder_criteria():
 def _integrity_constraint_name(exc: Exception) -> Optional[str]:
     """The violated constraint's name, across the shapes it actually arrives in.
 
-    Measured against this stack (SQLAlchemy 2 + asyncpg, mig 450 schema), NOT
+    Measured against this stack (SQLAlchemy 2 + asyncpg, mig 441 schema), NOT
     assumed: a duplicate keyed folder gives
     ``sqlalchemy.exc.IntegrityError`` whose ``.orig`` is the dialect's own
     ``asyncpg.IntegrityError`` — that wrapper has NEITHER ``constraint_name``
@@ -375,10 +380,10 @@ async def _ensure_chat_uploads_folder(scope_id: str, user_id: str) -> str:
     1. **Find by ``system_key``.** The name is never matched here.
     2. **Adopt** the oldest live, unkeyed, ROOT-level ``temp`` folder — see
        :func:`adoptable_chat_uploads_criteria` for why root-level is part of
-       the identity rather than a safety margin. This is migration 450's
-       candidate predicate restated in code, so that whichever runs first
-       (migration or deploy — the two chains have no ordering guarantee) the
-       other finds nothing left to do. ``MIN(id)`` because folder ids are
+       the identity rather than a safety margin. This is the same candidate
+       predicate migration 450 uses (a later PR), so whichever of the two
+       reaches a scope first, the other finds nothing left to do there.
+       ``MIN(id)`` because folder ids are
        snowflakes: smallest is oldest, i.e. the one chat uploads have actually
        been landing in. Every other ``temp`` folder in the scope is left alone
        as a plain user folder.
