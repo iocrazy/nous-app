@@ -41,6 +41,9 @@ const MENU_KEYS = [
   // The dialog's "where this file came from" line, the resource variant's
   // stand-in for a generation's `source.label`.
   'resources.saveAsAssetSource',
+  // Shown instead of the cover when `/resources/{id}/cover` 404s — which it
+  // does for an audio upload with no thumbnail.
+  'saveAsAsset.coverUnavailable',
 ];
 
 describe('As Asset i18n', () => {

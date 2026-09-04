@@ -2129,6 +2129,7 @@
     "loadout": "Loadout",
     "more": "+{{n}} more",
     "neverMoves": "File stays where it is · attaching never moves or copies",
+    "coverUnavailable": "No preview",
     "exists": "An asset with this name exists — attach to it instead?",
     "useExisting": "Use Existing",
     "attached": "Attached to {{name}} · {{slot}}",

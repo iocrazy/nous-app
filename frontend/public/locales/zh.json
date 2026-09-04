@@ -2129,6 +2129,7 @@
     "loadout": "造型",
     "more": "另外 {{n}} 项",
     "neverMoves": "文件留在原处 · 关联不会移动或复制文件",
+    "coverUnavailable": "暂无预览",
     "exists": "已存在同名资产 —— 直接关联到它？",
     "useExisting": "用已有的",
     "attached": "已关联到 {{name}} · {{slot}}",

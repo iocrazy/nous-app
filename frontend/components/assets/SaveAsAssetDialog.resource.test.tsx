@@ -33,6 +33,7 @@ const BUNDLE: Record<string, string> = {
     ]),
   ),
   'resources.saveAsAssetSource': EN.resources.saveAsAssetSource,
+  'saveAsAsset.coverUnavailable': EN.saveAsAsset.coverUnavailable,
 };
 
 const translate = (
@@ -156,6 +157,33 @@ const renderDialog = (resource: SaveAsAssetResource = IMAGE_RESOURCE) => {
   return { onClose, onDone };
 };
 
+/** Like {@link renderDialog}, but keeps the handle needed to re-render the
+ *  SAME mounted dialog on a different resource — the component stays mounted
+ *  between openings, which is what makes the reset behaviour testable. */
+const renderDialogRaw = (resource: SaveAsAssetResource) => {
+  const view = render(
+    <SaveAsAssetDialog
+      open
+      scopeId={SCOPE}
+      resource={resource}
+      onClose={vi.fn()}
+      onDone={vi.fn()}
+    />,
+  );
+  return {
+    rerender: (next: SaveAsAssetResource) =>
+      view.rerender(
+        <SaveAsAssetDialog
+          open
+          scopeId={SCOPE}
+          resource={next}
+          onClose={vi.fn()}
+          onDone={vi.fn()}
+        />,
+      ),
+  };
+};
+
 const primary = () => screen.getByTestId('sa-primary') as HTMLButtonElement;
 
 beforeEach(() => {
@@ -198,6 +226,59 @@ describe('SaveAsAssetDialog — resource variant prefill', () => {
     expect(screen.getByText(EN.resources.saveAsAssetSource)).toBeTruthy();
     // No batch strip: there is no batch form of this entry.
     expect(screen.queryByTestId('sa-more-strip')).toBeNull();
+  });
+
+  it('falls back to a kind icon when the cover 404s, instead of a broken image', async () => {
+    renderDialog();
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+
+    const cover = screen.getByAltText(IMAGE_RESOURCE.filename);
+    expect(screen.queryByTestId('sa-cover-fallback')).toBeNull();
+
+    // `/resources/{id}/cover` answers 404 for an upload with no thumbnail —
+    // most often audio, which this menu is what first sends here. The browser
+    // reports that as an error event on the <img>, and with no handler it
+    // paints the broken-image glyph inside the bordered square: the user reads
+    // "this file is damaged" for a file that is perfectly fine.
+    fireEvent.error(cover);
+
+    const fallback = await screen.findByTestId('sa-cover-fallback');
+    expect(fallback.textContent).toContain(EN.saveAsAsset.coverUnavailable);
+    // The <img> is gone, not merely covered — a hidden one keeps retrying.
+    expect(screen.queryByAltText(IMAGE_RESOURCE.filename)).toBeNull();
+    // Still labelled with the filename, so the placeholder is not a hole to a
+    // screen reader.
+    expect(fallback.getAttribute('aria-label')).toBe(IMAGE_RESOURCE.filename);
+  });
+
+  it('picks the audio icon for an audio upload and the image icon otherwise', async () => {
+    renderDialog({
+      ...IMAGE_RESOURCE,
+      filename: 'theme.mp3',
+      mime_type: 'audio/mpeg',
+      file_type: 'audio',
+    });
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    fireEvent.error(screen.getByAltText('theme.mp3'));
+
+    const fallback = await screen.findByTestId('sa-cover-fallback');
+    // lucide renders its name onto the svg, which is the only handle a test
+    // has on WHICH icon was chosen. An audio file drawn as a picture frame is
+    // a small lie, and the icon is the whole content of this placeholder.
+    expect(fallback.querySelector('svg')?.getAttribute('class')).toContain('file-audio');
+  });
+
+  it('a fresh cover is trusted again after the dialog reopens on another file', async () => {
+    const { rerender } = renderDialogRaw(IMAGE_RESOURCE);
+    await waitFor(() => expect(searchAssets).toHaveBeenCalled());
+    fireEvent.error(screen.getByAltText(IMAGE_RESOURCE.filename));
+    await screen.findByTestId('sa-cover-fallback');
+
+    // The previous file's 404 says nothing about this one; a sticky flag would
+    // hide every cover for the rest of the session.
+    rerender({ ...IMAGE_RESOURCE, id: '742318905233409009', filename: 'other.png' });
+    await waitFor(() => expect(screen.queryByTestId('sa-cover-fallback')).toBeNull());
+    expect(screen.getByAltText('other.png')).toBeTruthy();
   });
 
   it('prefills the new-asset name from the filename WITHOUT its extension', async () => {

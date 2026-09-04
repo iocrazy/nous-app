@@ -23,7 +23,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Loader2, Plus } from 'lucide-react';
+import { Check, FileAudio, Film, Image as ImageIcon, Loader2, Plus } from 'lucide-react';
 
 import { UiModal } from '../ui/primitives';
 import { useToast } from '../Toast';
@@ -151,6 +151,12 @@ interface Subject {
   key: string;
   title: string;
   coverUrl: string;
+  /**
+   * What to draw when {@link coverUrl} does not load. PRESENTATIONAL only —
+   * it never gates anything, so picking it from the mime prefix here is not a
+   * second copy of the kind ladder the menu gates on.
+   */
+  coverFallbackIcon: React.ReactNode;
   /** Second line under the cover. Empty renders nothing. */
   metaLine: string;
   /** Third line: where this came from. */
@@ -174,6 +180,14 @@ interface Subject {
  * anyone uses this entry, and nobody renames what the box already filled in.
  * A dotfile or an extensionless name is left alone.
  */
+/** Audio by mime, falling back to `file_type` for rows whose mime was never
+ *  recorded. Only ever chooses an icon — see `Subject.coverFallbackIcon`. */
+function isAudioish(resource: SaveAsAssetResource): boolean {
+  const mime = (resource.mime_type ?? '').toLowerCase();
+  if (mime) return mime.startsWith('audio/');
+  return (resource.file_type ?? '').toLowerCase() === 'audio';
+}
+
 export function assetNameFromFilename(filename: string): string {
   const trimmed = (filename ?? '').trim();
   const dot = trimmed.lastIndexOf('.');
@@ -253,6 +267,11 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
         // The resource's own cover endpoint, NOT a generated-media one: this
         // file may have no inbox row at all until the server mints one.
         coverUrl: getResourceCoverUrl(resource.id),
+        coverFallbackIcon: isAudioish(resource) ? (
+          <FileAudio size={28} aria-hidden="true" />
+        ) : (
+          <ImageIcon size={28} aria-hidden="true" />
+        ),
         metaLine: [resource.mime_type ?? resource.file_type ?? '', when]
           .filter(Boolean)
           .join(' · '),
@@ -279,6 +298,14 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
       key: `generated:${itemsKey}`,
       title: head.title,
       coverUrl: generatedMediaCoverUrl(head.id),
+      coverFallbackIcon:
+        head.media_kind === 'video' ? (
+          <Film size={28} aria-hidden="true" />
+        ) : head.media_kind === 'audio' ? (
+          <FileAudio size={28} aria-hidden="true" />
+        ) : (
+          <ImageIcon size={28} aria-hidden="true" />
+        ),
       metaLine: [head.model, when].filter(Boolean).join(' · '),
       sourceLabel: head.source.label,
       defaultName: head.title,
@@ -339,6 +366,14 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
   /** The recoverable 409: the id we may attach to instead. */
   const [existingConflictId, setExistingConflictId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * The cover URL is a BET, not a fact — `/resources/{id}/cover` 404s for an
+   * audio upload with no thumbnail, and this dialog's second entry point is
+   * exactly what first sends audio here. A bare <img> would render the
+   * browser's broken-image glyph inside a bordered square, which reads as
+   * "this file is damaged" rather than "there is no preview".
+   */
+  const [coverFailed, setCoverFailed] = useState(false);
 
   /** The suggestion sets the default type ONCE. After the user has touched
    *  the seg, a late-arriving fetch must not drag them back. */
@@ -386,6 +421,9 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
     setLoadoutsPending(false);
     setExistingConflictId(null);
     setBusy(false);
+    // Reset with everything else: the previous subject's 404 says nothing
+    // about the file the dialog is opening on now.
+    setCoverFailed(false);
     // `subject` is rebuilt each render; `subjectKey` is its identity, and
     // `defaultName` is read fresh above rather than tracked as a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -684,11 +722,26 @@ export const SaveAsAssetDialog: React.FC<SaveAsAssetDialogProps> = ({
       <div data-testid="save-as-asset-dialog" className="flex gap-4">
         {/* ─── What is being attached ─── */}
         <div className="w-40 shrink-0 space-y-2">
-          <img
-            src={subject.coverUrl}
-            alt={subject.title}
-            className="aspect-square w-full rounded-lg border border-line object-cover"
-          />
+          {coverFailed ? (
+            <div
+              data-testid="sa-cover-fallback"
+              role="img"
+              aria-label={subject.title}
+              className="flex aspect-square w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-line bg-island-2 text-content-4"
+            >
+              {subject.coverFallbackIcon}
+              <span className="px-2 text-center text-[10px] leading-tight">
+                {t('saveAsAsset.coverUnavailable', 'No preview')}
+              </span>
+            </div>
+          ) : (
+            <img
+              src={subject.coverUrl}
+              alt={subject.title}
+              onError={() => setCoverFailed(true)}
+              className="aspect-square w-full rounded-lg border border-line object-cover"
+            />
+          )}
           <div className="space-y-0.5 text-[11px] leading-snug">
             <div className="font-medium text-content" title={subject.title}>
               {subject.title}
