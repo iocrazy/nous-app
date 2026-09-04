@@ -5,24 +5,36 @@ service. Three properties are load-bearing:
 
 1. **The review-state machine is closed here.** No public method accepts a
    state string. ``saved`` is written only by ``mark_promoted`` (inside
-   ``PromoteGeneratedMediaService.promote``); ``in_assets`` is written by
-   :meth:`save_as_asset` — and only after the attach has succeeded — and by
+   ``PromoteGeneratedMediaService.promote``) and by
+   ``GeneratedMediaRepository.insert_registered_resource`` (a row that
+   registers an EXISTING resource is born ``saved`` — Tier-2 already holds the
+   bytes); ``in_assets`` is written by :meth:`_attach_and_mark` — and only
+   after the attach has succeeded — which is the single writer both
+   :meth:`save_as_asset` and :meth:`save_resource_as_asset` go through, and by
    ``workflows/backfill_generated_inbox._apply``, an admin-only reconciliation
    that labels rows whose attachment already exists. Two writers, both
    guarded; there is no generic setter.
    ``GeneratedMediaRepository.set_review_state`` is a repo primitive — it is
    deliberately NOT re-exported, because a caller that can write any state can
    silently un-promote a row.
-2. **Save-as-asset is TWO segments, not one transaction.** ``promote`` runs
-   first and OUTSIDE ``unit_of_work()`` (it does ``SET LOCAL ROLE``, storage
-   I/O, and carries a "non-fatal" backlink guard that a shared transaction
-   would make fatal — see :meth:`_save_as_asset_core` for the full reasoning);
-   attach + ``in_assets`` then share one transaction. A failed attach leaves
-   the row ``saved`` with a promoted resource behind it — a legitimate state,
-   identical to a plain :meth:`save`. What can never happen is the harmful
-   direction, ``in_assets`` without an attachment, because that write is last.
-   Pure validation failures do not even get that far: :meth:`_validate_target`
-   refuses before ``promote``.
+2. **Save-as-asset is TWO segments, not one transaction — from a
+   GENERATION.** ``promote`` runs first and OUTSIDE ``unit_of_work()`` (it does
+   ``SET LOCAL ROLE``, storage I/O, and carries a "non-fatal" backlink guard
+   that a shared transaction would make fatal — see
+   :meth:`_save_as_asset_core` for the full reasoning); attach + ``in_assets``
+   then share one transaction. A failed attach leaves the row ``saved`` with a
+   promoted resource behind it — a legitimate state, identical to a plain
+   :meth:`save`. What can never happen is the harmful direction, ``in_assets``
+   without an attachment, because that write is last. Pure validation failures
+   do not even get that far: :meth:`_validate_target` refuses before
+   ``promote``.
+
+   From a LIBRARY RESOURCE (:meth:`save_resource_as_asset`) the boundary is
+   different, and deliberately so: there is nothing to promote — the resource
+   already exists — so none of the three reasons above applies, and the mint of
+   the inbox row shares the attach's transaction. A failure there leaves NO
+   row, because an orphan inbox card for a file the user never generated is
+   the harmful direction on that path.
 3. **Errors are typed, never swallowed.** Everything a caller can be expected
    to act on becomes an :class:`AssetError` with a code; anything else (a
    storage backend refusing, a bug) propagates, because reporting a genuine
@@ -44,6 +56,7 @@ from app.repositories.generated_media_repository import (
     CLEANUP_SCAN_LIMIT,
     GeneratedMediaRepository,
 )
+from app.repositories.resources_repository import ResourcesRepository
 from app.schemas.assets import AssetCreate, AttachFileRequest
 from app.schemas.generated import (
     BatchRequest,
@@ -56,10 +69,14 @@ from app.schemas.generated import (
 )
 from app.services.assets.assets_service import AssetError, AssetsService
 from app.services.assets.slots import is_valid_slot
-from app.services.library.generated_source import describe_source
+from app.services.library.generated_source import (
+    LIBRARY_UPLOAD_ORIGIN,
+    describe_source,
+)
 from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
 )
+from app.services.library.resource_file_path import resolve_resource_file_path
 
 # One cleanup pass looks at at most this many rows. The number is the repo's
 # own SQL cap (``CLEANUP_SCAN_LIMIT``), imported rather than repeated so the
@@ -106,11 +123,13 @@ class GeneratedInboxService:
         promote: Optional[PromoteGeneratedMediaService] = None,
         assets: Optional[AssetsService] = None,
         canvases: Optional[CanvasRepository] = None,
+        resources: Optional[ResourcesRepository] = None,
     ):
         self.gen_repo = gen_repo or GeneratedMediaRepository()
         self.promote = promote or PromoteGeneratedMediaService()
         self.assets = assets or AssetsService()
         self.canvases = canvases or CanvasRepository()
+        self.resources = resources or ResourcesRepository()
 
     # ── helpers ────────────────────────────────────────────────────────────
 
@@ -329,34 +348,60 @@ class GeneratedInboxService:
         resource = await self._promoted_resource(gen_id, scope_id, user_id)
         resource_id = str(resource["id"])
         async with unit_of_work():
-            if req.new_asset is not None:
-                created = await self.assets.create_asset(
-                    int(scope_id),
-                    AssetCreate(
-                        asset_type=req.new_asset.asset_type,
-                        name=req.new_asset.name,
-                        source="generated",
-                    ),
-                    user_id,
-                )
-                asset_id = str(created["id"])
-            else:
-                asset_id = str(req.asset_id)
-            await self.assets.attach_file(
-                int(asset_id),
+            return await self._attach_and_mark(
+                gen_id, scope_id, user_id, req, resource_id
+            )
+
+    async def _attach_and_mark(
+        self,
+        gen_id: int | str,
+        scope_id: int,
+        user_id: str,
+        req: SaveAsAssetRequest,
+        resource_id: str,
+    ) -> dict[str, Any]:
+        """The TRANSACTIONAL segment of save-as-asset. The caller owns the
+        transaction — this method opens none.
+
+        Extracted so ``POST /resources/{id}/save-as-asset`` can run it in a
+        transaction that ALSO contains the mint of the inbox row (see
+        :meth:`save_resource_as_asset`), instead of a second copy that could
+        drift from this one. ``unit_of_work()`` is REQUIRES_NEW here — nesting
+        it would open a separate transaction that commits independently, which
+        is exactly the rollback guarantee the resource path is buying — so the
+        boundary has to be the caller's, not this method's.
+
+        ``set_review_state`` is last on purpose: ``in_assets`` without an
+        attachment is the one direction that must never be reachable.
+        """
+        if req.new_asset is not None:
+            created = await self.assets.create_asset(
                 int(scope_id),
-                AttachFileRequest(
-                    resource_id=resource_id,
-                    slot=req.slot,
-                    loadout_id=req.loadout_id,
+                AssetCreate(
+                    asset_type=req.new_asset.asset_type,
+                    name=req.new_asset.name,
+                    source="generated",
                 ),
                 user_id,
             )
-            updated = await self.gen_repo.set_review_state(
-                int(gen_id), int(scope_id), "in_assets"
-            )
-            if updated is None:
-                raise self._not_in_scope()
+            asset_id = str(created["id"])
+        else:
+            asset_id = str(req.asset_id)
+        await self.assets.attach_file(
+            int(asset_id),
+            int(scope_id),
+            AttachFileRequest(
+                resource_id=resource_id,
+                slot=req.slot,
+                loadout_id=req.loadout_id,
+            ),
+            user_id,
+        )
+        updated = await self.gen_repo.set_review_state(
+            int(gen_id), int(scope_id), "in_assets"
+        )
+        if updated is None:
+            raise self._not_in_scope()
         return {"row": updated, "asset_id": asset_id, "resource_id": resource_id}
 
     async def save_as_asset(
@@ -373,6 +418,136 @@ class GeneratedInboxService:
             "generation": (await self._decorate([out["row"]], str(scope_id)))[0],
             "asset_id": out["asset_id"],
             "resource_id": out["resource_id"],
+        }
+
+    # ── save a LIBRARY RESOURCE as an asset (ruling E) ─────────────────────
+
+    async def _require_library_resource(
+        self, resource_id: int | str, user_id: str
+    ) -> dict[str, Any]:
+        """The resource row, or a typed refusal. Never ``None`` to the caller.
+
+        ``get_resource_by_id_for_caller`` answers ``None`` for BOTH "no such
+        row" and "exists but not visible to you", and opens its own scope when
+        ``SCOPE_ENFORCE_RESOURCES`` is on — so this call site needs no ambient
+        request scope and leaks no existence. One code for both is deliberate:
+        "not yours" and "not there" are the same answer to a caller who may
+        not learn which.
+        """
+        row = await self.resources.get_resource_by_id_for_caller(
+            str(resource_id), str(user_id)
+        )
+        if not row:
+            raise AssetError(
+                404,
+                "resource_not_accessible",
+                "Resource not found or not accessible",
+            )
+        return row
+
+    async def _mint_args_for_resource(
+        self, resource: dict[str, Any], scope_id: int, user_id: str
+    ) -> dict[str, Any]:
+        """Everything ``insert_registered_resource`` needs, or a typed refusal.
+
+        Two refusals, both knowable before any write:
+
+        * ``resource_not_image`` — an asset FILE slot seeds a visual reference
+          (``sheet`` / ``establishing`` / ``turnaround`` / ``flat``); a PDF or a
+          video has no slot to land in. Narrower than
+          ``generated_media_router.resolve_resource_import`` (which also takes
+          ``video/*``, because an i2v reference is a real thing there) — see
+          the endpoint docstring for why that is a deliberate narrowing and not
+          an oversight.
+        * ``materialize_failed`` — the PR-B ladder
+          (``resources.file_path`` → ``parsed_media.download_path``) resolved
+          no SINGLE file. That covers a row whose bytes were never downloaded
+          AND an image album, whose path is a directory prefix: handing a
+          directory downstream is worse than refusing, not better.
+        """
+        mime = str(resource.get("mime_type") or "").lower()
+        if not mime.startswith("image/"):
+            raise AssetError(
+                422,
+                "resource_not_image",
+                "Only image resources can be saved as an asset file",
+            )
+        file_path = await resolve_resource_file_path(resource)
+        if not file_path:
+            raise AssetError(
+                422,
+                "materialize_failed",
+                "Resource has no single local file to attach",
+            )
+        return {
+            "scope_id": int(scope_id),
+            # The row describes who OWNS the file, not who clicked "As Asset"
+            # — same rule ``backfill_generated_inbox`` states for its own
+            # ``creator_id``. Falls back to the caller only for a legacy row
+            # with no creator.
+            "creator_id": str(resource.get("creator_id") or user_id),
+            "resource_id": int(resource["id"]),
+            "file_path": str(file_path),
+            "mime": mime or None,
+            "media_kind": "image",
+            "conversation_id": None,
+            "origin_kind": LIBRARY_UPLOAD_ORIGIN,
+        }
+
+    async def save_resource_as_asset(
+        self,
+        resource_id: int | str,
+        scope_id: int,
+        user_id: str,
+        req: SaveAsAssetRequest,
+    ) -> dict:
+        """Save a LIBRARY resource as an asset — find-or-mint + attach, ONE
+        transaction (ruling E).
+
+        A My Uploads file is not a generation, so there may be no inbox row to
+        save. Step ① reuses the one that exists (``promoted_resource_id`` is
+        the key — a resource has at most one inbox row, whoever wrote it);
+        step ② mints one when it does not, registering the EXISTING resource
+        (no blob copy: the row carries the resource's own ``file_path`` and
+        points ``promoted_resource_id`` at it); step ③ is the same
+        :meth:`_attach_and_mark` the generation path runs.
+
+        **Why one transaction, unlike :meth:`_save_as_asset_core`.** That path
+        keeps ``promote`` outside the unit of work because it escalates roles,
+        does storage I/O and carries a non-fatal backlink guard. None of the
+        three applies here: nothing is promoted, because the resource already
+        exists — the mint is a SELECT and an INSERT on ``generated_media`` and
+        nothing else. So the mint joins the attach's transaction, and a failure
+        at ③ (a slot conflict, a mid-flight permission change) leaves NO minted
+        row behind. That is the whole point: a user who cancels or whose save
+        fails must not find an orphan card in the Generated inbox.
+
+        Idempotent. A second call for the same resource hits ① and re-attaches
+        the same row; ``attach`` itself is the upsert that makes the repeat
+        harmless.
+
+        Validation runs BEFORE the transaction so an unknown asset, a read-only
+        preset, a bad slot, a non-image resource or a resource with no file all
+        refuse cleanly with nothing written.
+
+        A pre-existing inbox row that lives in ANOTHER scope surfaces as the
+        usual typed ``generation_not_found`` from ``set_review_state`` — inside
+        the transaction, so the attach rolls back with it rather than half
+        applying.
+        """
+        resource = await self._require_library_resource(resource_id, user_id)
+        mint_args = await self._mint_args_for_resource(resource, scope_id, user_id)
+        await self._validate_target(scope_id, req)
+        async with unit_of_work():
+            gen = await self.gen_repo.insert_registered_resource(**mint_args)
+            out = await self._attach_and_mark(
+                gen["id"], scope_id, user_id, req, str(resource["id"])
+            )
+        return {
+            "generation": (await self._decorate([out["row"]], str(scope_id)))[0],
+            "asset_id": out["asset_id"],
+            "resource_id": out["resource_id"],
+            "generated_id": str(gen["id"]),
         }
 
     async def delete(self, gen_id: int | str, scope_id: int) -> None:

@@ -11,6 +11,14 @@ from typing import Any, Optional
 
 _UNTITLED = "Untitled canvas"
 
+# The ``origin_kind`` written when a My Uploads resource is registered so it can
+# be saved as an asset (``GeneratedInboxService.save_resource_as_asset``).
+# Defined HERE, next to the label that renders it, because the writer and the
+# card are the two halves that must not drift: an origin_kind with no arm below
+# falls through to ``label = kind`` and prints its own raw column value on the
+# card, which reads as a broken card rather than as a missing case.
+LIBRARY_UPLOAD_ORIGIN = "library_upload"
+
 
 def describe_source(
     row: dict[str, Any], *, canvas_names: dict[str, str], team_id: str
@@ -41,6 +49,8 @@ def describe_source(
         label = "Chat generation"
     elif kind == "chat_upload":
         label = "Chat upload"
+    elif kind == LIBRARY_UPLOAD_ORIGIN:
+        label = "Library upload"
     else:
         label = kind
 

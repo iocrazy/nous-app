@@ -1,4 +1,7 @@
-from app.services.library.generated_source import describe_source
+from app.services.library.generated_source import (
+    LIBRARY_UPLOAD_ORIGIN,
+    describe_source,
+)
 
 NAMES = {"501": "EP1 · Storyboard"}
 
@@ -65,3 +68,19 @@ def test_unknown_kind_is_passed_through_not_crashed():
         and s["label"] == "future_thing"
         and s["deep_link"] is None
     )
+
+
+def test_library_upload_has_its_own_label_not_the_raw_column():
+    """The kind the resource → asset save writes.
+
+    Without an arm it falls through to ``label = kind`` and the card prints
+    "library_upload" at the user — which reads as a broken card, not as a
+    missing case. Asserted against the constant the WRITER imports, so
+    renaming one side fails here.
+    """
+    s = describe_source(
+        {"origin_kind": LIBRARY_UPLOAD_ORIGIN}, canvas_names={}, team_id="1"
+    )
+    assert s["label"] == "Library upload"
+    assert s["kind"] == LIBRARY_UPLOAD_ORIGIN
+    assert s["deep_link"] is None
