@@ -13,7 +13,9 @@ Task 2 tests pin save_chat_temp_upload and helpers:
   returns a normalized dict.
 
 The folder itself moved out of this file: P6 Task 2 replaced the name-matching
-get-or-create with a ``system_key='chat_uploads'`` identity (migration 450), and
+get-or-create with a ``system_key='chat_uploads'`` identity (code adopts by key,
+then a legacy root ``temp`` folder, then creates; the follow-up migration 450
+only sweeps scopes the code never touched), and
 its find / adopt / create branches are pinned in
 ``tests/services/library/test_chat_upload_folder.py``.
 """
