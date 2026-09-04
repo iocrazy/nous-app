@@ -620,7 +620,7 @@ export const ResourcesViewInner: React.FC = () => {
         touchDragState={touchDragState}
       />
 
-      {/* Add To Asset — one My Uploads file (P6 ruling E). */}
+      {/* As Asset — one My Uploads file (P6 ruling E). */}
       {saveAsAssetResource && (
         <SaveAsAssetDialog
           open

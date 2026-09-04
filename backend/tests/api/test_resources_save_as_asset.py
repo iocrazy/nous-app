@@ -495,8 +495,12 @@ def test_the_accepted_kinds_are_exactly_what_the_slot_table_supports():
 @pytest.mark.asyncio
 async def test_resource_with_no_single_file_is_a_typed_422(monkeypatch):
     """An album resolves to a DIRECTORY prefix, and a row that was never
-    downloaded resolves to nothing — both are ``materialize_failed``, not a
-    save that silently attaches a path nothing can read."""
+    downloaded resolves to nothing — both are ``resource_file_unresolved``, not
+    a save that silently attaches a path nothing can read.
+
+    The code is deliberately NOT ``materialize_failed``: that one tells the
+    user to retry, and neither of these two causes can ever succeed on a retry.
+    The user-facing copy has to name both causes for the same reason."""
     application = build_app(
         monkeypatch,
         resources=FakeResources([make_resource(file_path="", media_id=None)]),

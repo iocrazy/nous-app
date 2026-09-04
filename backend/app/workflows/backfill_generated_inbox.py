@@ -184,7 +184,7 @@ async def _load_inputs() -> PlannerInputs:
 
     Trashed resources and trashed folders are excluded: an inbox row for a file
     on its way to deletion is noise (temp clean-up is manual —
-    ``POST /api/v1/generated/cleanup``; the TTL sweeper is unscheduled).
+    ``POST /api/v1/generated/cleanup``; the TTL sweeper was retired in P6).
     ``file_path IS NULL`` rows are excluded because
     ``generated_media.file_path`` is NOT NULL.
     """

@@ -308,6 +308,25 @@ export async function saveGenerationAsAsset(
 }
 
 /**
+ * Every refusal code {@link saveResourceAsAsset} can raise that is NOT already
+ * rendered by the generation path, mirrored from
+ * `backend/app/api/resources_assets_router.py`.
+ *
+ * A TRIPWIRE, not a mechanism: nothing reads this list at runtime — the dialog
+ * resolves `saveAsAsset.err.<code>` straight from whatever the server sent, so
+ * an unlisted code still reaches the user (as the generic sentence). What the
+ * list buys is that `saveAsAssetI18n.test.ts` fails when a code is added here
+ * without copy in both locales, which forces whoever widens the backend's
+ * error set to write the sentence a user will actually read.
+ */
+export const RESOURCE_SAVE_AS_ASSET_ERROR_CODES = [
+  'resource_not_accessible',
+  'resource_not_found',
+  'resource_kind_unsupported',
+  'resource_file_unresolved',
+] as const;
+
+/**
  * The same action for a LIBRARY RESOURCE — `POST /resources/{id}/save-as-asset`
  * (`backend/app/api/resources_assets_router.py`).
  *
@@ -337,25 +356,6 @@ export async function saveGenerationAsAsset(
  * `signal` is honoured and its `AbortError` is rethrown untouched: a cancel is
  * not evidence about the server (see `envelopeFetch`).
  */
-/**
- * Every refusal code {@link saveResourceAsAsset} can raise that is NOT already
- * rendered by the generation path, mirrored from
- * `backend/app/api/resources_assets_router.py`.
- *
- * A TRIPWIRE, not a mechanism: nothing reads this list at runtime — the dialog
- * resolves `saveAsAsset.err.<code>` straight from whatever the server sent, so
- * an unlisted code still reaches the user (as the generic sentence). What the
- * list buys is that `saveAsAssetI18n.test.ts` fails when a code is added here
- * without copy in both locales, which forces whoever widens the backend's
- * error set to write the sentence a user will actually read.
- */
-export const RESOURCE_SAVE_AS_ASSET_ERROR_CODES = [
-  'resource_not_accessible',
-  'resource_not_found',
-  'resource_kind_unsupported',
-  'resource_file_unresolved',
-] as const;
-
 export async function saveResourceAsAsset(
   scopeId: string,
   resourceId: string,

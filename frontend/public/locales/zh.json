@@ -2171,7 +2171,7 @@
       "resource_not_accessible": "这个文件在这里不可用，可能已被删除，或属于其他人。",
       "resource_not_found": "这个文件没有归档在该工作区的资料库里，因此无法在这里挂载。",
       "resource_kind_unsupported": "只有图片和音频可以挂到资产槽位上。",
-      "resource_file_unresolved": "这个文件还没有下载完成，暂时没有可挂载的内容。"
+      "resource_file_unresolved": "这个素材没有可挂载的单个文件 —— 图集没有唯一的那一张，仍在下载中的文件则还没有。"
     }
   },
   "smartFolder": {

@@ -2171,7 +2171,7 @@
       "resource_not_accessible": "That file is not available here. It may have been deleted, or it belongs to someone else.",
       "resource_not_found": "That file is not filed in this workspace's library, so it cannot be attached here.",
       "resource_kind_unsupported": "Only images and audio can be attached to an asset slot.",
-      "resource_file_unresolved": "That file has not finished downloading, so there is nothing to attach yet."
+      "resource_file_unresolved": "That file has no single attachable file — photo albums have no one image to attach, and a file still downloading has none yet."
     }
   },
   "smartFolder": {

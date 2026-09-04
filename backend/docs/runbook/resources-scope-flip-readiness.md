@@ -56,7 +56,9 @@ but scope enforcement is meaningful **only** once the ORM repo is live.
   end-to-end (A4).
 
 **SYSTEM-scoped (`system_request_scope(reason)`):**
-- Sweepers — `temp_resource_sweeper`, `scheduled_cleanup` ×2 (pass 3).
+- Sweepers — `temp_resource_sweeper` (**deleted in P6** — kept here as the
+  record of what the flip covered, NOT as work still to do), `scheduled_cleanup`
+  ×2 (pass 3).
 - `thumbnail_workflow` (no user_id, owner-agnostic derived asset) + transcode
   batch/None path (pass 5).
 - `count_resources_by_media_id` — always-global GC refcount (A2.5).

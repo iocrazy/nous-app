@@ -74,7 +74,7 @@ interface UseContextMenuItemsOptions {
   /** Open the Upload Gallery dialog (empty-area menu). */
   onUploadGallery: () => void;
   /**
-   * Open "Add To Asset" on this file. Required, not optional: an optional
+   * Open "As Asset" on this file. Required, not optional: an optional
    * callback would let a host mount the menu with a silently dead entry, and
    * the whole point of this item is that a user action reaches a typed result.
    */
