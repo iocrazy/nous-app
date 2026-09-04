@@ -311,6 +311,11 @@ export interface Folder {
   created_by: string;
   sort_order: number;
   is_system: boolean;
+  // Stable identity of a system folder ('cover_templates', 'chat_uploads'),
+  // independent of its display name — migration 441 added the column and
+  // `folders` is fetched with `select('*')`, so it is always on the wire.
+  // Optional here only because hand-written Folder fixtures predate it.
+  system_key?: string | null;
   icon: string | null;
   color: string | null;
   visibility: 'inherited' | 'restricted';
