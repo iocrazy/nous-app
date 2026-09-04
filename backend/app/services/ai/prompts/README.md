@@ -101,11 +101,18 @@ Use the ResourceFetch tool to load any of these on demand:
 - **`has_image` 是独立字段，写作 `"true"` / `"false"`。** 音频资产有主资源却没有图，两者必须能分开——不然模型会对着 `.wav` 调 `mode=image`。Python 的 `True` 在属性里是另一个 token，拼写由渲染层负责，不由 `ChatAssetRef` 负责。
 - **`primary_resource_id` / `loadout` 为空时整个属性省略，不渲染成空串。** `primary_resource_id=""` 读起来仍然像一个 id，模型会拿它去调用然后失败；属性缺席 + `has_image="false"` 才是「没有图可取」。
 
-**所有属性值都过 `escape_frame_attr`，`<asset>` 的正文过 `escape_frame_body`**（`name` 是用户可自由改的，一致性提示词整段都是用户写的）；见 `../../../boundary/frame_markers.py`。
+**所有属性值都过 `escape_frame_attr`，`<asset>` 的正文过 `escape_frame_prose`**（`name` 是用户可自由改的，一致性提示词整段都是用户写的）；见 `../../../boundary/frame_markers.py`。
 
-⚠️ **`escape_frame_body` 只中和 `OWNED_FRAMES` 里那些框的闭合标记，别的标签一律原样保留**——用户散文里的 `</div>`、`</think>`、`<b>` 都会照原样到达模型。这是**约定的契约不是疏漏**：只有我们自己的框才赋予「这是系统说的」那层权威，把每个尖括号都转义掉会毁掉合法引用标签的文字，换不来任何安全收益。
+⚠️ **正文用的是 `escape_frame_prose` 而不是 `escape_frame_body`，这一块是例外**（终审 I1）。`escape_frame_body` 的契约是「只中和 `OWNED_FRAMES` 的闭合标记，别的标签原样保留」——`</div>`、`</think>`、`<b>` 照原样到达模型，因为剧本可能合法地谈到它们。那个契约对**自由排版**的框是对的，对**逐行目录**的这一块不成立：
 
-⚠️ **`asset` 刻意不在 `OWNED_FRAMES` 里**（P5 裁决 A，spec §6.5 已按此修订）：它是我们拥有的框**内部的元素**，不是框。用户提示词里出现字面 `</asset>` 只会截断它自己那一条，后面的文字仍在 `<available_resources>` 内，拿不到 harness 权威；反过来把它登记成框，会把提示词里每一次合法提到该词都糟蹋掉。`tests/services/ai/prompts/test_frame_escape_wiring.py` 的 `ignore` 名单记着这条理由。
+- 这个框是**按行读**的，一行一条 `<resource … />`；
+- 一致性提示词是这里唯一「用户写的 + 无长度自然上限 + 允许换行 + 不转义 `<`」的模型可见值。
+
+两者相乘的结果是**可以伪造一条兄弟目录行**，缩进、属性顺序、自闭合形式与我们自己写的那行**字节级无法区分**。它关不掉框（`</available_resources>` 仍被中和），伪造的 id 也进不了 ResourceFetch 白名单，所以不是提权；它伪造的是这个框唯一要断言的东西——**这些条目是系统列出来的**。
+
+`escape_frame_prose` 两手都要：**压平** `\r\n\t`（杀掉伪造的「行」）+ **实体转义** `&<>`（杀掉留在同一行里的伪造「元素」）。引号不转义——这是元素正文不是属性值。两条各有独立的突变验证。
+
+⚠️ **`asset` 刻意不在 `OWNED_FRAMES` 里**（P5 裁决 A，spec §6.5 已按此修订）：它是我们拥有的框**内部的元素**，不是框；把它登记成框会把提示词里每一次合法提到该词都糟蹋掉。`tests/services/ai/prompts/test_frame_escape_wiring.py` 的 `ignore` 名单记着这条理由。⚠️ 裁决 A 当时说的代价是「字面 `</asset>` 会截断它自己那一条」——**终审 I1 之后这个代价降到零**：正文的角括号全被实体转义，那个字面量关不掉任何东西。这两件事不矛盾，它们说的是两层（`OWNED_FRAMES` 是 `escape_frame_body` 的词表，正文防护来自 `escape_frame_prose`）。
 
 #### Token effect
 
@@ -113,7 +120,10 @@ Use the ResourceFetch tool to load any of these on demand:
 
 - **每条 `<resource … />`** 约 30-60 token。
 - **每条 `<asset …>…</asset>`** = 属性约 25-40 token + 一致性提示词。提示词是这里唯一无自然上限的输入（资产自身提示词 + loadout 的 `prompt_extra` + 每个链接的服装 / 道具 / 场景的提示词拼起来），所以在 `app/services/assets/chat_ref.py` 里**硬截断到 `MAX_CONSISTENCY_PROMPT_CHARS = 600` 字符**。⚠️ `" [truncated]"` 标记是**追加在上限之外**的，被截断的条目正文是 **612** 字符而不是 600——按常量本身算预算会每条少算 12 字符。600 字符在纯 ASCII 下约 150 token，全中文时可以接近 600 token，估上限要按后者。
-- **单条有界，总量无界。** 上面两个上限只管住「每一条多大」；**引用型附件（`resource_ref` / `asset_ref`）的条数服务端不限制**——`ChatMessageRequest.attachments` 是没有 `max_length` 的 list。链路上**唯一**存在的条数上限是 `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN = 8`，但它只作用于 **binary 桶**（`image` / `video` / `pdf` / `audio`），而分流处按 kind 已把两种引用摘走，所以它**管不到这一块**。⚠️ 那个 8 还是**静默截断**：第 9 条起直接丢弃且不产出任何 `attachment_failures` 条目（既有缺口，非 P5 引入）。所以这一块正确的说法是 `总量 = 客户端发的引用条数 × 单条上限`，而不是「有上限」。已记进下面的 Known Limitations。
+- **总量有界。** **引用型附件（`resource_ref` + `asset_ref`）合起来每轮最多 8 条**——`ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS`，在分流处按调用方自己的顺序计数（终审 I2）。所以这一块的最坏体积是 `8 × 单条上限`，约 5k 字符量级。
+  - **超出的条目不解析、也不静默丢**：每条产出一个 `attachment_limit_exceeded` 的 `attachment_failures` 条目，index 是它在**调用方完整附件表**里的位置。
+  - 按**位置**计数不按去重后的 id 计数：否则调用方发 200 份同一个 id 仍然要占 200 条请求体，而请求体正是要封的东西。
+  - 它与 binary 桶的 `chat_attachment_resolver.MAX_ATTACHMENTS_PER_TURN = 8` **数值相同但是两个常量**：两者封的成本不是一回事（字节 vs 数据库往返），耦合成一个会让其中一个为另一个的理由而移动。⚠️ binary 那个 8 仍然是**静默截断**（既有缺口，见下面 Known Limitations）。
 
 **资源正文与资产主图都不在这里**——这一块只是目录，正文/图片要模型主动调 `ResourceFetch` 才进上下文。没有 @-mention 也没有资产时整块返回空字符串，这样无 mention 的轮次系统消息缓存键不变。
 
@@ -128,9 +138,8 @@ Use the ResourceFetch tool to load any of these on demand:
 - **身份三段无长度上限**。一个 `agent_md` 写到 200k 字符的 agent 会把每一轮请求都撑爆，而且因为它在缓存边界之前，代价逐轮重复。skill 正文有 64k 上限（`../skills/`），身份文档没有对应的护栏。
 - **两个指纹都不覆盖 `request_instructions`、`<available_resources>` 与 `# Runtime` 行**。它们是缓存键，不是"这次请求的输入摘要"——`_dynamic_fingerprint()` 只加了记忆内容，因为缓存隔离只需要防跨用户串味。**别拿它判断"两轮输入是否相同"**：改了 request instructions、换了 @-mention 的资源、跨了一分钟，动态指纹都可能一模一样。
 - **`_build_tools()` 只决定给模型看什么，不是执行期的强制**。写权限的真正拦截在 `AgentRunner._dispatch_screenwriting`；把这里的过滤当成权限校验是 A4 评审记过的错误。
-- **引用型附件的条数没有服务端上限**。`ChatMessageRequest.attachments`（`app/schemas/ai_library_chat.py`）是没有 `max_length` 的 list，而链路上唯一的条数上限 `MAX_ATTACHMENTS_PER_TURN = 8` 只作用于 binary 桶（分流处已按 kind 把 `resource_ref` / `asset_ref` 摘走），所以 `<available_resources>` 这一块的总大小只受客户端约束。今天不构成事故是因为唯一的写方是我们自己的 composer UI；一个直接打 API 的调用方可以塞进任意多条，把系统消息撑到 provider 上限。要封顶就得在 schema 上加，别指望前端。
 - **binary 附件超过 8 条时被静默截断**（`chat_attachment_resolver.py` 的 `capped = requests[:MAX_ATTACHMENTS_PER_TURN]`）。第 9 条起既不解析也**不产出 `attachment_failures` 条目**，只写一条 warning 日志——用户贴了 12 张图，其中 4 张从未到达模型而界面上没有任何提示。与「触发路径必须类型化失败回显」相悖，是 P5 之前就存在的缺口，记在这里以免被读成引用路径的行为。
 - **issue 回复框不支持资产引用**（P5 裁决 H）。`frontend/components/Todolist/IssueReplyBox.tsx` 走的是另一条发送路径，本期只接了聊天面板一侧——「两个入口只接一个」这类缺口在本仓已经出现过多次，所以显式记在这里而不是留在源码 TODO。
 - **资产的主图可能「有」却「取不到」，此时条目被降级渲染**。`has_image` 由解析器用**系统作用域**读 `resources` 算出（资产的文件行是经资产可读的，不是经调用者的 team 成员关系），而 `ResourceFetch` 只认本轮可访问集合——两者会不一致，最典型的是系统预设资产，它的文件落在用户不属于的 scope 里。`ai_library_chat_service._merge_asset_primaries` 在这种情况下把条目改写成 `has_image="false"` 且**省掉 `primary_resource_id`**（即上面那条「没有图可取」的形状），并向用户回一条 `asset_no_primary_image`。宁可少给一张图，也不给模型一个用了就失败的 id。
-- **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 把 reason 词表钉死在四个值，其中 `asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得先给词表加第五个值。
+- **`audio` 资产的主资源取不到时，用户端没有回显**（同上那条的副作用）。裁决 C 的 reason 词表里，`asset_no_primary_image` 明确只对「本该有图的类型」成立，所以音频只写日志、不进 `attachment_failures`——模型仍拿到一致性提示词，只是听不到那段音频，而用户不会被告知。要补就得再给词表加一个值（词表现在是五个：四个来自 `asset_ref_resolver`，第五个 `attachment_limit_exceeded` 由 chat service 的条数上限产出）。
 - **`link_injection` 失败会落显式占位块**，不是静默跳过——但占位块的文案目前只有英文，与 UI 的 i18n 口径不一致。

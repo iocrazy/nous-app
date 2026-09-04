@@ -39,6 +39,7 @@ from uuid import UUID
 from app.boundary.frame_markers import (
     escape_frame_attr,
     escape_frame_body,
+    escape_frame_prose,
 )
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.skill_repository import SkillRepository
@@ -646,10 +647,16 @@ def render_available_resources(
     a character, a location — whose picture is one of the resources). They are
     siblings on purpose (P5 ruling A): ``<asset>`` is an ELEMENT INSIDE the
     frame we own, not a frame of its own, so it is deliberately absent from
-    ``OWNED_FRAMES``. A user-authored ``</asset>`` inside a consistency prompt
-    therefore truncates that one entry and cannot escape into harness
-    authority — which ``escape_frame_body`` still prevents for the frame
-    itself.
+    ``OWNED_FRAMES`` — registering it there would mangle every legitimate
+    mention of the word in a prompt for no authority gained.
+
+    The consistency prompt is nonetheless the only user-written, unbounded,
+    newline-bearing value this frame carries, and the frame is read LINE BY
+    LINE. So it goes through ``escape_frame_prose``, not ``escape_frame_body``
+    (final review I1): flattened to one line so it cannot emit a forged
+    ``  <resource … />`` row, and entity-escaped so it cannot forge one
+    in-line either. A user-authored ``</asset>`` consequently does not even
+    truncate its own entry any more.
 
     Assets render AFTER every resource so the primary images they point at are
     already on the page when the model reads ``primary_resource_id``.
@@ -741,7 +748,14 @@ def render_available_resources(
         asset_attrs.append(f'has_image="{"true" if a.has_image else "false"}"')
         if a.loadout_id is not None:
             asset_attrs.append(f'loadout="{escape_frame_attr(a.loadout_id)}"')
-        body = escape_frame_body(a.consistency_prompt)
+        # `escape_frame_prose`, NOT `escape_frame_body`: this frame is a
+        # line-oriented catalogue and the consistency prompt is the only
+        # user-written, newline-bearing, model-visible value in it. Body
+        # escaping alone leaves the newlines and the `<`, which is enough to
+        # emit a `  <resource … />` line indistinguishable from one we wrote
+        # (final review I1). Flattening kills the forged row, entity-escaping
+        # kills a forged element that stays on this line.
+        body = escape_frame_prose(a.consistency_prompt)
         lines.append(f"  <asset {' '.join(asset_attrs)}>{body}</asset>")
     lines.append("</available_resources>")
     # Only describe ResourceFetch when this turn actually has something to

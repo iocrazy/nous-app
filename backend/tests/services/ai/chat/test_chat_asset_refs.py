@@ -778,3 +778,155 @@ def test_ref_id_coercion_stays_narrow():
 
     with pytest.raises(ValidationError):
         AttachmentRequest.model_validate({"kind": 5})
+
+
+# ---------------------------------------------------------------------------
+# MAX_REFERENCE_ATTACHMENTS (final review I2)
+# ---------------------------------------------------------------------------
+#
+# Driven through the real consumer for the same reason as everything above: the
+# cap lives in the bucket split, and the thing it must get right — that an
+# over-cap entry is not resolved AND is reported against its position in the
+# CALLER's list — is only visible from outside.
+
+
+def _resource_ref(rid: str) -> dict:
+    return {
+        "kind": "resource_ref",
+        "resource_id": rid,
+        "name": f"file-{rid}.png",
+        "mime": "image/png",
+        "scope": {"type": "team", "id": "42"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_reference_attachments_past_the_cap_are_not_resolved():
+    """Nine asset refs: eight reach the resolver, the ninth is refused."""
+    from app.services.ai.chat.ai_library_chat_service import (
+        MAX_REFERENCE_ATTACHMENTS,
+    )
+
+    assert MAX_REFERENCE_ATTACHMENTS == 8
+    attachments = [{"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(9)]
+
+    result, captured, _ = await _run_turn(
+        attachments=attachments,
+        asset_result=([_asset_ref()], []),
+        meta={PRIMARY_ID: _resource_meta()},
+    )
+
+    # The list handed to the resolver keeps all nine POSITIONS — dropping the
+    # over-cap entry would shift every later index — but the ninth is blanked
+    # so the resolver's own kind filter skips it.
+    handed = captured["asset_resolver"].call_args[0][0]
+    assert len(handed) == 9
+    assert [a.get("kind") for a in handed] == ["asset_ref"] * 8 + [None]
+    assert handed[8] == {}
+
+    # ...and the user is told, at the index of the chip they can see.
+    assert result["attachment_failures"] == [
+        {"index": 8, "kind": "asset_ref", "reason": "attachment_limit_exceeded"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_cap_counts_both_reference_kinds_together():
+    """A `resource_ref` costs one batched query and an `asset_ref` costs about
+    five serial ones, but the cap bounds the REQUEST, so it counts them in the
+    caller's own order rather than per kind."""
+    attachments = [_resource_ref(str(100 + i)) for i in range(5)] + [
+        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(5)
+    ]
+
+    result, captured, _ = await _run_turn(
+        attachments=attachments,
+        asset_result=([_asset_ref()], []),
+        resource_refs=([], []),
+        meta={PRIMARY_ID: _resource_meta()},
+    )
+
+    # Positions 0-7 are within the cap (five resources + three assets);
+    # positions 8 and 9 are the fourth and fifth assets, refused.
+    assert result["attachment_failures"] == [
+        {"index": 8, "kind": "asset_ref", "reason": "attachment_limit_exceeded"},
+        {"index": 9, "kind": "asset_ref", "reason": "attachment_limit_exceeded"},
+    ]
+    handed = captured["asset_resolver"].call_args[0][0]
+    assert [a.get("kind") for a in handed[5:]] == [
+        "asset_ref",
+        "asset_ref",
+        "asset_ref",
+        None,
+        None,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_over_cap_resource_ref_reports_its_own_kind():
+    """The reason is shared; the kind is not. A consumer grouping by kind must
+    not be told an over-cap resource reference was an asset."""
+    attachments = [
+        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)
+    ] + [_resource_ref("100")]
+
+    result, _, _ = await _run_turn(
+        attachments=attachments,
+        asset_result=([_asset_ref()], []),
+        meta={PRIMARY_ID: _resource_meta()},
+    )
+
+    assert result["attachment_failures"] == [
+        {"index": 8, "kind": "resource_ref", "reason": "attachment_limit_exceeded"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exactly_the_cap_is_allowed():
+    """The boundary, in the passing direction: an off-by-one here would refuse
+    a turn the UI can legitimately stage."""
+    attachments = [{"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)]
+
+    result, captured, _ = await _run_turn(
+        attachments=attachments,
+        asset_result=([_asset_ref()], []),
+        meta={PRIMARY_ID: _resource_meta()},
+    )
+
+    assert result["attachment_failures"] == []
+    handed = captured["asset_resolver"].call_args[0][0]
+    assert all(a.get("kind") == "asset_ref" for a in handed)
+
+
+@pytest.mark.asyncio
+async def test_the_reference_cap_does_not_touch_the_binary_bucket():
+    """Binary attachments keep their own cap and their own (silent, recorded
+    elsewhere) behaviour — the two buckets bound different costs."""
+    attachments = [
+        {"kind": "asset_ref", "asset_id": str(7000 + i)} for i in range(8)
+    ] + [
+        {"kind": "image", "url": f"https://example.test/{i}.png", "mime": "image/png"}
+        for i in range(3)
+    ]
+
+    with patch(
+        "app.services.ai.chat.chat_attachment_resolver.resolve_attachments",
+        new=AsyncMock(
+            return_value=MagicMock(attachments=[], failures=[], **{"warnings": []})
+        ),
+    ) as mock_binary:
+        result, _, _ = await _run_turn(
+            attachments=attachments,
+            asset_result=([_asset_ref()], []),
+            meta={PRIMARY_ID: _resource_meta()},
+        )
+
+    # All three images reached the binary resolver: the reference cap counted
+    # only references.
+    assert mock_binary.await_count == 1
+    assert len(mock_binary.await_args[0][0]) == 3
+    assert not [
+        f
+        for f in result["attachment_failures"]
+        if f["reason"] == "attachment_limit_exceeded"
+    ]

@@ -87,10 +87,18 @@ _META_DECORATION_KEYS = ("agent_id", "prompt_tokens", "completion_tokens")
 # Deliberately excludes `data_url`: the vision pipeline resolves bytes from the
 # request separately, and inlining them here would bloat every history read.
 # See ConversationsAiStore.display_attachments for the shared reducer.
-# `asset_id` / `loadout_id` (P5) join the list for the same reason
-# `resource_id` is on it: an `asset_ref` bubble re-rendered from history has
-# nothing to point at without them, and the reference kinds carry no bytes to
-# fall back on — the chip would degrade to a bare name with no link.
+# `asset_id` (P5) joins the list for the same reason `resource_id` is on it: an
+# `asset_ref` bubble re-rendered from history has nothing to point at without
+# it, and the reference kinds carry no bytes to fall back on — the chip would
+# degrade to a bare name with no link.
+#
+# ⚠️ `loadout_id` is on this list but NEVER APPEARS IN A PERSISTED ROW TODAY.
+# The reducer drops None (`if a.get(k) is not None`), v1 has no loadout picker
+# at either entry point, so the wire always carries null and the key is always
+# dropped. It stays whitelisted so the day the v2 picker sends a real loadout
+# the value persists without a second migration of this tuple — but do not read
+# a persisted `loadout_id` expecting it to be there, and do not write a fixture
+# containing one: that is a shape this reducer cannot emit (final review M2).
 _DISPLAY_ATTACHMENT_KEYS = (
     "kind",
     "resource_id",

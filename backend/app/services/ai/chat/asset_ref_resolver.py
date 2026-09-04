@@ -53,11 +53,18 @@ from app.services.assets.slots import PRIMARY_SLOT
 
 _MEDIA_READ_REASON = "chat-asset-ref-primary-image-availability"
 
+# The closed vocabulary every `attachment_failures` entry on the REFERENCE
+# path draws from. Declared here because this is where four of the five are
+# produced; the fifth (`attachment_limit_exceeded`) is emitted by
+# `ai_library_chat_service` — the cap spans both reference kinds, so neither
+# resolver can see enough to raise it. One list, so a frontend adding copy for
+# a new code has one place to read.
 AssetRefFailureReason = Literal[
     "asset_not_accessible",
     "asset_deleted",
     "asset_no_primary_image",
     "asset_type_unknown",
+    "attachment_limit_exceeded",
 ]
 
 
@@ -231,8 +238,8 @@ async def resolve_asset_refs(
     the second mention would render a duplicate line without adding anything —
     and any failure is reported against the FIRST mention's index.
 
-    Failure vocabulary (ruling C), all four of which reach the user through
-    ``attachment_failures``:
+    Failure vocabulary (ruling C, amended by final review I2 with a fifth
+    code), all of which reach the user through ``attachment_failures``:
 
     ``asset_not_accessible``
         No row the caller can read, and no ``asset_id`` we could parse. The
@@ -251,6 +258,13 @@ async def resolve_asset_refs(
         neither the primary image nor readiness can be computed. Dropped, and
         loudly — the same posture ``slots.readiness`` takes, because a renamed
         or typo'd type must not come back as a well-formed entry with no image.
+    ``attachment_limit_exceeded``
+        NOT produced here. The turn carried more reference attachments than
+        ``ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS``, so this one was
+        never resolved. Listed in this vocabulary because it arrives in the
+        same ``attachment_failures`` list and needs the same UI copy; raised
+        one level up because the cap counts ``resource_ref`` and ``asset_ref``
+        together and this resolver only ever sees the latter.
     """
     if not attachments:
         return [], []
@@ -307,12 +321,11 @@ async def resolve_asset_refs(
     # ⚠️ Cost: FOUR round trips per asset (loadouts, files, and the two
     # ``link_targets`` traversals), against one batched ``resources`` read for
     # the whole turn. Left per-asset deliberately — batching them needs three
-    # new multi-asset repository methods, and our own composer UI stages a
-    # handful of attachments at most. ⚠️ That is a client habit, not a
-    # guarantee: nothing server-side caps the attachment count (see
-    # ``app/services/ai/prompts/README.md`` Known Limitations), so a caller
-    # hitting the API directly makes this loop as long as it likes. Revisit
-    # when either that cap lands or a caller resolves asset refs in bulk.
+    # new multi-asset repository methods, and the loop is now BOUNDED:
+    # ``ai_library_chat_service.MAX_REFERENCE_ATTACHMENTS`` (8) caps how many
+    # references one turn resolves, so the worst case is ~40 serial round
+    # trips rather than the unbounded one final review I2 found. Revisit if
+    # that cap rises or a caller starts resolving asset refs in bulk.
     staged: List[Tuple[str, Dict[str, Any], Optional[Dict], List[Dict], Dict]] = []
     for asset_id in order:
         row = by_id.get(asset_id)
