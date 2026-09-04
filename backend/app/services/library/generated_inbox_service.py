@@ -468,11 +468,20 @@ class GeneratedInboxService:
           becoming an attachment that renders as a broken card. The detail
           names the accepted kinds — a refusal the user cannot act on is half
           a refusal.
-        * ``materialize_failed`` — the PR-B ladder
+        * ``resource_file_unresolved`` — the PR-B ladder
           (``resources.file_path`` → ``parsed_media.download_path``) resolved
           no SINGLE file. That covers a row whose bytes were never downloaded
           AND an image album, whose path is a directory prefix: handing a
           directory downstream is worse than refusing, not better.
+
+          NOT ``materialize_failed``, which this endpoint originally borrowed:
+          ``workflows/canvas_generation`` already owns that vocabulary and
+          draws the line the other way — ``materialize_failed`` there means
+          "the bytes exist and READING them failed", which the frontend
+          renders as "读取失败". Nothing is materialized on this path (no
+          bytes are copied), and "never downloaded" is the opposite diagnosis
+          from "read failed"; reusing the code would have told the user to
+          retry something that cannot succeed.
         """
         mime = str(resource.get("mime_type") or "").lower()
         media_kind = next(
@@ -490,7 +499,7 @@ class GeneratedInboxService:
         if not file_path:
             raise AssetError(
                 422,
-                "materialize_failed",
+                "resource_file_unresolved",
                 "Resource has no single local file to attach",
             )
         return {
@@ -541,8 +550,8 @@ class GeneratedInboxService:
         harmless.
 
         Validation runs BEFORE the transaction so an unknown asset, a read-only
-        preset, a bad slot, a non-image resource or a resource with no file all
-        refuse cleanly with nothing written.
+        preset, a bad slot, a resource of a kind no slot accepts or a resource
+        with no single file all refuse cleanly with nothing written.
 
         A pre-existing inbox row that lives in ANOTHER scope surfaces as the
         usual typed ``generation_not_found`` from ``set_review_state`` — inside
@@ -553,6 +562,19 @@ class GeneratedInboxService:
         mint_args = await self._mint_args_for_resource(resource, scope_id, user_id)
         await self._validate_target(scope_id, req)
         async with unit_of_work():
+            # Serialise same-resource mints. ``insert_registered_resource`` is
+            # idempotent by a SELECT, not by a DB constraint — there is no
+            # unique index on ``promoted_resource_id`` — and unlike its other
+            # two writers (a one-shot upload, an admin backfill) THIS one is
+            # user-triggered and repeatable: a double-submitted dialog can put
+            # two requests in flight for the same resource, both read "no row"
+            # under READ COMMITTED, and both insert. The second row would then
+            # be unreachable forever (the lookup is ``id asc limit 1``) — a
+            # permanent orphan ``saved`` card, which is exactly the harm this
+            # transaction exists to prevent, entering by another door.
+            # Transaction-level, so the winner's COMMIT releases it and the
+            # loser re-reads and finds the winner's row.
+            await self.gen_repo.lock_resource_registration(int(resource["id"]))
             gen = await self.gen_repo.insert_registered_resource(**mint_args)
             out = await self._attach_and_mark(
                 gen["id"], scope_id, user_id, req, str(resource["id"])

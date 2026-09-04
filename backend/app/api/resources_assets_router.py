@@ -45,8 +45,9 @@ router = APIRouter(prefix="/resources", tags=["resources", "assets"])
 # Every refusal this route can produce, declared so the OpenAPI contract says
 # so too. 403 = not a member of the target scope (``_gate``) or the asset is a
 # read-only preset; 404 = resource not accessible / asset not found; 409 = a
-# mid-flight conflict from the attach; 422 = a non-image resource, a resource
-# with no single file, or a slot the asset type does not have.
+# mid-flight conflict from the attach; 422 = a resource of a kind no slot
+# accepts (neither image nor audio), a resource with no single file, or a slot
+# the asset type does not have.
 _ERRORS: Dict[Union[int, str], Dict[str, Any]] = {
     403: {"model": ErrorEnvelope},
     404: {"model": ErrorEnvelope},
@@ -77,7 +78,7 @@ async def save_resource_as_asset(
       team they do not belong to.
 
     Failures are typed (``resource_not_accessible`` /
-    ``resource_kind_unsupported`` / ``materialize_failed`` / the asset codes
+    ``resource_kind_unsupported`` / ``resource_file_unresolved`` / the asset codes
     ``attach_file`` already emits), so the context menu can say WHY rather than
     fall silent.
 

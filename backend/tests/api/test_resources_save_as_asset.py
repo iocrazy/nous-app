@@ -23,11 +23,16 @@ import datetime
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects import postgresql
 
 from app.api import assets_router as ar
 from app.api import generated_router as gr
 from app.api import resources_assets_router as rar
 from app.core.deps import get_auth
+from app.repositories.generated_media_repository import (
+    GeneratedMediaRepository,
+    _registration_lock_stmt,
+)
 from app.schemas.generated import SaveAsAssetRequest
 from app.services.assets.assets_service import AssetError
 from app.services.assets.slots import SLOTS
@@ -132,7 +137,12 @@ class FakeGenRepo:
         self.log = log if log is not None else []
         self.rows: dict[int, dict] = {int(r["id"]): r for r in (rows or [])}
         self.inserts: list[dict] = []
+        self.locked: list[int] = []
         self.next_id = MINTED
+
+    async def lock_resource_registration(self, resource_id):
+        self.log.append("lock_resource_registration")
+        self.locked.append(int(resource_id))
 
     async def insert_registered_resource(self, **kw):
         self.log.append("insert_registered_resource")
@@ -458,11 +468,19 @@ async def test_image_and_audio_are_both_accepted(monkeypatch, mime, kind):
 
 
 def test_the_accepted_kinds_are_exactly_what_the_slot_table_supports():
-    """Pinned against the slot table itself, not retyped.
+    """A TRIPWIRE, not a derivation — and the difference matters.
 
-    Every asset type's file slots take either a visual reference or an audio
-    file; a seventh type whose slots wanted something else would land here
-    rather than as a 422 the user cannot explain.
+    "Every non-audio type's slots take a visual reference, audio's take an
+    audio file" is not encoded anywhere: the slot table names slots, not the
+    file shapes they accept. So both halves below are retyped literals, and
+    the step between them is human reasoning this test cannot check.
+
+    What it DOES buy: widening ``ACCEPTED_ASSET_FILE_KINDS``, or adding a
+    seventh asset type, fails HERE and forces someone to redo that reasoning
+    rather than discovering it as a 422 the user cannot explain. Making it a
+    real derivation means annotating each slot with the file shape it accepts
+    — a change to ``slots.py``, which is mirrored into the frontend and pinned
+    by ``test_slots_frontend_mirror.py``; out of scope here.
     """
     assert mod.ACCEPTED_ASSET_FILE_KINDS == ("image", "audio")
     assert set(SLOTS) - {"prompt"} == {
@@ -485,12 +503,12 @@ async def test_resource_with_no_single_file_is_a_typed_422(monkeypatch):
     )
     r = await _post(application)
     assert r.status_code == 422
-    assert r.json()["error"]["code"] == "materialize_failed"
+    assert r.json()["error"]["code"] == "resource_file_unresolved"
     assert application.state.uow.enters == 0
 
 
 @pytest.mark.asyncio
-async def test_album_directory_prefix_is_materialize_failed(monkeypatch):
+async def test_album_directory_prefix_is_file_unresolved(monkeypatch):
     application = build_app(
         monkeypatch,
         resources=FakeResources(
@@ -499,7 +517,7 @@ async def test_album_directory_prefix_is_materialize_failed(monkeypatch):
     )
     r = await _post(application)
     assert r.status_code == 422
-    assert r.json()["error"]["code"] == "materialize_failed"
+    assert r.json()["error"]["code"] == "resource_file_unresolved"
 
 
 @pytest.mark.asyncio
@@ -543,6 +561,53 @@ async def test_a_body_naming_both_targets_is_422(app):
         },
     )
     assert r.status_code == 422
+
+
+# ── concurrency: the mint is serialised per resource ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_registration_lock_is_taken_before_the_lookup(app):
+    """``insert_registered_resource`` is idempotent by a SELECT, not by a
+    unique index, and this endpoint is the first writer a user can fire twice.
+    The lock has to be inside the transaction and BEFORE the find-or-mint, or
+    two concurrent submits both read "no row" and both insert — leaving a
+    second, permanently unreachable ``saved`` card.
+    """
+    r = await _post(app)
+    assert r.status_code == 201, r.text
+    log = app.state.log
+    assert log.index("uow_enter") < log.index("lock_resource_registration")
+    assert log.index("lock_resource_registration") < log.index(
+        "insert_registered_resource"
+    )
+    # Keyed on the RESOURCE, not the scope or the asset: the row it protects
+    # is the one keyed on ``promoted_resource_id``.
+    assert app.state.repo.locked == [int(RESOURCE)]
+
+
+def test_the_repository_really_exposes_the_lock_the_fake_stands_in_for():
+    assert callable(GeneratedMediaRepository().lock_resource_registration)
+
+
+def test_the_lock_statement_is_a_namespaced_transaction_level_advisory_lock():
+    """Compiled SQL, because every property here is invisible in Python.
+
+    ``_xact_`` (not the session-level ``pg_advisory_lock``) is what makes the
+    lock end with the transaction rather than leaking onto a pooled
+    connection. The namespace prefix is what stops the key colliding with
+    another module's per-id locks — ``hashtextextended`` of a bare snowflake
+    would collide with anything else that hashes the same id.
+    """
+    sql = str(
+        _registration_lock_stmt(int(RESOURCE)).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "pg_advisory_xact_lock(" in sql
+    assert "pg_advisory_lock(" not in sql
+    assert f"'generated_media_registration:{RESOURCE}'" in sql
+    assert "hashtextextended(" in sql
 
 
 # ── contract parity with the generation endpoint ───────────────────────────
