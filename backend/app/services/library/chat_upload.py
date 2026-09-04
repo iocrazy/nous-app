@@ -319,6 +319,34 @@ def chat_uploads_folder_criteria():
     return or_(keyed_chat_uploads_criteria(), legacy_chat_uploads_criteria())
 
 
+def _integrity_constraint_name(exc: Exception) -> Optional[str]:
+    """The violated constraint's name, across the shapes it actually arrives in.
+
+    Measured against this stack (SQLAlchemy 2 + asyncpg, mig 450 schema), NOT
+    assumed: a duplicate keyed folder gives
+    ``sqlalchemy.exc.IntegrityError`` whose ``.orig`` is the dialect's own
+    ``asyncpg.IntegrityError`` — that wrapper has NEITHER ``constraint_name``
+    NOR ``diag``. The name lives one level further down, on
+    ``.orig.__cause__`` (``asyncpg.exceptions.UniqueViolationError``). The two
+    likelier-looking shapes are tried first anyway because the driver is not
+    part of this module's contract and psycopg puts it in both of them.
+
+    Returns ``None`` when no shape carries it — the caller still logs
+    ``str(orig)``, which contains the constraint name in prose, so a genuinely
+    unexpected violation is never reduced to the word "IntegrityError".
+    """
+    orig = getattr(exc, "orig", None)
+    for candidate in (
+        orig,
+        getattr(orig, "diag", None),
+        getattr(orig, "__cause__", None),
+    ):
+        name = getattr(candidate, "constraint_name", None)
+        if name:
+            return str(name)
+    return None
+
+
 async def _find_chat_uploads_folder(scope_id: int) -> Optional[str]:
     """The scope's Chat Uploads folder id (by ``system_key``), or ``None``."""
     from sqlalchemy import select  # noqa: PLC0415
@@ -451,11 +479,16 @@ async def _ensure_chat_uploads_folder(scope_id: str, user_id: str) -> str:
                     outcome = (str(created), "created")
     except IntegrityError as e:
         # Only ux_folders_scope_system_key can realistically land here, and it
-        # means somebody else already has the folder. Logged (never ``pass``)
-        # so a different constraint violation is still visible.
+        # means somebody else already has the folder. The constraint name and
+        # the driver's own message are both in the line because that promise
+        # is otherwise unkeepable: "IntegrityError" alone reads identically
+        # whether we lost a benign race or violated something nobody
+        # anticipated, so the log would quietly assert the benign reading.
         logger.info(
             f"[chat_upload] Chat Uploads folder for scope {scope_id} lost a "
-            f"race: {e.__class__.__name__}; re-reading the winner"
+            f"race: {e.__class__.__name__} "
+            f"constraint={_integrity_constraint_name(e) or 'unknown'} "
+            f"({getattr(e, 'orig', None)}); re-reading the winner"
         )
         outcome = None
 

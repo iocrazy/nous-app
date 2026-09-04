@@ -412,6 +412,101 @@ class TestCreation:
 # ------------------------------------------------------------------ #
 
 
+class TestIntegrityDiagnostics:
+    """The race log has to name the constraint, or it asserts the benign case.
+
+    ``IntegrityError`` alone reads the same whether we lost a harmless race on
+    ``ux_folders_scope_system_key`` or violated something nobody anticipated —
+    so a log that prints only the class name quietly claims the first reading.
+
+    The three shapes below are not hypothetical: measured against this stack
+    (SQLAlchemy 2 + asyncpg) the name is on ``.orig.__cause__``, while
+    ``.orig`` itself has neither ``constraint_name`` nor ``diag``. The other
+    two are covered because the driver is not part of this module's contract.
+    """
+
+    def _err(self, orig):
+        e = IntegrityError("INSERT", {}, Exception("boom"))
+        e.orig = orig
+        return e
+
+    def test_reads_the_name_off_orig(self):
+        orig = type("Orig", (), {"constraint_name": "ux_folders_scope_system_key"})()
+        assert (
+            m._integrity_constraint_name(self._err(orig))
+            == "ux_folders_scope_system_key"
+        )
+
+    def test_reads_the_name_off_orig_diag(self):
+        diag = type("Diag", (), {"constraint_name": "ux_folders_scope_system_key"})()
+        orig = type("Orig", (), {"diag": diag})()
+        assert (
+            m._integrity_constraint_name(self._err(orig))
+            == "ux_folders_scope_system_key"
+        )
+
+    def test_reads_the_name_off_orig_cause_which_is_the_real_shape_here(self):
+        """asyncpg's ``UniqueViolationError`` sits under the dialect wrapper."""
+
+        class _Wrapper(Exception):
+            pass
+
+        # __cause__ must be a real exception — asyncpg's UniqueViolationError
+        # is one, so the stub has to be too or it stops modelling the shape.
+        class _UniqueViolationError(Exception):
+            constraint_name = "ux_folders_scope_system_key"
+
+        orig = _Wrapper("dup key")
+        orig.__cause__ = _UniqueViolationError("dup")
+        assert (
+            m._integrity_constraint_name(self._err(orig))
+            == "ux_folders_scope_system_key"
+        )
+
+    def test_returns_none_when_no_shape_carries_it(self):
+        """None, not a guess. The caller still logs ``str(orig)``."""
+        assert m._integrity_constraint_name(self._err(object())) is None
+        assert m._integrity_constraint_name(self._err(None)) is None
+
+    @pytest.mark.asyncio
+    async def test_the_race_log_carries_the_constraint_and_the_driver_message(
+        self, monkeypatch, caplog
+    ):
+        import logging
+
+        from loguru import logger as loguru_logger
+
+        class _Orig(Exception):
+            pass
+
+        class _UniqueViolationError(Exception):
+            constraint_name = "ux_folders_scope_system_key"
+
+        orig = _Orig('duplicate key value violates unique constraint "ux_x"')
+        orig.__cause__ = _UniqueViolationError("dup")
+        integrity = IntegrityError("INSERT", {}, Exception("dup"))
+        integrity.orig = orig
+
+        _install(
+            monkeypatch,
+            reads=[[], [(KEYED_FOLDER_ID,)]],
+            writes=[[], integrity],
+        )
+
+        sink_id = loguru_logger.add(
+            lambda msg: logging.getLogger("chat_upload_test").info(msg), level="INFO"
+        )
+        try:
+            with caplog.at_level(logging.INFO, logger="chat_upload_test"):
+                await m._ensure_chat_uploads_folder(SCOPE_ID_STR, USER_ID)
+        finally:
+            loguru_logger.remove(sink_id)
+
+        line = "\n".join(caplog.messages)
+        assert "constraint=ux_folders_scope_system_key" in line
+        assert "duplicate key value violates unique constraint" in line
+
+
 class TestConcurrency:
     @pytest.mark.asyncio
     async def test_a_rejected_insert_re_reads_the_winner(self, monkeypatch):

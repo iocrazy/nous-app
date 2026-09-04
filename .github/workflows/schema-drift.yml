@@ -344,4 +344,22 @@ jobs:
           # backs it all only exist in Postgres. The same step also runs the
           # code-side adoption against the real index, which is what proves the
           # migration and `chat_upload.py` agree instead of each minting a row.
-          uv run pytest tests/db/test_chat_uploads_folder_migration.py -v
+          #
+          # AND ASSERT THEY ACTUALLY RAN. This file skips itself at module
+          # level when INTEGRATION_DATABASE_URL is unset, and pytest exits 0
+          # when it skips everything — so the exit code alone cannot tell
+          # "18 passed" from "18 skipped". The DSN above is always set on this
+          # job, which means a skip here is a broken job, not a valid outcome:
+          # going green while asserting nothing is exactly the "can't run →
+          # pass" path this workflow's header forbids. The summary line is the
+          # signal; awk (not `grep -q`) so a non-match is a 0 count rather than
+          # a non-zero exit this step would have to launder with `|| true`.
+          log="$(mktemp)"
+          uv run pytest tests/db/test_chat_uploads_folder_migration.py -v | tee "$log"
+          passed=$(awk '/[0-9]+ passed/ {n++} END {print n+0}' "$log")
+          skipped=$(awk '/[0-9]+ skipped/ || /no tests ran/ {n++} END {print n+0}' "$log")
+          echo "summary check: passed_lines=${passed} skipped_lines=${skipped}"
+          if [ "$passed" -eq 0 ] || [ "$skipped" -ne 0 ]; then
+            echo "::error::mig 450 integration tests did not run (passed=${passed} skipped=${skipped}). A skipped file is not a green file — check INTEGRATION_DATABASE_URL and the Postgres service."
+            exit 1
+          fi

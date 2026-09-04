@@ -180,11 +180,12 @@ async def _load_inputs() -> PlannerInputs:
     one. Both arms are needed — the migration adopts a single ``temp`` folder
     per scope, and this workflow can run before the migration does (the
     migration and backend deploy chains have no ordering guarantee), so keying
-    only on ``system_key`` would report an empty plan and call it reconciled. Trashed resources and trashed
-    folders are excluded: an inbox row for a file on its way to deletion is
-    noise (temp clean-up is manual — ``POST /api/v1/generated/cleanup``; the
-    TTL sweeper is unscheduled). ``file_path IS NULL`` rows are excluded
-    because
+    only on ``system_key`` would report an empty plan and call it reconciled.
+
+    Trashed resources and trashed folders are excluded: an inbox row for a file
+    on its way to deletion is noise (temp clean-up is manual —
+    ``POST /api/v1/generated/cleanup``; the TTL sweeper is unscheduled).
+    ``file_path IS NULL`` rows are excluded because
     ``generated_media.file_path`` is NOT NULL.
     """
     async with read_scope() as session:
