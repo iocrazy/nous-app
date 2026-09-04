@@ -1,7 +1,8 @@
 """The provenance labels the P3 migration stamped into ``assets.attrs``.
 
-``backfill_assets_from_project_entities`` writes, for every asset it created
-from a legacy project entity::
+``backfill_assets_from_project_entities`` wrote, for every asset it created
+from a legacy project entity (it ran in production on 2026-09-02 and was
+deleted with mig 451's DROP; these rows are what it left behind)::
 
     attrs.legacy_ids = [["project_characters", 12], ["project_lib_entities", 7]]
 
@@ -10,16 +11,16 @@ PRE-RENAME spelling on purpose** — mig 447 renamed the physical tables to
 ``_legacy_project_characters`` / ``_legacy_project_lib_entities``, but the
 2026-09-02 production run had already written the old names into every row, and
 these strings are provenance LABELS, not SQL identifiers (nothing resolves them
-to a table; every read goes through the ORM models). Re-spelling them would make
+to a table — and as of mig 451 there is no table left to resolve them to).
+Re-spelling them, or "cleaning them up" now that the tables are gone, would make
 the persisted data and the lookup disagree, which reads as "this legacy card has
 no asset" rather than as an error.
 
-This module exists so the READ side (``GET /assets/resolve-legacy``, which a
-canvas uses to find the asset a legacy character/location/prop card became) does
-not have to import the DBOS workflow that does the writing. The two tables are
-pinned equal by ``tests/services/assets/test_legacy_refs_mirror.py``, so a
-future edit to either one fails rather than silently splitting the vocabulary
-in half.
+This module is the whole read side: ``GET /assets/resolve-legacy`` uses it to
+find the asset a legacy character/location/prop card became, reading
+``assets.attrs`` and nothing else — which is why it outlived both the tables and
+the migration workflow that wrote these labels. The literals are pinned against
+what production persisted by ``tests/services/assets/test_legacy_refs_mirror.py``.
 """
 
 from __future__ import annotations

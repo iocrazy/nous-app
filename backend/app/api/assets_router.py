@@ -393,8 +393,8 @@ async def import_assets_from_script(project_id: SnowflakePath, *, auth: AuthDep)
 
     This replaced the old ``/{project_id}/characters/extract`` and
     ``/{project_id}/lib/{type}/extract`` endpoints, which the mig-447 PR
-    deleted. Mig 447 itself renamed the two project-local tables they wrote
-    to ``_legacy_*``; the DROP is P6. Nothing writes those tables any more.
+    deleted. Mig 447 renamed the two project-local tables they wrote to
+    ``_legacy_*`` and mig 451 DROPped them, so there is nothing left to write.
     """
     try:
         await _project_gate(project_id, auth, write=True)
@@ -474,10 +474,12 @@ async def resolve_legacy(
     """Map a pre-P3 canvas card to the asset the migration produced.
 
     Canvases saved before P3 hold ``character`` / ``location`` / ``prop`` cards
-    keyed by ``_legacy_project_characters`` / ``_legacy_project_lib_entities``
-    row ids. Those are NOT ``assets.id``, so nothing downstream may treat one as
-    an asset — which is why the canvas resolves them HERE instead of stamping
-    them as provenance.
+    keyed by row ids of the two project-local tables (``project_characters`` /
+    ``project_lib_entities``, renamed ``_legacy_*`` by mig 447 and DROPped by
+    mig 451 — the ids outlive the tables, frozen in saved canvas JSON and in
+    ``assets.attrs.legacy_ids``). Those are NOT ``assets.id``, so nothing
+    downstream may treat one as an asset — which is why the canvas resolves
+    them HERE instead of stamping them as provenance.
 
     ``{"asset_id": null}`` is a 200: the question was well formed and the answer
     is "no asset carries that provenance" — the entity's project never

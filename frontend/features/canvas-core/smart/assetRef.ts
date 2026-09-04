@@ -24,10 +24,11 @@
 // is migrated it contributes no provenance, which is the honest answer — the
 // alternative is a stamp that reads as an asset id and is not one.
 //
-// Historical rows keep the old spelling: the backfill maps
-// `params.entity_kind`/`entity_id` → `source_asset_id` (see
-// `_ENTITY_KIND_TO_LEGACY_TABLE` in `backfill_assets_from_project_entities`), so
-// rows written before this change stay comparable with what it writes now.
+// Historical rows keep the old spelling: the P3 backfill mapped
+// `params.entity_kind`/`entity_id` → `source_asset_id` using the same three-entry
+// vocabulary that survives in `app/services/assets/legacy_refs.py` (the backfill
+// itself was deleted with mig 451's DROP), so rows written before this change
+// stay comparable with what it writes now.
 
 import { mentionedAssetsOf } from './promptInputs';
 import type { CanvasConnection, CanvasNode } from '../types';

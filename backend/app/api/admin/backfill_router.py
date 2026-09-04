@@ -21,9 +21,6 @@ from pydantic import BaseModel, Field
 
 from app.core.admin_deps import AdminAuthDep
 from app.utils.admin_helpers import create_audit_log
-from app.workflows.backfill_assets_from_project_entities import (
-    backfill_assets_from_project_entities,
-)
 from app.workflows.backfill_canvas_upload_roles import (
     backfill_canvas_upload_roles_workflow,
 )
@@ -55,11 +52,6 @@ _BACKFILLS: dict[str, Callable[..., Any]] = {
     "publish_task_team_ids": backfill_publish_task_team_ids_workflow,
     "resource_gen_params": backfill_resource_gen_params_workflow,
     "canvas_upload_roles": backfill_canvas_upload_roles_workflow,
-    # Kept deliberately through the legacy window: mig 447 renamed its source
-    # tables to `_legacy_project_characters` / `_legacy_project_lib_entities`
-    # and deleted every other reader, but an emergency re-run has to stay
-    # possible until the P6 DROP. This entry goes with that DROP.
-    "assets_from_project_entities": backfill_assets_from_project_entities,
     "generated_inbox": backfill_generated_inbox,
 }
 

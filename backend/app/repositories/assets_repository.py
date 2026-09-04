@@ -1,9 +1,10 @@
 """Data access for ``assets`` (mig 445).
 
 ORM-backed (read_scope/write_scope). Every method carries an explicit
-``scope_id`` predicate — the model has no scope mixin (ProjectCharacters
-stance), so tenancy lives here. Snowflake BIGINTs ride as strings at the API
-boundary via ``_serialize``; the derived fields (readiness / counts) are
+``scope_id`` predicate — the model has no scope mixin (the stance the
+retired ``ProjectCharacters`` model took, kept here), so tenancy lives
+here. Snowflake BIGINTs ride as strings at the API boundary via
+``_serialize``; the derived fields (readiness / counts) are
 computed by ``with_derived`` from batch queries so list pages cost O(1) round
 trips, not O(n). Read methods return NATIVE rows (int ids) because
 ``with_derived`` keys on them — the caller serializes last.

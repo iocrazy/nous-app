@@ -65,23 +65,29 @@ on:
       - 'supabase/ci_bootstrap.sql'
       - 'backend/tests/db/test_schema_drift.py'
       - 'backend/tests/db/test_assets_repository_integration.py'
-      - 'backend/tests/db/test_assets_migration_integration.py'
       - 'backend/tests/db/test_canvas_asset_refs_integration.py'
-      - 'backend/app/workflows/backfill_assets_from_project_entities.py'
-      # The migration workflow IMPORTS `_NOT_MARKABLE` and
-      # `_resources_with_asset_files_stmt` from this module on purpose (two
-      # copies would let the two backfills disagree about the same row), so a
-      # PR that only touches the shared definitions has to reach this E2 chain
-      # too — otherwise the one guard that runs them against a real Postgres
-      # never fires for the change that moved them.
+      # ⚠️ COVERAGE GAP, STATED PLAINLY. This entry was added because the
+      # project-entity migration workflow imported `_NOT_MARKABLE` and
+      # `_resources_with_asset_files_stmt` from this module, and the step that
+      # ran that workflow (`_run_extra_steps` -> `_map_generated_media`) was
+      # the ONE place `_resources_with_asset_files_stmt()` actually executed
+      # against a real Postgres. Mig 451 deleted that workflow and its step, so
+      # NO step in this job executes those definitions any more — the surviving
+      # test only COMPILES the statement against a stubbed session. The entry
+      # stays so a change here still triggers the schema build below rather
+      # than silently losing its only gate, but do not read a green run as
+      # "the server accepted this statement". The mig-450 step added by #2108
+      # does NOT close this: it exercises chat_upload.py, not this module
+      # (checked — no step file imports `backfill_generated_inbox`). Closing
+      # the gap means giving it its own live integration case here.
       - 'backend/app/workflows/backfill_generated_inbox.py'
       # The chat-uploads folder is identified by `system_key`, and the
-      # criterion the backfill joins on lives in chat_upload.py. Same reason as
-      # the line above: the shared definition has to reach the one chain that
-      # runs the backfill against a real Postgres, or the two readers can drift
-      # apart with nothing executing either of them. Migration 450 backfills
-      # that identity, and its candidate predicate must stay identical to the
-      # one in chat_upload.py — so a change to either has to reach this chain.
+      # criterion the backfill joins on lives in chat_upload.py. Migration 450
+      # backfills that identity, and its candidate predicate must stay
+      # identical to the one in chat_upload.py — so a change to either has to
+      # reach this chain. ⚠️ Unlike the entry ABOVE, this one IS executed live:
+      # the mig-450 step runs `_ensure_chat_uploads_folder` against the built
+      # schema. Do not read the two comments as making the same promise.
       - 'backend/app/services/library/chat_upload.py'
       - 'backend/tests/db/test_chat_uploads_folder_migration.py'
       - 'backend/app/repositories/assets_repository.py'
@@ -330,21 +336,6 @@ jobs:
           # teams — a canvas invisible to its own owner would read as "this
           # asset is used nowhere".
           bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_canvas_asset_refs_integration.py -v
-
-      - name: Exercise the project-library → assets migration (mig 445/446)
-        working-directory: backend
-        env:
-          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
-        run: |
-          set -euo pipefail
-          # P3 deleted the guard that blocked `dry_run=False`; THIS is what
-          # replaced it. `_apply` and `_reconcile` are ORM statements whose unit
-          # tests stub the session, so nothing else proves that the row-wise
-          # `(asset_type, lower(name)) IN ((...))` lookup runs, that re-applying
-          # takes the `existing` branch on every row (a property of the partial
-          # unique index, not of our Python), or that reconciliation agrees with
-          # apply about adopting a same-name asset of ANY source.
-          bash "$GITHUB_WORKSPACE/.github/scripts/pytest-no-full-skip.sh" tests/db/test_assets_migration_integration.py -v
 
       - name: Exercise the chat-uploads folder adoption (mig 450)
         working-directory: backend

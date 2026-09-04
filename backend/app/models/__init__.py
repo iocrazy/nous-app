@@ -167,8 +167,6 @@ from app.models.pipelines import (  # noqa: F401
     IssuePipelineSteps,
 )
 from app.models.project_library import (  # noqa: F401
-    ProjectCharacters,
-    ProjectLibEntities,
     ProjectStageHistory,
     ProjectStageNodeDeps,
     ProjectStageNodeMembers,
@@ -425,8 +423,6 @@ __all__ = [
     "PublishTasks",
     "SocialAccounts",
     # project authored library
-    "ProjectCharacters",
-    "ProjectLibEntities",
     "ProjectStageHistory",
     "ProjectStageNodeDeps",
     "ProjectStageNodeMembers",
