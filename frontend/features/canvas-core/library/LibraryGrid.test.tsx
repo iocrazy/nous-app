@@ -248,6 +248,27 @@ describe('LibraryGrid', () => {
     expect(cells[0]).not.toHaveAttribute('data-active');
   });
 
+  // The ring and the commit have to read the SAME cursor. A controlled caller
+  // drives `activeIndex` while the grid's own `active` stays where its last
+  // click left it, so committing `items[active]` rings cell 2 and activates
+  // cell 0 — the exact desync the controlled prop exists to prevent.
+  it('Enter commits the CONTROLLED cursor, not the grid\'s own', () => {
+    const onItemActivate = vi.fn();
+    renderGrid({ activeIndex: 2, onItemActivate, primaryAction: undefined });
+    fireEvent.keyDown(screen.getByTestId('library-grid'), { key: 'Enter' });
+    expect(onItemActivate).toHaveBeenCalledWith(expect.objectContaining({ title: 'Charlie' }));
+  });
+
+  // `ring-offset-1` with no offset COLOUR falls back to Tailwind's default,
+  // which is white — a white halo around the cursor cell on the dark canvas.
+  // The offset has to be painted in the surface the cell sits on.
+  it('the cursor ring offsets in the panel surface, not in white', () => {
+    renderGrid({ activeIndex: 1 });
+    const cell = screen.getAllByTestId('library-cell')[1];
+    expect(cell.className).toContain('ring-offset-1');
+    expect(cell.className).toContain('ring-offset-[var(--canvas-card)]');
+  });
+
   it('a draft asset is visible and labelled, not hidden', () => {
     renderGrid({
       items: [{ store: 'assets', id: '727145299382534300', title: 'Cole Bannon', thumbUrl: '', kind: 'character', ready: false }],

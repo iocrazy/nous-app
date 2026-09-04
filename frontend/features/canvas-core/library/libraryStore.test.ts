@@ -1,9 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
-import { LIBRARY_STORAGE_KEY, useLibraryStore } from './libraryStore';
+import { LIBRARY_STORAGE_KEY, useLibraryStore, type LibraryTarget } from './libraryStore';
 
 const TARGET = { nodeId: 'p1', kind: 'prompt' as const, title: 'Harbour' };
+
+// A panel target is only ever a PROMPT node. Nothing in the tree builds any
+// other kind, and both `LibraryPanel` and `LibraryMediaPage` refuse one — so a
+// wider type here would let a caller arm a target the panel silently ignores.
+// This is a COMPILER assertion: `@ts-expect-error` fails the typecheck if the
+// line below ever stops being an error, which is what pins the narrowing.
+// (`LibraryDropTarget` in dropLibraryItems.ts is a different type and still
+// has its own `media` case — a drop lands on media nodes, an aim does not.)
+// @ts-expect-error 'media' is not a LibraryTarget kind
+const NOT_A_TARGET: LibraryTarget = { nodeId: 'm1', kind: 'media', title: 'Clip' };
+void NOT_A_TARGET;
 
 /** A board with the target node on it, so the canvas selection has something
  *  real to name. `setSelection` drops ids that are not on the board. */

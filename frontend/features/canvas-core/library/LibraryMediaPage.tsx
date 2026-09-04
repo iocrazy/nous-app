@@ -357,7 +357,22 @@ export function LibraryMediaPage({
   };
 
   return (
-    <>
+    // CAPTURE, and on a wrapper rather than on the shelf itself. A `scroll`
+    // event does not bubble, so a listener on an ancestor only ever hears it
+    // in the capture phase — and the element that scrolls is the grid's own
+    // container, two components down, which this page never holds a ref to.
+    //
+    // Why clear rather than re-measure: the card is `position: fixed` at a
+    // rect taken ONCE, when the pointer arrived. After a scroll that rect
+    // describes a cell that has moved, so the card floats beside whatever slid
+    // into its place while still naming the item that left. Dropping the hover
+    // costs nothing — the pointer's next move re-opens it against a fresh
+    // rect — and it is the same answer this page already gives every control
+    // that swaps the shelf underneath.
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      onScrollCapture={() => setHover(null)}
+    >
       <div className="flex flex-wrap items-center gap-1 border-b border-canvas-line px-2 py-1.5">
         {SEGMENTS.map((s) => (
           <button
@@ -475,7 +490,7 @@ export function LibraryMediaPage({
           scopeId={scopeId}
         />
       )}
-    </>
+    </div>
   );
 }
 

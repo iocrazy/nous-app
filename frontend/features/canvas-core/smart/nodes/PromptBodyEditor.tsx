@@ -68,7 +68,20 @@ export interface PromptBodyEditorHandle {
   /** Insert an asset chip at the caret. Replaces a pending `@query` token
    *  unless `opts.consumeMention` is false. */
   insertAsset: (asset: MentionedAsset, opts?: MentionInsertOptions) => void;
-  /** Insert plain text at the caret, replacing a pending `@query` token. */
+  /**
+   * Insert plain text at the caret, replacing a pending `@query` token.
+   *
+   * NO PRODUCTION CALLER as of PR #2102. The `⌥` library drop used to be one —
+   * `insertText('@' + title + ' ')` per item — and final review ruling R31
+   * replaced it with `mentionLibraryItems.ts`, which inserts real chips: the
+   * characters `@Harbour` are prose a run never reads, and routed through
+   * `insertAtMention` they also ate the text before the caret.
+   *
+   * Kept because it is the editor handle's only plain-text door and its
+   * `@`-consuming behaviour is pinned by three cases in
+   * `PromptBodyEditor.test.tsx`. Anything reaching for it to write a MENTION
+   * wants `insertAsset` / `insertImage` instead.
+   */
   insertText: (text: string) => void;
   focus: () => void;
 }

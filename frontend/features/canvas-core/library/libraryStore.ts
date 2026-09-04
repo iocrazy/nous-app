@@ -31,7 +31,20 @@ export type LibraryPage = 'media' | 'prompts';
 
 export interface LibraryTarget {
   nodeId: string;
-  kind: 'prompt' | 'media';
+  /**
+   * Only PROMPT nodes can be aimed at.
+   *
+   * A one-member union rather than a dropped field: the panel's target bar and
+   * `LibraryMediaPage`'s target mode both test `kind === 'prompt'`, and keeping
+   * the discriminant is what lets a second aimable node type be added later
+   * without every consumer changing shape. `'media'` was in this union and
+   * nothing ever produced it, so it only widened what a caller could arm past
+   * what the panel would honour — a target the shelf silently ignores.
+   *
+   * NOT the same type as `LibraryDropTarget` (dropLibraryItems.ts), which does
+   * carry `media`: a drop lands on a media node, an aim does not.
+   */
+  kind: 'prompt';
   /** Display name at open time. The id is the authority. */
   title: string;
 }
@@ -100,6 +113,14 @@ export interface LibraryPanelState extends Persisted {
   setAssetScope(scope: AssetScope): void;
   setGeneratedScope(scope: GeneratedScope): void;
   setSelection(keys: LibraryItemKey[]): void;
+  /**
+   * No caller yet — kept deliberately, not dead code awaiting a sweep.
+   *
+   * `width` is already persisted and already read by the panel's geometry; P3's
+   * Prompts page opens at 600px against the Media page's 340px (spec §3.1), and
+   * this is the setter that switch goes through. Deleting it would mean
+   * re-adding the setter, the persist call and its test together next quarter.
+   */
   setWidth(px: number): void;
   clearTarget(): void;
 }

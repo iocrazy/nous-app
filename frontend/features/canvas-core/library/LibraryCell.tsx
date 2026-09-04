@@ -79,8 +79,14 @@ export function LibraryCell({
         // "the keyboard cursor is here". They are mutually exclusive as rings
         // because two ring utilities on one element would race on stylesheet
         // order rather than on class order.
+        //
+        // The offset needs its own COLOUR. Tailwind's default offset colour is
+        // white, so `ring-offset-1` alone drew a white halo around the cursor
+        // cell on the dark canvas. `--canvas-card` is the theme-aware surface
+        // this cell sits on (#171d29 dark / #ffffff light), so the offset reads
+        // as a gap in both themes rather than as a second ring.
         active
-          ? 'ring-2 ring-[var(--accent-text)] ring-offset-1'
+          ? 'ring-2 ring-[var(--accent-text)] ring-offset-1 ring-offset-[var(--canvas-card)]'
           : selected
             ? 'ring-1 ring-[var(--accent-border)]'
             : ''
