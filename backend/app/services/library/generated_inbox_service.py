@@ -88,6 +88,14 @@ _CLEANUP_SAMPLE = 12
 # An origin_kind that is NULL/blank in the database would render as an empty
 # card label ("" reads as a broken card, not as "we don't know").
 _UNKNOWN_ORIGIN = "unknown"
+# The media kinds a LIBRARY resource may seed an asset file with, in the order
+# the refusal detail lists them. Both are ``mime`` top-level types AND the
+# ``generated_media.media_kind`` value written for them, which is why one tuple
+# can drive the check and the column. Derived from the slot table, not from
+# what ``mime_type`` happens to hold: every non-audio asset type's slots take a
+# visual reference, ``audio``'s ``primary``/``variants`` take an audio file,
+# and nothing in ``app/services/assets/slots.py`` takes a video or a document.
+ACCEPTED_ASSET_FILE_KINDS = ("image", "audio")
 
 
 def _build_item(
@@ -452,13 +460,14 @@ class GeneratedInboxService:
 
         Two refusals, both knowable before any write:
 
-        * ``resource_not_image`` — an asset FILE slot seeds a visual reference
-          (``sheet`` / ``establishing`` / ``turnaround`` / ``flat``); a PDF or a
-          video has no slot to land in. Narrower than
-          ``generated_media_router.resolve_resource_import`` (which also takes
-          ``video/*``, because an i2v reference is a real thing there) — see
-          the endpoint docstring for why that is a deliberate narrowing and not
-          an oversight.
+        * ``resource_kind_unsupported`` — the slot table has exactly two file
+          shapes: every non-``audio`` type's slots take a visual reference
+          (``sheet`` / ``establishing`` / ``turnaround`` / ``flat`` …) and
+          ``audio``'s ``primary`` / ``variants`` take an audio file. A video or
+          a document has no slot to land in, so it refuses here rather than
+          becoming an attachment that renders as a broken card. The detail
+          names the accepted kinds — a refusal the user cannot act on is half
+          a refusal.
         * ``materialize_failed`` — the PR-B ladder
           (``resources.file_path`` → ``parsed_media.download_path``) resolved
           no SINGLE file. That covers a row whose bytes were never downloaded
@@ -466,11 +475,16 @@ class GeneratedInboxService:
           directory downstream is worse than refusing, not better.
         """
         mime = str(resource.get("mime_type") or "").lower()
-        if not mime.startswith("image/"):
+        media_kind = next(
+            (k for k in ACCEPTED_ASSET_FILE_KINDS if mime.startswith(f"{k}/")), None
+        )
+        if media_kind is None:
             raise AssetError(
                 422,
-                "resource_not_image",
-                "Only image resources can be saved as an asset file",
+                "resource_kind_unsupported",
+                "Only "
+                + " and ".join(ACCEPTED_ASSET_FILE_KINDS)
+                + " resources can be saved as an asset file",
             )
         file_path = await resolve_resource_file_path(resource)
         if not file_path:
@@ -489,7 +503,7 @@ class GeneratedInboxService:
             "resource_id": int(resource["id"]),
             "file_path": str(file_path),
             "mime": mime or None,
-            "media_kind": "image",
+            "media_kind": media_kind,
             "conversation_id": None,
             "origin_kind": LIBRARY_UPLOAD_ORIGIN,
         }

@@ -76,21 +76,24 @@ async def save_resource_as_asset(
       theirs, and a caller who owns the resource still cannot write it into a
       team they do not belong to.
 
-    Failures are typed (``resource_not_accessible`` / ``resource_not_image`` /
-    ``materialize_failed`` / the asset codes ``attach_file`` already emits), so
-    the context menu can say WHY rather than fall silent.
+    Failures are typed (``resource_not_accessible`` /
+    ``resource_kind_unsupported`` / ``materialize_failed`` / the asset codes
+    ``attach_file`` already emits), so the context menu can say WHY rather than
+    fall silent.
 
-    **Images only, and that is narrower than ``/generated/{id}/save-as-asset``
-    on purpose.** The generation route imposes no media-kind rule because the
-    inbox only ever holds what a model produced for a slot. My Uploads holds
-    everything a user ever dragged in, and every FILE slot in the slot table is
-    a visual reference (``sheet`` / ``establishing`` / ``turnaround`` /
-    ``flat``); a PDF or a screen recording attached to one is a broken card
-    rather than a saved asset. The one type this rules out that has a real slot
-    is ``audio`` (``primary`` / ``variants``) — widening to ``audio/*`` is a
-    one-line change here plus a ``media_kind`` in
-    ``GeneratedInboxService._mint_args_for_resource``, and is deliberately NOT
-    done blind: audio assets have no UI entry point in My Uploads yet.
+    **Images and audio only, which is narrower than
+    ``/generated/{id}/save-as-asset`` on purpose.** The generation route
+    imposes no media-kind rule because the inbox only ever holds what a model
+    produced for a slot. My Uploads holds everything a user ever dragged in,
+    and the slot table has exactly two file shapes: every non-``audio`` type's
+    slots take a visual reference (``sheet`` / ``establishing`` /
+    ``turnaround`` / ``flat`` …), and ``audio``'s ``primary`` / ``variants``
+    take an audio file. A video or a PDF has no slot to land in, so it refuses
+    with the accepted kinds NAMED rather than becoming an attachment that
+    renders as a broken card. The accepted set is
+    ``GeneratedInboxService.ACCEPTED_ASSET_FILE_KINDS`` — one tuple, because
+    the same two strings are both the mime top-level type checked here and the
+    ``generated_media.media_kind`` written for the row.
     """
     try:
         sid = await _gate(scope_id, auth)

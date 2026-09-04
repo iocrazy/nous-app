@@ -30,6 +30,7 @@ from app.api import resources_assets_router as rar
 from app.core.deps import get_auth
 from app.schemas.generated import SaveAsAssetRequest
 from app.services.assets.assets_service import AssetError
+from app.services.assets.slots import SLOTS
 from app.services.library import generated_inbox_service as mod
 from app.services.library.generated_inbox_service import GeneratedInboxService
 from app.services.library.generated_source import LIBRARY_UPLOAD_ORIGIN
@@ -419,15 +420,58 @@ async def test_validation_refuses_before_the_transaction_opens(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_non_image_resource_is_a_typed_422(monkeypatch):
+@pytest.mark.parametrize("mime", ["video/mp4", "application/pdf", "", "text/plain"])
+async def test_a_kind_no_slot_accepts_is_a_typed_422(monkeypatch, mime):
+    """Nothing in the slot table takes a video or a document, so attaching one
+    would produce a broken card rather than a saved asset."""
     application = build_app(
         monkeypatch,
-        resources=FakeResources([make_resource(mime_type="video/mp4")]),
+        resources=FakeResources([make_resource(mime_type=mime)]),
     )
     r = await _post(application)
     assert r.status_code == 422
-    assert r.json()["error"]["code"] == "resource_not_image"
+    err = r.json()["error"]
+    assert err["code"] == "resource_kind_unsupported"
+    # The detail NAMES what would work — a refusal the user cannot act on is
+    # half a refusal.
+    assert "image" in err["detail"] and "audio" in err["detail"]
     assert application.state.uow.enters == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mime", "kind"),
+    [("image/png", "image"), ("audio/mpeg", "audio"), ("audio/wav", "audio")],
+)
+async def test_image_and_audio_are_both_accepted(monkeypatch, mime, kind):
+    """``audio`` assets are real: their ``primary`` / ``variants`` slots take
+    an audio file, so refusing audio would make the menu lie about a supported
+    asset type. The minted row carries the matching ``media_kind`` — writing
+    "image" for an audio file would mislabel it in the inbox forever."""
+    application = build_app(
+        monkeypatch, resources=FakeResources([make_resource(mime_type=mime)])
+    )
+    r = await _post(application)
+    assert r.status_code == 201, r.text
+    assert application.state.repo.inserts[0]["media_kind"] == kind
+    assert application.state.repo.inserts[0]["mime"] == mime
+
+
+def test_the_accepted_kinds_are_exactly_what_the_slot_table_supports():
+    """Pinned against the slot table itself, not retyped.
+
+    Every asset type's file slots take either a visual reference or an audio
+    file; a seventh type whose slots wanted something else would land here
+    rather than as a 422 the user cannot explain.
+    """
+    assert mod.ACCEPTED_ASSET_FILE_KINDS == ("image", "audio")
+    assert set(SLOTS) - {"prompt"} == {
+        "character",
+        "location",
+        "prop",
+        "costume",
+        "audio",
+    }
 
 
 @pytest.mark.asyncio
