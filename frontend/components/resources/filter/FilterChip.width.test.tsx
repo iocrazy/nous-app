@@ -40,8 +40,30 @@ import { FilterChip } from './FilterChip';
 import { RatingFilterDropdown } from './RatingFilterDropdown';
 import { SocialFilterDropdown } from './SocialFilterDropdown';
 import { SourceFilterDropdown } from './SourceFilterDropdown';
+import { TagsFilterDropdown } from './TagsFilterDropdown';
 import { TypeFilterDropdown } from './TypeFilterDropdown';
 import { DEFAULT_CHIP_VALUES } from './types';
+
+// TagsFilterDropdown calls useTagPreferences on every render, including the
+// empty-state branch this file exercises. Preferences are irrelevant to the
+// width contract, and the real hook fetches — stub it so the test observes
+// layout, not the network.
+vi.mock('../../../services/tagPreferencesService', () => ({
+  fetchTagPreferences: () =>
+    Promise.resolve({
+      starred_tag_ids: [],
+      picker_settings: {
+        layout: 'list',
+        columnWidth: 'medium',
+        showStarred: true,
+        showRecently: true,
+        showRecommended: false,
+        showCount: true,
+      },
+      panel_size: { width: 480, height: 400 },
+    }),
+  updateTagPreferences: () => Promise.resolve(),
+}));
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -109,7 +131,72 @@ describe('FilterChip dropdown panel — content-sized, not pinned to a number', 
     );
 
     const root = container.querySelector('[data-chip-id="probe"]') as HTMLElement;
-    expect(root.className.split(/\s+/)).toEqual(['relative', 'w-fit']);
+    // Two properties, asserted separately so either can be falsified on its
+    // own. Exact-equality over the WIDTH projection (not the whole class
+    // string) is deliberate: `toContain('w-fit')` would not catch someone also
+    // adding `w-full`, while whole-string equality would go red on unrelated
+    // additions and decay into "paste the new class into the array".
+    expect(widthUtilities(root)).toEqual(['w-fit']);
+    expect(root.className).toContain('relative');
+  });
+
+  it('clips a body that manages to beat the ceiling', () => {
+    // `w-max` gives up the shrink-to-fit clamp that a plain `width:auto` box
+    // would have had, so "body wider than the panel" went from impossible to
+    // possible. Without this the overflow paints outside the rounded border.
+    // (UiSelect carries `overflow-hidden` for the same reason —
+    // `ui/primitives.tsx`.)
+    render(
+      <FilterChip
+        chipId="probe"
+        label="Probe"
+        isActive={false}
+        isOpen
+        onToggle={vi.fn()}
+        onClose={vi.fn()}
+      >
+        <div data-testid="chip-body">body</div>
+      </FilterChip>,
+    );
+
+    const panel = screen.getByTestId('chip-body').parentElement as HTMLElement;
+    expect(panel.className).toContain('overflow-hidden');
+  });
+});
+
+/**
+ * A `truncate` row inside a `w-max` parent NEVER truncates: `truncate` is
+ * `overflow:hidden` + `text-overflow:ellipsis` + `white-space:nowrap`, and a
+ * nowrap line contributes its full unbroken width to `max-content`. So the box
+ * grows instead of the text clipping. Any body whose rows render text the USER
+ * authored therefore needs its own ceiling, or one long value pushes the panel
+ * to the viewport edge.
+ *
+ * jsdom cannot show that — no layout engine — so this pins the pairing itself:
+ * a body that opts into `truncate` also declares a `max-w-`.
+ */
+describe('bodies with user-authored text are bounded', () => {
+  it('caps the source list, whose rows truncate a platform name', () => {
+    render(
+      <I18nextProvider i18n={makeI18n()}>
+        <SourceFilterDropdown
+          // Real shape: `platform` is a free string off
+          // `parsed_media.source_platform`, rendered verbatim when it is not
+          // one of the known icons.
+          availablePlatforms={['a-platform-name-far-longer-than-any-panel-should-ever-be']}
+          selectedPlatforms={[]}
+          onChange={vi.fn()}
+          onClearAll={vi.fn()}
+        />
+      </I18nextProvider>,
+    );
+
+    const menu = screen.getByRole('menu', { name: 'Source filter' });
+    expect(widthUtilities(menu).filter((c) => c.startsWith('max-w-'))).toEqual([
+      'max-w-[22rem]',
+    ]);
+    // The ceiling is only useful because the row asks to be ellipsised.
+    expect(menu.querySelector('.truncate')).toBeTruthy();
   });
 });
 
@@ -170,7 +257,9 @@ const BODIES: {
         onClearAll={vi.fn()}
       />
     ),
-    expected: ['w-max', 'min-w-[11rem]'],
+    // Its rows carry `truncate` over a platform name — see the ceiling test
+    // below for why that only means anything with a `max-w`.
+    expected: ['w-max', 'min-w-[11rem]', 'max-w-[22rem]'],
   },
   {
     name: 'AspectFilterDropdown',
@@ -207,6 +296,22 @@ const BODIES: {
     // checkbox. Its old `w-72` becomes the floor rather than the width, so a
     // longer translation grows the panel instead of wrapping inside it.
     expected: ['w-max', 'min-w-[18rem]'],
+  },
+  {
+    name: 'TagsFilterDropdown (empty state)',
+    menuLabel: 'Tags filter',
+    render: () => (
+      <TagsFilterDropdown
+        allTags={[]}
+        selectedTagIds={[]}
+        onChange={vi.fn()}
+        onClearAll={vi.fn()}
+      />
+    ),
+    // Only the POPULATED branch keeps a fixed box (the EagleTagBrowser needs a
+    // canvas — pinned separately below). The empty branch is one line of text
+    // and had been left at a hardcoded `w-64`, i.e. 256px for "No tags yet".
+    expected: ['w-max', 'min-w-[11rem]'],
   },
   {
     name: 'RatingFilterDropdown',

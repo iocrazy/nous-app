@@ -145,7 +145,14 @@ export const FilterChip: React.FC<FilterChipProps> = ({
         //   min-w-full   100% of this `relative` root, i.e. the chip itself,
         //                so a wide chip never sits above a narrower panel
         //   max-w-[90vw] never runs off the viewport
-        <div className="absolute left-0 top-full mt-1.5 z-30 w-max min-w-full max-w-[90vw] bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
+        //   overflow-hidden  `w-max` gives up the shrink-to-fit clamp a plain
+        //                `width:auto` box would have had, so a body wide
+        //                enough to beat the ceiling would otherwise paint
+        //                OUTSIDE these rounded borders. Bodies whose rows can
+        //                hold user-authored text carry their own max-w too —
+        //                a `truncate` row never truncates inside a `w-max`
+        //                parent, it just makes the box wider.
+        <div className="absolute left-0 top-full mt-1.5 z-30 w-max min-w-full max-w-[90vw] overflow-hidden bg-card backdrop-blur-sm border border-line rounded-xl shadow-2xl animate-dropdown">
           {children}
         </div>
       )}

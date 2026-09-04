@@ -85,7 +85,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
 
   return (
     <div
-      className="w-max min-w-[11rem] max-h-80 overflow-y-auto py-1"
+      className="w-max min-w-[11rem] max-w-[22rem] max-h-80 overflow-y-auto py-1"
       role="menu"
       aria-label="Source filter"
     >
