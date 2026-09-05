@@ -99,3 +99,46 @@ class StepHookChain:
 
 ## 波次与依赖
 T1 → T2 → T3 → (T4, T5, T6 并行) → T7 → (T8, T9, T10, T11 并行) → T12。
+
+## 完成账（2026-09-05 / 06 执行，单 session 不中断）
+
+| Task | PR | 状态 | 实测改判点 |
+|---|---|---|---|
+| T1 schema（mig 453） | #2121 | 已合并 + 生产迁移成功；publication 含 `agent_run_inbox`，drift 脚本 exit 0 | `public.snowflake_id()` 不存在 → `generate_snowflake_id()` |
+| T2 钩子链 | #2122 | 已合并 | — |
+| T3 事件单一入口 / step 括号 / 折叠 / 中断收尾 | #2124 | 已合并 | run 路径 tool_call / assistant 在 `step_end` **之后**落行 → 折叠器把它们挂回刚结束的 step；retry 的 `at` 由发射方盖，fold 不读时钟 |
+| T4 收件箱 | #2125 | 已合并 | 仓库/路由撞名（`inbox_repository` / `inbox_router` 是通知箱）→ `agent_run_inbox_repository` / `agent_inbox_router`；issue 会话的 run 只带 `conversation_id`（`issue_id` 事后回填）→ 目标解析经 `conversation_ai_meta.context_type='issue'` 自动带上 issue |
+| T5 预算钩子 | #2126 | 已合并 | 花费是 issue 级（先前 run 的 `cost_cents` + 本 run 折叠值）；`clear_budget` 才能写 NULL |
+| T6 rollup + 对账 | #2127 | 已合并 | 对账候选把"没有任何 run"留给 stranded monitor；`SET LOCAL ROLE service_role` 收成 `merge_execution_state` 单点 |
+| T7 前端接缝 C | #2128 | 已合并 | `/runs/{id}/events` 投影原本没有 `turn/step`，补两列 |
+| T8 Issue 详情页 | #2129 | 待合并（堆叠链头） | `IssueCostLine` 并入 StatusBlock；`DeliverablesZone`/`SubtaskBar` 有别的消费方，保留并被区块包装（计划的"删除"改为"包装"） |
+| T9 Issues 主页 | #2130 | 待合并 | 横条第五类 `inbox_pending` 未做：没有列表级待领计数端点，不放假类型 |
+| T10 聊天插话 + 双视图 | #2132（前端）/ #2131（后端） | 后端待合并；前端待合并 | 会话 steer 要在后端同时落一条消息行，否则历史回读看不到（与 issue 评论"保留评论行"同纪律） |
+| T11 任务中心 | #2133 | 待合并 | `AGENT_RUN_SELECT` 补 `conversation_id/issue_id` 才有插话目标 |
+| T12 修复 | #2134（后端）/ #2135（前端） | 待合并 | 见下 |
+
+### 真栈验收结果（调试账号，生产栈）
+
+跑 `script_ai` 一轮，**先**向会话收件箱投一条 steer 再发消息：
+
+- ✅ 转录：`user → inbox_claimed{turn:1,step:1} → step_start → step_end{usage,duration_ms} → assistant → turn_end{completed}`，`view.revision = 6`
+- ✅ 收件箱行 `claimed_run_id / claimed_turn / claimed_step` 齐；模型回复明显吃到了插话内容
+- ✅ `GET /issues/{id}/progress`：phase=idle、budget、inbox_pending 随投递变 1、sub_issues、origin 缺省；`PATCH budget_cents` 150 生效、-1 → 422、`clear_budget` → NULL
+- ❌→✅ **`metadata_json.view / cost` 是 jsonb STRING**（二期的 `todos / last_retry` 生产存量 3+1 行也全是）：`json.dumps + cast(JSONB)` 双重编码。mock 掉 session 的单测看不出。修法 `bindparam(type_=JSONB)`（#2134），真库回滚事务验证老/新写法分别落 `string` / `object`。前端 selectors 对存量字符串行 `JSON.parse` 一次（#2135）。
+- ❌→✅ 转录 payload 的嵌套字段（`usage / counts / todos / result`）被 `_truncate_payload` 字符串化，前端折叠器当对象读 → 改按真实 wire 形状读（#2135）
+- ❌→✅ `view.context` 常年 null：`measure_context` 只在压缩时喂 → 每个 `step_end` 用本次 prompt tokens 喂一次（#2134）
+- ⚠️ `cost_cents = null`、`run.cost.spent_cents = 0`：`ai_model_prices` **没有 `doubao-seed-2-0-lite-260428`**（预设 agent 的模型）。预算钩子在补价格行之前永远不触发。这是数据不是代码，需运营补一行。
+
+**未做真栈验收（原因）**：预算 80%/100% 落行（缺价格行）；`turn_end(interrupted)`（需让生产 run 心跳过期，等于在生产上杀 worker，不做；单测 + 突变覆盖）；issue 评论运行中改投（需一个正在跑的 issue 根 run 与人工评论同时发生；单测覆盖，路径与会话 steer 相同）；`todo_write` n/m 跳动（`script_ai` 没有 todo 工具，模型用正文写了计划）。
+
+### 合并后手工清单
+
+1. 补 `ai_model_prices` 的 doubao lite 行 → 再跑一次带预算的 issue 派发，看 `budget_check{warn}` 与卡片变黄
+2. 前端链（#2129 → #2130 → #2132 → #2133）按顺序合并后 `npm run e2e:prod`
+3. Issue 详情页真机走查：cockpit 四格、Trajectory 只 live 展开、评论运行中被领取
+4. 第 2 期（pause / resume、类型化提问、回放 + fork、schedule、continuable 子代理、逐工具超时）另立计划
+
+### 进程中的纪律教训
+
+- **合并前必须 `non-success == 0`**：#2127 在 rebase 后 checks 重新排队时被合并（旧 5/5 结论已过期）；结果无害（本地全量绿）但流程有洞，后续所有合并改为先数 non-success。
+- **mock 掉 session 的写路径测试要配一次真库回滚验证**：jsonb 路径类型（2026-08-27）与 JSONB 绑定双重编码（2026-09-05）是同一族。
