@@ -2022,6 +2022,26 @@
       }
     }
   },
+  "prompts": {
+    "form": {
+      "template": "Template",
+      "image": "Image",
+      "album": "Album"
+    },
+    "origin": {
+      "typed": "Typed",
+      "extracted": "Extracted",
+      "captioned": "Captioned"
+    },
+    "templateForm": {
+      "title": "Title",
+      "group": "Group",
+      "groupNew": "Or type a new group",
+      "examples": "Examples · {{count}} of {{total}} ticked",
+      "positive": "Positive",
+      "negative": "Negative"
+    }
+  },
   "generated": {
     "title": "Generated",
     "unreviewedChip": "{{n}} unreviewed",

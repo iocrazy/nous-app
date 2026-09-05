@@ -2022,6 +2022,26 @@
       }
     }
   },
+  "prompts": {
+    "form": {
+      "template": "模板",
+      "image": "单图",
+      "album": "图集"
+    },
+    "origin": {
+      "typed": "手写",
+      "extracted": "提取",
+      "captioned": "AI 打标"
+    },
+    "templateForm": {
+      "title": "标题",
+      "group": "分组",
+      "groupNew": "或输入新分组",
+      "examples": "示例图 · 已选 {{count}} / {{total}}",
+      "positive": "正向",
+      "negative": "负向"
+    }
+  },
   "generated": {
     "title": "生成内容",
     "unreviewedChip": "{{n}} 项待处理",
