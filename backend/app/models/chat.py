@@ -271,6 +271,9 @@ class ConversationAiMeta(Base):
     agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     context_type: Mapped[str | None] = mapped_column(Text)
     context_id: Mapped[str | None] = mapped_column(Text)
+    paused_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(True), comment="453: target-level pause for the chat path (phase 2)"
+    )
 
 
 class MessageRefs(Base):

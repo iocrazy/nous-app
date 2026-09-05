@@ -149,6 +149,12 @@ class AgentRuns(Base):
             name="agent_runs_episode_id_fkey",
         ),
         ForeignKeyConstraint(
+            ["fork_of_run_id"],
+            ["public.agent_runs.id"],
+            ondelete="SET NULL",
+            name="agent_runs_fork_of_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
             ["issue_id"],
             ["public.issues.id"],
             ondelete="SET NULL",
@@ -243,6 +249,16 @@ class AgentRuns(Base):
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    pause_requested: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        comment="453: pause signal for the live run; paused-ness lives on the target",
+    )
+    fork_of_run_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, comment="453: forked from that run's events[:fork_at_seq]"
+    )
+    fork_at_seq: Mapped[Optional[int]] = mapped_column(Integer)
     started_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True),
         nullable=False,
@@ -510,7 +526,9 @@ class AgentRunTranscriptEvents(Base):
             " 'tool_call'::text, 'error'::text, 'system'::text,"
             " 'llm_retry'::text, 'todo_write'::text,"
             " 'compaction_start'::text, 'compaction_summary'::text,"
-            " 'compaction_end'::text, 'turn_end'::text])",
+            " 'compaction_end'::text, 'turn_end'::text,"
+            " 'step_start'::text, 'step_end'::text, 'inbox_claimed'::text,"
+            " 'deliverable'::text, 'budget_check'::text])",
             name="agent_run_transcript_events_event_type_check",
         ),
         ForeignKeyConstraint(
@@ -536,6 +554,12 @@ class AgentRunTranscriptEvents(Base):
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
+    )
+    turn: Mapped[Optional[int]] = mapped_column(
+        Integer, comment="453: turn coordinate; NULL on pre-453 rows"
+    )
+    step: Mapped[Optional[int]] = mapped_column(
+        Integer, comment="453: step = one LLM call + its tool executions"
     )
 
 
@@ -663,6 +687,99 @@ class AgentPermissionAudits(Base):
     before_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     after_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     reason: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class AgentRunInbox(Base):
+    """453: the one queue into a running agent (harness p4 §1-③).
+
+    Keyed by the durable target (issue / conversation), not by run — a run
+    is one turn, the target outlives it. ``claimed_at IS NULL`` is the
+    queue; the root run claims at each step boundary (SKIP LOCKED) and
+    stamps ``claimed_run_id / claimed_turn / claimed_step``.
+    """
+
+    __tablename__ = "agent_run_inbox"
+    __table_args__ = (
+        CheckConstraint(
+            "target_kind = ANY (ARRAY['conversation'::text, 'issue'::text])",
+            name="agent_run_inbox_target_kind_check",
+        ),
+        CheckConstraint(
+            "kind = ANY (ARRAY['steer'::text, 'answer'::text, 'pause'::text,"
+            " 'resume'::text, 'budget_reply'::text])",
+            name="agent_run_inbox_kind_check",
+        ),
+        ForeignKeyConstraint(
+            ["claimed_run_id"],
+            ["public.agent_runs.id"],
+            ondelete="SET NULL",
+            name="agent_run_inbox_claimed_run_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="agent_run_inbox_pkey"),
+        Index("idx_agent_run_inbox_run", "claimed_run_id"),
+        Index(
+            "idx_agent_run_inbox_pending",
+            "target_kind",
+            "target_id",
+            "created_at",
+            postgresql_where=text("claimed_at IS NULL AND expired_at IS NULL"),
+        ),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    target_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    claimed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+    claimed_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    claimed_turn: Mapped[Optional[int]] = mapped_column(Integer)
+    claimed_step: Mapped[Optional[int]] = mapped_column(Integer)
+    expired_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+
+
+class RunDeliverables(Base):
+    """453: every output an agent produces, registered through the single
+    choke point ``register_deliverable()`` (harness p4 §1-④; wired in
+    phase 3). Not registered = does not exist."""
+
+    __tablename__ = "run_deliverables"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["public.agent_runs.id"],
+            ondelete="CASCADE",
+            name="run_deliverables_run_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="run_deliverables_pkey"),
+        Index("idx_run_deliverables_run", "run_id"),
+        Index("idx_run_deliverables_ref", "kind", "ref_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    ref_id: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    parent_version: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

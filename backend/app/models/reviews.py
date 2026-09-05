@@ -323,6 +323,10 @@ class Issues(Base):
             name="issues_origin_kind_check",
         ),
         CheckConstraint(
+            "budget_cents IS NULL OR budget_cents >= 0",
+            name="issues_budget_cents_check",
+        ),
+        CheckConstraint(
             "priority = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])",
             name="issues_priority_check",
         ),
@@ -498,6 +502,12 @@ class Issues(Base):
         DateTime(True)
     )
     execution_state: Mapped[Optional[dict]] = mapped_column(JSONB)
+    paused_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True), comment="453: target-level pause; blocks re-dispatch"
+    )
+    budget_cents: Mapped[Optional[int]] = mapped_column(
+        Integer, comment="453: spend cap for this issue's runs; NULL = unlimited"
+    )
     origin_id: Mapped[Optional[str]] = mapped_column(Text)
     billing_code: Mapped[Optional[str]] = mapped_column(Text)
     started_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
