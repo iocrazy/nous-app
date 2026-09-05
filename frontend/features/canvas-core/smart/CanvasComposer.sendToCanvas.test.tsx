@@ -5,9 +5,9 @@
 // into a Prompt node + Media node pair, then clears the router state so a
 // reload/back-nav doesn't reinsert it.
 //
-// The node/connection SHAPE (lang fallback, cover url, position offset,
-// connection id) is already covered by loadPromptAsset.test.ts — the pure
-// builder this wiring reuses. This file only proves the composer-level
+// The node/connection SHAPE (position offset, item kind, connection id) is
+// already covered by promptReferenceMedia.test.ts — the pure builder this
+// wiring reuses. This file only proves the composer-level
 // wiring fires at the right time and clears up after itself; it does NOT
 // re-derive the full canvas surface (surfaceRef geometry, viewport, React
 // Flow) that a true end-to-end drop-position test would need.
@@ -41,9 +41,9 @@ const mockRerunPrompt = vi.fn();
 vi.mock('./regenerate', () => ({
   rerunPrompt: (...args: unknown[]) => mockRerunPrompt(...args),
 }));
-// CanvasComposer only pulls the PromptAsset type + getResourceCoverUrl (the
-// mint-failure fallback) from resourceService — full mock avoids pulling in
-// supabaseClient's env-var-dependent init through the real module.
+// CanvasComposer only pulls getResourceCoverUrl (the mint-failure fallback)
+// from resourceService — full mock avoids pulling in supabaseClient's
+// env-var-dependent init through the real module.
 vi.mock('../../../services/resourceService', () => ({
   getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
 }));

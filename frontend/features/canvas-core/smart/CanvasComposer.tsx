@@ -47,7 +47,7 @@ import {
 } from './genSlots';
 import { resolveAssetRef } from './assetRef';
 import { promptBodyForRun } from './mentionedAssets';
-import { buildPromptAssetLoad } from './loadPromptAsset';
+import { buildPromptReferenceMedia } from './promptReferenceMedia';
 import { importResourceAsCanvasMedia } from './mediaImport';
 import {
   resolveEffectiveSourceUrl,
@@ -66,7 +66,7 @@ import {
 import { topoSortPrompts } from './topology';
 import type { CanvasConnection, CanvasNode } from '../types';
 import type { PromptNodeData } from './types';
-import { getResourceCoverUrl, type PromptAsset } from '../../../services/resourceService';
+import { getResourceCoverUrl } from '../../../services/resourceService';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
 import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
@@ -75,12 +75,11 @@ import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
 /** Shape of the router state SendToCanvasModal navigates here with
  *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4 / Phase 3 Task
  *  3; `autoRun`/`ratio` added by spec 2026-07-28-prompt-dataline, Task 5).
- *  `coverUrl` travels along for completeness but isn't consumed below —
- *  the adapter mints a fresh durable URL from `assetId` via
- *  importResourceAsCanvasMedia (falling back to the cover URL only if that
- *  mint fails), then hands it to buildPromptAssetLoad, which keeps the
- *  media-node construction on the one tested code path shared with the
- *  in-canvas Library picker (PromptNodeView). When `autoRun` is set, the
+ *  The insert mints a fresh durable URL from `assetId` via
+ *  importResourceAsCanvasMedia (falling back to `coverUrl`, else the
+ *  resource's cover, only if that mint fails), then hands it to
+ *  buildPromptReferenceMedia, which owns the media-node + connection
+ *  construction. When `autoRun` is set, the
  *  inserted prompt node gets `gen: {kind:'image', model:'', ratio}` merged
  *  in before the commit, then `rerunPrompt(id)` fires once — this is the
  *  "⚡ Generate Similar" one-click flow from a resource's result card. */
@@ -286,13 +285,22 @@ export function CanvasComposer({
       const position = dropPosition();
       const promptNode = createPromptNode({}, { position });
 
+      // The payload already carries the resolved positive/negative text
+      // (the sender picked the lang side), so the patch is the same
+      // expression on both branches. Each key is omitted when empty: an
+      // empty `body` would blow away text the user had already typed into
+      // the node, and an empty `negative_body` would render the negative
+      // textarea for no reason. promptPatch is spread over the node's
+      // existing data at the commit below, so an omitted key is a no-op.
+      const promptPatch: { body?: string; negative_body?: string } = {
+        ...(insert.positive.trim() ? { body: insert.positive } : {}),
+        ...(insert.negative ? { negative_body: insert.negative } : {}),
+      };
+
       // Text-only insert: no import, no media node, no connection. Minting a
       // cover from an id the payload does not have would put a tile that
       // resolves to nothing next to the prompt.
-      let promptPatch: { body?: string; negative_body?: string };
-      // Shape borrowed from the builder rather than re-declared, so a change
-      // to the media node or connection type reaches this branch too.
-      let media: Omit<ReturnType<typeof buildPromptAssetLoad>, 'promptPatch'> | null = null;
+      let media: ReturnType<typeof buildPromptReferenceMedia> | null = null;
 
       if (insert.assetId) {
         let mediaUrl: string;
@@ -309,38 +317,13 @@ export function CanvasComposer({
           mediaKind = 'image'; // cover endpoint always serves an image
         }
 
-        // Adapter: the payload already carries the resolved positive/negative
-        // text (PromptSection picked the lang side), so both sides of the
-        // fake asset get the same value — buildPromptAssetLoad's lang
-        // fallback logic is a no-op here, it's only used for the shared
-        // node/connection construction.
-        const asset: PromptAsset = {
-          id: insert.assetId,
-          filename: insert.filename,
-          gen_prompt: insert.positive,
-          gen_prompt_zh: insert.positive,
-          gen_prompt_negative: insert.negative ?? null,
-          gen_prompt_negative_zh: insert.negative ?? null,
-          updated_at: '',
-        };
-        const built = buildPromptAssetLoad({
-          asset,
-          lang: 'en',
+        media = buildPromptReferenceMedia({
           promptNodeId: promptNode.id,
           promptNodePosition: position,
           mediaUrl,
           mediaKind,
+          name: insert.filename,
         });
-        promptPatch = built.promptPatch;
-        media = { mediaNode: built.mediaNode, connection: built.connection };
-      } else {
-        // Same omit-when-empty rule buildPromptAssetLoad applies: an empty
-        // string would blow away text the user had already typed into the
-        // node, and render an empty negative box for no reason.
-        promptPatch = {
-          ...(insert.positive.trim() ? { body: insert.positive } : {}),
-          ...(insert.negative ? { negative_body: insert.negative } : {}),
-        };
       }
       const filledPromptNode = {
         ...promptNode,

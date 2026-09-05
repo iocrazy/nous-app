@@ -373,7 +373,8 @@ describe('durable prefixes (which urls can be run inputs)', () => {
 
   it('still refuses everything else', () => {
     // Absolute urls included: `getResourceCoverUrl` builds one and it is a
-    // VISUAL fallback, deliberately inert as a run input (loadPromptAsset).
+    // VISUAL fallback, deliberately inert as a run input (see
+    // promptReferenceMedia.ts's header).
     // Admitting it here would silently change that contract.
     expect(
       promptFrom([
