@@ -347,7 +347,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         insertText: (text) => {
           const editor = bodyEditorRef.current;
           if (!editor) throw new EditorGoneError();
-          editor.insertText(text);
+          // The panel has no pending `@query` — it is a button, not the `@`
+          // picker. The editor's default would delete back to the last literal
+          // `@` within 80 characters, eating whatever the user had written.
+          editor.insertText(text, { consumeMention: false });
         },
       }),
     [id],

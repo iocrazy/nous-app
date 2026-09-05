@@ -84,6 +84,7 @@ vi.mock('../../../../services/resourceService', () => ({
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { LIBRARY_DND_MIME } from '../../library/dropLibraryItems';
+import { getMentionHandle } from '../../library/mentionHandles';
 import { PromptNodeView } from './PromptNodeView';
 
 const baseProps = {
@@ -250,6 +251,26 @@ describe('PromptNodeView library drop hint', () => {
     expect(refsOn('p1')[1].url).toBe('/api/v1/generated-media/800000000000000001/file');
     expect(editorHandle.insertImage).not.toHaveBeenCalled();
     expect(editorHandle.insertAsset).not.toHaveBeenCalled();
+  });
+
+  // Ruling R16. The panel is a BUTTON, not the `@` picker, so it has no
+  // pending query — and the editor's `insertText` defaults to deleting back to
+  // the last literal `@` within 80 characters. A wrapper that forwarded the
+  // default would eat text the user wrote: the plain-text twin of the
+  // `contact me at foo@bar.com` bug the chip inserters already opt out of.
+  //
+  // Spied here rather than driven through the real editor because THIS is the
+  // seam under test — that the registered wrapper passes the option. The
+  // editor's own honouring of it is pinned in `PromptBodyEditor.test.tsx`
+  // against a real TipTap document.
+  it('the registered insertText opts OUT of consuming a pending @query', () => {
+    mount();
+
+    getMentionHandle('p1')?.insertText('a wide shot');
+
+    expect(editorHandle.insertText).toHaveBeenCalledWith('a wide shot', {
+      consumeMention: false,
+    });
   });
 
   it('a viewer gets no hint — the node is not a drop target at all', () => {

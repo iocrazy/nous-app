@@ -188,6 +188,36 @@ describe('PromptBodyEditor', () => {
     );
   });
 
+  // Ruling R16: `insertText` takes the same opt-out the chip inserters do.
+  // Its contract used to be consume-only, and the mention-handle registry
+  // documented the opposite — a caller reading that comment would have skipped
+  // the guard and shipped the `@bar.com` bug in plain-text form.
+  it('insertText with consumeMention:false leaves a pending @ standing', async () => {
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+    ref.current?.insertText('draft @');
+
+    ref.current?.insertText('hero', { consumeMention: false });
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('draft @hero'));
+  });
+
+  it('insertText DEFAULTS to consuming, unchanged — the picker contract', async () => {
+    // Pinned, not chosen: every existing caller passes no options, so the
+    // default must stay exactly what it was before R16 widened the signature.
+    const onChange = vi.fn();
+    const ref = createRef<PromptBodyEditorHandle>();
+    render(<PromptBodyEditor ref={ref} value="" onChange={onChange} />);
+    await screen.findByTestId('prompt-body-editor');
+    ref.current?.insertText('draft @');
+
+    ref.current?.insertText('hero');
+
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('draft hero'));
+  });
+
   it('consumeMention:false survives a SECOND @ in range — chip one is not eaten', async () => {
     // The narrow multi-item case: with two literal `@` inside the 80-character
     // window, the default deleted back past the first chip. Two drops in a row

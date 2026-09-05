@@ -44,8 +44,11 @@ import { EditorGoneError } from './mentionHandles';
 export interface MentionInserters {
   insertImage: (image: PromptImageRef, opts?: { consumeMention?: boolean }) => void;
   insertAsset: (asset: MentionedAsset, opts?: { consumeMention?: boolean }) => void;
-  /** Plain text at the caret. The Prompts page's Insert positive uses it; it
-   *  never consumes a pending `@query` (the editor's insertText does not). */
+  /** Plain text at the caret WITHOUT consuming a pending `@query` — the
+   *  registered wrapper passes `{ consumeMention: false }` (the editor's
+   *  default would eat back to the last `@` within 80 characters; see the
+   *  header of this file). The Prompts page's Insert positive relies on
+   *  this. */
   insertText: (text: string) => void;
 }
 
